@@ -174,7 +174,16 @@
     "dreamPruneDays": "Prune After (days)",
     "dreamBatchSize": "Batch Size",
     "detectContradictions": "Detect contradictions",
-    "summarizeInteractions": "Summarize interactions"
+    "summarizeInteractions": "Summarize interactions",
+    "confidenceLow": "Low",
+    "confidenceMedium": "Medium",
+    "confidenceHigh": "High",
+    "visibilitySelf": "self",
+    "visibilityGlobal": "global",
+    "onCapEvict": "Evict Oldest",
+    "onCapReject": "Reject",
+    "recallMostRecent": "Most Recent",
+    "recallMostRelevant": "Most Relevant"
   },
   "wizard": {
     "title": "Assistant Agent"
@@ -582,7 +591,12 @@
     "postResponseDesc": "Traiter la sortie du LLM : définir les propriétés, construire des messages de sortie et générer des réponses rapides.",
     "postPropertyInstructions": "Instructions de propriétés",
     "postOutputInstructions": "Instructions de sortie",
-    "postQrInstructions": "Instructions de réponses rapides"
+    "postQrInstructions": "Instructions de réponses rapides",
+    "allSkills": "All skills",
+    "skillPlaceholder": "e.g. order-tracking",
+    "modeAgent": "Agent",
+    "modeChat": "Chat",
+    "perMinute": "/min"
   },
   "outputEditor": {
     "language": "Langue",

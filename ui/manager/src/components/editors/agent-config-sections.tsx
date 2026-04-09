@@ -1,48 +1,100 @@
-import { useState } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ShieldCheck,
   Fingerprint,
   Brain,
   Moon,
-  ChevronDown,
-  ChevronRight,
   Plus,
   X,
   Sparkles,
 } from "lucide-react";
 import { useUpdateAgent } from "@/hooks/use-agents";
 import type { Agent } from "@/lib/api/agents";
+import { EditorSection } from "./editor-section";
 
-// ─── Collapsible Section wrapper ─────────────────────────────────────────────
+// ─── Debounced input helpers ─────────────────────────────────────────────────
 
-function Section({
-  label,
-  icon: Icon,
-  accent,
-  defaultOpen = false,
-  children,
-}: {
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  accent?: string;
-  defaultOpen?: boolean;
-  children: React.ReactNode;
+/** Text input that buffers locally and debounces the mutation to avoid per-keystroke PUTs */
+function DebouncedInput({
+  value,
+  onCommit,
+  delay = 600,
+  ...rest
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange"> & {
+  value: string;
+  onCommit: (v: string) => void;
+  delay?: number;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
+  const [local, setLocal] = useState(value);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sync from parent if the external value changes (version bump etc.)
+  useEffect(() => setLocal(value), [value]);
+
+  const commit = useCallback(
+    (v: string) => {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => onCommit(v), delay);
+    },
+    [onCommit, delay],
+  );
+
+  // Cleanup on unmount
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
   return (
-    <section className="rounded-xl border bg-card shadow-sm">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="flex w-full items-center gap-2 border-b border-border p-5 text-start"
-      >
-        {open ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
-        <Icon className={`h-5 w-5 ${accent ?? "text-primary"}`} />
-        <h2 className="text-lg font-semibold text-foreground">{label}</h2>
-      </button>
-      {open && <div className="p-5 space-y-4">{children}</div>}
-    </section>
+    <input
+      {...rest}
+      value={local}
+      onChange={(e) => {
+        setLocal(e.target.value);
+        commit(e.target.value);
+      }}
+    />
+  );
+}
+
+/** Number input that buffers locally and debounces the mutation */
+function DebouncedNumberInput({
+  value,
+  onCommit,
+  delay = 600,
+  fallback = 0,
+  ...rest
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange" | "value"> & {
+  value: number;
+  onCommit: (v: number) => void;
+  delay?: number;
+  fallback?: number;
+}) {
+  const [local, setLocal] = useState(String(value));
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => setLocal(String(value)), [value]);
+
+  const commit = useCallback(
+    (raw: string) => {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = setTimeout(() => {
+        onCommit(parseInt(raw, 10) || fallback);
+      }, delay);
+    },
+    [onCommit, delay, fallback],
+  );
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  return (
+    <input
+      {...rest}
+      type="number"
+      value={local}
+      onChange={(e) => {
+        setLocal(e.target.value);
+        commit(e.target.value);
+      }}
+    />
   );
 }
 
@@ -73,10 +125,11 @@ export function SecurityIdentitySection({
   }
 
   return (
-    <Section
+    <EditorSection
       label={t("agentDetail.securityIdentity", "Security & Identity")}
       icon={ShieldCheck}
       accent="text-rose-500"
+      variant="card"
       defaultOpen={!!(agent.security?.signInterAgentMessages || agent.security?.signMcpInvocations || agent.identity?.agentDid)}
     >
       {/* Identity */}
@@ -90,16 +143,16 @@ export function SecurityIdentitySection({
             <label className="mb-1 block text-xs text-muted-foreground">
               {t("agentDetail.agentDid", "Agent DID")}
             </label>
-            <input
+            <DebouncedInput
               type="text"
               value={agent.identity?.agentDid ?? ""}
-              onChange={(e) =>
+              onCommit={(v) =>
                 updateAgent.mutate({
                   id: agentId,
                   version,
                   agent: {
                     ...agent,
-                    identity: { ...agent.identity, agentDid: e.target.value || undefined },
+                    identity: { ...agent.identity, agentDid: v || undefined },
                   },
                 })
               }
@@ -149,7 +202,7 @@ export function SecurityIdentitySection({
           </label>
         ))}
       </div>
-    </Section>
+    </EditorSection>
   );
 }
 
@@ -188,10 +241,11 @@ export function CapabilitiesSection({
   }
 
   return (
-    <Section
+    <EditorSection
       label={t("agentDetail.capabilities", "Capabilities")}
       icon={Sparkles}
       accent="text-violet-500"
+      variant="card"
       defaultOpen={caps.length > 0}
     >
       <div className="space-y-3" data-testid="capabilities-section">
@@ -209,9 +263,9 @@ export function CapabilitiesSection({
                   onChange={(e) => updateConfidence(i, e.target.value)}
                   className="h-7 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
+                  <option value="low">{t("agentDetail.confidenceLow", "Low")}</option>
+                  <option value="medium">{t("agentDetail.confidenceMedium", "Medium")}</option>
+                  <option value="high">{t("agentDetail.confidenceHigh", "High")}</option>
                 </select>
                 <button
                   type="button"
@@ -245,7 +299,7 @@ export function CapabilitiesSection({
           </button>
         </div>
       </div>
-    </Section>
+    </EditorSection>
   );
 }
 
@@ -285,10 +339,11 @@ export function UserMemorySection({
   }
 
   return (
-    <Section
+    <EditorSection
       label={t("agentDetail.userMemory", "User Memory")}
       icon={Brain}
       accent="text-teal-500"
+      variant="card"
       defaultOpen={enabled}
     >
       <div className="space-y-4" data-testid="user-memory-section">
@@ -321,18 +376,18 @@ export function UserMemorySection({
                   onChange={(e) => patchConfig({ defaultVisibility: e.target.value })}
                   className="h-7 w-full rounded border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 >
-                  <option value="self">self</option>
-                  <option value="global">global</option>
+                  <option value="self">{t("agentDetail.visibilitySelf", "self")}</option>
+                  <option value="global">{t("agentDetail.visibilityGlobal", "global")}</option>
                 </select>
               </div>
               <div>
                 <label className="mb-0.5 block text-[10px] text-muted-foreground">
                   {t("agentDetail.maxRecallEntries", "Max Recall")}
                 </label>
-                <input
-                  type="number"
+                <DebouncedNumberInput
                   value={cfg.maxRecallEntries ?? 50}
-                  onChange={(e) => patchConfig({ maxRecallEntries: parseInt(e.target.value, 10) || 50 })}
+                  onCommit={(v) => patchConfig({ maxRecallEntries: v })}
+                  fallback={50}
                   className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
@@ -340,10 +395,10 @@ export function UserMemorySection({
                 <label className="mb-0.5 block text-[10px] text-muted-foreground">
                   {t("agentDetail.maxEntriesPerUser", "Max per User")}
                 </label>
-                <input
-                  type="number"
+                <DebouncedNumberInput
                   value={cfg.maxEntriesPerUser ?? 500}
-                  onChange={(e) => patchConfig({ maxEntriesPerUser: parseInt(e.target.value, 10) || 500 })}
+                  onCommit={(v) => patchConfig({ maxEntriesPerUser: v })}
+                  fallback={500}
                   className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>
@@ -359,8 +414,8 @@ export function UserMemorySection({
                   onChange={(e) => patchConfig({ onCapReached: e.target.value })}
                   className="h-7 w-full rounded border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 >
-                  <option value="evict_oldest">Evict Oldest</option>
-                  <option value="reject">Reject</option>
+                  <option value="evict_oldest">{t("agentDetail.onCapEvict", "Evict Oldest")}</option>
+                  <option value="reject">{t("agentDetail.onCapReject", "Reject")}</option>
                 </select>
               </div>
               <div>
@@ -372,8 +427,8 @@ export function UserMemorySection({
                   onChange={(e) => patchConfig({ recallOrder: e.target.value })}
                   className="h-7 w-full rounded border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 >
-                  <option value="most_recent">Most Recent</option>
-                  <option value="most_relevant">Most Relevant</option>
+                  <option value="most_recent">{t("agentDetail.recallMostRecent", "Most Recent")}</option>
+                  <option value="most_relevant">{t("agentDetail.recallMostRelevant", "Most Relevant")}</option>
                 </select>
               </div>
             </div>
@@ -386,15 +441,15 @@ export function UserMemorySection({
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxKeyLength", "Max Key Length")}</label>
-                  <input type="number" value={guardrails.maxKeyLength ?? 100} onChange={(e) => patchGuardrails({ maxKeyLength: parseInt(e.target.value, 10) || 100 })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <DebouncedNumberInput value={guardrails.maxKeyLength ?? 100} onCommit={(v) => patchGuardrails({ maxKeyLength: v })} fallback={100} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxValueLength", "Max Value Length")}</label>
-                  <input type="number" value={guardrails.maxValueLength ?? 1000} onChange={(e) => patchGuardrails({ maxValueLength: parseInt(e.target.value, 10) || 1000 })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <DebouncedNumberInput value={guardrails.maxValueLength ?? 1000} onCommit={(v) => patchGuardrails({ maxValueLength: v })} fallback={1000} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
                 <div>
                   <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxWritesPerTurn", "Max Writes/Turn")}</label>
-                  <input type="number" value={guardrails.maxWritesPerTurn ?? 10} onChange={(e) => patchGuardrails({ maxWritesPerTurn: parseInt(e.target.value, 10) || 10 })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                  <DebouncedNumberInput value={guardrails.maxWritesPerTurn ?? 10} onCommit={(v) => patchGuardrails({ maxWritesPerTurn: v })} fallback={10} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
               </div>
             </div>
@@ -421,29 +476,29 @@ export function UserMemorySection({
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamSchedule", "Schedule (cron)")}</label>
-                      <input type="text" value={dream.schedule ?? "0 3 * * *"} onChange={(e) => patchDream({ schedule: e.target.value })} placeholder="0 3 * * *" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DebouncedInput type="text" value={dream.schedule ?? "0 3 * * *"} onCommit={(v) => patchDream({ schedule: v })} placeholder="0 3 * * *" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamLlmProvider", "LLM Provider")}</label>
-                      <input type="text" value={dream.llmProvider ?? "anthropic"} onChange={(e) => patchDream({ llmProvider: e.target.value })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DebouncedInput type="text" value={dream.llmProvider ?? "anthropic"} onCommit={(v) => patchDream({ llmProvider: v })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamLlmModel", "LLM Model")}</label>
-                      <input type="text" value={dream.llmModel ?? "claude-sonnet-4-6"} onChange={(e) => patchDream({ llmModel: e.target.value })} placeholder="claude-sonnet-4-6" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DebouncedInput type="text" value={dream.llmModel ?? "claude-sonnet-4-6"} onCommit={(v) => patchDream({ llmModel: v })} placeholder="claude-sonnet-4-6" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamMaxCost", "Max Cost/Run ($)")}</label>
-                      <input type="number" step="0.01" value={dream.maxCostPerRun ?? 5.00} onChange={(e) => patchDream({ maxCostPerRun: parseFloat(e.target.value) || 5.00 })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DebouncedNumberInput value={dream.maxCostPerRun ?? 5.00} onCommit={(v) => patchDream({ maxCostPerRun: v })} fallback={5} step={0.01} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamPruneDays", "Prune After (days)")}</label>
-                      <input type="number" value={dream.pruneStaleAfterDays ?? 90} onChange={(e) => patchDream({ pruneStaleAfterDays: parseInt(e.target.value, 10) || 90 })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DebouncedNumberInput value={dream.pruneStaleAfterDays ?? 90} onCommit={(v) => patchDream({ pruneStaleAfterDays: v })} fallback={90} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamBatchSize", "Batch Size")}</label>
-                      <input type="number" value={dream.batchSize ?? 50} onChange={(e) => patchDream({ batchSize: parseInt(e.target.value, 10) || 50 })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DebouncedNumberInput value={dream.batchSize ?? 50} onCommit={(v) => patchDream({ batchSize: v })} fallback={50} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
                   <div className="flex gap-4">
@@ -462,6 +517,6 @@ export function UserMemorySection({
           </div>
         )}
       </div>
-    </Section>
+    </EditorSection>
   );
 }

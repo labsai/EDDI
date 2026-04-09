@@ -22,6 +22,7 @@ import {
   discoverMcpTools,
   type McpToolInfo,
 } from "@/lib/api/mcp-discover";
+import { EditorSection } from "./editor-section";
 
 // ─── Types matching McpCallsConfiguration backend model ──────────────────────
 
@@ -131,44 +132,19 @@ function TagListInput({
   );
 }
 
-function Section({
-  label,
-  icon: Icon,
-  defaultOpen = true,
+/** Wrapper around EditorSection that auto-opens when forceOpen transitions to true */
+function McpSection({
   forceOpen,
-  children,
-}: {
-  label: string;
-  icon?: React.ComponentType<{ className?: string }>;
-  defaultOpen?: boolean;
-  forceOpen?: boolean;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
+  defaultOpen = true,
+  ...rest
+}: React.ComponentProps<typeof EditorSection> & { forceOpen?: boolean }) {
+  const [autoOpened, setAutoOpened] = useState(false);
 
-  // Auto-open when forceOpen transitions to true (e.g. after discovery)
   useEffect(() => {
-    if (forceOpen) setOpen(true);
+    if (forceOpen) setAutoOpened(true);
   }, [forceOpen]);
 
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="mb-1.5 flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
-      >
-        {open ? (
-          <ChevronDown className="h-3 w-3" />
-        ) : (
-          <ChevronRight className="h-3 w-3" />
-        )}
-        {Icon && <Icon className="h-3 w-3" />}
-        {label}
-      </button>
-      {open && <div className="space-y-3">{children}</div>}
-    </div>
-  );
+  return <EditorSection defaultOpen={autoOpened || defaultOpen} {...rest} />;
 }
 
 // ─── Discovered Tools Panel ──────────────────────────────────────────────────
@@ -528,7 +504,7 @@ export function McpCallsEditor({
   return (
     <div className="space-y-6" data-testid="mcpcalls-form-editor">
       {/* Server Connection */}
-      <Section
+      <EditorSection
         label={t("mcpcallsEditor.serverConnection", "Server Connection")}
         icon={Plug}
       >
@@ -623,10 +599,10 @@ export function McpCallsEditor({
             />
           </div>
         </div>
-      </Section>
+      </EditorSection>
 
       {/* Tool Governance */}
-      <Section
+      <McpSection
         label={t("mcpcallsEditor.toolGovernance", "Tool Governance")}
         icon={ShieldCheck}
         defaultOpen={
@@ -707,10 +683,10 @@ export function McpCallsEditor({
           placeholder="tool_name"
           testId="tools-blacklist"
         />
-      </Section>
+      </McpSection>
 
       {/* Pipeline Calls */}
-      <Section
+      <EditorSection
         label={t("mcpcallsEditor.pipelineCalls", "Pipeline Calls")}
         icon={Zap}
         defaultOpen={(data.mcpCalls?.length ?? 0) > 0}
@@ -764,7 +740,7 @@ export function McpCallsEditor({
             </button>
           )}
         </div>
-      </Section>
+      </EditorSection>
     </div>
   );
 }

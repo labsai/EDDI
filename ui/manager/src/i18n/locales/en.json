@@ -201,7 +201,16 @@
     "dreamPruneDays": "Prune After (days)",
     "dreamBatchSize": "Batch Size",
     "detectContradictions": "Detect contradictions",
-    "summarizeInteractions": "Summarize interactions"
+    "summarizeInteractions": "Summarize interactions",
+    "confidenceLow": "Low",
+    "confidenceMedium": "Medium",
+    "confidenceHigh": "High",
+    "visibilitySelf": "self",
+    "visibilityGlobal": "global",
+    "onCapEvict": "Evict Oldest",
+    "onCapReject": "Reject",
+    "recallMostRecent": "Most Recent",
+    "recallMostRelevant": "Most Relevant"
   },
   "wizard": {
     "title": "Agent Wizard"
@@ -607,7 +616,12 @@
     "ragEmbeddingStore": "Embedding Store",
     "ragEmbeddingStorePlaceholder": "e.g. pgvector, qdrant",
     "ragMaxResults": "Max Results",
-    "ragMinScore": "Min Similarity Score (0–1)"
+    "ragMinScore": "Min Similarity Score (0–1)",
+    "allSkills": "All skills",
+    "skillPlaceholder": "e.g. order-tracking",
+    "modeAgent": "Agent",
+    "modeChat": "Chat",
+    "perMinute": "/min"
   },
   "outputEditor": {
     "language": "Language",

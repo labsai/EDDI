@@ -174,7 +174,16 @@
     "dreamPruneDays": "Prune After (days)",
     "dreamBatchSize": "Batch Size",
     "detectContradictions": "Detect contradictions",
-    "summarizeInteractions": "Summarize interactions"
+    "summarizeInteractions": "Summarize interactions",
+    "confidenceLow": "Low",
+    "confidenceMedium": "Medium",
+    "confidenceHigh": "High",
+    "visibilitySelf": "self",
+    "visibilityGlobal": "global",
+    "onCapEvict": "Evict Oldest",
+    "onCapReject": "Reject",
+    "recallMostRecent": "Most Recent",
+    "recallMostRelevant": "Most Relevant"
   },
   "wizard": {
     "title": "ตัวช่วยสร้าง Agent"
@@ -582,7 +591,12 @@
     "postResponseDesc": "ประมวลผลเอาต์พุตของ LLM: ตั้งค่าคุณสมบัติ สร้างข้อความเอาต์พุต และสร้างการตอบกลับด่วน",
     "postPropertyInstructions": "คำสั่งคุณสมบัติ",
     "postOutputInstructions": "คำสั่งเอาต์พุต",
-    "postQrInstructions": "คำสั่งการตอบกลับด่วน"
+    "postQrInstructions": "คำสั่งการตอบกลับด่วน",
+    "allSkills": "All skills",
+    "skillPlaceholder": "e.g. order-tracking",
+    "modeAgent": "Agent",
+    "modeChat": "Chat",
+    "perMinute": "/min"
   },
   "outputEditor": {
     "language": "ภาษา",

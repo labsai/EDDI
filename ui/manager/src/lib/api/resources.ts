@@ -139,7 +139,7 @@ export function deleteResource(
   options?: { permanent?: boolean }
 ): Promise<void> {
   const params = new URLSearchParams({ version: String(version) });
-  if (options?.permanent !== false) params.set("permanent", "true");
+  if (options?.permanent) params.set("permanent", "true");
   return api.delete(`${basePath(rt)}/${id}?${params}`);
 }
 

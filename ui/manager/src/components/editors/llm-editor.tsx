@@ -10,12 +10,6 @@ import {
   Bot,
   Zap,
   Handshake,
-  AlertTriangle,
-  Layers,
-  ArrowDown,
-  ArrowUp,
-  RotateCcw,
-  Database,
   Gauge,
   DollarSign,
   Cpu,
@@ -23,7 +17,6 @@ import {
   ArrowRightLeft,
   FileOutput,
   MessageCircle,
-  ScrollText,
   Scissors,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
@@ -33,6 +26,10 @@ import {
   OutputBuildInstructionsEditor,
   QrBuildInstructionsEditor,
 } from "./apicalls-editor";
+import { EditorSection } from "./editor-section";
+import { TaskCascadeSection } from "./llm/task-cascade-section";
+import { TaskMemorySection } from "./llm/task-memory-section";
+import { TaskRagSection } from "./llm/task-rag-section";
 
 // Re-export types so existing imports still work
 export type {
@@ -135,40 +132,6 @@ function ActionTags({
           </button>
         </div>
       )}
-    </div>
-  );
-}
-
-function Section({
-  label,
-  defaultOpen = true,
-  icon: Icon,
-  accent,
-  children,
-}: {
-  label: string;
-  defaultOpen?: boolean;
-  icon?: React.ComponentType<{ className?: string }>;
-  accent?: string;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
-      >
-        {open ? (
-          <ChevronDown className="h-3 w-3" />
-        ) : (
-          <ChevronRight className="h-3 w-3" />
-        )}
-        {Icon && <Icon className={`h-3.5 w-3.5 ${accent ?? ''}`} />}
-        {label}
-      </button>
-      {open && <div className="space-y-2">{children}</div>}
     </div>
   );
 }
@@ -367,16 +330,16 @@ function TaskEditor({
           </div>
 
           {/* Actions */}
-          <Section label={t("llmEditor.triggerActions", "Trigger Actions")}>
+          <EditorSection label={t("llmEditor.triggerActions", "Trigger Actions")}>
             <ActionTags
               actions={task.actions ?? []}
               onChange={(a) => onChange({ ...task, actions: a })}
               readOnly={readOnly}
             />
-          </Section>
+          </EditorSection>
 
           {/* System Prompt */}
-          <Section
+          <EditorSection
             label={t("llmEditor.systemPrompt", "System Prompt")}
           >
             <ContentEditor
@@ -391,10 +354,10 @@ function TaskEditor({
               )}
               testId="system-prompt"
             />
-          </Section>
+          </EditorSection>
 
           {/* Model Parameters */}
-          <Section
+          <EditorSection
             label={t("llmEditor.modelParams", "Model Parameters")}
             defaultOpen={false}
           >
@@ -450,10 +413,10 @@ function TaskEditor({
                 {t("llmEditor.addParam", "Add Parameter")}
               </button>
             )}
-          </Section>
+          </EditorSection>
 
           {/* Agent Mode */}
-          <Section
+          <EditorSection
             label={t("llmEditor.agentMode", "Agent Mode")}
             defaultOpen={!!isAgent}
           >
@@ -786,10 +749,10 @@ function TaskEditor({
                 </span>
               </div>
             </div>
-          </Section>
+          </EditorSection>
 
           {/* ══════ Budget & Costs ══════ */}
-          <Section
+          <EditorSection
             label={t("llmEditor.budgetCosts", "Budget & Costs")}
             icon={DollarSign}
             accent="text-amber-500"
@@ -850,10 +813,10 @@ function TaskEditor({
                 </label>
               </div>
             </div>
-          </Section>
+          </EditorSection>
 
           {/* ══════ Execution ══════ */}
-          <Section
+          <EditorSection
             label={t("llmEditor.execution", "Execution")}
             icon={Cpu}
             accent="text-sky-500"
@@ -1162,828 +1125,19 @@ function TaskEditor({
                 </div>
               </div>
             </div>
-          </Section>
+          </EditorSection>
 
-          {/* ══════ Model Cascade ══════ */}
-          <Section
-            label={t("llmEditor.cascade", "Model Cascade")}
-            icon={Layers}
-            accent="text-purple-500"
-            defaultOpen={!!(task.modelCascade?.enabled)}
-          >
-            <div className="space-y-3" data-testid="cascade-section">
-              {/* Explain what cascade does */}
-              <p className="text-[10px] text-muted-foreground leading-relaxed">
-                {t("llmEditor.cascadeDesc", "Try a cheap/fast model first. If confidence is too low, automatically escalate to a more powerful (and expensive) model. Saves costs without sacrificing quality.")}
-              </p>
+          <TaskCascadeSection task={task} onChange={onChange} readOnly={readOnly} />
 
-              {/* Enable toggle */}
-              <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
-                <input
-                  type="checkbox"
-                  checked={task.modelCascade?.enabled ?? false}
-                  onChange={(e) =>
-                    onChange({
-                      ...task,
-                      modelCascade: {
-                        ...task.modelCascade,
-                        enabled: e.target.checked,
-                        strategy: task.modelCascade?.strategy ?? "cascade",
-                        evaluationStrategy: task.modelCascade?.evaluationStrategy ?? "structured_output",
-                        enableInAgentMode: task.modelCascade?.enableInAgentMode ?? true,
-                        steps: task.modelCascade?.steps ?? [],
-                      },
-                    })
-                  }
-                  disabled={readOnly}
-                  className="h-3.5 w-3.5 rounded border-input accent-primary"
-                  data-testid="cascade-enable"
-                />
-                <Layers className="h-3.5 w-3.5 text-primary" />
-                {t("llmEditor.cascadeEnable", "Enable Model Cascade")}
-              </label>
 
-              {task.modelCascade?.enabled && (
-                <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
-                  {/* Strategy + Evaluation */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        {t("llmEditor.cascadeStrategy", "Strategy")}
-                      </label>
-                      <select
-                        value={task.modelCascade.strategy ?? "cascade"}
-                        onChange={(e) =>
-                          onChange({
-                            ...task,
-                            modelCascade: { ...task.modelCascade!, strategy: e.target.value },
-                          })
-                        }
-                        disabled={readOnly}
-                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-                      >
-                        <option value="cascade">{t("llmEditor.strategyCascade", "Sequential Escalation")}</option>
-                        <option value="parallel">{t("llmEditor.strategyParallel", "Parallel (future)")}</option>
-                      </select>
-                      <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        {t("llmEditor.cascadeStrategyHint", "Sequential tries cheap first, escalates on low confidence")}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        {t("llmEditor.cascadeEvalStrategy", "Confidence Evaluation")}
-                      </label>
-                      <select
-                        value={task.modelCascade.evaluationStrategy ?? "structured_output"}
-                        onChange={(e) =>
-                          onChange({
-                            ...task,
-                            modelCascade: { ...task.modelCascade!, evaluationStrategy: e.target.value },
-                          })
-                        }
-                        disabled={readOnly}
-                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-                      >
-                        <option value="structured_output">{t("llmEditor.evalStructured", "Structured Output (JSON)")}</option>
-                        <option value="heuristic">{t("llmEditor.evalHeuristic", "Heuristic (hedging detection)")}</option>
-                        <option value="judge_model">{t("llmEditor.evalJudge", "Judge Model (secondary LLM)")}</option>
-                        <option value="none">{t("llmEditor.evalNone", "None (always accept)")}</option>
-                      </select>
-                      <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        {t("llmEditor.cascadeEvalHint", "How to determine if a response is good enough")}
-                      </p>
-                    </div>
-                  </div>
+          <TaskMemorySection task={task} onChange={onChange} readOnly={readOnly} />
 
-                  {/* Enable in agent mode */}
-                  <label className="inline-flex items-center gap-2 text-xs text-foreground">
-                    <input
-                      type="checkbox"
-                      checked={task.modelCascade.enableInAgentMode ?? true}
-                      onChange={(e) =>
-                        onChange({
-                          ...task,
-                          modelCascade: { ...task.modelCascade!, enableInAgentMode: e.target.checked },
-                        })
-                      }
-                      disabled={readOnly}
-                      className="h-3.5 w-3.5 rounded border-input accent-primary"
-                    />
-                    {t("llmEditor.cascadeInAgent", "Also use cascade in Agent Mode (with tools)")}
-                  </label>
 
-                  {/* Steps */}
-                  <div>
-                    <label className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      <ArrowDown className="h-3 w-3" />
-                      {t("llmEditor.cascadeSteps", "Cascade Steps (cheap → expensive)")}
-                    </label>
-                    <p className="mb-2 text-[10px] text-muted-foreground">
-                      {t("llmEditor.cascadeStepsDesc", "Order matters: first step tried first. Last step is always accepted (set confidence to empty).")}
-                    </p>
+          <TaskRagSection task={task} onChange={onChange} readOnly={readOnly} />
 
-                    <div className="space-y-2">
-                      {(task.modelCascade.steps ?? []).map((step, si) => (
-                        <div
-                          key={si}
-                          className="rounded-lg border border-border bg-card p-3 space-y-2"
-                          data-testid={`cascade-step-${si}`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
-                              {si + 1}
-                            </span>
-                            <select
-                              value={step.type ?? "openai"}
-                              onChange={(e) => {
-                                const steps = [...(task.modelCascade!.steps ?? [])];
-                                steps[si] = { ...step, type: e.target.value };
-                                onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
-                              }}
-                              disabled={readOnly}
-                              className="h-7 rounded-md border border-input bg-background px-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-                            >
-                              {MODEL_TYPES.map((mt) => (
-                                <option key={mt} value={mt}>{mt}</option>
-                              ))}
-                            </select>
-                            <input
-                              type="text"
-                              value={step.parameters?.model ?? ""}
-                              onChange={(e) => {
-                                const steps = [...(task.modelCascade!.steps ?? [])];
-                                steps[si] = { ...step, parameters: { ...(step.parameters ?? {}), model: e.target.value } };
-                                onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
-                              }}
-                              readOnly={readOnly}
-                              placeholder={t("llmEditor.cascadeModelName", "e.g. gpt-5.4-mini")}
-                              className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                            />
-                            {!readOnly && (
-                              <div className="flex items-center gap-0.5">
-                                <button
-                                  type="button"
-                                  disabled={si === 0}
-                                  onClick={() => {
-                                    const steps = [...(task.modelCascade!.steps ?? [])];
-                                    const temp = steps[si];
-                                    steps[si] = steps[si - 1]!;
-                                    steps[si - 1] = temp!;
-                                    onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
-                                  }}
-                                  className="rounded p-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30"
-                                  title={t("llmEditor.moveUp", "Move up")}
-                                >
-                                  <ArrowUp className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={si === (task.modelCascade!.steps ?? []).length - 1}
-                                  onClick={() => {
-                                    const steps = [...(task.modelCascade!.steps ?? [])];
-                                    const temp = steps[si];
-                                    steps[si] = steps[si + 1]!;
-                                    steps[si + 1] = temp!;
-                                    onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
-                                  }}
-                                  className="rounded p-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-30"
-                                  title={t("llmEditor.moveDown", "Move down")}
-                                >
-                                  <ArrowDown className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const steps = (task.modelCascade!.steps ?? []).filter((_, j) => j !== si);
-                                    onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
-                                  }}
-                                  className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 ps-7">
-                            <div>
-                              <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                                {t("llmEditor.cascadeConfidence", "Min. Confidence (0–1)")}
-                              </label>
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                pattern="[0-9]*(\.[0-9]+)?"
-                                value={step.confidenceThreshold ?? ""}
-                                onChange={(e) => {
-                                  const steps = [...(task.modelCascade!.steps ?? [])];
-                                  const val = e.target.value;
-                                  steps[si] = {
-                                    ...step,
-                                    confidenceThreshold: val === "" ? null : (isNaN(parseFloat(val)) ? 0 : parseFloat(val)),
-                                  };
-                                  onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
-                                }}
-                                readOnly={readOnly}
-                                placeholder={t("llmEditor.cascadeConfidencePlaceholder", "empty = always accept")}
-                                className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                              />
-                            </div>
-                            <div>
-                              <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                                {t("llmEditor.cascadeTimeout", "Timeout (ms)")}
-                              </label>
-                              <input
-                                type="number"
-                                value={step.timeoutMs ?? 30000}
-                                onChange={(e) => {
-                                  const steps = [...(task.modelCascade!.steps ?? [])];
-                                  steps[si] = { ...step, timeoutMs: parseInt(e.target.value, 10) || 30000 };
-                                  onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
-                                }}
-                                readOnly={readOnly}
-                                className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {!readOnly && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const steps = [...(task.modelCascade?.steps ?? []), { type: "openai", parameters: { model: "" }, confidenceThreshold: 0.7, timeoutMs: 30000 }];
-                          onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
-                        }}
-                        className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-dashed border-primary/40 px-3 py-1.5 text-xs font-medium text-primary/70 transition-colors hover:border-primary hover:text-primary"
-                        data-testid="add-cascade-step"
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        {t("llmEditor.addCascadeStep", "Add Cascade Step")}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </Section>
-
-          {/* ══════ Conversation Memory (Rolling Summary) ══════ */}
-          <Section
-            label={t("llmEditor.conversationMemory", "Conversation Memory")}
-            icon={ScrollText}
-            accent="text-teal-500"
-            defaultOpen={!!(task.conversationSummary?.enabled)}
-          >
-            <div className="space-y-3" data-testid="conversation-memory-section">
-              <p className="text-[10px] text-muted-foreground leading-relaxed">
-                {t("llmEditor.conversationMemoryDesc", "Older turns are incrementally compressed into a rolling summary. The LLM sees: [system prompt + summary] + [recent N turns verbatim]. A built-in conversationRecall tool allows the agent to drill back into summarized turns on demand.")}
-              </p>
-
-              <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
-                <input
-                  type="checkbox"
-                  checked={task.conversationSummary?.enabled ?? false}
-                  onChange={(e) =>
-                    onChange({
-                      ...task,
-                      conversationSummary: {
-                        ...task.conversationSummary,
-                        enabled: e.target.checked,
-                        llmProvider: task.conversationSummary?.llmProvider ?? "anthropic",
-                        llmModel: task.conversationSummary?.llmModel ?? "claude-sonnet-4-6",
-                        maxSummaryTokens: task.conversationSummary?.maxSummaryTokens ?? 800,
-                        recentWindowSteps: task.conversationSummary?.recentWindowSteps ?? 5,
-                        maxRecallTurns: task.conversationSummary?.maxRecallTurns ?? 20,
-                      },
-                    })
-                  }
-                  disabled={readOnly}
-                  className="h-3.5 w-3.5 rounded border-input accent-primary"
-                  data-testid="summary-enable"
-                />
-                <ScrollText className="h-3.5 w-3.5 text-teal-500" />
-                {t("llmEditor.enableSummary", "Enable Rolling Summary")}
-              </label>
-
-              {task.conversationSummary?.enabled && (
-                <div className="space-y-3 rounded-lg border border-teal-500/20 bg-teal-500/5 p-3">
-                  {/* Provider + Model */}
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        {t("llmEditor.summaryProvider", "Summary Provider")}
-                      </label>
-                      <select
-                        value={task.conversationSummary.llmProvider ?? "anthropic"}
-                        onChange={(e) =>
-                          onChange({
-                            ...task,
-                            conversationSummary: { ...task.conversationSummary!, llmProvider: e.target.value },
-                          })
-                        }
-                        disabled={readOnly}
-                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-                      >
-                        {MODEL_TYPES.map((mt) => (
-                          <option key={mt} value={mt}>{mt}</option>
-                        ))}
-                      </select>
-                      <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        {t("llmEditor.summaryProviderHint", "Use a cheap/fast model for summarization")}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        {t("llmEditor.summaryModel", "Summary Model")}
-                      </label>
-                      <input
-                        type="text"
-                        value={task.conversationSummary.llmModel ?? ""}
-                        onChange={(e) =>
-                          onChange({
-                            ...task,
-                            conversationSummary: { ...task.conversationSummary!, llmModel: e.target.value },
-                          })
-                        }
-                        readOnly={readOnly}
-                        placeholder="claude-sonnet-4-6"
-                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Window + Recall + Tokens */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                        {t("llmEditor.recentWindow", "Recent Window (steps)")}
-                      </label>
-                      <input
-                        type="number"
-                        value={task.conversationSummary.recentWindowSteps ?? 5}
-                        onChange={(e) =>
-                          onChange({
-                            ...task,
-                            conversationSummary: {
-                              ...task.conversationSummary!,
-                              recentWindowSteps: parseInt(e.target.value, 10) || 5,
-                            },
-                          })
-                        }
-                        readOnly={readOnly}
-                        className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                      />
-                      <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        {t("llmEditor.recentWindowHint", "Turns kept verbatim")}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                        {t("llmEditor.maxRecallTurns", "Max Recall Turns")}
-                      </label>
-                      <input
-                        type="number"
-                        value={task.conversationSummary.maxRecallTurns ?? 20}
-                        onChange={(e) =>
-                          onChange({
-                            ...task,
-                            conversationSummary: {
-                              ...task.conversationSummary!,
-                              maxRecallTurns: parseInt(e.target.value, 10) || 20,
-                            },
-                          })
-                        }
-                        readOnly={readOnly}
-                        className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                      />
-                      <p className="mt-0.5 text-[10px] text-muted-foreground">
-                        {t("llmEditor.maxRecallHint", "Per recall invocation")}
-                      </p>
-                    </div>
-                    <div>
-                      <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                        {t("llmEditor.maxSummaryTokens", "Max Summary Tokens")}
-                      </label>
-                      <input
-                        type="number"
-                        value={task.conversationSummary.maxSummaryTokens ?? 800}
-                        onChange={(e) =>
-                          onChange({
-                            ...task,
-                            conversationSummary: {
-                              ...task.conversationSummary!,
-                              maxSummaryTokens: parseInt(e.target.value, 10) || 800,
-                            },
-                          })
-                        }
-                        readOnly={readOnly}
-                        className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Options */}
-                  <label className="inline-flex items-center gap-2 text-xs text-foreground">
-                    <input
-                      type="checkbox"
-                      checked={task.conversationSummary.excludePropertiesFromSummary ?? true}
-                      onChange={(e) =>
-                        onChange({
-                          ...task,
-                          conversationSummary: {
-                            ...task.conversationSummary!,
-                            excludePropertiesFromSummary: e.target.checked,
-                          },
-                        })
-                      }
-                      disabled={readOnly}
-                      className="h-3.5 w-3.5 rounded border-input accent-primary"
-                    />
-                    {t("llmEditor.excludeProps", "Exclude properties from summary")}
-                  </label>
-                  <p className="text-[10px] text-muted-foreground ps-5 -mt-2">
-                    {t("llmEditor.excludePropsDesc", "Skip facts already captured as persistent properties — focus on reasoning and implicit context")}
-                  </p>
-
-                  {/* Custom summarization prompt (collapsed) */}
-                  <div>
-                    <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      {t("llmEditor.summarizationPrompt", "Custom Summarization Prompt (optional)")}
-                    </label>
-                    <ContentEditor
-                      value={task.conversationSummary.summarizationPrompt ?? ""}
-                      onChange={(v) =>
-                        onChange({
-                          ...task,
-                          conversationSummary: {
-                            ...task.conversationSummary!,
-                            summarizationPrompt: v || undefined,
-                          },
-                        })
-                      }
-                      readOnly={readOnly}
-                      language="prompt"
-                      label={t("llmEditor.summarizationPrompt", "Custom Summarization Prompt")}
-                      placeholder={t("llmEditor.summarizationPromptPlaceholder", "Leave empty to use the default structured prompt that preserves goals, decisions, reasoning, and tone.")}
-                      testId="summarization-prompt"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          </Section>
-
-          {/* ══════ Retry Configuration ══════ */}
-          <Section
-            label={t("llmEditor.retryConfig", "Retry Configuration")}
-            icon={RotateCcw}
-            accent="text-orange-500"
-            defaultOpen={false}
-          >
-            <div className="space-y-2" data-testid="retry-section">
-              <p className="text-[10px] text-muted-foreground">
-                {t("llmEditor.retryDesc", "Configure automatic retries for failed LLM API calls with exponential backoff.")}
-              </p>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                    <RotateCcw className="inline h-3 w-3 me-1" />
-                    {t("llmEditor.retryMaxAttempts", "Max Attempts")}
-                  </label>
-                  <input
-                    type="number"
-                    value={task.retry?.maxAttempts ?? 3}
-                    onChange={(e) =>
-                      onChange({ ...task, retry: { ...task.retry, maxAttempts: parseInt(e.target.value, 10) || 1 } })
-                    }
-                    readOnly={readOnly}
-                    className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                  />
-                </div>
-                <div>
-                  <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                    {t("llmEditor.retryDelay", "Initial Delay (ms)")}
-                  </label>
-                  <input
-                    type="number"
-                    value={task.retry?.backoffDelayMs ?? 1000}
-                    onChange={(e) =>
-                      onChange({ ...task, retry: { ...task.retry, backoffDelayMs: parseInt(e.target.value, 10) || 0 } })
-                    }
-                    readOnly={readOnly}
-                    className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                  />
-                </div>
-                <div>
-                  <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                    {t("llmEditor.retryMultiplier", "Backoff Multiplier")}
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={task.retry?.backoffMultiplier ?? 2.0}
-                    onChange={(e) =>
-                      onChange({ ...task, retry: { ...task.retry, backoffMultiplier: parseFloat(e.target.value) || 1.0 } })
-                    }
-                    readOnly={readOnly}
-                    className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                  />
-                </div>
-                <div>
-                  <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                    {t("llmEditor.retryMaxDelay", "Max Delay (ms)")}
-                  </label>
-                  <input
-                    type="number"
-                    value={task.retry?.maxBackoffDelayMs ?? 10000}
-                    onChange={(e) =>
-                      onChange({ ...task, retry: { ...task.retry, maxBackoffDelayMs: parseInt(e.target.value, 10) || 0 } })
-                    }
-                    readOnly={readOnly}
-                    className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                  />
-                </div>
-              </div>
-            </div>
-          </Section>
-
-          {/* ══════ RAG Configuration (Phase 8c) ══════ */}
-          <Section
-            label={t("llmEditor.ragConfig", "RAG (Knowledge Retrieval)")}
-            icon={Database}
-            accent="text-emerald-500"
-            defaultOpen={false}
-          >
-            <div className="space-y-4" data-testid="rag-section">
-              <p className="text-[10px] text-muted-foreground">
-                {t("llmEditor.ragDesc", "Augment LLM responses with relevant documents from knowledge bases. Three modes can be combined.")}
-              </p>
-
-              {/* ── Mode 1: Explicit Knowledge Bases ── */}
-              <div className="rounded-md border border-border bg-card/30 p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-foreground">
-                    {t("llmEditor.knowledgeBases", "Knowledge Bases")}
-                  </span>
-                  {!readOnly && (
-                    <button
-                      type="button"
-                      onClick={() => onChange({
-                        ...task,
-                        knowledgeBases: [
-                          ...(task.knowledgeBases ?? []),
-                          { name: "", maxResults: 5, minScore: 0.6 },
-                        ],
-                      })}
-                      className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/10 transition-colors"
-                      data-testid="add-kb-ref"
-                    >
-                      <Plus className="h-3 w-3" />
-                      {t("llmEditor.addKnowledgeBase", "Add KB Reference")}
-                    </button>
-                  )}
-                </div>
-                <p className="text-[10px] text-muted-foreground">
-                  {t("llmEditor.knowledgeBasesHint", "Explicitly reference knowledge bases by name. Each name must match a RagConfiguration in the workflow.")}
-                </p>
-                {(task.knowledgeBases ?? []).map((kb, kbIdx) => (
-                  <div key={kbIdx} className="rounded-md border border-border bg-background p-2.5 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={kb.name ?? ""}
-                        onChange={(e) => {
-                          const updated = [...(task.knowledgeBases ?? [])];
-                          updated[kbIdx] = { ...kb, name: e.target.value || undefined };
-                          onChange({ ...task, knowledgeBases: updated });
-                        }}
-                        readOnly={readOnly}
-                        placeholder={t("llmEditor.kbNamePlaceholder", "e.g. product-docs")}
-                        className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                        data-testid={`kb-name-${kbIdx}`}
-                      />
-                      {!readOnly && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const updated = (task.knowledgeBases ?? []).filter((_, i) => i !== kbIdx);
-                            onChange({ ...task, knowledgeBases: updated.length > 0 ? updated : undefined });
-                          }}
-                          className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                          {t("llmEditor.ragMaxResults", "Max Results")}
-                        </label>
-                        <input
-                          type="number"
-                          value={kb.maxResults ?? ""}
-                          onChange={(e) => {
-                            const updated = [...(task.knowledgeBases ?? [])];
-                            updated[kbIdx] = { ...kb, maxResults: e.target.value ? parseInt(e.target.value, 10) : undefined };
-                            onChange({ ...task, knowledgeBases: updated });
-                          }}
-                          readOnly={readOnly}
-                          placeholder="5"
-                          className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                          {t("llmEditor.ragMinScore", "Min Score")}
-                        </label>
-                        <input
-                          type="number"
-                          step="0.05"
-                          min="0"
-                          max="1"
-                          value={kb.minScore ?? ""}
-                          onChange={(e) => {
-                            const updated = [...(task.knowledgeBases ?? [])];
-                            updated[kbIdx] = { ...kb, minScore: e.target.value ? parseFloat(e.target.value) : undefined };
-                            onChange({ ...task, knowledgeBases: updated });
-                          }}
-                          readOnly={readOnly}
-                          placeholder="0.6"
-                          className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                          {t("llmEditor.injectionStrategy", "Injection")}
-                        </label>
-                        <select
-                          value={kb.injectionStrategy ?? "system_message"}
-                          onChange={(e) => {
-                            const updated = [...(task.knowledgeBases ?? [])];
-                            updated[kbIdx] = { ...kb, injectionStrategy: e.target.value };
-                            onChange({ ...task, knowledgeBases: updated });
-                          }}
-                          disabled={readOnly}
-                          className="h-7 w-full rounded border border-input bg-background px-1 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-                        >
-                          <option value="system_message">System Message</option>
-                          <option value="user_message">User Message</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                {(task.knowledgeBases ?? []).length === 0 && (
-                  <p className="text-[10px] text-muted-foreground/60 italic">
-                    {t("llmEditor.noKnowledgeBases", "No knowledge bases referenced")}
-                  </p>
-                )}
-              </div>
-
-              {/* ── Mode 2: Auto-Discovery ── */}
-              <div className="rounded-md border border-border bg-card/30 p-3 space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={task.enableWorkflowRag ?? false}
-                    onChange={(e) => onChange({ ...task, enableWorkflowRag: e.target.checked || undefined })}
-                    disabled={readOnly}
-                    className="rounded"
-                    data-testid="enable-workflow-rag"
-                  />
-                  <span className="text-xs font-semibold text-foreground">
-                    {t("llmEditor.enableWorkflowRag", "Auto-Discover Workflow RAG")}
-                  </span>
-                </label>
-                <p className="text-[10px] text-muted-foreground">
-                  {t("llmEditor.workflowRagHint", "Automatically discovers all RAG steps from the workflow. Only used when no explicit knowledge bases are listed above.")}
-                </p>
-                {task.enableWorkflowRag && (
-                  <div className="ms-6 space-y-2 border-s-2 border-primary/20 ps-3">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      {t("llmEditor.ragDefaults", "Default Retrieval Parameters")}
-                    </span>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                          {t("llmEditor.ragMaxResults", "Max Results")}
-                        </label>
-                        <input
-                          type="number"
-                          value={task.ragDefaults?.maxResults ?? ""}
-                          onChange={(e) =>
-                            onChange({ ...task, ragDefaults: { ...task.ragDefaults, maxResults: e.target.value ? parseInt(e.target.value, 10) : undefined } })
-                          }
-                          readOnly={readOnly}
-                          placeholder="5"
-                          className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                          {t("llmEditor.ragMinScore", "Min Score")}
-                        </label>
-                        <input
-                          type="number"
-                          step="0.05"
-                          min="0"
-                          max="1"
-                          value={task.ragDefaults?.minScore ?? ""}
-                          onChange={(e) =>
-                            onChange({ ...task, ragDefaults: { ...task.ragDefaults, minScore: e.target.value ? parseFloat(e.target.value) : undefined } })
-                          }
-                          readOnly={readOnly}
-                          placeholder="0.6"
-                          className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-0.5 block text-[10px] text-muted-foreground">
-                          {t("llmEditor.injectionStrategy", "Injection")}
-                        </label>
-                        <select
-                          value={task.ragDefaults?.injectionStrategy ?? "system_message"}
-                          onChange={(e) =>
-                            onChange({ ...task, ragDefaults: { ...task.ragDefaults, injectionStrategy: e.target.value } })
-                          }
-                          disabled={readOnly}
-                          className="h-7 w-full rounded border border-input bg-background px-1 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
-                        >
-                          <option value="system_message">System Message</option>
-                          <option value="user_message">User Message</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* ── Mode 3: httpCall RAG (zero-infra) ── */}
-              <div className="rounded-md border border-border bg-card/30 p-3 space-y-2">
-                <span className="text-xs font-semibold text-foreground">
-                  {t("llmEditor.httpCallRag", "httpCall RAG (Zero Infrastructure)")}
-                </span>
-                <p className="text-[10px] text-muted-foreground">
-                  {t("llmEditor.httpCallRagHint", "Execute a named httpCall before the LLM call. The response is injected as context — no vector store needed.")}
-                </p>
-                <input
-                  type="text"
-                  value={task.httpCallRag ?? ""}
-                  onChange={(e) => onChange({ ...task, httpCallRag: e.target.value || undefined })}
-                  readOnly={readOnly}
-                  placeholder={t("llmEditor.httpCallRagPlaceholder", "e.g. search_docs, query_wiki")}
-                  dir="ltr"
-                  className="h-7 w-full rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                  data-testid="httpcall-rag"
-                />
-              </div>
-
-              {/* ── Legacy (backward compat, collapsed) ── */}
-              {task.retrievalAugmentor && (
-                <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
-                  <div className="flex items-center gap-1.5">
-                    <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-                    <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
-                      {t("llmEditor.legacyRag", "Legacy RAG (deprecated)")}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">
-                    {t("llmEditor.legacyRagHint", "This configuration uses the deprecated retrievalAugmentor format. Migrate to the modes above.")}
-                  </p>
-                  <div className="grid grid-cols-2 gap-2 opacity-60">
-                    <div className="col-span-2">
-                      <label className="mb-0.5 block text-[10px] text-muted-foreground">httpCall</label>
-                      <input type="text" value={task.retrievalAugmentor.httpCall ?? ""} readOnly className="h-7 w-full rounded border border-input bg-background px-2 font-mono text-xs" />
-                    </div>
-                    <div>
-                      <label className="mb-0.5 block text-[10px] text-muted-foreground">embeddingModel</label>
-                      <input type="text" value={task.retrievalAugmentor.embeddingModel ?? ""} readOnly className="h-7 w-full rounded border border-input bg-background px-2 text-xs" />
-                    </div>
-                    <div>
-                      <label className="mb-0.5 block text-[10px] text-muted-foreground">embeddingStore</label>
-                      <input type="text" value={task.retrievalAugmentor.embeddingStore ?? ""} readOnly className="h-7 w-full rounded border border-input bg-background px-2 text-xs" />
-                    </div>
-                  </div>
-                  {!readOnly && (
-                    <button
-                      type="button"
-                      onClick={() => onChange({ ...task, retrievalAugmentor: undefined })}
-                      className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 transition-colors"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                      {t("llmEditor.removeLegacyRag", "Remove Legacy Config")}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          </Section>
 
           {/* ══════ Pre/Post Instructions ══════ */}
-          <Section
+          <EditorSection
             label={t(
               "llmEditor.prePostInstructions",
               "Pre/Post Instructions"
@@ -2090,7 +1244,7 @@ function TaskEditor({
                 </div>
               </div>
             </div>
-          </Section>
+          </EditorSection>
         </div>
       )}
     </div>

@@ -174,7 +174,16 @@
     "dreamPruneDays": "Prune After (days)",
     "dreamBatchSize": "Batch Size",
     "detectContradictions": "Detect contradictions",
-    "summarizeInteractions": "Summarize interactions"
+    "summarizeInteractions": "Summarize interactions",
+    "confidenceLow": "Low",
+    "confidenceMedium": "Medium",
+    "confidenceHigh": "High",
+    "visibilitySelf": "self",
+    "visibilityGlobal": "global",
+    "onCapEvict": "Evict Oldest",
+    "onCapReject": "Reject",
+    "recallMostRecent": "Most Recent",
+    "recallMostRelevant": "Most Relevant"
   },
   "wizard": {
     "title": "Agent 向导"
@@ -582,7 +591,12 @@
     "postResponseDesc": "处理 LLM 输出：设置属性、构建输出消息和生成快速回复。",
     "postPropertyInstructions": "属性指令",
     "postOutputInstructions": "输出构建指令",
-    "postQrInstructions": "快速回复构建指令"
+    "postQrInstructions": "快速回复构建指令",
+    "allSkills": "All skills",
+    "skillPlaceholder": "e.g. order-tracking",
+    "modeAgent": "Agent",
+    "modeChat": "Chat",
+    "perMinute": "/min"
   },
   "outputEditor": {
     "language": "语言",

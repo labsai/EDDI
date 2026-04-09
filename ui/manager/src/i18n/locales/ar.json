@@ -174,7 +174,16 @@
     "dreamPruneDays": "Prune After (days)",
     "dreamBatchSize": "Batch Size",
     "detectContradictions": "Detect contradictions",
-    "summarizeInteractions": "Summarize interactions"
+    "summarizeInteractions": "Summarize interactions",
+    "confidenceLow": "Low",
+    "confidenceMedium": "Medium",
+    "confidenceHigh": "High",
+    "visibilitySelf": "self",
+    "visibilityGlobal": "global",
+    "onCapEvict": "Evict Oldest",
+    "onCapReject": "Reject",
+    "recallMostRecent": "Most Recent",
+    "recallMostRelevant": "Most Relevant"
   },
   "wizard": {
     "title": "معالج Agent"
@@ -582,7 +591,12 @@
     "postResponseDesc": "معالجة مخرجات LLM: تعيين الخصائص، وبناء رسائل المخرجات، وإنشاء ردود سريعة.",
     "postPropertyInstructions": "تعليمات الخصائص",
     "postOutputInstructions": "تعليمات المخرجات",
-    "postQrInstructions": "تعليمات الردود السريعة"
+    "postQrInstructions": "تعليمات الردود السريعة",
+    "allSkills": "All skills",
+    "skillPlaceholder": "e.g. order-tracking",
+    "modeAgent": "Agent",
+    "modeChat": "Chat",
+    "perMinute": "/min"
   },
   "outputEditor": {
     "language": "اللغة",

@@ -1,8 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  ChevronDown,
-  ChevronRight,
   Plus,
   X,
   Puzzle,
@@ -11,6 +9,7 @@ import {
   Code2,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
+import { EditorSection } from "./editor-section";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -27,39 +26,6 @@ const CATEGORIES = ["governance", "persona", "compliance", "custom"] as const;
 
 // ─── Sub-components ─────────────────────────────────────────────────────────
 
-function Section({
-  label,
-  defaultOpen = true,
-  icon: Icon,
-  accent,
-  children,
-}: {
-  label: string;
-  defaultOpen?: boolean;
-  icon?: React.ComponentType<{ className?: string }>;
-  accent?: string;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
-      >
-        {open ? (
-          <ChevronDown className="h-3 w-3" />
-        ) : (
-          <ChevronRight className="h-3 w-3" />
-        )}
-        {Icon && <Icon className={`h-3.5 w-3.5 ${accent ?? ""}`} />}
-        {label}
-      </button>
-      {open && <div className="space-y-2">{children}</div>}
-    </div>
-  );
-}
 
 function TagsInput({
   tags,
@@ -157,7 +123,7 @@ export function SnippetEditor({
   return (
     <div className="space-y-6" data-testid="snippet-editor">
       {/* Identity */}
-      <Section
+      <EditorSection
         label={t("snippetEditor.identity", "Identity")}
         icon={Puzzle}
         accent="text-violet-500"
@@ -239,10 +205,10 @@ export function SnippetEditor({
             />
           </div>
         </div>
-      </Section>
+      </EditorSection>
 
       {/* Content */}
-      <Section
+      <EditorSection
         label={t("snippetEditor.content", "Prompt Content")}
         icon={FileText}
         accent="text-amber-500"
@@ -283,10 +249,10 @@ export function SnippetEditor({
             )}
           </p>
         </div>
-      </Section>
+      </EditorSection>
 
       {/* Tags */}
-      <Section
+      <EditorSection
         label={t("snippetEditor.tags", "Tags")}
         icon={Tag}
         accent="text-sky-500"
@@ -297,7 +263,7 @@ export function SnippetEditor({
           onChange={(tags) => onChange({ ...data, tags })}
           readOnly={readOnly}
         />
-      </Section>
+      </EditorSection>
     </div>
   );
 }

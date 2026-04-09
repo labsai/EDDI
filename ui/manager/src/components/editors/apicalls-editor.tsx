@@ -26,6 +26,7 @@ import {
   type DiscoverEndpointsResult,
 } from "@/lib/api/openapi-discover";
 import { isValidUrl } from "@/lib/utils";
+import { EditorSection } from "./editor-section";
 
 // ─── Types matching HttpCallsConfiguration backend model ─────────────────────
 
@@ -278,34 +279,6 @@ function KvEditor({
   );
 }
 
-function Section({
-  label,
-  defaultOpen = true,
-  children,
-}: {
-  label: string;
-  defaultOpen?: boolean;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="mb-1.5 flex items-center gap-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
-      >
-        {open ? (
-          <ChevronDown className="h-3 w-3" />
-        ) : (
-          <ChevronRight className="h-3 w-3" />
-        )}
-        {label}
-      </button>
-      {open && <div className="space-y-2">{children}</div>}
-    </div>
-  );
-}
 
 // ─── HttpCodeValidator editor ────────────────────────────────────────────────
 
@@ -1106,16 +1079,16 @@ function HttpCallEditor({
           </div>
 
           {/* Actions */}
-          <Section label={t("apiCallsEditor.actions", "Trigger Actions")}>
+          <EditorSection label={t("apiCallsEditor.actions", "Trigger Actions")}>
             <ActionTags
               actions={call.actions ?? []}
               onChange={(a) => onChange({ ...call, actions: a })}
               readOnly={readOnly}
             />
-          </Section>
+          </EditorSection>
 
           {/* Request */}
-          <Section label={t("apiCallsEditor.request", "Request")}>
+          <EditorSection label={t("apiCallsEditor.request", "Request")}>
             <div className="flex gap-2">
               <select
                 value={call.request.method}
@@ -1155,10 +1128,10 @@ function HttpCallEditor({
                 className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               />
             </div>
-          </Section>
+          </EditorSection>
 
           {/* Headers */}
-          <Section
+          <EditorSection
             label={t("apiCallsEditor.headers", "Headers")}
             defaultOpen={
               Object.keys(call.request.headers ?? {}).length > 0
@@ -1172,10 +1145,10 @@ function HttpCallEditor({
               addLabel={t("apiCallsEditor.addHeader", "Add Header")}
               readOnly={readOnly}
             />
-          </Section>
+          </EditorSection>
 
           {/* Query params */}
-          <Section
+          <EditorSection
             label={t("apiCallsEditor.queryParams", "Query Parameters")}
             defaultOpen={
               Object.keys(call.request.queryParams ?? {}).length > 0
@@ -1189,10 +1162,10 @@ function HttpCallEditor({
               addLabel={t("apiCallsEditor.addQueryParam", "Add Query Param")}
               readOnly={readOnly}
             />
-          </Section>
+          </EditorSection>
 
           {/* Body */}
-          <Section
+          <EditorSection
             label={t("apiCallsEditor.body", "Request Body")}
             defaultOpen={!!call.request.body}
           >
@@ -1208,10 +1181,10 @@ function HttpCallEditor({
               )}
               testId="request-body-editor"
             />
-          </Section>
+          </EditorSection>
 
           {/* Parameters (for LLM agents) */}
-          <Section
+          <EditorSection
             label={t(
               "apiCallsEditor.parameters",
               "Parameters (for LLM agents)"
@@ -1231,10 +1204,10 @@ function HttpCallEditor({
               addLabel={t("apiCallsEditor.addParam", "Add Parameter")}
               readOnly={readOnly}
             />
-          </Section>
+          </EditorSection>
 
           {/* Options */}
-          <Section
+          <EditorSection
             label={t("apiCallsEditor.options", "Options")}
             defaultOpen={false}
           >
@@ -1324,10 +1297,10 @@ function HttpCallEditor({
                 />
               )}
             </div>
-          </Section>
+          </EditorSection>
 
           {/* Pre-Request */}
-          <Section
+          <EditorSection
             label={t("apiCallsEditor.preRequest", "Pre-Request")}
             defaultOpen={
               !!(call.preRequest?.propertyInstructions?.length || call.preRequest?.delayBeforeExecutingInMillis)
@@ -1338,10 +1311,10 @@ function HttpCallEditor({
               onChange={(pr) => onChange({ ...call, preRequest: pr })}
               readOnly={readOnly}
             />
-          </Section>
+          </EditorSection>
 
           {/* Post-Response */}
-          <Section
+          <EditorSection
             label={t("apiCallsEditor.postResponse", "Post-Response")}
             defaultOpen={
               !!(call.postResponse?.propertyInstructions?.length ||
@@ -1354,7 +1327,7 @@ function HttpCallEditor({
               onChange={(pr) => onChange({ ...call, postResponse: pr })}
               readOnly={readOnly}
             />
-          </Section>
+          </EditorSection>
         </div>
       )}
     </div>

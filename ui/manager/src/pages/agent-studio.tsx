@@ -2,8 +2,8 @@ import { useState, useMemo, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api-client";
-import { getAgentDescriptors, parseResourceUri, type AgentDescriptor } from "@/lib/api/agents";
+import { getAgentDescriptors, getAgent, parseResourceUri, type AgentDescriptor } from "@/lib/api/agents";
+import { getWorkflow } from "@/lib/api/workflows";
 import { PipelineRailroad } from "@/components/studio/pipeline-railroad";
 import { StudioEditorPanel, StudioEditorEmpty } from "@/components/studio/studio-editor-panel";
 import { ChatPanel } from "@/components/chat/chat-panel";
@@ -25,15 +25,6 @@ interface WorkflowStep {
   type: string;
   extensions: Record<string, unknown>;
   config: { uri?: string };
-}
-
-interface AgentConfig {
-  workflows: string[];
-  channels: unknown[];
-}
-
-interface WorkflowConfig {
-  workflowSteps: WorkflowStep[];
 }
 
 // ==================== Component ====================
@@ -70,7 +61,7 @@ export function AgentStudioPage() {
   // Fetch agent config
   const { data: agentConfig, isLoading: agentLoading } = useQuery({
     queryKey: ["studio", "agent", agentId],
-    queryFn: () => api.get<AgentConfig>(`/agentstore/agents/${agentId}`),
+    queryFn: () => getAgent(agentId!),
     enabled: !!agentId,
     staleTime: 30_000,
   });
@@ -85,12 +76,12 @@ export function AgentStudioPage() {
 
   const { data: workflowConfig } = useQuery({
     queryKey: ["studio", "workflow", workflowId],
-    queryFn: () => api.get<WorkflowConfig>(`/workflowstore/workflows/${workflowId}`),
+    queryFn: () => getWorkflow(workflowId!, workflowVersion),
     enabled: !!workflowId,
     staleTime: 30_000,
   });
 
-  const workflowSteps = workflowConfig?.workflowSteps ?? [];
+  const workflowSteps = (workflowConfig?.workflowSteps ?? []) as WorkflowStep[];
 
   const handleSelectStage = useCallback((index: number) => {
     setSelectedStageIndex(index);

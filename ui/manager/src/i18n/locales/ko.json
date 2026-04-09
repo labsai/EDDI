@@ -174,7 +174,16 @@
     "dreamPruneDays": "Prune After (days)",
     "dreamBatchSize": "Batch Size",
     "detectContradictions": "Detect contradictions",
-    "summarizeInteractions": "Summarize interactions"
+    "summarizeInteractions": "Summarize interactions",
+    "confidenceLow": "Low",
+    "confidenceMedium": "Medium",
+    "confidenceHigh": "High",
+    "visibilitySelf": "self",
+    "visibilityGlobal": "global",
+    "onCapEvict": "Evict Oldest",
+    "onCapReject": "Reject",
+    "recallMostRecent": "Most Recent",
+    "recallMostRelevant": "Most Relevant"
   },
   "wizard": {
     "title": "Agent 마법사"
@@ -582,7 +591,12 @@
     "postResponseDesc": "LLM 출력 처리: 속성 설정, 출력 메시지 빌드 및 빠른 답장 생성.",
     "postPropertyInstructions": "속성 지침",
     "postOutputInstructions": "출력 빌드 지침",
-    "postQrInstructions": "빠른 답장 빌드 지침"
+    "postQrInstructions": "빠른 답장 빌드 지침",
+    "allSkills": "All skills",
+    "skillPlaceholder": "e.g. order-tracking",
+    "modeAgent": "Agent",
+    "modeChat": "Chat",
+    "perMinute": "/min"
   },
   "outputEditor": {
     "language": "언어",

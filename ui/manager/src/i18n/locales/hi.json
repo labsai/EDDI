@@ -174,7 +174,16 @@
     "dreamPruneDays": "Prune After (days)",
     "dreamBatchSize": "Batch Size",
     "detectContradictions": "Detect contradictions",
-    "summarizeInteractions": "Summarize interactions"
+    "summarizeInteractions": "Summarize interactions",
+    "confidenceLow": "Low",
+    "confidenceMedium": "Medium",
+    "confidenceHigh": "High",
+    "visibilitySelf": "self",
+    "visibilityGlobal": "global",
+    "onCapEvict": "Evict Oldest",
+    "onCapReject": "Reject",
+    "recallMostRecent": "Most Recent",
+    "recallMostRelevant": "Most Relevant"
   },
   "wizard": {
     "title": "Agent विज़ार्ड"
@@ -582,7 +591,12 @@
     "postResponseDesc": "LLM आउटपुट को प्रोसेस करें: प्रॉपर्टीज सेट करें, आउटपुट मैसेज बनाएं और क्विक रिप्लाई जनरेट करें।",
     "postPropertyInstructions": "प्रॉपर्टी निर्देश",
     "postOutputInstructions": "आउटपुट निर्देश",
-    "postQrInstructions": "क्विक रिप्लाई निर्देश"
+    "postQrInstructions": "क्विक रिप्लाई निर्देश",
+    "allSkills": "All skills",
+    "skillPlaceholder": "e.g. order-tracking",
+    "modeAgent": "Agent",
+    "modeChat": "Chat",
+    "perMinute": "/min"
   },
   "outputEditor": {
     "language": "भाषा",
