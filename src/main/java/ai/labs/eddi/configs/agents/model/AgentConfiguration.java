@@ -58,6 +58,14 @@ public class AgentConfiguration {
      */
     private SecurityConfig security;
 
+    /**
+     * Memory management policy for this agent. Controls how failed task data is
+     * handled in conversation history.
+     *
+     * @since 6.0.0
+     */
+    private MemoryPolicy memoryPolicy;
+
     public static class ChannelConnector {
         private URI type;
         private Map<String, String> config = new HashMap<>();
@@ -195,6 +203,14 @@ public class AgentConfiguration {
 
     public void setSecurity(SecurityConfig security) {
         this.security = security;
+    }
+
+    public MemoryPolicy getMemoryPolicy() {
+        return memoryPolicy;
+    }
+
+    public void setMemoryPolicy(MemoryPolicy memoryPolicy) {
+        this.memoryPolicy = memoryPolicy;
     }
 
     /**
@@ -527,24 +543,6 @@ public class AgentConfiguration {
         public void setMaxUsersPerRun(int maxUsersPerRun) {
             this.maxUsersPerRun = maxUsersPerRun;
         }
-    }
-
-    // === Memory Policy (Phase A: Strict Write Discipline) ===
-
-    /**
-     * Memory management policy for this agent. Controls how failed task data is
-     * handled in conversation history.
-     *
-     * @since 6.0.0
-     */
-    private MemoryPolicy memoryPolicy;
-
-    public MemoryPolicy getMemoryPolicy() {
-        return memoryPolicy;
-    }
-
-    public void setMemoryPolicy(MemoryPolicy memoryPolicy) {
-        this.memoryPolicy = memoryPolicy;
     }
 
     /**

@@ -1,5 +1,6 @@
 package ai.labs.eddi.engine.lifecycle.internal;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.lifecycle.IComponentCache;
@@ -198,11 +199,17 @@ public class LifecycleManager implements ILifecycleManager {
 
             // Snapshot state before task execution (for rollback on failure)
             var currentStep = conversationMemory.getCurrentStep();
-            int dataCountBefore = 0;
+            Map<String, IData<?>> dataIdentitiesBefore = Map.of();
             Set<String> outputKeysBefore = Set.of();
+            List<String> actionsBefore = List.of();
             if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
-                dataCountBefore = cs.snapshotDataCount();
+                dataIdentitiesBefore = cs.snapshotDataIdentities();
                 outputKeysBefore = cs.snapshotOutputKeys();
+                // Capture pre-failure actions for Bug 3 fix
+                IData<List<String>> preActionData = currentStep.getLatestData(ACTIONS);
+                if (preActionData != null && preActionData.getResult() != null) {
+                    actionsBefore = List.copyOf(preActionData.getResult());
+                }
             }
 
             try {
@@ -244,10 +251,9 @@ public class LifecycleManager implements ILifecycleManager {
             } catch (LifecycleException | RuntimeException e) {
                 if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
                     // === Strict Write Discipline: handle task failure ===
-                    handleTaskFailure(cs, task, e, dataCountBefore, outputKeysBefore,
-                            memoryPolicy.getStrictWriteDiscipline() != null
-                                    ? memoryPolicy.getStrictWriteDiscipline().getOnFailure()
-                                    : "digest");
+                    String onFailureMode = resolveOnFailureMode(memoryPolicy);
+                    handleTaskFailure(cs, task, e, dataIdentitiesBefore,
+                            outputKeysBefore, actionsBefore, onFailureMode);
                 }
 
                 // Re-throw — pipeline stops (current behavior preserved).
@@ -426,39 +432,52 @@ public class LifecycleManager implements ILifecycleManager {
 
     // === Strict Write Discipline: failure handling ===
 
+    /** Valid onFailure modes. */
+    private static final Set<String> VALID_ON_FAILURE_MODES = Set.of("digest", "exclude_all", "keep_all");
+
+    /**
+     * Resolve and validate the onFailure mode from the memory policy. Logs a
+     * warning and defaults to "digest" for unknown values.
+     */
+    private String resolveOnFailureMode(AgentConfiguration.MemoryPolicy memoryPolicy) {
+        var swd = memoryPolicy != null ? memoryPolicy.getStrictWriteDiscipline() : null;
+        String mode = swd != null ? swd.getOnFailure() : "digest";
+        if (mode == null || !VALID_ON_FAILURE_MODES.contains(mode)) {
+            LOGGER.warnf("[STRICT_WRITE] Unknown onFailure mode '%s', defaulting to 'digest'", mode);
+            return "digest";
+        }
+        return mode;
+    }
+
     /**
      * Handle a task failure under strict write discipline. Performs three
      * operations:
      * <ol>
-     * <li>Marks all IData entries added by the failed task as uncommitted</li>
+     * <li>Marks all IData entries added or overwritten by the failed task as
+     * uncommitted (using identity comparison against pre-execution snapshot)</li>
      * <li>Rolls back ConversationOutput entries added by the failed task</li>
-     * <li>Injects an error digest (if mode is "digest") as a special output type
-     * and a {@code task_failed_<taskId>} action</li>
+     * <li>Injects an error digest (if mode is "digest") under a separate
+     * "taskErrors" key, and a {@code task_failed_<taskId>} action rebuilt from the
+     * pre-failure action state</li>
      * </ol>
-     *
-     * @param step
-     *            the conversation step (concrete type for snapshot access)
-     * @param task
-     *            the failed task
-     * @param exception
-     *            the exception that caused the failure
-     * @param dataCountBefore
-     *            number of IData entries before task execution
-     * @param outputKeysBefore
-     *            ConversationOutput keys before task execution
-     * @param onFailureMode
-     *            "digest", "exclude_all", or "keep_all"
      */
     private void handleTaskFailure(ConversationStep step, ILifecycleTask task, Exception exception,
-                                   int dataCountBefore, Set<String> outputKeysBefore, String onFailureMode) {
+                                   Map<String, IData<?>> dataIdentitiesBefore,
+                                   Set<String> outputKeysBefore, List<String> actionsBefore,
+                                   String onFailureMode) {
 
         LOGGER.warnf("[STRICT_WRITE] Task '%s' (type=%s) failed — applying write discipline (mode=%s): %s",
                 task.getId(), task.getType(), onFailureMode, exception.getMessage());
 
-        // 1. Mark new IData entries as uncommitted
-        List<IData<?>> allElements = step.getAllElements();
-        for (int i = dataCountBefore; i < allElements.size(); i++) {
-            allElements.get(i).setCommitted(false);
+        // 1. Mark new or overwritten IData entries as uncommitted.
+        // An entry is "dirty" if its key didn't exist before OR if the
+        // IData reference changed (task overwrote an existing key).
+        for (var entry : step.getAllElements()) {
+            IData<?> before = dataIdentitiesBefore.get(entry.getKey());
+            if (before == null || before != entry) {
+                // New key or different IData instance → written by failed task
+                entry.setCommitted(false);
+            }
         }
 
         // 2. Rollback ConversationOutput entries added by the failed task
@@ -474,26 +493,27 @@ public class LifecycleManager implements ILifecycleManager {
         if ("digest".equals(onFailureMode)) {
             injectErrorDigest(step, task, exception);
         }
-        injectFailureAction(step, task);
+        injectFailureAction(step, task, actionsBefore);
     }
 
     /**
-     * Injects a compact error digest into the conversation output as a special
-     * "errorDigest" output type. The LLM sees this in the conversation history and
-     * can adapt its behavior accordingly. The UI can render it with distinct
-     * styling (warning icon, different color).
+     * Injects a compact error digest into the conversation output under the
+     * dedicated "taskErrors" key (NOT mixed into "output"). This ensures
+     * {@link ConversationLogGenerator} doesn't concatenate error text with regular
+     * assistant output. The UI can render taskErrors with distinct styling (warning
+     * icon, different color).
      */
     private void injectErrorDigest(ConversationStep step, ILifecycleTask task, Exception exception) {
         String summary = summarizeException(exception);
         String digestText = String.format("Task '%s' failed: %s", task.getId(), summary);
 
-        // Store as special output type (like thinking/tool usage)
+        // Store under separate "taskErrors" key — never mixed into "output"
         var errorOutput = new LinkedHashMap<String, Object>();
         errorOutput.put("type", "errorDigest");
         errorOutput.put("taskId", task.getId());
         errorOutput.put("taskType", task.getType());
         errorOutput.put("text", digestText);
-        step.addConversationOutputList("output", List.of(errorOutput));
+        step.addConversationOutputList("taskErrors", List.of(errorOutput));
 
         // Also store as committed IData so it's visible in memory
         Data<String> digestData = new Data<>("taskError:" + task.getId(), digestText);
@@ -503,24 +523,22 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     /**
-     * Injects a {@code task_failed_<taskId>} action into the conversation step. On
-     * the next turn, behavior rules can match this action to trigger recovery
-     * logic.
+     * Injects a {@code task_failed_<taskId>} action into the conversation step.
+     * Rebuilds the actions list from the pre-failure snapshot to avoid including
+     * actions that the failed task may have added.
+     *
+     * @param actionsBefore
+     *            the actions list captured before the failed task ran
      */
-    private void injectFailureAction(ConversationStep step, ILifecycleTask task) {
+    private void injectFailureAction(ConversationStep step, ILifecycleTask task,
+                                     List<String> actionsBefore) {
         String failureAction = "task_failed_" + task.getId();
 
-        // Append to existing actions list
-        IData<List<String>> actionData = step.getLatestData(ACTIONS);
-        List<String> actions;
-        if (actionData != null && actionData.getResult() != null) {
-            actions = new ArrayList<>(actionData.getResult());
-        } else {
-            actions = new ArrayList<>();
-        }
+        // Rebuild from pre-failure state + failure action
+        List<String> actions = new ArrayList<>(actionsBefore);
         actions.add(failureAction);
 
-        // Store updated actions
+        // Store as fresh committed IData (replaces any uncommitted actions data)
         step.set(ACTIONS, actions);
         step.addConversationOutputList(ACTIONS.key(), List.of(failureAction));
     }

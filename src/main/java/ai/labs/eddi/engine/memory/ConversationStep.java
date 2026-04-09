@@ -114,15 +114,15 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     }
 
     /**
-     * Returns the current number of data elements in this step. Used by
-     * LifecycleManager to determine which data entries were added by a task
-     * (comparing before/after counts).
+     * Returns a snapshot of the current data store as a map of key to {@code IData}
+     * reference. Used by LifecycleManager to detect both new entries AND
+     * overwritten entries after task execution (by comparing object identity).
      *
-     * @return current data element count
+     * @return defensive copy mapping keys to their current IData references
      * @since 6.0.0
      */
-    public int snapshotDataCount() {
-        return store.size();
+    public Map<String, IData<?>> snapshotDataIdentities() {
+        return new LinkedHashMap<>(store);
     }
 
     /**
