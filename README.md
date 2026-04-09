@@ -12,6 +12,23 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 
 ---
 
+## 🏗️ Standards & Protocol Compliance
+
+EDDI implements industry standards and emerging AI interoperability protocols — not proprietary APIs:
+
+| Standard / Protocol | Support | Description |
+|---|---|---|
+| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | ✅ Server (48+ tools) + Client | Full EDDI control from Claude Desktop, IDE plugins, or any MCP client. Agents can also consume external MCP tool servers |
+| **[A2A](https://google.github.io/A2A/)** (Agent-to-Agent Protocol) | ✅ Full | Google's peer communication protocol — Agent Cards, skill discovery, cross-platform agent interop |
+| **[OpenAPI](https://www.openapis.org/)** 3.1 | ✅ Native | Auto-generated spec at `/q/openapi`. Paste any OpenAPI spec → get a fully deployed API-calling agent |
+| **OAuth 2.0 / OIDC** | ✅ Native | Keycloak-backed authentication, authorization, and tenant isolation |
+| **SSE** (Server-Sent Events) | ✅ Native | Real-time streaming for chat responses, group discussions, and log feeds |
+| **[EU AI Act](https://artificialintelligenceact.eu/)** | ✅ Compliant | Immutable HMAC-SHA256 audit ledger, decision traceability, risk classification guidance |
+| **[GDPR](https://gdpr.eu/)** / **[CCPA](https://oag.ca.gov/privacy/ccpa)** | ✅ Built-in | Data erasure, portability, restriction of processing (Art. 18), per-category retention, pseudonymization |
+| **[HIPAA](https://www.hhs.gov/hipaa/)** | ✅ Ready | Deployment guide, BAA template, encryption guidance, LLM provider BAA matrix |
+
+---
+
 ## ✨ Features at a Glance
 
 ### 🤖 Multi-Agent Orchestration
@@ -21,6 +38,7 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - 🪆 **Nested Groups** — Compose groups of groups for tournament brackets, red-team vs blue-team, and panel reviews
 - 👥 **Managed Conversations** — Intent-based auto-routing with one conversation per user per intent
 - 🧙 **Agent Father** — Meta-agent that creates other agents through conversation (ships out of the box)
+- 🎯 **Capability Matching** — A2A-style discovery and soft-routing via agent skill attributes and confidence scores
 
 ### 🧠 LLM Provider Support (12 Providers)
 
@@ -32,17 +50,25 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 ### 🔗 Protocol & Interoperability
 
 - 🧩 **MCP Server** (48+ tools) — Full EDDI control from Claude Desktop, IDE plugins, or any MCP client
-- 🧩 **MCP Client** — Connect agents to external MCP tool servers
+- 🧩 **MCP Client** — Connect agents to external MCP tool servers with governance (READ_ONLY / STATE_CHANGING classification)
 - 🤝 **A2A Protocol** — Agent-to-Agent peer communication with skill discovery and Agent Cards
 - 📋 **OpenAPI-to-Agent** — Paste an OpenAPI spec, get a fully deployed API-calling agent
 
-### 🛠️ Built-In AI Agent Tools
+### 💭 Memory & Context
 
-- 🔍 **Web Search** — DuckDuckGo or Google Custom Search
-- 🧮 **Calculator** — Sandboxed math parser (no code injection)
-- 🌐 **Web Scraper** · 📄 **PDF Reader** — SSRF-protected content extraction
-- ☁️ **Weather** · 🕐 **DateTime** · 📊 **Data Formatter** · 📝 **Text Summarizer**
-- 🔌 **HTTP Calls as Tools** — Expose your own APIs as LLM-callable tools with full security sandboxing
+- 💾 **Persistent User Memory** — Agents remember facts, preferences, and context across conversations
+- 💤 **Dream Consolidation** — Background memory maintenance: stale entry pruning, contradiction detection, and summarization (inspired by [Claude's memory architecture](https://www.anthropic.com/engineering/claude-code-best-practices))
+- 🪟 **Token-Aware Windowing** — Intelligent context packing with anchored opening steps and per-model tokenizer support
+- 📝 **Rolling Summary** — Incremental LLM-powered summarization of older turns, with a **Conversation Recall Tool** for drill-back
+- 🔧 **Property Extraction** — Config-driven slot-filling for structured data capture with `longTerm` / `conversation` / `step` scoping
+- 🔄 **Conversation State** — Full history with undo/redo support
+
+### 📈 Smart Model Cascading
+
+- 📉 **Cost Optimization** — Try cheap/fast models first, escalate to powerful models only when needed
+- 📊 **4 Confidence Strategies** — Structured output, heuristic, judge model, or none
+- 💰 **Per-Conversation Budgets** — Automatic cost tracking with budget caps
+- 🏢 **Tenant Cost Ceilings** — Monthly cost budgets per tenant with automatic enforcement
 
 ### 📚 RAG (Retrieval-Augmented Generation)
 
@@ -51,27 +77,37 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - 🌐 **httpCall RAG** — Zero-infrastructure RAG via any search API
 - 📥 **REST Ingestion API** — Async document ingestion with status tracking
 
-### 💭 Memory & Context
+### 🛠️ Built-In AI Agent Tools
 
-- 💾 **Persistent User Memory** — Agents remember facts, preferences, and context across conversations
-- 🪟 **Token-Aware Windowing** — Intelligent context packing with anchored opening steps
-- 📝 **Property Extraction** — Config-driven slot-filling for structured data capture
-- 🔄 **Conversation State** — Full history with undo/redo support
+- 🔍 **Web Search** — DuckDuckGo or Google Custom Search
+- 🧮 **Calculator** — Sandboxed math parser (no code injection)
+- 🌐 **Web Scraper** · 📄 **PDF Reader** — SSRF-protected content extraction
+- ☁️ **Weather** · 🕐 **DateTime** · 📊 **Data Formatter** · 📝 **Text Summarizer**
+- 🔌 **HTTP Calls as Tools** — Expose your own APIs as LLM-callable tools with full security sandboxing
+- 🧠 **Memory Tools** — LLM-callable tools for reading/writing persistent user memory
+- 🔙 **Conversation Recall** — Tool for LLMs to drill back into summarized conversation history
+- 📎 **Multimodal Attachments** — Image, PDF, audio, and video attachment pipeline with MIME-based routing
 
-### 📈 Smart Model Cascading
+### ⏰ Scheduled Execution & Heartbeats
 
-- 📉 **Cost Optimization** — Try cheap/fast models first, escalate to powerful models only when needed
-- 📊 **4 Confidence Strategies** — Structured output, heuristic, judge model, or none
-- 💰 **Per-Conversation Budgets** — Automatic cost tracking with budget caps
+- 🫀 **Heartbeat Triggers** — Periodic agent wake-ups at configurable intervals (inspired by [OpenClaw's](https://github.com/openclaw) proactive agent patterns)
+- ⏲️ **Cron Scheduling** — Standard cron expressions for timed agent execution
+- 🔄 **Conversation Strategies** — `persistent` (reuse same conversation) or `new` (fresh context each fire)
+- 📊 **Fire Logging** — Complete execution history with status, duration, cost, and retry tracking
+- 🌙 **Dream Cycles** — Scheduled background memory consolidation (pruning, contradiction detection, summarization)
 
-### 🔐 Enterprise Security
+### 🔐 Enterprise Security & Compliance
 
-- 🏦 **Secrets Vault** — Envelope encryption (PBKDF2 + AES) for API keys, never plaintext in DB
+- 🏦 **Secrets Vault** — Envelope encryption (PBKDF2 + AES) for API keys, never plaintext in DB. DEK/KEK rotation, tenant-scoped
 - 🛡️ **SSRF Protection** — URL validation blocks private/internal addresses on all tools
 - 🔒 **Sandboxed Evaluation** — No `eval()`, no script engines — safe recursive-descent math parser
 - 🔑 **OAuth 2.0 / Keycloak** — Authentication, authorization, and tenant isolation
-- 📜 **Immutable Audit Ledger** — Write-once trail with HMAC integrity for EU AI Act compliance
+- 📜 **Immutable Audit Ledger** — Write-once trail with HMAC-SHA256 integrity for EU AI Act compliance
+- ✍️ **Agent Signing** — Ed25519 cryptographic identity per agent, audit entries signed with agent private keys
 - 🚫 **No Dynamic Code Execution** — Custom logic runs in external MCP servers, outside the EDDI perimeter
+- 🗑️ **GDPR Compliance Suite** — Cascading user data erasure, data portability exports, Art. 18 restriction of processing, per-category retention policies
+- 🏥 **HIPAA Ready** — Deployment guide, BAA template, LLM provider BAA matrix, session timeout guidance
+- 🔍 **Compliance Startup Checks** — Advisory warnings on boot for TLS and database encryption gaps
 
 ### ⚙️ Configuration-Driven Architecture
 
@@ -80,6 +116,8 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - 📦 **Composable Agents** — Agents assembled from reusable, version-controlled workflows and extensions
 - 🧪 **Behavior Rules** — IF-THEN logic engine for routing, orchestration, and business logic
 - 📤 **Import / Export** — Agents are portable as ZIP files with secret scrubbing on export
+- 📝 **Prompt Snippets** — Reusable, versioned system prompt building blocks (`{{snippets.safety_instructions}}`)
+- 📎 **Content Type Routing** — MIME-based behavior rule conditions for multimodal attachment routing
 
 ### 🚀 Cloud-Native & Observable
 
@@ -89,7 +127,8 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - 🩺 **Health Checks** — Liveness & readiness probes at `/q/health/live` and `/q/health/ready`
 - 🔄 **NATS JetStream** — Async event bus for distributed processing
 - ⚡ **Virtual Threads** — Java 25 virtual threads for true concurrency, no GIL
-- 🗃️ **DB-Agnostic** — Choose MongoDB or PostgreSQL, switch with one env var
+- 🗃️ **DB-Agnostic** — Choose MongoDB or PostgreSQL, switch with one env var. Single Docker image for both
+- 🏗️ **Red Hat Certified** — Container certification with automated preflight checks in CI
 
 ### 🖥️ Manager Dashboard & Chat UI
 
@@ -97,7 +136,7 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - 💬 **Chat Widget** — Embeddable React chat UI with SSE streaming and Keycloak auth
 - 🔍 **Audit Trail Viewer** — Timeline-based compliance and debugging UI
 - 📋 **Logs Panel** — Live SSE log streaming + searchable history
-- 🔑 **Secrets Manager** — Write-only UI for vault entries
+- 🔑 **Secrets Manager** — Write-only UI for vault entries with copy-reference support
 
 ---
 
@@ -242,7 +281,7 @@ Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming
 | **[Getting Started](docs/getting-started.md)**               | Setup and first steps                      |
 | **[Developer Quickstart](docs/developer-quickstart.md)**     | Build your first agent in 5 minutes        |
 | **[Architecture](docs/architecture.md)**                     | Deep dive into EDDI's design and pipeline  |
-| **[LangChain Integration](docs/langchain.md)**               | Connecting to 12 LLM providers             |
+| **[LLM Configuration](docs/langchain.md)**                   | Connecting to 12 LLM providers             |
 | **[Behavior Rules](docs/behavior-rules.md)**                 | Configuring agent routing logic            |
 | **[HTTP Calls](docs/httpcalls.md)**                          | External API integration                   |
 | **[RAG](docs/rag.md)**                                       | Knowledge base retrieval setup             |
@@ -251,6 +290,9 @@ Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming
 | **[Group Conversations](docs/group-conversations.md)**       | Multi-agent debate orchestration           |
 | **[User Memory](docs/user-memory.md)**                       | Cross-conversation fact retention          |
 | **[Model Cascading](docs/model-cascade.md)**                 | Cost-optimized multi-model routing         |
+| **[Prompt Snippets](docs/prompt-snippets-guide.md)**         | Reusable system prompt building blocks     |
+| **[Attachments](docs/attachments-guide.md)**                 | Multimodal attachment pipeline             |
+| **[Capability Matching](docs/capability-match-guide.md)**    | A2A skill discovery and routing            |
 | **[Security](docs/security.md)**                             | SSRF protection, sandboxing, and hardening |
 | **[Secrets Vault](docs/secrets-vault.md)**                   | Envelope encryption for sensitive data     |
 | **[Audit Ledger](docs/audit-ledger.md)**                     | EU AI Act-compliant audit trail            |
@@ -340,10 +382,10 @@ EDDI provides built-in infrastructure for regulatory compliance:
 
 | Guide | Covers |
 |---|---|
-| **[GDPR / CCPA](docs/gdpr-compliance.md)** | Data erasure, export, retention, and consent guidance |
-| **[HIPAA](docs/hipaa-compliance.md)** | Healthcare deployment guide — encryption, BAAs, session management |
-| **[EU AI Act](docs/eu-ai-act-compliance.md)** | AI risk classification and decision traceability |
-| **[Privacy & Data Processing](PRIVACY.md)** | Data flows, LLM provider matrix, international regulations (PIPEDA, LGPD) |
+| **[GDPR / CCPA](docs/gdpr-compliance.md)** | Data erasure, export, Art. 18 restriction of processing, per-category retention, and consent guidance |
+| **[HIPAA](docs/hipaa-compliance.md)** | Healthcare deployment guide — encryption, BAAs, LLM provider matrix, session management |
+| **[EU AI Act](docs/eu-ai-act-compliance.md)** | AI risk classification, decision traceability, immutable audit ledger |
+| **[Privacy & Data Processing](PRIVACY.md)** | Data flows, LLM provider matrix, international regulations (PIPEDA, LGPD, APPI, POPIA, PDPA) |
 | **[Compliance Data Flow](docs/compliance-data-flow.md)** | Single-page data flow diagram for auditors |
 | **[Incident Response](docs/incident-response.md)** | Breach response runbook (GDPR, CCPA, HIPAA timelines) |
 
