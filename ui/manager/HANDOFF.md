@@ -1,8 +1,8 @@
 # EDDI Manager — Handoff Document
 
-> **Last updated**: 2026-04-07  
+> **Last updated**: 2026-04-09  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: `6ee2922` feat(v6): Phase 13 Polish - Studio nav, slug fixes, keyboard nav, tool metrics MSW, mobile tabs
+> **Last commit**: `63a867a` feat(v6): Phase 15.5 - Secret rotation API/UI + Capability registry (API, hooks, MSW)
 
 ---
 
@@ -68,6 +68,7 @@
 | PlatS | **Global Platform Status**: Always-visible top-bar health indicator polling `/administration/logs/instance` every 15s. Click/tap popover with instance ID, latency (color-coded), last-checked time. Reusable `StreamBadge` component for SSE connections. Logs page: replaced big SSE badge with StreamBadge. Coordinator: replaced ● Live span with StreamBadge. Secrets: removed vault health badge (covered by global indicator). `usePlatformStatus` hook (TanStack Query). 16 i18n keys across 11 locales. | pending |
 | **P14** | **Phase 14 — UX Hardening (partial)**: Logs session SSE collector (`session-log-store.ts`), agent/conversation dropdown filters on Logs + Audit. Audit auto-loads `recent` on mount. Agents + Groups: unified "New" button with CreateOrWizardDialog. Orphans: pre-scan empty state, type-specific icons, version extraction, copy URI, selective deletion checkboxes. Sidebar: regrouped into Core/Build/Monitor/Admin, icons updated (MessagesSquare, CalendarClock, Link2Off), `__APP_VERSION__` display. 31 i18n keys propagated to all 10 locales. | `890fa53` |
 | **13P** | **Phase 13 Polish**: Fix stale resource slugs (behavior→rules, httpcalls→apicalls, langchain→llm). Sidebar + Agent Detail Studio entry points. StudioLandingPage with agent picker grid. Pipeline Railroad dictionary/rag icons. Debug drawer ARIA keyboard nav (Arrow/Home/End + roving tabIndex). MSW tool metrics handlers (costs, rate limits, cache, history). Vite proxy `/llm/tools`. Memory inspector API centralized to conversations.ts. Mobile bottom tab navigation. 7 new i18n keys propagated to all 11 locales. | `6ee2922` |
+| **15** | **Phase 15 — Backend Feature Integration**: 15.1 Prompt Snippets (SnippetEditor, RESOURCE_TYPES, MSW, i18n). 15.2 GDPR Privacy Admin (Art. 17 erasure + Art. 15/20 export, sidebar, API/hooks/MSW). 15.3 LLM Editor Enrichment (Conversation Memory rolling summary, Tool Response Limits). 15.4 Agent Editor Enrichment (Security/Identity DID+signing, Capabilities registry, User Memory with guardrails + Dream consolidation). 15.5 Secrets key rotation (API+dialog) + Capability registry (API/hooks/MSW). | `63a867a` |
 
 ### Test Status
 
