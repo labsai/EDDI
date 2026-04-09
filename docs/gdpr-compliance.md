@@ -218,7 +218,8 @@ feature mapping and deployer checklist in PRIVACY.md:
 - **[LGPD](../PRIVACY.md#lgpd--brazil)** — Brazil (Art. 18 data subject rights)
 - **[APPI](../PRIVACY.md#appi--japan)** — Japan (2022 amendments, EU adequacy)
 - **[POPIA](../PRIVACY.md#popia--south-africa)** — South Africa (8 processing conditions)
-- **[PDPA](../PRIVACY.md#pdpa--southeast-asia)** — Singapore & Thailand
+- **[PDPA](../PRIVACY.md#pdpa--southeast-asia)** — Singapore, Thailand & Malaysia
+- **[PIPL](../PRIVACY.md#pipl--china)** — China (data localization, cross-border transfer)
 
 The same erasure and export endpoints (`DELETE /admin/gdpr/{userId}`,
 `GET /admin/gdpr/{userId}/export`) work for all jurisdictions. EDDI

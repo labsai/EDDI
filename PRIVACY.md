@@ -324,8 +324,9 @@ standards. Enforced by the Information Regulator.
 ### PDPA — Southeast Asia
 
 The **Personal Data Protection Act** applies in multiple Southeast Asian
-jurisdictions. Singapore's PDPA (2012, major amendments 2021) and
-Thailand's PDPA (2019, effective 2022) are the most mature.
+jurisdictions. Singapore's PDPA (2012, major amendments 2021),
+Thailand's PDPA (2019, effective 2022), and Malaysia's PDPA (2010,
+amended 2024) are the most mature.
 
 #### Singapore PDPA
 
@@ -364,6 +365,85 @@ covers all technical requirements. Key deployer responsibilities:
 | Cross-border transfers | Require adequacy, appropriate safeguards, or consent |
 | Thai-language notices | Provide privacy notices in **Thai** |
 | Consent for sensitive data | Explicit consent required for sensitive personal data (health, biometrics, etc.) |
+
+#### Malaysia PDPA
+
+Malaysia's **Personal Data Protection Act** (2010, significant amendments
+2024) regulates the processing of personal data in commercial transactions.
+The 2024 amendments introduced mandatory breach notification, appointment
+of data protection officers, and cross-border data transfer mechanisms —
+aligning Malaysia more closely with GDPR.
+
+| Malaysia PDPA Principle | EDDI Technical Capability | Status |
+|---|---|---|
+| General Principle (lawful processing) | Agent configuration documents processing purpose; deployer establishes lawful basis | ✅ + 🏢 |
+| Notice and Choice Principle | Deployer provides notice and obtains consent in their application layer | 🏢 Your org |
+| Disclosure Principle | LLM provider data flows documented in PRIVACY.md; audit trail records which provider processed each turn | ✅ Built-in |
+| Security Principle | AES-256-GCM vault encryption, HMAC-SHA256 audit integrity, Keycloak OIDC, RBAC, SSRF protection | ✅ Built-in |
+| Retention Principle | Configurable auto-cleanup (`deleteEndedConversationsOnceOlderThanDays`) + idle conversation timeout | ✅ Built-in |
+| Data Integrity Principle | Timestamped, versioned conversation state; user memories updatable via REST API | ✅ Built-in |
+| Access Principle | `GET /admin/gdpr/{userId}/export` — full data bundle in machine-readable JSON | ✅ Built-in |
+| Correction (2024 amendment) | `PUT /usermemorystore/memories` — upserts individual entries | ✅ Built-in |
+| Deletion (2024 amendment) | `DELETE /admin/gdpr/{userId}` — cascade deletion across all stores | ✅ Built-in |
+| Data breach notification (2024 amendment) | Incident response runbook template (`docs/incident-response.md`) | ✅ Built-in |
+| Cross-border transfer (2024 amendment) | Provider data flows documented; deployer applies for approval or uses whitelisted countries | ✅ + 🏢 |
+
+**Deployer checklist (Malaysia)**:
+
+| Responsibility | Details |
+|---|---|
+| Registration | Register with the **Department of Personal Data Protection** (JPDP) if processing personal data |
+| DPO appointment | Appoint a **Data Protection Officer** — mandatory under the 2024 amendments |
+| Consent capture | Obtain consent before processing; separate consent required for each purpose; consent must be in both **Bahasa Malaysia and English** |
+| Breach notification | Notify the **JPDP Commissioner** as soon as practicable (within **72 hours** under 2024 amendments); notify affected data subjects without undue delay |
+| Cross-border transfers | The 2024 amendments introduced a whitelist model — data may only be transferred to countries specified by the Minister, or with explicit consent of the data subject |
+| Sensitive personal data | Processing of sensitive data (health, political opinions, religion, criminal offences) requires **explicit consent** and additional safeguards |
+
+---
+
+### PIPL — China
+
+China's **Personal Information Protection Law** (2021) is one of the
+world's strictest data privacy frameworks. It has strong extraterritorial
+reach, strict data localization requirements, and heavy penalties (up to
+5% of annual revenue). PIPL is particularly relevant for EDDI deployments
+serving users in mainland China, as it imposes specific requirements on
+cross-border data transfers and AI-powered automated decision-making.
+
+| PIPL Obligation | EDDI Technical Capability | Status |
+|---|---|---|
+| Lawful basis for processing (Art. 13) | Agent configuration documents purpose; deployer establishes legal basis (consent, contract, public interest, etc.) | ✅ + 🏢 |
+| Informed consent / separate consent (Art. 14, 29) | Deployer integrates consent capture and separate consent UI for sensitive data, cross-border transfer, and public disclosure | 🏢 Your org |
+| Right to know (Art. 44) | Documented data processing in PRIVACY.md; agent configs describe purpose | ✅ + 🏢 |
+| Right to access and copy (Art. 45) | `GET /admin/gdpr/{userId}/export` — full data bundle in structured JSON | ✅ Built-in |
+| Right to correction (Art. 46) | `PUT /usermemorystore/memories` — upserts individual entries | ✅ Built-in |
+| Right to deletion (Art. 47) | `DELETE /admin/gdpr/{userId}` — cascade deletion across all stores + pseudonymization of audit trail | ✅ Built-in |
+| Right to refuse automated decision-making (Art. 24) | Deployer provides opt-out mechanism; EDDI's audit ledger records all AI decisions for transparency | ✅ + 🏢 |
+| Data minimization (Art. 6) | Token-aware windowing limits data sent to LLMs; configurable retention auto-deletes old conversations | ✅ Built-in |
+| Security measures (Art. 51) | AES-256-GCM vault encryption, HMAC-SHA256 audit integrity, Keycloak OIDC, RBAC, SSRF protection, sandboxed evaluation | ✅ Built-in |
+| Data breach notification (Art. 57) | Incident response runbook template (`docs/incident-response.md`) | ✅ Built-in |
+| Impact assessment for sensitive data (Art. 55) | EDDI's audit ledger and data flow documentation provide evidence for Personal Information Protection Impact Assessments (PIIAs) | ✅ + 🏢 |
+| Audit and record-keeping (Art. 54) | Immutable HMAC-signed audit ledger with full agent decision traceability | ✅ Built-in |
+
+**Deployer checklist (China)**:
+
+| Responsibility | Details |
+|---|---|
+| Data localization | PIPL Art. 40 requires **Critical Information Infrastructure Operators** (CIIOs) and processors exceeding volume thresholds to store personal information **within mainland China**. Use self-hosted LLM providers (Ollama, jlama) or Chinese cloud providers to avoid cross-border transfer issues |
+| Cross-border data transfer | If personal information must leave China, complete one of: (1) **CAC security assessment** (mandatory for CIIOs or large volumes), (2) **PIPL standard contract** filed with provincial CAC, or (3) **Personal information protection certification** from an accredited body (Art. 38) |
+| Separate consent | Obtain **separate, informed consent** for: cross-border transfers (Art. 39), sensitive personal information processing (Art. 29), public disclosure of personal information, and image/identity processing in public spaces |
+| Personal Information Protection Impact Assessment | Conduct PIIAs before: processing sensitive data, using personal data for automated decision-making, cross-border transfers, or any processing that significantly impacts individuals (Art. 55). EDDI's audit ledger and data flow docs provide the technical input |
+| DPO / representative appointment | Appoint a **Personal Information Protection Officer** if processing volume exceeds CAC thresholds. Foreign organizations processing Chinese residents' data must designate a **domestic representative** (Art. 53) |
+| Breach notification | Notify the **Cyberspace Administration of China** (CAC) and affected individuals **immediately** upon discovering a breach. Notification must include: categories of data, cause, potential harm, and remediation measures (Art. 57) |
+| Automated decision-making transparency | PIPL Art. 24 requires transparency and fairness in automated decision-making. Provide users with an explanation of decision logic and an opt-out mechanism. Do **not** use automated decisions to impose unreasonable differential treatment on individuals |
+| LLM provider selection | Prefer providers with data centers in mainland China (e.g., Azure China, Alibaba Cloud, Baidu, local Ollama deployment) to avoid triggering cross-border transfer obligations |
+
+> **⚠️ Important**: PIPL's cross-border data transfer regime is significantly
+> stricter than GDPR's. Using cloud-hosted LLM providers (OpenAI, Anthropic,
+> Google, etc.) with Chinese user data likely triggers cross-border transfer
+> obligations. For China-targeted deployments, **self-hosted models via Ollama
+> or jlama are strongly recommended** to keep all data within Chinese
+> jurisdiction.
 
 ---
 

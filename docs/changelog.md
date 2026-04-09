@@ -15,7 +15,32 @@ Each entry follows this format:
 
 ---
 
+## International Privacy — Malaysia PDPA + China PIPL (2026-04-10)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Added two new international privacy regulation sections to `PRIVACY.md`:
+
+| Regulation | Details |
+|---|---|
+| **Malaysia PDPA** (2010, amended 2024) | Full obligation mapping table (11 principles), deployer checklist (6 items). Added to existing "PDPA — Southeast Asia" section alongside Singapore and Thailand. Covers 2024 amendments: mandatory breach notification, DPO appointment, whitelist-based cross-border transfers |
+| **China PIPL** (2021) | NEW top-level section with obligation mapping table (12 articles), deployer checklist (8 items), and prominent warning about cross-border data transfer strictness. Covers data localization (Art. 40), CAC security assessments (Art. 38), separate consent requirements (Art. 29/39), automated decision-making transparency (Art. 24) |
+
+Cross-references updated in `README.md` (2 locations), `docs/gdpr-compliance.md` (international regulations list).
+
+**Design decisions:**
+- China's PIPL gets its own top-level section (not under "Other Jurisdictions") due to its unique data localization requirements, extraterritorial scope, and the significant compliance implications for LLM provider selection
+- Malaysia fits naturally into the existing "PDPA — Southeast Asia" section alongside Singapore and Thailand
+- Added explicit recommendation for self-hosted models (Ollama/jlama) in China-targeted deployments to avoid cross-border transfer obligations
+
+**Files:** `PRIVACY.md`, `README.md`, `docs/gdpr-compliance.md`
+
+---
+
 ## Phase A Fix: Code Review Findings (2026-04-09)
+
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
 
