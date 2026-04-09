@@ -3225,3 +3225,33 @@ export const scheduleHandlers = [
   }),
 ];
 
+// ─── GDPR Admin Handlers ────────────────────────────────────────────────────
+
+export const gdprHandlers = [
+  // Art. 17 — Delete user data (cascade)
+  http.delete("*/admin/gdpr/:userId", ({ params }) => {
+    return HttpResponse.json({
+      userId: params.userId as string,
+      memoriesDeleted: 14,
+      conversationsDeleted: 7,
+      auditEntriesPseudonymized: 23,
+      logEntriesPseudonymized: 89,
+    });
+  }),
+
+  // Art. 15/20 — Export user data
+  http.get("*/admin/gdpr/:userId/export", ({ params }) => {
+    return HttpResponse.json({
+      userId: params.userId as string,
+      memories: [
+        { key: "preferred_language", value: "en", createdAt: new Date(Date.now() - 86400000).toISOString() },
+        { key: "name", value: "Jane Doe", createdAt: new Date(Date.now() - 172800000).toISOString() },
+      ],
+      conversations: [
+        { id: "conv-1", agentId: "agent1", state: "ENDED", steps: 12, created: new Date(Date.now() - 86400000).toISOString() },
+        { id: "conv-2", agentId: "agent2", state: "IN_PROGRESS", steps: 3, created: new Date(Date.now() - 3600000).toISOString() },
+      ],
+      managedConversations: [],
+    });
+  }),
+];

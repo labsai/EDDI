@@ -25,6 +25,7 @@ import { GroupDetailPage } from "@/pages/group-detail";
 import { GroupWizardPage } from "@/pages/group-wizard";
 import { AgentStudioPage } from "@/pages/agent-studio";
 import { StudioLandingPage } from "@/pages/studio-landing";
+import { GdprPage } from "@/pages/gdpr";
 
 export function App() {
   return (
@@ -47,6 +48,7 @@ export function App() {
         <Route path="/manage/secrets" element={<SecretsPage />} />
         <Route path="/manage/audit" element={<AuditPage />} />
         <Route path="/manage/quotas" element={<QuotasPage />} />
+        <Route path="/manage/gdpr" element={<GdprPage />} />
         <Route path="/manage/groups" element={<GroupsPage />} />
         <Route path="/manage/groups/wizard" element={<GroupWizardPage />} />
         <Route path="/manage/groups/:id" element={<GroupDetailPage />} />

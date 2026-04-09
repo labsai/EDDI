@@ -1,4 +1,4 @@
 import { setupServer } from "msw/node";
-import { handlers, coordinatorHandlers, orphanHandlers, logAdminHandlers, secretsHandlers, auditHandlers, quotaHandlers, scheduleHandlers } from "./handlers";
+import { handlers, coordinatorHandlers, orphanHandlers, logAdminHandlers, secretsHandlers, auditHandlers, quotaHandlers, scheduleHandlers, gdprHandlers } from "./handlers";
 
-export const server = setupServer(...handlers, ...coordinatorHandlers, ...orphanHandlers, ...logAdminHandlers, ...secretsHandlers, ...auditHandlers, ...quotaHandlers, ...scheduleHandlers);
+export const server = setupServer(...handlers, ...coordinatorHandlers, ...orphanHandlers, ...logAdminHandlers, ...secretsHandlers, ...auditHandlers, ...quotaHandlers, ...scheduleHandlers, ...gdprHandlers);

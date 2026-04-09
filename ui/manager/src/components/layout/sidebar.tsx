@@ -25,6 +25,7 @@ import {
   Check,
   RotateCcw,
   Sparkles,
+  ShieldAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -67,6 +68,7 @@ const navSections = [
       { path: "/manage/quotas", icon: SlidersHorizontal, labelKey: "nav.quotas" },
       { path: "/manage/schedules", icon: CalendarClock, labelKey: "nav.schedules" },
       { path: "/manage/orphans", icon: Link2Off, labelKey: "nav.orphans" },
+      { path: "/manage/gdpr", icon: ShieldAlert, labelKey: "nav.gdpr" },
     ],
   },
 ] as const;

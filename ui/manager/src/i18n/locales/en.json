@@ -28,6 +28,7 @@
     "chat": "Chat",
     "studio": "Studio",
     "resources": "Resources",
+    "gdpr": "Privacy",
     "sectionCore": "Core",
     "sectionBuild": "Build & Test",
     "sectionMonitor": "Monitor",

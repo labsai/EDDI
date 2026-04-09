@@ -36,7 +36,8 @@
     "sectionBuild": "Build & Test",
     "sectionMonitor": "Monitor",
     "sectionAdmin": "Admin",
-    "studio": "Studio"
+    "studio": "Studio",
+    "gdpr": "Privacy"
   },
   "theme": {
     "light": "สว่าง",
