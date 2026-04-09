@@ -5,7 +5,6 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.modules.rules.impl.Rule;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -79,7 +78,6 @@ public class ContentTypeMatcher implements IRuleCondition {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public ExecutionState execute(IConversationMemory memory, List<Rule> trace) {
         if (mimeType == null || mimeType.isBlank()) {
             return FAIL;

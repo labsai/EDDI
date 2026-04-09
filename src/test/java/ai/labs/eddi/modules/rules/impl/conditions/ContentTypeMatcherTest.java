@@ -13,7 +13,8 @@ import java.util.Map;
 
 import static ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.ExecutionState.*;
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
+import org.mockito.ArgumentMatchers;
+
 import static org.mockito.Mockito.*;
 
 class ContentTypeMatcherTest {
@@ -36,7 +37,7 @@ class ContentTypeMatcherTest {
      * arise with {@code when().thenReturn()} on generic methods.
      */
     private void stubAttachments(IData<List<Attachment>> data) {
-        doReturn(data).when(currentStep).getLatestData(any(MemoryKey.class));
+        doReturn(data).when(currentStep).getLatestData(ArgumentMatchers.<MemoryKey<?>>any());
     }
 
     @Test
@@ -72,7 +73,7 @@ class ContentTypeMatcherTest {
     @Test
     void execute_failsOnNoAttachments() {
         matcher.setConfigs(Map.of("mimeType", "image/*"));
-        doReturn(null).when(currentStep).getLatestData(any(MemoryKey.class));
+        doReturn(null).when(currentStep).getLatestData(ArgumentMatchers.<MemoryKey<?>>any());
 
         assertEquals(FAIL, matcher.execute(memory, List.of()));
     }
