@@ -15,6 +15,26 @@ Each entry follows this format:
 
 ---
 
+## Phase A Fix: Code Review Findings (2026-04-09)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**What changed:**
+
+Self-review of the Phase A implementation uncovered 3 correctness bugs and 2 design concerns. All fixed:
+
+| Issue | Severity | Fix |
+|---|---|---|
+| **Bug 1: Count-based IData tracking fails on overwrites** | Critical | Replaced `snapshotDataCount()` with `snapshotDataIdentities()` — snapshots a `Map<String, IData<?>>` and uses object identity comparison to detect both new keys AND overwritten entries |
+| **Bug 2: Error digest mixed into `output` list** | Medium | Moved error digest from `"output"` key to dedicated `"taskErrors"` key — prevents `ConversationLogGenerator` from concatenating error text with regular assistant output |
+| **Bug 3: Failure action inherits failed task's actions** | Low | Pre-failure actions captured via `List.copyOf()` before execution; `injectFailureAction` now rebuilds from pre-failure state only |
+| **Concern 1: String-based `onFailure` lacks validation** | Low | Added `VALID_ON_FAILURE_MODES` set + `resolveOnFailureMode()` — logs warning for unknown modes, defaults to `"digest"` |
+| **Concern 2: `memoryPolicy` field at bottom of 600-line class** | Cosmetic | Moved field to top block alongside other agent-level fields; accessors placed with getter/setter block |
+
+**All 1711 tests pass.**
+
+---
+
 ## Phase A: Strict Write Discipline — Commit Flags (2026-04-09)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
