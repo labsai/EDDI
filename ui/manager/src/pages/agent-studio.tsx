@@ -30,7 +30,6 @@ interface WorkflowStep {
 interface AgentConfig {
   workflows: string[];
   channels: unknown[];
-  _version: number;
 }
 
 interface WorkflowConfig {
@@ -46,10 +45,11 @@ export function AgentStudioPage() {
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [mobileTab, setMobileTab] = useState<"pipeline" | "editor" | "chat">("pipeline");
 
-  // Fetch agent descriptor for name
+  // Fetch agent descriptor for name — filter by ID to avoid fetching all agents
   const { data: descriptors } = useQuery({
-    queryKey: ["studio", "descriptors"],
-    queryFn: () => getAgentDescriptors(100, 0, ""),
+    queryKey: ["studio", "descriptors", agentId],
+    queryFn: () => getAgentDescriptors(10, 0, agentId ?? ""),
+    enabled: !!agentId,
     staleTime: 60_000,
   });
 
@@ -127,6 +127,7 @@ export function AgentStudioPage() {
           to={`/manage/agentview/${agentId}`}
           className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"
           data-testid="studio-back"
+          aria-label={t("studio.backToAgent", "Back to agent detail")}
         >
           <ArrowLeft className="h-4 w-4" />
         </Link>

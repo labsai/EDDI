@@ -163,7 +163,18 @@
     "saveError": "Agent 保存失败",
     "deployToEnv": "部署到{{env}}",
     "undeployFromEnv": "从{{env}}移除",
-    "openStudio": "Open in Studio"
+    "openStudio": "Open in Studio",
+    "maxKeyLength": "Max Key Length",
+    "maxValueLength": "Max Value Length",
+    "maxWritesPerTurn": "Max Writes/Turn",
+    "dreamSchedule": "Schedule (cron)",
+    "dreamLlmProvider": "LLM Provider",
+    "dreamLlmModel": "LLM Model",
+    "dreamMaxCost": "Max Cost/Run ($)",
+    "dreamPruneDays": "Prune After (days)",
+    "dreamBatchSize": "Batch Size",
+    "detectContradictions": "Detect contradictions",
+    "summarizeInteractions": "Summarize interactions"
   },
   "wizard": {
     "title": "Agent 向导"
@@ -915,7 +926,11 @@
     },
     "landingDescription": "Select an agent to open the visual pipeline editor, debugger, and live chat",
     "noAgents": "No agents found — create one from the Agents page",
-    "chat": "Chat"
+    "chat": "Chat",
+    "backToAgent": "Back to agent detail",
+    "selectStageHint": "Select any extension in the pipeline to view and edit its configuration inline",
+    "noConfig": "This pipeline stage has no configuration URI",
+    "unsupportedType": "Editor not available for this extension type"
   },
   "ragEditor": {
     "general": "常规",

@@ -190,7 +190,18 @@
     "saveError": "Failed to save agent",
     "deployToEnv": "Deploy to {{env}}",
     "undeployFromEnv": "Undeploy from {{env}}",
-    "openStudio": "Open in Studio"
+    "openStudio": "Open in Studio",
+    "maxKeyLength": "Max Key Length",
+    "maxValueLength": "Max Value Length",
+    "maxWritesPerTurn": "Max Writes/Turn",
+    "dreamSchedule": "Schedule (cron)",
+    "dreamLlmProvider": "LLM Provider",
+    "dreamLlmModel": "LLM Model",
+    "dreamMaxCost": "Max Cost/Run ($)",
+    "dreamPruneDays": "Prune After (days)",
+    "dreamBatchSize": "Batch Size",
+    "detectContradictions": "Detect contradictions",
+    "summarizeInteractions": "Summarize interactions"
   },
   "wizard": {
     "title": "Agent Wizard"
@@ -919,6 +930,10 @@
     "notFound": "Agent not found",
     "hideChat": "Hide chat",
     "showChat": "Show chat",
+    "backToAgent": "Back to agent detail",
+    "selectStageHint": "Select any extension in the pipeline to view and edit its configuration inline",
+    "noConfig": "This pipeline stage has no configuration URI",
+    "unsupportedType": "Editor not available for this extension type",
     "openEditor": "Open in Editor",
     "editorComingSoon": "In-place editor integration coming soon",
     "noPipeline": "No pipeline stages",

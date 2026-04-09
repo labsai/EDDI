@@ -1,4 +1,4 @@
-import { useState, useCallback, type ReactNode } from "react";
+import { useState, useCallback } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -32,6 +32,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
+import { EDITOR_MAP } from "@/components/editors/editor-registry";
 import { UpdateUsageDialog } from "@/components/editors/update-usage-dialog";
 import {
   findResourceUsage,
@@ -43,42 +44,6 @@ import { VersionDiffDialog } from "@/components/editors/version-diff-dialog";
 import { getResource } from "@/lib/api/resources";
 import { useAgentContext } from "@/hooks/use-agent-context";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
-import {
-  RulesEditor,
-  type RulesConfig,
-} from "@/components/editors/rules-editor";
-import {
-  LlmEditor,
-  type LlmConfig,
-} from "@/components/editors/llm-editor";
-import {
-  ApiCallsEditor,
-  type HttpCallsConfig as ApiCallsConfig,
-} from "@/components/editors/apicalls-editor";
-import {
-  OutputEditor,
-  type OutputConfig,
-} from "@/components/editors/output-editor";
-import {
-  PropertySetterEditor,
-  type PropertySetterConfig,
-} from "@/components/editors/propertysetter-editor";
-import {
-  DictionaryEditor,
-  type DictionaryConfig,
-} from "@/components/editors/dictionary-editor";
-import {
-  McpCallsEditor,
-  type McpCallsConfig,
-} from "@/components/editors/mcpcalls-editor";
-import {
-  RagEditor,
-  type RagConfig,
-} from "@/components/editors/rag-editor";
-import {
-  SnippetEditor,
-  type PromptSnippetConfig,
-} from "@/components/editors/snippet-editor";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   GitBranch,
@@ -92,39 +57,6 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Puzzle,
 };
 
-// Clean editor lookup — replaces the 6-level nested ternary
-const EDITOR_MAP: Record<
-  string,
-  (parsed: unknown, onChange: (val: unknown) => void, readOnly: boolean, meta: { resourceId: string; version: number }) => ReactNode
-> = {
-  rules: (p, o, r) => (
-    <RulesEditor data={p as RulesConfig} onChange={o} readOnly={r} />
-  ),
-  apicalls: (p, o, r) => (
-    <ApiCallsEditor data={p as ApiCallsConfig} onChange={o} readOnly={r} />
-  ),
-  llm: (p, o, r) => (
-    <LlmEditor data={p as LlmConfig} onChange={o} readOnly={r} />
-  ),
-  output: (p, o, r) => (
-    <OutputEditor data={p as OutputConfig} onChange={o} readOnly={r} />
-  ),
-  propertysetter: (p, o, r) => (
-    <PropertySetterEditor data={p as PropertySetterConfig} onChange={o} readOnly={r} />
-  ),
-  dictionary: (p, o, r) => (
-    <DictionaryEditor data={p as DictionaryConfig} onChange={o} readOnly={r} />
-  ),
-  mcpcalls: (p, o, r) => (
-    <McpCallsEditor data={p as McpCallsConfig} onChange={o} readOnly={r} />
-  ),
-  rag: (p, o, r, meta) => (
-    <RagEditor data={p as RagConfig} onChange={o} readOnly={r} resourceId={meta.resourceId} version={meta.version} />
-  ),
-  snippets: (p, o, r) => (
-    <SnippetEditor data={p as PromptSnippetConfig} onChange={o} readOnly={r} />
-  ),
-};
 
 export function ResourceDetailPage() {
   const { type, id } = useParams<{ type: string; id: string }>();
