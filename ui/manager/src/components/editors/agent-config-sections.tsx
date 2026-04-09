@@ -385,15 +385,15 @@ export function UserMemorySection({
               </h4>
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="mb-0.5 block text-[10px] text-muted-foreground">Max Key Length</label>
+                  <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxKeyLength", "Max Key Length")}</label>
                   <input type="number" value={guardrails.maxKeyLength ?? 100} onChange={(e) => patchGuardrails({ maxKeyLength: parseInt(e.target.value, 10) || 100 })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
                 <div>
-                  <label className="mb-0.5 block text-[10px] text-muted-foreground">Max Value Length</label>
+                  <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxValueLength", "Max Value Length")}</label>
                   <input type="number" value={guardrails.maxValueLength ?? 1000} onChange={(e) => patchGuardrails({ maxValueLength: parseInt(e.target.value, 10) || 1000 })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
                 <div>
-                  <label className="mb-0.5 block text-[10px] text-muted-foreground">Max Writes/Turn</label>
+                  <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.maxWritesPerTurn", "Max Writes/Turn")}</label>
                   <input type="number" value={guardrails.maxWritesPerTurn ?? 10} onChange={(e) => patchGuardrails({ maxWritesPerTurn: parseInt(e.target.value, 10) || 10 })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                 </div>
               </div>
@@ -420,40 +420,40 @@ export function UserMemorySection({
                 <div className="space-y-3 ps-5">
                   <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="mb-0.5 block text-[10px] text-muted-foreground">Schedule (cron)</label>
+                      <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamSchedule", "Schedule (cron)")}</label>
                       <input type="text" value={dream.schedule ?? "0 3 * * *"} onChange={(e) => patchDream({ schedule: e.target.value })} placeholder="0 3 * * *" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
-                      <label className="mb-0.5 block text-[10px] text-muted-foreground">LLM Provider</label>
+                      <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamLlmProvider", "LLM Provider")}</label>
                       <input type="text" value={dream.llmProvider ?? "anthropic"} onChange={(e) => patchDream({ llmProvider: e.target.value })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
-                      <label className="mb-0.5 block text-[10px] text-muted-foreground">LLM Model</label>
+                      <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamLlmModel", "LLM Model")}</label>
                       <input type="text" value={dream.llmModel ?? "claude-sonnet-4-6"} onChange={(e) => patchDream({ llmModel: e.target.value })} placeholder="claude-sonnet-4-6" className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
-                      <label className="mb-0.5 block text-[10px] text-muted-foreground">Max Cost/Run ($)</label>
+                      <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamMaxCost", "Max Cost/Run ($)")}</label>
                       <input type="number" step="0.01" value={dream.maxCostPerRun ?? 5.00} onChange={(e) => patchDream({ maxCostPerRun: parseFloat(e.target.value) || 5.00 })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
-                      <label className="mb-0.5 block text-[10px] text-muted-foreground">Prune After (days)</label>
+                      <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamPruneDays", "Prune After (days)")}</label>
                       <input type="number" value={dream.pruneStaleAfterDays ?? 90} onChange={(e) => patchDream({ pruneStaleAfterDays: parseInt(e.target.value, 10) || 90 })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
-                      <label className="mb-0.5 block text-[10px] text-muted-foreground">Batch Size</label>
+                      <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamBatchSize", "Batch Size")}</label>
                       <input type="number" value={dream.batchSize ?? 50} onChange={(e) => patchDream({ batchSize: parseInt(e.target.value, 10) || 50 })} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                   </div>
                   <div className="flex gap-4">
                     <label className="inline-flex items-center gap-1.5 text-xs text-foreground">
                       <input type="checkbox" checked={dream.detectContradictions ?? true} onChange={(e) => patchDream({ detectContradictions: e.target.checked })} className="h-3.5 w-3.5 rounded border-input accent-primary" />
-                      Detect contradictions
+                      {t("agentDetail.detectContradictions", "Detect contradictions")}
                     </label>
                     <label className="inline-flex items-center gap-1.5 text-xs text-foreground">
                       <input type="checkbox" checked={dream.summarizeInteractions ?? false} onChange={(e) => patchDream({ summarizeInteractions: e.target.checked })} className="h-3.5 w-3.5 rounded border-input accent-primary" />
-                      Summarize interactions
+                      {t("agentDetail.summarizeInteractions", "Summarize interactions")}
                     </label>
                   </div>
                 </div>
