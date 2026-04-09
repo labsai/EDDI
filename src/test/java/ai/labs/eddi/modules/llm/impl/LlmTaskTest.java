@@ -152,10 +152,6 @@ class LlmTaskTest {
         IData outputData = mock(IData.class);
         when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
 
-        // Adding debug statements
-        System.out.println("Setting up mocks with parameters:");
-        parameters.forEach((key, value) -> System.out.println(key + ": " + value));
-
         var systemMessage = parameters.getOrDefault("systemMessage", "-1");
         var apiKey = parameters.getOrDefault("apiKey", "-1");
         var logSizeLimit = parameters.getOrDefault("logSizeLimit", "-1");
