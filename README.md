@@ -6,7 +6,7 @@
 
 **E.D.D.I** (Enhanced Dialog Driven Interface) is a production-grade, **config-driven multi-agent orchestration middleware** for conversational AI. It coordinates users, AI agents, and business systems through **intelligent routing, persistent memory, and API orchestration** — without writing code.
 
-Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker image**. Implements **MCP**, **A2A**, **OpenAPI**, and **OAuth 2.0**.
+Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker image**. Native support for **MCP** (Model Context Protocol), **A2A** (Agent-to-Agent), **OpenAPI**, and **OAuth 2.0**.
 
 **Latest version: 6.0.0-RC1** · [Website](https://eddi.labs.ai/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
 
@@ -16,14 +16,14 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 
 Most multi-agent frameworks (LangGraph, CrewAI, AutoGen) are Python/Node libraries — great for prototyping, hard to govern in production. EDDI approaches from the opposite direction: **a deterministic engine built to safely govern non-deterministic AI.**
 
-| | Python/Node Frameworks | EDDI |
+| Dimension | Typical Python/Node Frameworks | EDDI |
 |---|---|---|
-| **Concurrency** | GIL / single-threaded event loop | Java 25 Virtual Threads — true parallelism |
-| **Agent Logic** | Compiled into code | JSON configurations — change behavior without redeployment |
-| **Security** | `eval()`, sandbox escapes, plaintext secrets | No dynamic code execution, envelope-encrypted vault, SSRF protection |
-| **Compliance** | Build-it-yourself | GDPR, HIPAA, EU AI Act infrastructure built-in |
-| **Audit Trail** | Log files | HMAC-SHA256 immutable ledger with agent signing |
-| **Deployment** | pip/npm + custom infra | One-command Docker install, Kubernetes/OpenShift-ready |
+| **Concurrency** | GIL or single-threaded event loop | Java 25 Virtual Threads — true OS-level parallelism |
+| **Agent Logic** | Embedded in application code | Versioned JSON configurations — update behavior without redeployment |
+| **Security Model** | Often relies on sandboxed code execution | No dynamic code execution at all; envelope-encrypted vault, SSRF protection |
+| **Compliance** | Requires custom implementation | GDPR, HIPAA, EU AI Act infrastructure built-in |
+| **Audit Trail** | Application-level logging | HMAC-SHA256 immutable ledger with cryptographic agent signing |
+| **Deployment** | pip/npm + manual infrastructure | One-command Docker install, Kubernetes/OpenShift-ready |
 
 > _"The engine is strict so the AI can be creative."_ — [Project Philosophy](docs/project-philosophy.md)
 
@@ -114,8 +114,8 @@ EDDI implements open standards — not proprietary APIs:
 <summary><strong>Security Architecture</strong></summary>
 
 - 🏦 **Secrets Vault** — Envelope encryption (PBKDF2 + AES-256) with tenant-scoped DEK/KEK rotation. Never plaintext in DB
-- 🛡️ **SSRF Protection** — `UrlValidationUtils` blocks private IPs, internal hostnames, and non-HTTP schemes on all tools
-- 🔒 **Sandboxed Evaluation** — `SafeMathParser` with recursive descent. No `eval()`, no `ScriptEngine`, no reflection
+- 🛡️ **SSRF Protection** — All tools validate URLs against private IPs, internal hostnames, and non-HTTP schemes before any request
+- 🔒 **Sandboxed Evaluation** — Recursive-descent math parser only. No `eval()`, no script engines, no reflection-based execution
 - 🔑 **OAuth 2.0 / Keycloak** — Multi-tenant authentication, authorization, and role-based access control
 - ✍️ **Agent Signing** — Ed25519 cryptographic identity per agent; audit entries signed with agent private keys
 - 🚫 **No Dynamic Code Execution** — Custom logic runs in external MCP servers, outside the EDDI security perimeter
@@ -157,7 +157,7 @@ EDDI implements open standards — not proprietary APIs:
 - 📊 **Prometheus & Grafana** — 50+ Micrometer metrics at `/q/metrics` (tools, vault, memory, scheduling, conversations)
 - 🩺 **Health Checks** — Liveness & readiness probes at `/q/health/live` and `/q/health/ready`
 - 🔄 **NATS JetStream** — Async event bus for distributed processing
-- ⚡ **Virtual Threads** — Java 25 virtual threads for true concurrency without GIL
+- ⚡ **Virtual Threads** — Java 25 virtual threads for true OS-level concurrency (no Python GIL or Node.js event loop bottleneck)
 - 🗃️ **DB-Agnostic** — Choose MongoDB or PostgreSQL; switch with one env var. Single Docker image for both
 - 🏗️ **Red Hat Certified** — Container certification with automated preflight checks in CI/CD
 

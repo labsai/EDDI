@@ -15,6 +15,42 @@ Each entry follows this format:
 
 ---
 
+## README v2 Overhaul — Positioning, Missing Features, SEO (2026-04-09)
+
+**Repo:** EDDI (`feature/version-6.0.0`)
+
+**What changed:**
+
+Major overhaul of `README.md` (117 insertions, 83 deletions) to improve viral potential, professional perception, and SEO discoverability. The README now functions as a high-conversion landing page.
+
+| Change | Details |
+|---|---|
+| **"Why EDDI?" section** | NEW — Competitive positioning table comparing EDDI vs Python/Node frameworks (LangGraph, CrewAI, AutoGen) across concurrency, security, compliance, audit, and deployment. Links to `project-philosophy.md` |
+| **"Standards & Interoperability" section** | NEW — Table-driven section with clickable links to MCP, A2A, OpenAPI, OAuth 2.0, SSE official specs. Shows EDDI implements open standards, not proprietary APIs |
+| **18 missing features added** | Capability Matching, Dream Consolidation, Rolling Summary, Conversation Recall Tool, Memory Tools, Multimodal Attachments, Prompt Snippets, Content Type Routing, Agent Signing, Tenant Cost Ceilings, Scheduled Execution, Heartbeat Triggers, Cron Scheduling, Dream Cycles, GDPR Art. 18, Per-Category Retention, Compliance Startup Checks, 11 Languages |
+| **OpenClaw reference** | Heartbeat triggers reference OpenClaw's proactive agent architecture (openclaw.ai) |
+| **Claude reference** | Dream Consolidation references Claude's background memory processing (Anthropic engineering blog) |
+| **Regulatory compliance table** | EU AI Act, GDPR, CCPA, HIPAA, and 5 international regulations with clickable links and specific article references |
+| **Collapsible Security/Compliance** | Used `<details open>` for Security Architecture and Regulatory Compliance sub-sections |
+| **LLM Providers table** | Restructured from bullet list to categorized table (Cloud APIs, Enterprise Cloud, Self-Hosted, Compatible) |
+| **Built-In Tools table** | Restructured from bullet list to scannable table |
+| **Documentation table** | Added 3 new guides (Prompt Snippets, Attachments, Capability Matching). Renamed "LangChain Integration" → "LLM Configuration" |
+| **Incident Response** | Added specific regulatory timelines (GDPR 72h, CCPA 45 days, HIPAA 60 days) |
+| **Metrics callout** | "50+ Micrometer metrics" with categories (tools, vault, memory, scheduling, conversations) |
+| **Ordering** | Multi-Agent Orchestration first (what it does), then LLM Providers (breadth), then Standards (credibility), then Memory/RAG/Tools (depth), then Security/Compliance (trust) |
+
+**Design decisions:**
+
+- **"Why EDDI?" leads** — Visitors decide in 2-3 seconds. A comparison table is faster to scan than a feature list and immediately answers "how is this different?"
+- **Multi-Agent Orchestration first in features** — This is what EDDI does. Standards support that claim; they don't replace it
+- **Standards integrated into features, not separate** — The previous version had Standards as a standalone top section. This felt like a credential wall before showing value. Now it's woven into the feature narrative
+- **Tables over bullet lists** — LLM providers, tools, and compliance all converted to tables for faster scanning
+- **OpenClaw/Claude references** — Established credibility by referencing known architectures while making EDDI's implementation distinct (config-driven heartbeats, scheduled dream cycles with cost ceilings)
+
+**Files:** `README.md`
+
+---
+
 ## Quarkus Upgrade 3.34.2 → 3.34.3 (2026-04-09)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
