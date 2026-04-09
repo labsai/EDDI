@@ -71,6 +71,7 @@ src/
 ├── components/
 │   ├── editors/              # Form editors + shared editor chrome
 │   │   ├── config-editor-layout.tsx   # Tabs (Form|JSON), version picker, save
+│   │   ├── editor-registry.tsx        # Shared EDITOR_MAP (single source of truth)
 │   │   ├── rules-editor.tsx           # Behavior rules editor
 │   │   ├── apicalls-editor.tsx        # HTTP API calls editor
 │   │   ├── llm-editor.tsx             # LLM/langchain task editor
@@ -78,7 +79,12 @@ src/
 │   │   ├── propertysetter-editor.tsx  # Property setter editor
 │   │   ├── dictionary-editor.tsx      # Dictionary/parser editor
 │   │   ├── mcpcalls-editor.tsx        # MCP calls editor
-│   │   └── rag-editor.tsx             # RAG config editor
+│   │   ├── rag-editor.tsx             # RAG config editor
+│   │   ├── snippet-editor.tsx         # Prompt snippet editor
+│   │   └── agent-config-sections.tsx  # Security, capabilities, memory sections
+│   ├── studio/                # Agent Studio workspace
+│   │   ├── pipeline-railroad.tsx      # Visual pipeline step list
+│   │   └── studio-editor-panel.tsx    # In-place editor for selected stage
 │   ├── layout/                # Sidebar, top-bar, theme-provider
 │   └── ui/                    # Reusable UI primitives
 ├── hooks/                     # TanStack Query hooks
@@ -88,7 +94,9 @@ src/
 ├── i18n/locales/              # 11 locale JSON files
 ├── pages/
 │   ├── __tests__/             # Vitest component tests
-│   └── resource-detail.tsx    # Wires editors via renderFormEditor
+│   ├── resource-detail.tsx    # Wires editors via EDITOR_MAP
+│   ├── agent-studio.tsx       # 3-panel studio (railroad + editor + chat)
+│   └── gdpr.tsx               # GDPR Privacy Admin page
 └── test/mocks/
     ├── handlers.ts            # MSW request handlers
     └── server.ts              # MSW server setup
@@ -96,26 +104,25 @@ src/
 
 ### Key Patterns
 
-#### 1. Editor Render Prop
+#### 1. Editor Registry (Single Source of Truth)
 
-All extension editors plug into `ConfigEditorLayout` via `renderFormEditor` in `resource-detail.tsx`:
-
-Editors are wired in `resource-detail.tsx` via a `FORM_EDITORS` map keyed by resource type slug:
+All extension editors are registered in `src/components/editors/editor-registry.tsx`:
 
 ```tsx
-const FORM_EDITORS: Record<string, (p, o, r) => ReactNode> = {
+// editor-registry.tsx — shared by both ResourceDetailPage and StudioEditorPanel
+export const EDITOR_MAP: Record<string, EditorRenderFn> = {
   rules:    (p, o, r) => <RulesEditor data={p} onChange={o} readOnly={r} />,
   llm:      (p, o, r) => <LlmEditor data={p} onChange={o} readOnly={r} />,
   apicalls: (p, o, r) => <ApiCallsEditor data={p} onChange={o} readOnly={r} />,
-  // ... output, dictionary, propertysetter, mcpcalls, rag
+  // ... output, dictionary, propertysetter, mcpcalls, rag, snippets
 };
 ```
 
-To add a new editor: create the component, add to the map, add MSW handler, add i18n keys, add test file.
+To add a new editor: create the component, add to `EDITOR_MAP` in `editor-registry.tsx`, add MSW handler, add i18n keys, add test file.
 
 #### 2. Resource Type Config
 
-All 8 resource types are in `src/lib/api/resources.ts` as `RESOURCE_TYPES`:
+All 9 resource types are in `src/lib/api/resources.ts` as `RESOURCE_TYPES`:
 
 | Slug               | Store                    | Plural                |
 | ------------------ | ------------------------ | --------------------- |
@@ -127,6 +134,7 @@ All 8 resource types are in `src/lib/api/resources.ts` as `RESOURCE_TYPES`:
 | `propertysetter`   | `propertysetterstore`    | `propertysetters`     |
 | `mcpcalls`         | `mcpcallsstore`          | `mcpcalls`            |
 | `rag`              | `ragstore`               | `rags`                |
+| `snippets`         | `snippetstore`           | `snippets`            |
 
 > **⚠️ Parser vs Dictionary — these are separate stores!**
 >
