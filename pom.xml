@@ -16,7 +16,7 @@
         <quarkus.microprofile.version>3.0.0.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.34.2</quarkus.platform.version>
+        <quarkus.platform.version>3.34.3</quarkus.platform.version>
         <langchain4j-beta.version>1.12.2-beta22</langchain4j-beta.version>
         <langchain4j.version>1.12.2</langchain4j.version>
         <langchain4j-libs.version>1.12.2</langchain4j-libs.version>

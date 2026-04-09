@@ -15,6 +15,16 @@ Each entry follows this format:
 
 ---
 
+## Quarkus Upgrade 3.34.2 → 3.34.3 (2026-04-09)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**What changed:** Bumped `quarkus.platform.version` from `3.34.2` to `3.34.3` (patch release). Compile and all unit tests pass cleanly.
+
+**Files:** `pom.xml`
+
+---
+
 ## Compliance Privacy Features — Art. 18 Restriction, Audit Export, Per-Category Retention (2026-04-09)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
