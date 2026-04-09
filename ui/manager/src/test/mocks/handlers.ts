@@ -1735,6 +1735,21 @@ export const handlers = [
     ]);
   }),
 
+  // Prompt Snippets mock data
+  http.get("*/snippetstore/snippets/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    return HttpResponse.json({
+      name: "cautious_mode",
+      category: "governance",
+      description: "Makes the agent more careful and hedging in responses",
+      content: "You should be cautious and careful in your responses. When uncertain about facts, explicitly state your uncertainty. Avoid making definitive claims without supporting evidence. Use hedging language when appropriate.",
+      tags: ["safety", "production", "enterprise"],
+      templateEnabled: true,
+    });
+  }),
+
   // Generic descriptor handlers for all resource types
   ...createResourceHandlers("rulestore", "rulesets", "rules"),
   ...createResourceHandlers("apicallstore", "apicalls", "apicalls"),
@@ -1753,6 +1768,7 @@ export const handlers = [
   ...createResourceHandlers("mcpcallsstore", "mcpcalls", "mcpcalls"),
   ...createResourceHandlers("ragstore", "rags", "rag"),
   ...createResourceHandlers("parserstore", "parsers", "parser"),
+  ...createResourceHandlers("snippetstore", "snippets", "snippets"),
 ];
 
 function createResourceHandlers(
@@ -1804,6 +1820,11 @@ function createResourceHandlers(
     ],
     parser: [
       { id: "par1", name: "Default Parser", desc: "Standard expression parser" },
+    ],
+    snippets: [
+      { id: "snip1", name: "Cautious Mode", desc: "Makes the agent more careful and hedging in responses" },
+      { id: "snip2", name: "Compliance Disclaimer", desc: "Adds regulatory compliance disclaimers to financial advice" },
+      { id: "snip3", name: "Friendly Persona", desc: "Sets a warm, approachable conversational tone" },
     ],
   };
 

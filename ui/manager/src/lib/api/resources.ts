@@ -71,6 +71,13 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     labelKey: "resources.types.rag",
     icon: "BookOpenCheck",
   },
+  {
+    slug: "snippets",
+    store: "snippetstore",
+    plural: "snippets",
+    labelKey: "resources.types.snippets",
+    icon: "Puzzle",
+  },
 ];
 
 /** Look up a resource type config by slug */

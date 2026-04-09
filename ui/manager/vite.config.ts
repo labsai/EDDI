@@ -42,6 +42,9 @@ export default defineConfig({
       "/deploymentstore": "http://localhost:7070",
       "/propertiesstore": "http://localhost:7070",
       "/administration": "http://localhost:7070",
+      "/snippetstore": "http://localhost:7070",
+      "/admin": "http://localhost:7070",
+      "/capabilities": "http://localhost:7070",
       // The /agents path includes the /agents/{id}/stream SSE endpoint.
       // We must disable http-proxy buffering so the stream closes cleanly.
       "/agents": {

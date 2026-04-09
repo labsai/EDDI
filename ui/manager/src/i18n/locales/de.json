@@ -369,6 +369,10 @@
       "rag": {
         "name": "Knowledge Bases",
         "description": "Configure RAG knowledge bases for document retrieval"
+      },
+      "snippets": {
+        "name": "Prompt-Snippets",
+        "description": "Wiederverwendbare Systemprompt-Bausteine fuer die Vorlagenkomposition"
       }
     },
     "emptyDescription": "Erstellen Sie Ihre erste {{type}}, um sie in Workflows zu verwenden."

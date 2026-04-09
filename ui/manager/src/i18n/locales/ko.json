@@ -369,6 +369,10 @@
       "rag": {
         "name": "Knowledge Bases",
         "description": "Configure RAG knowledge bases for document retrieval"
+      },
+      "snippets": {
+        "name": "Prompt Snippets",
+        "description": "Reusable system prompt building blocks"
       }
     },
     "emptyDescription": "워크플로에서 사용할 첫 번째 {{type}}을(를) 만드세요."

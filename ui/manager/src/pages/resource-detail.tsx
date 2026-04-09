@@ -14,6 +14,7 @@ import {
   Plug,
   Trash2,
   Copy,
+  Puzzle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -74,6 +75,10 @@ import {
   RagEditor,
   type RagConfig,
 } from "@/components/editors/rag-editor";
+import {
+  SnippetEditor,
+  type PromptSnippetConfig,
+} from "@/components/editors/snippet-editor";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   GitBranch,
@@ -84,6 +89,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   Brain,
   Settings,
   Plug,
+  Puzzle,
 };
 
 // Clean editor lookup — replaces the 6-level nested ternary
@@ -114,6 +120,9 @@ const EDITOR_MAP: Record<
   ),
   rag: (p, o, r, meta) => (
     <RagEditor data={p as RagConfig} onChange={o} readOnly={r} resourceId={meta.resourceId} version={meta.version} />
+  ),
+  snippets: (p, o, r) => (
+    <SnippetEditor data={p as PromptSnippetConfig} onChange={o} readOnly={r} />
   ),
 };
 

@@ -369,6 +369,10 @@
       "rag": {
         "name": "Knowledge Bases",
         "description": "Configure RAG knowledge bases for document retrieval"
+      },
+      "snippets": {
+        "name": "Fragmentos de prompts",
+        "description": "Bloques reutilizables para la composicion de prompts del sistema"
       }
     },
     "emptyDescription": "Cree su primer(a) {{type}} para usarlo en workflows."

@@ -369,6 +369,10 @@
       "rag": {
         "name": "Knowledge Bases",
         "description": "Configure RAG knowledge bases for document retrieval"
+      },
+      "snippets": {
+        "name": "Prompt Snippets",
+        "description": "Reusable system prompt building blocks"
       }
     },
     "emptyDescription": "创建您的第一个 {{type}} 以在 Workflow 中使用。"
