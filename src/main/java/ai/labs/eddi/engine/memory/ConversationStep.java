@@ -113,6 +113,29 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
         return conversationOutput;
     }
 
+    /**
+     * Returns the current number of data elements in this step. Used by
+     * LifecycleManager to determine which data entries were added by a task
+     * (comparing before/after counts).
+     *
+     * @return current data element count
+     * @since 6.0.0
+     */
+    public int snapshotDataCount() {
+        return store.size();
+    }
+
+    /**
+     * Returns a snapshot of the current ConversationOutput keys. Used by
+     * LifecycleManager to rollback output entries added by a failed task.
+     *
+     * @return defensive copy of current output key set
+     * @since 6.0.0
+     */
+    public Set<String> snapshotOutputKeys() {
+        return new LinkedHashSet<>(conversationOutput.keySet());
+    }
+
     @Override
     public Set<String> getAllKeys() {
         return store.keySet();

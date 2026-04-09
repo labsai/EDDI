@@ -204,6 +204,16 @@ public class OutputTemplateTaskTest {
         }
 
         @Override
+        public boolean isCommitted() {
+            return true;
+        }
+
+        @Override
+        public void setCommitted(boolean committed) {
+
+        }
+
+        @Override
         public boolean equals(Object o) {
             if (this == o)
                 return true;

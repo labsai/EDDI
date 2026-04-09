@@ -17,6 +17,7 @@ public class Data<T> implements IData<T> {
     private final Date timestamp;
     private String originWorkflowId;
     private boolean isPublic;
+    private boolean committed = true;
 
     public Data(String key, T result) {
         this(key, result, Collections.singletonList(result), new Date(System.currentTimeMillis()));
@@ -101,5 +102,15 @@ public class Data<T> implements IData<T> {
 
     public void setPublic(boolean isPublic) {
         this.isPublic = isPublic;
+    }
+
+    @Override
+    public boolean isCommitted() {
+        return committed;
+    }
+
+    @Override
+    public void setCommitted(boolean committed) {
+        this.committed = committed;
     }
 }

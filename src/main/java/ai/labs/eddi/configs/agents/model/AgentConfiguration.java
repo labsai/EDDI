@@ -528,4 +528,85 @@ public class AgentConfiguration {
             this.maxUsersPerRun = maxUsersPerRun;
         }
     }
+
+    // === Memory Policy (Phase A: Strict Write Discipline) ===
+
+    /**
+     * Memory management policy for this agent. Controls how failed task data is
+     * handled in conversation history.
+     *
+     * @since 6.0.0
+     */
+    private MemoryPolicy memoryPolicy;
+
+    public MemoryPolicy getMemoryPolicy() {
+        return memoryPolicy;
+    }
+
+    public void setMemoryPolicy(MemoryPolicy memoryPolicy) {
+        this.memoryPolicy = memoryPolicy;
+    }
+
+    /**
+     * Memory management policy. Currently contains strict write discipline
+     * settings; will be extended in future phases with context selection,
+     * auto-compaction, and consolidation.
+     *
+     * @since 6.0.0
+     */
+    public static class MemoryPolicy {
+        private StrictWriteDiscipline strictWriteDiscipline = new StrictWriteDiscipline();
+
+        public StrictWriteDiscipline getStrictWriteDiscipline() {
+            return strictWriteDiscipline;
+        }
+
+        public void setStrictWriteDiscipline(StrictWriteDiscipline strictWriteDiscipline) {
+            this.strictWriteDiscipline = strictWriteDiscipline;
+        }
+
+        /**
+         * Returns true if strict write discipline is enabled and its mode is not
+         * "keep_all" (which preserves backwards-compatible behavior).
+         */
+        public boolean isEffectivelyEnabled() {
+            return strictWriteDiscipline != null && strictWriteDiscipline.isEnabled()
+                    && !"keep_all".equals(strictWriteDiscipline.getOnFailure());
+        }
+    }
+
+    /**
+     * Strict write discipline: on task failure, raw data is marked uncommitted and
+     * an error digest is injected into the conversation output.
+     * <p>
+     * Modes:
+     * <ul>
+     * <li>{@code digest} (default) — raw data hidden, concise error summary visible
+     * to LLM as a special output type</li>
+     * <li>{@code exclude_all} — raw data hidden, no error info visible</li>
+     * <li>{@code keep_all} — everything visible (backwards-compatible)</li>
+     * </ul>
+     *
+     * @since 6.0.0
+     */
+    public static class StrictWriteDiscipline {
+        private boolean enabled = false;
+        private String onFailure = "digest";
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getOnFailure() {
+            return onFailure;
+        }
+
+        public void setOnFailure(String onFailure) {
+            this.onFailure = onFailure;
+        }
+    }
 }
