@@ -20,6 +20,61 @@ export interface Agent {
   a2aEnabled?: boolean;
   description?: string;
   a2aSkills?: string[];
+  // Phase 15.4 — Security, Identity, Capabilities, Memory
+  identity?: AgentIdentity;
+  security?: SecurityConfig;
+  capabilities?: Capability[];
+  enableMemoryTools?: boolean;
+  userMemoryConfig?: UserMemoryConfig;
+}
+
+export interface AgentIdentity {
+  agentDid?: string;
+  publicKey?: string;
+}
+
+export interface SecurityConfig {
+  signInterAgentMessages?: boolean;
+  signMcpInvocations?: boolean;
+  requirePeerVerification?: boolean;
+}
+
+export interface Capability {
+  skill: string;
+  attributes?: Record<string, string>;
+  confidence?: string;
+}
+
+export interface UserMemoryConfig {
+  defaultVisibility?: string;
+  maxRecallEntries?: number;
+  maxEntriesPerUser?: number;
+  onCapReached?: string;
+  recallOrder?: string;
+  autoRecallCategories?: string[];
+  guardrails?: MemoryGuardrails;
+  dream?: DreamConfig;
+}
+
+export interface MemoryGuardrails {
+  maxKeyLength?: number;
+  maxValueLength?: number;
+  maxWritesPerTurn?: number;
+  allowedCategories?: string[];
+}
+
+export interface DreamConfig {
+  enabled?: boolean;
+  schedule?: string;
+  detectContradictions?: boolean;
+  contradictionResolution?: string;
+  pruneStaleAfterDays?: number;
+  summarizeInteractions?: boolean;
+  llmProvider?: string;
+  llmModel?: string;
+  maxCostPerRun?: number;
+  batchSize?: number;
+  maxUsersPerRun?: number;
 }
 
 export interface DeploymentStatus {

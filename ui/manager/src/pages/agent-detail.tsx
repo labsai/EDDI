@@ -48,6 +48,11 @@ import { parseResourceUri, type EnvironmentStatus, deployAgent, getDeploymentSta
 import { useLatestVersions } from "@/hooks/use-latest-versions";
 import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
 import { useChatStore, useStartConversation } from "@/hooks/use-chat";
+import {
+  SecurityIdentitySection,
+  CapabilitiesSection,
+  UserMemorySection,
+} from "@/components/editors/agent-config-sections";
 
 /* ─── Status icons (labels resolved via i18n in component) ─── */
 const statusIcons = {
@@ -457,6 +462,15 @@ export function AgentDetailPage() {
         agentId={id!}
         version={resolvedVersion}
       />
+
+      {/* Security & Identity */}
+      <SecurityIdentitySection agent={agent} agentId={id!} version={resolvedVersion} />
+
+      {/* Capabilities */}
+      <CapabilitiesSection agent={agent} agentId={id!} version={resolvedVersion} />
+
+      {/* User Memory */}
+      <UserMemorySection agent={agent} agentId={id!} version={resolvedVersion} />
 
       {/* Workflows section */}
       <section className="rounded-xl border bg-card shadow-sm">
