@@ -6,6 +6,8 @@ import jakarta.enterprise.event.Observes;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.util.Optional;
+
 /**
  * Startup checks that warn operators about compliance-relevant configuration
  * gaps. These are advisory warnings, not hard blocks — EDDI runs fine without
@@ -25,10 +27,10 @@ public class ComplianceStartupChecks {
     private final boolean dbEncryptionAcknowledged;
 
     public ComplianceStartupChecks(
-            @ConfigProperty(name = "quarkus.http.ssl.certificate.file", defaultValue = "") String sslCertFile,
+            @ConfigProperty(name = "quarkus.http.ssl.certificate.file") Optional<String> sslCertFile,
             @ConfigProperty(name = "eddi.compliance.database-encryption-acknowledged",
                             defaultValue = "false") boolean dbEncryptionAcknowledged) {
-        this.sslCertFile = sslCertFile;
+        this.sslCertFile = sslCertFile.orElse("");
         this.dbEncryptionAcknowledged = dbEncryptionAcknowledged;
     }
 

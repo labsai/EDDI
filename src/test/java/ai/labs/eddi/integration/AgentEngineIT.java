@@ -223,7 +223,7 @@ public class AgentEngineIT extends BaseIntegrationIT {
         // Create package with all extensions
         String packageBody = String.format("""
                 {
-                  "WorkflowSteps": [
+                  "workflowSteps": [
                     {
                       "type": "eddi://ai.labs.parser",
                       "config": {},

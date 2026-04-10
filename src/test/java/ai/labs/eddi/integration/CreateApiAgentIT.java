@@ -271,7 +271,7 @@ public class CreateApiAgentIT {
     void createWorkflow() {
         String packageJson = String.format("""
                 {
-                  "WorkflowSteps": [
+                  "workflowSteps": [
                     { "type": "eddi://ai.labs.parser", "config": {} },
                     { "type": "eddi://ai.labs.rules", "config": { "uri": "%s" } },
                     { "type": "eddi://ai.labs.apicalls", "config": { "uri": "%s" } },
@@ -294,9 +294,9 @@ public class CreateApiAgentIT {
     void readWorkflow() {
         ResourceId res = extractResourceId(packageLocation);
         given().get("/workflowstore/workflows/" + res.id() + "?version=" + res.version()).then().assertThat().statusCode(200)
-                .body("WorkflowSteps.size()", equalTo(5)).body("WorkflowSteps[0].type", equalTo("eddi://ai.labs.parser"))
-                .body("WorkflowSteps[1].type", equalTo("eddi://ai.labs.rules")).body("WorkflowSteps[2].type", equalTo("eddi://ai.labs.apicalls"))
-                .body("WorkflowSteps[3].type", equalTo("eddi://ai.labs.apicalls")).body("WorkflowSteps[4].type", equalTo("eddi://ai.labs.llm"));
+                .body("workflowSteps.size()", equalTo(5)).body("workflowSteps[0].type", equalTo("eddi://ai.labs.parser"))
+                .body("workflowSteps[1].type", equalTo("eddi://ai.labs.rules")).body("workflowSteps[2].type", equalTo("eddi://ai.labs.apicalls"))
+                .body("workflowSteps[3].type", equalTo("eddi://ai.labs.apicalls")).body("workflowSteps[4].type", equalTo("eddi://ai.labs.llm"));
     }
 
     // ==================== Step 5: Create Agent ====================

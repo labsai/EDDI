@@ -15,6 +15,63 @@ Each entry follows this format:
 
 ---
 
+## Integration Test Suite — Code Review & Bug Fixes (2026-04-10)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**What changed:**
+
+Thorough code review of the new integration test suite uncovered **12 bugs** in test payloads + **2 pre-existing blockers** that prevented ALL integration tests from running:
+
+1. **ComplianceStartupChecks SSL blocker** — `@ConfigProperty(defaultValue = "")` on `quarkus.http.ssl.certificate.file` caused SmallRye Config to reject the empty string as null. Fixed by using `Optional<String>` — the correct Quarkus pattern for truly optional config. This blocked every single IT.
+2. **WorkflowSteps JSON casing** — All 11 IT files used `"WorkflowSteps"` (PascalCase) but Jackson maps `getWorkflowSteps()` → `workflowSteps` (camelCase). Combined with `FAIL_ON_UNKNOWN_PROPERTIES=false`, workflows were silently stored with zero steps. Fixed across all files.
+3. **McpCallsCrudIT** — Wrong REST path and completely wrong JSON model.
+4. **RagCrudIT** — Wrong JSON structure (tasks array vs flat config).
+5. **ScheduleAndTriggerIT** — 5 separate bugs (wrong paths, wrong field names, wrong models).
+6. **UserMemoryIT** — Invalid visibility enum value (`"personal"` → `"self"`).
+
+**Result:** 51 CRUD tests pass green. All 1711+ unit tests remain green.
+
+**Files:**
+- `ComplianceStartupChecks.java` (production fix: Optional<String>)
+- 4 IT files rewritten (McpCalls, Rag, Schedule, UserMemory)
+- 11 IT files fixed for workflowSteps casing (both new and pre-existing)
+
+---
+
+## Integration Test Suite — Full Feature Coverage (2026-04-10)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**What changed:**
+
+Implemented comprehensive integration test suite to achieve ~93% REST API coverage (38 of 41 testable interfaces), up from ~19% (9 of 47). Total: **252 test methods** across **57 IT files** (including Postgres mirrors + 2 base classes).
+
+| Tier | Files Added | Coverage |
+|---|---|---|
+| Config Store CRUD | 8 + 8 Postgres mirrors | LLM, API Calls, MCP Calls, RAG, Property Setter, Workflow, Agent Group, Prompt Snippet |
+| Core Features | 3 + 3 Postgres mirrors | GDPR (Art. 15/17/18), User Memory, Conversation Store |
+| Agent & Scheduling | 2 + 2 Postgres mirrors | Agent Configuration (setup wizard, versioning), Schedule + Trigger + Managed Conversations |
+| Multi-Agent & Security | 4 + 4 Postgres mirrors | Group Conversations, Audit Trail, Secrets Vault, Capability Registry, Infrastructure (health/metrics/OpenAPI) |
+| Protocols (Standalone) | 3 (incl. base class) | MCP Server (tool discovery, invocation), A2A (Agent Cards, JSON-RPC) |
+
+**New files (21 test classes + 18 Postgres mirrors + 2 base classes):**
+- `LlmCrudIT`, `ApiCallsCrudIT`, `McpCallsCrudIT`, `RagCrudIT`, `PropertySetterCrudIT`, `WorkflowCrudIT`, `AgentGroupCrudIT`, `PromptSnippetCrudIT`
+- `GdprComplianceIT`, `UserMemoryIT`, `ConversationStoreIT`
+- `AgentConfigurationIT`, `ScheduleAndTriggerIT`
+- `GroupConversationIT`, `AuditAndSecurityIT`, `CapabilityRegistryIT`, `InfrastructureIT`
+- `BaseStandaloneIT`, `McpEndpointIT`, `A2aEndpointIT`
+- 18 `Postgres*IT` mirror classes
+
+**Design decisions:**
+- **Two test modes:** `@QuarkusTest` (DevServices + Testcontainers) for most tests; standalone `@Tag("running-instance")` for MCP/A2A due to `quarkus-mcp-server-http` build-time CDI injection conflict
+- **Standalone tests skip gracefully** via `Assumptions.assumeTrue` when EDDI isn't running
+- **Group conversations** tested with template-based agents (dictionary+rules+output, no LLM keys)
+- **GDPR** tested end-to-end: export → restrict → verify restriction blocks conversations → unrestrict → erase → verify gone
+- **Postgres parity** via trivial subclass inheritance pattern
+
+---
+
 ## International Privacy — Malaysia PDPA + China PIPL (2026-04-10)
 
 **Repo:** EDDI (`feature/version-6.0.0`)
