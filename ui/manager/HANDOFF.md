@@ -1,8 +1,8 @@
 # EDDI Manager — Handoff Document
 
-> **Last updated**: 2026-04-09  
+> **Last updated**: 2026-04-10  
 > **Branch**: `feature/version-6.0.0`  
-> **Last commit**: `20336a3` test(v6): add studio test coverage — AgentStudioPage (10) + StudioEditorPanel (9)
+> **Last commit**: see git log — feat(v6): feature gap hardening + test coverage
 
 ---
 
@@ -71,11 +71,17 @@
 | **15** | **Phase 15 — Backend Feature Integration**: 15.1 Prompt Snippets (SnippetEditor, RESOURCE_TYPES, MSW, i18n). 15.2 GDPR Privacy Admin (Art. 17 erasure + Art. 15/20 export, sidebar, API/hooks/MSW). 15.3 LLM Editor Enrichment (Conversation Memory rolling summary, Tool Response Limits). 15.4 Agent Editor Enrichment (Security/Identity DID+signing, Capabilities registry, User Memory with guardrails + Dream consolidation). 15.5 Secrets key rotation (API+dialog) + Capability registry (API/hooks/MSW). | `63a867a` |
 | **15H** | **Phase 15 Hardening**: Code review + test coverage. Fixed 11 hardcoded English labels in agent-config-sections with i18n t(). Added 3 test files: snippet editor (9 tests), GDPR page (9 tests), agent config sections (9 tests). StudioEditorPanel component + agent-studio inline editor wiring. 453→480 tests. | `a4c591e` |
 | **15CR** | **Critical Review Fixes**: Extracted shared `EDITOR_MAP` to `editor-registry.tsx` (DRY). Fixed `useMemo` abused as `useEffect` in StudioEditorPanel. Filtered agent descriptor fetch by ID. Added `aria-label` to studio back button. Added `saveSuccess` inline feedback. Added 15 i18n keys (`studio.*`, `agentDetail.*`) to `en.json` + 10 locales. Removed dead `_version` field. | `3d21a11` |
+| **15LLM** | **LLM Editor Decomposition**: Split monolithic llm-editor into 8 sub-components (TaskBasicSection, TaskModelSection, etc.). Studio save-flow test. | `7472086` |
+| **FG-A** | **Feature Gap Quick Wins**: Token-aware context window (`maxContextTokens`, `anchorFirstSteps`). GDPR Art. 18 restrict/unrestrict. Agent memory policy (strict write discipline). Channel connectors editor. | pending |
+| **FG-B** | **Feature Gap — User Memory Browser**: `/manage/memories` page with search, category tabs, stats, debounced lookup. API module + hooks + MSW handlers. | pending |
+| **FG-C** | **Feature Gap — Properties Browser**: `/manage/properties` page with type-aware table, debounced lookup. API module + hooks + MSW handlers. | pending |
+| **FG-D** | **Feature Gap — Triggers + Capabilities**: `/manage/triggers` CRUD page with dialog (a11y: Escape, aria-modal, scroll lock). `/manage/capabilities` discovery page with debounced search. MSW handlers for both. | pending |
+| **FG-R** | **Feature Gap Review Fixes**: Debounce all lookup inputs (useDebounce hook). Error states on Triggers + Capabilities. Trigger search filter. Dialog a11y. Icon dedup (Layers). ENVIRONMENTS constant. 34 new tests across 4 test files. 20 new MSW handlers. | pending |
 
 ### Test Status
 
 - **TypeScript**: Zero errors (`npx tsc --noEmit`)
-- **Unit/Component**: 499 pass (`npm run test`) — 47 files (100% green)
+- **Unit/Component**: 540 pass (`npm run test`) — 52 files (100% green)
 - **E2E (Playwright)**: 75/75 pass (`npm run test:e2e`) — 11 spec files across 3 browsers
 - **Integration**: 44/44 pass (`npm run test:integration`) — 6 spec files, 10 parallel workers, 28.8s. Requires live EDDI backend
 - **Build**: Succeeds

@@ -3267,6 +3267,188 @@ export const gdprHandlers = [
       managedConversations: [],
     });
   }),
+
+  // Art. 18 — Restrict processing
+  http.post("*/admin/gdpr/:userId/restrict", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Art. 18 — Unrestrict processing
+  http.delete("*/admin/gdpr/:userId/restrict", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Art. 18 — Check restriction status
+  http.get("*/admin/gdpr/:userId/restrict", () => {
+    return HttpResponse.json(false);
+  }),
+];
+
+// ─── User Memory Handlers ───────────────────────────────────────────────────
+
+const MOCK_MEMORIES = [
+  {
+    id: "mem-1",
+    userId: "user-123",
+    key: "preferred_language",
+    value: "en",
+    category: "preference",
+    visibility: "self",
+    sourceAgentId: "agent1",
+    conflicted: false,
+    accessCount: 12,
+    createdAt: new Date(Date.now() - 7 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 3600000).toISOString(),
+  },
+  {
+    id: "mem-2",
+    userId: "user-123",
+    key: "favorite_color",
+    value: "blue",
+    category: "preference",
+    visibility: "self",
+    sourceAgentId: "agent1",
+    conflicted: false,
+    accessCount: 3,
+    createdAt: new Date(Date.now() - 5 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: "mem-3",
+    userId: "user-123",
+    key: "account_type",
+    value: "premium",
+    category: "fact",
+    visibility: "global",
+    sourceAgentId: "agent2",
+    conflicted: false,
+    accessCount: 28,
+    createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 7200000).toISOString(),
+  },
+  {
+    id: "mem-4",
+    userId: "user-123",
+    key: "last_topic",
+    value: "billing",
+    category: "context",
+    visibility: "self",
+    sourceAgentId: "agent1",
+    sourceConversationId: "conv-42",
+    conflicted: true,
+    accessCount: 1,
+    createdAt: new Date(Date.now() - 3600000).toISOString(),
+    updatedAt: new Date(Date.now() - 1800000).toISOString(),
+  },
+];
+
+export const userMemoryHandlers = [
+  http.get("*/usermemorystore/memories/:userId", () => {
+    return HttpResponse.json(MOCK_MEMORIES);
+  }),
+
+  http.get("*/usermemorystore/memories/:userId/search", ({ request }) => {
+    const url = new URL(request.url);
+    const q = (url.searchParams.get("q") ?? "").toLowerCase();
+    const filtered = MOCK_MEMORIES.filter(
+      (m) => m.key.toLowerCase().includes(q) || String(m.value).toLowerCase().includes(q),
+    );
+    return HttpResponse.json(filtered);
+  }),
+
+  http.get("*/usermemorystore/memories/:userId/category/:category", ({ params }) => {
+    const filtered = MOCK_MEMORIES.filter((m) => m.category === params.category);
+    return HttpResponse.json(filtered);
+  }),
+
+  http.get("*/usermemorystore/memories/:userId/count", () => {
+    return HttpResponse.json({ count: MOCK_MEMORIES.length });
+  }),
+
+  http.put("*/usermemorystore/memories", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.delete("*/usermemorystore/memories/entry/:entryId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.delete("*/usermemorystore/memories/:userId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+];
+
+// ─── Properties Handlers ────────────────────────────────────────────────────
+
+const MOCK_PROPERTIES = {
+  user_name: { name: "user_name", scope: "longTerm", valueString: "Jane Doe" },
+  age: { name: "age", scope: "longTerm", valueInt: 32 },
+  is_vip: { name: "is_vip", scope: "longTerm", valueBoolean: true },
+  preferences: { name: "preferences", scope: "longTerm", valueObject: { theme: "dark", lang: "en" } },
+  tags: { name: "tags", scope: "longTerm", valueList: ["loyal", "premium"] },
+};
+
+export const propertiesHandlers = [
+  http.get("*/propertiesstore/properties/:userId", () => {
+    return HttpResponse.json(MOCK_PROPERTIES);
+  }),
+
+  http.post("*/propertiesstore/properties/:userId", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.delete("*/propertiesstore/properties/:userId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+];
+
+// ─── Agent Trigger Handlers ─────────────────────────────────────────────────
+
+const MOCK_TRIGGERS = [
+  {
+    intent: "booking_request",
+    agentDeployments: [
+      { environment: "production", agentId: "agent1" },
+      { environment: "test", agentId: "agent3" },
+    ],
+  },
+  {
+    intent: "faq_query",
+    agentDeployments: [
+      { environment: "production", agentId: "agent2" },
+    ],
+  },
+  {
+    intent: "escalation",
+    agentDeployments: [
+      { environment: "production", agentId: "agent1" },
+      { environment: "production", agentId: "agent8" },
+    ],
+  },
+];
+
+export const triggerHandlers = [
+  http.get("*/AgentTriggerStore/agenttriggers", () => {
+    return HttpResponse.json(MOCK_TRIGGERS);
+  }),
+
+  http.get("*/AgentTriggerStore/agenttriggers/:intent", ({ params }) => {
+    const found = MOCK_TRIGGERS.find((t) => t.intent === params.intent);
+    if (!found) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json(found);
+  }),
+
+  http.post("*/AgentTriggerStore/agenttriggers", () => {
+    return new HttpResponse(null, { status: 201 });
+  }),
+
+  http.put("*/AgentTriggerStore/agenttriggers/:intent", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.delete("*/AgentTriggerStore/agenttriggers/:intent", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
 ];
 
 // ─── Capability Registry Handlers ────────────────────────────────────────────
@@ -3278,23 +3460,19 @@ const MOCK_CAPABILITIES = [
   { agentId: "agent3", skill: "code-review", attributes: { language: "java" }, confidence: "high" },
 ];
 
+const ALL_SKILLS = ["customer-support", "order-tracking", "faq", "code-review", "data-validation", "invoice-parsing"];
+
 export const capabilityHandlers = [
+  // Skills list — must come BEFORE the query-param search handler
+  http.get("*/capabilities/skills", () => {
+    return HttpResponse.json(ALL_SKILLS);
+  }),
+
+  // Skill search with query params (?skill=...&strategy=...)
   http.get("*/capabilities", ({ request }) => {
     const url = new URL(request.url);
-    // Skip sub-paths (agent-specific, search)
-    const segments = url.pathname.split("/").filter(Boolean);
-    if (segments.length > 1) return;
-    return HttpResponse.json(MOCK_CAPABILITIES);
-  }),
-
-  http.get("*/capabilities/agents/:agentId", ({ params }) => {
-    const filtered = MOCK_CAPABILITIES.filter((c) => c.agentId === params.agentId);
-    return HttpResponse.json(filtered);
-  }),
-
-  http.get("*/capabilities/search", ({ request }) => {
-    const url = new URL(request.url);
     const skill = url.searchParams.get("skill") ?? "";
+    if (!skill) return HttpResponse.json(MOCK_CAPABILITIES);
     const filtered = MOCK_CAPABILITIES.filter((c) =>
       c.skill.toLowerCase().includes(skill.toLowerCase()),
     );
