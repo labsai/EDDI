@@ -15,6 +15,32 @@ Each entry follows this format:
 
 ---
 
+## Granular Export/Import & Live Sync Architecture (2026-04-10)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**What changed:**
+
+Implemented the core architecture for granular agent synchronization, replacing the monolithic ZIP import/export with a transport-agnostic pipeline that supports content diffs, selective resource picking, and structural matching.
+
+| Component | Files | Purpose |
+|---|---|---|
+| **Transport Layer** | `IResourceSource`, `ZipResourceSource` | Transport-agnostic abstraction for reading agent configs from any source |
+| **Matching Engine** | `StructuralMatcher` | Deterministic pairing of source/target resources by position, type, or name |
+| **Upgrade Executor** | `UpgradeExecutor` | Content-sync writer: updates target resources in-place, creates new versions |
+| **Models** | `ExportPreview`, `SyncMapping`, `SyncRequest`, enhanced `ImportPreview` | Export tree, batch sync, content diffs |
+| **API Layer** | Enhanced `IRestExportService`, `IRestImportService` | Preview endpoints, `strategy=upgrade`, sync endpoints (stubbed 501) |
+
+**Key design decisions:**
+1. **Upgrade = content sync** — preserves existing resource IDs, prevents breaking references
+2. **Deterministic matching** — extensions matched by `WorkflowStep.type`, not by origin ID
+3. **Transport-agnostic** — same matcher/executor for ZIP imports and live sync
+4. **Backwards-compatible API** — all new query params are optional
+
+**Files:** 8 new, 4 modified (backup package)
+
+---
+
 ## Integration Test Suite — Code Review & Bug Fixes (2026-04-10)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
