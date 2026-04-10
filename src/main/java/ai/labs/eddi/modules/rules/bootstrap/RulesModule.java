@@ -33,6 +33,8 @@ public class RulesModule {
     @Inject
     protected void configure() {
         lifecycleTaskProviders.put(RulesEvaluationTask.ID, () -> instance.select(RulesEvaluationTask.class).get());
+        // V6 alias: ai.labs.behavior → ai.labs.rules
+        lifecycleTaskProviders.put("ai.labs.rules", lifecycleTaskProviders.get(RulesEvaluationTask.ID));
         LOGGER.debug("Added Behaviour Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 }

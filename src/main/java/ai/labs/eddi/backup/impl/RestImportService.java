@@ -119,7 +119,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             List<CompletableFuture<Void>> deploymentFutures = new ArrayList<>();
 
             for (var agentFileName : agentExampleFiles) {
-                importAgent(getResourceAsStream("/initial-agents/" + agentFileName), "create", null, new MockAsyncResponse() {
+                importAgent(getResourceAsStream("/initial-agents/" + agentFileName), "create", null, null, null, new MockAsyncResponse() {
                     @Override
                     public boolean resume(Object responseObj) {
                         if (responseObj instanceof Response response) {
@@ -1208,40 +1208,126 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     // ==================== Live Sync Endpoints ====================
 
+    /**
+     * In development mode, allow HTTP for remote sync (easier local testing). In
+     * production, enforce HTTPS to prevent credential leakage.
+     */
+    private boolean isDevMode() {
+        String profile = System.getProperty("quarkus.profile", "prod");
+        return "dev".equalsIgnoreCase(profile) || "test".equalsIgnoreCase(profile);
+    }
+
+    private void validateSourceUrl(String sourceUrl) {
+        SourceUrlValidator.validate(sourceUrl, isDevMode());
+    }
+
     @Override
     public List<DocumentDescriptor> listRemoteAgents(String sourceUrl, String sourceAuth) {
-        // Phase 3: RemoteApiResourceSource will be implemented next
-        throw new jakarta.ws.rs.WebApplicationException("Live sync will be available in the next release", 501);
+        validateSourceUrl(sourceUrl);
+        try {
+            return RemoteApiResourceSource.listRemoteAgentDescriptors(sourceUrl, sourceAuth, jsonSerialization);
+        } catch (Exception e) {
+            log.errorf("Failed to list remote agents from %s: %s", sourceUrl, e.getMessage());
+            throw new InternalServerErrorException("Failed to connect to remote instance: " + e.getMessage(), e);
+        }
     }
 
     @Override
     public ImportPreview previewSync(String sourceUrl, String sourceAgentId, Integer sourceVersion,
                                      String targetAgentId, String sourceAuth) {
-        // Phase 3: RemoteApiResourceSource will be implemented next
-        throw new jakarta.ws.rs.WebApplicationException("Live sync will be available in the next release", 501);
+        validateSourceUrl(sourceUrl);
+        try (var source = new RemoteApiResourceSource(sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization)) {
+            return structuralMatcher.buildPreview(source, targetAgentId, true);
+        } catch (Exception e) {
+            log.errorf("Sync preview failed for agent %s from %s: %s", sourceAgentId, sourceUrl, e.getMessage());
+            throw new InternalServerErrorException("Sync preview failed: " + e.getMessage(), e);
+        }
     }
 
     @Override
     public List<ImportPreview> previewSyncBatch(String sourceUrl, List<SyncMapping> mappings, String sourceAuth) {
-        // Phase 3: RemoteApiResourceSource will be implemented next
-        throw new jakarta.ws.rs.WebApplicationException("Live sync will be available in the next release", 501);
+        validateSourceUrl(sourceUrl);
+        if (mappings == null || mappings.isEmpty()) {
+            return List.of();
+        }
+
+        List<ImportPreview> previews = new ArrayList<>();
+        for (SyncMapping mapping : mappings) {
+            try (var source = new RemoteApiResourceSource(
+                    sourceUrl, mapping.sourceAgentId(), mapping.sourceAgentVersion(),
+                    sourceAuth, jsonSerialization)) {
+                ImportPreview preview = structuralMatcher.buildPreview(source, mapping.targetAgentId(), true);
+                previews.add(preview);
+            } catch (Exception e) {
+                log.warnf("Batch preview failed for agent %s: %s", mapping.sourceAgentId(), e.getMessage());
+                // Add a failed preview entry so the caller knows which agent failed
+                previews.add(new ImportPreview(
+                        mapping.sourceAgentId(), "Error: " + e.getMessage(),
+                        mapping.targetAgentId(), null, List.of()));
+            }
+        }
+        return previews;
     }
 
     @Override
     public void executeSync(String sourceUrl, String sourceAgentId, Integer sourceVersion,
                             String targetAgentId, String selectedResources, String workflowOrder,
                             String sourceAuth, AsyncResponse response) {
-        // Phase 3: RemoteApiResourceSource will be implemented next
-        if (response != null) {
-            response.resume(new jakarta.ws.rs.WebApplicationException("Live sync will be available in the next release", 501));
+        validateSourceUrl(sourceUrl);
+        try {
+            if (response != null)
+                response.setTimeout(120, TimeUnit.SECONDS);
+
+            try (var source = new RemoteApiResourceSource(
+                    sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization)) {
+                Set<String> selectedSet = parseSelectedResources(selectedResources);
+                List<String> wfOrder = parseWorkflowOrder(workflowOrder);
+
+                URI resultUri = upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, wfOrder);
+                if (response != null) {
+                    response.resume(Response.ok().location(resultUri).build());
+                }
+            }
+        } catch (Exception e) {
+            log.errorf("Sync execution failed for agent %s from %s: %s",
+                    sourceAgentId, sourceUrl, e.getMessage());
+            if (response != null) {
+                response.resume(new InternalServerErrorException("Sync failed: " + e.getMessage(), e));
+            }
         }
     }
 
     @Override
     public void executeSyncBatch(String sourceUrl, List<SyncRequest> requests, String sourceAuth, AsyncResponse response) {
-        // Phase 3: RemoteApiResourceSource will be implemented next
-        if (response != null) {
-            response.resume(new jakarta.ws.rs.WebApplicationException("Live sync will be available in the next release", 501));
+        validateSourceUrl(sourceUrl);
+        try {
+            if (response != null)
+                response.setTimeout(300, TimeUnit.SECONDS);
+
+            List<URI> resultUris = new ArrayList<>();
+            for (SyncRequest request : requests) {
+                try (var source = new RemoteApiResourceSource(
+                        sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(),
+                        sourceAuth, jsonSerialization)) {
+                    URI resultUri = upgradeExecutor.executeUpgrade(
+                            source, request.targetAgentId(),
+                            request.selectedResources(), request.workflowOrder());
+                    resultUris.add(resultUri);
+                } catch (Exception e) {
+                    log.warnf("Batch sync failed for agent %s→%s: %s",
+                            request.sourceAgentId(), request.targetAgentId(), e.getMessage());
+                    // Continue with remaining agents — partial success is better than total failure
+                }
+            }
+
+            if (response != null) {
+                response.resume(Response.ok(resultUris).build());
+            }
+        } catch (Exception e) {
+            log.errorf("Batch sync execution failed: %s", e.getMessage());
+            if (response != null) {
+                response.resume(new InternalServerErrorException("Batch sync failed: " + e.getMessage(), e));
+            }
         }
     }
 

@@ -369,7 +369,7 @@ public class StructuralMatcher {
                     .readPropertySetter(resId.getId(), resId.getVersion());
             case "ai.labs.output" -> restInterfaceFactory.get(
                     ai.labs.eddi.configs.output.IRestOutputStore.class)
-                    .readOutputSet(resId.getId(), resId.getVersion());
+                    .readOutputSet(resId.getId(), resId.getVersion(), "", "", 0, 0);
             case "ai.labs.mcpcalls" -> restInterfaceFactory.get(
                     ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore.class)
                     .readMcpCalls(resId.getId(), resId.getVersion());

@@ -30,6 +30,8 @@ public class ApiCallsModule {
     @Inject
     protected void configure() {
         lifecycleTaskProviders.put(ApiCallsTask.ID, () -> instance.select(ApiCallsTask.class).get());
+        // V6 alias: ai.labs.httpcalls → ai.labs.apicalls
+        lifecycleTaskProviders.put("ai.labs.apicalls", lifecycleTaskProviders.get(ApiCallsTask.ID));
         LOGGER.debug("Added ApiCalls Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 
