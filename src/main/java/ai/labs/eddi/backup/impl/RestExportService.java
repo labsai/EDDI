@@ -9,7 +9,11 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.llm.ILlmStore;
+import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.output.IOutputStore;
+import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
+import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
@@ -37,9 +41,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.MessageFormat;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -59,6 +63,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private final ILlmStore llmStore;
     private final IPropertySetterStore propertySetterStore;
     private final IOutputStore outputStore;
+    private final IMcpCallsStore mcpCallsStore;
+    private final IRagStore ragStore;
+    private final IPromptSnippetStore snippetStore;
     private final IJsonSerialization jsonSerialization;
     private final IZipArchive zipArchive;
     private final SecretScrubber secretScrubber;
@@ -68,10 +75,17 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     private static final Logger log = Logger.getLogger(RestExportService.class);
     private static final String SCHEDULE_EXT = "schedule";
 
+    /**
+     * Matches snippet references in template strings: {{snippets.name}} or
+     * {snippets.name}. Captures the snippet name (group 1).
+     */
+    private static final Pattern SNIPPET_REF_PATTERN = Pattern.compile("snippets\\.([a-zA-Z0-9_\\-]+)");
+
     @Inject
     public RestExportService(IDocumentDescriptorStore documentDescriptorStore, IAgentStore agentStore, IWorkflowStore workflowStore,
             IDictionaryStore regularDictionaryStore, IRuleSetStore behaviorStore, IApiCallsStore httpCallsStore, ILlmStore llmStore,
-            IPropertySetterStore propertySetterStore, IOutputStore outputStore, IJsonSerialization jsonSerialization, IZipArchive zipArchive,
+            IPropertySetterStore propertySetterStore, IOutputStore outputStore, IMcpCallsStore mcpCallsStore, IRagStore ragStore,
+            IPromptSnippetStore snippetStore, IJsonSerialization jsonSerialization, IZipArchive zipArchive,
             SecretScrubber secretScrubber, IScheduleStore scheduleStore) {
         this.documentDescriptorStore = documentDescriptorStore;
         this.agentStore = agentStore;
@@ -82,6 +96,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         this.llmStore = llmStore;
         this.propertySetterStore = propertySetterStore;
         this.outputStore = outputStore;
+        this.mcpCallsStore = mcpCallsStore;
+        this.ragStore = ragStore;
+        this.snippetStore = snippetStore;
         this.jsonSerialization = jsonSerialization;
         this.zipArchive = zipArchive;
         this.secretScrubber = secretScrubber;
@@ -119,34 +136,55 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
             DocumentDescriptor agentDocumentDescriptor = writeDocumentDescriptor(agentPath, agentId, agentVersion);
 
+            // Collect all serialized extension configs to scan for snippet references
+            List<String> allExtensionConfigs = new ArrayList<>();
+
             for (IResourceId resourceId : workflowConfigurations.keySet()) {
                 WorkflowConfiguration workflowConfig = workflowConfigurations.get(resourceId);
                 String workflowConfigString = jsonSerialization.serialize(workflowConfig);
                 Path workflowPath = writeDirAndDocument(resourceId.getId(), resourceId.getVersion(), workflowConfigString, agentPath, WORKFLOW_EXT);
                 writeDocumentDescriptor(workflowPath, resourceId.getId(), resourceId.getVersion());
 
-                writeConfigs(workflowPath,
-                        convertConfigsToString(
-                                readConfigs(regularDictionaryStore, extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN))),
-                        DICTIONARY_EXT);
+                Map<IResourceId, String> dictionaryConfigs = convertConfigsToString(
+                        readConfigs(regularDictionaryStore, extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN)));
+                writeConfigs(workflowPath, dictionaryConfigs, DICTIONARY_EXT);
 
-                writeConfigs(workflowPath,
-                        convertConfigsToString(readConfigs(behaviorStore, extractResourcesUris(workflowConfigString, BEHAVIOR_URI_PATTERN))),
-                        BEHAVIOR_EXT);
+                Map<IResourceId, String> behaviorConfigs = convertConfigsToString(
+                        readConfigs(behaviorStore, extractResourcesUris(workflowConfigString, BEHAVIOR_URI_PATTERN)));
+                writeConfigs(workflowPath, behaviorConfigs, BEHAVIOR_EXT);
 
-                writeConfigs(workflowPath,
-                        convertConfigsToString(readConfigs(httpCallsStore, extractResourcesUris(workflowConfigString, HTTPCALLS_URI_PATTERN))),
-                        HTTPCALLS_EXT);
+                Map<IResourceId, String> httpCallsConfigs = convertConfigsToString(
+                        readConfigs(httpCallsStore, extractResourcesUris(workflowConfigString, HTTPCALLS_URI_PATTERN)));
+                writeConfigs(workflowPath, httpCallsConfigs, HTTPCALLS_EXT);
 
-                writeConfigs(workflowPath,
-                        convertConfigsToString(readConfigs(llmStore, extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN))), LLM_EXT);
+                Map<IResourceId, String> llmConfigs = convertConfigsToString(
+                        readConfigs(llmStore, extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN)));
+                writeConfigs(workflowPath, llmConfigs, LLM_EXT);
 
-                writeConfigs(workflowPath,
-                        convertConfigsToString(readConfigs(propertySetterStore, extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN))),
-                        PROPERTY_EXT);
+                Map<IResourceId, String> propertyConfigs = convertConfigsToString(
+                        readConfigs(propertySetterStore, extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN)));
+                writeConfigs(workflowPath, propertyConfigs, PROPERTY_EXT);
 
-                writeConfigs(workflowPath,
-                        convertConfigsToString(readConfigs(outputStore, extractResourcesUris(workflowConfigString, OUTPUT_URI_PATTERN))), OUTPUT_EXT);
+                Map<IResourceId, String> outputConfigs = convertConfigsToString(
+                        readConfigs(outputStore, extractResourcesUris(workflowConfigString, OUTPUT_URI_PATTERN)));
+                writeConfigs(workflowPath, outputConfigs, OUTPUT_EXT);
+
+                Map<IResourceId, String> mcpConfigs = convertConfigsToString(
+                        readConfigs(mcpCallsStore, extractResourcesUris(workflowConfigString, MCPCALLS_URI_PATTERN)));
+                writeConfigs(workflowPath, mcpConfigs, MCPCALLS_EXT);
+
+                Map<IResourceId, String> ragConfigs = convertConfigsToString(
+                        readConfigs(ragStore, extractResourcesUris(workflowConfigString, RAG_URI_PATTERN)));
+                writeConfigs(workflowPath, ragConfigs, RAG_EXT);
+
+                // Collect serialized configs for snippet reference scanning
+                // (snippet refs like {{snippets.name}} can appear in LLM system prompts,
+                // httpCall templates, property setter instructions, and output templates)
+                allExtensionConfigs.add(workflowConfigString);
+                allExtensionConfigs.addAll(llmConfigs.values());
+                allExtensionConfigs.addAll(httpCallsConfigs.values());
+                allExtensionConfigs.addAll(propertyConfigs.values());
+                allExtensionConfigs.addAll(outputConfigs.values());
 
                 Path unusedPath = Files.createDirectories(Paths.get(tmpPath.toString(), agentId, "unused")).normalize();
 
@@ -158,8 +196,14 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 writeAllVersionsOfUris(unusedPath, propertySetterStore, extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN),
                         PROPERTY_EXT);
                 writeAllVersionsOfUris(unusedPath, outputStore, extractResourcesUris(workflowConfigString, OUTPUT_URI_PATTERN), OUTPUT_EXT);
+                writeAllVersionsOfUris(unusedPath, mcpCallsStore, extractResourcesUris(workflowConfigString, MCPCALLS_URI_PATTERN), MCPCALLS_EXT);
+                writeAllVersionsOfUris(unusedPath, ragStore, extractResourcesUris(workflowConfigString, RAG_URI_PATTERN), RAG_EXT);
 
             }
+
+            // Export only snippets actually referenced by this agent's configs
+            Set<String> referencedSnippetNames = extractReferencedSnippetNames(allExtensionConfigs);
+            exportSnippets(agentPath, referencedSnippetNames);
 
             // Export schedules for this agent
             exportSchedules(agentId, agentPath);
@@ -343,6 +387,88 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         }
         if (value.contains("..") || value.contains("/") || value.contains("\\")) {
             throw new BadRequestException(paramName + " contains invalid path characters");
+        }
+    }
+
+    /**
+     * Scans serialized config strings for {@code snippets.<name>} template
+     * references.
+     *
+     * @return set of snippet names referenced by any config
+     */
+    private Set<String> extractReferencedSnippetNames(List<String> configStrings) {
+        Set<String> names = new LinkedHashSet<>();
+        for (String config : configStrings) {
+            if (config == null || config.isEmpty())
+                continue;
+            Matcher matcher = SNIPPET_REF_PATTERN.matcher(config);
+            while (matcher.find()) {
+                names.add(matcher.group(1));
+            }
+        }
+        return names;
+    }
+
+    /**
+     * Exports only snippets whose {@code name} is in the referenced set. If the
+     * referenced set is empty, no snippets are exported.
+     */
+    private void exportSnippets(Path agentPath, Set<String> referencedNames) {
+        if (referencedNames.isEmpty()) {
+            return;
+        }
+
+        try {
+            List<DocumentDescriptor> descriptors = documentDescriptorStore.readDescriptors(
+                    "ai.labs.snippet", "", 0, 0, false);
+            if (descriptors == null || descriptors.isEmpty()) {
+                return;
+            }
+
+            Path snippetsDir = Files.createDirectories(Paths.get(agentPath.toString(), "snippets"));
+            int exportedCount = 0;
+            for (DocumentDescriptor descriptor : descriptors) {
+                try {
+                    java.net.URI resourceUri = descriptor.getResource();
+                    IResourceId resourceId = RestUtilities.extractResourceId(resourceUri);
+                    if (resourceId == null)
+                        continue;
+
+                    PromptSnippet snippet = snippetStore.read(resourceId.getId(), resourceId.getVersion());
+                    if (snippet == null || snippet.getName() == null)
+                        continue;
+
+                    // Only export snippets actually referenced by this agent
+                    if (!referencedNames.contains(snippet.getName())) {
+                        continue;
+                    }
+
+                    String json = jsonSerialization.serialize(snippet);
+                    json = secretScrubber.scrubJson(json);
+                    String filename = resourceId.getId() + "." + SNIPPET_EXT + ".json";
+                    Path filePath = Paths.get(snippetsDir.toString(), filename);
+                    deleteFileIfExists(filePath);
+                    try (BufferedWriter writer = Files.newBufferedWriter(filePath)) {
+                        writer.write(json);
+                    }
+
+                    // Write descriptor
+                    String descriptorFilename = resourceId.getId() + ".descriptor.json";
+                    Path descriptorPath = Paths.get(snippetsDir.toString(), descriptorFilename);
+                    deleteFileIfExists(descriptorPath);
+                    try (BufferedWriter writer = Files.newBufferedWriter(descriptorPath)) {
+                        writer.write(jsonSerialization.serialize(descriptor));
+                    }
+                    exportedCount++;
+                } catch (IResourceStore.ResourceNotFoundException e) {
+                    log.debugf("Snippet descriptor references missing resource: %s", descriptor.getResource());
+                }
+            }
+            if (exportedCount > 0) {
+                log.infof("Exported %d snippet(s) (referenced: %s)", exportedCount, referencedNames);
+            }
+        } catch (Exception e) {
+            log.warnf("Failed to export snippets: %s", e.getMessage());
         }
     }
 

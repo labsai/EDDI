@@ -23,6 +23,7 @@ import java.util.List;
 public interface IRestRagStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.rag";
     String resourceURI = resourceBaseType + "/ragstore/rags/";
+    String versionQueryParam = "?version=";
 
     @GET
     @Path("/jsonSchema")

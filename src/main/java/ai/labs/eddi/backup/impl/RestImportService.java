@@ -15,10 +15,16 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
+import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
+import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
+import ai.labs.eddi.configs.rag.IRestRagStore;
+import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
+import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.patch.PatchInstruction;
@@ -194,6 +200,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             }
                         }
                     }
+                    // Snippets (global resources, not workflow-embedded)
+                    addSnippetDiffs(diffs, Paths.get(targetDirPath));
 
                     return new ImportPreview(agentOriginId, agentName, diffs);
                 }
@@ -215,6 +223,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         addDiffsForType(diffs, workflowFileString, LANGCHAIN_URI_PATTERN, LLM_EXT, workflowDir);
         addDiffsForType(diffs, workflowFileString, PROPERTY_URI_PATTERN, PROPERTY_EXT, workflowDir);
         addDiffsForType(diffs, workflowFileString, OUTPUT_URI_PATTERN, OUTPUT_EXT, workflowDir);
+        addDiffsForType(diffs, workflowFileString, MCPCALLS_URI_PATTERN, MCPCALLS_EXT, workflowDir);
+        addDiffsForType(diffs, workflowFileString, RAG_URI_PATTERN, RAG_EXT, workflowDir);
     }
 
     private void addDiffsForType(List<ResourceDiff> diffs, String workflowFileString, Pattern uriPattern, String ext, Path workflowDir)
@@ -227,6 +237,50 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 continue;
             String name = readNameFromDescriptor(workflowDir, resourceId.getId());
             diffs.add(buildResourceDiff(resourceId.getId(), ext, name));
+        }
+    }
+
+    /**
+     * Scans the snippets/ directory in the ZIP and adds preview diffs. Uses
+     * name-based lookup to match existing snippets — consistent with the import
+     * logic's name-based deduplication.
+     */
+    private void addSnippetDiffs(List<ResourceDiff> diffs, Path targetDirPath) {
+        Path snippetsDir = findSnippetsDir(targetDirPath);
+        if (snippetsDir == null || !Files.exists(snippetsDir)) {
+            return;
+        }
+
+        try {
+            // Build name→IResourceId map of existing snippets for accurate CREATE/UPDATE
+            IRestPromptSnippetStore restSnippetStore = getRestResourceStore(IRestPromptSnippetStore.class);
+            Map<String, IResourceId> existingByName = buildExistingSnippetNameMap(restSnippetStore);
+
+            try (var snippetStream = Files.newDirectoryStream(snippetsDir,
+                    p -> p.toString().endsWith("." + SNIPPET_EXT + ".json"))) {
+                for (Path snippetFilePath : snippetStream) {
+                    try {
+                        String json = readFile(snippetFilePath);
+                        PromptSnippet snippet = jsonSerialization.deserialize(json, PromptSnippet.class);
+                        if (snippet == null || snippet.getName() == null)
+                            continue;
+
+                        String snippetName = snippet.getName();
+                        IResourceId existing = existingByName.get(snippetName);
+                        if (existing != null) {
+                            diffs.add(new ResourceDiff(existing.getId(), SNIPPET_EXT, snippetName,
+                                    DiffAction.UPDATE, existing.getId(), existing.getVersion()));
+                        } else {
+                            diffs.add(new ResourceDiff(null, SNIPPET_EXT, snippetName,
+                                    DiffAction.CREATE, null, null));
+                        }
+                    } catch (Exception e) {
+                        log.debugf("Could not preview snippet %s: %s", snippetFilePath.getFileName(), e.getMessage());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debugf("Could not scan snippets for preview: %s", e.getMessage());
         }
     }
 
@@ -302,6 +356,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
         this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
         var targetDirPath = targetDir.getPath();
+
+        // Import snippets (global resources, not workflow-embedded)
+        importSnippets(Paths.get(targetDirPath), isMerge);
+
         try (var directoryStream = Files.newDirectoryStream(Paths.get(targetDirPath), path -> path.toString().endsWith(AGENT_FILE_ENDING))) {
             directoryStream.forEach(agentFilePath -> {
                 try {
@@ -421,6 +479,24 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                         updateDocumentDescriptor(workflowPath, outputUris, newOutputUris);
                         workflowFileString = replaceURIs(workflowFileString, outputUris, newOutputUris);
+
+                        // ... for mcp calls
+                        List<URI> mcpCallsUris = extractResourcesUris(workflowFileString, MCPCALLS_URI_PATTERN);
+                        List<URI> newMcpCallsUris = createOrUpdateResources(
+                                readResources(mcpCallsUris, workflowPath, MCPCALLS_EXT, McpCallsConfiguration.class), mcpCallsUris, isMerge,
+                                selectedSet, this::createNewMcpCalls, this::updateMcpCalls);
+
+                        updateDocumentDescriptor(workflowPath, mcpCallsUris, newMcpCallsUris);
+                        workflowFileString = replaceURIs(workflowFileString, mcpCallsUris, newMcpCallsUris);
+
+                        // ... for rag
+                        List<URI> ragUris = extractResourcesUris(workflowFileString, RAG_URI_PATTERN);
+                        List<URI> newRagUris = createOrUpdateResources(
+                                readResources(ragUris, workflowPath, RAG_EXT, RagConfiguration.class), ragUris, isMerge, selectedSet,
+                                this::createNewRags, this::updateRag);
+
+                        updateDocumentDescriptor(workflowPath, ragUris, newRagUris);
+                        workflowFileString = replaceURIs(workflowFileString, ragUris, newRagUris);
 
                         // creating updated workflow and replacing references in Agent config
                         URI newWorkflowUri;
@@ -737,6 +813,191 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         Response createResp = store.createOutputSet(config);
         checkIfCreatedResponse(createResp);
         return createResp.getLocation();
+    }
+
+    private List<URI> createNewMcpCalls(List<McpCallsConfiguration> mcpCallsConfigurations)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestMcpCallsStore restMcpCallsStore = getRestResourceStore(IRestMcpCallsStore.class);
+        return mcpCallsConfigurations.stream().map(mcpCallsConfiguration -> {
+            Response mcpCallsResponse = restMcpCallsStore.createMcpCalls(mcpCallsConfiguration);
+            checkIfCreatedResponse(mcpCallsResponse);
+            return mcpCallsResponse.getLocation();
+        }).toList();
+    }
+
+    private URI updateMcpCalls(McpCallsConfiguration config, String localId, Integer localVersion)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestMcpCallsStore store = getRestResourceStore(IRestMcpCallsStore.class);
+        Response response = store.updateMcpCalls(localId, localVersion, config);
+        if (response.getStatus() == 200) {
+            return URI.create(IRestMcpCallsStore.resourceURI + localId + IRestMcpCallsStore.versionQueryParam + (localVersion + 1));
+        }
+        Response createResp = store.createMcpCalls(config);
+        checkIfCreatedResponse(createResp);
+        return createResp.getLocation();
+    }
+
+    private List<URI> createNewRags(List<RagConfiguration> ragConfigurations)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestRagStore restRagStore = getRestResourceStore(IRestRagStore.class);
+        return ragConfigurations.stream().map(ragConfiguration -> {
+            Response ragResponse = restRagStore.createRag(ragConfiguration);
+            checkIfCreatedResponse(ragResponse);
+            return ragResponse.getLocation();
+        }).toList();
+    }
+
+    private URI updateRag(RagConfiguration config, String localId, Integer localVersion)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestRagStore store = getRestResourceStore(IRestRagStore.class);
+        Response response = store.updateRag(localId, localVersion, config);
+        if (response.getStatus() == 200) {
+            return URI.create(IRestRagStore.resourceURI + localId + IRestRagStore.versionQueryParam + (localVersion + 1));
+        }
+        Response createResp = store.createRag(config);
+        checkIfCreatedResponse(createResp);
+        return createResp.getLocation();
+    }
+
+    // ==================== Snippet Import ====================
+
+    private void importSnippets(Path targetDirPath, boolean isMerge) {
+        try {
+            // Look for snippets directory — could be inside the agent subdirectory
+            Path snippetsDir = findSnippetsDir(targetDirPath);
+            if (snippetsDir == null || !Files.exists(snippetsDir)) {
+                return;
+            }
+
+            try (var snippetStream = Files.newDirectoryStream(snippetsDir,
+                    p -> p.toString().endsWith("." + SNIPPET_EXT + ".json"))) {
+
+                IRestPromptSnippetStore restSnippetStore = getRestResourceStore(IRestPromptSnippetStore.class);
+
+                // Build a name → (id, version) map of existing snippets for name-based
+                // deduplication.
+                // Snippet name is the natural key (e.g., "cautious_mode") — not the MongoDB
+                // document ID
+                // which differs across EDDI instances.
+                Map<String, IResourceId> existingSnippetsByName = buildExistingSnippetNameMap(restSnippetStore);
+
+                int importedCount = 0;
+                int skippedCount = 0;
+                for (Path snippetFilePath : snippetStream) {
+                    try {
+                        String snippetJson = readFile(snippetFilePath);
+                        PromptSnippet snippet = jsonSerialization.deserialize(snippetJson, PromptSnippet.class);
+                        if (snippet == null || snippet.getName() == null)
+                            continue;
+
+                        String snippetName = snippet.getName();
+
+                        // Always check for name collision — snippets are global resources,
+                        // duplicates cause unpredictable runtime behavior regardless of strategy
+                        if (existingSnippetsByName.containsKey(snippetName)) {
+                            if (isMerge) {
+                                // Merge strategy: update existing snippet with imported content
+                                IResourceId localResId = existingSnippetsByName.get(snippetName);
+                                Response updateResp = restSnippetStore.updateSnippet(
+                                        localResId.getId(), localResId.getVersion(), snippet);
+                                if (updateResp.getStatus() == 200) {
+                                    log.debugf("Updated existing snippet '%s' (id=%s, v=%d)",
+                                            snippetName, localResId.getId(), localResId.getVersion());
+                                    importedCount++;
+                                    continue;
+                                }
+                                // Update failed (e.g., version conflict) — fall through to create
+                                log.warnf("Update failed for snippet '%s' (status=%d), creating new",
+                                        snippetName, updateResp.getStatus());
+                            } else {
+                                // Create strategy: snippet already exists globally, skip to avoid duplicates
+                                log.debugf("Snippet '%s' already exists, skipping (create strategy)", snippetName);
+                                skippedCount++;
+                                continue;
+                            }
+                        }
+
+                        // Create new snippet
+                        Response createResp = restSnippetStore.createSnippet(snippet);
+                        checkIfCreatedResponse(createResp);
+                        importedCount++;
+                        log.debugf("Created new snippet '%s'", snippetName);
+                    } catch (Exception e) {
+                        log.warnf("Failed to import snippet from %s: %s", snippetFilePath, e.getMessage());
+                    }
+                }
+                if (importedCount > 0 || skippedCount > 0) {
+                    log.infof("Snippets: imported %d, skipped %d (already exist)", importedCount, skippedCount);
+                }
+            }
+        } catch (Exception e) {
+            log.warnf("Failed to import snippets: %s", e.getMessage());
+        }
+    }
+
+    /**
+     * Builds a map of existing snippet names → resource IDs by loading all snippet
+     * descriptors and their configs. This enables name-based deduplication during
+     * import — the natural key for snippets is their {@code name} field, not the
+     * MongoDB document ID.
+     */
+    private Map<String, IResourceId> buildExistingSnippetNameMap(IRestPromptSnippetStore restSnippetStore) {
+        Map<String, IResourceId> nameMap = new LinkedHashMap<>();
+        try {
+            List<DocumentDescriptor> descriptors = restSnippetStore.readSnippetDescriptors("", 0, 0);
+            if (descriptors == null)
+                return nameMap;
+
+            for (DocumentDescriptor descriptor : descriptors) {
+                try {
+                    IResourceId resourceId = RestUtilities.extractResourceId(descriptor.getResource());
+                    if (resourceId == null)
+                        continue;
+
+                    PromptSnippet existing = restSnippetStore.readSnippet(resourceId.getId(), resourceId.getVersion());
+                    if (existing != null && existing.getName() != null) {
+                        nameMap.put(existing.getName(), resourceId);
+                    }
+                } catch (Exception e) {
+                    log.debugf("Could not load snippet for dedup: %s", e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.warnf("Could not build snippet name map: %s", e.getMessage());
+        }
+        return nameMap;
+    }
+
+    private Path findSnippetsDir(Path targetDirPath) {
+        // Check directly under target dir
+        Path direct = Paths.get(targetDirPath.toString(), "snippets");
+        if (Files.exists(direct)) {
+            return direct;
+        }
+
+        // Check inside agent subdirectories (the ZIP structure nests under
+        // agentId/version/)
+        try (var dirStream = Files.newDirectoryStream(targetDirPath, Files::isDirectory)) {
+            for (Path subDir : dirStream) {
+                // Look in agentId/ directory
+                Path nested = Paths.get(subDir.toString(), "snippets");
+                if (Files.exists(nested)) {
+                    return nested;
+                }
+                // Look in agentId/version/ directories
+                try (var versionStream = Files.newDirectoryStream(subDir, Files::isDirectory)) {
+                    for (Path versionDir : versionStream) {
+                        Path deepNested = Paths.get(versionDir.toString(), "snippets");
+                        if (Files.exists(deepNested)) {
+                            return deepNested;
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            log.debug("Error searching for snippets directory: " + e.getMessage());
+        }
+        return null;
     }
 
     // ==================== Shared helpers ====================
