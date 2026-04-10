@@ -2,7 +2,7 @@
 
 # E.D.D.I — Multi-Agent Orchestration Middleware for Conversational AI
 
-[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade) [![Docker Pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi)
+[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12355/badge)](https://www.bestpractices.dev/projects/12355) [![Docker Pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi)
 
 **E.D.D.I** (Enhanced Dialog Driven Interface) is a production-grade, **config-driven multi-agent orchestration middleware** for conversational AI. It coordinates users, AI agents, and business systems through **intelligent routing, persistent memory, and API orchestration** — without writing code.
 
@@ -131,7 +131,7 @@ EDDI implements open standards — not proprietary APIs:
 | **[GDPR](https://gdpr.eu/)**                           | Cascading data erasure (Art. 17), data portability (Art. 15/20), restriction of processing (Art. 18), per-category retention, pseudonymization |
 | **[CCPA](https://oag.ca.gov/privacy/ccpa)**            | Right to delete, right to know, data portability                                                                                               |
 | **[HIPAA](https://www.hhs.gov/hipaa/)**                | Deployment guide, BAA template, LLM provider BAA matrix, session timeout guidance                                                              |
-| **International**                                      | PIPEDA 🇨🇦 · LGPD 🇧🇷 · APPI 🇯🇵 · POPIA 🇿🇦 · PDPA 🇸🇬🇹🇭🇲🇾 · PIPL 🇨🇳 compatibility documented                                                       |
+| **International**                                      | PIPEDA 🇨🇦 · LGPD 🇧🇷 · APPI 🇯🇵 · POPIA 🇿🇦 · PDPA 🇸🇬🇹🇭🇲🇾 · PIPL 🇨🇳 compatibility documented                                                      |
 
 - 📜 **Audit Ledger** — Every agent decision recorded in a write-once, HMAC-secured, append-only ledger
 - 🔍 **Compliance Startup Checks** — Advisory warnings on boot for TLS and database encryption gaps
@@ -344,7 +344,7 @@ EDDI provides built-in infrastructure for regulatory compliance:
 | **[GDPR / CCPA](docs/gdpr-compliance.md)**               | Data erasure, export, Art. 18 restriction of processing, per-category retention, and consent guidance |
 | **[HIPAA](docs/hipaa-compliance.md)**                    | Healthcare deployment guide — encryption, BAAs, LLM provider matrix, session management               |
 | **[EU AI Act](docs/eu-ai-act-compliance.md)**            | AI risk classification, decision traceability, immutable audit ledger                                 |
-| **[Privacy & Data Processing](PRIVACY.md)**              | Data flows, LLM provider matrix, international regulations (PIPEDA, LGPD, APPI, POPIA, PDPA, PIPL)   |
+| **[Privacy & Data Processing](PRIVACY.md)**              | Data flows, LLM provider matrix, international regulations (PIPEDA, LGPD, APPI, POPIA, PDPA, PIPL)    |
 | **[Compliance Data Flow](docs/compliance-data-flow.md)** | Single-page data flow diagram for auditors                                                            |
 | **[Incident Response](docs/incident-response.md)**       | Breach response runbook (GDPR 72h, CCPA 45 days, HIPAA 60 days)                                       |
 
