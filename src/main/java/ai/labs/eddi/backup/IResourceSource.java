@@ -15,7 +15,7 @@ import java.util.Map;
  *
  * @since 6.0.0
  */
-public interface IResourceSource {
+public interface IResourceSource extends AutoCloseable {
 
     /** Agent config + metadata from the source. */
     AgentSourceData readAgent();
@@ -25,6 +25,15 @@ public interface IResourceSource {
 
     /** All snippets referenced by this agent. */
     List<SnippetSourceData> readSnippets();
+
+    /**
+     * Cleans up any temporary resources (e.g., unzipped directories). Default no-op
+     * — override when cleanup is needed.
+     */
+    @Override
+    default void close() throws Exception {
+        // no-op by default
+    }
 
     // ==================== Data Records ====================
 

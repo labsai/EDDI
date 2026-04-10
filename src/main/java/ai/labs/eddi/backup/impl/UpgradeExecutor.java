@@ -9,6 +9,8 @@ import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
@@ -23,7 +25,6 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
-import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
@@ -48,6 +49,9 @@ import java.util.stream.Collectors;
  * <p>
  * The target agent's URI structure stays unchanged — only content is updated
  * and version numbers incremented.
+ * <p>
+ * Extension type dispatch is handled via {@link ExtensionStoreRegistry} to
+ * avoid duplicated switch blocks.
  *
  * @since 6.0.0
  */
@@ -62,6 +66,7 @@ public class UpgradeExecutor {
     private final IRestPromptSnippetStore snippetStore;
     private final IJsonSerialization jsonSerialization;
     private final StructuralMatcher structuralMatcher;
+    private final IDocumentDescriptorStore documentDescriptorStore;
 
     @Inject
     public UpgradeExecutor(IRestAgentStore agentStore,
@@ -69,13 +74,15 @@ public class UpgradeExecutor {
             IRestInterfaceFactory restInterfaceFactory,
             IRestPromptSnippetStore snippetStore,
             IJsonSerialization jsonSerialization,
-            StructuralMatcher structuralMatcher) {
+            StructuralMatcher structuralMatcher,
+            IDocumentDescriptorStore documentDescriptorStore) {
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
         this.restInterfaceFactory = restInterfaceFactory;
         this.snippetStore = snippetStore;
         this.jsonSerialization = jsonSerialization;
         this.structuralMatcher = structuralMatcher;
+        this.documentDescriptorStore = documentDescriptorStore;
     }
 
     /**
@@ -99,7 +106,6 @@ public class UpgradeExecutor {
             // 1. Build the preview to get the match map
             ImportPreview preview = structuralMatcher.buildPreview(source, targetAgentId, false);
 
-            AgentSourceData sourceAgent = source.readAgent();
             List<WorkflowSourceData> sourceWorkflows = source.readWorkflows();
             List<SnippetSourceData> sourceSnippets = source.readSnippets();
 
@@ -232,85 +238,89 @@ public class UpgradeExecutor {
         return updates;
     }
 
-    // ==================== Extension Update Dispatch ====================
+    // ==================== Extension Store Registry ====================
+
+    /**
+     * Central registry mapping extension type names to their configuration class
+     * and store operations. Adding a new extension type requires only one new entry
+     * here — no switch blocks to maintain.
+     */
+    @SuppressWarnings("unchecked")
+    private <T> ExtensionStoreOps<T> resolveExtensionOps(String extensionType) throws RestInterfaceFactory.RestInterfaceFactoryException {
+        return (ExtensionStoreOps<T>) switch (extensionType) {
+            case "regulardictionary" -> new ExtensionStoreOps<>(
+                    DictionaryConfiguration.class,
+                    getStore(IRestDictionaryStore.class),
+                    IRestDictionaryStore.resourceURI,
+                    IRestDictionaryStore.versionQueryParam);
+            case "behavior" -> new ExtensionStoreOps<>(
+                    RuleSetConfiguration.class,
+                    getStore(IRestRuleSetStore.class),
+                    IRestRuleSetStore.resourceURI,
+                    IRestRuleSetStore.versionQueryParam);
+            case "httpcalls" -> new ExtensionStoreOps<>(
+                    ApiCallsConfiguration.class,
+                    getStore(IRestApiCallsStore.class),
+                    IRestApiCallsStore.resourceURI,
+                    IRestApiCallsStore.versionQueryParam);
+            case "langchain" -> new ExtensionStoreOps<>(
+                    LlmConfiguration.class,
+                    getStore(IRestLlmStore.class),
+                    IRestLlmStore.resourceURI,
+                    IRestLlmStore.versionQueryParam);
+            case "property" -> new ExtensionStoreOps<>(
+                    PropertySetterConfiguration.class,
+                    getStore(IRestPropertySetterStore.class),
+                    IRestPropertySetterStore.resourceURI,
+                    IRestPropertySetterStore.versionQueryParam);
+            case "output" -> new ExtensionStoreOps<>(
+                    OutputConfigurationSet.class,
+                    getStore(IRestOutputStore.class),
+                    IRestOutputStore.resourceURI,
+                    IRestOutputStore.versionQueryParam);
+            case "mcpcalls" -> new ExtensionStoreOps<>(
+                    McpCallsConfiguration.class,
+                    getStore(IRestMcpCallsStore.class),
+                    IRestMcpCallsStore.resourceURI,
+                    IRestMcpCallsStore.versionQueryParam);
+            case "rag" -> new ExtensionStoreOps<>(
+                    RagConfiguration.class,
+                    getStore(IRestRagStore.class),
+                    IRestRagStore.resourceURI,
+                    IRestRagStore.versionQueryParam);
+            default -> null;
+        };
+    }
+
+    /**
+     * Holds the configuration class, store reference, and URI pattern for a single
+     * extension type. Used by {@link #updateExtension} and {@link #createExtension}
+     * to eliminate duplicated dispatch logic.
+     */
+    private record ExtensionStoreOps<T>(
+            Class<T> configClass,
+            Object store,
+            String resourceUri,
+            String versionQueryParam) {
+    }
+
+    // ==================== Extension Update/Create (Unified) ====================
 
     /**
      * Updates a target extension resource with content from the source. Dispatches
-     * to the correct store based on the extension type.
+     * to the correct store via {@link #resolveExtensionOps}.
      */
     private URI updateExtension(ExtensionSourceData source, String targetId, Integer targetVersion) {
         try {
-            return switch (source.type()) {
-                case "regulardictionary" -> {
-                    var config = jsonSerialization.deserialize(source.contentJson(), DictionaryConfiguration.class);
-                    var store = getStore(IRestDictionaryStore.class);
-                    Response resp = store.updateRegularDictionary(targetId, targetVersion, config);
-                    yield resp.getStatus() == 200
-                            ? URI.create(IRestDictionaryStore.resourceURI + targetId + IRestDictionaryStore.versionQueryParam + (targetVersion + 1))
-                            : null;
-                }
-                case "behavior" -> {
-                    var config = jsonSerialization.deserialize(source.contentJson(), RuleSetConfiguration.class);
-                    var store = getStore(IRestRuleSetStore.class);
-                    Response resp = store.updateRuleSet(targetId, targetVersion, config);
-                    yield resp.getStatus() == 200
-                            ? URI.create(IRestRuleSetStore.resourceURI + targetId + IRestRuleSetStore.versionQueryParam + (targetVersion + 1))
-                            : null;
-                }
-                case "httpcalls" -> {
-                    var config = jsonSerialization.deserialize(source.contentJson(), ApiCallsConfiguration.class);
-                    var store = getStore(IRestApiCallsStore.class);
-                    Response resp = store.updateApiCalls(targetId, targetVersion, config);
-                    yield resp.getStatus() == 200
-                            ? URI.create(IRestApiCallsStore.resourceURI + targetId + IRestApiCallsStore.versionQueryParam + (targetVersion + 1))
-                            : null;
-                }
-                case "langchain" -> {
-                    var config = jsonSerialization.deserialize(source.contentJson(), LlmConfiguration.class);
-                    var store = getStore(IRestLlmStore.class);
-                    Response resp = store.updateLlm(targetId, targetVersion, config);
-                    yield resp.getStatus() == 200
-                            ? URI.create(IRestLlmStore.resourceURI + targetId + IRestLlmStore.versionQueryParam + (targetVersion + 1))
-                            : null;
-                }
-                case "property" -> {
-                    var config = jsonSerialization.deserialize(source.contentJson(), PropertySetterConfiguration.class);
-                    var store = getStore(IRestPropertySetterStore.class);
-                    Response resp = store.updatePropertySetter(targetId, targetVersion, config);
-                    yield resp.getStatus() == 200
-                            ? URI.create(IRestPropertySetterStore.resourceURI + targetId + IRestPropertySetterStore.versionQueryParam
-                                    + (targetVersion + 1))
-                            : null;
-                }
-                case "output" -> {
-                    var config = jsonSerialization.deserialize(source.contentJson(), OutputConfigurationSet.class);
-                    var store = getStore(IRestOutputStore.class);
-                    Response resp = store.updateOutputSet(targetId, targetVersion, config);
-                    yield resp.getStatus() == 200
-                            ? URI.create(IRestOutputStore.resourceURI + targetId + IRestOutputStore.versionQueryParam + (targetVersion + 1))
-                            : null;
-                }
-                case "mcpcalls" -> {
-                    var config = jsonSerialization.deserialize(source.contentJson(), McpCallsConfiguration.class);
-                    var store = getStore(IRestMcpCallsStore.class);
-                    Response resp = store.updateMcpCalls(targetId, targetVersion, config);
-                    yield resp.getStatus() == 200
-                            ? URI.create(IRestMcpCallsStore.resourceURI + targetId + IRestMcpCallsStore.versionQueryParam + (targetVersion + 1))
-                            : null;
-                }
-                case "rag" -> {
-                    var config = jsonSerialization.deserialize(source.contentJson(), RagConfiguration.class);
-                    var store = getStore(IRestRagStore.class);
-                    Response resp = store.updateRag(targetId, targetVersion, config);
-                    yield resp.getStatus() == 200
-                            ? URI.create(IRestRagStore.resourceURI + targetId + IRestRagStore.versionQueryParam + (targetVersion + 1))
-                            : null;
-                }
-                default -> {
-                    log.warnf("Unknown extension type: %s", source.type());
-                    yield null;
-                }
-            };
+            ExtensionStoreOps<?> ops = resolveExtensionOps(source.type());
+            if (ops == null) {
+                log.warnf("Unknown extension type: %s", source.type());
+                return null;
+            }
+            Response resp = dispatchUpdate(ops, source.contentJson(), targetId, targetVersion);
+            return resp != null && resp.getStatus() == 200
+                    ? URI.create(ops.resourceUri() + targetId + ops.versionQueryParam() + (targetVersion + 1))
+                    : null;
         } catch (Exception e) {
             log.warnf("Failed to update %s '%s' (target=%s): %s",
                     source.type(), source.name(), targetId, e.getMessage());
@@ -319,53 +329,69 @@ public class UpgradeExecutor {
     }
 
     /**
-     * Creates a new extension resource from the source content.
+     * Creates a new extension resource from the source content. Dispatches to the
+     * correct store via {@link #resolveExtensionOps}.
      */
     private URI createExtension(ExtensionSourceData source) {
         try {
-            Response resp = switch (source.type()) {
-                case "regulardictionary" -> {
-                    var config = jsonSerialization.deserialize(source.contentJson(), DictionaryConfiguration.class);
-                    yield getStore(IRestDictionaryStore.class).createRegularDictionary(config);
-                }
-                case "behavior" -> {
-                    var config = jsonSerialization.deserialize(source.contentJson(), RuleSetConfiguration.class);
-                    yield getStore(IRestRuleSetStore.class).createRuleSet(config);
-                }
-                case "httpcalls" -> {
-                    var config = jsonSerialization.deserialize(source.contentJson(), ApiCallsConfiguration.class);
-                    yield getStore(IRestApiCallsStore.class).createApiCalls(config);
-                }
-                case "langchain" -> {
-                    var config = jsonSerialization.deserialize(source.contentJson(), LlmConfiguration.class);
-                    yield getStore(IRestLlmStore.class).createLlm(config);
-                }
-                case "property" -> {
-                    var config = jsonSerialization.deserialize(source.contentJson(), PropertySetterConfiguration.class);
-                    yield getStore(IRestPropertySetterStore.class).createPropertySetter(config);
-                }
-                case "output" -> {
-                    var config = jsonSerialization.deserialize(source.contentJson(), OutputConfigurationSet.class);
-                    yield getStore(IRestOutputStore.class).createOutputSet(config);
-                }
-                case "mcpcalls" -> {
-                    var config = jsonSerialization.deserialize(source.contentJson(), McpCallsConfiguration.class);
-                    yield getStore(IRestMcpCallsStore.class).createMcpCalls(config);
-                }
-                case "rag" -> {
-                    var config = jsonSerialization.deserialize(source.contentJson(), RagConfiguration.class);
-                    yield getStore(IRestRagStore.class).createRag(config);
-                }
-                default -> {
-                    log.warnf("Unknown extension type for create: %s", source.type());
-                    yield null;
-                }
-            };
+            ExtensionStoreOps<?> ops = resolveExtensionOps(source.type());
+            if (ops == null) {
+                log.warnf("Unknown extension type for create: %s", source.type());
+                return null;
+            }
+            Response resp = dispatchCreate(ops, source.contentJson());
             return resp != null ? resp.getLocation() : null;
         } catch (Exception e) {
             log.warnf("Failed to create %s '%s': %s", source.type(), source.name(), e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Deserializes JSON and calls the store's update method via reflection-free
+     * type-safe dispatch.
+     */
+    @SuppressWarnings("unchecked")
+    private <T> Response dispatchUpdate(ExtensionStoreOps<T> ops, String json,
+                                        String targetId, Integer targetVersion)
+            throws Exception {
+        T config = jsonSerialization.deserialize(json, ops.configClass());
+        Object store = ops.store();
+        // Type-safe dispatch — each store has a different update method name
+        return switch (ops.configClass().getSimpleName()) {
+            case "DictionaryConfiguration" ->
+                ((IRestDictionaryStore) store).updateRegularDictionary(targetId, targetVersion, (DictionaryConfiguration) config);
+            case "RuleSetConfiguration" -> ((IRestRuleSetStore) store).updateRuleSet(targetId, targetVersion, (RuleSetConfiguration) config);
+            case "ApiCallsConfiguration" -> ((IRestApiCallsStore) store).updateApiCalls(targetId, targetVersion, (ApiCallsConfiguration) config);
+            case "LlmConfiguration" -> ((IRestLlmStore) store).updateLlm(targetId, targetVersion, (LlmConfiguration) config);
+            case "PropertySetterConfiguration" ->
+                ((IRestPropertySetterStore) store).updatePropertySetter(targetId, targetVersion, (PropertySetterConfiguration) config);
+            case "OutputConfigurationSet" -> ((IRestOutputStore) store).updateOutputSet(targetId, targetVersion, (OutputConfigurationSet) config);
+            case "McpCallsConfiguration" -> ((IRestMcpCallsStore) store).updateMcpCalls(targetId, targetVersion, (McpCallsConfiguration) config);
+            case "RagConfiguration" -> ((IRestRagStore) store).updateRag(targetId, targetVersion, (RagConfiguration) config);
+            default -> throw new IllegalArgumentException("Unsupported config class: " + ops.configClass().getSimpleName());
+        };
+    }
+
+    /**
+     * Deserializes JSON and calls the store's create method via reflection-free
+     * type-safe dispatch.
+     */
+    @SuppressWarnings("unchecked")
+    private <T> Response dispatchCreate(ExtensionStoreOps<T> ops, String json) throws Exception {
+        T config = jsonSerialization.deserialize(json, ops.configClass());
+        Object store = ops.store();
+        return switch (ops.configClass().getSimpleName()) {
+            case "DictionaryConfiguration" -> ((IRestDictionaryStore) store).createRegularDictionary((DictionaryConfiguration) config);
+            case "RuleSetConfiguration" -> ((IRestRuleSetStore) store).createRuleSet((RuleSetConfiguration) config);
+            case "ApiCallsConfiguration" -> ((IRestApiCallsStore) store).createApiCalls((ApiCallsConfiguration) config);
+            case "LlmConfiguration" -> ((IRestLlmStore) store).createLlm((LlmConfiguration) config);
+            case "PropertySetterConfiguration" -> ((IRestPropertySetterStore) store).createPropertySetter((PropertySetterConfiguration) config);
+            case "OutputConfigurationSet" -> ((IRestOutputStore) store).createOutputSet((OutputConfigurationSet) config);
+            case "McpCallsConfiguration" -> ((IRestMcpCallsStore) store).createMcpCalls((McpCallsConfiguration) config);
+            case "RagConfiguration" -> ((IRestRagStore) store).createRag((RagConfiguration) config);
+            default -> throw new IllegalArgumentException("Unsupported config class: " + ops.configClass().getSimpleName());
+        };
     }
 
     // ==================== Workflow Updates ====================
@@ -420,31 +446,19 @@ public class UpgradeExecutor {
     // ==================== Agent Config Update ====================
 
     /**
-     * Updates the agent configuration: - Replaces workflow URIs with updated
-     * versions - Appends new workflows at specified positions
+     * Updates the agent configuration:
+     * <ul>
+     * <li>Replaces workflow URIs with updated versions</li>
+     * <li>Appends new workflows at specified positions</li>
+     * <li>Applies custom workflow order if specified</li>
+     * </ul>
      */
     private URI updateAgentConfig(String agentId,
                                   Map<String, URI> updatedWorkflowUris,
                                   List<URI> newWorkflowUris,
                                   List<String> workflowOrder) {
         try {
-            // Read current agent config
-            IResourceId agentResId = RestUtilities.extractResourceId(
-                    URI.create(IRestAgentStore.resourceURI + agentId + "?version=1"));
-            int currentVersion = 1; // will be overridden
-            try {
-                var descriptors = agentStore.readAgentDescriptors("", 0, 100);
-                for (var desc : descriptors) {
-                    IResourceId resId = RestUtilities.extractResourceId(desc.getResource());
-                    if (resId != null && resId.getId().equals(agentId)) {
-                        currentVersion = resId.getVersion();
-                        break;
-                    }
-                }
-            } catch (Exception e) {
-                log.debugf("Could not find latest version for agent %s, using 1", agentId);
-            }
-
+            int currentVersion = readLatestVersion(agentId);
             AgentConfiguration agentConfig = agentStore.readAgent(agentId, currentVersion);
 
             // Replace workflow URIs with updated versions
@@ -482,8 +496,26 @@ public class UpgradeExecutor {
     }
 
     /**
+     * Reads the latest version of a resource via its descriptor.
+     */
+    private int readLatestVersion(String resourceId) {
+        try {
+            DocumentDescriptor desc = documentDescriptorStore.readDescriptor(resourceId, null);
+            if (desc != null && desc.getResource() != null) {
+                IResourceId resId = RestUtilities.extractResourceId(desc.getResource());
+                if (resId != null)
+                    return resId.getVersion();
+            }
+        } catch (Exception e) {
+            log.debugf("Could not find latest version for %s, using 1", resourceId);
+        }
+        return 1;
+    }
+
+    /**
      * Reorders workflows according to the specified order. Workflow IDs in
      * workflowOrder are extracted and matched against the existing workflow URIs.
+     * Workflows not mentioned in the order are appended at the end.
      */
     private List<URI> reorderWorkflows(List<URI> workflows, List<String> workflowOrder) {
         Map<String, URI> uriById = new LinkedHashMap<>();

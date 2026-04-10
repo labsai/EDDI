@@ -40,7 +40,7 @@ public record ExportPreview(
      */
     public record ExportableResource(
             String resourceId,
-            int resourceVersion,
+            Integer resourceVersion,
             String resourceType,
             String name,
             String parentWorkflowId,

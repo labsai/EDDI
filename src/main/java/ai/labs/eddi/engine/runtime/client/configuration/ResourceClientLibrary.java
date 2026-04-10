@@ -95,6 +95,9 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             }
         });
 
+        // Alias: IRestDictionaryStore uses resourceBaseType "ai.labs.dictionary"
+        restInterfaces.put("ai.labs.dictionary", restInterfaces.get("ai.labs.regulardictionary"));
+
         restInterfaces.put("ai.labs.behavior", new IResourceService() {
             @Override
             public Object read(String id, Integer version) {

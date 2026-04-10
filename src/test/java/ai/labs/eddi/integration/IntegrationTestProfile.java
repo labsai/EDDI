@@ -16,12 +16,13 @@ public class IntegrationTestProfile implements QuarkusTestProfile {
 
     @Override
     public Map<String, String> getConfigOverrides() {
-        return Map.of(
-                "quarkus.oidc.tenant-enabled", "false",
-                "authorization.enabled", "false",
-                "quarkus.http.test-port", "8081",
-                "quarkus.http.port", "8081",
-                "mongodb.connectionString",
-                "mongodb://localhost:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000");
+        return Map.ofEntries(
+                Map.entry("quarkus.oidc.tenant-enabled", "false"),
+                Map.entry("authorization.enabled", "false"),
+                Map.entry("quarkus.http.test-port", "8081"),
+                Map.entry("quarkus.http.port", "8081"),
+                Map.entry("quarkus.log.category.\"ai.labs.eddi\".level", "INFO"),
+                Map.entry("mongodb.connectionString",
+                        "mongodb://localhost:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"));
     }
 }

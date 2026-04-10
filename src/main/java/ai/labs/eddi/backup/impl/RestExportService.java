@@ -265,7 +265,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             }
             Set<String> referencedSnippetNames = extractReferencedSnippetNames(allExtensionConfigs);
             for (String snippetName : referencedSnippetNames) {
-                resources.add(new ExportableResource(snippetName, 0, "snippet", snippetName, null, -1, false));
+                resources.add(new ExportableResource(snippetName, null, "snippet", snippetName, null, -1, false));
             }
 
             return new ExportPreview(agentId, agentName, agentVersion, resources);

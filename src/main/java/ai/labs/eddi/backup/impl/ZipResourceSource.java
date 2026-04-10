@@ -11,11 +11,9 @@ import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.FileUtilities;
 import org.jboss.logging.Logger;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,11 +30,29 @@ import static ai.labs.eddi.backup.impl.AbstractBackupService.*;
  * {@link UpgradeExecutor} for content sync.
  * <p>
  * This class is NOT a CDI bean — it's constructed per-import with the path to
- * the unzipped directory.
+ * the unzipped directory. Implements {@link AutoCloseable} to allow cleanup of
+ * temporary files.
+ *
+ * <h3>Expected ZIP directory structure</h3>
+ *
+ * <pre>
+ * &lt;rootDir&gt;/
+ *   &lt;agentId&gt;/
+ *     &lt;agentId&gt;.agent.json
+ *     &lt;agentId&gt;.descriptor.json
+ *     &lt;workflowId&gt;/
+ *       &lt;version&gt;/
+ *         &lt;workflowId&gt;.workflow.json        (or .package.json for legacy)
+ *         &lt;workflowId&gt;.descriptor.json
+ *         &lt;extId&gt;.&lt;type&gt;.json              (e.g., abc123.langchain.json)
+ *         &lt;extId&gt;.descriptor.json
+ *     snippets/                              (may be at root, agent, or version level)
+ *       &lt;snippetId&gt;.snippet.json
+ * </pre>
  *
  * @since 6.0.0
  */
-public class ZipResourceSource implements IResourceSource {
+public class ZipResourceSource implements IResourceSource, AutoCloseable {
 
     private static final Logger log = Logger.getLogger(ZipResourceSource.class);
 
@@ -152,6 +168,19 @@ public class ZipResourceSource implements IResourceSource {
         return snippetDataList;
     }
 
+    @Override
+    public void close() {
+        // Clean up the temporary unzipped directory
+        try {
+            if (rootDir != null && Files.exists(rootDir)) {
+                deleteDirectoryRecursively(rootDir);
+                log.debugf("Cleaned up temp import directory: %s", rootDir);
+            }
+        } catch (IOException e) {
+            log.warnf("Failed to clean up temp import directory %s: %s", rootDir, e.getMessage());
+        }
+    }
+
     // ==================== Internal Helpers ====================
 
     private WorkflowSourceData readSingleWorkflow(URI workflowUri, int positionIndex) throws IOException {
@@ -162,8 +191,7 @@ public class ZipResourceSource implements IResourceSource {
         String workflowId = workflowResourceId.getId();
         String workflowVersion = String.valueOf(workflowResourceId.getVersion());
 
-        // Find the workflow JSON file. ZIP structure:
-        // <agentId>/<workflowId>/<version>/<workflowId>.workflow.json
+        // Find the workflow JSON file (see class Javadoc for directory layout)
         Path versionDir = findVersionDir(workflowId, workflowVersion);
         if (versionDir == null)
             return null;
@@ -228,8 +256,7 @@ public class ZipResourceSource implements IResourceSource {
     }
 
     /**
-     * Extracts resource URIs from a JSON string using the given pattern. Delegates
-     * to the same logic as {@link AbstractBackupService#extractResourcesUris}.
+     * Extracts resource URIs from a JSON string using the given pattern.
      */
     private List<URI> extractResourcesUris(String json, Pattern uriPattern) {
         List<URI> uris = new ArrayList<>();
@@ -248,8 +275,7 @@ public class ZipResourceSource implements IResourceSource {
     }
 
     private Path findVersionDir(String workflowId, String version) {
-        // Try direct path under root: <root>/<agentId>/<workflowId>/<version>/
-        // The root dir IS the agent dir after unzipping
+        // Try under each subdirectory of root (agent dirs after unzipping)
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(rootDir, Files::isDirectory)) {
             for (Path agentDir : stream) {
                 Path versionDir = Paths.get(agentDir.toString(), workflowId, version).normalize();
@@ -257,17 +283,21 @@ public class ZipResourceSource implements IResourceSource {
                     return versionDir;
             }
         } catch (IOException e) {
-            // Try direct: root is the agent dir itself
+            // fall through to direct path
         }
+        // Try direct: root may be the agent dir itself
         Path direct = Paths.get(rootDir.toString(), workflowId, version).normalize();
         if (Files.exists(direct))
             return direct;
         return null;
     }
 
+    /**
+     * Finds the snippets directory. EDDI exports may place snippets at:
+     * {@code <root>/snippets/}, {@code <root>/<agentId>/snippets/}, or
+     * {@code <root>/<agentId>/<version>/snippets/}.
+     */
     private Path findSnippetsDir() {
-        // Snippets can be at: <root>/snippets/, <root>/<agentId>/snippets/,
-        // or <root>/<agentId>/<version>/snippets/
         Path direct = rootDir.resolve("snippets");
         if (Files.exists(direct))
             return direct;
@@ -325,14 +355,27 @@ public class ZipResourceSource implements IResourceSource {
         return null;
     }
 
+    /**
+     * Reads a file as a UTF-8 string. Preserves whitespace (including newlines) to
+     * ensure accurate content comparison during diff generation.
+     */
     private String readFile(Path path) throws IOException {
-        try (BufferedReader reader = new BufferedReader(new FileReader(path.toFile()))) {
-            StringBuilder builder = new StringBuilder();
-            String currentLine;
-            while ((currentLine = reader.readLine()) != null) {
-                builder.append(currentLine);
+        return Files.readString(path, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Recursively deletes a directory and all its contents.
+     */
+    private static void deleteDirectoryRecursively(Path dir) throws IOException {
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dir)) {
+            for (Path entry : stream) {
+                if (Files.isDirectory(entry)) {
+                    deleteDirectoryRecursively(entry);
+                } else {
+                    Files.deleteIfExists(entry);
+                }
             }
-            return builder.toString();
         }
+        Files.deleteIfExists(dir);
     }
 }

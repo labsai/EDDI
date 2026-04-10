@@ -11,11 +11,11 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
+import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
-import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.runtime.client.configuration.ResourceClientLibrary;
+import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -28,6 +28,17 @@ import java.util.*;
  * Matches source resources (from ZIP, remote API, or local agent) against a
  * target agent's resource tree by structural position and type. Produces an
  * {@link ImportPreview} with content diffs.
+ * <p>
+ * <b>Matching algorithm:</b>
+ * <ol>
+ * <li><b>Agent</b> — matched directly by {@code targetAgentId} parameter</li>
+ * <li><b>Workflows</b> — matched by position (index in agent's workflow
+ * list)</li>
+ * <li><b>Extensions</b> — matched by {@code WorkflowStep.type} URI
+ * (deterministic: each type appears at most once per workflow)</li>
+ * <li><b>Snippets</b> — matched by {@code PromptSnippet.name} (natural
+ * key)</li>
+ * </ol>
  * <p>
  * This is the core matching engine shared by all import/sync flows. It is
  * stateless — all state comes from the {@link IResourceSource} and the target
@@ -43,19 +54,22 @@ public class StructuralMatcher {
     private final IRestAgentStore agentStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IRestPromptSnippetStore snippetStore;
-    private final ResourceClientLibrary resourceClientLibrary;
+    private final IRestWorkflowStore workflowStore;
+    private final IRestInterfaceFactory restInterfaceFactory;
     private final IJsonSerialization jsonSerialization;
 
     @Inject
     public StructuralMatcher(IRestAgentStore agentStore,
             IDocumentDescriptorStore documentDescriptorStore,
             IRestPromptSnippetStore snippetStore,
-            ResourceClientLibrary resourceClientLibrary,
+            IRestWorkflowStore workflowStore,
+            IRestInterfaceFactory restInterfaceFactory,
             IJsonSerialization jsonSerialization) {
         this.agentStore = agentStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.snippetStore = snippetStore;
-        this.resourceClientLibrary = resourceClientLibrary;
+        this.workflowStore = workflowStore;
+        this.restInterfaceFactory = restInterfaceFactory;
         this.jsonSerialization = jsonSerialization;
     }
 
@@ -140,7 +154,7 @@ public class StructuralMatcher {
         String sourceJson = includeContent ? serializeSafe(sourceAgent.config()) : null;
         String targetJson = includeContent ? serializeSafe(targetConfig) : null;
 
-        DiffAction action = (sourceJson != null && sourceJson.equals(targetJson))
+        DiffAction action = Objects.equals(sourceJson, targetJson)
                 ? DiffAction.SKIP
                 : DiffAction.UPDATE;
 
@@ -172,7 +186,7 @@ public class StructuralMatcher {
         // Workflow-level diff
         String sourceJson = includeContent ? serializeSafe(sourceWf.config()) : null;
         String targetJson = includeContent ? readTargetWorkflowJson(targetId, targetVersion) : null;
-        DiffAction wfAction = (sourceJson != null && sourceJson.equals(targetJson))
+        DiffAction wfAction = Objects.equals(sourceJson, targetJson)
                 ? DiffAction.SKIP
                 : DiffAction.UPDATE;
 
@@ -195,7 +209,7 @@ public class StructuralMatcher {
                 // Matched by type
                 String srcContent = includeContent ? sourceExt.contentJson() : null;
                 String tgtContent = includeContent ? targetExt.contentJson : null;
-                DiffAction extAction = contentEquals(srcContent, tgtContent)
+                DiffAction extAction = Objects.equals(srcContent, tgtContent)
                         ? DiffAction.SKIP
                         : DiffAction.UPDATE;
 
@@ -246,7 +260,7 @@ public class StructuralMatcher {
         if (existing != null) {
             String sourceJson = includeContent ? serializeSafe(sourceSnippet.snippet()) : null;
             String targetJson = includeContent ? readTargetSnippetJson(existing.getId(), existing.getVersion()) : null;
-            DiffAction action = contentEquals(sourceJson, targetJson)
+            DiffAction action = Objects.equals(sourceJson, targetJson)
                     ? DiffAction.SKIP
                     : DiffAction.UPDATE;
 
@@ -267,11 +281,7 @@ public class StructuralMatcher {
 
     private AgentConfiguration readTargetAgent(String agentId) {
         try {
-            // Read the latest version
-            DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(agentId, null);
-            int version = descriptor != null && descriptor.getResource() != null
-                    ? RestUtilities.extractResourceId(descriptor.getResource()).getVersion()
-                    : 1;
+            int version = readLatestVersionOrDefault(agentId, 1);
             return agentStore.readAgent(agentId, version);
         } catch (Exception e) {
             throw new RuntimeException("Failed to read target agent " + agentId, e);
@@ -280,9 +290,7 @@ public class StructuralMatcher {
 
     private String readTargetWorkflowJson(String workflowId, int version) {
         try {
-            Object config = resourceClientLibrary.getResource(
-                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + workflowId + "?version=" + version),
-                    WorkflowConfiguration.class);
+            WorkflowConfiguration config = workflowStore.readWorkflow(workflowId, version);
             return serializeSafe(config);
         } catch (Exception e) {
             log.debugf("Could not read target workflow %s v%d: %s", workflowId, version, e.getMessage());
@@ -295,15 +303,13 @@ public class StructuralMatcher {
 
     /**
      * Reads all extensions from a target workflow by parsing its config and loading
-     * each referenced resource.
+     * each referenced resource via the correct typed store.
      */
     private Map<String, TargetExtension> readTargetExtensions(String workflowId, int version) {
         Map<String, TargetExtension> result = new LinkedHashMap<>();
 
         try {
-            WorkflowConfiguration wfConfig = resourceClientLibrary.getResource(
-                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + workflowId + "?version=" + version),
-                    WorkflowConfiguration.class);
+            WorkflowConfiguration wfConfig = workflowStore.readWorkflow(workflowId, version);
 
             for (WorkflowConfiguration.WorkflowStep step : wfConfig.getWorkflowSteps()) {
                 URI stepType = step.getType();
@@ -320,7 +326,7 @@ public class StructuralMatcher {
                     continue;
 
                 try {
-                    Object extConfig = resourceClientLibrary.getResource(extUri, Object.class);
+                    Object extConfig = readTypedExtension(extUri, stepType.toString());
                     String json = serializeSafe(extConfig);
                     result.put(stepType.toString(), new TargetExtension(
                             extResId.getId(), extResId.getVersion(), json));
@@ -335,6 +341,48 @@ public class StructuralMatcher {
         return result;
     }
 
+    /**
+     * Reads a typed extension config from the correct store based on the step type.
+     * This produces deterministic JSON serialization (matching what UpgradeExecutor
+     * would write), unlike deserializing as {@code Object.class}.
+     */
+    private Object readTypedExtension(URI extUri, String stepType) throws Exception {
+        IResourceId resId = RestUtilities.extractResourceId(extUri);
+        if (resId == null)
+            return null;
+
+        return switch (stepType) {
+            case "ai.labs.dictionary" -> restInterfaceFactory.get(
+                    ai.labs.eddi.configs.dictionary.IRestDictionaryStore.class)
+                    .readRegularDictionary(resId.getId(), resId.getVersion(), "", "", 0, 0);
+            case "ai.labs.rules" -> restInterfaceFactory.get(
+                    ai.labs.eddi.configs.rules.IRestRuleSetStore.class)
+                    .readRuleSet(resId.getId(), resId.getVersion());
+            case "ai.labs.apicalls" -> restInterfaceFactory.get(
+                    ai.labs.eddi.configs.apicalls.IRestApiCallsStore.class)
+                    .readApiCalls(resId.getId(), resId.getVersion());
+            case "ai.labs.llm" -> restInterfaceFactory.get(
+                    ai.labs.eddi.configs.llm.IRestLlmStore.class)
+                    .readLlm(resId.getId(), resId.getVersion());
+            case "ai.labs.property" -> restInterfaceFactory.get(
+                    ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore.class)
+                    .readPropertySetter(resId.getId(), resId.getVersion());
+            case "ai.labs.output" -> restInterfaceFactory.get(
+                    ai.labs.eddi.configs.output.IRestOutputStore.class)
+                    .readOutputSet(resId.getId(), resId.getVersion());
+            case "ai.labs.mcpcalls" -> restInterfaceFactory.get(
+                    ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore.class)
+                    .readMcpCalls(resId.getId(), resId.getVersion());
+            case "ai.labs.rag" -> restInterfaceFactory.get(
+                    ai.labs.eddi.configs.rag.IRestRagStore.class)
+                    .readRag(resId.getId(), resId.getVersion());
+            default -> {
+                log.debugf("Unknown step type for typed read: %s", stepType);
+                yield null;
+            }
+        };
+    }
+
     private String readTargetSnippetJson(String snippetId, int version) {
         try {
             PromptSnippet snippet = snippetStore.readSnippet(snippetId, version);
@@ -345,6 +393,11 @@ public class StructuralMatcher {
         }
     }
 
+    /**
+     * Builds a map of snippet name → resource ID by reading all snippet
+     * descriptors. Uses the descriptor's name field directly (set during snippet
+     * creation) to avoid the N+1 problem of loading each snippet individually.
+     */
     private Map<String, IResourceId> buildExistingSnippetNameMap() {
         Map<String, IResourceId> nameMap = new LinkedHashMap<>();
         try {
@@ -354,9 +407,15 @@ public class StructuralMatcher {
                     IResourceId resId = RestUtilities.extractResourceId(desc.getResource());
                     if (resId == null)
                         continue;
-                    PromptSnippet snippet = snippetStore.readSnippet(resId.getId(), resId.getVersion());
-                    if (snippet != null && snippet.getName() != null) {
-                        nameMap.put(snippet.getName(), resId);
+                    // Use descriptor name if available (avoids N+1 reads).
+                    // Fall back to reading the snippet only when name is missing.
+                    String name = desc.getName();
+                    if (name == null || name.isBlank()) {
+                        PromptSnippet snippet = snippetStore.readSnippet(resId.getId(), resId.getVersion());
+                        name = snippet != null ? snippet.getName() : null;
+                    }
+                    if (name != null) {
+                        nameMap.put(name, resId);
                     }
                 } catch (Exception e) {
                     log.debugf("Could not read snippet for name map: %s", e.getMessage());
@@ -390,13 +449,12 @@ public class StructuralMatcher {
         return null;
     }
 
-    // ==================== Utilities ====================
-
-    private boolean contentEquals(String a, String b) {
-        if (a == null || b == null)
-            return false;
-        return a.equals(b);
+    private int readLatestVersionOrDefault(String resourceId, int defaultVersion) {
+        Integer version = readLatestVersion(resourceId);
+        return version != null ? version : defaultVersion;
     }
+
+    // ==================== Utilities ====================
 
     private String serializeSafe(Object obj) {
         if (obj == null)
