@@ -37,7 +37,11 @@
     "sectionMonitor": "Monitor",
     "sectionAdmin": "Admin",
     "studio": "Studio",
-    "gdpr": "Privacy"
+    "gdpr": "Privacy",
+    "memories": "User Memory",
+    "properties": "Properties",
+    "triggers": "Triggers",
+    "capabilities": "Capabilities"
   },
   "theme": {
     "light": "สว่าง",
@@ -116,7 +120,8 @@
     "sortByModified": "เรียงตามวันที่แก้ไข",
     "apply": "นำไปใช้",
     "copied": "Copied",
-    "copy": "Copy"
+    "copy": "Copy",
+    "saving": "Saving..."
   },
   "agents": {
     "deploy": "Deploy",
@@ -1188,5 +1193,79 @@
     "confirmDelete": "ลบกลุ่มนี้?",
     "confirmDeleteDesc": "การกำหนดค่ากลุ่มจะถูกลบอย่างถาวร",
     "duplicateSuccess": "Group ถูกทำซ้ำแล้ว"
+  },
+  "memories": {
+    "title": "User Memory",
+    "subtitle": "Browse, search, and manage persistent user memories stored by agents",
+    "userIdPlaceholder": "Enter User ID...",
+    "searchPlaceholder": "Search memories...",
+    "enterUserId": "Enter a User ID to browse their memories",
+    "totalEntries": "Total Entries",
+    "preferences": "Preferences",
+    "facts": "Facts",
+    "conflicts": "Conflicted",
+    "cat_all": "All",
+    "cat_preference": "Preferences",
+    "cat_fact": "Facts",
+    "cat_context": "Context",
+    "deleteAll": "Delete All",
+    "deleteAllTitle": "Delete All Memories",
+    "deleteAllDesc": "This will permanently delete ALL memory entries for this user. This action cannot be undone.",
+    "deleteAllConfirm": "Delete All",
+    "entryDeleted": "Memory entry deleted",
+    "allDeleted": "All memories deleted for user",
+    "noResults": "No memory entries found",
+    "value": "Value",
+    "sourceAgent": "Source Agent",
+    "accessCount": "Access Count",
+    "created": "Created",
+    "updated": "Updated",
+    "sourceConversation": "Source Conversation",
+    "conflicted": "Conflicted"
+  },
+  "properties": {
+    "title": "User Properties",
+    "subtitle": "Browse and manage longTerm slot-filling properties stored per user",
+    "userIdPlaceholder": "Enter User ID...",
+    "searchPlaceholder": "Filter properties...",
+    "enterUserId": "Enter a User ID to view their properties",
+    "key": "Key",
+    "type": "Type",
+    "value": "Value",
+    "deleteAll": "Delete All",
+    "deleteAllTitle": "Delete All Properties",
+    "deleteAllDesc": "This will permanently delete ALL properties for this user.",
+    "deleted": "Properties deleted",
+    "noResults": "No properties found",
+    "showingCount": "{{count}} properties"
+  },
+  "triggers": {
+    "title": "Agent Triggers",
+    "subtitle": "Map intents to agent deployments for automatic routing",
+    "create": "New Trigger",
+    "createTitle": "Create Trigger",
+    "editTitle": "Edit Trigger",
+    "intent": "Intent",
+    "deployments": "Agent Deployments",
+    "addDeployment": "Add Agent",
+    "agents": "agents",
+    "empty": "No triggers configured yet",
+    "created": "Trigger created",
+    "updated": "Trigger updated",
+    "deleted": "Trigger deleted",
+    "deleteTitle": "Delete Trigger",
+    "deleteDesc": "Permanently delete the trigger for intent \"{{intent}}\"?",
+    "searchPlaceholder": "Filter by intent or agent ID..."
+  },
+  "capabilities": {
+    "title": "Capability Discovery",
+    "subtitle": "Discover agents by their declared skills and capabilities",
+    "searchPlaceholder": "Search skills...",
+    "strategyHighest": "Highest Confidence",
+    "strategyAll": "All Matches",
+    "registeredSkills": "Registered Skills",
+    "noSkills": "No skills found",
+    "matchingAgents": "Matching Agents",
+    "noMatches": "No agents found for this skill"
   }
 }

@@ -44,7 +44,7 @@ import {
 } from "@/hooks/use-agents";
 import { useExportAgent } from "@/hooks/use-backup";
 import { useWorkflowDescriptors, useUpdateAgentWorkflows } from "@/hooks/use-workflows";
-import { parseResourceUri, type EnvironmentStatus, deployAgent, getDeploymentStatus } from "@/lib/api/agents";
+import { parseResourceUri, type EnvironmentStatus, type Agent, deployAgent, getDeploymentStatus } from "@/lib/api/agents";
 import { useLatestVersions } from "@/hooks/use-latest-versions";
 import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
 import { useChatStore, useStartConversation } from "@/hooks/use-chat";
@@ -52,6 +52,8 @@ import {
   SecurityIdentitySection,
   CapabilitiesSection,
   UserMemorySection,
+  MemoryPolicySection,
+  ChannelsSection,
 } from "@/components/editors/agent-config-sections";
 
 /* ─── Status icons (labels resolved via i18n in component) ─── */
@@ -472,6 +474,12 @@ export function AgentDetailPage() {
       {/* User Memory */}
       <UserMemorySection agent={agent} agentId={id!} version={resolvedVersion} />
 
+      {/* Memory Policy */}
+      <MemoryPolicySection agent={agent} agentId={id!} version={resolvedVersion} />
+
+      {/* Channel Connectors */}
+      <ChannelsSection agent={agent} agentId={id!} version={resolvedVersion} />
+
       {/* Workflows section */}
       <section className="rounded-xl border bg-card shadow-sm">
         <div className="flex items-center justify-between border-b border-border p-5">
@@ -792,7 +800,7 @@ function AddWorkflowPanel({
 }
 
 /* ─── Raw Config Section ─── */
-function RawConfigSection({ agent }: { agent: { workflows?: string[]; channels?: string[] } }) {
+function RawConfigSection({ agent }: { agent: Agent }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
@@ -831,7 +839,7 @@ function A2ASection({
   agentId,
   version,
 }: {
-  agent: { workflows?: string[]; channels?: string[]; a2aEnabled?: boolean; description?: string; a2aSkills?: string[] };
+  agent: Agent;
   agentId: string;
   version: number;
 }) {

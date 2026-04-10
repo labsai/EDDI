@@ -16,7 +16,7 @@ export interface AgentDescriptor {
 
 export interface Agent {
   workflows?: string[];
-  channels?: string[];
+  channels?: ChannelConnector[];
   a2aEnabled?: boolean;
   description?: string;
   a2aSkills?: string[];
@@ -26,6 +26,21 @@ export interface Agent {
   capabilities?: Capability[];
   enableMemoryTools?: boolean;
   userMemoryConfig?: UserMemoryConfig;
+  memoryPolicy?: MemoryPolicy;
+}
+
+export interface ChannelConnector {
+  type: string;
+  config: Record<string, string>;
+}
+
+export interface MemoryPolicy {
+  strictWriteDiscipline?: StrictWriteDiscipline;
+}
+
+export interface StrictWriteDiscipline {
+  enabled?: boolean;
+  onFailure?: string; // "digest" | "exclude_all" | "keep_all"
 }
 
 export interface AgentIdentity {

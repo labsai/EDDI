@@ -1,7 +1,10 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   deleteUserData,
   exportUserData,
+  restrictProcessing,
+  unrestrictProcessing,
+  isProcessingRestricted,
   type GdprDeletionResult,
   type UserDataExport,
 } from "@/lib/api/gdpr";
@@ -17,5 +20,28 @@ export function useDeleteUserData() {
 export function useExportUserData() {
   return useMutation<UserDataExport, Error, string>({
     mutationFn: (userId) => exportUserData(userId),
+  });
+}
+
+/** Mutation: restrict processing for a user (GDPR Art. 18) */
+export function useRestrictProcessing() {
+  return useMutation<void, Error, string>({
+    mutationFn: (userId) => restrictProcessing(userId),
+  });
+}
+
+/** Mutation: remove processing restriction (GDPR Art. 18) */
+export function useUnrestrictProcessing() {
+  return useMutation<void, Error, string>({
+    mutationFn: (userId) => unrestrictProcessing(userId),
+  });
+}
+
+/** Query: check if processing is restricted (GDPR Art. 18) */
+export function useIsProcessingRestricted(userId: string) {
+  return useQuery<boolean, Error>({
+    queryKey: ["gdpr", "restricted", userId],
+    queryFn: () => isProcessingRestricted(userId),
+    enabled: !!userId.trim(),
   });
 }

@@ -36,3 +36,22 @@ export async function exportUserData(
     `${BASE}/${encodeURIComponent(userId)}/export`,
   );
 }
+
+/** GDPR Art. 18 — Restrict processing for a user. */
+export async function restrictProcessing(userId: string): Promise<void> {
+  return api.post(`${BASE}/${encodeURIComponent(userId)}/restrict`);
+}
+
+/** GDPR Art. 18 — Remove processing restriction. */
+export async function unrestrictProcessing(userId: string): Promise<void> {
+  return api.delete(`${BASE}/${encodeURIComponent(userId)}/restrict`);
+}
+
+/** GDPR Art. 18 — Check processing restriction status. */
+export async function isProcessingRestricted(
+  userId: string,
+): Promise<boolean> {
+  return api.get<boolean>(
+    `${BASE}/${encodeURIComponent(userId)}/restrict`,
+  );
+}

@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ShieldAlert,
@@ -8,20 +9,33 @@ import {
   AlertTriangle,
   FileSearch,
   CheckCircle2,
+  Ban,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { useDeleteUserData, useExportUserData } from "@/hooks/use-gdpr";
+import {
+  useDeleteUserData,
+  useExportUserData,
+  useRestrictProcessing,
+  useUnrestrictProcessing,
+  useIsProcessingRestricted,
+} from "@/hooks/use-gdpr";
 import type { GdprDeletionResult } from "@/lib/api/gdpr";
 
 export function GdprPage() {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const [userId, setUserId] = useState("");
   const [showConfirm, setShowConfirm] = useState(false);
   const [result, setResult] = useState<GdprDeletionResult | null>(null);
 
   const deleteMutation = useDeleteUserData();
   const exportMutation = useExportUserData();
+  const restrictMutation = useRestrictProcessing();
+  const unrestrictMutation = useUnrestrictProcessing();
+  const { data: isRestricted, isLoading: restrictLoading } =
+    useIsProcessingRestricted(userId.trim());
 
   const handleExport = useCallback(() => {
     if (!userId.trim()) return;
@@ -64,6 +78,30 @@ export function GdprPage() {
     });
   }, [userId, deleteMutation, t]);
 
+  const handleToggleRestriction = useCallback(() => {
+    if (!userId.trim()) return;
+    const uid = userId.trim();
+    if (isRestricted) {
+      unrestrictMutation.mutate(uid, {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: ["gdpr", "restricted", uid] });
+          toast.success(t("gdpr.restrictionLifted", "Processing restriction removed"));
+        },
+        onError: (error) => toast.error(error.message),
+      });
+    } else {
+      restrictMutation.mutate(uid, {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: ["gdpr", "restricted", uid] });
+          toast.success(t("gdpr.restrictionApplied", "Processing restricted for user"));
+        },
+        onError: (error) => toast.error(error.message),
+      });
+    }
+  }, [userId, isRestricted, restrictMutation, unrestrictMutation, queryClient, t]);
+
+  const isBusy = restrictMutation.isPending || unrestrictMutation.isPending;
+
   return (
     <div className="space-y-8" data-testid="gdpr-page">
       {/* Header */}
@@ -77,7 +115,7 @@ export function GdprPage() {
         <p className="mt-1 text-sm text-muted-foreground">
           {t(
             "gdpr.subtitle",
-            "GDPR-compliant user data management — erasure (Art. 17) and portability (Art. 15/20)",
+            "GDPR-compliant user data management — erasure (Art. 17), portability (Art. 15/20), and processing restriction (Art. 18)",
           )}
         </p>
       </div>
@@ -107,7 +145,7 @@ export function GdprPage() {
           {t("gdpr.userLookup", "User Lookup")}
         </h2>
 
-        <div className="flex items-end gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="flex-1">
             <label
               htmlFor="gdpr-user-id"
@@ -129,30 +167,99 @@ export function GdprPage() {
             />
           </div>
 
-          <Button
-            variant="secondary"
-            onClick={handleExport}
-            disabled={!userId.trim() || exportMutation.isPending}
-            className="gap-2"
-            data-testid="gdpr-export-btn"
-          >
-            <Download className="h-4 w-4" />
-            {exportMutation.isPending
-              ? t("gdpr.exporting", "Exporting...")
-              : t("gdpr.export", "Export Data")}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              onClick={handleExport}
+              disabled={!userId.trim() || exportMutation.isPending}
+              className="gap-2"
+              data-testid="gdpr-export-btn"
+            >
+              <Download className="h-4 w-4" />
+              {exportMutation.isPending
+                ? t("gdpr.exporting", "Exporting...")
+                : t("gdpr.export", "Export Data")}
+            </Button>
+
+            <Button
+              variant="destructive"
+              onClick={() => setShowConfirm(true)}
+              disabled={!userId.trim() || deleteMutation.isPending}
+              className="gap-2"
+              data-testid="gdpr-delete-btn"
+            >
+              <Trash2 className="h-4 w-4" />
+              {deleteMutation.isPending
+                ? t("gdpr.deleting", "Deleting...")
+                : t("gdpr.delete", "Delete All Data")}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Processing Restriction (Art. 18) */}
+      <div className="rounded-xl border border-border bg-card p-6 space-y-4" data-testid="gdpr-restriction-section">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
+          <Ban className="h-4 w-4 text-amber-500" />
+          {t("gdpr.restrictionTitle", "Processing Restriction (Art. 18)")}
+        </h2>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          {t(
+            "gdpr.restrictionDesc",
+            "Restrict processing when a user disputes data accuracy or objects to processing. While restricted, the user's data is preserved but no new conversations can be processed. This is reversible.",
+          )}
+        </p>
+
+        {/* Status + Toggle */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            {userId.trim() ? (
+              restrictLoading ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1  text-xs font-medium text-muted-foreground">
+                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+                  {t("gdpr.checkingStatus", "Checking...")}
+                </span>
+              ) : isRestricted ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-600 dark:text-amber-400" data-testid="restriction-badge-restricted">
+                  <Ban className="h-3 w-3" />
+                  {t("gdpr.statusRestricted", "Processing Restricted")}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400" data-testid="restriction-badge-active">
+                  <ShieldCheck className="h-3 w-3" />
+                  {t("gdpr.statusActive", "Processing Active")}
+                </span>
+              )
+            ) : (
+              <span className="text-xs text-muted-foreground italic">
+                {t("gdpr.enterUserIdFirst", "Enter a user ID above to check status")}
+              </span>
+            )}
+          </div>
 
           <Button
-            variant="destructive"
-            onClick={() => setShowConfirm(true)}
-            disabled={!userId.trim() || deleteMutation.isPending}
+            variant={isRestricted ? "secondary" : "destructive"}
+            size="sm"
+            onClick={handleToggleRestriction}
+            disabled={!userId.trim() || isBusy || restrictLoading}
             className="gap-2"
-            data-testid="gdpr-delete-btn"
+            data-testid="gdpr-restrict-toggle"
           >
-            <Trash2 className="h-4 w-4" />
-            {deleteMutation.isPending
-              ? t("gdpr.deleting", "Deleting...")
-              : t("gdpr.delete", "Delete All Data")}
+            {isRestricted ? (
+              <>
+                <ShieldCheck className="h-4 w-4" />
+                {isBusy
+                  ? t("gdpr.liftingRestriction", "Lifting...")
+                  : t("gdpr.liftRestriction", "Lift Restriction")}
+              </>
+            ) : (
+              <>
+                <Ban className="h-4 w-4" />
+                {isBusy
+                  ? t("gdpr.restricting", "Restricting...")
+                  : t("gdpr.restrictProcessing", "Restrict Processing")}
+              </>
+            )}
           </Button>
         </div>
       </div>

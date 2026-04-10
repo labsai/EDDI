@@ -26,6 +26,10 @@ import { GroupWizardPage } from "@/pages/group-wizard";
 import { AgentStudioPage } from "@/pages/agent-studio";
 import { StudioLandingPage } from "@/pages/studio-landing";
 import { GdprPage } from "@/pages/gdpr";
+import { UserMemoryPage } from "@/pages/user-memory";
+import { PropertiesPage } from "@/pages/properties";
+import { TriggersPage } from "@/pages/triggers";
+import { CapabilitiesPage } from "@/pages/capabilities";
 
 export function App() {
   return (
@@ -52,6 +56,10 @@ export function App() {
         <Route path="/manage/groups" element={<GroupsPage />} />
         <Route path="/manage/groups/wizard" element={<GroupWizardPage />} />
         <Route path="/manage/groups/:id" element={<GroupDetailPage />} />
+        <Route path="/manage/memories" element={<UserMemoryPage />} />
+        <Route path="/manage/properties" element={<PropertiesPage />} />
+        <Route path="/manage/triggers" element={<TriggersPage />} />
+        <Route path="/manage/capabilities" element={<CapabilitiesPage />} />
         <Route
           path="/manage/conversationview/:id"
           element={<ConversationDetailPage />}

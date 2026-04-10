@@ -14,6 +14,64 @@ export function TaskMemorySection({ task, onChange, readOnly }: TaskSectionProps
 
   return (
     <>
+      {/* ══════ Token-Aware Context Window ══════ */}
+      <EditorSection
+        label={t("llmEditor.tokenWindow", "Token-Aware Context Window")}
+        icon={ScrollText}
+        accent="text-cyan-500"
+        defaultOpen={task.maxContextTokens != null && task.maxContextTokens > 0}
+      >
+        <div className="space-y-3" data-testid="token-window-section">
+          <p className="text-[10px] text-muted-foreground leading-relaxed">
+            {t("llmEditor.tokenWindowDesc", "Replace step-count-based history with token-aware packing. When maxContextTokens is set (> 0), the engine fits as many recent turns as possible within the budget, optionally anchoring the opening turns.")}
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                {t("llmEditor.maxContextTokens", "Max Context Tokens")}
+              </label>
+              <input
+                type="number"
+                value={task.maxContextTokens ?? -1}
+                onChange={(e) =>
+                  onChange({
+                    ...task,
+                    maxContextTokens: parseInt(e.target.value, 10) || -1,
+                  })
+                }
+                readOnly={readOnly}
+                className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                data-testid="max-context-tokens"
+              />
+              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                {t("llmEditor.maxContextTokensHint", "-1 = use step count instead")}
+              </p>
+            </div>
+            <div>
+              <label className="mb-0.5 block text-[10px] text-muted-foreground">
+                {t("llmEditor.anchorFirstSteps", "Anchor First Steps")}
+              </label>
+              <input
+                type="number"
+                value={task.anchorFirstSteps ?? 2}
+                onChange={(e) =>
+                  onChange({
+                    ...task,
+                    anchorFirstSteps: parseInt(e.target.value, 10) || 0,
+                  })
+                }
+                readOnly={readOnly}
+                className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                data-testid="anchor-first-steps"
+              />
+              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                {t("llmEditor.anchorFirstStepsHint", "Opening turns always retained (0 = none)")}
+              </p>
+            </div>
+          </div>
+        </div>
+      </EditorSection>
+
       {/* ══════ Conversation Memory (Rolling Summary) ══════ */}
       <EditorSection
         label={t("llmEditor.conversationMemory", "Conversation Memory")}

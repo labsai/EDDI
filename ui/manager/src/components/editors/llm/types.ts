@@ -63,6 +63,9 @@ export interface LlmTask {
   enableMcpCallTools?: boolean;
   builtInToolsWhitelist?: string[];
   conversationHistoryLimit?: number;
+  // Token-aware context window (Strategy 1)
+  maxContextTokens?: number;
+  anchorFirstSteps?: number;
   /** @deprecated Use knowledgeBases, enableWorkflowRag, or httpCallRag instead */
   retrievalAugmentor?: {
     httpCall?: string;

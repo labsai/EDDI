@@ -25,7 +25,11 @@ import {
   Check,
   RotateCcw,
   Sparkles,
+  Layers,
   ShieldAlert,
+  Brain,
+  Database,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -50,6 +54,7 @@ const navSections = [
       { path: "/manage/resources", icon: FileCode, labelKey: "nav.resources" },
       { path: "/manage/chat", icon: MessageCircle, labelKey: "nav.chat" },
       { path: "/manage/studio", icon: Sparkles, labelKey: "nav.studio" },
+      { path: "/manage/capabilities", icon: Layers, labelKey: "nav.capabilities" },
     ],
   },
   {
@@ -59,6 +64,8 @@ const navSections = [
       { path: "/manage/conversations", icon: MessagesSquare, labelKey: "nav.conversations" },
       { path: "/manage/coordinator", icon: Activity, labelKey: "nav.coordinator" },
       { path: "/manage/audit", icon: ShieldCheck, labelKey: "nav.audit" },
+      { path: "/manage/memories", icon: Brain, labelKey: "nav.memories" },
+      { path: "/manage/properties", icon: Database, labelKey: "nav.properties" },
     ],
   },
   {
@@ -67,6 +74,7 @@ const navSections = [
       { path: "/manage/secrets", icon: KeyRound, labelKey: "nav.secrets" },
       { path: "/manage/quotas", icon: SlidersHorizontal, labelKey: "nav.quotas" },
       { path: "/manage/schedules", icon: CalendarClock, labelKey: "nav.schedules" },
+      { path: "/manage/triggers", icon: Zap, labelKey: "nav.triggers" },
       { path: "/manage/orphans", icon: Link2Off, labelKey: "nav.orphans" },
       { path: "/manage/gdpr", icon: ShieldAlert, labelKey: "nav.gdpr" },
     ],
