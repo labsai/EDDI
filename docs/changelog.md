@@ -15,6 +15,49 @@ Each entry follows this format:
 
 ---
 
+## Phase 3: Live Instance-to-Instance Sync (2026-04-11)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**What changed:**
+
+Implemented the live sync backend — all 5 sync API endpoints are now fully operational, enabling direct agent synchronization between two running EDDI instances without ZIP intermediary.
+
+| Component | Files | Purpose |
+|---|---|---|
+| **Remote Source** | `RemoteApiResourceSource` | Reads agent configs from remote EDDI via JDK HttpClient |
+| **SSRF Protection** | `SourceUrlValidator` | Blocks private IPs, enforces HTTPS in production |
+| **Endpoint Wiring** | `RestImportService` (5 endpoints) | listRemoteAgents, previewSync, previewSyncBatch, executeSync, executeSyncBatch |
+| **Tests** | `RemoteApiResourceSourceTest`, `SourceUrlValidatorTest` | 22 new tests (56 total sync subsystem) |
+
+**Key design decisions:**
+1. **JDK HttpClient** — zero external dependencies, constructor-injectable for testing
+2. **Bearer token forwarding** — auth token from `X-Source-Authorization` header, never persisted
+3. **Batch = loop over single-agent pipeline** — no special batching infrastructure needed
+4. **Partial success** — batch sync continues on individual agent failures
+
+**Result:** 1,767 tests pass. API endpoints ready for frontend integration.
+
+---
+
+## Agent Sync Code Review & Test Hardening (2026-04-10)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**What changed:**
+
+Thorough code review resolved 12 issues (3 critical, 5 medium, 4 low) across `UpgradeExecutor`, `StructuralMatcher`, and `ZipResourceSource`. Added 30 unit tests covering the full sync subsystem.
+
+| Severity | Issues | Highlights |
+|---|---|---|
+| Critical (3) | Version lookup, duplicated switch blocks, mixed store access | `IDocumentDescriptorStore` for version lookup; `ExtensionStoreOps` registry; direct stores |
+| Medium (5) | Newline stripping, N+1 reads, null-safety, missing docs | `Files.readString`; descriptor-name map; `Objects.equals` |
+| Low (4) | AutoCloseable, unused imports, nullable types, typed reads | `IResourceSource extends AutoCloseable`; `Integer` for version |
+
+**Result:** 30 new tests (StructuralMatcherTest: 15, UpgradeExecutorTest: 7, ZipResourceSourceTest: 11). Architecture documented in `docs/agent-sync-architecture.md`.
+
+---
+
 ## Granular Export/Import & Live Sync Architecture (2026-04-10)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
