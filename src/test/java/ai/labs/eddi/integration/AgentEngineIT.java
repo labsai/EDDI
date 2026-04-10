@@ -272,8 +272,11 @@ public class AgentEngineIT extends BaseIntegrationIT {
     }
 
     private void deployAgent(String id, int version) throws InterruptedException {
-        given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false", id, version));
-        for (int i = 0; i < 60; i++) {
+        // Use waitForCompletion=true — server waits up to 30s
+        given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false&waitForCompletion=true", id, version));
+
+        // Verify deployment reached READY (may already be done from server-side wait)
+        for (int i = 0; i < 120; i++) { // max 60 seconds additional polling
             Response response = given().get(String.format("administration/production/deploymentstatus/%s?version=%s&format=text", id, version));
             String status = response.getBody().print().trim();
             if ("READY".equals(status))

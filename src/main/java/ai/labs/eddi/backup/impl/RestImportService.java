@@ -5,6 +5,8 @@ import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
+import ai.labs.eddi.backup.model.SyncMapping;
+import ai.labs.eddi.backup.model.SyncRequest;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
@@ -88,13 +90,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final IDeploymentListener deploymentListener;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final TemplateSyntaxMigrator templateSyntaxMigrator;
+    private final StructuralMatcher structuralMatcher;
+    private final UpgradeExecutor upgradeExecutor;
 
     private static final Logger log = Logger.getLogger(RestImportService.class);
 
     @Inject
     public RestImportService(IZipArchive zipArchive, IJsonSerialization jsonSerialization, IRestInterfaceFactory restInterfaceFactory,
             IRestAgentAdministration restAgentAdministration, IMigrationManager migrationManager, IDeploymentListener deploymentListener,
-            IDocumentDescriptorStore documentDescriptorStore, TemplateSyntaxMigrator templateSyntaxMigrator) {
+            IDocumentDescriptorStore documentDescriptorStore, TemplateSyntaxMigrator templateSyntaxMigrator,
+            StructuralMatcher structuralMatcher, UpgradeExecutor upgradeExecutor) {
         this.zipArchive = zipArchive;
         this.jsonSerialization = jsonSerialization;
         this.restInterfaceFactory = restInterfaceFactory;
@@ -103,6 +108,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         this.deploymentListener = deploymentListener;
         this.documentDescriptorStore = documentDescriptorStore;
         this.templateSyntaxMigrator = templateSyntaxMigrator;
+        this.structuralMatcher = structuralMatcher;
+        this.upgradeExecutor = upgradeExecutor;
     }
 
     @Override
@@ -158,7 +165,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     // ==================== Preview ====================
 
     @Override
-    public ImportPreview previewImport(InputStream zippedAgentConfigFiles) {
+    public ImportPreview previewImport(InputStream zippedAgentConfigFiles, String targetAgentId) {
+        // When targetAgentId is provided, use the new structural matching pipeline
+        if (targetAgentId != null && !targetAgentId.isBlank()) {
+            return previewUpgrade(zippedAgentConfigFiles, targetAgentId);
+        }
+        // Legacy merge preview path
         try {
             File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
             this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
@@ -203,11 +215,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     // Snippets (global resources, not workflow-embedded)
                     addSnippetDiffs(diffs, Paths.get(targetDirPath));
 
-                    return new ImportPreview(agentOriginId, agentName, diffs);
+                    return new ImportPreview(agentOriginId, agentName, null, null, diffs);
                 }
             }
 
-            return new ImportPreview(null, null, List.of());
+            return new ImportPreview(null, null, null, null, List.of());
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Preview failed: " + e.getMessage(), e);
@@ -269,10 +281,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         IResourceId existing = existingByName.get(snippetName);
                         if (existing != null) {
                             diffs.add(new ResourceDiff(existing.getId(), SNIPPET_EXT, snippetName,
-                                    DiffAction.UPDATE, existing.getId(), existing.getVersion()));
+                                    DiffAction.UPDATE, existing.getId(), existing.getVersion(),
+                                    "name", null, null, -1));
                         } else {
                             diffs.add(new ResourceDiff(null, SNIPPET_EXT, snippetName,
-                                    DiffAction.CREATE, null, null));
+                                    DiffAction.CREATE, null, null,
+                                    null, null, null, -1));
                         }
                     } catch (Exception e) {
                         log.debugf("Could not preview snippet %s: %s", snippetFilePath.getFileName(), e.getMessage());
@@ -291,13 +305,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 DocumentDescriptor desc = existing.getFirst();
                 IResourceId localResourceId = RestUtilities.extractResourceId(desc.getResource());
                 if (localResourceId != null) {
-                    return new ResourceDiff(originId, resourceType, name, DiffAction.UPDATE, localResourceId.getId(), localResourceId.getVersion());
+                    return new ResourceDiff(originId, resourceType, name, DiffAction.UPDATE, localResourceId.getId(), localResourceId.getVersion(),
+                            "originId", null, null, -1);
                 }
             }
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             log.debug("Could not look up origin ID " + originId + ": " + e.getMessage());
         }
-        return new ResourceDiff(originId, resourceType, name, DiffAction.CREATE, null, null);
+        return new ResourceDiff(originId, resourceType, name, DiffAction.CREATE, null, null, null, null, null, -1);
     }
 
     private String readNameFromDescriptor(Path dir, String resourceId) {
@@ -322,10 +337,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     // ==================== Import ====================
 
     @Override
-    public void importAgent(InputStream zippedAgentConfigFiles, String strategy, String selectedOriginIds, AsyncResponse response) {
+    public void importAgent(InputStream zippedAgentConfigFiles, String strategy, String selectedOriginIds,
+                            String targetAgentId, String workflowOrder, AsyncResponse response) {
         try {
             if (response != null)
                 response.setTimeout(60, TimeUnit.SECONDS);
+
+            // "upgrade" strategy → use the new structural matcher + upgrade executor
+            if ("upgrade".equalsIgnoreCase(strategy) && targetAgentId != null) {
+                executeUpgradeFromZip(zippedAgentConfigFiles, targetAgentId, selectedOriginIds, workflowOrder, response);
+                return;
+            }
             File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
 
             Set<String> selectedSet = parseSelectedResources(selectedOriginIds);
@@ -1138,6 +1160,92 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             log.error(String.format("Http Response Code was not 201 when attempting resource creation, but %s", status));
         }
     }
+
+    // ==================== Upgrade (Structural) Flow ====================
+
+    private ImportPreview previewUpgrade(InputStream zippedAgentConfigFiles, String targetAgentId) {
+        try {
+            File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
+            this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
+
+            ZipResourceSource source = new ZipResourceSource(targetDir.toPath(), jsonSerialization);
+            return structuralMatcher.buildPreview(source, targetAgentId, true);
+        } catch (Exception e) {
+            log.error("Upgrade preview failed: " + e.getMessage(), e);
+            throw new InternalServerErrorException("Upgrade preview failed: " + e.getMessage(), e);
+        }
+    }
+
+    private void executeUpgradeFromZip(InputStream zippedAgentConfigFiles, String targetAgentId,
+                                       String selectedOriginIds, String workflowOrderString, AsyncResponse response) {
+        try {
+            File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
+            this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
+
+            ZipResourceSource source = new ZipResourceSource(targetDir.toPath(), jsonSerialization);
+            Set<String> selectedSet = parseSelectedResources(selectedOriginIds);
+            List<String> workflowOrder = parseWorkflowOrder(workflowOrderString);
+
+            URI resultUri = upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, workflowOrder);
+            if (response != null) {
+                response.resume(Response.ok().location(resultUri).build());
+            }
+        } catch (Exception e) {
+            log.error("Upgrade from ZIP failed: " + e.getMessage(), e);
+            if (response != null) {
+                response.resume(new InternalServerErrorException("Upgrade failed: " + e.getMessage(), e));
+            }
+        }
+    }
+
+    private List<String> parseWorkflowOrder(String workflowOrderString) {
+        if (isNullOrEmpty(workflowOrderString))
+            return null;
+        return Arrays.stream(workflowOrderString.split(","))
+                .map(String::trim).filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
+    }
+
+    // ==================== Live Sync Endpoints ====================
+
+    @Override
+    public List<DocumentDescriptor> listRemoteAgents(String sourceUrl, String sourceAuth) {
+        // Phase 3: RemoteApiResourceSource will be implemented next
+        throw new jakarta.ws.rs.WebApplicationException("Live sync will be available in the next release", 501);
+    }
+
+    @Override
+    public ImportPreview previewSync(String sourceUrl, String sourceAgentId, Integer sourceVersion,
+                                     String targetAgentId, String sourceAuth) {
+        // Phase 3: RemoteApiResourceSource will be implemented next
+        throw new jakarta.ws.rs.WebApplicationException("Live sync will be available in the next release", 501);
+    }
+
+    @Override
+    public List<ImportPreview> previewSyncBatch(String sourceUrl, List<SyncMapping> mappings, String sourceAuth) {
+        // Phase 3: RemoteApiResourceSource will be implemented next
+        throw new jakarta.ws.rs.WebApplicationException("Live sync will be available in the next release", 501);
+    }
+
+    @Override
+    public void executeSync(String sourceUrl, String sourceAgentId, Integer sourceVersion,
+                            String targetAgentId, String selectedResources, String workflowOrder,
+                            String sourceAuth, AsyncResponse response) {
+        // Phase 3: RemoteApiResourceSource will be implemented next
+        if (response != null) {
+            response.resume(new jakarta.ws.rs.WebApplicationException("Live sync will be available in the next release", 501));
+        }
+    }
+
+    @Override
+    public void executeSyncBatch(String sourceUrl, List<SyncRequest> requests, String sourceAuth, AsyncResponse response) {
+        // Phase 3: RemoteApiResourceSource will be implemented next
+        if (response != null) {
+            response.resume(new jakarta.ws.rs.WebApplicationException("Live sync will be available in the next release", 501));
+        }
+    }
+
+    // ==================== Inner Classes ====================
 
     private static class MockAsyncResponse implements AsyncResponse {
 

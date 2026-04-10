@@ -100,7 +100,7 @@ public class ImportMergeIT extends BaseIntegrationIT {
 
         ImportPreview preview = previewResponse.as(ImportPreview.class);
 
-        assertThat("Preview should identify the agent", preview.agentOriginId(), notNullValue());
+        assertThat("Preview should identify the agent", preview.sourceAgentId(), notNullValue());
         assertThat("Preview should have resources", preview.resources(), not(empty()));
 
         // Since we already imported this agent, all resources should show UPDATE
@@ -174,7 +174,7 @@ public class ImportMergeIT extends BaseIntegrationIT {
         assertThat("Preview should have resources", preview.resources(), not(empty()));
 
         // Select only the Agent resource
-        String agentOriginId = preview.resources().stream().filter(r -> "agent".equals(r.resourceType())).map(ImportPreview.ResourceDiff::originId)
+        String agentOriginId = preview.resources().stream().filter(r -> "agent".equals(r.resourceType())).map(ImportPreview.ResourceDiff::sourceId)
                 .findFirst().orElseThrow();
 
         Response selectiveResponse = given().contentType("application/zip").queryParam("strategy", "merge")

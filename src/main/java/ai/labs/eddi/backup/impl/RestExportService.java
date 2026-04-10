@@ -2,6 +2,8 @@ package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.backup.IRestExportService;
 import ai.labs.eddi.backup.IZipArchive;
+import ai.labs.eddi.backup.model.ExportPreview;
+import ai.labs.eddi.backup.model.ExportPreview.ExportableResource;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -124,7 +126,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     }
 
     @Override
-    public Response exportAgent(String agentId, Integer agentVersion) {
+    public Response exportAgent(String agentId, Integer agentVersion, String selectedResourceIds) {
         try {
             // Validate agentId early before any path construction (CodeQL
             // java/path-injection)
@@ -216,6 +218,113 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             throw sneakyThrow(e);
         } catch (IResourceStore.ResourceStoreException | IOException | CallbackMatcher.CallbackMatcherException e) {
             throw sneakyThrow(e);
+        }
+    }
+
+    @Override
+    public ExportPreview previewExport(String agentId, Integer agentVersion) {
+        try {
+            sanitizePathComponent(agentId, "agentId");
+
+            AgentConfiguration agentConfig = agentStore.read(agentId, agentVersion);
+            DocumentDescriptor agentDescriptor = documentDescriptorStore.readDescriptor(agentId, agentVersion);
+            String agentName = agentDescriptor != null ? agentDescriptor.getName() : null;
+
+            List<ExportableResource> resources = new ArrayList<>();
+
+            // Agent itself (always required)
+            resources.add(new ExportableResource(agentId, agentVersion, "agent", agentName, null, -1, true));
+
+            // Walk workflows
+            Map<IResourceId, WorkflowConfiguration> workflowConfigs = readConfigs(workflowStore, agentConfig.getWorkflows());
+            int wfIndex = 0;
+            for (Map.Entry<IResourceId, WorkflowConfiguration> wfEntry : workflowConfigs.entrySet()) {
+                IResourceId wfResId = wfEntry.getKey();
+                WorkflowConfiguration wfConfig = wfEntry.getValue();
+                String wfId = wfResId.getId();
+                DocumentDescriptor wfDescriptor = documentDescriptorStore.readDescriptor(wfId, wfResId.getVersion());
+                String wfName = wfDescriptor != null ? wfDescriptor.getName() : null;
+
+                // Workflow skeleton (always required)
+                resources.add(new ExportableResource(wfId, wfResId.getVersion(), "workflow", wfName, null, wfIndex, true));
+
+                // Walk extensions within this workflow
+                String wfJson = jsonSerialization.serialize(wfConfig);
+                addExtensionResources(resources, wfJson, wfId, wfIndex);
+
+                wfIndex++;
+            }
+
+            // Snippets
+            List<String> allExtensionConfigs = new ArrayList<>();
+            for (WorkflowConfiguration wfConfig : workflowConfigs.values()) {
+                String wfJson = jsonSerialization.serialize(wfConfig);
+                allExtensionConfigs.add(wfJson);
+                // Also scan extension content for snippet refs
+                addExtensionContentForSnippetScan(allExtensionConfigs, wfJson);
+            }
+            Set<String> referencedSnippetNames = extractReferencedSnippetNames(allExtensionConfigs);
+            for (String snippetName : referencedSnippetNames) {
+                resources.add(new ExportableResource(snippetName, 0, "snippet", snippetName, null, -1, false));
+            }
+
+            return new ExportPreview(agentId, agentName, agentVersion, resources);
+
+        } catch (Exception e) {
+            log.error("Export preview failed: " + e.getMessage(), e);
+            throw sneakyThrow(e);
+        }
+    }
+
+    private void addExtensionResources(List<ExportableResource> resources, String wfJson,
+                                       String parentWorkflowId, int workflowIndex) {
+        addExtensionResourcesForType(resources, wfJson, DICTIONARY_URI_PATTERN, "regulardictionary", parentWorkflowId);
+        addExtensionResourcesForType(resources, wfJson, BEHAVIOR_URI_PATTERN, "behavior", parentWorkflowId);
+        addExtensionResourcesForType(resources, wfJson, HTTPCALLS_URI_PATTERN, "httpcalls", parentWorkflowId);
+        addExtensionResourcesForType(resources, wfJson, LANGCHAIN_URI_PATTERN, "langchain", parentWorkflowId);
+        addExtensionResourcesForType(resources, wfJson, PROPERTY_URI_PATTERN, "property", parentWorkflowId);
+        addExtensionResourcesForType(resources, wfJson, OUTPUT_URI_PATTERN, "output", parentWorkflowId);
+        addExtensionResourcesForType(resources, wfJson, MCPCALLS_URI_PATTERN, "mcpcalls", parentWorkflowId);
+        addExtensionResourcesForType(resources, wfJson, RAG_URI_PATTERN, "rag", parentWorkflowId);
+    }
+
+    private void addExtensionResourcesForType(List<ExportableResource> resources, String wfJson,
+                                              Pattern uriPattern, String typeLabel, String parentWorkflowId) {
+        try {
+            List<URI> uris = extractResourcesUris(wfJson, uriPattern);
+            for (URI uri : uris) {
+                IResourceId resId = RestUtilities.extractResourceId(uri);
+                if (resId == null)
+                    continue;
+                DocumentDescriptor desc = null;
+                try {
+                    desc = documentDescriptorStore.readDescriptor(resId.getId(), resId.getVersion());
+                } catch (Exception ignored) {
+                }
+                String name = desc != null ? desc.getName() : null;
+                resources.add(new ExportableResource(resId.getId(), resId.getVersion(), typeLabel, name, parentWorkflowId, -1, false));
+            }
+        } catch (Exception e) {
+            log.debugf("Could not extract %s resources from workflow: %s", typeLabel, e.getMessage());
+        }
+    }
+
+    private void addExtensionContentForSnippetScan(List<String> allConfigs, String wfJson) {
+        try {
+            for (IResourceId resId : readConfigs(llmStore, extractResourcesUris(wfJson, LANGCHAIN_URI_PATTERN)).keySet()) {
+                allConfigs.add(jsonSerialization.serialize(llmStore.read(resId.getId(), resId.getVersion())));
+            }
+            for (IResourceId resId : readConfigs(httpCallsStore, extractResourcesUris(wfJson, HTTPCALLS_URI_PATTERN)).keySet()) {
+                allConfigs.add(jsonSerialization.serialize(httpCallsStore.read(resId.getId(), resId.getVersion())));
+            }
+            for (IResourceId resId : readConfigs(propertySetterStore, extractResourcesUris(wfJson, PROPERTY_URI_PATTERN)).keySet()) {
+                allConfigs.add(jsonSerialization.serialize(propertySetterStore.read(resId.getId(), resId.getVersion())));
+            }
+            for (IResourceId resId : readConfigs(outputStore, extractResourcesUris(wfJson, OUTPUT_URI_PATTERN)).keySet()) {
+                allConfigs.add(jsonSerialization.serialize(outputStore.read(resId.getId(), resId.getVersion())));
+            }
+        } catch (Exception e) {
+            log.debugf("Could not scan extension content for snippets: %s", e.getMessage());
         }
     }
 
