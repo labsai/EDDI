@@ -15,7 +15,30 @@ Each entry follows this format:
 
 ---
 
+## Test Coverage Expansion — Sync Subsystem (2026-04-11)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**What changed:**
+
+Expanded sync subsystem test coverage from 56 to **63 tests** by adding critical path tests for extension dispatch, workflow URI rewriting, and content-based SKIP detection.
+
+| Test Class | New Tests | Coverage Gaps Closed |
+|---|---|---|
+| `UpgradeExecutorTest` (+4) | Extension UPDATE dispatch, Extension CREATE dispatch, New workflow CREATE + agent config append, Agent update failure propagation | LLM store update + URI rewrite, RAG store create, workflow creation |
+| `StructuralMatcherTest` (+3) | Extension type match → UPDATE, Unmatched type → CREATE, Identical snippet → SKIP | Extension matching within workflows, content-identical detection |
+
+**Key fixes:**
+- `LlmConfiguration` is a record requiring `List<Task>` — tests were using the wrong constructor
+- Extension matching test needed `restInterfaceFactory.get(IRestLlmStore)` mock for `readTypedExtension` path
+- Snippet SKIP test needed shared object reference since `FakeJsonSerialization` uses `toString()`
+
+**Result:** 63 sync subsystem tests, all green. Full suite: 1,767 tests.
+
+---
+
 ## Phase 3: Live Instance-to-Instance Sync (2026-04-11)
+
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
 
