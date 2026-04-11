@@ -25,6 +25,26 @@ vi.mock("@/hooks/use-backup", () => ({
     mutate: mockMergeMutate,
     isPending: false,
   }),
+  usePreviewUpgrade: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useImportUpgrade: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  usePreviewSync: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useExecuteSync: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
+  useListRemoteAgents: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
 }));
 
 function renderDialog(
@@ -55,12 +75,14 @@ async function uploadFile(user: ReturnType<typeof userEvent.setup>) {
 }
 
 const PREVIEW_RESPONSE = {
-  agentOriginId: "origin-agent-1",
-  agentName: "Weather Agent",
+  sourceAgentId: "origin-agent-1",
+  sourceAgentName: "Weather Agent",
+  targetAgentId: null,
+  targetAgentName: null,
   resources: [
-    { originId: "o1", resourceType: "agent", name: "WAgent Config", action: "UPDATE", localId: "b1", localVersion: 1 },
-    { originId: "o2", resourceType: "package", name: "Main Pkg", action: "UPDATE", localId: "p1", localVersion: 1 },
-    { originId: "o3", resourceType: "behavior", name: "Greeting Rules", action: "CREATE", localId: null, localVersion: null },
+    { sourceId: "o1", resourceType: "agent", name: "WAgent Config", action: "UPDATE", targetId: "b1", targetVersion: 1, matchStrategy: null, sourceContent: null, targetContent: null, workflowIndex: 0 },
+    { sourceId: "o2", resourceType: "workflow", name: "Main Pkg", action: "UPDATE", targetId: "p1", targetVersion: 1, matchStrategy: null, sourceContent: null, targetContent: null, workflowIndex: 0 },
+    { sourceId: "o3", resourceType: "behavior", name: "Greeting Rules", action: "CREATE", targetId: null, targetVersion: null, matchStrategy: null, sourceContent: null, targetContent: null, workflowIndex: 0 },
   ],
 };
 
@@ -228,7 +250,7 @@ describe("ImportAgentDialog", () => {
     expect(mockMergeMutate).toHaveBeenCalledTimes(1);
     const args = mockMergeMutate.mock.calls[0]![0];
     expect(args.file).toBeInstanceOf(File);
-    expect(args.selectedOriginIds).toEqual(expect.arrayContaining(["o1", "o2", "o3"]));
+    expect(args.selectedSourceIds).toEqual(expect.arrayContaining(["o1", "o2", "o3"]));
     expect(onSuccess).toHaveBeenCalled();
   });
 

@@ -1,5 +1,93 @@
 const BASE_URL = window.location.origin;
 
+// ==================== Export Types ====================
+
+export interface ExportableResource {
+  resourceId: string;
+  resourceVersion: number | null;
+  resourceType: string;
+  name: string | null;
+  parentWorkflowId: string | null;
+  workflowIndex: number;
+  required: boolean;
+}
+
+export interface ExportPreview {
+  agentId: string;
+  agentName: string;
+  agentVersion: number;
+  resources: ExportableResource[];
+}
+
+// ==================== Import/Sync Types ====================
+
+export type DiffAction = "CREATE" | "UPDATE" | "SKIP" | "CONFLICT";
+export type MatchStrategy = "position" | "type" | "name" | "originId" | null;
+
+export interface ResourceDiff {
+  sourceId: string;
+  resourceType: string;
+  name: string | null;
+  action: DiffAction;
+  targetId: string | null;
+  targetVersion: number | null;
+  matchStrategy: MatchStrategy;
+  sourceContent: string | null;
+  targetContent: string | null;
+  workflowIndex: number;
+}
+
+export interface ImportPreview {
+  sourceAgentId: string | null;
+  sourceAgentName: string | null;
+  targetAgentId: string | null;
+  targetAgentName: string | null;
+  resources: ResourceDiff[];
+}
+
+// ==================== Sync Types ====================
+
+export interface SyncMapping {
+  sourceAgentId: string;
+  sourceAgentVersion: number | null;
+  targetAgentId: string | null;
+}
+
+export interface SyncRequest {
+  sourceAgentId: string;
+  sourceAgentVersion: number | null;
+  targetAgentId: string | null;
+  selectedResources: string[] | null;
+  workflowOrder: string[] | null;
+}
+
+export interface DocumentDescriptor {
+  resource: string;
+  name: string | null;
+  description: string | null;
+  lastModifiedOn: string;
+}
+
+// ==================== Shared Utilities ====================
+
+/**
+ * Parse an EDDI resource URI into its id and version.
+ * e.g. "eddi://ai.labs.agent/agentstore/agents/abc123?version=3" → { id: "abc123", version: 3 }
+ */
+export function parseResourceUri(resource: string): { id: string; version: number | null } {
+  const match = resource.match(/\/([^/?]+)\?version=(\d+)/);
+  if (match) return { id: match[1]!, version: parseInt(match[2]!, 10) };
+  const parts = resource.split("/");
+  return { id: parts[parts.length - 1] || resource, version: null };
+}
+
+/** Build auth headers conditionally — avoids sending empty X-Source-Authorization */
+function authHeaders(sourceAuth: string): Record<string, string> {
+  return sourceAuth ? { "X-Source-Authorization": sourceAuth } : {};
+}
+
+// ==================== Existing Export Functions ==
+
 /**
  * Step 1: Trigger export — backend prepares a zip and returns a Location header.
  * POST /backup/export/{agentId}?agentVersion={version}
@@ -61,6 +149,8 @@ export async function exportAndDownloadAgent(
   await downloadAgentZip(location);
 }
 
+// ==================== Existing Import Functions ====================
+
 /**
  * Import a agent from a zip file (create new — default strategy).
  * POST /backup/import with Content-Type: application/zip
@@ -79,23 +169,6 @@ export async function importAgent(file: File): Promise<string> {
 
   const location = res.headers.get("Location");
   return location || "";
-}
-
-// ==================== Merge Import Types ====================
-
-export interface ResourceDiff {
-  originId: string;
-  resourceType: string;
-  name: string | null;
-  action: "CREATE" | "UPDATE" | "SKIP";
-  localId: string | null;
-  localVersion: number | null;
-}
-
-export interface ImportPreview {
-  agentOriginId: string | null;
-  agentName: string | null;
-  resources: ResourceDiff[];
 }
 
 /**
@@ -122,11 +195,11 @@ export async function previewImport(file: File): Promise<ImportPreview> {
  */
 export async function importAgentMerge(
   file: File,
-  selectedOriginIds?: string[]
+  selectedSourceIds?: string[]
 ): Promise<string> {
   const params = new URLSearchParams({ strategy: "merge" });
-  if (selectedOriginIds && selectedOriginIds.length > 0) {
-    params.set("selectedResources", selectedOriginIds.join(","));
+  if (selectedSourceIds && selectedSourceIds.length > 0) {
+    params.set("selectedResources", selectedSourceIds.join(","));
   }
 
   const res = await fetch(`${BASE_URL}/backup/import?${params}`, {
@@ -141,4 +214,201 @@ export async function importAgentMerge(
 
   const location = res.headers.get("Location");
   return location || "";
+}
+
+// ==================== Selective Export ====================
+
+/**
+ * Preview exportable resources for an agent.
+ * POST /backup/export/{agentId}/preview?agentVersion={version}
+ */
+export async function previewExport(
+  agentId: string,
+  version = 1
+): Promise<ExportPreview> {
+  const res = await fetch(
+    `${BASE_URL}/backup/export/${agentId}/preview?agentVersion=${version}`,
+    { method: "POST" }
+  );
+  if (!res.ok) throw new Error(`Export preview failed: ${res.statusText}`);
+  return res.json();
+}
+
+/**
+ * Export agent with selected resources only.
+ * POST /backup/export/{agentId}?agentVersion={version}&selectedResources=id1,id2
+ */
+export async function exportAgentSelective(
+  agentId: string,
+  version: number,
+  selectedResourceIds: string[]
+): Promise<void> {
+  const params = new URLSearchParams({ agentVersion: String(version) });
+  if (selectedResourceIds.length > 0) {
+    params.set("selectedResources", selectedResourceIds.join(","));
+  }
+  const res = await fetch(
+    `${BASE_URL}/backup/export/${agentId}?${params}`,
+    { method: "POST" }
+  );
+  if (!res.ok) throw new Error(`Export failed: ${res.statusText}`);
+  const location = res.headers.get("Location");
+  if (location) await downloadAgentZip(location);
+}
+
+// ==================== Upgrade Import ====================
+
+/**
+ * Preview upgrade import with structural matching against a target agent.
+ * POST /backup/import/preview?targetAgentId={targetAgentId}
+ */
+export async function previewUpgrade(
+  file: File,
+  targetAgentId: string
+): Promise<ImportPreview> {
+  const params = new URLSearchParams({ targetAgentId });
+  const res = await fetch(`${BASE_URL}/backup/import/preview?${params}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/zip" },
+    body: file,
+  });
+  if (!res.ok) throw new Error(`Upgrade preview failed: ${res.statusText}`);
+  return res.json();
+}
+
+/**
+ * Execute upgrade import.
+ * POST /backup/import?strategy=upgrade&targetAgentId=...
+ */
+export async function importAgentUpgrade(
+  file: File,
+  targetAgentId: string,
+  selectedSourceIds?: string[],
+  workflowOrder?: string[]
+): Promise<string> {
+  const params = new URLSearchParams({ strategy: "upgrade", targetAgentId });
+  if (selectedSourceIds?.length) {
+    params.set("selectedResources", selectedSourceIds.join(","));
+  }
+  if (workflowOrder?.length) {
+    params.set("workflowOrder", workflowOrder.join(","));
+  }
+
+  const res = await fetch(`${BASE_URL}/backup/import?${params}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/zip" },
+    body: file,
+  });
+  if (!res.ok) throw new Error(`Upgrade import failed: ${res.statusText}`);
+  return res.headers.get("Location") || "";
+}
+
+// ==================== Live Sync ====================
+
+/**
+ * List agents from a remote EDDI instance.
+ * GET /backup/import/sync/agents?sourceUrl=...
+ */
+export async function listRemoteAgents(
+  sourceUrl: string,
+  sourceAuth: string
+): Promise<DocumentDescriptor[]> {
+  const params = new URLSearchParams({ sourceUrl });
+  const res = await fetch(`${BASE_URL}/backup/import/sync/agents?${params}`, {
+    headers: authHeaders(sourceAuth),
+  });
+  if (!res.ok) throw new Error(`Failed to list remote agents: ${res.statusText}`);
+  return res.json();
+}
+
+/**
+ * Preview sync for a single agent.
+ * POST /backup/import/sync/preview?sourceUrl=...&sourceAgentId=...
+ */
+export async function previewSync(
+  sourceUrl: string,
+  sourceAgentId: string,
+  sourceVersion: number | null,
+  targetAgentId: string | null,
+  sourceAuth: string
+): Promise<ImportPreview> {
+  const params = new URLSearchParams({ sourceUrl, sourceAgentId });
+  if (sourceVersion != null) params.set("sourceAgentVersion", String(sourceVersion));
+  if (targetAgentId) params.set("targetAgentId", targetAgentId);
+
+  const res = await fetch(`${BASE_URL}/backup/import/sync/preview?${params}`, {
+    method: "POST",
+    headers: authHeaders(sourceAuth),
+  });
+  if (!res.ok) throw new Error(`Sync preview failed: ${res.statusText}`);
+  return res.json();
+}
+
+/**
+ * Batch preview for multiple agent mappings.
+ * POST /backup/import/sync/preview/batch?sourceUrl=...
+ */
+export async function previewSyncBatch(
+  sourceUrl: string,
+  mappings: SyncMapping[],
+  sourceAuth: string
+): Promise<ImportPreview[]> {
+  const params = new URLSearchParams({ sourceUrl });
+  const res = await fetch(`${BASE_URL}/backup/import/sync/preview/batch?${params}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(sourceAuth),
+    },
+    body: JSON.stringify(mappings),
+  });
+  if (!res.ok) throw new Error(`Batch preview failed: ${res.statusText}`);
+  return res.json();
+}
+
+/**
+ * Execute sync for a single agent.
+ * POST /backup/import/sync?sourceUrl=...&sourceAgentId=...
+ */
+export async function executeSync(
+  sourceUrl: string,
+  sourceAgentId: string,
+  sourceVersion: number | null,
+  targetAgentId: string | null,
+  selectedResources: string[] | null,
+  workflowOrder: string[] | null,
+  sourceAuth: string
+): Promise<void> {
+  const params = new URLSearchParams({ sourceUrl, sourceAgentId });
+  if (sourceVersion != null) params.set("sourceAgentVersion", String(sourceVersion));
+  if (targetAgentId) params.set("targetAgentId", targetAgentId);
+  if (selectedResources?.length) params.set("selectedResources", selectedResources.join(","));
+  if (workflowOrder?.length) params.set("workflowOrder", workflowOrder.join(","));
+
+  const res = await fetch(`${BASE_URL}/backup/import/sync?${params}`, {
+    method: "POST",
+    headers: authHeaders(sourceAuth),
+  });
+  if (!res.ok) throw new Error(`Sync execute failed: ${res.statusText}`);
+}
+
+/**
+ * Batch sync execution.
+ * POST /backup/import/sync/batch?sourceUrl=...
+ */
+export async function executeSyncBatch(
+  sourceUrl: string,
+  requests: SyncRequest[],
+  sourceAuth: string
+): Promise<void> {
+  const params = new URLSearchParams({ sourceUrl });
+  const res = await fetch(`${BASE_URL}/backup/import/sync/batch?${params}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(sourceAuth),
+    },
+    body: JSON.stringify(requests),
+  });
+  if (!res.ok) throw new Error(`Batch sync failed: ${res.statusText}`);
 }

@@ -30,6 +30,7 @@ import { UserMemoryPage } from "@/pages/user-memory";
 import { PropertiesPage } from "@/pages/properties";
 import { TriggersPage } from "@/pages/triggers";
 import { CapabilitiesPage } from "@/pages/capabilities";
+import { SyncPage } from "@/pages/sync-page";
 
 export function App() {
   return (
@@ -60,6 +61,7 @@ export function App() {
         <Route path="/manage/properties" element={<PropertiesPage />} />
         <Route path="/manage/triggers" element={<TriggersPage />} />
         <Route path="/manage/capabilities" element={<CapabilitiesPage />} />
+        <Route path="/manage/sync" element={<SyncPage />} />
         <Route
           path="/manage/conversationview/:id"
           element={<ConversationDetailPage />}

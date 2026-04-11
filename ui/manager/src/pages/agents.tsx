@@ -8,6 +8,7 @@ import { useInfiniteAgentDescriptors, useDeleteAgent, useDuplicateAgent, groupAg
 import { AgentCard } from "@/components/agents/agent-card";
 import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
 import { ImportAgentDialog } from "@/components/agents/import-agent-dialog";
+import { ExportAgentDialog } from "@/components/agents/export-agent-dialog";
 import { CreateOrWizardDialog } from "@/components/shared/create-or-wizard-dialog";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,7 +22,6 @@ import {
   setStoredViewMode,
   type ViewMode,
 } from "@/components/shared/view-toggle";
-import { useExportAgent } from "@/hooks/use-backup";
 import { cn } from "@/lib/utils";
 import { useOnboarding } from "@/hooks/use-onboarding";
 
@@ -35,6 +35,7 @@ export function AgentsPage() {
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
+  const [exportTarget, setExportTarget] = useState<{ id: string; version: number } | null>(null);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("agents"));
   const [sortField, setSortField] = useState<SortField>("modified");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -58,7 +59,6 @@ export function AgentsPage() {
 
   const deleteMutation = useDeleteAgent();
   const duplicateMutation = useDuplicateAgent();
-  const exportMutation = useExportAgent();
 
   // Flatten infinite pages → single array → group by name → sort
   const groupedAgents = useMemo(() => {
@@ -227,6 +227,7 @@ export function AgentsPage() {
                   agent={agent}
                   onDuplicate={handleDuplicate}
                   onDelete={handleDelete}
+                  onExport={(id, version) => setExportTarget({ id, version })}
                 />
               ))}
             </div>
@@ -326,9 +327,8 @@ export function AgentsPage() {
                             <Copy className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => exportMutation.mutate({ agentId: agent.id, version: agent.version })}
-                            disabled={exportMutation.isPending}
-                            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors disabled:opacity-50"
+                            onClick={() => setExportTarget({ id: agent.id, version: agent.version })}
+                            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
                             title={t("agents.export", "Export")}
                           >
                             <Download className="h-4 w-4" />
@@ -392,6 +392,16 @@ export function AgentsPage() {
         onConfirm={confirmDelete}
         isPending={deleteMutation.isPending}
       />
+
+      {/* Export dialog */}
+      {exportTarget && (
+        <ExportAgentDialog
+          open
+          onClose={() => setExportTarget(null)}
+          agentId={exportTarget.id}
+          agentVersion={exportTarget.version}
+        />
+      )}
     </div>
   );
 }

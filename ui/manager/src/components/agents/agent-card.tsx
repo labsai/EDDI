@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { useDeploymentStatus, useDeployAgent, useUndeployAgent } from "@/hooks/use-agents";
-import { useExportAgent } from "@/hooks/use-backup";
+
 import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
 import { useChatStore, useStartConversation } from "@/hooks/use-chat";
 import { getErrorMessage } from "@/lib/api-client";
@@ -37,13 +37,12 @@ const statusIcons = {
   NOT_FOUND: { icon: Square, color: "text-muted-foreground", bg: "bg-muted", ring: "ring-border" },
 };
 
-export function AgentCard({ agent, onDuplicate, onDelete }: AgentCardProps) {
+export function AgentCard({ agent, onDuplicate, onDelete, onExport }: AgentCardProps) {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const { data: deployment } = useDeploymentStatus(agent.id, agent.version);
   const deployMutation = useDeployAgent();
   const undeployMutation = useUndeployAgent();
-  const exportMutation = useExportAgent();
   const startConversation = useStartConversation();
 
   const status = deployment?.status ?? "NOT_FOUND";
@@ -148,17 +147,14 @@ export function AgentCard({ agent, onDuplicate, onDelete }: AgentCardProps) {
                 </button>
                 <button
                   onClick={() => {
-                    exportMutation.mutate({ agentId: agent.id, version: agent.version });
+                    onExport?.(agent.id, agent.version);
                     setMenuOpen(false);
                   }}
-                  disabled={exportMutation.isPending}
                   className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-secondary disabled:opacity-50"
                   role="menuitem"
                 >
                   <Download className="h-4 w-4" aria-hidden="true" />
-                  {exportMutation.isPending
-                    ? t("agents.exporting", "Exporting...")
-                    : t("agents.export", "Export")}
+                  {t("agents.export", "Export")}
                 </button>
                 <button
                   onClick={() => {

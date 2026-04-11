@@ -3479,3 +3479,120 @@ export const capabilityHandlers = [
     return HttpResponse.json(filtered);
   }),
 ];
+
+// ─── Backup / Sync Handlers ──────────────────────────────────────────────────
+
+const MOCK_EXPORT_PREVIEW = {
+  agentId: "agent1",
+  agentName: "Support Agent",
+  agentVersion: 3,
+  resources: [
+    { resourceId: "agent1", resourceVersion: 3, resourceType: "agent", name: "Support Agent", parentWorkflowId: null, workflowIndex: 0, required: true },
+    { resourceId: "pkg1", resourceVersion: 2, resourceType: "workflow", name: "Support Ticket Pipeline", parentWorkflowId: null, workflowIndex: 0, required: true },
+    { resourceId: "beh1", resourceVersion: 1, resourceType: "behavior", name: "Support Rules", parentWorkflowId: "pkg1", workflowIndex: 0, required: false },
+    { resourceId: "llm1", resourceVersion: 1, resourceType: "langchain", name: "GPT-4 Task", parentWorkflowId: "pkg1", workflowIndex: 1, required: false },
+    { resourceId: "out1", resourceVersion: 1, resourceType: "output", name: "Support Outputs", parentWorkflowId: "pkg1", workflowIndex: 2, required: false },
+    { resourceId: "ps1", resourceVersion: 1, resourceType: "property", name: "Props", parentWorkflowId: "pkg1", workflowIndex: 3, required: false },
+    { resourceId: "dict1", resourceVersion: 1, resourceType: "regulardictionary", name: "Support Dict", parentWorkflowId: "pkg1", workflowIndex: 4, required: false },
+    { resourceId: "snip1", resourceVersion: 1, resourceType: "snippet", name: "System Prompt Base", parentWorkflowId: null, workflowIndex: 0, required: false },
+  ],
+};
+
+const MOCK_IMPORT_PREVIEW = {
+  sourceAgentId: "agent1",
+  sourceAgentName: "Support Agent",
+  targetAgentId: "agent1",
+  targetAgentName: "Support Agent",
+  resources: [
+    { sourceId: "beh1", resourceType: "behavior", name: "Support Rules", action: "UPDATE", targetId: "beh1-local", targetVersion: 1, matchStrategy: "type", sourceContent: '{"behaviorGroups":[{"name":"main","rules":[{"name":"greet","actions":["greet"]}]}]}', targetContent: '{"behaviorGroups":[{"name":"main","rules":[{"name":"greet","actions":["hello"]}]}]}', workflowIndex: 0 },
+    { sourceId: "llm1", resourceType: "langchain", name: "GPT-4 Task", action: "SKIP", targetId: "llm1-local", targetVersion: 1, matchStrategy: "type", sourceContent: null, targetContent: null, workflowIndex: 1 },
+    { sourceId: "out1", resourceType: "output", name: "Support Outputs", action: "UPDATE", targetId: "out1-local", targetVersion: 1, matchStrategy: "name", sourceContent: '{"outputSet":[{"action":"greet","outputs":[{"valueAlternatives":[{"type":"text","text":"Hello!"}]}]}]}', targetContent: '{"outputSet":[{"action":"greet","outputs":[{"valueAlternatives":[{"type":"text","text":"Hi!"}]}]}]}', workflowIndex: 2 },
+    { sourceId: "snip-new", resourceType: "snippet", name: "New Snippet", action: "CREATE", targetId: null, targetVersion: null, matchStrategy: null, sourceContent: '{"content":"You are a helpful assistant."}', targetContent: null, workflowIndex: 0 },
+  ],
+};
+
+const MOCK_REMOTE_AGENTS = [
+  { resource: "eddi://ai.labs.agent/agentstore/agents/remote-agent1?version=5", name: "Support Agent", description: "Support bot", lastModifiedOn: new Date().toISOString() },
+  { resource: "eddi://ai.labs.agent/agentstore/agents/remote-agent2?version=3", name: "FAQ Agent", description: "FAQ bot", lastModifiedOn: new Date().toISOString() },
+  { resource: "eddi://ai.labs.agent/agentstore/agents/remote-agent3?version=1", name: "Sales Agent", description: "Sales bot", lastModifiedOn: new Date().toISOString() },
+  { resource: "eddi://ai.labs.agent/agentstore/agents/remote-agent4?version=2", name: "Onboarding Agent", description: "New hire guide", lastModifiedOn: new Date().toISOString() },
+];
+
+export const backupSyncHandlers = [
+  // Export preview
+  http.post("*/backup/export/:agentId/preview", () => {
+    return HttpResponse.json(MOCK_EXPORT_PREVIEW);
+  }),
+
+  // Selective export — returns Location header
+  http.post("*/backup/export/:agentId", () => {
+    return new HttpResponse(null, {
+      status: 200,
+      headers: { Location: "/backup/export/agent-export.zip" },
+    });
+  }),
+
+  // Export file download
+  http.get("*/backup/export/:filename", () => {
+    return new HttpResponse(new Blob(["fake-zip-content"]), {
+      status: 200,
+      headers: { "Content-Type": "application/zip" },
+    });
+  }),
+
+  // Import preview (merge or upgrade)
+  http.post("*/backup/import/preview", ({ request }) => {
+    const url = new URL(request.url);
+    const targetAgentId = url.searchParams.get("targetAgentId");
+    if (targetAgentId) {
+      // Upgrade preview
+      return HttpResponse.json(MOCK_IMPORT_PREVIEW);
+    }
+    // Merge preview
+    return HttpResponse.json({
+      ...MOCK_IMPORT_PREVIEW,
+      targetAgentId: null,
+      targetAgentName: null,
+    });
+  }),
+
+  // Import execute (create, merge, or upgrade)
+  http.post("*/backup/import", () => {
+    const newId = `imported-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 202,
+      headers: { Location: `/agentstore/agents/${newId}?version=1` },
+    });
+  }),
+
+  // List remote agents
+  http.get("*/backup/import/sync/agents", () => {
+    return HttpResponse.json(MOCK_REMOTE_AGENTS);
+  }),
+
+  // Sync preview (single)
+  http.post("*/backup/import/sync/preview", () => {
+    return HttpResponse.json(MOCK_IMPORT_PREVIEW);
+  }),
+
+  // Sync preview (batch)
+  http.post("*/backup/import/sync/preview/batch", async ({ request }) => {
+    const mappings = (await request.json()) as Array<{ sourceAgentId: string }>;
+    return HttpResponse.json(
+      mappings.map((m) => ({
+        ...MOCK_IMPORT_PREVIEW,
+        sourceAgentId: m.sourceAgentId,
+      }))
+    );
+  }),
+
+  // Sync execute (single)
+  http.post("*/backup/import/sync", () => {
+    return new HttpResponse(null, { status: 202 });
+  }),
+
+  // Sync execute (batch)
+  http.post("*/backup/import/sync/batch", () => {
+    return new HttpResponse(null, { status: 202 });
+  }),
+];

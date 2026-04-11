@@ -42,7 +42,7 @@ import {
   useAgentVersions,
   useUpdateAgent,
 } from "@/hooks/use-agents";
-import { useExportAgent } from "@/hooks/use-backup";
+import { ExportAgentDialog } from "@/components/agents/export-agent-dialog";
 import { useWorkflowDescriptors, useUpdateAgentWorkflows } from "@/hooks/use-workflows";
 import { parseResourceUri, type EnvironmentStatus, type Agent, deployAgent, getDeploymentStatus } from "@/lib/api/agents";
 import { useLatestVersions } from "@/hooks/use-latest-versions";
@@ -79,6 +79,7 @@ export function AgentDetailPage() {
   const [showAddWorkflow, setShowAddWorkflow] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showExportDialog, setShowExportDialog] = useState(false);
 
   const { data: versions } = useAgentVersions(id!);
 
@@ -94,7 +95,6 @@ export function AgentDetailPage() {
   const deleteMutation = useDeleteAgent();
   const duplicateMutation = useDuplicateAgent();
   const updateWorkflowsMutation = useUpdateAgentWorkflows();
-  const exportMutation = useExportAgent();
   const startConversationMutation = useStartConversation();
 
   const status = deployment?.status ?? "NOT_FOUND";
@@ -402,15 +402,12 @@ export function AgentDetailPage() {
 
           {/* Export */}
           <button
-            onClick={() => exportMutation.mutate({ agentId: id!, version })}
-            disabled={exportMutation.isPending}
-            className="rounded-lg border border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition-colors disabled:opacity-50"
+            onClick={() => setShowExportDialog(true)}
+            className="rounded-lg border border-input px-4 py-2 text-sm font-medium text-foreground hover:bg-secondary transition-colors"
             data-testid="export-agent-btn"
           >
             <Download className="h-4 w-4 inline-block me-1.5" />
-            {exportMutation.isPending
-              ? t("agents.exporting", "Exporting...")
-              : t("agents.export", "Export")}
+            {t("agents.export", "Export")}
           </button>
 
           {/* Delete */}
@@ -595,6 +592,14 @@ export function AgentDetailPage() {
         cancelLabel={t("common.cancel")}
         onConfirm={handleDelete}
         isPending={deleteMutation.isPending}
+      />
+
+      {/* Export dialog */}
+      <ExportAgentDialog
+        open={showExportDialog}
+        onClose={() => setShowExportDialog(false)}
+        agentId={id!}
+        agentVersion={resolvedVersion}
       />
     </div>
   );

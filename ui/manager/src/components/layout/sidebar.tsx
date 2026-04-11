@@ -30,6 +30,7 @@ import {
   Brain,
   Database,
   Zap,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -76,6 +77,7 @@ const navSections = [
       { path: "/manage/schedules", icon: CalendarClock, labelKey: "nav.schedules" },
       { path: "/manage/triggers", icon: Zap, labelKey: "nav.triggers" },
       { path: "/manage/orphans", icon: Link2Off, labelKey: "nav.orphans" },
+      { path: "/manage/sync", icon: RefreshCw, labelKey: "nav.sync" },
       { path: "/manage/gdpr", icon: ShieldAlert, labelKey: "nav.gdpr" },
     ],
   },
