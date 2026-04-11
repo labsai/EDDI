@@ -113,9 +113,18 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
         given().contentType(ContentType.JSON).body("{\"input\":\"bye\"}")
                 .post(String.format("agents/%s?returnDetailed=true", conversationId.id()));
 
-        Thread.sleep(200);
+        // Poll until the conversation state has propagated (avoids hardcoded sleep)
+        for (int i = 0; i < 20; i++) {
+            Response probe = given().contentType(ContentType.JSON).body("{\"input\":\"hello\"}")
+                    .post(String.format("agents/%s?returnDetailed=true", conversationId.id()));
+            if (probe.statusCode() == 410) {
+                probe.then().assertThat().statusCode(410);
+                return;
+            }
+            Thread.sleep(500);
+        }
 
-        // Verify conversation is ended
+        // Final attempt (will fail with assertion error if state never propagated)
         Response response = given().contentType(ContentType.JSON).body("{\"input\":\"hello\"}")
                 .post(String.format("agents/%s?returnDetailed=true", conversationId.id()));
 
@@ -138,47 +147,5 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
         // both conversations should be in READY state and contain the input
         response1.then().statusCode(200).body("conversationState", equalTo("READY"));
         response2.then().statusCode(200).body("conversationState", equalTo("READY"));
-    }
-
-    // ==================== Helpers ====================
-
-    private ResourceId setupAndDeployMinimalAgent() throws Exception {
-        String dictionary = load("agentengine/dictionary.json");
-        String behavior = load("agentengine/rules.json");
-        String output = load("agentengine/output.json");
-
-        String locationDictionary = createResource(dictionary, "/dictionarystore/dictionaries");
-        String locationBehavior = createResource(behavior, "/rulestore/rulesets");
-        String locationOutput = createResource(output, "/outputstore/outputsets");
-
-        String packageBody = String.format("""
-                {
-                  "workflowSteps": [
-                    {
-                      "type": "eddi://ai.labs.parser",
-                      "config": {},
-                      "extensions": {
-                        "dictionaries": [
-                          {"type": "eddi://ai.labs.parser.dictionaries.regular", "config": {"uri": "%s"}}
-                        ],
-                        "corrections": []
-                      }
-                    },
-                    {"type": "eddi://ai.labs.rules", "config": {"uri": "%s"}},
-                    {"type": "eddi://ai.labs.output", "config": {"uri": "%s"}},
-                    {"type": "eddi://ai.labs.templating", "config": {}},
-                    {"type": "eddi://ai.labs.property", "config": {}}
-                  ]
-                }""", locationDictionary, locationBehavior, locationOutput);
-
-        String locationWorkflow = createResource(packageBody, "/workflowstore/workflows");
-
-        String agentBody = String.format("""
-                {"packages": ["%s"]}""", locationWorkflow);
-        String agentLocation = createResource(agentBody, "/agentstore/agents");
-
-        ResourceId agentId = extractResourceId(agentLocation);
-        deployAgent(agentId.id(), agentId.version());
-        return agentId;
     }
 }

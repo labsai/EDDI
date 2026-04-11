@@ -178,6 +178,7 @@ class LlmTaskTest {
     }
 
     @Test
+    @DisplayName("Agent Mode — should reach CDI boundary via executeWithTools path")
     void testExecute_AgentMode() throws Exception {
         // Setup
         IConversationMemory memory = mock(IConversationMemory.class);
@@ -196,7 +197,7 @@ class LlmTaskTest {
         task.setActions(List.of("agent_action"));
         task.setId("agentTask");
         task.setType("openai");
-        // Enable Agent Mode to test the new integration
+        // Enable Agent Mode to test the executeWithTools path
         task.setEnableBuiltInTools(true);
         task.setBuiltInToolsWhitelist(List.of("calculator"));
         task.setParameters(Map.of("systemMessage", "Agent System Message"));
@@ -209,22 +210,34 @@ class LlmTaskTest {
         // Mock templating to return inputs as-is
         when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
 
-        // Execute
-        // Note: This test validates that the Agent Mode path (executeWithTools) is
-        // invoked.
-        // In a real unit test without Quarkus CDI context, the AiServices.builder()
-        // will fail
-        // because it requires Arc.container(). This is expected behavior and validates
-        // that
-        // the Agent Mode code path is executed.
-        // The exception may be NullPointerException or ExceptionInInitializerError
-        // (wrapping NPE)
-        // depending on whether the CDI class initializer has already been attempted.
-        assertThrows(Throwable.class, () -> {
+        // Execute: The agent mode path reaches AiServices.builder() which requires
+        // Arc.container() — a CDI API not available in plain unit tests.
+        // We catch Throwable because CDI failures are Error subclasses
+        // (ExceptionInInitializerError, NoClassDefFoundError), not Exceptions.
+        // We then verify we got a SPECIFIC CDI-boundary error — not just "any crash."
+        Throwable thrown = null;
+        try {
             langChainTask.execute(memory, llmConfig);
-        }, "Expected exception due to missing Quarkus CDI context when using Agent Mode");
+            fail("Expected CDI boundary exception when Agent Mode reaches AiServices.builder()");
+        } catch (Throwable t) {
+            thrown = t;
+        }
 
-        // Verify that templating was called for system message (happens before the NPE)
+        // Verify this is specifically the CDI boundary exception, not some random NPE
+        // from bad setup.
+        Throwable rootCause = thrown;
+        while (rootCause.getCause() != null) {
+            rootCause = rootCause.getCause();
+        }
+        assertTrue(
+                thrown instanceof ExceptionInInitializerError
+                        || thrown instanceof NoClassDefFoundError
+                        || thrown instanceof LifecycleException,
+                "Exception should be CDI boundary error (ExceptionInInitializerError/NoClassDefFoundError/LifecycleException), "
+                        + "but was: " + thrown.getClass().getSimpleName() + ": " + thrown.getMessage());
+
+        // Verify that templating was called for system message (happens before CDI
+        // call)
         verify(templatingEngine, atLeastOnce()).processTemplate(anyString(), anyMap());
     }
 

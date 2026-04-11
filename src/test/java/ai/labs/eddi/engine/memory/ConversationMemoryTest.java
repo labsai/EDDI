@@ -4,6 +4,7 @@ import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedList;
@@ -11,6 +12,7 @@ import java.util.LinkedList;
 /**
  * @author ginccc
  */
+@DisplayName("ConversationMemory")
 public class ConversationMemoryTest {
     private static ConversationMemory memory;
 

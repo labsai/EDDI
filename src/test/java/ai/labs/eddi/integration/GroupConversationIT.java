@@ -101,7 +101,7 @@ public class GroupConversationIT extends BaseIntegrationIT {
 
     @Test
     @Order(4)
-    @DisplayName("Start group discussion should return transcript")
+    @DisplayName("Start group discussion should return transcript or indicate no output")
     void discussGroup() {
         Assumptions.assumeTrue(groupResourceId != null, "Group must be created");
 
@@ -112,10 +112,11 @@ public class GroupConversationIT extends BaseIntegrationIT {
         var response = given().contentType(ContentType.JSON).body(request)
                 .post("/groups/" + groupResourceId.id() + "/conversations");
 
-        // The discussion may succeed or fail (agents may not produce meaningful output
-        // without LLM), but the endpoint should not crash
+        // 200 = discussion completed successfully
+        // 404 = group or agent not found (valid if deployment state changed)
+        // 500 is NOT acceptable — server errors indicate bugs, not valid behavior
         response.then().assertThat()
-                .statusCode(anyOf(equalTo(200), equalTo(404), equalTo(500)));
+                .statusCode(anyOf(equalTo(200), equalTo(404)));
     }
 
     @Test

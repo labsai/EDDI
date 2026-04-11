@@ -65,8 +65,17 @@ public class AgentEngineIT extends BaseIntegrationIT {
     @Test
     @DisplayName("should return welcome message on conversation start")
     void checkWelcomeMessage() throws Exception {
-        Thread.sleep(1000); // wait for async welcome processing
-        Response response = getConversationLog(agentResourceId.id(), conversationResourceId.id(), false);
+        // Poll until the async welcome message has been processed
+        Response response = null;
+        for (int i = 0; i < 20; i++) { // max 10 seconds
+            response = getConversationLog(agentResourceId.id(), conversationResourceId.id(), false);
+            if (response.statusCode() == 200) {
+                var steps = response.jsonPath().getList("conversationSteps");
+                if (steps != null && !steps.isEmpty())
+                    break;
+            }
+            Thread.sleep(500);
+        }
 
         response.then().assertThat().statusCode(200).body("agentId", equalTo(agentResourceId.id()))
                 .body("agentVersion", equalTo(agentResourceId.version())).body("conversationSteps", hasSize(1))
@@ -206,7 +215,16 @@ public class AgentEngineIT extends BaseIntegrationIT {
         String body = """
                 {"input":"bye","context":{"userInfo":{"type":"object","value":{"username":"John"}}}}""";
         sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
-        Thread.sleep(100);
+        // Poll until the conversation state has propagated (avoids hardcoded sleep)
+        for (int i = 0; i < 20; i++) { // max 10 seconds
+            Response probe = sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
+            if (probe.statusCode() == 410) {
+                probe.then().assertThat().statusCode(410).body(equalTo("Conversation has ended"));
+                return;
+            }
+            Thread.sleep(500);
+        }
+        // Final attempt (will fail with assertion error if state never propagated)
         Response response = sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
 
         response.then().assertThat().statusCode(410).body(equalTo("Conversation has ended"));

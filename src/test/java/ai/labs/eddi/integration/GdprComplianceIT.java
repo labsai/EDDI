@@ -187,52 +187,13 @@ public class GdprComplianceIT extends BaseIntegrationIT {
                 .post(String.format("agents/%s?returnDetailed=false&returnCurrentStepOnly=false",
                         convId.id()));
 
-        // Should be 403 (Forbidden) or similar error from processing restriction
+        // Should be 403 (Forbidden) or 409 (Conflict) — never 500.
+        // If the processing restriction throws an unhandled exception, that's a bug.
         response.then().assertThat()
-                .statusCode(anyOf(equalTo(403), equalTo(409), equalTo(500)));
+                .statusCode(anyOf(equalTo(403), equalTo(409)));
 
         // Clean up restriction
         given().delete(GDPR_BASE + userId + "/restrict");
     }
 
-    // ==================== Helpers ====================
-
-    private ResourceId setupAndDeployMinimalAgent() throws Exception {
-        String dictionary = load("agentengine/dictionary.json");
-        String behavior = load("agentengine/rules.json");
-        String output = load("agentengine/output.json");
-
-        String locationDictionary = createResource(dictionary, "/dictionarystore/dictionaries");
-        String locationBehavior = createResource(behavior, "/rulestore/rulesets");
-        String locationOutput = createResource(output, "/outputstore/outputsets");
-
-        String packageBody = String.format("""
-                {
-                  "workflowSteps": [
-                    {
-                      "type": "eddi://ai.labs.parser",
-                      "config": {},
-                      "extensions": {
-                        "dictionaries": [
-                          {"type": "eddi://ai.labs.parser.dictionaries.regular", "config": {"uri": "%s"}}
-                        ],
-                        "corrections": []
-                      }
-                    },
-                    {"type": "eddi://ai.labs.rules", "config": {"uri": "%s"}},
-                    {"type": "eddi://ai.labs.output", "config": {"uri": "%s"}},
-                    {"type": "eddi://ai.labs.templating", "config": {}},
-                    {"type": "eddi://ai.labs.property", "config": {}}
-                  ]
-                }""", locationDictionary, locationBehavior, locationOutput);
-
-        String locationWorkflow = createResource(packageBody, "/workflowstore/workflows");
-        String agentBody = String.format("""
-                {"packages": ["%s"]}""", locationWorkflow);
-        String agentLocation = createResource(agentBody, "/agentstore/agents");
-
-        ResourceId agentId = extractResourceId(agentLocation);
-        deployAgent(agentId.id(), agentId.version());
-        return agentId;
-    }
 }

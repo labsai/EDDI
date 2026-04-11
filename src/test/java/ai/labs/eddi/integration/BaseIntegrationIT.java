@@ -177,6 +177,54 @@ public abstract class BaseIntegrationIT {
         }
     }
 
+    // ==================== Shared Agent Fixture ====================
+
+    /**
+     * Creates and deploys a minimal agent with dictionary, rules, output,
+     * templating, and property extraction. Shared across IT classes to avoid
+     * copy-pasting the same setup in every test.
+     *
+     * @return the deployed agent's ResourceId
+     */
+    protected ResourceId setupAndDeployMinimalAgent() throws Exception {
+        String dictionary = load("agentengine/dictionary.json");
+        String behavior = load("agentengine/rules.json");
+        String output = load("agentengine/output.json");
+
+        String locationDictionary = createResource(dictionary, "/dictionarystore/dictionaries");
+        String locationBehavior = createResource(behavior, "/rulestore/rulesets");
+        String locationOutput = createResource(output, "/outputstore/outputsets");
+
+        String packageBody = String.format("""
+                {
+                  "workflowSteps": [
+                    {
+                      "type": "eddi://ai.labs.parser",
+                      "config": {},
+                      "extensions": {
+                        "dictionaries": [
+                          {"type": "eddi://ai.labs.parser.dictionaries.regular", "config": {"uri": "%s"}}
+                        ],
+                        "corrections": []
+                      }
+                    },
+                    {"type": "eddi://ai.labs.rules", "config": {"uri": "%s"}},
+                    {"type": "eddi://ai.labs.output", "config": {"uri": "%s"}},
+                    {"type": "eddi://ai.labs.templating", "config": {}},
+                    {"type": "eddi://ai.labs.property", "config": {}}
+                  ]
+                }""", locationDictionary, locationBehavior, locationOutput);
+
+        String locationWorkflow = createResource(packageBody, "/workflowstore/workflows");
+        String agentBody = String.format("""
+                {"packages": ["%s"]}""", locationWorkflow);
+        String agentLocation = createResource(agentBody, "/agentstore/agents");
+
+        ResourceId agentId = extractResourceId(agentLocation);
+        deployAgent(agentId.id(), agentId.version());
+        return agentId;
+    }
+
     public record ResourceId(String id, int version) {
     }
 }

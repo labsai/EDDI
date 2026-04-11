@@ -4,6 +4,7 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.Data;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedList;
@@ -13,6 +14,7 @@ import java.util.Set;
 /**
  * @author ginccc
  */
+@DisplayName("ConversationStep")
 public class ConversationStepTest {
     private static IConversationMemory.IWritableConversationStep conversationStep;
 
@@ -121,14 +123,34 @@ public class ConversationStepTest {
     }
 
     @Test
-    public void testEquals() {
-        // setup
+    public void testEquals_identicalData_shouldBeEqual() {
+        // setup — two DISTINCT instances with the same data
         final var data = new Data<>("testKey", new LinkedList<>());
         conversationStep.storeData(data);
-        ConversationStep conversationStep = new ConversationStep(new ConversationOutput());
-        conversationStep.storeData(data);
+
+        ConversationStep otherStep = new ConversationStep(new ConversationOutput());
+        otherStep.storeData(data);
+
+        // assert — compare two different objects, not the same reference
+        Assertions.assertEquals(conversationStep, otherStep);
+        Assertions.assertEquals(otherStep, conversationStep);
+    }
+
+    @Test
+    public void testEquals_differentData_shouldNotBeEqual() {
+        // setup — two instances with different data
+        conversationStep.storeData(new Data<>("keyA", "valueA"));
+
+        ConversationStep otherStep = new ConversationStep(new ConversationOutput());
+        otherStep.storeData(new Data<>("keyB", "valueB"));
 
         // assert
+        Assertions.assertNotEquals(conversationStep, otherStep);
+    }
+
+    @Test
+    public void testEquals_sameReference_shouldBeEqual() {
+        conversationStep.storeData(new Data<>("key", "value"));
         Assertions.assertEquals(conversationStep, conversationStep);
     }
 
