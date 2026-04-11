@@ -53,7 +53,46 @@ jobs:
           path: target/site/jacoco/
           retention-days: 14
 
-  # ─── Job 2: Docker Build & Push ─────────────────────────────────
+  # ─── Job 2: Integration Tests ─────────────────────────────────
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Set execute permission for mvnw
+        run: chmod +x mvnw
+
+      - name: Run integration tests
+        run: ./mvnw verify -DskipITs=false -B
+
+      - name: Upload integration test results
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: integration-test-results
+          path: target/failsafe-reports/
+          retention-days: 14
+
+      - name: Upload integration coverage report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: jacoco-it-report
+          path: target/site/jacoco-it/
+          retention-days: 14
+
+  # ─── Job 3: Docker Build & Push ─────────────────────────────────
   docker:
     name: Docker Build & Push
     runs-on: ubuntu-latest
@@ -143,7 +182,7 @@ jobs:
 
           echo "### ✅ Pushed to Docker Hub" >> $GITHUB_STEP_SUMMARY
 
-  # ─── Job 3: Smoke Test ──────────────────────────────────────────
+  # ─── Job 4: Smoke Test ──────────────────────────────────────────
   smoke-test:
     name: Smoke Test
     runs-on: ubuntu-latest
@@ -211,7 +250,7 @@ jobs:
           docker rm -f eddi 2>/dev/null || true
           docker rm -f mongodb 2>/dev/null || true
 
-  # ─── Job 4: Red Hat Preflight (PRs only) ────────────────────────
+  # ─── Job 5: Red Hat Preflight (PRs only) ────────────────────────
   preflight-check:
     name: Preflight Dry-Run (Red Hat Certification)
     runs-on: ubuntu-latest

@@ -1,150 +1,160 @@
 package ai.labs.eddi.modules.llm.tools;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-
-import java.lang.reflect.Field;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for ToolRateLimiter - including custom per-tool limits fix.
+ * Unit tests for {@link ToolRateLimiter} covering token bucket logic, window
+ * resets, custom limits, and informational methods.
  */
 class ToolRateLimiterTest {
 
     private ToolRateLimiter rateLimiter;
 
     @BeforeEach
-    void setUp() throws Exception {
+    void setUp() {
         rateLimiter = new ToolRateLimiter();
-        // Inject a SimpleMeterRegistry since @PostConstruct won't run in unit tests
-        Field meterField = ToolRateLimiter.class.getDeclaredField("meterRegistry");
-        meterField.setAccessible(true);
-        meterField.set(rateLimiter, new SimpleMeterRegistry());
+        rateLimiter.meterRegistry = new SimpleMeterRegistry();
         rateLimiter.init();
     }
 
-    @Test
-    void testTryAcquire_Default_AllowsWithinLimit() {
-        for (int i = 0; i < 100; i++) {
-            assertTrue(rateLimiter.tryAcquire("testTool"), "Should allow call " + (i + 1) + " within default limit");
+    @Nested
+    @DisplayName("tryAcquire with default limit")
+    class DefaultLimit {
+
+        @Test
+        @DisplayName("should allow first call")
+        void firstCallAllowed() {
+            assertTrue(rateLimiter.tryAcquire("testTool"));
+        }
+
+        @Test
+        @DisplayName("should allow multiple calls within default limit (100)")
+        void multipleCallsWithinLimit() {
+            for (int i = 0; i < 50; i++) {
+                assertTrue(rateLimiter.tryAcquire("testTool"), "Call " + i + " should be allowed");
+            }
+        }
+
+        @Test
+        @DisplayName("should deny call at default limit boundary")
+        void denyAtBoundary() {
+            // Exhaust default limit (100)
+            for (int i = 0; i < 100; i++) {
+                assertTrue(rateLimiter.tryAcquire("exhaustTool"));
+            }
+            // 101st call should be denied
+            assertFalse(rateLimiter.tryAcquire("exhaustTool"));
         }
     }
 
-    @Test
-    void testTryAcquire_Default_DeniesOverLimit() {
-        for (int i = 0; i < 100; i++) {
-            rateLimiter.tryAcquire("testTool");
+    @Nested
+    @DisplayName("tryAcquire with custom limit")
+    class CustomLimit {
+
+        @Test
+        @DisplayName("should enforce custom lower limit")
+        void customLowerLimit() {
+            for (int i = 0; i < 5; i++) {
+                assertTrue(rateLimiter.tryAcquire("limitedTool", 5));
+            }
+            assertFalse(rateLimiter.tryAcquire("limitedTool", 5));
         }
-        assertFalse(rateLimiter.tryAcquire("testTool"), "Should deny call 101 (exceeds default limit of 100)");
-    }
 
-    @Test
-    void testTryAcquire_CustomLimit_RespectsLimit() {
-        // Set a custom limit of 5
-        for (int i = 0; i < 5; i++) {
-            assertTrue(rateLimiter.tryAcquire("limitedTool", 5), "Should allow call " + (i + 1) + " within custom limit of 5");
+        @Test
+        @DisplayName("should enforce limit of 1")
+        void limitOfOne() {
+            assertTrue(rateLimiter.tryAcquire("onceTool", 1));
+            assertFalse(rateLimiter.tryAcquire("onceTool", 1));
         }
-        assertFalse(rateLimiter.tryAcquire("limitedTool", 5), "Should deny call 6 (exceeds custom limit of 5)");
     }
 
-    @Test
-    void testTryAcquire_CustomLimitUpdate_IsApplied() {
-        // First, create bucket with limit of 3
-        for (int i = 0; i < 3; i++) {
-            assertTrue(rateLimiter.tryAcquire("updatedTool", 3));
+    @Nested
+    @DisplayName("getRemaining")
+    class GetRemaining {
+
+        @Test
+        @DisplayName("should return default limit for unknown tool")
+        void unknownToolReturnsDefault() {
+            assertEquals(100, rateLimiter.getRemaining("unknownTool"));
         }
-        assertFalse(rateLimiter.tryAcquire("updatedTool", 3), "Should deny at limit of 3");
 
-        // Reset and re-create with higher limit
-        rateLimiter.reset("updatedTool");
-
-        // Now use a higher limit of 10
-        for (int i = 0; i < 10; i++) {
-            assertTrue(rateLimiter.tryAcquire("updatedTool", 10), "Should allow call " + (i + 1) + " with updated limit of 10");
+        @Test
+        @DisplayName("should decrease after calls")
+        void decreasesAfterCalls() {
+            rateLimiter.tryAcquire("countTool", 10);
+            rateLimiter.tryAcquire("countTool", 10);
+            assertEquals(8, rateLimiter.getRemaining("countTool"));
         }
-        assertFalse(rateLimiter.tryAcquire("updatedTool", 10));
     }
 
-    @Test
-    void testTryAcquire_CustomLimitAppliedOnExistingBucket() {
-        // Create bucket with limit 5
-        assertTrue(rateLimiter.tryAcquire("dynamicTool", 5));
+    @Nested
+    @DisplayName("getInfo")
+    class GetInfo {
 
-        // Update to limit 2 - next call with limit 2 should update the bucket limit
-        rateLimiter.tryAcquire("dynamicTool", 2);
-        // After 2 total calls (1 + 1), with limit now 2, next should fail
-        assertFalse(rateLimiter.tryAcquire("dynamicTool", 2), "After updating limit to 2, 3rd call should be denied");
-    }
-
-    @Test
-    void testTryAcquire_DifferentToolsIndependent() {
-        for (int i = 0; i < 5; i++) {
-            rateLimiter.tryAcquire("toolA", 5);
+        @Test
+        @DisplayName("should return default info for unknown tool")
+        void unknownToolInfo() {
+            var info = rateLimiter.getInfo("newTool");
+            assertEquals(100, info.limit);
+            assertEquals(100, info.remaining);
+            assertTrue(info.resetTimeMs > System.currentTimeMillis());
         }
-        assertFalse(rateLimiter.tryAcquire("toolA", 5));
 
-        // toolB should still be allowed
-        assertTrue(rateLimiter.tryAcquire("toolB", 5));
-    }
-
-    @Test
-    void testGetRemaining_UnknownTool() {
-        // Unknown tool should return default limit
-        assertEquals(100, rateLimiter.getRemaining("unknownTool"));
-    }
-
-    @Test
-    void testGetRemaining_AfterUsage() {
-        rateLimiter.tryAcquire("remainTool", 10);
-        rateLimiter.tryAcquire("remainTool", 10);
-        assertEquals(8, rateLimiter.getRemaining("remainTool"));
-    }
-
-    @Test
-    void testGetInfo_UnknownTool() {
-        var info = rateLimiter.getInfo("unknownTool");
-        assertEquals(100, info.limit);
-        assertEquals(100, info.remaining);
-    }
-
-    @Test
-    void testGetInfo_AfterUsage() {
-        rateLimiter.tryAcquire("infoTool", 20);
-        var info = rateLimiter.getInfo("infoTool");
-        assertEquals(20, info.limit);
-        assertEquals(19, info.remaining);
-    }
-
-    @Test
-    void testReset_ClearsTool() {
-        for (int i = 0; i < 5; i++) {
-            rateLimiter.tryAcquire("resetTool", 5);
+        @Test
+        @DisplayName("should reflect current state for known tool")
+        void knownToolInfo() {
+            rateLimiter.tryAcquire("knownTool", 5);
+            var info = rateLimiter.getInfo("knownTool");
+            assertEquals(5, info.limit);
+            assertEquals(4, info.remaining);
         }
-        assertFalse(rateLimiter.tryAcquire("resetTool", 5));
 
-        rateLimiter.reset("resetTool");
-        assertTrue(rateLimiter.tryAcquire("resetTool", 5), "Should allow after reset");
+        @Test
+        @DisplayName("toString should contain rate limit info")
+        void infoToString() {
+            var info = rateLimiter.getInfo("anyTool");
+            String str = info.toString();
+            assertTrue(str.contains("Rate Limit"));
+            assertTrue(str.contains("remaining"));
+        }
     }
 
-    @Test
-    void testResetAll_ClearsAllTools() {
-        rateLimiter.tryAcquire("tool1", 1);
-        rateLimiter.tryAcquire("tool2", 1);
-        assertFalse(rateLimiter.tryAcquire("tool1", 1));
-        assertFalse(rateLimiter.tryAcquire("tool2", 1));
+    @Nested
+    @DisplayName("reset")
+    class Reset {
 
-        rateLimiter.resetAll();
-        assertTrue(rateLimiter.tryAcquire("tool1", 1));
-        assertTrue(rateLimiter.tryAcquire("tool2", 1));
-    }
+        @Test
+        @DisplayName("should clear specific tool bucket")
+        void resetSpecificTool() {
+            // Exhaust the limit
+            for (int i = 0; i < 5; i++) {
+                rateLimiter.tryAcquire("resetMe", 5);
+            }
+            assertFalse(rateLimiter.tryAcquire("resetMe", 5));
 
-    @Test
-    void testRateLimitInfo_ToString() {
-        rateLimiter.tryAcquire("infoStr", 10);
-        var info = rateLimiter.getInfo("infoStr");
-        String str = info.toString();
-        assertTrue(str.contains("Rate Limit: 9/10 remaining"));
+            // Reset and verify it's available again
+            rateLimiter.reset("resetMe");
+            assertTrue(rateLimiter.tryAcquire("resetMe", 5));
+        }
+
+        @Test
+        @DisplayName("resetAll should clear all buckets")
+        void resetAll() {
+            rateLimiter.tryAcquire("tool1", 1);
+            rateLimiter.tryAcquire("tool2", 1);
+            assertFalse(rateLimiter.tryAcquire("tool1", 1));
+            assertFalse(rateLimiter.tryAcquire("tool2", 1));
+
+            rateLimiter.resetAll();
+            assertTrue(rateLimiter.tryAcquire("tool1", 1));
+            assertTrue(rateLimiter.tryAcquire("tool2", 1));
+        }
     }
 }

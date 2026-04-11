@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- E.D.D.I Logo - Circuit board + Dialog icon -->
+
+  <!-- Rounded dark background -->
+  <rect width="512" height="512" rx="56" ry="56" fill="#0F0F0F"/>
+
+  <g fill="#FFFFFF">
+
+    <!-- ============================================ -->
+    <!-- TOP SECTION - Two horizontal bars            -->
+    <!-- ============================================ -->
+
+    <!-- Top bar left segment (short stub) -->
+    <rect x="48" y="48" width="120" height="28" rx="4"/>
+
+    <!-- Top bar right segment (longer, from gap to right edge) -->
+    <rect x="232" y="48" width="232" height="28" rx="4"/>
+
+    <!-- Second horizontal bar (spans center area) -->
+    <rect x="112" y="112" width="256" height="28" rx="4"/>
+
+    <!-- ============================================ -->
+    <!-- LEFT SIDE - "E" structure                    -->
+    <!-- ============================================ -->
+
+    <!-- Left vertical spine -->
+    <rect x="48" y="48" width="28" height="226" rx="4"/>
+
+    <!-- Left middle horizontal bar (E middle) -->
+    <rect x="48" y="216" width="104" height="28" rx="4"/>
+
+    <!-- ============================================ -->
+    <!-- RIGHT VERTICAL                               -->
+    <!-- ============================================ -->
+
+    <!-- Right vertical line -->
+    <rect x="436" y="48" width="28" height="180" rx="4"/>
+
+    <!-- Right horizontal connector -->
+    <rect x="372" y="216" width="92" height="28" rx="4"/>
+
+    <!-- ============================================ -->
+    <!-- SPEECH BUBBLE (center)                       -->
+    <!-- ============================================ -->
+
+    <!-- Speech bubble outline (drawn as a filled shape with cutout) -->
+    <path d="
+      M 192,160
+      L 344,160
+      Q 372,160 372,188
+      L 372,300
+      Q 372,328 344,328
+      L 264,328
+      L 220,376
+      L 220,328
+      L 192,328
+      Q 164,328 164,300
+      L 164,188
+      Q 164,160 192,160
+      Z
+
+      M 192,184
+      Q 188,184 188,188
+      L 188,300
+      Q 188,304 192,304
+      L 244,304
+      L 244,344
+      L 272,304
+      L 344,304
+      Q 348,304 348,300
+      L 348,188
+      Q 348,184 344,184
+      Z
+    " fill-rule="evenodd"/>
+
+    <!-- Letter "D" inside the bubble -->
+    <path d="
+      M 238,208
+      L 238,280
+      L 272,280
+      Q 316,280 316,244
+      Q 316,208 272,208
+      Z
+
+      M 260,226
+      L 270,226
+      Q 294,226 294,244
+      Q 294,262 270,262
+      L 260,262
+      Z
+    " fill-rule="evenodd"/>
+
+    <!-- ============================================ -->
+    <!-- BOTTOM SECTION - Brackets and connections    -->
+    <!-- ============================================ -->
+
+    <!-- Bottom-left vertical (bracket up-stroke) -->
+    <rect x="48" y="340" width="28" height="124" rx="4"/>
+
+    <!-- Bottom-left horizontal (bracket right-stroke) -->
+    <rect x="48" y="436" width="124" height="28" rx="4"/>
+
+    <!-- Bottom-right vertical (bracket up-stroke) -->
+    <rect x="436" y="340" width="28" height="124" rx="4"/>
+
+    <!-- Bottom-right horizontal (bracket left-stroke) -->
+    <rect x="340" y="436" width="124" height="28" rx="4"/>
+
+    <!-- Bottom center horizontal connector -->
+    <rect x="172" y="436" width="168" height="28" rx="4"/>
+
+    <!-- ============================================ -->
+    <!-- CONNECTION DOTS                              -->
+    <!-- ============================================ -->
+
+    <!-- Dot: left side near E middle bar end -->
+    <circle cx="152" cy="230" r="16"/>
+
+    <!-- Dot: above bubble, left of center -->
+    <circle cx="208" cy="126" r="16"/>
+
+    <!-- Dot: above bubble, right of center -->
+    <circle cx="308" cy="126" r="16"/>
+
+    <!-- Dot: bottom-left bracket corner (inner) -->
+    <circle cx="62" cy="340" r="16"/>
+
+    <!-- Dot: bottom-right bracket corner (inner) -->
+    <circle cx="450" cy="340" r="16"/>
+
+    <!-- Dot: bottom center -->
+    <circle cx="256" cy="450" r="16"/>
+
+  </g>
+</svg>
