@@ -1,5 +1,7 @@
 package ai.labs.eddi.configs.rules.model;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+
 import java.util.LinkedList;
 import java.util.List;
 
@@ -35,6 +37,7 @@ public class RuleGroupConfiguration {
         return behaviorRules;
     }
 
+    @JsonAlias("behaviorRules")
     public void setRules(List<RuleConfiguration> behaviorRules) {
         this.behaviorRules = behaviorRules;
     }

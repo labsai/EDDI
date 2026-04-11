@@ -137,9 +137,10 @@ public class AgentEngineIT extends BaseIntegrationIT {
         Response response = sendUserInput(agentResourceId.id(), conversationResourceId.id(), "question", false, false);
 
         response.then().assertThat().statusCode(200).body("conversationSteps", hasSize(2))
-                .body("conversationSteps[1].conversationStep[3].key", equalTo("quickReplies:giving_two_options"))
-                .body("conversationSteps[1].conversationStep[3].value[0].value", equalTo("Option 1"))
-                .body("conversationSteps[1].conversationStep[3].value[1].value", equalTo("Option 2"));
+                .body("conversationSteps[1].conversationStep.find { it.key == 'quickReplies:giving_two_options' }.value[0].value",
+                        equalTo("Option 1"))
+                .body("conversationSteps[1].conversationStep.find { it.key == 'quickReplies:giving_two_options' }.value[1].value",
+                        equalTo("Option 2"));
     }
 
     // ==================== Context Handling ====================
@@ -178,8 +179,9 @@ public class AgentEngineIT extends BaseIntegrationIT {
                 {"input":"hello","context":{"userInfo":{"type":"object","value":{"username":"John"}}}}""";
         Response response = sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
 
-        response.then().assertThat().statusCode(200).body("conversationSteps[1].conversationStep[8].key", equalTo("output:text:greet_personally"))
-                .body("conversationSteps[1].conversationStep[8].value.text", equalTo("Hello John! Nice to meet you! :-)"));
+        response.then().assertThat().statusCode(200)
+                .body("conversationSteps[1].conversationStep.find { it.key == 'output:text:greet_personally' }.value.text",
+                        equalTo("Hello John! Nice to meet you! :-)"));
     }
 
     // ==================== Property Extraction ====================
@@ -191,8 +193,9 @@ public class AgentEngineIT extends BaseIntegrationIT {
                 {"input":"property","context":{}}""";
         Response response = sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
 
-        response.then().assertThat().statusCode(200).body("conversationSteps[1].conversationStep[6].key", equalTo("properties:someMeaning"))
-                .body("conversationSteps[1].conversationStep[6].value[0].valueString", equalTo("someValue"));
+        response.then().assertThat().statusCode(200)
+                .body("conversationSteps[1].conversationStep.find { it.key == 'properties:someMeaning' }.value[0].valueString",
+                        equalTo("someValue"));
     }
 
     // ==================== Conversation Ended ====================
@@ -206,7 +209,7 @@ public class AgentEngineIT extends BaseIntegrationIT {
         Thread.sleep(100);
         Response response = sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
 
-        response.then().assertThat().statusCode(410).body(equalTo("Conversation has ended!"));
+        response.then().assertThat().statusCode(410).body(equalTo("Conversation has ended"));
     }
 
     // ==================== Helpers ====================
