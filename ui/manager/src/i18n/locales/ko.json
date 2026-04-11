@@ -1,4 +1,4 @@
-{
+﻿{
   "app": {
     "title": "EDDI Manager",
     "description": "EDDI 대화형 AI 플랫폼 관리 대시보드"
@@ -937,6 +937,31 @@
     "roleUser": "사용자",
     "roleAssistant": "어시스턴트",
     "roleTool": "도구 결과"
+  },
+  "promptPreview": {
+    "preview": "Preview",
+    "edit": "Edit",
+    "switchToPreview": "Preview resolved prompt",
+    "switchToEdit": "Switch to Edit",
+    "refresh": "Refresh",
+    "sampleData": "Sample data (no conversation)",
+    "disclaimerReal": "Preview uses the real Qute engine with actual conversation data.",
+    "disclaimerSample": "Preview uses the real Qute engine with built-in sample data. Select a conversation for real values.",
+    "resolvedPrompt": "Resolved Prompt",
+    "copy": "Copy",
+    "copied": "Copied!",
+    "error": "Template resolution error",
+    "loading": "Resolving template…",
+    "availableVariables": "Available Variables",
+    "copyVariable": "Click to copy variable reference",
+    "varProperties": "Properties",
+    "varMemory": "Memory",
+    "varContext": "Context",
+    "varSnippets": "Snippets",
+    "varUserInfo": "User Info",
+    "varConversationInfo": "Conversation Info",
+    "varInput": "Input",
+    "varConversationLog": "Conversation Log"
   },
   "studio": {
     "title": "에이전트 스튜디오",

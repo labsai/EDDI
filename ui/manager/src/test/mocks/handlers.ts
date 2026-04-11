@@ -551,6 +551,47 @@ function generateMockAuditEntries(conversationId: string, count: number) {
 }
 
 export const handlers = [
+  // Template preview — resolves Qute templates for the LLM editor preview
+  http.post("*/administration/preview/template", async ({ request }) => {
+    const body = (await request.json()) as { template?: string; conversationId?: string };
+    const template = body.template ?? "";
+    // Sample data matching what the real backend provides
+    const sampleData: Record<string, unknown> = {
+      "properties.userName": "Alice",
+      "properties.language": "en",
+      "properties.email": "alice@example.com",
+      "memory.current.input": "What is my order status?",
+      "memory.current.actions": "check_order, respond",
+      "memory.last.input": "Hello",
+      "memory.last.output": "Welcome! How can I help you today?",
+      "context.output": "Previous context value",
+      "snippets.tone": "Be professional and concise.",
+      "snippets.safety": "Do not reveal internal system details.",
+      "userInfo.userId": "user-12345",
+      "conversationInfo.conversationId": body.conversationId ?? "conv-67890",
+      "conversationInfo.agentId": "agent-abc",
+      "conversationInfo.agentVersion": "1",
+      "input": "What is my order status?",
+    };
+    // Simple template resolution: replace {key} with values
+    let resolved = template;
+    for (const [key, val] of Object.entries(sampleData)) {
+      resolved = resolved.split(`{${key}}`).join(String(val));
+    }
+    // Strip {#if ...} ... {/if} and {#for ...} ... {/for} blocks (just show inner content)
+    resolved = resolved.replace(/\{#if[^}]*\}\n?/g, "");
+    resolved = resolved.replace(/\{\/if\}\n?/g, "");
+    resolved = resolved.replace(/\{#for[^}]*\}\n?/g, "");
+    resolved = resolved.replace(/\{\/for\}\n?/g, "");
+    resolved = resolved.replace(/\{#else\}\n?/g, "");
+    return HttpResponse.json({
+      resolved,
+      availableVariables: Object.keys(sampleData),
+      variableValues: sampleData,
+      error: null,
+    });
+  }),
+
   // Descriptor PATCH — used by create-workflow/create-agent to set name/description
   http.patch("*/descriptorstore/descriptors/:id", () => {
     return new HttpResponse(null, { status: 200 });

@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { PromptPreview } from "./prompt-preview";
 import { useTranslation } from "react-i18next";
 import {
   ChevronDown,
@@ -22,6 +23,7 @@ import {
   Wrench,
   Check,
   ListFilter,
+  Eye,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
@@ -31,6 +33,7 @@ import {
   QrBuildInstructionsEditor,
 } from "./apicalls-editor";
 import { EditorSection } from "./editor-section";
+import { cn } from "@/lib/utils";
 import { TaskCascadeSection } from "./llm/task-cascade-section";
 import { TaskMemorySection } from "./llm/task-memory-section";
 import { TaskRagSection } from "./llm/task-rag-section";
@@ -226,6 +229,7 @@ function TaskEditor({
 }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
+  const [showPreview, setShowPreview] = useState(false);
 
   const isAgent =
     (task.tools && task.tools.length > 0) ||
@@ -346,18 +350,48 @@ function TaskEditor({
           <EditorSection
             label={t("llmEditor.systemPrompt", "System Prompt")}
           >
-            <ContentEditor
-              value={task.parameters?.systemMessage ?? ""}
-              onChange={(v) => updateParam("systemMessage", v)}
-              readOnly={readOnly}
-              language="prompt"
-              label={t("llmEditor.systemPrompt", "System Prompt")}
-              placeholder={t(
-                "llmEditor.systemPromptPlaceholder",
-                "You are a helpful assistant..."
-              )}
-              testId="system-prompt"
-            />
+            {/* Preview toggle */}
+            <div className="mb-2 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setShowPreview(!showPreview)}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-medium transition-all",
+                  showPreview
+                    ? "bg-primary/15 text-primary border border-primary/30"
+                    : "text-muted-foreground border border-transparent hover:text-foreground hover:border-border"
+                )}
+                title={showPreview
+                  ? t("promptPreview.switchToEdit", "Switch to Edit")
+                  : t("promptPreview.switchToPreview", "Preview resolved prompt")
+                }
+                data-testid="system-prompt-preview-toggle"
+              >
+                <Eye className="h-3 w-3" />
+                {showPreview
+                  ? t("promptPreview.edit", "Edit")
+                  : t("promptPreview.preview", "Preview")}
+              </button>
+            </div>
+
+            {showPreview ? (
+              <PromptPreview
+                template={task.parameters?.systemMessage ?? ""}
+              />
+            ) : (
+              <ContentEditor
+                value={task.parameters?.systemMessage ?? ""}
+                onChange={(v) => updateParam("systemMessage", v)}
+                readOnly={readOnly}
+                language="prompt"
+                label={t("llmEditor.systemPrompt", "System Prompt")}
+                placeholder={t(
+                  "llmEditor.systemPromptPlaceholder",
+                  "You are a helpful assistant..."
+                )}
+                testId="system-prompt"
+              />
+            )}
           </EditorSection>
 
           {/* Model Parameters */}
