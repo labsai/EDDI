@@ -9,6 +9,7 @@ import {
   endConversation as endConversationApi,
   undoConversation as undoConversationApi,
   redoConversation as redoConversationApi,
+  rerunLastStep,
   type ChatMessage,
   type SSEEvent,
 } from "@/lib/api/chat";
@@ -668,6 +669,35 @@ export function useEndConversation() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [...CHAT_KEY, "history"] });
+    },
+  });
+}
+
+/** Rerun the last conversation step (retry after error), then reload. */
+export function useRerunConversation() {
+  const store = useChatStore;
+  return useMutation({
+    mutationFn: async () => {
+      const { selectedAgentId, conversationId } = store.getState();
+      if (!selectedAgentId || !conversationId) throw new Error("No active conversation");
+
+      // Trigger server-side re-execution
+      await rerunLastStep(conversationId);
+
+      // Reload conversation to pick up the new output
+      const snapshot = await readConversation(
+        "production",
+        selectedAgentId,
+        conversationId,
+        false
+      );
+      const messages = snapshotToMessages(snapshot);
+      store.getState().replaceMessages(messages);
+      store.getState().setUndoRedo(
+        snapshot.conversationSteps.length > 0,
+        snapshot.redoAvailable ?? false
+      );
+      return snapshot;
     },
   });
 }

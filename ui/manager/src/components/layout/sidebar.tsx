@@ -31,6 +31,7 @@ import {
   Database,
   Zap,
   RefreshCw,
+  Link2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -67,6 +68,7 @@ const navSections = [
       { path: "/manage/audit", icon: ShieldCheck, labelKey: "nav.audit" },
       { path: "/manage/memories", icon: Brain, labelKey: "nav.memories" },
       { path: "/manage/properties", icon: Database, labelKey: "nav.properties" },
+      { path: "/manage/user-conversations", icon: Link2, labelKey: "nav.userConversations" },
     ],
   },
   {

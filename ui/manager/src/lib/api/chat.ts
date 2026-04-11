@@ -218,4 +218,13 @@ export function redoConversation(
   );
 }
 
-
+/** Rerun the last conversation step (retry after error). */
+export function rerunLastStep(
+  conversationId: string,
+): Promise<void> {
+  const params = new URLSearchParams({
+    returnDetailed: "false",
+    returnCurrentStepOnly: "true",
+  });
+  return api.post(`/agents/${conversationId}/rerun?${params.toString()}`);
+}

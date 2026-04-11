@@ -42,7 +42,8 @@
     "properties": "Properties",
     "triggers": "Triggers",
     "capabilities": "Capabilities",
-    "sync": "同步"
+    "sync": "同步",
+    "userConversations": "用户对话"
   },
   "theme": {
     "light": "浅色",
@@ -274,7 +275,12 @@
     "deployed": "已部署",
     "endpointsParsed": "已解析 {{count}} 个 API endpoints",
     "viewAgent": "查看 Agent",
-    "createAnother": "创建另一个"
+    "createAnother": "创建另一个",
+    "allTools": "All Tools",
+    "selectSpecific": "Select Specific",
+    "allToolsInfo": "All {{count}} built-in tools will be available to your agent. Switch to \"Select Specific\" to restrict which tools are enabled.",
+    "availableTools": "Available Tools",
+    "toolCount": "{{selected}} of {{total}} selected"
   },
   "packages": {
     "createWorkflow": "创建 Workflow",
@@ -345,7 +351,14 @@
     "undo": "撤销上一条消息",
     "redo": "恢复消息",
     "continueConversation": "继续",
-    "noHistory": "暂无会话历史。"
+    "noHistory": "暂无会话历史。",
+    "attach": "附加文件",
+    "attachUploading": "上传中...",
+    "attachSuccess": "文件已附加",
+    "attachError": "文件上传失败",
+    "retry": "重试上一步",
+    "retrySuccess": "步骤已重新执行",
+    "retryError": "重试失败"
   },
   "resources": {
     "unnamed": "未命名资源",
@@ -602,7 +615,15 @@
     "skillPlaceholder": "e.g. order-tracking",
     "modeAgent": "Agent",
     "modeChat": "Chat",
-    "perMinute": "/min"
+    "perMinute": "/min",
+    "allTools": "All Tools",
+    "selectSpecific": "Select Specific",
+    "allToolsInfo": "All {{count}} built-in tools are available to the LLM. Switch to \"Select Specific\" to restrict which tools are exposed.",
+    "availableTools": "Available Tools",
+    "toolCount": "{{selected}} of {{total}} selected",
+    "toolSources": "Workflow Tool Sources",
+    "toolSourcesInfo": "Both sources are enabled by default — all workflow HTTP calls and MCP calls are automatically exposed as LLM tools. Disable a source to exclude it.",
+    "included": "Included"
   },
   "outputEditor": {
     "language": "语言",
@@ -1346,5 +1367,24 @@
     "actionUpdate": "Update",
     "actionSkip": "Up to date",
     "actionConflict": "Conflict"
+  },
+  "userConversations": {
+    "title": "用户对话",
+    "subtitle": "管理意图→用户→对话绑定",
+    "lookup": "查找",
+    "intent": "意图",
+    "userId": "用户ID",
+    "agentId": "代理ID",
+    "environment": "环境",
+    "conversationId": "对话ID",
+    "binding": "活动绑定",
+    "enterBoth": "输入意图和用户ID进行搜索",
+    "notFound": "未找到绑定",
+    "create": "创建绑定",
+    "createTitle": "创建绑定",
+    "created": "绑定已创建",
+    "deleteTitle": "删除绑定",
+    "deleteDesc": "删除意图\"{{intent}}\"和用户\"{{userId}}\"的绑定？",
+    "deleted": "绑定已删除"
   }
 }

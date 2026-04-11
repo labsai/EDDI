@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   useChatStore,
   useDeployedAgents,
@@ -9,7 +10,9 @@ import {
   useEndConversation,
   useUndoConversation,
   useRedoConversation,
+  useRerunConversation,
 } from "@/hooks/use-chat";
+import { uploadAttachment } from "@/lib/api/attachments";
 import { ChatMessage } from "./chat-message";
 import { ChatHistory } from "./chat-history";
 import { StreamingToggle } from "./streaming-toggle";
@@ -30,6 +33,8 @@ import {
   Eye,
   EyeOff,
   Send,
+  Paperclip,
+  RefreshCw,
 } from "lucide-react";
 
 export function ChatPanel() {
@@ -132,6 +137,41 @@ export function ChatPanel() {
     },
     [sendMessage]
   );
+
+  // ── Attachment upload ──
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleAttach = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !conversationId) return;
+    setIsUploading(true);
+    try {
+      const result = await uploadAttachment(conversationId, file);
+      // Send the storage ref as a user message so the agent can process it
+      sendMessage.mutate({
+        message: `📎 ${file.name} [ref:${result.storageRef}]`,
+      });
+      toast.success(t("chat.attachSuccess", "File attached"));
+    } catch {
+      toast.error(t("chat.attachError", "Failed to upload file"));
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }, [conversationId, sendMessage, t]);
+
+  // ── Rerun last step ──
+  const rerunConversation = useRerunConversation();
+  const lastMessage = messages[messages.length - 1];
+  const showRerun = lastMessage?.role === "agent" && (lastMessage.content ?? "").includes("⚠️ Error");
+
+  const handleRerun = useCallback(() => {
+    rerunConversation.mutate(undefined, {
+      onSuccess: () => toast.success(t("chat.retrySuccess", "Step re-executed")),
+      onError: () => toast.error(t("chat.retryError", "Retry failed")),
+    });
+  }, [rerunConversation, t]);
 
   return (
     <div className="flex h-full overflow-hidden rounded-xl border border-border bg-background shadow-sm">
@@ -277,6 +317,21 @@ export function ChatPanel() {
                 </div>
               )}
 
+              {/* Rerun button — shown when last message is an error */}
+              {showRerun && !isProcessing && (
+                <div className="flex justify-center py-2">
+                  <button
+                    onClick={handleRerun}
+                    disabled={rerunConversation.isPending}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/5 px-4 py-1.5 text-xs font-medium text-amber-600 transition-colors hover:bg-amber-500/15 disabled:opacity-50 dark:text-amber-400"
+                    data-testid="rerun-btn"
+                  >
+                    <RefreshCw className={cn("h-3.5 w-3.5", rerunConversation.isPending && "animate-spin")} />
+                    {t("chat.retry", "Retry Last Step")}
+                  </button>
+                </div>
+              )}
+
               <div ref={messagesEndRef} />
             </div>
           )}
@@ -361,6 +416,10 @@ export function ChatPanel() {
             isProcessing={isProcessing}
             isSecretMode={isSecretMode}
             onToggleSecret={toggleSecretMode}
+            fileInputRef={fileInputRef}
+            onFileChange={handleAttach}
+            isUploading={isUploading}
+            hasConversation={!!conversationId}
           />
         )}
       </div>
@@ -466,12 +525,20 @@ function ChatInputWithSecretToggle({
   isProcessing = false,
   isSecretMode,
   onToggleSecret,
+  fileInputRef,
+  onFileChange,
+  isUploading = false,
+  hasConversation = false,
 }: {
   onSend: (message: string, isSecret?: boolean) => void;
   disabled?: boolean;
   isProcessing?: boolean;
   isSecretMode: boolean;
   onToggleSecret: () => void;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  isUploading?: boolean;
+  hasConversation?: boolean;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -503,7 +570,35 @@ function ChatInputWithSecretToggle({
 
   return (
     <div className="border-t border-border bg-background p-4" data-tour="chat-input-area">
+      {/* Hidden file input for attachments */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={onFileChange}
+        data-testid="chat-file-input"
+      />
       <div className="flex items-end gap-2">
+        {/* 📎 Attach button */}
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={!hasConversation || isUploading}
+          className={cn(
+            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-colors",
+            isUploading
+              ? "bg-primary/10 text-primary animate-pulse"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          )}
+          title={t("chat.attach", "Attach file")}
+          data-testid="chat-attach-btn"
+        >
+          {isUploading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Paperclip className="h-4 w-4" />
+          )}
+        </button>
         {/* 🔒 Secret mode toggle */}
         <button
           type="button"

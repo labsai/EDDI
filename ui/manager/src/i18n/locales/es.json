@@ -42,7 +42,8 @@
     "properties": "Properties",
     "triggers": "Triggers",
     "capabilities": "Capabilities",
-    "sync": "Sincronización"
+    "sync": "Sincronización",
+    "userConversations": "Conversaciones de usuario"
   },
   "theme": {
     "light": "Claro",
@@ -274,7 +275,12 @@
     "deployed": "Desplegado",
     "endpointsParsed": "{{count}} endpoints API analizados",
     "viewAgent": "Ver agent",
-    "createAnother": "Crear otro"
+    "createAnother": "Crear otro",
+    "allTools": "All Tools",
+    "selectSpecific": "Select Specific",
+    "allToolsInfo": "All {{count}} built-in tools will be available to your agent. Switch to \"Select Specific\" to restrict which tools are enabled.",
+    "availableTools": "Available Tools",
+    "toolCount": "{{selected}} of {{total}} selected"
   },
   "packages": {
     "createWorkflow": "Crear workflow",
@@ -345,7 +351,14 @@
     "undo": "Deshacer último mensaje",
     "redo": "Rehacer mensaje",
     "continueConversation": "Continuar",
-    "noHistory": "Sin historial de conversaciones."
+    "noHistory": "Sin historial de conversaciones.",
+    "attach": "Adjuntar archivo",
+    "attachUploading": "Subiendo...",
+    "attachSuccess": "Archivo adjuntado",
+    "attachError": "Error al subir archivo",
+    "retry": "Reintentar último paso",
+    "retrySuccess": "Paso re-ejecutado",
+    "retryError": "Reintento fallido"
   },
   "resources": {
     "unnamed": "Recurso sin nombre",
@@ -602,7 +615,15 @@
     "skillPlaceholder": "e.g. order-tracking",
     "modeAgent": "Agent",
     "modeChat": "Chat",
-    "perMinute": "/min"
+    "perMinute": "/min",
+    "allTools": "All Tools",
+    "selectSpecific": "Select Specific",
+    "allToolsInfo": "All {{count}} built-in tools are available to the LLM. Switch to \"Select Specific\" to restrict which tools are exposed.",
+    "availableTools": "Available Tools",
+    "toolCount": "{{selected}} of {{total}} selected",
+    "toolSources": "Workflow Tool Sources",
+    "toolSourcesInfo": "Both sources are enabled by default — all workflow HTTP calls and MCP calls are automatically exposed as LLM tools. Disable a source to exclude it.",
+    "included": "Included"
   },
   "outputEditor": {
     "language": "Idioma",
@@ -1346,5 +1367,24 @@
     "actionUpdate": "Update",
     "actionSkip": "Up to date",
     "actionConflict": "Conflict"
+  },
+  "userConversations": {
+    "title": "Conversaciones de usuario",
+    "subtitle": "Gestionar vínculos de intent → usuario → conversación",
+    "lookup": "Búsqueda",
+    "intent": "Intent",
+    "userId": "ID de usuario",
+    "agentId": "ID de agente",
+    "environment": "Entorno",
+    "conversationId": "ID de conversación",
+    "binding": "Vínculo activo",
+    "enterBoth": "Ingrese intent e ID de usuario",
+    "notFound": "No se encontró vínculo",
+    "create": "Crear vínculo",
+    "createTitle": "Crear vínculo",
+    "created": "Vínculo creado",
+    "deleteTitle": "Eliminar vínculo",
+    "deleteDesc": "¿Eliminar el vínculo para intent \"{{intent}}\" y usuario \"{{userId}}\"?",
+    "deleted": "Vínculo eliminado"
   }
 }

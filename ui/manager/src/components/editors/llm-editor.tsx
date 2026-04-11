@@ -18,6 +18,10 @@ import {
   FileOutput,
   MessageCircle,
   Scissors,
+  Info,
+  Wrench,
+  Check,
+  ListFilter,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
@@ -420,118 +424,254 @@ function TaskEditor({
             label={t("llmEditor.agentMode", "Agent Mode")}
             defaultOpen={!!isAgent}
           >
-            <div className="space-y-3">
-              <label className="inline-flex items-center gap-2 text-xs text-foreground">
-                <input
-                  type="checkbox"
-                  checked={task.enableBuiltInTools ?? false}
-                  onChange={(e) =>
-                    onChange({
-                      ...task,
-                      enableBuiltInTools: e.target.checked,
-                    })
-                  }
-                  disabled={readOnly}
-                  className="h-3.5 w-3.5 rounded border-input accent-primary"
-                  data-testid="enable-builtin-tools"
-                />
-                {t(
-                  "llmEditor.enableBuiltInTools",
-                  "Enable Built-in Tools"
-                )}
-              </label>
-
-              {task.enableBuiltInTools && (
-                <div>
-                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <div className="space-y-4">
+              {/* ─── Built-in Tools ─── */}
+              <div className="rounded-lg border border-border bg-secondary/10 p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={task.enableBuiltInTools ?? false}
+                      onChange={(e) =>
+                        onChange({
+                          ...task,
+                          enableBuiltInTools: e.target.checked,
+                        })
+                      }
+                      disabled={readOnly}
+                      className="h-3.5 w-3.5 rounded border-input accent-primary"
+                      data-testid="enable-builtin-tools"
+                    />
+                    <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
                     {t(
-                      "llmEditor.toolWhitelist",
-                      "Tool Whitelist (empty = all)"
+                      "llmEditor.enableBuiltInTools",
+                      "Enable Built-in Tools"
                     )}
                   </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {BUILT_IN_TOOLS.map((tool) => (
-                      <label
-                        key={tool}
-                        className="inline-flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs text-foreground transition-colors hover:bg-secondary"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={
-                            task.builtInToolsWhitelist?.includes(tool) ?? false
-                          }
-                          onChange={(e) => {
-                            const wl = task.builtInToolsWhitelist ?? [];
+                </div>
+
+                {task.enableBuiltInTools && (
+                  <div className="space-y-2.5 ps-5">
+                    {/* All vs Select Specific toggle */}
+                    <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5" role="radiogroup" aria-label={t("llmEditor.enableBuiltInTools", "Enable Built-in Tools")} data-testid="tool-selection-mode">
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={!task.builtInToolsWhitelist || task.builtInToolsWhitelist.length === 0}
+                        onClick={() => {
+                          if (!readOnly) {
                             onChange({
                               ...task,
-                              builtInToolsWhitelist: e.target.checked
-                                ? [...wl, tool]
-                                : wl.filter((item) => item !== tool),
+                              builtInToolsWhitelist: undefined,
                             });
-                          }}
-                          disabled={readOnly}
-                          className="h-3 w-3 accent-primary"
-                        />
-                        {tool}
-                      </label>
-                    ))}
+                          }
+                        }}
+                        disabled={readOnly}
+                        className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+                          !task.builtInToolsWhitelist || task.builtInToolsWhitelist.length === 0
+                            ? "bg-primary text-primary-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                        data-testid="tool-mode-all"
+                      >
+                        <Check className="h-3 w-3" />
+                        {t("llmEditor.allTools", "All Tools")}
+                      </button>
+                      <button
+                        type="button"
+                        role="radio"
+                        aria-checked={!!(task.builtInToolsWhitelist && task.builtInToolsWhitelist.length > 0)}
+                        onClick={() => {
+                          if (!readOnly && (!task.builtInToolsWhitelist || task.builtInToolsWhitelist.length === 0)) {
+                            onChange({
+                              ...task,
+                              builtInToolsWhitelist: [...BUILT_IN_TOOLS],
+                            });
+                          }
+                        }}
+                        disabled={readOnly}
+                        className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+                          task.builtInToolsWhitelist && task.builtInToolsWhitelist.length > 0
+                            ? "bg-primary text-primary-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                        data-testid="tool-mode-specific"
+                      >
+                        <ListFilter className="h-3 w-3" />
+                        {t("llmEditor.selectSpecific", "Select Specific")}
+                      </button>
+                    </div>
+
+                    {/* Info callout for All mode */}
+                    {(!task.builtInToolsWhitelist || task.builtInToolsWhitelist.length === 0) && (
+                      <div className="flex items-start gap-2 rounded-md bg-sky-500/10 px-3 py-2 text-[11px] text-sky-700 dark:text-sky-400" data-testid="all-tools-info">
+                        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <span>
+                          {t(
+                            "llmEditor.allToolsInfo",
+                            "All {{count}} built-in tools are available to the LLM. Switch to \"Select Specific\" to restrict which tools are exposed.",
+                            { count: BUILT_IN_TOOLS.length }
+                          )}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Tool chips (visible in Select Specific mode) */}
+                    {task.builtInToolsWhitelist && task.builtInToolsWhitelist.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                            {t("llmEditor.availableTools", "Available Tools")}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {t("llmEditor.toolCount", "{{selected}} of {{total}} selected", {
+                              selected: task.builtInToolsWhitelist.length,
+                              total: BUILT_IN_TOOLS.length,
+                            })}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {BUILT_IN_TOOLS.map((tool) => {
+                            const selected = task.builtInToolsWhitelist?.includes(tool) ?? false;
+                            return (
+                              <button
+                                key={tool}
+                                type="button"
+                                aria-pressed={selected}
+                                onClick={() => {
+                                  if (readOnly) return;
+                                  const wl = task.builtInToolsWhitelist ?? [];
+                                  const next = selected
+                                    ? wl.filter((item) => item !== tool)
+                                    : [...wl, tool];
+                                  onChange({
+                                    ...task,
+                                    builtInToolsWhitelist: next.length > 0 ? next : undefined,
+                                  });
+                                }}
+                                disabled={readOnly}
+                                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all ${
+                                  selected
+                                    ? "bg-primary/15 text-primary border border-primary/30 shadow-sm"
+                                    : "bg-secondary/50 text-muted-foreground border border-transparent hover:border-border hover:text-foreground"
+                                }`}
+                                data-testid={`tool-chip-${tool}`}
+                              >
+                                {selected && <Check className="h-3 w-3" />}
+                                {tool}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* ─── Auto-discover Tool Sources ─── */}
+              <div className="rounded-lg border border-border bg-secondary/10 p-3 space-y-3">
+                <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {t("llmEditor.toolSources", "Workflow Tool Sources")}
+                </label>
+
+                {/* Info callout about defaults — shown only when both sources are enabled */}
+                {(task.enableHttpCallTools ?? true) && (task.enableMcpCallTools ?? true) && (
+                  <div className="flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400" data-testid="tool-sources-info">
+                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      {t(
+                        "llmEditor.toolSourcesInfo",
+                        "Both sources are enabled by default \u2014 all workflow HTTP calls and MCP calls are automatically exposed as LLM tools. Disable a source to exclude it."
+                      )}
+                    </span>
+                  </div>
+                )}
+
+                {/* Auto-discover HTTP Call Tools */}
+                <div className={`flex items-start gap-2 rounded-md border px-3 py-2 transition-colors ${
+                  (task.enableHttpCallTools ?? true)
+                    ? "border-emerald-500/30 bg-emerald-500/5"
+                    : "border-border bg-secondary/20"
+                }`}>
+                  <input
+                    type="checkbox"
+                    checked={task.enableHttpCallTools ?? true}
+                    onChange={(e) =>
+                      onChange({
+                        ...task,
+                        enableHttpCallTools: e.target.checked,
+                      })
+                    }
+                    disabled={readOnly}
+                    className="mt-0.5 h-3.5 w-3.5 rounded border-input accent-primary shrink-0"
+                    data-testid="enable-httpcall-tools"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-foreground">
+                        {t(
+                          "llmEditor.enableHttpCallTools",
+                          "Auto-Discover HTTP Call Tools"
+                        )}
+                      </span>
+                      {(task.enableHttpCallTools ?? true) && (
+                        <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                          {t("llmEditor.included", "Included")}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">
+                      {t(
+                        "llmEditor.enableHttpCallToolsDesc",
+                        "Automatically expose all httpcall extensions from the workflow as LLM tools"
+                      )}
+                    </p>
                   </div>
                 </div>
-              )}
 
-              {/* Auto-discover HTTP Call Tools */}
-              <label className="inline-flex items-center gap-2 text-xs text-foreground">
-                <input
-                  type="checkbox"
-                  checked={task.enableHttpCallTools ?? true}
-                  onChange={(e) =>
-                    onChange({
-                      ...task,
-                      enableHttpCallTools: e.target.checked,
-                    })
-                  }
-                  disabled={readOnly}
-                  className="h-3.5 w-3.5 rounded border-input accent-primary"
-                  data-testid="enable-httpcall-tools"
-                />
-                {t(
-                  "llmEditor.enableHttpCallTools",
-                  "Auto-Discover HTTP Call Tools"
-                )}
-              </label>
-              <p className="text-[10px] text-muted-foreground ps-5 -mt-2">
-                {t(
-                  "llmEditor.enableHttpCallToolsDesc",
-                  "Automatically expose all httpcall extensions from the workflow as LLM tools"
-                )}
-              </p>
-
-              {/* Auto-discover MCP Call Tools */}
-              <label className="inline-flex items-center gap-2 text-xs text-foreground">
-                <input
-                  type="checkbox"
-                  checked={task.enableMcpCallTools ?? true}
-                  onChange={(e) =>
-                    onChange({
-                      ...task,
-                      enableMcpCallTools: e.target.checked,
-                    })
-                  }
-                  disabled={readOnly}
-                  className="h-3.5 w-3.5 rounded border-input accent-primary"
-                  data-testid="enable-mcpcall-tools"
-                />
-                {t(
-                  "llmEditor.enableMcpCallTools",
-                  "Auto-Discover MCP Call Tools"
-                )}
-              </label>
-              <p className="text-[10px] text-muted-foreground ps-5 -mt-2">
-                {t(
-                  "llmEditor.enableMcpCallToolsDesc",
-                  "Automatically expose all mcpcalls extensions from the workflow as LLM tools"
-                )}
-              </p>
+                {/* Auto-discover MCP Call Tools */}
+                <div className={`flex items-start gap-2 rounded-md border px-3 py-2 transition-colors ${
+                  (task.enableMcpCallTools ?? true)
+                    ? "border-emerald-500/30 bg-emerald-500/5"
+                    : "border-border bg-secondary/20"
+                }`}>
+                  <input
+                    type="checkbox"
+                    checked={task.enableMcpCallTools ?? true}
+                    onChange={(e) =>
+                      onChange({
+                        ...task,
+                        enableMcpCallTools: e.target.checked,
+                      })
+                    }
+                    disabled={readOnly}
+                    className="mt-0.5 h-3.5 w-3.5 rounded border-input accent-primary shrink-0"
+                    data-testid="enable-mcpcall-tools"
+                  />
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-foreground">
+                        {t(
+                          "llmEditor.enableMcpCallTools",
+                          "Auto-Discover MCP Call Tools"
+                        )}
+                      </span>
+                      {(task.enableMcpCallTools ?? true) && (
+                        <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                          {t("llmEditor.included", "Included")}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">
+                      {t(
+                        "llmEditor.enableMcpCallToolsDesc",
+                        "Automatically expose all mcpcalls extensions from the workflow as LLM tools"
+                      )}
+                    </p>
+                  </div>
+                </div>
+              </div>
 
               {/* Explicit HTTP Call Tool URIs */}
               <div>

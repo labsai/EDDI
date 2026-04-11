@@ -31,6 +31,7 @@ import { PropertiesPage } from "@/pages/properties";
 import { TriggersPage } from "@/pages/triggers";
 import { CapabilitiesPage } from "@/pages/capabilities";
 import { SyncPage } from "@/pages/sync-page";
+import { UserConversationsPage } from "@/pages/user-conversations";
 
 export function App() {
   return (
@@ -62,6 +63,7 @@ export function App() {
         <Route path="/manage/triggers" element={<TriggersPage />} />
         <Route path="/manage/capabilities" element={<CapabilitiesPage />} />
         <Route path="/manage/sync" element={<SyncPage />} />
+        <Route path="/manage/user-conversations" element={<UserConversationsPage />} />
         <Route
           path="/manage/conversationview/:id"
           element={<ConversationDetailPage />}

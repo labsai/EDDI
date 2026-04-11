@@ -42,7 +42,8 @@
     "properties": "Properties",
     "triggers": "Triggers",
     "capabilities": "Capabilities",
-    "sync": "동기화"
+    "sync": "동기화",
+    "userConversations": "사용자 대화"
   },
   "theme": {
     "light": "라이트",
@@ -274,7 +275,12 @@
     "deployed": "배포됨",
     "endpointsParsed": "{{count}}개의 API endpoints 분석 완료",
     "viewAgent": "Agent 보기",
-    "createAnother": "다른 Agent 생성"
+    "createAnother": "다른 Agent 생성",
+    "allTools": "All Tools",
+    "selectSpecific": "Select Specific",
+    "allToolsInfo": "All {{count}} built-in tools will be available to your agent. Switch to \"Select Specific\" to restrict which tools are enabled.",
+    "availableTools": "Available Tools",
+    "toolCount": "{{selected}} of {{total}} selected"
   },
   "packages": {
     "createWorkflow": "Workflow 생성",
@@ -345,7 +351,14 @@
     "undo": "마지막 메시지 취소",
     "redo": "메시지 복원",
     "continueConversation": "계속",
-    "noHistory": "대화 기록이 없습니다."
+    "noHistory": "대화 기록이 없습니다.",
+    "attach": "파일 첨부",
+    "attachUploading": "업로드 중...",
+    "attachSuccess": "파일 첨부됨",
+    "attachError": "파일 업로드 실패",
+    "retry": "마지막 단계 재시도",
+    "retrySuccess": "단계 재실행 완료",
+    "retryError": "재시도 실패"
   },
   "resources": {
     "unnamed": "이름 없는 리소스",
@@ -602,7 +615,15 @@
     "skillPlaceholder": "e.g. order-tracking",
     "modeAgent": "Agent",
     "modeChat": "Chat",
-    "perMinute": "/min"
+    "perMinute": "/min",
+    "allTools": "All Tools",
+    "selectSpecific": "Select Specific",
+    "allToolsInfo": "All {{count}} built-in tools are available to the LLM. Switch to \"Select Specific\" to restrict which tools are exposed.",
+    "availableTools": "Available Tools",
+    "toolCount": "{{selected}} of {{total}} selected",
+    "toolSources": "Workflow Tool Sources",
+    "toolSourcesInfo": "Both sources are enabled by default — all workflow HTTP calls and MCP calls are automatically exposed as LLM tools. Disable a source to exclude it.",
+    "included": "Included"
   },
   "outputEditor": {
     "language": "언어",
@@ -1346,5 +1367,24 @@
     "actionUpdate": "Update",
     "actionSkip": "Up to date",
     "actionConflict": "Conflict"
+  },
+  "userConversations": {
+    "title": "사용자 대화",
+    "subtitle": "인텐트 → 사용자 → 대화 바인딩 관리",
+    "lookup": "조회",
+    "intent": "인텐트",
+    "userId": "사용자 ID",
+    "agentId": "에이전트 ID",
+    "environment": "환경",
+    "conversationId": "대화 ID",
+    "binding": "활성 바인딩",
+    "enterBoth": "인텐트와 사용자 ID를 입력하세요",
+    "notFound": "바인딩을 찾을 수 없습니다",
+    "create": "바인딩 생성",
+    "createTitle": "바인딩 생성",
+    "created": "바인딩이 생성되었습니다",
+    "deleteTitle": "바인딩 삭제",
+    "deleteDesc": "인텐트 \"{{intent}}\"과 사용자 \"{{userId}}\"의 바인딩을 삭제하시겠습니까?",
+    "deleted": "바인딩이 삭제되었습니다"
   }
 }

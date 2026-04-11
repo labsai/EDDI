@@ -42,7 +42,8 @@
     "properties": "Properties",
     "triggers": "Triggers",
     "capabilities": "Capabilities",
-    "sync": "同期"
+    "sync": "同期",
+    "userConversations": "ユーザー会話"
   },
   "theme": {
     "light": "ライト",
@@ -274,7 +275,12 @@
     "deployed": "デプロイ済み",
     "endpointsParsed": "{{count}} 個の API endpoints を解析",
     "viewAgent": "Agent を表示",
-    "createAnother": "別の Agent を作成"
+    "createAnother": "別の Agent を作成",
+    "allTools": "All Tools",
+    "selectSpecific": "Select Specific",
+    "allToolsInfo": "All {{count}} built-in tools will be available to your agent. Switch to \"Select Specific\" to restrict which tools are enabled.",
+    "availableTools": "Available Tools",
+    "toolCount": "{{selected}} of {{total}} selected"
   },
   "packages": {
     "createWorkflow": "Workflow を作成",
@@ -345,7 +351,14 @@
     "undo": "最後のメッセージを元に戻す",
     "redo": "メッセージをやり直す",
     "continueConversation": "続行",
-    "noHistory": "会話履歴がありません。"
+    "noHistory": "会話履歴がありません。",
+    "attach": "ファイルを添付",
+    "attachUploading": "アップロード中...",
+    "attachSuccess": "ファイル添付完了",
+    "attachError": "ファイルのアップロードに失敗",
+    "retry": "最後のステップをリトライ",
+    "retrySuccess": "ステップを再実行しました",
+    "retryError": "リトライ失敗"
   },
   "resources": {
     "unnamed": "名前なしリソース",
@@ -602,7 +615,15 @@
     "skillPlaceholder": "e.g. order-tracking",
     "modeAgent": "Agent",
     "modeChat": "Chat",
-    "perMinute": "/min"
+    "perMinute": "/min",
+    "allTools": "All Tools",
+    "selectSpecific": "Select Specific",
+    "allToolsInfo": "All {{count}} built-in tools are available to the LLM. Switch to \"Select Specific\" to restrict which tools are exposed.",
+    "availableTools": "Available Tools",
+    "toolCount": "{{selected}} of {{total}} selected",
+    "toolSources": "Workflow Tool Sources",
+    "toolSourcesInfo": "Both sources are enabled by default — all workflow HTTP calls and MCP calls are automatically exposed as LLM tools. Disable a source to exclude it.",
+    "included": "Included"
   },
   "outputEditor": {
     "language": "言語",
@@ -1346,5 +1367,24 @@
     "actionUpdate": "Update",
     "actionSkip": "Up to date",
     "actionConflict": "Conflict"
+  },
+  "userConversations": {
+    "title": "ユーザー会話",
+    "subtitle": "インテント→ユーザー→会話のバインディングを管理",
+    "lookup": "検索",
+    "intent": "インテント",
+    "userId": "ユーザーID",
+    "agentId": "エージェントID",
+    "environment": "環境",
+    "conversationId": "会話ID",
+    "binding": "アクティブバインディング",
+    "enterBoth": "インテントとユーザーIDを入力",
+    "notFound": "バインディングが見つかりません",
+    "create": "バインディング作成",
+    "createTitle": "バインディング作成",
+    "created": "バインディングを作成しました",
+    "deleteTitle": "バインディング削除",
+    "deleteDesc": "インテント\"{{intent}}\"とユーザー\"{{userId}}\"のバインディングを削除しますか？",
+    "deleted": "バインディングを削除しました"
   }
 }

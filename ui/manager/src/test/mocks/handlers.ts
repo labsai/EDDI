@@ -3595,4 +3595,44 @@ export const backupSyncHandlers = [
   http.post("*/backup/import/sync/batch", () => {
     return new HttpResponse(null, { status: 202 });
   }),
+
+  // ── User Conversation Store ──
+
+  http.get("*/userconversationstore/userconversations/:intent/:userId", ({ params }) => {
+    return HttpResponse.json({
+      intent: params.intent,
+      userId: params.userId,
+      environment: "production",
+      agentId: "agent1",
+      conversationId: "conv1",
+    });
+  }),
+
+  http.post("*/userconversationstore/userconversations/:intent/:userId", () => {
+    return new HttpResponse(null, {
+      status: 201,
+      headers: { Location: "/userconversationstore/userconversations/test/user1" },
+    });
+  }),
+
+  http.delete("*/userconversationstore/userconversations/:intent/:userId", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // ── Conversation Attachments ──
+
+  http.post("*/conversations/:conversationId/attachments", () => {
+    return HttpResponse.json({
+      storageRef: `attachment-${Date.now()}`,
+      fileName: "document.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 102400,
+    });
+  }),
+
+  // ── Conversation Rerun ──
+
+  http.post("*/agents/:conversationId/rerun", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
 ];

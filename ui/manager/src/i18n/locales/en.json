@@ -34,6 +34,7 @@
     "triggers": "Triggers",
     "capabilities": "Capabilities",
     "sync": "Sync",
+    "userConversations": "User Conversations",
     "sectionCore": "Core",
     "sectionBuild": "Build & Test",
     "sectionMonitor": "Monitor",
@@ -279,6 +280,11 @@
     "builtInTools": "Built-in Tools",
     "builtInToolsDesc": "Enable EDDI's built-in tool library (calculator, datetime, etc.)",
     "toolsWhitelist": "Whitelist (empty = all tools)",
+    "allTools": "All Tools",
+    "selectSpecific": "Select Specific",
+    "allToolsInfo": "All {{count}} built-in tools will be available to your agent. Switch to \"Select Specific\" to restrict which tools are enabled.",
+    "availableTools": "Available Tools",
+    "toolCount": "{{selected}} of {{total}} selected",
     "mcpServers": "MCP Servers",
     "mcpServersDesc": "Connect to Model Context Protocol servers for external tools",
     "autoDeploy": "Auto-Deploy",
@@ -370,7 +376,14 @@
     "continueConversation": "Continue",
     "noHistory": "No conversation history yet.",
     "undo": "Undo last message",
-    "redo": "Redo message"
+    "redo": "Redo message",
+    "attach": "Attach file",
+    "attachUploading": "Uploading...",
+    "attachSuccess": "File attached",
+    "attachError": "Failed to upload file",
+    "retry": "Retry Last Step",
+    "retrySuccess": "Step re-executed",
+    "retryError": "Retry failed"
   },
   "resources": {
     "unnamed": "Unnamed Resource",
@@ -627,7 +640,15 @@
     "skillPlaceholder": "e.g. order-tracking",
     "modeAgent": "Agent",
     "modeChat": "Chat",
-    "perMinute": "/min"
+    "perMinute": "/min",
+    "allTools": "All Tools",
+    "selectSpecific": "Select Specific",
+    "allToolsInfo": "All {{count}} built-in tools are available to the LLM. Switch to \"Select Specific\" to restrict which tools are exposed.",
+    "availableTools": "Available Tools",
+    "toolCount": "{{selected}} of {{total}} selected",
+    "toolSources": "Workflow Tool Sources",
+    "toolSourcesInfo": "Both sources are enabled by default — all workflow HTTP calls and MCP calls are automatically exposed as LLM tools. Disable a source to exclude it.",
+    "included": "Included"
   },
   "outputEditor": {
     "language": "Language",
@@ -1340,5 +1361,24 @@
     "empty": "Connect to a source instance to begin syncing agents.",
     "autoMatched": "auto-matched",
     "previewFirst": "Preview changes before syncing"
+  },
+  "userConversations": {
+    "title": "User Conversations",
+    "subtitle": "Lookup and manage intent → user → conversation bindings used by managed agents",
+    "lookup": "Lookup",
+    "intent": "Intent",
+    "userId": "User ID",
+    "agentId": "Agent ID",
+    "environment": "Environment",
+    "conversationId": "Conversation ID",
+    "binding": "Active Binding",
+    "enterBoth": "Enter both intent and user ID to search",
+    "notFound": "No binding found for this intent + user",
+    "create": "Create Binding",
+    "createTitle": "Create Binding",
+    "created": "Binding created",
+    "deleteTitle": "Delete Binding",
+    "deleteDesc": "Remove the conversation binding for intent \"{{intent}}\" and user \"{{userId}}\"?",
+    "deleted": "Binding deleted"
   }
 }

@@ -42,7 +42,8 @@
     "properties": "Properties",
     "triggers": "Triggers",
     "capabilities": "Capabilities",
-    "sync": "المزامنة"
+    "sync": "المزامنة",
+    "userConversations": "محادثات المستخدم"
   },
   "theme": {
     "light": "فاتح",
@@ -274,7 +275,12 @@
     "deployed": "تم النشر",
     "endpointsParsed": "تم تحليل {{count}} endpoints API",
     "viewAgent": "عرض Agent",
-    "createAnother": "إنشاء آخر"
+    "createAnother": "إنشاء آخر",
+    "allTools": "All Tools",
+    "selectSpecific": "Select Specific",
+    "allToolsInfo": "All {{count}} built-in tools will be available to your agent. Switch to \"Select Specific\" to restrict which tools are enabled.",
+    "availableTools": "Available Tools",
+    "toolCount": "{{selected}} of {{total}} selected"
   },
   "packages": {
     "createWorkflow": "إنشاء Workflow",
@@ -345,7 +351,14 @@
     "undo": "تراجع عن آخر رسالة",
     "redo": "إعادة الرسالة",
     "continueConversation": "متابعة",
-    "noHistory": "لا يوجد سجل محادثات بعد."
+    "noHistory": "لا يوجد سجل محادثات بعد.",
+    "attach": "إرفاق ملف",
+    "attachUploading": "...جارٍ الرفع",
+    "attachSuccess": "تم إرفاق الملف",
+    "attachError": "فشل في رفع الملف",
+    "retry": "إعادة محاولة الخطوة الأخيرة",
+    "retrySuccess": "تم إعادة تنفيذ الخطوة",
+    "retryError": "فشلت إعادة المحاولة"
   },
   "resources": {
     "unnamed": "مورد بدون اسم",
@@ -602,7 +615,15 @@
     "skillPlaceholder": "e.g. order-tracking",
     "modeAgent": "Agent",
     "modeChat": "Chat",
-    "perMinute": "/min"
+    "perMinute": "/min",
+    "allTools": "All Tools",
+    "selectSpecific": "Select Specific",
+    "allToolsInfo": "All {{count}} built-in tools are available to the LLM. Switch to \"Select Specific\" to restrict which tools are exposed.",
+    "availableTools": "Available Tools",
+    "toolCount": "{{selected}} of {{total}} selected",
+    "toolSources": "Workflow Tool Sources",
+    "toolSourcesInfo": "Both sources are enabled by default — all workflow HTTP calls and MCP calls are automatically exposed as LLM tools. Disable a source to exclude it.",
+    "included": "Included"
   },
   "outputEditor": {
     "language": "اللغة",
@@ -1346,5 +1367,24 @@
     "actionUpdate": "Update",
     "actionSkip": "Up to date",
     "actionConflict": "Conflict"
+  },
+  "userConversations": {
+    "title": "محادثات المستخدم",
+    "subtitle": "إدارة ربط النية → المستخدم → المحادثة",
+    "lookup": "بحث",
+    "intent": "النية",
+    "userId": "معرف المستخدم",
+    "agentId": "معرف الوكيل",
+    "environment": "البيئة",
+    "conversationId": "معرف المحادثة",
+    "binding": "الربط النشط",
+    "enterBoth": "أدخل النية ومعرف المستخدم",
+    "notFound": "لم يتم العثور على ربط",
+    "create": "إنشاء ربط",
+    "createTitle": "إنشاء ربط",
+    "created": "تم إنشاء الربط",
+    "deleteTitle": "حذف الربط",
+    "deleteDesc": "إزالة الربط للنية \"{{intent}}\" والمستخدم \"{{userId}}\"?",
+    "deleted": "تم حذف الربط"
   }
 }

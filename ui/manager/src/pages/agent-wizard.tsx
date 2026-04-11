@@ -22,6 +22,8 @@ import {
   AlertCircle,
   CheckCircle2,
   ExternalLink,
+  ListFilter,
+  Info,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSetupAgent, useCreateApiAgent } from "@/hooks/use-agent-setup";
@@ -35,6 +37,7 @@ import {
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { BUILT_IN_TOOLS } from "@/components/editors/llm/types";
 
 /* ================================================================
    Types & Constants
@@ -1195,13 +1198,106 @@ function FeaturesStep({
               data-testid="wizard-toggle-tools"
             />
             {state.enableBuiltInTools && (
-              <input
-                value={state.builtInToolsWhitelist}
-                onChange={(e) => onChange({ builtInToolsWhitelist: e.target.value })}
-                placeholder={t("setupWizard.toolsWhitelist", "Whitelist (empty = all tools)")}
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
-                data-testid="wizard-tools-whitelist"
-              />
+              <div className="space-y-3 ps-9">
+                {/* All / Select Specific toggle */}
+                <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-0.5" role="radiogroup" aria-label={t("setupWizard.builtInTools", "Built-in Tools")} data-testid="wizard-tool-selection-mode">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={!state.builtInToolsWhitelist}
+                    onClick={() => onChange({ builtInToolsWhitelist: "" })}
+                    className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+                      !state.builtInToolsWhitelist
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    data-testid="wizard-tool-mode-all"
+                  >
+                    <Check className="h-3 w-3" />
+                    {t("setupWizard.allTools", "All Tools")}
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={!!state.builtInToolsWhitelist}
+                    onClick={() => {
+                      if (!state.builtInToolsWhitelist) {
+                        onChange({ builtInToolsWhitelist: BUILT_IN_TOOLS.join(",") });
+                      }
+                    }}
+                    className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all ${
+                      state.builtInToolsWhitelist
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    data-testid="wizard-tool-mode-specific"
+                  >
+                    <ListFilter className="h-3 w-3" />
+                    {t("setupWizard.selectSpecific", "Select Specific")}
+                  </button>
+                </div>
+
+                {/* Info banner for All mode */}
+                {!state.builtInToolsWhitelist && (
+                  <div className="flex items-start gap-2 rounded-md bg-sky-500/10 px-3 py-2 text-xs text-sky-700 dark:text-sky-400" data-testid="wizard-all-tools-info">
+                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      {t(
+                        "setupWizard.allToolsInfo",
+                        "All {{count}} built-in tools will be available to your agent. Switch to \"Select Specific\" to restrict which tools are enabled.",
+                        { count: BUILT_IN_TOOLS.length }
+                      )}
+                    </span>
+                  </div>
+                )}
+
+                {/* Tool chips in Select Specific mode */}
+                {state.builtInToolsWhitelist && (() => {
+                  const currentTools = state.builtInToolsWhitelist.split(",").filter(Boolean);
+                  return (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          {t("setupWizard.availableTools", "Available Tools")}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">
+                          {t("setupWizard.toolCount", "{{selected}} of {{total}} selected", {
+                            selected: currentTools.length,
+                            total: BUILT_IN_TOOLS.length,
+                          })}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5" data-testid="wizard-tools-whitelist">
+                        {BUILT_IN_TOOLS.map((tool) => {
+                          const selected = currentTools.includes(tool);
+                          return (
+                            <button
+                              key={tool}
+                              type="button"
+                              aria-pressed={selected}
+                              onClick={() => {
+                                const next = selected
+                                  ? currentTools.filter((item) => item !== tool)
+                                  : [...currentTools, tool];
+                                onChange({ builtInToolsWhitelist: next.length > 0 ? next.join(",") : "" });
+                              }}
+                              className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium transition-all ${
+                                selected
+                                  ? "bg-primary/15 text-primary border border-primary/30 shadow-sm"
+                                  : "bg-secondary/50 text-muted-foreground border border-transparent hover:border-border hover:text-foreground"
+                              }`}
+                              data-testid={`wizard-tool-chip-${tool}`}
+                            >
+                              {selected && <Check className="h-3 w-3" />}
+                              {tool}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
             )}
           </div>
         )}

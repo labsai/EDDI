@@ -42,7 +42,8 @@
     "properties": "Properties",
     "triggers": "Triggers",
     "capabilities": "Capabilities",
-    "sync": "सिंक"
+    "sync": "सिंक",
+    "userConversations": "उपयोगकर्ता वार्तालाप"
   },
   "theme": {
     "light": "लाइट",
@@ -274,7 +275,12 @@
     "deployed": "Deploy हो गया",
     "endpointsParsed": "{{count}} API endpoints का विश्लेषण किया गया",
     "viewAgent": "Agent देखें",
-    "createAnother": "एक और बनाएं"
+    "createAnother": "एक और बनाएं",
+    "allTools": "All Tools",
+    "selectSpecific": "Select Specific",
+    "allToolsInfo": "All {{count}} built-in tools will be available to your agent. Switch to \"Select Specific\" to restrict which tools are enabled.",
+    "availableTools": "Available Tools",
+    "toolCount": "{{selected}} of {{total}} selected"
   },
   "packages": {
     "createWorkflow": "Workflow बनाएं",
@@ -345,7 +351,14 @@
     "undo": "अंतिम संदेश पूर्ववत करें",
     "redo": "संदेश पुनः करें",
     "continueConversation": "जारी रखें",
-    "noHistory": "अभी तक कोई वार्तालाप इतिहास नहीं।"
+    "noHistory": "अभी तक कोई वार्तालाप इतिहास नहीं।",
+    "attach": "फ़ाइल संलग्न करें",
+    "attachUploading": "अपलोड हो रहा है...",
+    "attachSuccess": "फ़ाइल संलग्न",
+    "attachError": "फ़ाइल अपलोड विफल",
+    "retry": "अंतिम चरण पुनः प्रयास करें",
+    "retrySuccess": "चरण पुनः निष्पादित",
+    "retryError": "पुनः प्रयास विफल"
   },
   "resources": {
     "unnamed": "अनामित संसाधन",
@@ -602,7 +615,15 @@
     "skillPlaceholder": "e.g. order-tracking",
     "modeAgent": "Agent",
     "modeChat": "Chat",
-    "perMinute": "/min"
+    "perMinute": "/min",
+    "allTools": "All Tools",
+    "selectSpecific": "Select Specific",
+    "allToolsInfo": "All {{count}} built-in tools are available to the LLM. Switch to \"Select Specific\" to restrict which tools are exposed.",
+    "availableTools": "Available Tools",
+    "toolCount": "{{selected}} of {{total}} selected",
+    "toolSources": "Workflow Tool Sources",
+    "toolSourcesInfo": "Both sources are enabled by default — all workflow HTTP calls and MCP calls are automatically exposed as LLM tools. Disable a source to exclude it.",
+    "included": "Included"
   },
   "outputEditor": {
     "language": "भाषा",
@@ -1346,5 +1367,24 @@
     "actionUpdate": "Update",
     "actionSkip": "Up to date",
     "actionConflict": "Conflict"
+  },
+  "userConversations": {
+    "title": "उपयोगकर्ता वार्तालाप",
+    "subtitle": "इंटेंट → उपयोगकर्ता → वार्तालाप बाइंडिंग प्रबंधित करें",
+    "lookup": "खोज",
+    "intent": "इंटेंट",
+    "userId": "उपयोगकर्ता ID",
+    "agentId": "एजेंट ID",
+    "environment": "वातावरण",
+    "conversationId": "वार्तालाप ID",
+    "binding": "सक्रिय बाइंडिंग",
+    "enterBoth": "इंटेंट और उपयोगकर्ता ID दर्ज करें",
+    "notFound": "कोई बाइंडिंग नहीं मिली",
+    "create": "बाइंडिंग बनाएं",
+    "createTitle": "बाइंडिंग बनाएं",
+    "created": "बाइंडिंग बनाई गई",
+    "deleteTitle": "बाइंडिंग हटाएं",
+    "deleteDesc": "इंटेंट \"{{intent}}\" और उपयोगकर्ता \"{{userId}}\" के लिए बाइंडिंग हटाएं?",
+    "deleted": "बाइंडिंग हटा दी गई"
   }
 }

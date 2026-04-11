@@ -35,6 +35,8 @@ export default defineConfig({
       "/parserstore": "http://localhost:7070",
       "/extensionstore": "http://localhost:7070",
       "/conversationstore": "http://localhost:7070",
+      "/conversations": "http://localhost:7070",
+      "/userconversationstore": "http://localhost:7070",
       "/descriptorstore": "http://localhost:7070",
       "/secretstore": "http://localhost:7070",
       "/auditstore": "http://localhost:7070",

@@ -42,7 +42,8 @@
     "properties": "Properties",
     "triggers": "Triggers",
     "capabilities": "Capabilities",
-    "sync": "Synchronisierung"
+    "sync": "Synchronisierung",
+    "userConversations": "Nutzer-Konversationen"
   },
   "theme": {
     "light": "Hell",
@@ -274,7 +275,12 @@
     "deployed": "Bereitgestellt",
     "endpointsParsed": "{{count}} API-Endpoints analysiert",
     "viewAgent": "Agent anzeigen",
-    "createAnother": "Weiteren erstellen"
+    "createAnother": "Weiteren erstellen",
+    "allTools": "All Tools",
+    "selectSpecific": "Select Specific",
+    "allToolsInfo": "All {{count}} built-in tools will be available to your agent. Switch to \"Select Specific\" to restrict which tools are enabled.",
+    "availableTools": "Available Tools",
+    "toolCount": "{{selected}} of {{total}} selected"
   },
   "packages": {
     "createWorkflow": "Workflow erstellen",
@@ -345,7 +351,14 @@
     "undo": "Letzte Nachricht rückgängig",
     "redo": "Nachricht wiederherstellen",
     "continueConversation": "Fortsetzen",
-    "noHistory": "Noch kein Gesprächsverlauf."
+    "noHistory": "Noch kein Gesprächsverlauf.",
+    "attach": "Datei anhängen",
+    "attachUploading": "Wird hochgeladen...",
+    "attachSuccess": "Datei angehängt",
+    "attachError": "Datei konnte nicht hochgeladen werden",
+    "retry": "Letzten Schritt wiederholen",
+    "retrySuccess": "Schritt erneut ausgeführt",
+    "retryError": "Wiederholung fehlgeschlagen"
   },
   "resources": {
     "unnamed": "Unbenannte Ressource",
@@ -602,7 +615,15 @@
     "skillPlaceholder": "e.g. order-tracking",
     "modeAgent": "Agent",
     "modeChat": "Chat",
-    "perMinute": "/min"
+    "perMinute": "/min",
+    "allTools": "All Tools",
+    "selectSpecific": "Select Specific",
+    "allToolsInfo": "All {{count}} built-in tools are available to the LLM. Switch to \"Select Specific\" to restrict which tools are exposed.",
+    "availableTools": "Available Tools",
+    "toolCount": "{{selected}} of {{total}} selected",
+    "toolSources": "Workflow Tool Sources",
+    "toolSourcesInfo": "Both sources are enabled by default — all workflow HTTP calls and MCP calls are automatically exposed as LLM tools. Disable a source to exclude it.",
+    "included": "Included"
   },
   "outputEditor": {
     "language": "Sprache",
@@ -1346,5 +1367,24 @@
     "actionUpdate": "Update",
     "actionSkip": "Up to date",
     "actionConflict": "Conflict"
+  },
+  "userConversations": {
+    "title": "Nutzer-Konversationen",
+    "subtitle": "Intent-Benutzer-Konversationszuordnungen verwalten",
+    "lookup": "Suche",
+    "intent": "Intent",
+    "userId": "Benutzer-ID",
+    "agentId": "Agenten-ID",
+    "environment": "Umgebung",
+    "conversationId": "Konversations-ID",
+    "binding": "Aktive Zuordnung",
+    "enterBoth": "Geben Sie Intent und Benutzer-ID ein",
+    "notFound": "Keine Zuordnung gefunden",
+    "create": "Zuordnung erstellen",
+    "createTitle": "Zuordnung erstellen",
+    "created": "Zuordnung erstellt",
+    "deleteTitle": "Zuordnung löschen",
+    "deleteDesc": "Zuordnung für Intent \"{{intent}}\" und Benutzer \"{{userId}}\" entfernen?",
+    "deleted": "Zuordnung gelöscht"
   }
 }
