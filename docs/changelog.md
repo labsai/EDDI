@@ -15,7 +15,30 @@ Each entry follows this format:
 
 ---
 
+## Integration Test Stabilization — Rules Deserialization Fix (2026-04-11)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**What changed:**
+
+Resolved all 11 `AgentEngineIT` integration test failures caused by two bugs:
+
+1. **Jackson `@JsonAlias` deserialization gap** — `RuleGroupConfiguration.java` has a field named `behaviorRules` but getter/setter named `getRules()`/`setRules()`, so Jackson maps JSON property `"rules"`. Legacy configs stored in MongoDB use `"behaviorRules"`. Without `@JsonAlias("behaviorRules")`, Jackson silently ignored the field, producing **empty rule sets** — zero rules evaluated, no actions, no output.
+
+2. **Test assertion fragility** — Tests used hard-coded positional indices (`conversationStep[8]`) that broke when the pipeline produced different numbers of intermediate data entries. Replaced with Groovy GPath `find { it.key == '...' }` queries.
+
+**Decision:** Added `@JsonAlias` rather than renaming the JSON in MongoDB configs, because this preserves backward compatibility with all existing agent configurations.
+
+**Files:**
+- `RuleGroupConfiguration.java` — `@JsonAlias("behaviorRules")` on `setRules()`
+- `AgentEngineIT.java` — GPath find queries, fixed conversation ended message
+
+**Test Results:** 1774 unit tests ✓, 15 integration tests ✓
+
+---
+
 ## Test Coverage Expansion — Sync Subsystem (2026-04-11)
+
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
 
