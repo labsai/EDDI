@@ -63,6 +63,9 @@ public class RegularDictionaryProvider implements IDictionaryProvider {
             Object uriObj = config.get(KEY_URI);
             if (!RuntimeUtilities.isNullOrEmpty(uriObj) && uriObj.toString().startsWith("eddi")) {
                 DictionaryConfiguration regularDictionaryConfiguration = fetchRegularDictionaryConfiguration(URI.create(uriObj.toString()));
+                if (regularDictionaryConfiguration == null) {
+                    throw new ServiceException("DictionaryConfiguration could not be loaded from URI: " + uriObj);
+                }
                 return addConfigsToDictionary(regularDictionaryConfiguration);
             } else {
                 throw new ServiceException("No resource URI has been defined! [DictionaryConfiguration]");

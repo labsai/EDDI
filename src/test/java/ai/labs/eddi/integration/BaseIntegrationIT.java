@@ -115,19 +115,30 @@ public abstract class BaseIntegrationIT {
     }
 
     protected ResourceId createConversation(String agentId, String userId) {
-        Response response = given().post("agents/production/" + agentId + "?userId=" + userId);
+        Response response = given().post("agents/" + agentId + "/start?environment=production&userId=" + userId);
+        int statusCode = response.statusCode();
+        if (statusCode != 201 && statusCode != 200) {
+            throw new RuntimeException(String.format(
+                    "Failed to create conversation for agent %s: status=%d, body=%s",
+                    agentId, statusCode, response.getBody().print()));
+        }
         String location = response.getHeader("location");
+        if (location == null) {
+            throw new RuntimeException(String.format(
+                    "No Location header in conversation creation response for agent %s: status=%d, headers=%s",
+                    agentId, statusCode, response.getHeaders()));
+        }
         return extractResourceId(location);
     }
 
     protected Response sendUserInput(String agentId, String conversationId, String userInput, boolean returnDetailed, boolean returnCurrentStepOnly) {
         return given().contentType(ContentType.TEXT).body(userInput)
-                .post(String.format("agents/production/%s/%s?returnDetailed=%s&returnCurrentStepOnly=%s", agentId, conversationId, returnDetailed,
+                .post(String.format("agents/%s?returnDetailed=%s&returnCurrentStepOnly=%s", conversationId, returnDetailed,
                         returnCurrentStepOnly));
     }
 
     protected Response getConversationLog(String agentId, String conversationId, boolean returnDetailed) {
-        return given().get(String.format("agents/production/%s/%s?returnDetailed=%s", agentId, conversationId, returnDetailed));
+        return given().get(String.format("agents/%s?returnDetailed=%s", conversationId, returnDetailed));
     }
 
     // ==================== URI Utilities ====================

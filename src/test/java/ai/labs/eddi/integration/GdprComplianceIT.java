@@ -184,8 +184,8 @@ public class GdprComplianceIT extends BaseIntegrationIT {
 
         // Attempt to send input — should be rejected
         Response response = given().contentType(ContentType.TEXT).body("hello")
-                .post(String.format("agents/production/%s/%s?returnDetailed=false&returnCurrentStepOnly=false",
-                        agentResourceId.id(), convId.id()));
+                .post(String.format("agents/%s?returnDetailed=false&returnCurrentStepOnly=false",
+                        convId.id()));
 
         // Should be 403 (Forbidden) or similar error from processing restriction
         response.then().assertThat()

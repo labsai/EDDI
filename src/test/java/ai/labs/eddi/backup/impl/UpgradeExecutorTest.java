@@ -236,6 +236,151 @@ class UpgradeExecutorTest {
         }
     }
 
+    // ==================== Extension Processing ====================
+
+    @Nested
+    @DisplayName("Extension processing")
+    class ExtensionProcessing {
+
+        @Test
+        @DisplayName("should update matched extension and rewrite workflow URI")
+        void updatesExtensionAndRewritesWorkflowUri() throws Exception {
+            String wfId = "aaaaaaaaaaaaaaaaaaaaaaaa";
+            String extId = "bbbbbbbbbbbbbbbbbbbbbbbb";
+
+            var llmExt = new ExtensionSourceData("src-ext-1", "GPT Config", "langchain", "ai.labs.llm", "{\"model\":\"gpt-4\"}");
+            var sourceWf = new WorkflowSourceData("src-wf-1", "Workflow 1", 0,
+                    new WorkflowConfiguration(), Map.of("ai.labs.llm", llmExt));
+            var source = createSource(List.of(sourceWf), List.of());
+
+            // Diffs: agent SKIP, workflow UPDATE with extension UPDATE
+            List<ResourceDiff> diffs = new ArrayList<>();
+            diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
+            diffs.add(new ResourceDiff("src-wf-1", "workflow", "Workflow 1",
+                    DiffAction.UPDATE, wfId, 1, "position", null, null, 0));
+            diffs.add(new ResourceDiff("src-ext-1", "langchain", "GPT Config",
+                    DiffAction.UPDATE, extId, 2, "type", null, null, -1));
+
+            var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
+            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(false))).thenReturn(preview);
+
+            // Setup agent descriptor
+            var descriptor = new DocumentDescriptor();
+            descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
+            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+
+            // Mock LLM store for extension update
+            var llmStore = Mockito.mock(ai.labs.eddi.configs.llm.IRestLlmStore.class);
+            when(restInterfaceFactory.get(ai.labs.eddi.configs.llm.IRestLlmStore.class)).thenReturn(llmStore);
+            when(jsonSerialization.deserialize(eq("{\"model\":\"gpt-4\"}"), any()))
+                    .thenReturn(new ai.labs.eddi.modules.llm.model.LlmConfiguration(List.of()));
+            when(llmStore.updateLlm(eq(extId), eq(2), any())).thenReturn(Response.ok().build());
+
+            // Workflow config with workflowStep referencing old extension URI
+            var targetWfConfig = new WorkflowConfiguration();
+            var step = new WorkflowConfiguration.WorkflowStep();
+            step.setType(URI.create("ai.labs.llm"));
+            step.setExtensions(new HashMap<>(Map.of("uri", "eddi://ai.labs.llm/llmstore/llms/" + extId + "?version=2")));
+            targetWfConfig.setWorkflowSteps(List.of(step));
+            when(workflowStore.readWorkflow(wfId, 1)).thenReturn(targetWfConfig);
+            when(workflowStore.updateWorkflow(eq(wfId), eq(1), any())).thenReturn(Response.ok().build());
+
+            // Agent config
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setWorkflows(new ArrayList<>(List.of(
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + wfId + "?version=1"))));
+            when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+
+            URI result = executor.executeUpgrade(source, "target-1", null, null);
+
+            assertNotNull(result);
+            verify(llmStore).updateLlm(eq(extId), eq(2), any());
+            verify(workflowStore).updateWorkflow(eq(wfId), eq(1), any());
+        }
+
+        @Test
+        @DisplayName("should create new extension when action is CREATE")
+        void createsNewExtension() throws Exception {
+            String wfId = "aaaaaaaaaaaaaaaaaaaaaaaa";
+
+            var ragExt = new ExtensionSourceData("src-ext-2", "RAG Config", "rag", "ai.labs.rag", "{\"vectorStore\":\"pgvector\"}");
+            var sourceWf = new WorkflowSourceData("src-wf-1", "Workflow 1", 0,
+                    new WorkflowConfiguration(), Map.of("ai.labs.rag", ragExt));
+            var source = createSource(List.of(sourceWf), List.of());
+
+            List<ResourceDiff> diffs = new ArrayList<>();
+            diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
+            diffs.add(new ResourceDiff("src-wf-1", "workflow", "Workflow 1",
+                    DiffAction.UPDATE, wfId, 1, "position", null, null, 0));
+            diffs.add(new ResourceDiff("src-ext-2", "rag", "RAG Config",
+                    DiffAction.CREATE, null, null, null, null, null, -1));
+
+            var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
+            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(false))).thenReturn(preview);
+
+            var descriptor = new DocumentDescriptor();
+            descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
+            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+
+            // Mock RAG store for create
+            var ragStore = Mockito.mock(ai.labs.eddi.configs.rag.IRestRagStore.class);
+            when(restInterfaceFactory.get(ai.labs.eddi.configs.rag.IRestRagStore.class)).thenReturn(ragStore);
+            when(jsonSerialization.deserialize(eq("{\"vectorStore\":\"pgvector\"}"), any()))
+                    .thenReturn(new ai.labs.eddi.configs.rag.model.RagConfiguration());
+            URI newRagUri = URI.create("eddi://ai.labs.rag/ragstore/rags/newragid?version=1");
+            when(ragStore.createRag(any())).thenReturn(Response.created(newRagUri).build());
+
+            // Workflow config (empty steps — no URI rewriting needed for CREATE)
+            when(workflowStore.readWorkflow(wfId, 1)).thenReturn(new WorkflowConfiguration());
+
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setWorkflows(new ArrayList<>(List.of(
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + wfId + "?version=1"))));
+            when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
+
+            executor.executeUpgrade(source, "target-1", null, null);
+
+            verify(ragStore).createRag(any());
+        }
+    }
+
+    // ==================== New Workflow Creation ====================
+
+    @Nested
+    @DisplayName("New workflow creation")
+    class NewWorkflowCreation {
+
+        @Test
+        @DisplayName("should create new workflow and append to agent config")
+        void createsNewWorkflowAndAppendsToAgent() throws Exception {
+            var newWf = new WorkflowSourceData("src-wf-1", "New Workflow", 0,
+                    new WorkflowConfiguration(), Map.of());
+            var source = createSource(List.of(newWf), List.of());
+
+            List<ResourceDiff> diffs = new ArrayList<>();
+            diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
+            diffs.add(new ResourceDiff("src-wf-1", "workflow", "New Workflow",
+                    DiffAction.CREATE, null, null, null, null, null, 0));
+
+            setupPreviewAndAgent("target-1", 1, diffs);
+
+            URI newWfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/newwfid123456789012?version=1");
+            when(workflowStore.createWorkflow(any())).thenReturn(Response.created(newWfUri).build());
+
+            URI result = executor.executeUpgrade(source, "target-1", null, null);
+
+            assertNotNull(result);
+            verify(workflowStore).createWorkflow(any());
+            // Verify agent was updated with new workflow appended
+            var captor = org.mockito.ArgumentCaptor.forClass(AgentConfiguration.class);
+            verify(agentStore).updateAgent(eq("target-1"), eq(1), captor.capture());
+            assertTrue(captor.getValue().getWorkflows().stream()
+                    .anyMatch(uri -> uri.toString().contains("newwfid123456789012")));
+        }
+    }
+
     // ==================== Error Handling ====================
 
     @Nested
@@ -251,6 +396,31 @@ class UpgradeExecutorTest {
                     .thenThrow(new RuntimeException("Preview failed"));
 
             assertThrows(RuntimeException.class, () -> executor.executeUpgrade(source, "target-1", null, null));
+        }
+
+        @Test
+        @DisplayName("should propagate exception when agent update fails")
+        void propagatesAgentUpdateFailure() throws Exception {
+            var source = createSource(List.of(), List.of());
+
+            List<ResourceDiff> diffs = new ArrayList<>();
+            diffs.add(agentDiff("src-1", "target-1", DiffAction.SKIP));
+
+            var preview = new ImportPreview("src-1", "Source Agent", "target-1", "Target Agent", diffs);
+            when(structuralMatcher.buildPreview(any(), eq("target-1"), eq(false))).thenReturn(preview);
+
+            var descriptor = new DocumentDescriptor();
+            descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
+            when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
+
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setWorkflows(new ArrayList<>());
+            when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
+            when(agentStore.updateAgent(eq("target-1"), eq(1), any()))
+                    .thenThrow(new RuntimeException("DB error"));
+
+            assertThrows(RuntimeException.class,
+                    () -> executor.executeUpgrade(source, "target-1", null, null));
         }
     }
 

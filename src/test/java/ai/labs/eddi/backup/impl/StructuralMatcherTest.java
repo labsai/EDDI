@@ -274,6 +274,134 @@ class StructuralMatcherTest {
         }
     }
 
+    // ==================== Extension Matching ====================
+
+    @Nested
+    @DisplayName("Extension matching within workflows")
+    class ExtensionMatching {
+
+        @Test
+        @DisplayName("extensions should be matched by step type within matched workflow")
+        void extensionsMatchedByStepType() throws Exception {
+            String wfId = "aabb000011112222cccc";
+
+            // Source workflow with an LLM extension
+            Map<String, ExtensionSourceData> extensions = Map.of(
+                    "ai.labs.llm", new ExtensionSourceData("ext-1", "LLM Config",
+                            "langchain", "ai.labs.llm", "{\"model\":\"gpt-4\"}"));
+            var sourceWf = new WorkflowSourceData("src-wf-1", "Workflow 1", 0,
+                    new WorkflowConfiguration(), extensions);
+
+            // Target agent with matching workflow
+            var targetConfig = new AgentConfiguration();
+            targetConfig.setWorkflows(List.of(
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + wfId + "?version=1")));
+
+            var source = createMinimalSource("src-1", "Agent", List.of(sourceWf), List.of());
+            setupTargetAgent("target-1", 1, targetConfig);
+            when(snippetStore.readSnippetDescriptors(anyString(), anyInt(), anyInt())).thenReturn(List.of());
+
+            // Target workflow with matching step type
+            var targetWfConfig = new WorkflowConfiguration();
+            var step = new WorkflowConfiguration.WorkflowStep();
+            step.setType(URI.create("ai.labs.llm"));
+            step.setExtensions(new java.util.HashMap<>(Map.of(
+                    "uri", "eddi://ai.labs.llm/llmstore/llms/aabb000011114444eeee?version=2")));
+            targetWfConfig.setWorkflowSteps(List.of(step));
+            when(workflowStore.readWorkflow(wfId, 1)).thenReturn(targetWfConfig);
+
+            // Mock the LLM store so readTypedExtension can read the target extension
+            var llmStore = Mockito.mock(ai.labs.eddi.configs.llm.IRestLlmStore.class);
+            when(restInterfaceFactory.get(ai.labs.eddi.configs.llm.IRestLlmStore.class)).thenReturn(llmStore);
+            when(llmStore.readLlm("aabb000011114444eeee", 2))
+                    .thenReturn(new ai.labs.eddi.modules.llm.model.LlmConfiguration(List.of()));
+
+            ImportPreview preview = matcher.buildPreview(source, "target-1", false);
+
+            // Should contain extension diff matched by type
+            ResourceDiff extDiff = preview.resources().stream()
+                    .filter(d -> "langchain".equals(d.resourceType()))
+                    .findFirst().orElse(null);
+            assertNotNull(extDiff, "Should have an extension diff");
+            assertEquals("type", extDiff.matchStrategy());
+            assertEquals("aabb000011114444eeee", extDiff.targetId());
+        }
+
+        @Test
+        @DisplayName("unmatched extension type should be CREATE")
+        void unmatchedExtensionTypeIsCreate() throws Exception {
+            String wfId = "aabb000011112222cccc";
+
+            // Source has RAG extension, target has no RAG step
+            Map<String, ExtensionSourceData> extensions = Map.of(
+                    "ai.labs.rag", new ExtensionSourceData("ext-rag", "RAG Config",
+                            "rag", "ai.labs.rag", "{\"vectorStore\":\"pgvector\"}"));
+            var sourceWf = new WorkflowSourceData("src-wf-1", "Workflow 1", 0,
+                    new WorkflowConfiguration(), extensions);
+
+            var targetConfig = new AgentConfiguration();
+            targetConfig.setWorkflows(List.of(
+                    URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + wfId + "?version=1")));
+
+            var source = createMinimalSource("src-1", "Agent", List.of(sourceWf), List.of());
+            setupTargetAgent("target-1", 1, targetConfig);
+            when(snippetStore.readSnippetDescriptors(anyString(), anyInt(), anyInt())).thenReturn(List.of());
+
+            // Target workflow with no RAG step
+            var targetWfConfig = new WorkflowConfiguration();
+            var llmStep = new WorkflowConfiguration.WorkflowStep();
+            llmStep.setType(URI.create("ai.labs.llm"));
+            llmStep.setExtensions(new java.util.HashMap<>(Map.of(
+                    "uri", "eddi://ai.labs.llm/llmstore/llms/aabb000011114444eeee?version=1")));
+            targetWfConfig.setWorkflowSteps(List.of(llmStep));
+            when(workflowStore.readWorkflow(wfId, 1)).thenReturn(targetWfConfig);
+
+            ImportPreview preview = matcher.buildPreview(source, "target-1", false);
+
+            ResourceDiff ragDiff = preview.resources().stream()
+                    .filter(d -> "rag".equals(d.resourceType()))
+                    .findFirst().orElse(null);
+            assertNotNull(ragDiff, "Should have a RAG extension diff");
+            assertEquals(DiffAction.CREATE, ragDiff.action());
+            assertNull(ragDiff.targetId());
+        }
+    }
+
+    // ==================== Snippet SKIP ====================
+
+    @Nested
+    @DisplayName("Snippet SKIP scenario")
+    class SnippetSkip {
+
+        @Test
+        @DisplayName("identical snippets should be SKIP")
+        void identicalSnippetsAreSkip() throws Exception {
+            // Use the SAME object for both source and target so FakeJsonSerialization
+            // produces identical toString() output
+            var sharedSnippet = createSnippet("persona", "Same content");
+            var sourceSnippet = new SnippetSourceData("src-snp-1", "persona", sharedSnippet);
+
+            var targetConfig = new AgentConfiguration();
+            var source = createMinimalSource("src-1", "Agent", List.of(), List.of(sourceSnippet));
+            setupTargetAgent("target-1", 1, targetConfig);
+
+            // Existing snippet with same name AND same object ref
+            var existingDescriptor = new DocumentDescriptor();
+            existingDescriptor.setName("persona");
+            existingDescriptor.setResource(URI.create("eddi://ai.labs.snippet/snippetstore/snippets/aabb000011113333dddd?version=1"));
+            when(snippetStore.readSnippetDescriptors(anyString(), anyInt(), anyInt()))
+                    .thenReturn(List.of(existingDescriptor));
+            when(snippetStore.readSnippet("aabb000011113333dddd", 1))
+                    .thenReturn(sharedSnippet);
+
+            ImportPreview preview = matcher.buildPreview(source, "target-1", true);
+
+            ResourceDiff snippetDiff = preview.resources().stream()
+                    .filter(d -> "snippet".equals(d.resourceType())).findFirst().orElseThrow();
+            assertEquals(DiffAction.SKIP, snippetDiff.action());
+        }
+    }
+
     // ==================== Edge Cases ====================
 
     @Nested

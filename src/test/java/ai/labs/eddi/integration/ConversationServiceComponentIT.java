@@ -45,7 +45,7 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
     @Test
     @DisplayName("should create conversation and return location header")
     void createConversation_returnsLocation() {
-        Response response = given().post("agents/production/" + agentResourceId.id() + "?userId=" + TEST_USER_ID);
+        Response response = given().post("agents/" + agentResourceId.id() + "/start?environment=production&userId=" + TEST_USER_ID);
 
         response.then().assertThat().statusCode(anyOf(equalTo(200), equalTo(201))).header("location", notNullValue());
     }
@@ -82,7 +82,7 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
         sendUserInput(agentResourceId.id(), conversationId.id(), "hello", false, false);
 
         // Undo — path is /{env}/{agentId}/undo/{convId}
-        Response undoResponse = given().post(String.format("agents/production/%s/undo/%s", agentResourceId.id(), conversationId.id()));
+        Response undoResponse = given().post(String.format("agents/%s/undo", conversationId.id()));
 
         undoResponse.then().assertThat().statusCode(200);
     }
@@ -96,10 +96,10 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
         sendUserInput(agentResourceId.id(), conversationId.id(), "hello", false, false);
 
         // Undo — path is /{env}/{agentId}/undo/{convId}
-        given().post(String.format("agents/production/%s/undo/%s", agentResourceId.id(), conversationId.id()));
+        given().post(String.format("agents/%s/undo", conversationId.id()));
 
         // Redo — path is /{env}/{agentId}/redo/{convId}
-        Response redoResponse = given().post(String.format("agents/production/%s/redo/%s", agentResourceId.id(), conversationId.id()));
+        Response redoResponse = given().post(String.format("agents/%s/redo", conversationId.id()));
 
         redoResponse.then().assertThat().statusCode(200);
     }
@@ -111,13 +111,13 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
 
         // Send bye to end conversation
         given().contentType(ContentType.JSON).body("{\"input\":\"bye\"}")
-                .post(String.format("agents/production/%s/%s?returnDetailed=true", agentResourceId.id(), conversationId.id()));
+                .post(String.format("agents/%s?returnDetailed=true", conversationId.id()));
 
         Thread.sleep(200);
 
         // Verify conversation is ended
         Response response = given().contentType(ContentType.JSON).body("{\"input\":\"hello\"}")
-                .post(String.format("agents/production/%s/%s?returnDetailed=true", agentResourceId.id(), conversationId.id()));
+                .post(String.format("agents/%s?returnDetailed=true", conversationId.id()));
 
         response.then().assertThat().statusCode(410);
     }

@@ -349,7 +349,7 @@ public class CreateApiAgentIT {
     @Order(10)
     @DisplayName("should start a conversation with the API agent")
     void startConversation() {
-        Response response = given().post("agents/production/" + agentId + "?userId=apIAgent-test-user");
+        Response response = given().post("agents/" + agentId + "/start?environment=production&userId=apIAgent-test-user");
         String location = response.getHeader("location");
 
         Assertions.assertNotNull(location, "Conversation location should be returned");

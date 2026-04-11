@@ -290,6 +290,6 @@ public class AgentEngineIT extends BaseIntegrationIT {
 
     private Response sendJsonInput(String agentId, String conversationId, String jsonBody, boolean returnDetailed) {
         return given().contentType(ContentType.JSON).body(jsonBody).post(
-                String.format("agents/production/%s/%s?returnDetailed=%s&returnCurrentStepOnly=%s", agentId, conversationId, returnDetailed, false));
+                String.format("agents/%s?returnDetailed=%s&returnCurrentStepOnly=%s", conversationId, returnDetailed, false));
     }
 }
