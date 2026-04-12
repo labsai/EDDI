@@ -268,8 +268,8 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     /**
-     * Build a summary map for the task_complete event. Includes emitted actions for
-     * behavior tasks so the Manager UI can display them.
+     * Build a summary map for the task_complete event. Includes emitted actions,
+     * tool execution traces, and cascade confidence for the Manager UI.
      */
     private Map<String, Object> buildTaskSummary(IConversationMemory conversationMemory, ILifecycleTask task) {
         var summary = new HashMap<String, Object>();
@@ -277,6 +277,16 @@ public class LifecycleManager implements ILifecycleManager {
         IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(ACTIONS);
         if (actionData != null && actionData.getResult() != null) {
             summary.put("actions", actionData.getResult());
+        }
+        // Tool execution trace (for LLM tasks) — enables live tool call display in UI
+        IData<?> traceData = conversationMemory.getCurrentStep().getLatestData("langchain:trace:" + task.getId());
+        if (traceData != null && traceData.getResult() != null) {
+            summary.put("toolTrace", traceData.getResult());
+        }
+        // Cascade confidence (when model cascade is active)
+        IData<Double> confidenceData = conversationMemory.getCurrentStep().getLatestData("audit:confidence");
+        if (confidenceData != null && confidenceData.getResult() != null) {
+            summary.put("confidence", confidenceData.getResult());
         }
         return summary;
     }

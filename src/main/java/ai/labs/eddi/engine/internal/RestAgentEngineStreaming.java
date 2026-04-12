@@ -31,6 +31,7 @@ import java.util.Map;
 public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
     private static final Logger LOGGER = Logger.getLogger(RestAgentEngineStreaming.class);
+    private static final com.fasterxml.jackson.databind.ObjectMapper MAPPER = new com.fasterxml.jackson.databind.ObjectMapper();
 
     private final IConversationService conversationService;
 
@@ -58,6 +59,17 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                             sb.append(String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"durationMs\":%d", taskId, taskType, durationMs));
                             if (summary.containsKey("actions")) {
                                 sb.append(",\"actions\":").append(toJsonArray(summary.get("actions")));
+                            }
+                            if (summary.containsKey("toolTrace")) {
+                                try {
+                                    sb.append(",\"toolTrace\":").append(
+                                            MAPPER.writeValueAsString(summary.get("toolTrace")));
+                                } catch (Exception ex) {
+                                    LOGGER.debugf("Failed to serialize toolTrace: %s", ex.getMessage());
+                                }
+                            }
+                            if (summary.containsKey("confidence")) {
+                                sb.append(",\"confidence\":").append(summary.get("confidence"));
                             }
                             sb.append("}");
                             sendEvent(eventSink, sse, "task_complete", sb.toString());
@@ -145,7 +157,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             sb.append("\"conversationState\":\"").append(snapshot.getConversationState()).append("\"");
             if (snapshot.getConversationOutputs() != null) {
                 sb.append(",\"conversationOutputs\":")
-                        .append(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(snapshot.getConversationOutputs()));
+                        .append(MAPPER.writeValueAsString(snapshot.getConversationOutputs()));
             }
             sb.append("}");
             return sb.toString();
