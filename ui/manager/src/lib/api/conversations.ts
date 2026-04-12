@@ -5,6 +5,28 @@ export type ConversationState = "READY" | "IN_PROGRESS" | "ERROR" | "ENDED";
 
 export type ViewState = "UNSEEN" | "READ" | "DONE";
 
+/** Raw shape returned by the backend GET /conversationstore/conversations */
+export interface ConversationDescriptorRaw {
+  resource: string;
+  createdOn: number;
+  lastModifiedOn: number;
+  deleted?: boolean;
+  /** Full EDDI URI, e.g. eddi://ai.labs.agent/agentstore/agents/{id}?version=N */
+  agentResource?: string;
+  agentName?: string;
+  userId?: string;
+  conversationStepSize?: number;
+  environment?: string;
+  conversationState: ConversationState;
+  viewState?: ViewState;
+  // Legacy fields (older backend versions)
+  name?: string;
+  description?: string;
+  agentId?: string;
+  agentVersion?: number;
+}
+
+/** Normalized descriptor used throughout the Manager UI */
 export interface ConversationDescriptor {
   resource: string;
   name: string;
@@ -15,8 +37,44 @@ export interface ConversationDescriptor {
   agentVersion: number;
   conversationState: ConversationState;
   viewState?: ViewState;
-  createdBy?: string;
-  lastModifiedBy?: string;
+  conversationStepSize?: number;
+  environment?: string;
+  userId?: string;
+}
+
+/** Parse an agentResource URI into { agentId, agentVersion }.
+ *  Example: "eddi://ai.labs.agent/agentstore/agents/abc123?version=2" → { agentId: "abc123", agentVersion: 2 } */
+export function parseAgentResource(uri?: string): { agentId: string; agentVersion: number } {
+  if (!uri) return { agentId: "", agentVersion: 0 };
+  try {
+    const normalized = uri.replace("eddi://", "http://");
+    const url = new URL(normalized);
+    const parts = url.pathname.split("/");
+    const agentId = parts[parts.length - 1] || "";
+    const version = parseInt(url.searchParams.get("version") || "0", 10);
+    return { agentId, agentVersion: isNaN(version) ? 0 : version };
+  } catch {
+    return { agentId: uri, agentVersion: 0 };
+  }
+}
+
+/** Normalize a raw backend descriptor into the shape the UI expects */
+function normalizeDescriptor(raw: ConversationDescriptorRaw): ConversationDescriptor {
+  const parsed = parseAgentResource(raw.agentResource);
+  return {
+    resource: raw.resource,
+    name: raw.name || raw.agentName || "",
+    description: raw.description || "",
+    createdOn: raw.createdOn,
+    lastModifiedOn: raw.lastModifiedOn,
+    agentId: raw.agentId || parsed.agentId,
+    agentVersion: raw.agentVersion ?? parsed.agentVersion,
+    conversationState: raw.conversationState,
+    viewState: raw.viewState,
+    conversationStepSize: raw.conversationStepSize,
+    environment: raw.environment,
+    userId: raw.userId,
+  };
 }
 
 /** Java backend serializes ConversationOutput as a LinkedHashMap<String, Object> */
@@ -176,7 +234,7 @@ export function parseConversationUri(resource: string): string {
 }
 
 // API functions — using low-level /conversationstore/conversations endpoints
-export function getConversationDescriptors(
+export async function getConversationDescriptors(
   limit = 20,
   index = 0,
   filter = "",
@@ -192,9 +250,12 @@ export function getConversationDescriptors(
   if (agentId) params.set("agentId", agentId);
   if (agentVersion) params.set("agentVersion", String(agentVersion));
   if (conversationState) params.set("conversationState", conversationState);
-  return api.get<ConversationDescriptor[]>(
+  const raw = await api.get<ConversationDescriptorRaw[] | { value: ConversationDescriptorRaw[]; Count?: number }>(
     `/conversationstore/conversations?${params.toString()}`
   );
+  // Backend may return a raw array or a { value: [...], Count } wrapper
+  const items = Array.isArray(raw) ? raw : (raw?.value ?? []);
+  return items.map(normalizeDescriptor);
 }
 
 export function getSimpleConversationLog(
