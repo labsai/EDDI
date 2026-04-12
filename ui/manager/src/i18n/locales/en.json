@@ -383,7 +383,45 @@
     "attachError": "Failed to upload file",
     "retry": "Retry Last Step",
     "retrySuccess": "Step re-executed",
-    "retryError": "Retry failed"
+    "retryError": "Retry failed",
+    "showActivity": "Show Activity",
+    "hideActivity": "Hide Activity",
+    "scrollToBottom": "Scroll to bottom",
+    "copyMessage": "Copy message",
+    "copied": "Copied!",
+    "activity": {
+      "processing": "Processing\u2026",
+      "steps": "steps",
+      "toolCalls": "tool calls",
+      "toolCall": "Tool call",
+      "toolResult": "Result"
+    },
+    "context": {
+      "conversationId": "Conversation ID",
+      "agentVersion": "Agent Version",
+      "startTime": "Started",
+      "stepCount": "Steps",
+      "show": "Show conversation info",
+      "hide": "Hide conversation info"
+    }
+  },
+  "commandPalette": {
+    "placeholder": "Search pages, agents, actions\u2026",
+    "noResults": "No results found.",
+    "recent": "Recent",
+    "navigate": "Navigate",
+    "agents": "Agents",
+    "actions": "Quick Actions",
+    "createAgent": "Create New Agent",
+    "openChat": "Open Chat"
+  },
+  "conversationDetail": {
+    "continueChat": "Continue in Chat",
+    "searchTranscript": "Search in conversation\u2026",
+    "exportMd": "Export as Markdown",
+    "toolSummary": "Tool Usage Summary",
+    "totalCost": "Total Cost",
+    "cacheHitRate": "Cache Hit Rate"
   },
   "resources": {
     "unnamed": "Unnamed Resource",

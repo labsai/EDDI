@@ -18,6 +18,9 @@ import {
   AlertTriangle,
   Zap,
   Code,
+  MessageCircle,
+  Download,
+  Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -51,6 +54,7 @@ export function ConversationDetailPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // i18n labels
   const stateLabels: Record<ConversationState, string> = {
@@ -77,6 +81,30 @@ export function ConversationDetailPage() {
       }
     );
     setShowDeleteDialog(false);
+  }
+
+  function handleExportMarkdown() {
+    if (!conversation) return;
+    const lines: string[] = [
+      `# Conversation ${id}`,
+      `**Agent**: ${conversation.agentId} v${conversation.agentVersion}`,
+      `**State**: ${conversation.conversationState}`,
+      `**Steps**: ${conversation.conversationSteps?.length ?? 0}`,
+      "",
+    ];
+    conversation.conversationSteps?.forEach((step, i) => {
+      const input = extractInput(step);
+      const output = extractOutput(conversation.conversationOutputs?.[i]);
+      if (input) lines.push(`**User**: ${input}`, "");
+      if (output) lines.push(`**Agent**: ${output}`, "");
+    });
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `conversation-${id?.slice(0, 8)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   if (isLoading) {
@@ -159,6 +187,28 @@ export function ConversationDetailPage() {
           >
             <Trash2 className="h-4 w-4" />
           </button>
+
+          {/* Continue in Chat */}
+          {(state === "READY" || state === "IN_PROGRESS") && (
+            <button
+              onClick={() => navigate(`/manage/chat?agentId=${conversation.agentId}&conversationId=${id}`)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/20 transition-colors"
+              data-testid="continue-in-chat"
+            >
+              <MessageCircle className="h-4 w-4" />
+              {t("conversationDetail.continueChat", "Continue in Chat")}
+            </button>
+          )}
+
+          {/* Export as Markdown */}
+          <button
+            onClick={() => handleExportMarkdown()}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground hover:bg-secondary/80 transition-colors"
+            data-testid="export-md"
+          >
+            <Download className="h-4 w-4" />
+            {t("conversationDetail.exportMd", "Export")}
+          </button>
         </div>
       </div>
 
@@ -180,6 +230,19 @@ export function ConversationDetailPage() {
           <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
             {stepCount}
           </span>
+          <div className="ms-auto">
+            <div className="relative">
+              <Search className="absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={t("conversationDetail.searchTranscript", "Search…")}
+                className="h-8 w-48 rounded-lg border border-input bg-background ps-8 pe-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                data-testid="transcript-search"
+              />
+            </div>
+          </div>
         </div>
 
         <div className="p-4 sm:p-6 space-y-1">
@@ -195,15 +258,25 @@ export function ConversationDetailPage() {
             </div>
           )}
 
-          {conversation.conversationSteps?.map((step, index) => (
-            <ChatBubbleStep
-              key={index}
-              step={step}
-              conversationOutput={conversation.conversationOutputs?.[index]}
-              stepNumber={index + 1}
-              isLast={index === stepCount - 1}
-            />
-          ))}
+          {conversation.conversationSteps?.map((step, index) => {
+            // Filter by search query
+            if (searchQuery) {
+              const q = searchQuery.toLowerCase();
+              const input = extractInput(step)?.toLowerCase() ?? "";
+              const output = extractOutput(conversation.conversationOutputs?.[index])?.toLowerCase() ?? "";
+              if (!input.includes(q) && !output.includes(q)) return null;
+            }
+            return (
+              <ChatBubbleStep
+                key={index}
+                step={step}
+                conversationOutput={conversation.conversationOutputs?.[index]}
+                stepNumber={index + 1}
+                isLast={index === stepCount - 1}
+                highlight={searchQuery}
+              />
+            );
+          })}
         </div>
       </section>
 
@@ -235,16 +308,37 @@ function BackLink() {
   );
 }
 
+function HighlightText({ text, highlight }: { text: string; highlight?: string }) {
+  if (!highlight || !highlight.trim()) return <>{text}</>;
+  const regex = new RegExp(`(${highlight.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+  const parts = text.split(regex);
+  return (
+    <>
+      {parts.map((part, i) =>
+        regex.test(part) ? (
+          <mark key={i} className="bg-amber-300/60 dark:bg-amber-500/40 rounded-sm px-0.5">
+            {part}
+          </mark>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </>
+  );
+}
+
 function ChatBubbleStep({
   step,
   conversationOutput,
   stepNumber,
   isLast,
+  highlight,
 }: {
   step: SimpleConversationStep;
   conversationOutput?: ConversationOutput;
   stepNumber: number;
   isLast: boolean;
+  highlight?: string;
 }) {
   const { t } = useTranslation();
   const [showRaw, setShowRaw] = useState(false);
@@ -274,7 +368,7 @@ function ChatBubbleStep({
         <div className="flex justify-end">
           <div className="flex items-end gap-2 max-w-[80%] sm:max-w-[70%]">
             <div className="rounded-2xl rounded-be-md bg-primary px-4 py-2.5 text-primary-foreground shadow-sm">
-              <p className="text-sm whitespace-pre-wrap">{input}</p>
+              <p className="text-sm whitespace-pre-wrap"><HighlightText text={input} highlight={highlight} /></p>
             </div>
             <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/20">
               <User className="h-3.5 w-3.5 text-primary" />
@@ -308,7 +402,7 @@ function ChatBubbleStep({
               <Bot className="h-3.5 w-3.5 text-primary" />
             </div>
             <div className="rounded-2xl rounded-bs-md bg-secondary px-4 py-2.5 shadow-sm">
-              <p className="text-sm text-foreground whitespace-pre-wrap">{output}</p>
+              <p className="text-sm text-foreground whitespace-pre-wrap"><HighlightText text={output} highlight={highlight} /></p>
             </div>
           </div>
         </div>

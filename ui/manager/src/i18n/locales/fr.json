@@ -1,4 +1,4 @@
-﻿{
+{
   "app": {
     "title": "EDDI Manager",
     "description": "Tableau de bord d'administration de la plateforme IA EDDI"
@@ -334,7 +334,13 @@
     "backToConversations": "Retour aux Conversations",
     "steps": "Étapes de conversation",
     "noSteps": "Aucune étape de conversation enregistrée",
-    "properties": "Propriétés de la conversation"
+    "properties": "Propriétés de la conversation",
+    "continueChat": "Continue in Chat",
+    "searchTranscript": "Search in conversation…",
+    "exportMd": "Export as Markdown",
+    "toolSummary": "Tool Usage Summary",
+    "totalCost": "Total Cost",
+    "cacheHitRate": "Cache Hit Rate"
   },
   "chat": {
     "selectAgent": "Sélectionnez un agent...",
@@ -358,7 +364,27 @@
     "attachError": "Échec du chargement",
     "retry": "Réessayer la dernière étape",
     "retrySuccess": "Étape ré-exécutée",
-    "retryError": "Échec de la tentative"
+    "retryError": "Échec de la tentative",
+    "showActivity": "Show Activity",
+    "hideActivity": "Hide Activity",
+    "scrollToBottom": "Scroll to bottom",
+    "copyMessage": "Copy message",
+    "copied": "Copied!",
+    "activity": {
+      "processing": "Processing…",
+      "steps": "steps",
+      "toolCalls": "tool calls",
+      "toolCall": "Tool call",
+      "toolResult": "Result"
+    },
+    "context": {
+      "conversationId": "Conversation ID",
+      "agentVersion": "Agent Version",
+      "startTime": "Started",
+      "stepCount": "Steps",
+      "show": "Show conversation info",
+      "hide": "Hide conversation info"
+    }
   },
   "resources": {
     "unnamed": "Ressource sans nom",
@@ -1411,5 +1437,15 @@
     "deleteTitle": "Supprimer la liaison",
     "deleteDesc": "Supprimer la liaison pour l'intent \"{{intent}}\" et l'utilisateur \"{{userId}}\" ?",
     "deleted": "Liaison supprimée"
+  },
+  "commandPalette": {
+    "placeholder": "Search pages, agents, actions…",
+    "noResults": "No results found.",
+    "recent": "Recent",
+    "navigate": "Navigate",
+    "agents": "Agents",
+    "actions": "Quick Actions",
+    "createAgent": "Create New Agent",
+    "openChat": "Open Chat"
   }
 }

@@ -1,4 +1,4 @@
-﻿{
+{
   "app": {
     "title": "EDDI Manager",
     "description": "EDDI 会话式 AI 平台管理面板"
@@ -334,7 +334,13 @@
     "backToConversations": "返回会话列表",
     "steps": "会话步骤",
     "noSteps": "未记录会话步骤",
-    "properties": "会话属性"
+    "properties": "会话属性",
+    "continueChat": "Continue in Chat",
+    "searchTranscript": "Search in conversation…",
+    "exportMd": "Export as Markdown",
+    "toolSummary": "Tool Usage Summary",
+    "totalCost": "Total Cost",
+    "cacheHitRate": "Cache Hit Rate"
   },
   "chat": {
     "selectAgent": "选择 Agent...",
@@ -358,7 +364,27 @@
     "attachError": "文件上传失败",
     "retry": "重试上一步",
     "retrySuccess": "步骤已重新执行",
-    "retryError": "重试失败"
+    "retryError": "重试失败",
+    "showActivity": "Show Activity",
+    "hideActivity": "Hide Activity",
+    "scrollToBottom": "Scroll to bottom",
+    "copyMessage": "Copy message",
+    "copied": "Copied!",
+    "activity": {
+      "processing": "Processing…",
+      "steps": "steps",
+      "toolCalls": "tool calls",
+      "toolCall": "Tool call",
+      "toolResult": "Result"
+    },
+    "context": {
+      "conversationId": "Conversation ID",
+      "agentVersion": "Agent Version",
+      "startTime": "Started",
+      "stepCount": "Steps",
+      "show": "Show conversation info",
+      "hide": "Hide conversation info"
+    }
   },
   "resources": {
     "unnamed": "未命名资源",
@@ -1411,5 +1437,15 @@
     "deleteTitle": "删除绑定",
     "deleteDesc": "删除意图\"{{intent}}\"和用户\"{{userId}}\"的绑定？",
     "deleted": "绑定已删除"
+  },
+  "commandPalette": {
+    "placeholder": "Search pages, agents, actions…",
+    "noResults": "No results found.",
+    "recent": "Recent",
+    "navigate": "Navigate",
+    "agents": "Agents",
+    "actions": "Quick Actions",
+    "createAgent": "Create New Agent",
+    "openChat": "Open Chat"
   }
 }

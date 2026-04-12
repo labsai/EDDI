@@ -1,4 +1,4 @@
-﻿{
+{
   "app": {
     "title": "EDDI Manager",
     "description": "EDDI 대화형 AI 플랫폼 관리 대시보드"
@@ -334,7 +334,13 @@
     "backToConversations": "대화 목록으로 돌아가기",
     "steps": "대화 단계",
     "noSteps": "기록된 대화 단계가 없습니다",
-    "properties": "대화 속성"
+    "properties": "대화 속성",
+    "continueChat": "Continue in Chat",
+    "searchTranscript": "Search in conversation…",
+    "exportMd": "Export as Markdown",
+    "toolSummary": "Tool Usage Summary",
+    "totalCost": "Total Cost",
+    "cacheHitRate": "Cache Hit Rate"
   },
   "chat": {
     "selectAgent": "Agent 선택...",
@@ -358,7 +364,27 @@
     "attachError": "파일 업로드 실패",
     "retry": "마지막 단계 재시도",
     "retrySuccess": "단계 재실행 완료",
-    "retryError": "재시도 실패"
+    "retryError": "재시도 실패",
+    "showActivity": "Show Activity",
+    "hideActivity": "Hide Activity",
+    "scrollToBottom": "Scroll to bottom",
+    "copyMessage": "Copy message",
+    "copied": "Copied!",
+    "activity": {
+      "processing": "Processing…",
+      "steps": "steps",
+      "toolCalls": "tool calls",
+      "toolCall": "Tool call",
+      "toolResult": "Result"
+    },
+    "context": {
+      "conversationId": "Conversation ID",
+      "agentVersion": "Agent Version",
+      "startTime": "Started",
+      "stepCount": "Steps",
+      "show": "Show conversation info",
+      "hide": "Hide conversation info"
+    }
   },
   "resources": {
     "unnamed": "이름 없는 리소스",
@@ -1411,5 +1437,15 @@
     "deleteTitle": "바인딩 삭제",
     "deleteDesc": "인텐트 \"{{intent}}\"과 사용자 \"{{userId}}\"의 바인딩을 삭제하시겠습니까?",
     "deleted": "바인딩이 삭제되었습니다"
+  },
+  "commandPalette": {
+    "placeholder": "Search pages, agents, actions…",
+    "noResults": "No results found.",
+    "recent": "Recent",
+    "navigate": "Navigate",
+    "agents": "Agents",
+    "actions": "Quick Actions",
+    "createAgent": "Create New Agent",
+    "openChat": "Open Chat"
   }
 }

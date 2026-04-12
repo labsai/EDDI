@@ -1,4 +1,4 @@
-﻿{
+{
   "app": {
     "title": "EDDI Manager",
     "description": "Painel de administração da plataforma de IA conversacional EDDI"
@@ -334,7 +334,13 @@
     "backToConversations": "Voltar para Conversas",
     "steps": "Etapas da conversa",
     "noSteps": "Nenhuma etapa de conversa registrada",
-    "properties": "Propriedades da conversa"
+    "properties": "Propriedades da conversa",
+    "continueChat": "Continue in Chat",
+    "searchTranscript": "Search in conversation…",
+    "exportMd": "Export as Markdown",
+    "toolSummary": "Tool Usage Summary",
+    "totalCost": "Total Cost",
+    "cacheHitRate": "Cache Hit Rate"
   },
   "chat": {
     "selectAgent": "Selecione um agent...",
@@ -358,7 +364,27 @@
     "attachError": "Falha ao enviar arquivo",
     "retry": "Repetir última etapa",
     "retrySuccess": "Etapa re-executada",
-    "retryError": "Falha na repetição"
+    "retryError": "Falha na repetição",
+    "showActivity": "Show Activity",
+    "hideActivity": "Hide Activity",
+    "scrollToBottom": "Scroll to bottom",
+    "copyMessage": "Copy message",
+    "copied": "Copied!",
+    "activity": {
+      "processing": "Processing…",
+      "steps": "steps",
+      "toolCalls": "tool calls",
+      "toolCall": "Tool call",
+      "toolResult": "Result"
+    },
+    "context": {
+      "conversationId": "Conversation ID",
+      "agentVersion": "Agent Version",
+      "startTime": "Started",
+      "stepCount": "Steps",
+      "show": "Show conversation info",
+      "hide": "Hide conversation info"
+    }
   },
   "resources": {
     "unnamed": "Recurso sem nome",
@@ -1411,5 +1437,15 @@
     "deleteTitle": "Excluir vínculo",
     "deleteDesc": "Remover o vínculo para intenção \"{{intent}}\" e usuário \"{{userId}}\"?",
     "deleted": "Vínculo excluído"
+  },
+  "commandPalette": {
+    "placeholder": "Search pages, agents, actions…",
+    "noResults": "No results found.",
+    "recent": "Recent",
+    "navigate": "Navigate",
+    "agents": "Agents",
+    "actions": "Quick Actions",
+    "createAgent": "Create New Agent",
+    "openChat": "Open Chat"
   }
 }

@@ -2,6 +2,13 @@ import { create } from "zustand";
 
 // ==================== Types ====================
 
+export interface ToolTraceEntry {
+  type: "tool_call" | "tool_result";
+  tool: string;
+  arguments?: string;
+  result?: string;
+}
+
 export interface PipelineEvent {
   type: "task_start" | "task_complete" | "cascade_step_start" | "cascade_escalation";
   taskId: string;
@@ -10,6 +17,7 @@ export interface PipelineEvent {
   durationMs?: number;
   actions?: string[];
   confidence?: number;
+  toolTrace?: ToolTraceEntry[];
   timestamp: number;
 }
 
@@ -32,6 +40,7 @@ interface DebugState {
   isDebugOpen: boolean;
   activeTab: DebugTab;
   selectedTurnIndex: number | null; // null = current/latest
+  showActivity: boolean; // inline activity cards in chat
 
   // Actions
   addEvent: (event: PipelineEvent) => void;
@@ -40,6 +49,7 @@ interface DebugState {
   toggleDebug: () => void;
   setActiveTab: (tab: DebugTab) => void;
   setSelectedTurn: (index: number | null) => void;
+  toggleShowActivity: () => void;
   reset: () => void;
 }
 
@@ -61,6 +71,22 @@ const saveDebugPref = (open: boolean) => {
   }
 };
 
+const loadActivityPref = (): boolean => {
+  try {
+    return localStorage.getItem("eddi-show-activity") !== "false";
+  } catch {
+    return true;
+  }
+};
+
+const saveActivityPref = (show: boolean) => {
+  try {
+    localStorage.setItem("eddi-show-activity", String(show));
+  } catch {
+    /* noop */
+  }
+};
+
 // ==================== Store ====================
 
 export const useDebugStore = create<DebugState>((set) => ({
@@ -70,6 +96,7 @@ export const useDebugStore = create<DebugState>((set) => ({
   isDebugOpen: loadDebugPref(),
   activeTab: "pipeline",
   selectedTurnIndex: null,
+  showActivity: loadActivityPref(),
 
   addEvent: (event) =>
     set((s) => ({
@@ -117,6 +144,13 @@ export const useDebugStore = create<DebugState>((set) => ({
   setActiveTab: (tab) => set({ activeTab: tab }),
 
   setSelectedTurn: (index) => set({ selectedTurnIndex: index }),
+
+  toggleShowActivity: () =>
+    set((s) => {
+      const next = !s.showActivity;
+      saveActivityPref(next);
+      return { showActivity: next };
+    }),
 
   reset: () =>
     set({

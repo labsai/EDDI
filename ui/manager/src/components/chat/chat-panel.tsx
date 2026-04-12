@@ -14,9 +14,11 @@ import {
 } from "@/hooks/use-chat";
 import { uploadAttachment } from "@/lib/api/attachments";
 import { ChatMessage } from "./chat-message";
+import { ChatActivity } from "./chat-activity";
 import { ChatHistory } from "./chat-history";
 import { StreamingToggle } from "./streaming-toggle";
 import { DebugDrawer } from "@/components/debugger/debug-drawer";
+import { useDebugStore } from "@/hooks/use-debug-events";
 import { cn } from "@/lib/utils";
 import {
   Bot,
@@ -35,6 +37,13 @@ import {
   Send,
   Paperclip,
   RefreshCw,
+  Activity,
+  ArrowDown,
+  Info,
+  ChevronUp,
+  Hash,
+  Clock,
+  Layers,
 } from "lucide-react";
 
 export function ChatPanel() {
@@ -43,8 +52,11 @@ export function ChatPanel() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [agentSelectorOpen, setAgentSelectorOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const agentSelectorRef = useRef<HTMLDivElement>(null);
   const autoStartedRef = useRef(false);
+  const [showScrollFab, setShowScrollFab] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
 
   // Store state
   const messages = useChatStore((s) => s.messages);
@@ -61,6 +73,11 @@ export function ChatPanel() {
   const isSecretMode = useChatStore((s) => s.isSecretMode);
   const toggleSecretMode = useChatStore((s) => s.toggleSecretMode);
   const clearInputField = useChatStore((s) => s.clearInputField);
+
+  // Activity display
+  const showActivity = useDebugStore((s) => s.showActivity);
+  const toggleShowActivity = useDebugStore((s) => s.toggleShowActivity);
+  const currentTurnEvents = useDebugStore((s) => s.currentTurnEvents);
 
   // Queries & mutations
   const { data: deployedAgents, isLoading: agentsLoading } = useDeployedAgents();
@@ -265,6 +282,21 @@ export function ChatPanel() {
           {/* Streaming toggle */}
           <StreamingToggle />
 
+          {/* Activity toggle */}
+          <button
+            onClick={toggleShowActivity}
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
+              showActivity
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+            title={showActivity ? t("chat.hideActivity", "Hide Activity") : t("chat.showActivity", "Show Activity")}
+            data-testid="activity-toggle"
+          >
+            <Activity className="h-4 w-4" />
+          </button>
+
           {/* Top bar actions */}
           {conversationId && (
             <>
@@ -288,8 +320,67 @@ export function ChatPanel() {
           )}
         </div>
 
+        {/* Conversation context header */}
+        {conversationId && contextOpen && (
+          <div className="flex items-center gap-4 border-b border-border/50 bg-muted/30 px-4 py-1.5 text-[11px] text-muted-foreground">
+            <div className="flex items-center gap-1" title="Conversation ID">
+              <Hash className="h-3 w-3" />
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(conversationId);
+                  toast.success(t("common.copied", "Copied!"));
+                }}
+                className="font-mono hover:text-foreground transition-colors truncate max-w-[120px]"
+                title={conversationId}
+              >
+                {conversationId.slice(0, 12)}…
+              </button>
+            </div>
+            <div className="flex items-center gap-1" title="Steps">
+              <Layers className="h-3 w-3" />
+              <span>{messages.filter((m) => m.role === "user").length} {t("chat.context.stepCount", "turns")}</span>
+            </div>
+            <div className="flex items-center gap-1" title="Started">
+              <Clock className="h-3 w-3" />
+              <span>
+                {messages[0]
+                  ? new Date(messages[0].timestamp).toLocaleTimeString(undefined, {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : "—"}
+              </span>
+            </div>
+          </div>
+        )}
+        {conversationId && (
+          <button
+            onClick={() => setContextOpen((p) => !p)}
+            className={cn(
+              "flex w-full items-center justify-center py-0.5 text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/30 transition-colors",
+              contextOpen && "border-b border-border/30",
+            )}
+            title={contextOpen ? "Hide conversation info" : "Show conversation info"}
+            data-testid="context-toggle"
+          >
+            {contextOpen ? (
+              <ChevronUp className="h-3 w-3" />
+            ) : (
+              <Info className="h-3 w-3" />
+            )}
+          </button>
+        )}
+
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto">
+        <div
+          ref={scrollContainerRef}
+          className="relative flex-1 overflow-y-auto"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+            setShowScrollFab(distFromBottom > 200);
+          }}
+        >
           {!selectedAgentId ? (
             <EmptyState />
           ) : messages.length === 0 ? (
@@ -309,8 +400,16 @@ export function ChatPanel() {
                 <ChatMessage key={msg.id} message={msg} />
               ))}
 
-              {/* Thinking indicator */}
-              {isThinking && (
+              {/* Inline activity — live processing */}
+              {showActivity && (isProcessing || isThinking) && currentTurnEvents.length > 0 && (
+                <ChatActivity
+                  events={currentTurnEvents}
+                  isLive={true}
+                />
+              )}
+
+              {/* Thinking indicator (only when activity is hidden) */}
+              {!showActivity && isThinking && (
                 <div className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground animate-pulse">
                   <Brain className="h-4 w-4" />
                   <span className="italic">{t("chat.thinking")}</span>
@@ -334,6 +433,18 @@ export function ChatPanel() {
 
               <div ref={messagesEndRef} />
             </div>
+          )}
+
+          {/* Scroll-to-bottom FAB */}
+          {showScrollFab && (
+            <button
+              onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })}
+              className="absolute bottom-4 end-4 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-all animate-in fade-in slide-in-from-bottom-2"
+              title={t("chat.scrollToBottom", "Scroll to bottom")}
+              data-testid="scroll-to-bottom"
+            >
+              <ArrowDown className="h-4 w-4" />
+            </button>
           )}
         </div>
 

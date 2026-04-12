@@ -1,4 +1,4 @@
-﻿{
+{
   "app": {
     "title": "EDDI Manager",
     "description": "แดชบอร์ดบริหารจัดการแพลตฟอร์ม AI สนทนา EDDI"
@@ -334,7 +334,13 @@
     "backToConversations": "กลับไปยังการสนทนา",
     "steps": "ขั้นตอนการสนทนา",
     "noSteps": "ไม่มีขั้นตอนการสนทนาที่บันทึกไว้",
-    "properties": "คุณสมบัติการสนทนา"
+    "properties": "คุณสมบัติการสนทนา",
+    "continueChat": "Continue in Chat",
+    "searchTranscript": "Search in conversation…",
+    "exportMd": "Export as Markdown",
+    "toolSummary": "Tool Usage Summary",
+    "totalCost": "Total Cost",
+    "cacheHitRate": "Cache Hit Rate"
   },
   "chat": {
     "selectAgent": "เลือก Agent...",
@@ -358,7 +364,27 @@
     "attachError": "อัปโหลดไฟล์ล้มเหลว",
     "retry": "ลองใหม่ขั้นตอนล่าสุด",
     "retrySuccess": "ดำเนินการขั้นตอนใหม่แล้ว",
-    "retryError": "ลองใหม่ล้มเหลว"
+    "retryError": "ลองใหม่ล้มเหลว",
+    "showActivity": "Show Activity",
+    "hideActivity": "Hide Activity",
+    "scrollToBottom": "Scroll to bottom",
+    "copyMessage": "Copy message",
+    "copied": "Copied!",
+    "activity": {
+      "processing": "Processing…",
+      "steps": "steps",
+      "toolCalls": "tool calls",
+      "toolCall": "Tool call",
+      "toolResult": "Result"
+    },
+    "context": {
+      "conversationId": "Conversation ID",
+      "agentVersion": "Agent Version",
+      "startTime": "Started",
+      "stepCount": "Steps",
+      "show": "Show conversation info",
+      "hide": "Hide conversation info"
+    }
   },
   "resources": {
     "unnamed": "ทรัพยากรไม่มีชื่อ",
@@ -1411,5 +1437,15 @@
     "deleteTitle": "ลบการเชื่อมโยง",
     "deleteDesc": "ลบการเชื่อมโยงสำหรับ intent \"{{intent}}\" และผู้ใช้ \"{{userId}}\"?",
     "deleted": "ลบการเชื่อมโยงแล้ว"
+  },
+  "commandPalette": {
+    "placeholder": "Search pages, agents, actions…",
+    "noResults": "No results found.",
+    "recent": "Recent",
+    "navigate": "Navigate",
+    "agents": "Agents",
+    "actions": "Quick Actions",
+    "createAgent": "Create New Agent",
+    "openChat": "Open Chat"
   }
 }

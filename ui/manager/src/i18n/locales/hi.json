@@ -1,4 +1,4 @@
-﻿{
+{
   "app": {
     "title": "EDDI Manager",
     "description": "EDDI संवादात्मक AI प्लेटफ़ॉर्म प्रशासन डैशबोर्ड"
@@ -334,7 +334,13 @@
     "backToConversations": "वार्तालापों पर वापस जाएं",
     "steps": "वार्तालाप चरण",
     "noSteps": "कोई वार्तालाप चरण दर्ज नहीं किया गया",
-    "properties": "वार्तालाप गुण"
+    "properties": "वार्तालाप गुण",
+    "continueChat": "Continue in Chat",
+    "searchTranscript": "Search in conversation…",
+    "exportMd": "Export as Markdown",
+    "toolSummary": "Tool Usage Summary",
+    "totalCost": "Total Cost",
+    "cacheHitRate": "Cache Hit Rate"
   },
   "chat": {
     "selectAgent": "Agent चुनें...",
@@ -358,7 +364,27 @@
     "attachError": "फ़ाइल अपलोड विफल",
     "retry": "अंतिम चरण पुनः प्रयास करें",
     "retrySuccess": "चरण पुनः निष्पादित",
-    "retryError": "पुनः प्रयास विफल"
+    "retryError": "पुनः प्रयास विफल",
+    "showActivity": "Show Activity",
+    "hideActivity": "Hide Activity",
+    "scrollToBottom": "Scroll to bottom",
+    "copyMessage": "Copy message",
+    "copied": "Copied!",
+    "activity": {
+      "processing": "Processing…",
+      "steps": "steps",
+      "toolCalls": "tool calls",
+      "toolCall": "Tool call",
+      "toolResult": "Result"
+    },
+    "context": {
+      "conversationId": "Conversation ID",
+      "agentVersion": "Agent Version",
+      "startTime": "Started",
+      "stepCount": "Steps",
+      "show": "Show conversation info",
+      "hide": "Hide conversation info"
+    }
   },
   "resources": {
     "unnamed": "अनामित संसाधन",
@@ -1411,5 +1437,15 @@
     "deleteTitle": "बाइंडिंग हटाएं",
     "deleteDesc": "इंटेंट \"{{intent}}\" और उपयोगकर्ता \"{{userId}}\" के लिए बाइंडिंग हटाएं?",
     "deleted": "बाइंडिंग हटा दी गई"
+  },
+  "commandPalette": {
+    "placeholder": "Search pages, agents, actions…",
+    "noResults": "No results found.",
+    "recent": "Recent",
+    "navigate": "Navigate",
+    "agents": "Agents",
+    "actions": "Quick Actions",
+    "createAgent": "Create New Agent",
+    "openChat": "Open Chat"
   }
 }

@@ -1,4 +1,4 @@
-﻿{
+{
   "app": {
     "title": "EDDI Manager",
     "description": "EDDI 会話型AIプラットフォーム管理ダッシュボード"
@@ -334,7 +334,13 @@
     "backToConversations": "会話一覧に戻る",
     "steps": "会話ステップ",
     "noSteps": "会話ステップが記録されていません",
-    "properties": "会話プロパティ"
+    "properties": "会話プロパティ",
+    "continueChat": "Continue in Chat",
+    "searchTranscript": "Search in conversation…",
+    "exportMd": "Export as Markdown",
+    "toolSummary": "Tool Usage Summary",
+    "totalCost": "Total Cost",
+    "cacheHitRate": "Cache Hit Rate"
   },
   "chat": {
     "selectAgent": "Agent を選択...",
@@ -358,7 +364,27 @@
     "attachError": "ファイルのアップロードに失敗",
     "retry": "最後のステップをリトライ",
     "retrySuccess": "ステップを再実行しました",
-    "retryError": "リトライ失敗"
+    "retryError": "リトライ失敗",
+    "showActivity": "Show Activity",
+    "hideActivity": "Hide Activity",
+    "scrollToBottom": "Scroll to bottom",
+    "copyMessage": "Copy message",
+    "copied": "Copied!",
+    "activity": {
+      "processing": "Processing…",
+      "steps": "steps",
+      "toolCalls": "tool calls",
+      "toolCall": "Tool call",
+      "toolResult": "Result"
+    },
+    "context": {
+      "conversationId": "Conversation ID",
+      "agentVersion": "Agent Version",
+      "startTime": "Started",
+      "stepCount": "Steps",
+      "show": "Show conversation info",
+      "hide": "Hide conversation info"
+    }
   },
   "resources": {
     "unnamed": "名前なしリソース",
@@ -1411,5 +1437,15 @@
     "deleteTitle": "バインディング削除",
     "deleteDesc": "インテント\"{{intent}}\"とユーザー\"{{userId}}\"のバインディングを削除しますか？",
     "deleted": "バインディングを削除しました"
+  },
+  "commandPalette": {
+    "placeholder": "Search pages, agents, actions…",
+    "noResults": "No results found.",
+    "recent": "Recent",
+    "navigate": "Navigate",
+    "agents": "Agents",
+    "actions": "Quick Actions",
+    "createAgent": "Create New Agent",
+    "openChat": "Open Chat"
   }
 }

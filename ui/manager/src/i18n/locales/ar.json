@@ -1,4 +1,4 @@
-﻿{
+{
   "app": {
     "title": "مدير EDDI",
     "description": "لوحة تحكم منصة EDDI للذكاء الاصطناعي"
@@ -334,7 +334,13 @@
     "backToConversations": "العودة إلى المحادثات",
     "steps": "خطوات المحادثة",
     "noSteps": "لم يتم تسجيل خطوات محادثة",
-    "properties": "خصائص المحادثة"
+    "properties": "خصائص المحادثة",
+    "continueChat": "Continue in Chat",
+    "searchTranscript": "Search in conversation…",
+    "exportMd": "Export as Markdown",
+    "toolSummary": "Tool Usage Summary",
+    "totalCost": "Total Cost",
+    "cacheHitRate": "Cache Hit Rate"
   },
   "chat": {
     "selectAgent": "اختر Agent...",
@@ -358,7 +364,27 @@
     "attachError": "فشل في رفع الملف",
     "retry": "إعادة محاولة الخطوة الأخيرة",
     "retrySuccess": "تم إعادة تنفيذ الخطوة",
-    "retryError": "فشلت إعادة المحاولة"
+    "retryError": "فشلت إعادة المحاولة",
+    "showActivity": "Show Activity",
+    "hideActivity": "Hide Activity",
+    "scrollToBottom": "Scroll to bottom",
+    "copyMessage": "Copy message",
+    "copied": "Copied!",
+    "activity": {
+      "processing": "Processing…",
+      "steps": "steps",
+      "toolCalls": "tool calls",
+      "toolCall": "Tool call",
+      "toolResult": "Result"
+    },
+    "context": {
+      "conversationId": "Conversation ID",
+      "agentVersion": "Agent Version",
+      "startTime": "Started",
+      "stepCount": "Steps",
+      "show": "Show conversation info",
+      "hide": "Hide conversation info"
+    }
   },
   "resources": {
     "unnamed": "مورد بدون اسم",
@@ -1411,5 +1437,15 @@
     "deleteTitle": "حذف الربط",
     "deleteDesc": "إزالة الربط للنية \"{{intent}}\" والمستخدم \"{{userId}}\"?",
     "deleted": "تم حذف الربط"
+  },
+  "commandPalette": {
+    "placeholder": "Search pages, agents, actions…",
+    "noResults": "No results found.",
+    "recent": "Recent",
+    "navigate": "Navigate",
+    "agents": "Agents",
+    "actions": "Quick Actions",
+    "createAgent": "Create New Agent",
+    "openChat": "Open Chat"
   }
 }

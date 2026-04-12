@@ -517,6 +517,7 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
       let durationMs: number | undefined;
       let actions: string[] | undefined;
       let confidence: number | undefined;
+      let toolTrace: import("@/hooks/use-debug-events").ToolTraceEntry[] | undefined;
       try {
         const parsed = JSON.parse(event.data);
         taskId = parsed.taskId ?? parsed.id ?? "unknown";
@@ -525,6 +526,7 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
         durationMs = parsed.durationMs ?? parsed.duration;
         actions = parsed.actions;
         confidence = parsed.confidence;
+        toolTrace = parsed.toolTrace;
       } catch {
         taskType = event.data || "unknown";
       }
@@ -536,6 +538,7 @@ function handleSSEEvent(event: SSEEvent, store: typeof useChatStore): boolean {
         durationMs,
         actions,
         confidence,
+        toolTrace,
         timestamp: Date.now(),
       });
       return false;
