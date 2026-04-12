@@ -356,11 +356,12 @@
     "count_other": "{{count}} conversations"
   },
   "conversationDetail": {
-    "title": "Conversation",
-    "backToConversations": "Back to Conversations",
-    "steps": "Conversation Steps",
-    "noSteps": "No conversation steps recorded",
-    "properties": "Conversation Properties"
+    "continueChat": "Continue in Chat",
+    "searchTranscript": "Search in conversation…",
+    "exportMd": "Export as Markdown",
+    "toolSummary": "Tool Usage Summary",
+    "totalCost": "Total Cost",
+    "cacheHitRate": "Cache Hit Rate"
   },
   "chat": {
     "selectAgent": "Select an agent...",
@@ -391,7 +392,7 @@
     "copyMessage": "Copy message",
     "copied": "Copied!",
     "activity": {
-      "processing": "Processing\u2026",
+      "processing": "Processing…",
       "steps": "steps",
       "toolCalls": "tool calls",
       "toolCall": "Tool call",
@@ -404,10 +405,11 @@
       "stepCount": "Steps",
       "show": "Show conversation info",
       "hide": "Hide conversation info"
-    }
+    },
+    "agentTyping": "Agent is typing"
   },
   "commandPalette": {
-    "placeholder": "Search pages, agents, actions\u2026",
+    "placeholder": "Search pages, agents, actions…",
     "noResults": "No results found.",
     "recent": "Recent",
     "navigate": "Navigate",
@@ -415,14 +417,6 @@
     "actions": "Quick Actions",
     "createAgent": "Create New Agent",
     "openChat": "Open Chat"
-  },
-  "conversationDetail": {
-    "continueChat": "Continue in Chat",
-    "searchTranscript": "Search in conversation\u2026",
-    "exportMd": "Export as Markdown",
-    "toolSummary": "Tool Usage Summary",
-    "totalCost": "Total Cost",
-    "cacheHitRate": "Cache Hit Rate"
   },
   "resources": {
     "unnamed": "Unnamed Resource",
