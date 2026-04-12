@@ -392,8 +392,9 @@ jobs:
           REF="${REF#refs/tags/}"
           REF="${REF#refs/pull/}"
 
-          # Truncate commit message
-          COMMIT_MSG=$(echo "${{ github.event.head_commit.message || github.event.pull_request.title || 'Manual run' }}" | head -1 | cut -c1-80)
+          # Sanitize commit message for JSON embedding
+          RAW_MSG="${{ github.event.head_commit.message || github.event.pull_request.title || 'Manual run' }}"
+          COMMIT_MSG=$(echo "$RAW_MSG" | head -1 | cut -c1-80 | sed 's/[\"\\]//g' | sed "s/[']//g")
 
           curl -sf -X POST "$SLACK_WEBHOOK" \
             -H 'Content-type: application/json' \

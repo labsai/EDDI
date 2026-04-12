@@ -3,13 +3,17 @@ name: Project Metrics Tracker
 on:
   schedule:
     - cron: '*/15 * * * *' # every 15 min — collect metrics + push to analytics
-    - cron: '0 9 * * 0'  # weekly — Sunday 9am UTC, Slack digest
+    - cron: '0 9 * * 0'    # weekly — Sunday 9am UTC, Slack digest
   workflow_dispatch:
     inputs:
       force_digest:
         description: 'Send weekly digest now'
         type: boolean
         default: false
+
+permissions:
+  actions: write   # cache delete
+  contents: read   # repo metadata + traffic API
 
 jobs:
   track:
@@ -69,12 +73,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VIEWS=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
-            https://api.github.com/repos/labsai/EDDI/traffic/views | jq '.count // 0')
-          UNIQUES=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
-            https://api.github.com/repos/labsai/EDDI/traffic/views | jq '.uniques // 0')
+          VIEWS_DATA=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/labsai/EDDI/traffic/views)
+          VIEWS=$(echo "$VIEWS_DATA" | jq '.count // 0')
+          UNIQUES=$(echo "$VIEWS_DATA" | jq '.uniques // 0')
+
           CLONES=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
             https://api.github.com/repos/labsai/EDDI/traffic/clones | jq '.count // 0')
+
           echo "views=$VIEWS" >> "$GITHUB_OUTPUT"
           echo "uniques=$UNIQUES" >> "$GITHUB_OUTPUT"
           echo "clones=$CLONES" >> "$GITHUB_OUTPUT"
@@ -205,9 +211,9 @@ jobs:
           PULLS_FMT=$(printf "%'d" "$PULLS")
 
           # Build sign prefixes
-          pull_sign="" && [ "$WEEK_PULL_DIFF" -gt 0 ] && pull_sign="+"
-          star_sign="" && [ "$WEEK_STAR_DIFF" -gt 0 ] && star_sign="+"
-          fork_sign="" && [ "$WEEK_FORK_DIFF" -gt 0 ] && fork_sign="+"
+          pull_sign=""; [ "$WEEK_PULL_DIFF" -gt 0 ] && pull_sign="+"
+          star_sign=""; [ "$WEEK_STAR_DIFF" -gt 0 ] && star_sign="+"
+          fork_sign=""; [ "$WEEK_FORK_DIFF" -gt 0 ] && fork_sign="+"
 
           curl -sf -X POST "$SLACK_WEBHOOK" \
             -H 'Content-type: application/json' \
