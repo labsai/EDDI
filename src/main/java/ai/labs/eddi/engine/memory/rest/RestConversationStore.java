@@ -149,6 +149,12 @@ public class RestConversationStore implements IRestConversationStore {
         try {
             var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
 
+            if (memorySnapshot == null) {
+                log.warn(format("Memory snapshot not found for conversation [%s, %s]. Descriptor is orphaned.",
+                        resourceId.getId(), resourceId.getVersion()));
+                return;
+            }
+
             if (conversationDescriptor.getUserId() == null) {
                 // fallback for older conversations pre v5.1.6
                 conversationDescriptor.setUserId(memorySnapshot.getUserId());
