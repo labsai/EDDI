@@ -4,6 +4,4 @@ globs:
 alwaysApply: true
 ---
 
-See the repository root file `AGENTS.md` for the complete instruction set.
-
-This file exists because Cursor reads `.cursor/rules/*.mdc` by convention. All instructions are maintained in a single `AGENTS.md` to avoid duplication across AI tools.
+Read and follow all instructions in the repository root file AGENTS.md.
