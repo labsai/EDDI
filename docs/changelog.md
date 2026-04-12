@@ -15,7 +15,33 @@ Each entry follows this format:
 
 ---
 
+## AI Documentation Audit — Stale Naming Fix (2026-04-12)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**What changed:**
+
+Comprehensive audit of all AI-agent-relevant documentation, cross-referencing class names, package paths, and interfaces against the actual codebase. Found and fixed ~20 stale references left behind by the v6 naming migration (`langchain` → `llm`, `httpcalls` → `apicalls`, etc.).
+
+| File | Fixes |
+|------|-------|
+| **`AGENTS.md`** | `LangchainTask` → `LlmTask` (4 refs), `HttpCallsTask` → `ApiCallsTask` (2 refs), `BehaviorRulesEvaluationTask` → `RulesEvaluationTask` (2 refs), `IPropertiesStore` → `IUserMemoryStore`, `UrlValidationUtils` package path fix, Property Lifecycle section rewritten, removed hardcoded branch name, added 6 missing features to roadmap, fixed "agenttlenecks" typo |
+| **`docs/mcp-server.md`** | Fixed `LangchainTask` → `LlmTask` in architecture diagram |
+| **`HANDOFF.md`** | Added deprecation banner pointing to `docs/changelog.md` as authoritative source |
+| **`.github/copilot-instructions.md`** | NEW — Pointer to `AGENTS.md` for GitHub Copilot |
+| **`.cursorrules`** | NEW — Pointer to `AGENTS.md` for Cursor |
+
+**Design decisions:**
+- **Branch-agnostic instructions**: AI agents should check `git branch --show-current` to discover the active branch rather than following hardcoded branch names
+- **Pointer files over copies**: Copilot/Cursor files point to `AGENTS.md` to prevent maintenance drift
+- **Historical docs left as-is**: `docs/v6-planning/` research docs contain old names but are clearly historical
+
+**Files:** 5 modified, 2 new.
+
+---
+
 ## Integration Test Stabilization — Rules Deserialization Fix (2026-04-11)
+
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
 

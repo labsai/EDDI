@@ -1,7 +1,11 @@
 # EDDI v6.0 — Current Status
 
+> [!IMPORTANT]
+> **This file is a historical snapshot from early v6.0 development and is no longer actively maintained.**
+> For the authoritative, up-to-date log of all changes, decisions, and reasoning, see [`docs/changelog.md`](docs/changelog.md).
+> This file contains class names and package paths that have since been renamed (e.g., `LangchainTask` → `LlmTask`, `HttpCallsTask` → `ApiCallsTask`).
+
 > **Last updated:** 2026-03-30
-> **Branch:** `feature/version-6.0.0`
 
 ## Completed
 

@@ -24,7 +24,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 - **Lifecycle pipeline**: Input → Parse → Behavior Rules → Actions → Tasks → Output
 - **Stateless tasks, stateful memory**: `ILifecycleTask` implementations are singletons; all state lives in `IConversationMemory`
 - **Action-based orchestration**: Tasks emit/listen for string-based actions, never call each other directly
-- **Self-contained platform**: EDDI is a closed platform, not a library consumed by third-party code. Internal interfaces (`IPropertiesStore`, `IResourceStore`, etc.) have no external consumers. Deprecation and replacement of internal APIs is safe — the only backward-compat concern is old JSON configs stored in MongoDB or imported via ZIP.
+- **Self-contained platform**: EDDI is a closed platform, not a library consumed by third-party code. Internal interfaces (`IUserMemoryStore`, `IResourceStore`, etc.) have no external consumers. Deprecation and replacement of internal APIs is safe — the only backward-compat concern is old JSON configs stored in MongoDB or imported via ZIP.
 - **CI/CD**: GitHub Actions (compile → test → Docker build → smoke test → push to Docker Hub). `[skip docker]` in commit message skips image builds. Tag-based releases (`v6.0.0-RC1` → `labsai/eddi:6.0.0-RC1`)
 
 ---
@@ -42,7 +42,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 ### During Work
 
-3. **Branch: `feature/version-6.0.0`**: All v6.0 work branches from and merges back to `feature/version-6.0.0`. **Do NOT commit directly to `main`.**
+3. **Branching**: Check `git branch --show-current` and `git log -5 --oneline` to understand the current branch context. **Do NOT commit directly to `main`.** If unsure which branch to use, ask the user.
 4. **Commit often**: Every working unit gets a commit. Use conventional commits:
    ```
    feat(scope): description
@@ -73,7 +73,7 @@ Follow this order unless the user explicitly requests something different.
 | Phase | Area                     | Highlights                                                                                          |
 | ----- | ------------------------ | --------------------------------------------------------------------------------------------------- |
 | 0     | Security Quick Wins      | CORS lockdown, PathNavigator (replaced OGNL)                                                        |
-| 1     | Backend Foundation       | ConversationService extraction, SSE streaming, typed memory, LangchainTask decomposition            |
+| 1     | Backend Foundation       | ConversationService extraction, SSE streaming, typed memory, LlmTask decomposition                  |
 | 2     | Testing Infrastructure   | Integration tests migrated to main repo, Testcontainers, API contract tests                         |
 | 3     | Manager UI               | Greenfield React 19 + Vite + Tailwind rewrite                                                       |
 | 4     | Chat-UI                  | CRA→Vite, SSE streaming, Keycloak auth                                                              |
@@ -92,6 +92,12 @@ Follow this order unless the user explicitly requests something different.
 | —     | Conversation Windows      | Token-aware windowing, rolling summary, ConversationRecallTool                                        |
 | —     | Agentic Improvements 1–5  | Counterweights, MCP governance, capability registry, multimodal attachments, agent signing            |
 | —     | Compliance Hardening      | HIPAA, EU AI Act, international privacy docs + ComplianceStartupChecks                               |
+| —     | Prompt Snippets           | Config-driven system prompt building blocks, Caffeine-cached, REST CRUD                              |
+| —     | Agent Sync                | Granular export/import, structural matching, live instance-to-instance sync                          |
+| —     | GDPR/CCPA Framework       | Cascading erasure, data portability, Art. 18 restriction, per-category retention                     |
+| —     | Commit Flags              | Strict write discipline for memory — uncommit failed task data, error digest injection                |
+| —     | Template Preview          | REST endpoint for previewing resolved system prompts with sample/live data                           |
+| —     | RC2 Hardening             | 2,000+ unit tests, 250+ integration tests, branding overhaul, rules deserialization fix              |
 
 ### In Progress / Upcoming
 
@@ -114,9 +120,9 @@ Follow this order unless the user explicitly requests something different.
 
 ### 4.1 Golden Rules (Non-Negotiable)
 
-1. **Logic is Configuration, Java is the Engine** — Agent behavior (e.g., "if user says 'hello', call API 'X'") MUST NOT be hard-coded in Java. Agent logic belongs in **JSON configurations** (`behavior.json`, `httpcalls.json`, `langchain.json`). Java code creates the `ILifecycleTask` components that _read and execute_ this configuration.
+1. **Logic is Configuration, Java is the Engine** — Agent behavior (e.g., "if user says 'hello', call API 'X'") MUST NOT be hard-coded in Java. Agent logic belongs in **JSON configurations** (`behavior.json`, `httpcalls.json`, `langchain.json`). Java code creates the `ILifecycleTask` components that _read and execute_ this configuration. (Note: the config file is still named `langchain.json` but the implementing class is `LlmTask`.)
 2. **Stateless Tasks, Stateful Memory** — `ILifecycleTask` implementations MUST be stateless. They are singletons shared by all conversations. All conversational state MUST be read from and written to the `IConversationMemory` object passed into the `execute` method.
-3. **Action-Based Orchestration** — Tasks MUST NOT call other tasks directly. The system is event-driven. Tasks are orchestrated by string-based **actions**. A task (like `BehaviorRulesEvaluationTask`) emits actions, and other tasks (like `OutputGenerationTask` or `HttpCallsTask`) listen for them.
+3. **Action-Based Orchestration** — Tasks MUST NOT call other tasks directly. The system is event-driven. Tasks are orchestrated by string-based **actions**. A task (like `RulesEvaluationTask`) emits actions, and other tasks (like `OutputGenerationTask` or `ApiCallsTask`) listen for them.
 4. **Dependency Injection via Quarkus CDI** — All components (`ILifecycleTask`s, `IResourceStore`s) use `@ApplicationScoped` and `@Inject`. No manual module registration — Quarkus auto-discovers beans.
 5. **Thread Safety** — The `ConversationCoordinator` handles concurrency _between_ conversations. Code must be thread-safe and non-blocking. REST endpoints use JAX-RS `AsyncResponse`. Tasks execute synchronously but must not block for extended periods.
 
@@ -126,7 +132,7 @@ Follow this order unless the user explicitly requests something different.
 
 The `LifecycleManager` is the heart of EDDI. It processes a conversation turn by running a pipeline of `ILifecycleTask` implementations.
 
-A **new feature** (e.g., "Langchain Agents") is implemented as a **new `ILifecycleTask`**:
+A **new feature** (e.g., "LLM Agents") is implemented as a **new `ILifecycleTask`**:
 
 1. Create the task class implementing `ILifecycleTask`
 2. Implement `execute(IConversationMemory memory)`
@@ -154,10 +160,10 @@ Agent definitions are versioned MongoDB documents. A "Agent" is a list of "Workf
 
 #### Core Workflow Extensions
 
-- **`behavior.json`** → `BehaviorRulesEvaluationTask` — the **primary orchestrator**. Its `actions` list is the event that triggers other tasks.
-- **`httpcalls.json`** → `HttpCallsTask` — **Tool Definitions** with templated API calls.
+- **`behavior.json`** → `RulesEvaluationTask` — the **primary orchestrator**. Its `actions` list is the event that triggers other tasks.
+- **`httpcalls.json`** → `ApiCallsTask` — **Tool Definitions** with templated API calls.
 - **`property.json`** → `PropertySetterTask` — **EDDI's importance extraction mechanism.** Config-driven slot-filling that explicitly selects which data to preserve as `longTerm` properties. These properties survive the LLM context window boundary — they're loaded at conversation init and available in all templates regardless of how many turns have passed. When designing context management or memory features, PropertySetter is **not just slot-filling** — it's how EDDI ensures critical facts outlive the conversation window.
-- **`langchain.json`** → `LangchainTask` — **Agent Definition** (prompt, model, tools, or legacy chat).
+- **`langchain.json`** → `LlmTask` — **Agent Definition** (prompt, model, tools, or legacy chat). (Config file retains the `langchain` name for backward compatibility.)
 
 #### The Template Data Model
 
@@ -180,10 +186,11 @@ Properties have a well-defined lifecycle managed by `Conversation.java`:
 
 ```
 1. Conversation.init()
-   └─→ loadLongTermProperties()
-       └─→ IPropertiesHandler.loadProperties(userId)
-       └─→ Loaded into conversationProperties with scope=longTerm
-       └─→ Available as {properties.key} in all templates
+   └─→ loadUserProperties()
+       └─→ IUserMemoryStore.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries)
+       └─→ Visibility scoping: self + group + global entries are loaded
+       └─→ Converted to Property objects with scope=longTerm
+       └─→ Available as {{properties.key}} in all templates
 
 2. Pipeline runs
    └─→ PropertySetterTask sets properties based on actions
@@ -194,8 +201,8 @@ Properties have a well-defined lifecycle managed by `Conversation.java`:
 
 3. Conversation turn ends
    └─→ storePropertiesPermanently()
-       └─→ All longTerm properties saved via IPropertiesHandler
-       └─→ Secret properties scrubbed and vaulted
+       └─→ All longTerm properties saved via IUserMemoryStore.upsert()
+       └─→ Visibility applied at persistence boundary (explicit or config default)
 ```
 
 > **Key insight**: Persistent state is a **session concern** handled in `Conversation.java` init/teardown — NOT a pipeline task. If your feature needs to load/save cross-conversation state, extend the Conversation init/teardown logic. Do NOT create a new `ILifecycleTask` for session-level concerns.
@@ -366,7 +373,7 @@ Pipeline: `Tool Call → Rate Limiter → Cache Check → Execute → Cost Track
 - **Never use `ScriptEngine`** — use `SafeMathParser` (recursive-descent)
 
 ```java
-import static ai.labs.eddi.modules.langchain.tools.UrlValidationUtils.validateUrl;
+import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 
 @Tool("Fetches data from a URL")
 public String fetchData(@P("URL (http or https)") String url) {
@@ -492,7 +499,7 @@ When implementing a new feature, provide:
 
 - Cache expensive resources (models, compiled templates)
 - Use `@PostConstruct` for one-time initialization
-- Track metrics to identify agenttlenecks
+- Track metrics to identify bottlenecks
 - Avoid blocking operations in task execution
 
 #### Memory Management
@@ -541,7 +548,7 @@ When designing any new feature, always consider these before finalizing the desi
 
 **If picking up from a previous session:**
 
-1. Run `git log -5 --oneline` on `feature/version-6.0.0` to see recent commits
+1. Run `git log -5 --oneline` and `git branch --show-current` to see recent commits and the active branch
 2. Run `git status` to check for uncommitted changes
 3. Check which phase/item from Section 3 is currently in progress
 4. Read [`docs/changelog.md`](docs/changelog.md) for latest changes and decisions
