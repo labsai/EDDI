@@ -1,0 +1,9 @@
+---
+description: EDDI Backend — AI Agent Instructions. Complete project context, architecture, and coding guidelines.
+globs:
+alwaysApply: true
+---
+
+See the repository root file `AGENTS.md` for the complete instruction set.
+
+This file exists because Cursor reads `.cursor/rules/*.mdc` by convention. All instructions are maintained in a single `AGENTS.md` to avoid duplication across AI tools.
