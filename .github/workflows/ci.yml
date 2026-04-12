@@ -339,3 +339,92 @@ jobs:
           name: preflight-dryrun
           path: preflight-dryrun.txt
           retention-days: 14
+
+  # ─── Job 6: Slack Notification ─────────────────────────────────
+  notify-slack:
+    name: Slack Notification
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [build-and-test, integration-test, docker, smoke-test, preflight-check]
+
+    steps:
+      - name: Send build notification
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          # Skip if no webhook configured
+          if [ -z "$SLACK_WEBHOOK" ]; then
+            echo "No SLACK_WEBHOOK_URL configured, skipping"
+            exit 0
+          fi
+
+          # Determine overall status
+          BUILD="${{ needs.build-and-test.result }}"
+          IT="${{ needs.integration-test.result }}"
+          DOCKER="${{ needs.docker.result }}"
+          SMOKE="${{ needs.smoke-test.result }}"
+          PREFLIGHT="${{ needs.preflight-check.result }}"
+
+          # Map result to emoji
+          status_icon() {
+            case "$1" in
+              success)  echo "✅" ;;
+              failure)  echo "❌" ;;
+              skipped)  echo "⏭️" ;;
+              cancelled) echo "🚫" ;;
+              *)        echo "❓" ;;
+            esac
+          }
+
+          # Overall status
+          if [ "$BUILD" = "success" ] && [ "$IT" != "failure" ] && [ "$DOCKER" != "failure" ] && [ "$SMOKE" != "failure" ]; then
+            OVERALL_ICON="✅"
+            OVERALL_TEXT="Build Passed"
+            COLOR="#36a64f"
+          else
+            OVERALL_ICON="❌"
+            OVERALL_TEXT="Build Failed"
+            COLOR="#cc0000"
+          fi
+
+          # Branch or tag name
+          REF="${GITHUB_REF#refs/heads/}"
+          REF="${REF#refs/tags/}"
+          REF="${REF#refs/pull/}"
+
+          # Truncate commit message
+          COMMIT_MSG=$(echo "${{ github.event.head_commit.message || github.event.pull_request.title || 'Manual run' }}" | head -1 | cut -c1-80)
+
+          curl -sf -X POST "$SLACK_WEBHOOK" \
+            -H 'Content-type: application/json' \
+            -d "{
+              \"blocks\": [
+                {
+                  \"type\": \"header\",
+                  \"text\": { \"type\": \"plain_text\", \"text\": \"${OVERALL_ICON}  EDDI CI: ${OVERALL_TEXT}\", \"emoji\": true }
+                },
+                {
+                  \"type\": \"section\",
+                  \"text\": {
+                    \"type\": \"mrkdwn\",
+                    \"text\": \"*Branch:* \`${REF}\`  ·  *By:* ${{ github.actor }}\n${COMMIT_MSG}\"
+                  }
+                },
+                {
+                  \"type\": \"section\",
+                  \"fields\": [
+                    { \"type\": \"mrkdwn\", \"text\": \"$(status_icon $BUILD) Build & Test\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"$(status_icon $IT) Integration Tests\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"$(status_icon $DOCKER) Docker Push\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"$(status_icon $SMOKE) Smoke Test\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"$(status_icon $PREFLIGHT) Red Hat Preflight\" }
+                  ]
+                },
+                {
+                  \"type\": \"context\",
+                  \"elements\": [
+                    { \"type\": \"mrkdwn\", \"text\": \"<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run #${{ github.run_number }}>\" }
+                  ]
+                }
+              ]
+            }"
