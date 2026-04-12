@@ -1,0 +1,287 @@
+name: Project Metrics Tracker
+
+on:
+  schedule:
+    - cron: '*/15 * * * *' # every 15 min — collect metrics + push to analytics
+    - cron: '0 9 * * 0'  # weekly — Sunday 9am UTC, Slack digest
+  workflow_dispatch:
+    inputs:
+      force_digest:
+        description: 'Send weekly digest now'
+        type: boolean
+        default: false
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    steps:
+      # ── Restore cached metrics ──────────────────────────────
+      - name: Restore metrics cache
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: metrics.json
+          key: project-metrics-data
+
+      - name: Load previous metrics
+        id: prev
+        run: |
+          if [ -f metrics.json ]; then
+            cat metrics.json
+            echo "docker_pulls=$(jq -r '.docker_pulls // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "stars=$(jq -r '.stars // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "forks=$(jq -r '.forks // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "week_docker=$(jq -r '.week_docker // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "week_stars=$(jq -r '.week_stars // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "week_forks=$(jq -r '.week_forks // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "last_milestone=$(jq -r '.last_milestone // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "has_data=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_data=false" >> "$GITHUB_OUTPUT"
+            for key in docker_pulls stars forks week_docker week_stars week_forks last_milestone; do
+              echo "${key}=0" >> "$GITHUB_OUTPUT"
+            done
+          fi
+
+      # ── Fetch current metrics ───────────────────────────────
+      - name: Fetch Docker Hub pulls
+        id: docker
+        run: |
+          PULLS=$(curl -sf https://hub.docker.com/v2/repositories/labsai/eddi/ | jq '.pull_count')
+          echo "pulls=$PULLS" >> "$GITHUB_OUTPUT"
+          echo "Docker pulls: $PULLS"
+
+      - name: Fetch GitHub stats
+        id: github
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REPO_DATA=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/labsai/EDDI)
+          STARS=$(echo "$REPO_DATA" | jq '.stargazers_count')
+          FORKS=$(echo "$REPO_DATA" | jq '.forks_count')
+          echo "stars=$STARS" >> "$GITHUB_OUTPUT"
+          echo "forks=$FORKS" >> "$GITHUB_OUTPUT"
+          echo "Stars: $STARS, Forks: $FORKS"
+
+      - name: Fetch GitHub traffic (views + clones)
+        id: traffic
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VIEWS=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/labsai/EDDI/traffic/views | jq '.count // 0')
+          UNIQUES=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/labsai/EDDI/traffic/views | jq '.uniques // 0')
+          CLONES=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/labsai/EDDI/traffic/clones | jq '.count // 0')
+          echo "views=$VIEWS" >> "$GITHUB_OUTPUT"
+          echo "uniques=$UNIQUES" >> "$GITHUB_OUTPUT"
+          echo "clones=$CLONES" >> "$GITHUB_OUTPUT"
+          echo "Views: $VIEWS (uniques: $UNIQUES), Clones: $CLONES"
+
+      # ── Compute deltas ──────────────────────────────────────
+      - name: Compute deltas
+        id: delta
+        run: |
+          PULL_DIFF=$(( ${{ steps.docker.outputs.pulls }} - ${{ steps.prev.outputs.docker_pulls }} ))
+          STAR_DIFF=$(( ${{ steps.github.outputs.stars }} - ${{ steps.prev.outputs.stars }} ))
+          FORK_DIFF=$(( ${{ steps.github.outputs.forks }} - ${{ steps.prev.outputs.forks }} ))
+          echo "pull_diff=$PULL_DIFF" >> "$GITHUB_OUTPUT"
+          echo "star_diff=$STAR_DIFF" >> "$GITHUB_OUTPUT"
+          echo "fork_diff=$FORK_DIFF" >> "$GITHUB_OUTPUT"
+
+          # Check for changes
+          if [ "$PULL_DIFF" -ne 0 ] || [ "$STAR_DIFF" -ne 0 ] || [ "$FORK_DIFF" -ne 0 ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Milestone check (every 10,000 pulls)
+          CURRENT=${{ steps.docker.outputs.pulls }}
+          LAST_MS=${{ steps.prev.outputs.last_milestone }}
+          CURRENT_MS=$(( CURRENT / 10000 * 10000 ))
+          if [ "$CURRENT_MS" -gt "$LAST_MS" ] && [ "$LAST_MS" -ne 0 ]; then
+            echo "milestone=$CURRENT_MS" >> "$GITHUB_OUTPUT"
+          else
+            echo "milestone=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── Push to analytics (always, if data changed) ─────────
+      - name: Send to Google Analytics 4
+        if: steps.delta.outputs.changed == 'true' && steps.prev.outputs.has_data == 'true'
+        env:
+          GA4_SECRET: ${{ secrets.GA4_API_SECRET }}
+        run: |
+          curl -sf -X POST \
+            "https://www.google-analytics.com/mp/collect?measurement_id=G-L1011GL1PY&api_secret=$GA4_SECRET" \
+            -H 'Content-Type: application/json' \
+            -d "{
+              \"client_id\": \"github-actions.metrics\",
+              \"events\": [{
+                \"name\": \"project_metrics\",
+                \"params\": {
+                  \"docker_pulls\": ${{ steps.docker.outputs.pulls }},
+                  \"docker_delta\": ${{ steps.delta.outputs.pull_diff }},
+                  \"github_stars\": ${{ steps.github.outputs.stars }},
+                  \"github_forks\": ${{ steps.github.outputs.forks }},
+                  \"github_views\": ${{ steps.traffic.outputs.views }},
+                  \"github_clones\": ${{ steps.traffic.outputs.clones }},
+                  \"engagement_time_msec\": 1
+                }
+              }]
+            }"
+
+      - name: Send to Umami Cloud
+        if: steps.delta.outputs.changed == 'true' && steps.prev.outputs.has_data == 'true'
+        run: |
+          curl -sf -X POST "https://cloud.umami.is/api/send" \
+            -H 'Content-Type: application/json' \
+            -H 'User-Agent: EDDI-GitHub-Actions/1.0' \
+            -d "{
+              \"type\": \"event\",
+              \"payload\": {
+                \"hostname\": \"eddi.labs.ai\",
+                \"language\": \"en-US\",
+                \"url\": \"/project-metrics\",
+                \"website\": \"06a369b1-4a64-4262-9f6e-0a987ca7122a\",
+                \"name\": \"project_metrics\",
+                \"data\": {
+                  \"docker_pulls\": ${{ steps.docker.outputs.pulls }},
+                  \"docker_delta\": ${{ steps.delta.outputs.pull_diff }},
+                  \"github_stars\": ${{ steps.github.outputs.stars }},
+                  \"github_forks\": ${{ steps.github.outputs.forks }},
+                  \"github_views\": ${{ steps.traffic.outputs.views }},
+                  \"github_clones\": ${{ steps.traffic.outputs.clones }}
+                }
+              }
+            }"
+
+      # ── Milestone alert (immediate) ─────────────────────────
+      - name: Milestone celebration
+        if: steps.delta.outputs.milestone != '0'
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          MS=$(printf "%'d" ${{ steps.delta.outputs.milestone }})
+          curl -sf -X POST "$SLACK_WEBHOOK" \
+            -H 'Content-type: application/json' \
+            -d "{
+              \"blocks\": [
+                {
+                  \"type\": \"header\",
+                  \"text\": { \"type\": \"plain_text\", \"text\": \"🎉  EDDI hit ${MS} Docker pulls!\", \"emoji\": true }
+                },
+                {
+                  \"type\": \"section\",
+                  \"text\": {
+                    \"type\": \"mrkdwn\",
+                    \"text\": \"⭐ Stars: ${{ steps.github.outputs.stars }}  ·  🍴 Forks: ${{ steps.github.outputs.forks }}\"
+                  }
+                }
+              ]
+            }"
+
+      # ── Weekly digest (Sunday or manual) ────────────────────
+      - name: Weekly digest
+        if: >-
+          (github.event.schedule == '0 9 * * 0' || github.event.inputs.force_digest == 'true')
+          && steps.prev.outputs.has_data == 'true'
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          PULLS=${{ steps.docker.outputs.pulls }}
+          STARS=${{ steps.github.outputs.stars }}
+          FORKS=${{ steps.github.outputs.forks }}
+          VIEWS=${{ steps.traffic.outputs.views }}
+          UNIQUES=${{ steps.traffic.outputs.uniques }}
+          CLONES=${{ steps.traffic.outputs.clones }}
+
+          WEEK_PULL_DIFF=$(( PULLS - ${{ steps.prev.outputs.week_docker }} ))
+          WEEK_STAR_DIFF=$(( STARS - ${{ steps.prev.outputs.week_stars }} ))
+          WEEK_FORK_DIFF=$(( FORKS - ${{ steps.prev.outputs.week_forks }} ))
+
+          PULLS_FMT=$(printf "%'d" "$PULLS")
+
+          # Build sign prefixes
+          pull_sign="" && [ "$WEEK_PULL_DIFF" -gt 0 ] && pull_sign="+"
+          star_sign="" && [ "$WEEK_STAR_DIFF" -gt 0 ] && star_sign="+"
+          fork_sign="" && [ "$WEEK_FORK_DIFF" -gt 0 ] && fork_sign="+"
+
+          curl -sf -X POST "$SLACK_WEBHOOK" \
+            -H 'Content-type: application/json' \
+            -d "{
+              \"blocks\": [
+                {
+                  \"type\": \"header\",
+                  \"text\": { \"type\": \"plain_text\", \"text\": \"📊  EDDI Weekly Digest\", \"emoji\": true }
+                },
+                {
+                  \"type\": \"section\",
+                  \"fields\": [
+                    { \"type\": \"mrkdwn\", \"text\": \"*🐳 Docker Pulls*\n${PULLS_FMT} (${pull_sign}${WEEK_PULL_DIFF})\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"*⭐ GitHub Stars*\n${STARS} (${star_sign}${WEEK_STAR_DIFF})\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"*🍴 Forks*\n${FORKS} (${fork_sign}${WEEK_FORK_DIFF})\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"*👀 Repo Views (14d)*\n${VIEWS} (${UNIQUES} unique)\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"*📥 Git Clones (14d)*\n${CLONES}\" }
+                  ]
+                },
+                {
+                  \"type\": \"context\",
+                  \"elements\": [
+                    { \"type\": \"mrkdwn\", \"text\": \"<https://hub.docker.com/r/labsai/eddi|Docker Hub> · <https://github.com/labsai/EDDI|GitHub> · <https://eddi.labs.ai|Website>\" }
+                  ]
+                }
+              ]
+            }"
+
+      # ── Save updated metrics ────────────────────────────────
+      - name: Build metrics snapshot
+        run: |
+          IS_WEEKLY="${{ github.event.schedule == '0 9 * * 0' || github.event.inputs.force_digest == 'true' }}"
+
+          # On weekly digest, reset the week baseline
+          if [ "$IS_WEEKLY" = "true" ]; then
+            WEEK_DOCKER=${{ steps.docker.outputs.pulls }}
+            WEEK_STARS=${{ steps.github.outputs.stars }}
+            WEEK_FORKS=${{ steps.github.outputs.forks }}
+          else
+            WEEK_DOCKER=${{ steps.prev.outputs.week_docker }}
+            WEEK_STARS=${{ steps.prev.outputs.week_stars }}
+            WEEK_FORKS=${{ steps.prev.outputs.week_forks }}
+          fi
+
+          # First run: initialize week baseline
+          [ "$WEEK_DOCKER" = "0" ] && WEEK_DOCKER=${{ steps.docker.outputs.pulls }}
+          [ "$WEEK_STARS" = "0" ] && WEEK_STARS=${{ steps.github.outputs.stars }}
+          [ "$WEEK_FORKS" = "0" ] && WEEK_FORKS=${{ steps.github.outputs.forks }}
+
+          # Current milestone marker
+          CURRENT_MS=$(( ${{ steps.docker.outputs.pulls }} / 10000 * 10000 ))
+
+          jq -n \
+            --argjson docker_pulls "${{ steps.docker.outputs.pulls }}" \
+            --argjson stars "${{ steps.github.outputs.stars }}" \
+            --argjson forks "${{ steps.github.outputs.forks }}" \
+            --argjson week_docker "$WEEK_DOCKER" \
+            --argjson week_stars "$WEEK_STARS" \
+            --argjson week_forks "$WEEK_FORKS" \
+            --argjson last_milestone "$CURRENT_MS" \
+            '{docker_pulls: $docker_pulls, stars: $stars, forks: $forks,
+              week_docker: $week_docker, week_stars: $week_stars, week_forks: $week_forks,
+              last_milestone: $last_milestone}' > metrics.json
+
+          echo "Saved metrics:"
+          cat metrics.json
+
+      - name: Delete old cache
+        run: gh cache delete project-metrics-data || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Save metrics cache
+        uses: actions/cache/save@v4
+        with:
+          path: metrics.json
+          key: project-metrics-data
