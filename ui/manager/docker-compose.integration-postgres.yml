@@ -1,0 +1,35 @@
+# Lightweight compose for integration testing — EDDI backend + PostgreSQL.
+# Usage: docker compose -f docker-compose.integration-postgres.yml up -d
+# Then wait ~30s for EDDI to boot: curl http://localhost:7070/q/health
+services:
+  eddi:
+    image: labsai/eddi:latest
+    ports:
+      - "7070:7070"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      QUARKUS_PROFILE: postgres
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://postgres:5432/eddi
+      QUARKUS_DATASOURCE_USERNAME: eddi
+      QUARKUS_DATASOURCE_PASSWORD: eddi
+      QUARKUS_HTTP_CORS_ORIGINS: "http://localhost:3000,http://localhost:5173"
+
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: eddi
+      POSTGRES_USER: eddi
+      POSTGRES_PASSWORD: eddi
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eddi"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - integration-postgres:/var/lib/postgresql/data
+
+volumes:
+  integration-postgres:

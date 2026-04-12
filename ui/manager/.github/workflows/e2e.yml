@@ -1,0 +1,139 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      run_fullstack:
+        description: "Run full-stack tests (requires EDDI Docker image)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Tier 1: Fast UI tests (MSW mocks, no backend) ──────────────────
+  ui-tests:
+    name: UI E2E (MSW)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run UI E2E tests
+        run: npm run test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: ui-e2e-report
+          path: playwright-report/
+          retention-days: 14
+
+  # ── Tier 2+3: Backend tests (integration + fullstack) ───────────────
+  # Runs against both MongoDB and PostgreSQL via matrix strategy.
+  # Only runs on push to main/master, manual dispatch, or when
+  # explicitly requested via workflow_dispatch.
+  backend-tests:
+    name: Backend E2E (${{ matrix.database }})
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [mongodb, postgres]
+        include:
+          - database: mongodb
+            compose-file: docker-compose.integration.yml
+          - database: postgres
+            compose-file: docker-compose.integration-postgres.yml
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # The EDDI Docker image must be available locally or in a registry.
+      # Options:
+      #   1. Push to GHCR from the EDDI repo CI and pull here
+      #   2. Build from source as a prior workflow step (requires EDDI checkout)
+      #   3. Use `docker load` from a cached artifact
+      - name: Verify EDDI Docker image is available
+        run: |
+          if ! docker image inspect labsai/eddi:latest >/dev/null 2>&1; then
+            echo "::error::labsai/eddi:latest not found locally."
+            echo "::error::Build it from the EDDI repo first:"
+            echo "::error::  cd EDDI && ./mvnw package -DskipTests -Dquarkus.container-image.build=true"
+            echo "::error::Or pull from your container registry."
+            exit 1
+          fi
+          echo "✅ labsai/eddi:latest found"
+
+      - name: Start backend infrastructure (${{ matrix.database }})
+        run: docker compose -f ${{ matrix.compose-file }} up -d --wait
+        timeout-minutes: 5
+
+      - name: Wait for EDDI health
+        run: |
+          echo "Waiting for EDDI backend to become healthy..."
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:7070/q/health/live | grep -q '"UP"'; then
+              echo "Backend is healthy!"
+              exit 0
+            fi
+            echo "  Attempt $i/60 — waiting..."
+            sleep 2
+          done
+          echo "::error::Backend did not become healthy within 120s"
+          docker compose -f ${{ matrix.compose-file }} logs eddi
+          exit 1
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run integration tests (${{ matrix.database }})
+        run: npm run test:e2e:integration
+
+      - name: Run full-stack tests (${{ matrix.database }})
+        run: npm run test:e2e:fullstack
+
+      - name: Collect backend logs
+        if: ${{ !cancelled() }}
+        run: docker compose -f ${{ matrix.compose-file }} logs > backend-logs.txt 2>&1
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: backend-e2e-report-${{ matrix.database }}
+          path: |
+            playwright-report/
+            test-results.json
+            backend-logs.txt
+          retention-days: 14
+
+      - name: Tear down infrastructure
+        if: always()
+        run: docker compose -f ${{ matrix.compose-file }} down -v

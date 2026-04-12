@@ -1,7 +1,7 @@
 {
   "name": "eddi-manager",
   "private": true,
-  "version": "6.0.0-RC1",
+  "version": "6.0.0-RC2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,10 +12,16 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui",
-    "test:integration": "playwright test --project=chromium e2e/integration/",
-    "test:all": "vitest run && playwright test",
+    "test:e2e": "playwright test --project=ui",
+    "test:e2e:ui": "playwright test --project=ui --ui",
+    "test:e2e:integration": "playwright test --project=integration",
+    "test:e2e:fullstack": "playwright test --project=fullstack",
+    "test:e2e:all": "playwright test --project=ui --project=integration --project=fullstack",
+    "test:all": "vitest run && playwright test --project=ui",
+    "infra:up:mongo": "docker compose -f docker-compose.integration.yml up -d --wait",
+    "infra:up:postgres": "docker compose -f docker-compose.integration-postgres.yml up -d --wait",
+    "infra:down:mongo": "docker compose -f docker-compose.integration.yml down -v",
+    "infra:down:postgres": "docker compose -f docker-compose.integration-postgres.yml down -v",
     "prepare": "husky"
   },
   "lint-staged": {
