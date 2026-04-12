@@ -43,7 +43,8 @@
     "triggers": "Triggers",
     "capabilities": "Capabilities",
     "sync": "Synchronisierung",
-    "userConversations": "Nutzer-Konversationen"
+    "userConversations": "Nutzer-Konversationen",
+    "userData": "User Data"
   },
   "theme": {
     "light": "Hell",

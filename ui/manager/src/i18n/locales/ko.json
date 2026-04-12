@@ -43,7 +43,8 @@
     "triggers": "Triggers",
     "capabilities": "Capabilities",
     "sync": "동기화",
-    "userConversations": "사용자 대화"
+    "userConversations": "사용자 대화",
+    "userData": "User Data"
   },
   "theme": {
     "light": "라이트",

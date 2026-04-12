@@ -24,7 +24,7 @@ import {
 } from "@/hooks/use-user-conversations";
 import { useDebounce } from "@/hooks/use-debounce";
 
-export function UserConversationsPage() {
+export function UserConversationsPage({ embedded }: { embedded?: boolean } = {}) {
   const { t } = useTranslation();
 
   // Lookup state
@@ -51,7 +51,8 @@ export function UserConversationsPage() {
 
   return (
     <div className="space-y-6" data-testid="user-conversations-page">
-      {/* Header */}
+      {/* Header — hidden when embedded in tabbed UserDataPage */}
+      {!embedded && (
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="flex items-center gap-3 text-2xl font-bold text-foreground">
@@ -76,6 +77,20 @@ export function UserConversationsPage() {
           {t("userConversations.create", "Create Binding")}
         </Button>
       </div>
+      )}
+      {/* Show create button inline when embedded (since the header+button combo is hidden) */}
+      {embedded && (
+        <div className="flex justify-end">
+          <Button
+            onClick={() => setShowCreate(true)}
+            className="gap-2"
+            data-testid="create-user-conv-btn-embedded"
+          >
+            <Plus className="h-4 w-4" />
+            {t("userConversations.create", "Create Binding")}
+          </Button>
+        </div>
+      )}
 
       {/* Lookup Form */}
       <div className="rounded-xl border border-border bg-card p-5">

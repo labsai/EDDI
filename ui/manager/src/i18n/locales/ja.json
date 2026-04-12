@@ -43,7 +43,8 @@
     "triggers": "Triggers",
     "capabilities": "Capabilities",
     "sync": "同期",
-    "userConversations": "ユーザー会話"
+    "userConversations": "ユーザー会話",
+    "userData": "User Data"
   },
   "theme": {
     "light": "ライト",

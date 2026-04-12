@@ -24,26 +24,26 @@ import { GroupsPage } from "@/pages/groups";
 import { GroupDetailPage } from "@/pages/group-detail";
 import { GroupWizardPage } from "@/pages/group-wizard";
 import { AgentStudioPage } from "@/pages/agent-studio";
-import { StudioLandingPage } from "@/pages/studio-landing";
+import { CommandPalette } from "@/components/shared/command-palette";
+
 import { GdprPage } from "@/pages/gdpr";
-import { UserMemoryPage } from "@/pages/user-memory";
-import { PropertiesPage } from "@/pages/properties";
+import { UserDataPage } from "@/pages/user-data";
 import { TriggersPage } from "@/pages/triggers";
 import { CapabilitiesPage } from "@/pages/capabilities";
 import { SyncPage } from "@/pages/sync-page";
-import { UserConversationsPage } from "@/pages/user-conversations";
 
 export function App() {
   return (
     <ErrorBoundary>
     <Routes>
+      {/* Studio — full-screen breakout, no sidebar/topbar chrome */}
+      <Route path="/manage/studio/:agentId" element={<AgentStudioPage />} />
+
       <Route element={<AppLayout />}>
         <Route path="/manage" element={<DashboardPage />} />
         <Route path="/manage/agents" element={<AgentsPage />} />
         <Route path="/manage/agents/wizard" element={<AgentWizardPage />} />
         <Route path="/manage/agentview/:id" element={<AgentDetailPage />} />
-        <Route path="/manage/studio" element={<StudioLandingPage />} />
-        <Route path="/manage/studio/:agentId" element={<AgentStudioPage />} />
         <Route path="/manage/workflows" element={<WorkflowsPage />} />
         <Route path="/manage/workflowview/:id" element={<WorkflowDetailPage />} />
         <Route path="/manage/conversations" element={<ConversationsPage />} />
@@ -58,12 +58,14 @@ export function App() {
         <Route path="/manage/groups" element={<GroupsPage />} />
         <Route path="/manage/groups/wizard" element={<GroupWizardPage />} />
         <Route path="/manage/groups/:id" element={<GroupDetailPage />} />
-        <Route path="/manage/memories" element={<UserMemoryPage />} />
-        <Route path="/manage/properties" element={<PropertiesPage />} />
+        <Route path="/manage/userdata" element={<UserDataPage />} />
         <Route path="/manage/triggers" element={<TriggersPage />} />
         <Route path="/manage/capabilities" element={<CapabilitiesPage />} />
         <Route path="/manage/sync" element={<SyncPage />} />
-        <Route path="/manage/user-conversations" element={<UserConversationsPage />} />
+        {/* Redirects from old standalone user-data pages */}
+        <Route path="/manage/memories" element={<Navigate to="/manage/userdata?tab=memories" replace />} />
+        <Route path="/manage/properties" element={<Navigate to="/manage/userdata?tab=properties" replace />} />
+        <Route path="/manage/user-conversations" element={<Navigate to="/manage/userdata?tab=conversations" replace />} />
         <Route
           path="/manage/conversationview/:id"
           element={<ConversationDetailPage />}
@@ -79,6 +81,7 @@ export function App() {
         <Route path="*" element={<Navigate to="/manage" replace />} />
       </Route>
     </Routes>
+    <CommandPalette />
     </ErrorBoundary>
   );
 }

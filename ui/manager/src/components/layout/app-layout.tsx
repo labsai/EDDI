@@ -8,7 +8,7 @@ import { WelcomeModal } from "@/components/onboarding/welcome-modal";
 import { GuidedTour } from "@/components/onboarding/guided-tour";
 import { TourOfferBar } from "@/components/onboarding/tour-offer-bar";
 import { MockDataBanner } from "./mock-data-banner";
-import { CommandPalette } from "@/components/shared/command-palette";
+
 import { cn } from "@/lib/utils";
 
 export function AppLayout() {
@@ -83,7 +83,7 @@ export function AppLayout() {
       <WelcomeModal />
       <GuidedTour />
       <TourOfferBar />
-      <CommandPalette />
+
     </div>
   );
 }

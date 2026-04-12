@@ -40,7 +40,7 @@ const visibilityColors: Record<string, string> = {
   group: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
 };
 
-export function UserMemoryPage() {
+export function UserMemoryPage({ embedded }: { embedded?: boolean } = {}) {
   const { t } = useTranslation();
   const [userId, setUserId] = useState("");
   const [search, setSearch] = useState("");
@@ -112,7 +112,8 @@ export function UserMemoryPage() {
 
   return (
     <div className="space-y-6" data-testid="user-memory-page">
-      {/* Header */}
+      {/* Header — hidden when embedded in tabbed UserDataPage */}
+      {!embedded && (
       <div>
         <h1 className="flex items-center gap-3 text-2xl font-bold text-foreground">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-teal-500/10">
@@ -124,6 +125,7 @@ export function UserMemoryPage() {
           {t("memories.subtitle", "Browse, search, and manage persistent user memories stored by agents")}
         </p>
       </div>
+      )}
 
       {/* Search controls */}
       <div className="flex flex-col gap-3 sm:flex-row">

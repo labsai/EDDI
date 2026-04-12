@@ -43,7 +43,8 @@
     "triggers": "Triggers",
     "capabilities": "Capabilities",
     "sync": "Sincronização",
-    "userConversations": "Conversas do usuário"
+    "userConversations": "Conversas do usuário",
+    "userData": "User Data"
   },
   "theme": {
     "light": "Claro",

@@ -35,6 +35,7 @@
     "capabilities": "Capabilities",
     "sync": "Sync",
     "userConversations": "User Conversations",
+    "userData": "User Data",
     "sectionCore": "Core",
     "sectionBuild": "Build & Test",
     "sectionMonitor": "Monitor",

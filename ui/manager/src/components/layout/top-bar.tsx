@@ -48,6 +48,11 @@ function useBreadcrumbs() {
     secrets: t("nav.secrets", "Secrets"),
     audit: t("nav.audit", "Audit Trail"),
     quotas: t("nav.quotas", "Quotas"),
+    userdata: t("userData.title", "User Data"),
+    triggers: t("nav.triggers", "Triggers"),
+    capabilities: t("nav.capabilities", "Capabilities"),
+    sync: t("nav.sync", "Sync"),
+    gdpr: t("nav.gdpr", "GDPR"),
     wizard: t("wizard.title", "Agent Wizard"),
     workflowview: t("nav.packages"),
   };

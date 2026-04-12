@@ -39,7 +39,7 @@ const typeColors: Record<string, string> = {
   null: "text-muted-foreground bg-muted",
 };
 
-export function PropertiesPage() {
+export function PropertiesPage({ embedded }: { embedded?: boolean } = {}) {
   const { t } = useTranslation();
   const [userId, setUserId] = useState("");
   const [search, setSearch] = useState("");
@@ -69,7 +69,8 @@ export function PropertiesPage() {
 
   return (
     <div className="space-y-6" data-testid="properties-page">
-      {/* Header */}
+      {/* Header — hidden when embedded in tabbed UserDataPage */}
+      {!embedded && (
       <div>
         <h1 className="flex items-center gap-3 text-2xl font-bold text-foreground">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-500/10">
@@ -81,6 +82,7 @@ export function PropertiesPage() {
           {t("properties.subtitle", "Browse and manage longTerm slot-filling properties stored per user")}
         </p>
       </div>
+      )}
 
       {/* Controls */}
       <div className="flex flex-col gap-3 sm:flex-row">

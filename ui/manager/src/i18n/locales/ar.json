@@ -43,7 +43,8 @@
     "triggers": "Triggers",
     "capabilities": "Capabilities",
     "sync": "المزامنة",
-    "userConversations": "محادثات المستخدم"
+    "userConversations": "محادثات المستخدم",
+    "userData": "User Data"
   },
   "theme": {
     "light": "فاتح",

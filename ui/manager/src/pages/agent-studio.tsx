@@ -111,7 +111,7 @@ export function AgentStudioPage() {
   const selectedStep = selectedStageIndex !== null ? workflowSteps[selectedStageIndex] : null;
 
   return (
-    <div className="flex h-full flex-col" data-testid="agent-studio">
+    <div className="flex h-screen flex-col bg-background" data-testid="agent-studio">
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-border px-4 py-2.5 shrink-0">
         <Link

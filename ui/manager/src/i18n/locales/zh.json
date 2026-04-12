@@ -43,7 +43,8 @@
     "triggers": "Triggers",
     "capabilities": "Capabilities",
     "sync": "同步",
-    "userConversations": "用户对话"
+    "userConversations": "用户对话",
+    "userData": "User Data"
   },
   "theme": {
     "light": "浅色",

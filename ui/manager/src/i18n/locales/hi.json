@@ -43,7 +43,8 @@
     "triggers": "Triggers",
     "capabilities": "Capabilities",
     "sync": "सिंक",
-    "userConversations": "उपयोगकर्ता वार्तालाप"
+    "userConversations": "उपयोगकर्ता वार्तालाप",
+    "userData": "User Data"
   },
   "theme": {
     "light": "लाइट",

@@ -15,8 +15,7 @@ import {
   ScrollText,
   MessagesSquare,
   ShieldCheck,
-  Brain,
-  Database,
+  Users,
   Search,
   Keyboard,
   Clock,
@@ -47,12 +46,11 @@ export function CommandPalette() {
     { path: "/manage/groups", label: t("nav.groups", "Groups"), icon: Boxes, section: "pages" },
     { path: "/manage/resources", label: t("nav.resources", "Resources"), icon: FileCode, section: "pages" },
     { path: "/manage/chat", label: t("nav.chat", "Chat"), icon: MessageCircle, section: "pages" },
-    { path: "/manage/studio", label: t("nav.studio", "Agent Studio"), icon: Sparkles, section: "pages" },
+
     { path: "/manage/conversations", label: t("nav.conversations", "Conversations"), icon: MessagesSquare, section: "pages" },
     { path: "/manage/logs", label: t("nav.logs", "Logs"), icon: ScrollText, section: "pages" },
     { path: "/manage/audit", label: t("nav.audit", "Audit Trail"), icon: ShieldCheck, section: "pages" },
-    { path: "/manage/memories", label: t("nav.memories", "Memories"), icon: Brain, section: "pages" },
-    { path: "/manage/properties", label: t("nav.properties", "Properties"), icon: Database, section: "pages" },
+    { path: "/manage/userdata", label: t("userData.title", "User Data"), icon: Users, section: "pages" },
   ];
 
   // Global Ctrl+K / ⌘+K handler

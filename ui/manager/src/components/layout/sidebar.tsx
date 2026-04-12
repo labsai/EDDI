@@ -24,18 +24,16 @@ import {
   HelpCircle,
   Check,
   RotateCcw,
-  Sparkles,
   Layers,
   ShieldAlert,
-  Brain,
-  Database,
   Zap,
   RefreshCw,
-  Link2,
+  ChevronRight,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useOnboarding, ALL_CHAPTERS, type TourChapterId } from "@/hooks/use-onboarding";
 import { TOUR_CHAPTERS } from "@/components/onboarding/tour-chapters";
@@ -48,6 +46,7 @@ const navSections = [
       { path: "/manage/agents", icon: Bot, labelKey: "nav.agents" },
       { path: "/manage/workflows", icon: Workflow, labelKey: "nav.packages" },
       { path: "/manage/groups", icon: Boxes, labelKey: "nav.groups" },
+      { path: "/manage/capabilities", icon: Layers, labelKey: "nav.capabilities" },
     ],
   },
   {
@@ -55,8 +54,7 @@ const navSections = [
     items: [
       { path: "/manage/resources", icon: FileCode, labelKey: "nav.resources" },
       { path: "/manage/chat", icon: MessageCircle, labelKey: "nav.chat" },
-      { path: "/manage/studio", icon: Sparkles, labelKey: "nav.studio" },
-      { path: "/manage/capabilities", icon: Layers, labelKey: "nav.capabilities" },
+      { path: "/manage/triggers", icon: Zap, labelKey: "nav.triggers" },
     ],
   },
   {
@@ -66,9 +64,6 @@ const navSections = [
       { path: "/manage/conversations", icon: MessagesSquare, labelKey: "nav.conversations" },
       { path: "/manage/coordinator", icon: Activity, labelKey: "nav.coordinator" },
       { path: "/manage/audit", icon: ShieldCheck, labelKey: "nav.audit" },
-      { path: "/manage/memories", icon: Brain, labelKey: "nav.memories" },
-      { path: "/manage/properties", icon: Database, labelKey: "nav.properties" },
-      { path: "/manage/user-conversations", icon: Link2, labelKey: "nav.userConversations" },
     ],
   },
   {
@@ -77,7 +72,7 @@ const navSections = [
       { path: "/manage/secrets", icon: KeyRound, labelKey: "nav.secrets" },
       { path: "/manage/quotas", icon: SlidersHorizontal, labelKey: "nav.quotas" },
       { path: "/manage/schedules", icon: CalendarClock, labelKey: "nav.schedules" },
-      { path: "/manage/triggers", icon: Zap, labelKey: "nav.triggers" },
+      { path: "/manage/userdata", icon: Users, labelKey: "nav.userData" },
       { path: "/manage/orphans", icon: Link2Off, labelKey: "nav.orphans" },
       { path: "/manage/sync", icon: RefreshCw, labelKey: "nav.sync" },
       { path: "/manage/gdpr", icon: ShieldAlert, labelKey: "nav.gdpr" },
@@ -118,6 +113,27 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         .join("")
         .toUpperCase() || user.username[0]?.toUpperCase() || "?"
     : "";
+
+  // ── Collapsible section state (persisted in localStorage) ──
+  const STORAGE_KEY = "eddi-sidebar-sections";
+  const [collapsedSections, setCollapsedSections] = useState<Set<number>>(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      return stored ? new Set(JSON.parse(stored) as number[]) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+
+  const toggleSection = useCallback((idx: number) => {
+    setCollapsedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify([...next])); } catch { /* noop */ }
+      return next;
+    });
+  }, []);
 
   return (
     <aside
@@ -161,48 +177,62 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       </div>
 
       {/* Navigation with section groupings */}
-      <nav className="flex-1 overflow-y-auto p-2" aria-label={t("nav.mainNavigation", "Main navigation")}>
+      <nav className="flex-1 overflow-y-auto p-1.5" aria-label={t("nav.mainNavigation", "Main navigation")}>
         {navSections.map((section, idx) => (
-          <div key={section.labelKey} className={cn(idx > 0 && "mt-4")}>
-            {/* Section label (hidden when collapsed) */}
+          <div key={section.labelKey} className={cn(idx > 0 && "mt-2.5")}>
+            {/* Section label — clickable toggle (hidden when sidebar is collapsed) */}
             {!collapsed && (
-              <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
+              <button
+                type="button"
+                onClick={() => toggleSection(idx)}
+                className="mb-1 flex w-full items-center gap-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50 hover:text-sidebar-foreground/80 transition-colors"
+                aria-expanded={!collapsedSections.has(idx)}
+              >
+                <ChevronRight
+                  className={cn(
+                    "h-3 w-3 shrink-0 transition-transform duration-200",
+                    !collapsedSections.has(idx) && "rotate-90"
+                  )}
+                />
                 {t(section.labelKey)}
-              </p>
+              </button>
             )}
             {collapsed && idx > 0 && (
               <div className="mx-3 mb-2 border-t border-sidebar-border" />
             )}
-            <div className="space-y-0.5">
-              {section.items.map((item) => (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  end={item.path === "/manage"}
-                  className={({ isActive }) =>
-                    cn(
-                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
-                      "hover:bg-sidebar-accent/10 hover:text-sidebar-accent",
-                      isActive
-                        ? "border-s-2 border-sidebar-accent bg-sidebar-accent/10 text-sidebar-accent"
-                        : "border-s-2 border-transparent text-sidebar-foreground",
-                      collapsed && "justify-center px-2"
-                    )
-                  }
-                  aria-label={collapsed ? t(item.labelKey) : undefined}
-                  title={collapsed ? t(item.labelKey) : undefined}
-                >
-                  <item.icon className="h-5 w-5 shrink-0" aria-hidden="true" />
-                  {!collapsed && <span>{t(item.labelKey)}</span>}
-                </NavLink>
-              ))}
-            </div>
+            {/* Section items — hidden when section is collapsed (only in expanded sidebar) */}
+            {(!collapsed ? !collapsedSections.has(idx) : true) && (
+              <div className="space-y-0.5">
+                {section.items.map((item) => (
+                  <NavLink
+                    key={item.path}
+                    to={item.path}
+                    end={item.path === "/manage"}
+                    className={({ isActive }) =>
+                      cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all",
+                        "hover:bg-sidebar-accent/10 hover:text-sidebar-accent",
+                        isActive
+                          ? "border-s-2 border-sidebar-accent bg-sidebar-accent/10 text-sidebar-accent"
+                          : "border-s-2 border-transparent text-sidebar-foreground",
+                        collapsed && "justify-center px-2"
+                      )
+                    }
+                    aria-label={collapsed ? t(item.labelKey) : undefined}
+                    title={collapsed ? t(item.labelKey) : undefined}
+                  >
+                    <item.icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+                    {!collapsed && <span>{t(item.labelKey)}</span>}
+                  </NavLink>
+                ))}
+              </div>
+            )}
           </div>
         ))}
       </nav>
 
       {/* External links */}
-      <div className="border-t border-sidebar-border p-2">
+      <div className="border-t border-sidebar-border p-1.5">
         {!collapsed && (
           <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50">
             {t("nav.sectionExternal", "External")}
@@ -216,7 +246,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               target="_blank"
               rel="noopener noreferrer"
               className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+                "flex items-center gap-3 rounded-lg px-3 py-1.5 text-sm font-medium transition-all",
                 "border-s-2 border-transparent text-sidebar-foreground",
                 "hover:bg-sidebar-accent/10 hover:text-sidebar-accent",
                 collapsed && "justify-center px-2"
@@ -239,10 +269,10 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* User profile section (only when auth is enabled) */}
       {showUser && (
-        <div className="border-t border-sidebar-border p-2">
+        <div className="border-t border-sidebar-border p-1.5">
           <div
             className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2.5",
+              "flex items-center gap-3 rounded-lg px-3 py-2",
               collapsed && "justify-center px-2"
             )}
             data-testid="sidebar-user"
@@ -282,7 +312,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       <HelpMenu collapsed={collapsed} />
 
       {/* Version + Collapse toggle */}
-      <div className="border-t border-sidebar-border p-2">
+      <div className="border-t border-sidebar-border p-1.5">
         {!collapsed && (
           <p className="mb-1 px-3 text-center text-[10px] text-sidebar-foreground/30">
             EDDI Manager {__APP_VERSION__}
@@ -292,7 +322,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           onClick={onToggle}
           data-testid="sidebar-toggle"
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="flex w-full items-center justify-center rounded-lg p-2.5 text-sidebar-foreground transition-all hover:bg-sidebar-accent/10 hover:text-sidebar-accent active:scale-[0.98]"
+          className="flex w-full items-center justify-center rounded-lg p-2 text-sidebar-foreground transition-all hover:bg-sidebar-accent/10 hover:text-sidebar-accent active:scale-[0.98]"
         >
           {collapsed ? (
             <PanelLeft className="h-5 w-5" />
@@ -354,11 +384,11 @@ function HelpMenu({ collapsed }: { collapsed: boolean }) {
   };
 
   return (
-    <div ref={ref} className="relative border-t border-sidebar-border p-2">
+    <div ref={ref} className="relative border-t border-sidebar-border p-1.5">
       <button
         onClick={() => setOpen((p) => !p)}
         className={cn(
-          "flex w-full items-center rounded-lg px-3 py-2.5 text-sidebar-foreground transition-all hover:bg-sidebar-accent/10 hover:text-sidebar-accent",
+          "flex w-full items-center rounded-lg px-3 py-2 text-sidebar-foreground transition-all hover:bg-sidebar-accent/10 hover:text-sidebar-accent",
           collapsed && "justify-center px-2"
         )}
         title={t("onboarding.help.title", "Help & Tour")}
