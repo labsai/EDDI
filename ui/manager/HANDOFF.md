@@ -45,7 +45,7 @@
 | 3.16  | Workflow Editor: drag-and-drop pipeline builder (`@dnd-kit`), add/remove extensions, save/discard, version picker                                                                                                                  | —         |
 | 3.17  | Behavior Rules & HTTP Calls Editors: form-based editors with render prop, Form↔JSON sync, 14 new tests                                                                                                                             | —         |
 | 3.18  | LangChain, Output, Property Setter, Dictionary Editors: 4 form editors, MSW mocks, 29 new tests                                                                                                                                    | —         |
-| 3.19  | Polish, Tests & Documentation: API-layer tests, dashboard test, renderPage helper, README rewrite                                                                                                                                  | —         |
+| 3.19  | Polish, Tests & Documentation: API-layer tests, dashboard test, renderPage helper, README rewrite, full i18n language parity (10 locales synchronized with English schema, 200+ gap keys populated programmatically) | latest |
 | 3.20  | UI/UX Enterprise Polish: unified component library (Button/Card/Badge/Skeleton/AlertDialog), Sonner toasts, Charcoal dark mode, sidebar sections, breadcrumbs, shared EmptyState/ErrorState/BackLink, dashboard with real API data | —         |
 | 3.21  | MSW Browser Mode + JSON Schema: auto-detect backend, mock data in dev, Vite proxy fix, Monaco JSON schema validation/autocomplete from backend `/jsonSchema` endpoints                                                             | —         |
 | 4.4a  | Backend: migrate from kjetland/jackson-jsonSchema to victools/jsonschema-generator v4.38.0 (Draft 2020-12). `JsonSchemaCreatorTest` (11 tests). both victools deps at 4.38.0 (Jackson 2.x)                                       | EDDI repo |
@@ -233,6 +233,6 @@ The next steps in the overall EDDI project roadmap occur in other repositories:
 | `src/components/layout/sidebar.tsx` | 4 sections (Core/Build/Monitor/Admin), new icons, version display |
 | `vite.config.ts` | `define: { __APP_VERSION__: ... }` from package.json |
 | `src/vite-env.d.ts` | `declare const __APP_VERSION__: string` |
-| `src/i18n/locales/*.json` | 31 new keys propagated to all 11 locales, fixed `studio.type.output` collision |
+| `src/i18n/locales/*.json` | Complete i18n parity pass: 223 gap keys translated idiomatically across all 10 non-English locales. Removed 11 orphaned target keys. Cleaned `.cjs` tool scripts. |
 | `src/pages/__tests__/audit.test.tsx` | Updated for auto-load + text input (not select) |
 | `src/pages/__tests__/backup.test.tsx` | Updated for unified button (no separate wizard button) |
