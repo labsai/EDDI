@@ -271,6 +271,21 @@ function SortableExtensionItem({
     onUpdateVersion(item.index, newUri);
   }
 
+  // Build resource link once (used by both label area and Edit button)
+  const resourceLink = parsed ? (() => {
+    let path = `/manage/resources/${parsed.slug}/${parsed.id}`;
+    const params = new URLSearchParams();
+    if (workflowId && workflowVersion) {
+      params.set("pkgId", workflowId);
+      params.set("pkgVer", String(workflowVersion));
+    }
+    if (agentId) params.set("agentId", agentId);
+    if (agentVer) params.set("agentVer", agentVer);
+    const qs = params.toString();
+    if (qs) path += `?${qs}`;
+    return path;
+  })() : null;
+
   return (
     <div
       ref={setNodeRef}
@@ -304,26 +319,14 @@ function SortableExtensionItem({
 
       {/* Type icon + label — entire area navigates to resource */}
       <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-      {parsed ? (
+      {resourceLink ? (
         <Link
-          to={(() => {
-            let path = `/manage/resources/${parsed.slug}/${parsed.id}`;
-            const params = new URLSearchParams();
-            if (workflowId && workflowVersion) {
-              params.set("pkgId", workflowId);
-              params.set("pkgVer", String(workflowVersion));
-            }
-            if (agentId) params.set("agentId", agentId);
-            if (agentVer) params.set("agentVer", agentVer);
-            const qs = params.toString();
-            if (qs) path += `?${qs}`;
-            return path;
-          })()}
+          to={resourceLink}
           className="min-w-0 flex-1"
         >
           <p className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{label}</p>
           <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-xs text-muted-foreground truncate">{parsed.id}</span>
+            <span className="text-xs text-muted-foreground truncate">{parsed!.id}</span>
             <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">v{currentVer}</span>
           </div>
         </Link>
@@ -348,33 +351,14 @@ function SortableExtensionItem({
           </button>
         )}
 
-        {parsed && (
+        {resourceLink && (
           <Link
-            to={(() => {
-              let path = `/manage/resources/${parsed.slug}/${parsed.id}`;
-              const params = new URLSearchParams();
-              if (workflowId && workflowVersion) {
-                params.set("pkgId", workflowId);
-                params.set("pkgVer", String(workflowVersion));
-              }
-              if (agentId) params.set("agentId", agentId);
-              if (agentVer) params.set("agentVer", agentVer);
-              const qs = params.toString();
-              if (qs) path += `?${qs}`;
-              return path;
-            })()}
+            to={resourceLink}
             className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
           >
             <ExternalLink className="h-3 w-3" />
             {t("common.edit", "Edit")}
           </Link>
-        )}
-
-        {/* Pipeline connector arrow (except last) */}
-        {position < total && (
-          <span className="text-xs text-muted-foreground/40 hidden sm:block">
-            →
-          </span>
         )}
 
         {/* Remove */}
@@ -388,6 +372,13 @@ function SortableExtensionItem({
           <Trash2 className="h-4 w-4" />
         </button>
       </div>
+
+      {/* Pipeline connector arrow (between items, not inside actions) */}
+      {position < total && (
+        <span className="text-xs text-muted-foreground/40 hidden sm:block" aria-hidden="true">
+          →
+        </span>
+      )}
     </div>
   );
 }

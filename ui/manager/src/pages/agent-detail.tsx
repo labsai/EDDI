@@ -905,9 +905,11 @@ function RawConfigSection({ agent }: { agent: Agent }) {
             {t("agentDetail.rawConfig", "Raw Configuration")}
           </h2>
         </div>
-        <span className="text-sm text-muted-foreground" aria-hidden="true">
-          {expanded ? "▲" : "▼"}
-        </span>
+        {expanded ? (
+          <ChevronDown className="h-4 w-4 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+        )}
       </button>
       {expanded && (
         <div className="border-t border-border p-5" id="raw-config-content">
@@ -936,6 +938,9 @@ function A2ASection({
   const [localDesc, setLocalDesc] = useState(agent.description ?? "");
   const [showCard, setShowCard] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+
+  // Keep localDesc synced when agent data changes (version switch, refetch)
+  useEffect(() => setLocalDesc(agent.description ?? ""), [agent.description]);
 
   const isEnabled = agent.a2aEnabled ?? false;
 
@@ -1014,7 +1019,10 @@ function A2ASection({
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex w-full items-center gap-2 border-b border-border p-5 text-start"
+        className={cn(
+          "flex w-full items-center gap-2 p-5 text-start",
+          isOpen && "border-b border-border"
+        )}
       >
         {isOpen ? (
           <ChevronDown className="h-4 w-4 text-muted-foreground" />
