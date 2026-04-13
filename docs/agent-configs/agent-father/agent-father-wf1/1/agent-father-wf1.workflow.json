@@ -1,0 +1,34 @@
+{
+  "workflowSteps" : [ {
+    "type" : "eddi://ai.labs.parser",
+    "extensions" : {
+      "dictionaries" : [ ],
+      "corrections" : [ ]
+    },
+    "config" : { }
+  }, {
+    "type" : "eddi://ai.labs.behavior",
+    "extensions" : { },
+    "config" : {
+      "uri" : "eddi://ai.labs.rules/rulestore/rulesets/agent-father-behavior?version=1"
+    }
+  }, {
+    "type" : "eddi://ai.labs.property",
+    "extensions" : { },
+    "config" : {
+      "uri" : "eddi://ai.labs.property/propertysetterstore/propertysetters/agent-father-property?version=1"
+    }
+  }, {
+    "type" : "eddi://ai.labs.httpcalls",
+    "extensions" : { },
+    "config" : {
+      "uri" : "eddi://ai.labs.apicalls/apicallstore/apicalls/agent-father-httpcalls?version=1"
+    }
+  }, {
+    "type" : "eddi://ai.labs.output",
+    "extensions" : { },
+    "config" : {
+      "uri" : "eddi://ai.labs.output/outputstore/outputsets/agent-father-output?version=1"
+    }
+  } ]
+}

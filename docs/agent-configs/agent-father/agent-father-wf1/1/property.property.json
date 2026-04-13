@@ -1,0 +1,155 @@
+{
+  "setOnActions" : [ {
+    "actions" : [ "set_agent_name" ],
+    "setProperties" : [ {
+      "name" : "agentName",
+      "valueString" : "{memory.current.input}",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_system_prompt" ],
+    "setProperties" : [ {
+      "name" : "systemPrompt",
+      "valueString" : "{memory.current.input}",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_intro_message" ],
+    "setProperties" : [ {
+      "name" : "introMessage",
+      "valueString" : "{memory.current.input}",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "skip_intro" ],
+    "setProperties" : [ {
+      "name" : "introMessage",
+      "valueString" : "",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_provider_anthropic" ],
+    "setProperties" : [ {
+      "name" : "provider",
+      "valueString" : "anthropic",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_provider_openai" ],
+    "setProperties" : [ {
+      "name" : "provider",
+      "valueString" : "openai",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_provider_gemini" ],
+    "setProperties" : [ {
+      "name" : "provider",
+      "valueString" : "gemini",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_provider_mistral" ],
+    "setProperties" : [ {
+      "name" : "provider",
+      "valueString" : "mistral",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_provider_huggingface" ],
+    "setProperties" : [ {
+      "name" : "provider",
+      "valueString" : "huggingface",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_provider_azure_openai" ],
+    "setProperties" : [ {
+      "name" : "provider",
+      "valueString" : "azure-openai",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_provider_gemini_vertex" ],
+    "setProperties" : [ {
+      "name" : "provider",
+      "valueString" : "gemini-vertex",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_provider_ollama" ],
+    "setProperties" : [ {
+      "name" : "provider",
+      "valueString" : "ollama",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_provider_jlama" ],
+    "setProperties" : [ {
+      "name" : "provider",
+      "valueString" : "jlama",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_provider_bedrock" ],
+    "setProperties" : [ {
+      "name" : "provider",
+      "valueString" : "bedrock",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_provider_oracle_genai" ],
+    "setProperties" : [ {
+      "name" : "provider",
+      "valueString" : "oracle-genai",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_api_key" ],
+    "setProperties" : [ {
+      "name" : "apiKey",
+      "valueString" : "{memory.current.input}",
+      "scope" : "secret",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_default_base_url" ],
+    "setProperties" : [ {
+      "name" : "baseUrl",
+      "valueString" : "http://localhost:11434",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_base_url" ],
+    "setProperties" : [ {
+      "name" : "baseUrl",
+      "valueString" : "{memory.current.input}",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  }, {
+    "actions" : [ "set_model" ],
+    "setProperties" : [ {
+      "name" : "model",
+      "valueString" : "{memory.current.input}",
+      "scope" : "conversation",
+      "override" : true
+    } ]
+  } ]
+}

@@ -1,0 +1,277 @@
+{
+  "outputSet" : [ {
+    "action" : "CONVERSATION_START",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Hello! I'm the <b>Agent Father</b> \u2014 EDDI's built-in agent creation wizard.",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "I'll help you create and deploy a fully working AI agent in just a few steps.",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "Let's get started!",
+      "expressions" : "CONVERSATION_START"
+    }, {
+      "value" : "Not now",
+      "expressions" : "exit_conversation, CONVERSATION_END"
+    } ]
+  }, {
+    "action" : "ask_for_agent_name",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "\ud83d\udcdd What would you like to <b>name</b> your new agent?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ ]
+  }, {
+    "action" : "ask_for_system_prompt",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Great name! Now let's define your agent's personality.",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "\ud83e\udde0 Write a <b>system prompt</b> that describes what your agent should do and how it should behave.",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ ]
+  }, {
+    "action" : "ask_for_intro_message",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Excellent!",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "\ud83d\udc4b What <b>greeting message</b> should your agent show when a new conversation starts?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "Skip \u2014 no intro message",
+      "expressions" : "skip_intro"
+    } ]
+  }, {
+    "action" : "ask_for_provider",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "\u2699\ufe0f Which <b>LLM provider</b> would you like your agent to use?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "Anthropic",
+      "expressions" : "select_anthropic"
+    }, {
+      "value" : "OpenAI",
+      "expressions" : "select_openai"
+    }, {
+      "value" : "Gemini",
+      "expressions" : "select_gemini"
+    }, {
+      "value" : "Ollama (local)",
+      "expressions" : "select_ollama"
+    }, {
+      "value" : "Mistral",
+      "expressions" : "select_mistral"
+    }, {
+      "value" : "Azure OpenAI",
+      "expressions" : "select_azure_openai"
+    }, {
+      "value" : "Bedrock (AWS)",
+      "expressions" : "select_bedrock"
+    }, {
+      "value" : "Oracle GenAI",
+      "expressions" : "select_oracle_genai"
+    }, {
+      "value" : "Gemini Vertex",
+      "expressions" : "select_gemini_vertex"
+    }, {
+      "value" : "HuggingFace",
+      "expressions" : "select_huggingface"
+    }, {
+      "value" : "Jlama (local)",
+      "expressions" : "select_jlama"
+    } ]
+  }, {
+    "action" : "ask_for_api_key",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "\ud83d\udd10 Please provide your <b>API key</b>.",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "Don't worry \u2014 it will be <b>encrypted and stored securely</b> in the vault. It is never stored in plaintext.",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ ]
+  }, {
+    "action" : "ask_for_base_url",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "\ud83c\udf10 What's your <b>Ollama base URL</b>?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "Use default (localhost:11434)",
+      "expressions" : "use_default_ollama_url"
+    } ]
+  }, {
+    "action" : "ask_for_model",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "\ud83d\udd10 API key stored securely in vault \u2713",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "\ud83e\udd16 Which <b>model</b> should your agent use?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "claude-sonnet-4-6",
+      "expressions" : "claude-sonnet-4-6"
+    }, {
+      "value" : "gpt-5.4",
+      "expressions" : "gpt-5.4"
+    }, {
+      "value" : "gemini-3.1-pro-preview",
+      "expressions" : "gemini-3.1-pro-preview"
+    } ]
+  }, {
+    "action" : "ask_for_model_ollama",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "\ud83e\udd16 Which <b>Ollama model</b> should your agent use?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "llama3.2:1b",
+      "expressions" : "llama3.2:1b"
+    }, {
+      "value" : "llama3.2:3b",
+      "expressions" : "llama3.2:3b"
+    }, {
+      "value" : "mistral:7b",
+      "expressions" : "mistral:7b"
+    }, {
+      "value" : "deepseek-r1:7b",
+      "expressions" : "deepseek-r1:7b"
+    } ]
+  }, {
+    "action" : "ask_for_model_jlama",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "\ud83e\udd16 Which <b>Jlama model</b> should your agent use?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "tjake/TinyLlama-1.1B-Chat-v1.0-Jlama-Q4",
+      "expressions" : "tjake/TinyLlama-1.1B-Chat-v1.0-Jlama-Q4"
+    } ]
+  }, {
+    "action" : "ask_for_model_bedrock",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "\ud83e\udd16 Which <b>Bedrock model</b> should your agent use?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "anthropic.claude-sonnet-4-6-20250514-v1:0",
+      "expressions" : "anthropic.claude-sonnet-4-6-20250514-v1:0"
+    }, {
+      "value" : "amazon.titan-text-premier-v1:0",
+      "expressions" : "amazon.titan-text-premier-v1:0"
+    } ]
+  }, {
+    "action" : "ask_for_model_oracle",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "\ud83e\udd16 Which <b>Oracle GenAI model</b> should your agent use?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "cohere.command-r-plus",
+      "expressions" : "cohere.command-r-plus"
+    } ]
+  }, {
+    "action" : "confirm_creation",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "\ud83d\udccb <b>Agent Summary</b><br><br>\ud83c\udfaf <b>Name:</b> {properties.agentName}<br>\u2699\ufe0f <b>Provider:</b> {properties.provider}<br>\ud83e\udd16 <b>Model:</b> {properties.model}<br>\ud83d\udd10 <b>API Key:</b> stored in vault \u2713<br><br>Ready to create and deploy?",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ {
+      "value" : "\u2705 Create & Deploy",
+      "expressions" : "confirm_create_agent"
+    }, {
+      "value" : "\ud83d\udd04 Start Over",
+      "expressions" : "start_over"
+    } ]
+  }, {
+    "action" : "create_agent",
+    "timesOccurred" : 0,
+    "outputs" : [ {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "\u2705 <b>{properties.agentName}</b> has been created and deployed!",
+        "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "text",
+        "text" : "You can now chat with your new agent. Go to the EDDI Manager to find it, or start a new conversation via the API.",
+        "delay" : 0
+      } ]
+    } ],
+    "quickReplies" : [ ]
+  } ]
+}

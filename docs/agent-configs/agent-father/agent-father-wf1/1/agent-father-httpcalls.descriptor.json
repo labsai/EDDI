@@ -1,0 +1,6 @@
+{
+  "resource" : "eddi://ai.labs.apicalls/apicallstore/apicalls/agent-father-httpcalls?version=1",
+  "name" : "Agent Father",
+  "description" : "Setup agent via REST API",
+  "deleted" : false
+}
