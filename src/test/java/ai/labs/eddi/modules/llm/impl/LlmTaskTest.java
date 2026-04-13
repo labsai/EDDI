@@ -228,11 +228,11 @@ class LlmTaskTest {
         // and CDI availability — it may be ExceptionInInitializerError,
         // NoClassDefFoundError,
         // LifecycleException, or RuntimeException("Not implemented").
+        assertNotNull(thrown, "Expected an exception to be thrown");
         Throwable rootCause = thrown;
         while (rootCause.getCause() != null) {
             rootCause = rootCause.getCause();
         }
-        assertNotNull(rootCause, "rootCause should not be null");
         assertFalse(
                 rootCause instanceof NullPointerException,
                 "Should NOT be NullPointerException (that indicates bad test setup), "

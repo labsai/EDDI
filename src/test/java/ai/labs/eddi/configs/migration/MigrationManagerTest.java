@@ -382,7 +382,6 @@ class MigrationManagerTest {
 
     // ─── Test Helpers ────────────────────────────────────────────
 
-    @SuppressWarnings("unchecked")
     private Document buildPropertySetterDoc(Map<String, Object> property) {
         var setProperties = new ArrayList<Map<String, Object>>();
         setProperties.add(property);

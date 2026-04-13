@@ -4,7 +4,6 @@ import ai.labs.eddi.backup.IResourceSource.*;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
-import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -22,7 +21,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+
 import static org.mockito.Mockito.when;
 
 /**
@@ -213,10 +212,10 @@ class RemoteApiResourceSourceTest {
                     .thenReturn(new DocumentDescriptor[0]);
 
             // Create with trailing slash
-            var source = new RemoteApiResourceSource(
-                    BASE_URL + "/", AGENT_ID, 1, "Bearer token", jsonSerialization, mockHttpClient);
-
-            assertDoesNotThrow(source::readAgent);
+            try (var source = new RemoteApiResourceSource(
+                    BASE_URL + "/", AGENT_ID, 1, "Bearer token", jsonSerialization, mockHttpClient)) {
+                assertDoesNotThrow(source::readAgent);
+            }
         }
     }
 

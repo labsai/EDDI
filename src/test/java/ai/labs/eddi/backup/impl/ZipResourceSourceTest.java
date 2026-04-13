@@ -263,9 +263,10 @@ class ZipResourceSourceTest {
             when(jsonSerialization.deserialize(eq(prettyJson), eq(AgentConfiguration.class)))
                     .thenReturn(config);
 
-            var source = new ZipResourceSource(tempDir, jsonSerialization);
-            source.readAgent();
-            Mockito.verify(jsonSerialization).deserialize(eq(prettyJson), eq(AgentConfiguration.class));
+            try (var source = new ZipResourceSource(tempDir, jsonSerialization)) {
+                source.readAgent();
+                Mockito.verify(jsonSerialization).deserialize(eq(prettyJson), eq(AgentConfiguration.class));
+            }
         }
     }
 

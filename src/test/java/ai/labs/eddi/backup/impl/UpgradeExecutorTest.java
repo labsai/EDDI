@@ -289,8 +289,9 @@ class UpgradeExecutorTest {
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
             when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
 
-            try (MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class)) {
-                @SuppressWarnings("unchecked")
+            @SuppressWarnings("rawtypes")
+            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            try (cdiMock) {
                 var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
                 cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
                 @SuppressWarnings("unchecked")
@@ -357,8 +358,9 @@ class UpgradeExecutorTest {
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
             when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
 
-            try (MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class)) {
-                @SuppressWarnings("unchecked")
+            @SuppressWarnings("rawtypes")
+            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            try (cdiMock) {
                 var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
                 cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
 
@@ -418,8 +420,9 @@ class UpgradeExecutorTest {
             };
             when(wfDirectStore.create(any())).thenReturn(wfResourceId);
 
-            try (MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class)) {
-                @SuppressWarnings("unchecked")
+            @SuppressWarnings("rawtypes")
+            MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class);
+            try (cdiMock) {
                 var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
                 cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
                 @SuppressWarnings("unchecked")

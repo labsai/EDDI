@@ -257,7 +257,6 @@ class RestTemplatePreviewTest {
             when(promptSnippetService.getAll()).thenReturn(snippets);
             when(templatingEngine.processTemplate(eq("{{snippets.safety}}"), anyMap()))
                     .thenAnswer(inv -> {
-                        @SuppressWarnings("unchecked")
                         Map<String, Object> data = inv.getArgument(1);
                         // Verify snippets are present in the data passed to the engine
                         assertNotNull(data.get("snippets"), "snippets should be injected");
@@ -290,7 +289,6 @@ class RestTemplatePreviewTest {
             when(promptSnippetService.getAll()).thenReturn(Map.of());
             when(templatingEngine.processTemplate(eq("test"), anyMap()))
                     .thenAnswer(inv -> {
-                        @SuppressWarnings("unchecked")
                         Map<String, Object> data = inv.getArgument(1);
                         assertNull(data.get("snippets"), "snippets key should not exist when empty");
                         return "test";

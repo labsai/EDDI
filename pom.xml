@@ -488,8 +488,8 @@
                     <linkXRef>false</linkXRef>
                 </configuration>
                 <executions>
-                    <?m2e ignore?>
                     <execution>
+                        <?m2e ignore?>
                         <id>validate</id>
                         <phase>validate</phase>
                         <goals>

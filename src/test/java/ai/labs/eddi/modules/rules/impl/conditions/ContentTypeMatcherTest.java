@@ -442,7 +442,6 @@ class ContentTypeMatcherTest {
 
         @Test
         @DisplayName("should ignore non-Attachment objects in the list")
-        @SuppressWarnings("unchecked")
         void ignoresNonAttachmentObjects() {
             matcher.setConfigs(Map.of("mimeType", "image/*"));
             var att = new Attachment();
@@ -456,7 +455,6 @@ class ContentTypeMatcherTest {
 
         @Test
         @DisplayName("should FAIL when all entries are non-Attachment objects")
-        @SuppressWarnings("unchecked")
         void failsWhenAllNonAttachment() {
             matcher.setConfigs(Map.of("mimeType", "image/*"));
             List<?> nonAttachments = List.of("string", 123, Map.of("key", "val"));
