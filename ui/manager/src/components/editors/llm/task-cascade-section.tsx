@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Layers, Plus, Trash2, ArrowUp, ArrowDown } from "lucide-react";
+import { Layers, Plus, Trash2, ArrowUp, ArrowDown, Info } from "lucide-react";
 import { EditorSection } from "../editor-section";
 import { MODEL_TYPES } from "./types";
 import type { TaskSectionProps } from "./task-section-props";
@@ -251,6 +251,13 @@ export function TaskCascadeSection({ task, onChange, readOnly }: TaskSectionProp
                           className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                         />
                       </div>
+                    </div>
+                    {/* API key resolution hint */}
+                    <div className="flex items-start gap-1.5 ps-7 mt-1">
+                      <Info className="h-3 w-3 text-muted-foreground/60 shrink-0 mt-0.5" />
+                      <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
+                        {t("llmEditor.cascadeApiKeyHint", "API key is inherited from the parent task and resolved from the Secrets Vault. Ensure a matching key is configured for this provider.")}
+                      </p>
                     </div>
                   </div>
                 ))}

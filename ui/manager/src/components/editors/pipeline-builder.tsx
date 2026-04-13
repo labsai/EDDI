@@ -275,7 +275,7 @@ function SortableExtensionItem({
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-3 px-5 py-3 transition-colors ${
+      className={`group flex items-center gap-3 px-5 py-3 transition-colors ${
         isDragging
           ? "bg-primary/5 shadow-lg rounded-lg"
           : isStale
@@ -302,65 +302,92 @@ function SortableExtensionItem({
         {position}
       </span>
 
-      {/* Type icon + label */}
+      {/* Type icon + label — entire area navigates to resource */}
       <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-foreground">{label}</p>
-        {parsed && (
-          <div className="flex items-center gap-2">
-            <Link
-              to={(() => {
-                let path = `/manage/resources/${parsed.slug}/${parsed.id}`;
-                const params = new URLSearchParams();
-                if (workflowId && workflowVersion) {
-                  params.set("pkgId", workflowId);
-                  params.set("pkgVer", String(workflowVersion));
-                }
-                if (agentId) params.set("agentId", agentId);
-                if (agentVer) params.set("agentVer", agentVer);
-                const qs = params.toString();
-                if (qs) path += `?${qs}`;
-                return path;
-              })()}
-              className="text-xs text-muted-foreground hover:text-primary truncate transition-colors"
-            >
-              {parsed.id}
-              <span className="ms-1 text-muted-foreground/60">v{currentVer}</span>
-              <ExternalLink className="ms-1 inline h-3 w-3 opacity-40" />
-            </Link>
-            {isStale && (
-              <button
-                onClick={handleUpdateVersion}
-                disabled={disabled}
-                className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors shrink-0"
-                title={t("packageEditor.updateToLatest", "Update to latest version")}
-                data-testid={`update-version-${item.index}`}
-              >
-                <ArrowUpCircle className="h-3 w-3" />
-                v{latestVer}
-              </button>
-            )}
+      {parsed ? (
+        <Link
+          to={(() => {
+            let path = `/manage/resources/${parsed.slug}/${parsed.id}`;
+            const params = new URLSearchParams();
+            if (workflowId && workflowVersion) {
+              params.set("pkgId", workflowId);
+              params.set("pkgVer", String(workflowVersion));
+            }
+            if (agentId) params.set("agentId", agentId);
+            if (agentVer) params.set("agentVer", agentVer);
+            const qs = params.toString();
+            if (qs) path += `?${qs}`;
+            return path;
+          })()}
+          className="min-w-0 flex-1"
+        >
+          <p className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{label}</p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <span className="text-xs text-muted-foreground truncate">{parsed.id}</span>
+            <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">v{currentVer}</span>
           </div>
-        )}
-      </div>
-
-      {/* Pipeline connector arrow (except last) */}
-      {position < total && (
-        <span className="text-xs text-muted-foreground/40 hidden sm:block">
-          →
-        </span>
+        </Link>
+      ) : (
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-foreground">{label}</p>
+        </div>
       )}
 
-      {/* Remove */}
-      <button
-        onClick={onRemove}
-        disabled={disabled}
-        className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
-        title={t("common.delete")}
-        data-testid={`remove-ext-${item.index}`}
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
+      {/* Version update + Edit + Remove actions */}
+      <div className="flex items-center gap-1.5 shrink-0">
+        {isStale && (
+          <button
+            onClick={handleUpdateVersion}
+            disabled={disabled}
+            className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors shrink-0"
+            title={t("packageEditor.updateToLatest", "Update to latest version")}
+            data-testid={`update-version-${item.index}`}
+          >
+            <ArrowUpCircle className="h-3 w-3" />
+            v{latestVer}
+          </button>
+        )}
+
+        {parsed && (
+          <Link
+            to={(() => {
+              let path = `/manage/resources/${parsed.slug}/${parsed.id}`;
+              const params = new URLSearchParams();
+              if (workflowId && workflowVersion) {
+                params.set("pkgId", workflowId);
+                params.set("pkgVer", String(workflowVersion));
+              }
+              if (agentId) params.set("agentId", agentId);
+              if (agentVer) params.set("agentVer", agentVer);
+              const qs = params.toString();
+              if (qs) path += `?${qs}`;
+              return path;
+            })()}
+            className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+          >
+            <ExternalLink className="h-3 w-3" />
+            {t("common.edit", "Edit")}
+          </Link>
+        )}
+
+        {/* Pipeline connector arrow (except last) */}
+        {position < total && (
+          <span className="text-xs text-muted-foreground/40 hidden sm:block">
+            →
+          </span>
+        )}
+
+        {/* Remove */}
+        <button
+          onClick={onRemove}
+          disabled={disabled}
+          className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
+          title={t("common.delete")}
+          data-testid={`remove-ext-${item.index}`}
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
     </div>
   );
 }
