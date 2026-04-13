@@ -1,4 +1,4 @@
-![EDDI Banner Image](/screenshots/EDDI-landing-page-image.png)
+![EDDI Banner Image](/screenshots/EDDI-Readme-banner-image.webp)
 
 # E.D.D.I — Multi-Agent Orchestration Middleware for Conversational AI
 

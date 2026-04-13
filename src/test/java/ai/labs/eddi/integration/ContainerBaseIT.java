@@ -47,7 +47,8 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
     @Container
     static final GenericContainer<?> EDDI = new GenericContainer<>(
             new ImageFromDockerfile("eddi-it", false)
-                    .withDockerfile(Path.of("src/main/docker/Dockerfile.jvm")))
+                    .withFileFromPath(".", Path.of("."))
+                    .withDockerfilePath("src/main/docker/Dockerfile.jvm"))
             .withNetwork(NETWORK)
             .withExposedPorts(7070)
             .withEnv("MONGODB_CONNECTIONSTRING",

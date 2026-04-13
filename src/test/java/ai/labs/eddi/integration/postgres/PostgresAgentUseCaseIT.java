@@ -50,7 +50,8 @@ public class PostgresAgentUseCaseIT extends BaseIntegrationIT {
     @Container
     static final GenericContainer<?> EDDI = new GenericContainer<>(
             new ImageFromDockerfile("eddi-pg-it", false)
-                    .withDockerfile(Path.of("src/main/docker/Dockerfile.jvm")))
+                    .withFileFromPath(".", Path.of("."))
+                    .withDockerfilePath("src/main/docker/Dockerfile.jvm"))
             .withNetwork(NETWORK)
             .withExposedPorts(7070)
             .withEnv("EDDI_DATASTORE_TYPE", "postgres")
