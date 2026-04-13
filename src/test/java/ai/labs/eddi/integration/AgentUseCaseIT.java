@@ -1,7 +1,5 @@
 package ai.labs.eddi.integration;
 
-import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
 import io.restassured.response.Response;
 import org.junit.jupiter.api.*;
@@ -19,11 +17,11 @@ import static org.hamcrest.Matchers.*;
  * Integration test for Agent use cases: import, deploy, multi-turn
  * conversation.
  * <p>
- * Ported from {@code RestUseCaseTest} in EDDI-integration-tests.
+ * Uses Testcontainers to run EDDI + MongoDB in Docker containers, providing
+ * true black-box E2E testing. Ported from {@code RestUseCaseTest} in
+ * EDDI-integration-tests.
  */
-@QuarkusTest
-@TestProfile(IntegrationTestProfile.class)
-public class AgentUseCaseIT extends BaseIntegrationIT {
+public class AgentUseCaseIT extends ContainerBaseIT {
 
     private static ResourceId weatherAgentId;
     private static boolean agentImported = false;

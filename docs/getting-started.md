@@ -162,11 +162,7 @@ docker-compose -f docker-compose.yml -f docker-compose.local.yml up
 For integration testing run
 
 ```bash
-./integration-tests.sh
+./mvnw verify -DskipITs=false
 ```
 
-or
-
-```bash
-docker-compose -f docker-compose.yml -f docker-compose.local.yml -f docker-compose.testing.yml -p ci up -d
-```
+This uses Testcontainers to automatically start EDDI + MongoDB/PostgreSQL in Docker containers for E2E testing. Requires Docker to be running.

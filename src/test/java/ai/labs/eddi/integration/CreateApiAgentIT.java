@@ -1,7 +1,5 @@
 package ai.labs.eddi.integration;
 
-import io.quarkus.test.junit.QuarkusIntegrationTest;
-import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
 import io.restassured.response.Response;
 import org.junit.jupiter.api.*;
@@ -12,30 +10,24 @@ import static org.hamcrest.Matchers.*;
 /**
  * Integration test for the create_api_agent workflow.
  * <p>
- * Uses {@code @QuarkusIntegrationTest} which builds and launches the
- * application in a <b>separate JVM process</b>. This avoids the CDI
- * augmentation issue caused by the {@code quarkus-mcp-server-http} extension's
- * build-time processor generating injection points from {@code @ToolArg}
- * parameters (which breaks {@code @QuarkusTest} but not production builds).
+ * Uses Testcontainers to run EDDI + MongoDB in Docker containers, providing
+ * true black-box E2E testing that works on all platforms and avoids MCP CDI
+ * augmentation issues.
  * <p>
- * Validates the resource creation workflow that {@code create_api_agent}
- * produces:
+ * Validates the resource creation workflow:
  * <ol>
  * <li>Create 2 ApiCallsConfiguration resources (grouped by tag: users,
  * orders)</li>
  * <li>Create Behavior Rules and LangChain configuration</li>
- * <li>Create Workflow with 5 extensions (parser + behavior + 2×httpcalls +
- * langchain)</li>
+ * <li>Create Workflow with 5 extensions</li>
  * <li>Verify all resources are persisted and readable</li>
  * <li>Create Agent referencing the workflow</li>
  * <li>Deploy the Agent and verify READY status</li>
  * <li>Start a conversation to verify the workflow is wired correctly</li>
  * </ol>
  */
-@QuarkusIntegrationTest
-@TestProfile(IntegrationTestProfile.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-public class CreateApiAgentIT {
+public class CreateApiAgentIT extends ContainerBaseIT {
 
     // Shared state across ordered test methods
     private static String httpCallsUsersLocation;
@@ -165,22 +157,7 @@ public class CreateApiAgentIT {
             }
             """;
 
-    // ==================== URL Utilities ====================
-
-    private record ResourceId(String id, int version) {
-    }
-
-    private static ResourceId extractResourceId(String locationUri) {
-        var uri = java.net.URI.create(locationUri);
-        String path = uri.getPath();
-        String id = path.substring(path.lastIndexOf('/') + 1);
-        String query = uri.getQuery();
-        int version = 1;
-        if (query != null && query.startsWith("version=")) {
-            version = Integer.parseInt(query.substring("version=".length()));
-        }
-        return new ResourceId(id, version);
-    }
+    // ResourceId and extractResourceId inherited from BaseIntegrationIT
 
     // ==================== Step 1: Create ApiCalls resources ====================
 
