@@ -127,7 +127,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
             for (var agentFileName : agentExampleFiles) {
                 Response result = importAgent(getResourceAsStream("/initial-agents/" + agentFileName), "create", null, null, null);
-                if (result != null && result.getStatus() == 200 && result.getEntity() instanceof Map<?, ?> body) {
+                if (result != null && (result.getStatus() == 200 || result.getStatus() == 201) && result.getEntity() instanceof Map<?, ?> body) {
                     String resourceUri = (String) body.get("resourceUri");
                     if (resourceUri != null && !resourceUri.isBlank()) {
                         var agentId = RestUtilities.extractResourceId(URI.create(resourceUri));
@@ -413,7 +413,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             }
         }
         log.infof("Import complete: lastAgentUri=%s", lastAgentUri);
-        return Response.ok(Map.of("resourceUri", lastAgentUri != null ? lastAgentUri.toString() : "")).build();
+        if (lastAgentUri != null) {
+            return Response.created(lastAgentUri)
+                    .header("X-Resource-URI", lastAgentUri.toString())
+                    .entity(Map.of("resourceUri", lastAgentUri.toString())).build();
+        }
+        return Response.ok(Map.of("resourceUri", "")).build();
     }
 
     private URI buildOldAgentUri(Path agentPath) {
@@ -1146,7 +1151,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             List<String> workflowOrder = parseWorkflowOrder(workflowOrderString);
 
             URI resultUri = upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, workflowOrder);
-            return Response.ok(Map.of("resourceUri", resultUri.toString())).build();
+            return Response.created(resultUri)
+                    .header("X-Resource-URI", resultUri.toString())
+                    .entity(Map.of("resourceUri", resultUri.toString())).build();
         } catch (Exception e) {
             log.error("Upgrade from ZIP failed: " + e.getMessage(), e);
             throw new InternalServerErrorException("Upgrade failed: " + e.getMessage(), e);
@@ -1236,7 +1243,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 List<String> wfOrder = parseWorkflowOrder(workflowOrder);
 
                 URI resultUri = upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, wfOrder);
-                return Response.ok(Map.of("resourceUri", resultUri.toString())).build();
+                return Response.created(resultUri)
+                        .header("X-Resource-URI", resultUri.toString())
+                        .entity(Map.of("resourceUri", resultUri.toString())).build();
             }
         } catch (Exception e) {
             log.errorf("Sync execution failed for agent %s from %s: %s",

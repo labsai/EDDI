@@ -103,12 +103,20 @@ public class AgentUseCaseIT extends BaseIntegrationIT {
         Response response = given()
                 .contentType("application/zip").body(file).post("/backup/import");
 
-        response.then().statusCode(200);
+        response.then().statusCode(201);
 
-        // Import endpoint returns the agent URI in the JSON body under "resourceUri"
-        String resourceUri = response.jsonPath().getString("resourceUri");
+        // Try Location header first (RESTful standard), then X-Resource-URI fallback,
+        // then JSON body — eddi:// URIs may be stripped from the Location header by
+        // JAX-RS
+        String resourceUri = response.getHeader("location");
         if (resourceUri == null || resourceUri.isBlank()) {
-            throw new RuntimeException("Import response did not contain a resourceUri. " + "Status: " + response.getStatusCode() + ", Body: "
+            resourceUri = response.getHeader("X-Resource-URI");
+        }
+        if (resourceUri == null || resourceUri.isBlank()) {
+            resourceUri = response.jsonPath().getString("resourceUri");
+        }
+        if (resourceUri == null || resourceUri.isBlank()) {
+            throw new RuntimeException("Import response did not contain a resource URI. " + "Status: " + response.getStatusCode() + ", Body: "
                     + response.getBody().asString());
         }
 

@@ -48,7 +48,7 @@ public class ImportMergeIT extends BaseIntegrationIT {
         System.out.println("Headers: " + response.headers().asList());
         System.out.println("Body: " + response.body().asString().substring(0, Math.min(500, response.body().asString().length())));
 
-        response.then().statusCode(200);
+        response.then().statusCode(201);
 
         String resourceUri = response.jsonPath().getString("resourceUri");
         assertThat("Import should return a resourceUri", resourceUri, notNullValue());
@@ -131,7 +131,7 @@ public class ImportMergeIT extends BaseIntegrationIT {
 
         Response mergeResponse = given().contentType("application/zip").queryParam("strategy", "merge").body(exportedZipBytes).post("/backup/import");
 
-        mergeResponse.then().statusCode(200);
+        mergeResponse.then().statusCode(201);
 
         String mergeLocation = mergeResponse.jsonPath().getString("resourceUri");
         assertThat("Merge import should return a resourceUri", mergeLocation, notNullValue());
@@ -186,7 +186,7 @@ public class ImportMergeIT extends BaseIntegrationIT {
         Response selectiveResponse = given().contentType("application/zip").queryParam("strategy", "merge")
                 .queryParam("selectedResources", agentOriginId).body(exportedZipBytes).post("/backup/import");
 
-        selectiveResponse.then().statusCode(200);
+        selectiveResponse.then().statusCode(201);
 
         String location = selectiveResponse.jsonPath().getString("resourceUri");
         assertThat("Selective merge should return a resourceUri", location, notNullValue());
@@ -204,7 +204,7 @@ public class ImportMergeIT extends BaseIntegrationIT {
         Response response = given()
                 .contentType("application/zip").body(agentZip).post("/backup/import");
 
-        response.then().statusCode(200);
+        response.then().statusCode(201);
 
         String location = response.jsonPath().getString("resourceUri");
         assertThat("Import should return a resourceUri", location, notNullValue());
