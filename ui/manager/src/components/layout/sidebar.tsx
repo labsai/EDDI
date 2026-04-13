@@ -187,12 +187,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 onClick={() => toggleSection(idx)}
                 className="mb-1 flex w-full items-center gap-1 px-3 text-[11px] font-semibold uppercase tracking-wider text-sidebar-foreground/50 hover:text-sidebar-foreground/80 transition-colors"
                 aria-expanded={!collapsedSections.has(idx)}
+                aria-controls={`sidebar-section-${idx}`}
               >
                 <ChevronRight
                   className={cn(
                     "h-3 w-3 shrink-0 transition-transform duration-200",
                     !collapsedSections.has(idx) && "rotate-90"
                   )}
+                  aria-hidden="true"
                 />
                 {t(section.labelKey)}
               </button>
@@ -202,7 +204,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             )}
             {/* Section items — hidden when section is collapsed (only in expanded sidebar) */}
             {(!collapsed ? !collapsedSections.has(idx) : true) && (
-              <div className="space-y-0.5">
+              <div id={`sidebar-section-${idx}`} className="space-y-0.5">
                 {section.items.map((item) => (
                   <NavLink
                     key={item.path}
@@ -359,12 +361,13 @@ function HelpMenu({ collapsed }: { collapsed: boolean }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const completedChapters = useOnboarding((s) => s.completedChapters);
   const restartChapter = useOnboarding((s) => s.restartChapter);
   const resetAll = useOnboarding((s) => s.resetAll);
 
-  // Close on outside click
+  // Close on outside click or Escape
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
@@ -372,8 +375,19 @@ function HelpMenu({ collapsed }: { collapsed: boolean }) {
         setOpen(false);
       }
     };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
   }, [open]);
 
   const handleChapterClick = (id: TourChapterId) => {
@@ -383,9 +397,48 @@ function HelpMenu({ collapsed }: { collapsed: boolean }) {
     setTimeout(() => restartChapter(id), 300);
   };
 
+  // Auto-focus first menu item when opened
+  useEffect(() => {
+    if (open) {
+      requestAnimationFrame(() => {
+        const firstItem = ref.current?.querySelector<HTMLElement>('[role="menuitem"]');
+        firstItem?.focus();
+      });
+    }
+  }, [open]);
+
+  /** Arrow key navigation for the menu */
+  const handleMenuKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    const items = ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]');
+    if (!items || items.length === 0) return;
+    const itemArray = Array.from(items);
+    const currentIndex = itemArray.indexOf(document.activeElement as HTMLElement);
+
+    let nextIndex: number | null = null;
+    switch (e.key) {
+      case "ArrowDown":
+        nextIndex = (currentIndex + 1) % itemArray.length;
+        break;
+      case "ArrowUp":
+        nextIndex = (currentIndex - 1 + itemArray.length) % itemArray.length;
+        break;
+      case "Home":
+        nextIndex = 0;
+        break;
+      case "End":
+        nextIndex = itemArray.length - 1;
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    itemArray[nextIndex]?.focus();
+  }, []);
+
   return (
     <div ref={ref} className="relative border-t border-sidebar-border p-1.5">
       <button
+        ref={triggerRef}
         onClick={() => setOpen((p) => !p)}
         className={cn(
           "flex w-full items-center rounded-lg px-3 py-2 text-sidebar-foreground transition-all hover:bg-sidebar-accent/10 hover:text-sidebar-accent",
@@ -393,9 +446,11 @@ function HelpMenu({ collapsed }: { collapsed: boolean }) {
         )}
         title={t("onboarding.help.title", "Help & Tour")}
         aria-label={t("onboarding.help.title", "Help & Tour")}
+        aria-haspopup="true"
+        aria-expanded={open}
         data-testid="sidebar-help"
       >
-        <HelpCircle className="h-5 w-5 shrink-0" />
+        <HelpCircle className="h-5 w-5 shrink-0" aria-hidden="true" />
         {!collapsed && (
           <span className="ms-3 text-sm font-medium">
             {t("onboarding.help.title", "Help & Tour")}
@@ -410,9 +465,12 @@ function HelpMenu({ collapsed }: { collapsed: boolean }) {
             "absolute z-50 mb-2 w-56 rounded-xl border border-sidebar-border bg-sidebar p-1.5 shadow-xl shadow-black/20",
             collapsed ? "inset-s-14 bottom-0" : "inset-s-2 bottom-full"
           )}
+          role="menu"
+          aria-label={t("onboarding.help.platformTour", "Platform Tour")}
+          onKeyDown={handleMenuKeyDown}
           data-testid="help-menu-dropdown"
         >
-          <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/40">
+          <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-sidebar-foreground/40" aria-hidden="true">
             {t("onboarding.help.platformTour", "Platform Tour")}
           </p>
           {ALL_CHAPTERS.map((id) => {
@@ -422,14 +480,16 @@ function HelpMenu({ collapsed }: { collapsed: boolean }) {
               <button
                 key={id}
                 onClick={() => handleChapterClick(id)}
-                className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-start text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent/10"
+                className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-start text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent/10 focus:bg-sidebar-accent/10"
+                role="menuitem"
+                tabIndex={-1}
                 data-testid={`help-chapter-${id}`}
               >
                 <span className="flex-1 truncate">{t(chapter.titleKey)}</span>
                 {done ? (
-                  <Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                  <Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" aria-hidden="true" />
                 ) : (
-                  <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-sidebar-foreground/30" />
+                  <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-sidebar-foreground/30" aria-hidden="true" />
                 )}
               </button>
             );
@@ -440,10 +500,12 @@ function HelpMenu({ collapsed }: { collapsed: boolean }) {
                 setOpen(false);
                 resetAll();
               }}
-              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-sidebar-foreground/50 transition-colors hover:text-sidebar-foreground hover:bg-sidebar-accent/10"
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-sidebar-foreground/50 transition-colors hover:text-sidebar-foreground hover:bg-sidebar-accent/10 focus:bg-sidebar-accent/10"
+              role="menuitem"
+              tabIndex={-1}
               data-testid="help-reset-all"
             >
-              <RotateCcw className="h-3.5 w-3.5" />
+              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
               {t("onboarding.help.resetAll", "Reset All Tours")}
             </button>
           </div>

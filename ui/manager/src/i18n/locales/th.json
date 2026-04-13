@@ -1437,6 +1437,9 @@
     "agents": "เอเจนต์",
     "actions": "การดำเนินการด่วน",
     "createAgent": "สร้างเอเจนต์ใหม่",
-    "openChat": "เปิดแชท"
+    "openChat": "เปิดแชท",
+    "kbdNavigate": "นำทาง",
+    "kbdSelect": "เลือก",
+    "kbdClose": "ปิด"
   }
 }

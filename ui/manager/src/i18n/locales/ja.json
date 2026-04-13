@@ -1437,6 +1437,9 @@
     "agents": "エージェント",
     "actions": "クイック操作",
     "createAgent": "新しいエージェントを作成",
-    "openChat": "チャットを開く"
+    "openChat": "チャットを開く",
+    "kbdNavigate": "移動",
+    "kbdSelect": "選択",
+    "kbdClose": "閉じる"
   }
 }

@@ -1437,6 +1437,9 @@
     "agents": "Agenten",
     "actions": "Schnellaktionen",
     "createAgent": "Neuen Agenten erstellen",
-    "openChat": "Chat öffnen"
+    "openChat": "Chat öffnen",
+    "kbdNavigate": "navigieren",
+    "kbdSelect": "auswählen",
+    "kbdClose": "schließen"
   }
 }

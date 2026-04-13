@@ -1,7 +1,8 @@
 import { api } from "../api-client";
+import { ENVIRONMENTS, type Environment } from "../constants";
 
-export const ENVIRONMENTS = ["production", "test"] as const;
-export type Environment = (typeof ENVIRONMENTS)[number];
+// Re-export from shared constants for backward compatibility
+export { ENVIRONMENTS, type Environment };
 
 // Types matching EDDI backend
 export interface AgentDescriptor {

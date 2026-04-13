@@ -323,22 +323,25 @@ export function AgentsPage() {
                             onClick={() => handleDuplicate(agent.id, agent.version)}
                             className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
                             title={t("common.duplicate", "Duplicate")}
+                            aria-label={t("common.duplicate", "Duplicate")}
                           >
-                            <Copy className="h-4 w-4" />
+                            <Copy className="h-4 w-4" aria-hidden="true" />
                           </button>
                           <button
                             onClick={() => setExportTarget({ id: agent.id, version: agent.version })}
                             className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
                             title={t("agents.export", "Export")}
+                            aria-label={t("agents.export", "Export")}
                           >
-                            <Download className="h-4 w-4" />
+                            <Download className="h-4 w-4" aria-hidden="true" />
                           </button>
                           <button
                             onClick={() => handleDelete(agent.id, agent.version)}
                             className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                             title={t("common.delete")}
+                            aria-label={t("common.delete")}
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <Trash2 className="h-4 w-4" aria-hidden="true" />
                           </button>
                         </div>
                       </td>

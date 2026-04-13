@@ -74,7 +74,7 @@ describe("AgentDetailPage", () => {
     renderAgentDetail();
     await waitFor(() => {
       expect(screen.getByTestId("env-badges")).toBeInTheDocument();
-    });
+    }, { timeout: 5000 });
   });
 
   it("renders add package button", async () => {

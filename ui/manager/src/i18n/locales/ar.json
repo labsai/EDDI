@@ -1437,6 +1437,9 @@
     "agents": "الوكلاء",
     "actions": "إجراءات سريعة",
     "createAgent": "إنشاء وكيل جديد",
-    "openChat": "فتح الدردشة"
+    "openChat": "فتح الدردشة",
+    "kbdNavigate": "تنقل",
+    "kbdSelect": "تحديد",
+    "kbdClose": "إغلاق"
   }
 }

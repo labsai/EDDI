@@ -1437,6 +1437,9 @@
     "agents": "Agentes",
     "actions": "Acciones rápidas",
     "createAgent": "Crear nuevo agente",
-    "openChat": "Abrir chat"
+    "openChat": "Abrir chat",
+    "kbdNavigate": "navegar",
+    "kbdSelect": "seleccionar",
+    "kbdClose": "cerrar"
   }
 }

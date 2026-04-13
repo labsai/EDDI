@@ -1437,6 +1437,9 @@
     "agents": "एजेंट",
     "actions": "त्वरित कार्यवाही",
     "createAgent": "नया एजेंट बनाएं",
-    "openChat": "चैट खोलें"
+    "openChat": "चैट खोलें",
+    "kbdNavigate": "नेविगेट",
+    "kbdSelect": "चुनें",
+    "kbdClose": "बंद करें"
   }
 }

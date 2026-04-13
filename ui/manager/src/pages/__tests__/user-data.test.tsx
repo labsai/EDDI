@@ -59,7 +59,7 @@ describe("UserDataPage", () => {
     const headings = screen.getAllByRole("heading", { level: 1 });
     // Should only have the parent User Data heading, not a User Memory h1
     expect(headings).toHaveLength(1);
-    expect(headings[0].textContent).toContain("User Data");
+    expect(headings[0]!.textContent).toContain("User Data");
   });
 
   it("switches to Properties tab on click", () => {
@@ -77,7 +77,7 @@ describe("UserDataPage", () => {
     // Only one h1 should exist: the parent User Data heading
     const headings = screen.getAllByRole("heading", { level: 1 });
     expect(headings).toHaveLength(1);
-    expect(headings[0].textContent).toContain("User Data");
+    expect(headings[0]!.textContent).toContain("User Data");
   });
 
   it("switches to Conversations tab on click", () => {

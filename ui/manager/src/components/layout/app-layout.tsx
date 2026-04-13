@@ -8,11 +8,13 @@ import { WelcomeModal } from "@/components/onboarding/welcome-modal";
 import { GuidedTour } from "@/components/onboarding/guided-tour";
 import { TourOfferBar } from "@/components/onboarding/tour-offer-bar";
 import { MockDataBanner } from "./mock-data-banner";
+import { useDocumentTitle } from "@/hooks/use-document-title";
 
 import { cn } from "@/lib/utils";
 
 export function AppLayout() {
   const { t } = useTranslation();
+  useDocumentTitle();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -28,6 +30,18 @@ export function AppLayout() {
   useEffect(() => {
     if (!isMobile) setMobileSidebarOpen(false);
   }, [isMobile]);
+
+  // M5: Close mobile sidebar on Escape key
+  useEffect(() => {
+    if (!mobileSidebarOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setMobileSidebarOpen(false);
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [mobileSidebarOpen]);
 
   return (
     <div className="flex h-screen overflow-hidden" data-testid="app-layout">
@@ -49,6 +63,7 @@ export function AppLayout() {
           <div
             className="fixed inset-0 z-40 bg-black/50 transition-opacity"
             onClick={() => setMobileSidebarOpen(false)}
+            aria-hidden="true"
             data-testid="sidebar-overlay"
           />
           <div className="fixed inset-y-0 start-0 z-50 w-64">

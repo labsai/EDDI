@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -17,7 +17,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { ENVIRONMENTS } from "@/lib/api/agents";
+import { ENVIRONMENTS } from "@/lib/constants";
+import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import {
   useTriggers,
   useCreateTrigger,
@@ -198,31 +199,39 @@ function TriggerCard({
 
   return (
     <div className="rounded-xl border border-border bg-card" data-testid={`trigger-${trigger.intent}`}>
-      <div className="flex items-center gap-3 px-5 py-4 cursor-pointer" onClick={() => setExpanded(!expanded)}>
-        <button type="button" className="text-muted-foreground">
-          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+      <div className="flex items-center gap-3 px-5 py-4">
+        <button
+          type="button"
+          className="flex flex-1 items-center gap-3 cursor-pointer text-start"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          aria-controls={`trigger-content-${trigger.intent}`}
+        >
+          <span className="text-muted-foreground" aria-hidden="true">
+            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </span>
+          <Zap className="h-4 w-4 text-amber-500 shrink-0" aria-hidden="true" />
+          <span className="flex-1 font-semibold text-sm text-foreground font-mono">{trigger.intent}</span>
+          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+            {trigger.agentDeployments.length} {t("triggers.agents", "agents")}
+          </span>
         </button>
-        <Zap className="h-4 w-4 text-amber-500 shrink-0" />
-        <span className="flex-1 font-semibold text-sm text-foreground font-mono">{trigger.intent}</span>
-        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
-          {trigger.agentDeployments.length} {t("triggers.agents", "agents")}
-        </span>
-        <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(); }} className="rounded p-1.5 text-muted-foreground hover:text-foreground transition-colors" title={t("common.edit")}>
-          <Edit3 className="h-3.5 w-3.5" />
+        <button type="button" onClick={() => onEdit()} className="rounded p-1.5 text-muted-foreground hover:text-foreground transition-colors" title={t("common.edit")} aria-label={t("common.edit")}>
+          <Edit3 className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
-        <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(); }} className="rounded p-1.5 text-muted-foreground hover:text-destructive transition-colors" title={t("common.delete")}>
-          <Trash2 className="h-3.5 w-3.5" />
+        <button type="button" onClick={() => onDelete()} className="rounded p-1.5 text-muted-foreground hover:text-destructive transition-colors" title={t("common.delete")} aria-label={t("common.delete")}>
+          <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
       </div>
 
       {expanded && (
-        <div className="border-t border-border px-5 py-3 space-y-2">
+        <div id={`trigger-content-${trigger.intent}`} className="border-t border-border px-5 py-3 space-y-2">
           {trigger.agentDeployments.map((dep, i) => (
             <div key={i} className="flex items-center gap-3 rounded-lg bg-secondary/30 px-3 py-2">
-              <Bot className="h-3.5 w-3.5 text-primary shrink-0" />
+              <Bot className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
               <span className="flex-1 text-xs font-mono text-foreground truncate">{dep.agentId}</span>
               <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                <Server className="h-3 w-3" />
+                <Server className="h-3 w-3" aria-hidden="true" />
                 {dep.environment}
               </span>
             </div>
@@ -250,21 +259,6 @@ function TriggerDialog({
     initial?.agentDeployments ?? [{ environment: "production", agentId: "" }],
   );
 
-  // Escape key closes dialog
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  // Prevent body scroll while dialog is open
-  useEffect(() => {
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = ""; };
-  }, []);
-
   const handleSave = useCallback(() => {
     if (!intent.trim()) return;
     const validDeps = deployments.filter((d) => d.agentId.trim());
@@ -272,29 +266,21 @@ function TriggerDialog({
     onSave({ intent: intent.trim(), agentDeployments: validDeps });
   }, [intent, deployments, onSave]);
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={initial ? t("triggers.editTitle", "Edit Trigger") : t("triggers.createTitle", "Create Trigger")}
-    >
-      <div
-        className="w-full max-w-lg rounded-xl border border-border bg-card p-6 shadow-xl space-y-4 mx-4"
-        onClick={(e) => e.stopPropagation()}
-        data-testid="trigger-dialog"
-      >
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-foreground">
-            {initial ? t("triggers.editTitle", "Edit Trigger") : t("triggers.createTitle", "Create Trigger")}
-          </h2>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("common.close")}><X className="h-5 w-5" /></button>
-        </div>
+  const dialogTitle = initial ? t("triggers.editTitle", "Edit Trigger") : t("triggers.createTitle", "Create Trigger");
 
+  return (
+    <AccessibleDialog
+      open
+      onClose={onClose}
+      title={dialogTitle}
+      testId="trigger-dialog"
+      maxWidth="max-w-lg"
+    >
+      <div className="space-y-4 p-6">
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">{t("triggers.intent", "Intent")}</label>
+          <label htmlFor="trigger-intent" className="mb-1 block text-xs font-medium text-muted-foreground">{t("triggers.intent", "Intent")}</label>
           <input
+            id="trigger-intent"
             type="text"
             value={intent}
             onChange={(e) => setIntent(e.target.value)}
@@ -319,6 +305,7 @@ function TriggerDialog({
                   setDeployments(next);
                 }}
                 placeholder="Agent ID"
+                aria-label={`${t("triggers.agentId", "Agent ID")} ${i + 1}`}
                 className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring"
               />
               <select
@@ -328,6 +315,7 @@ function TriggerDialog({
                   next[i] = { ...dep, environment: e.target.value };
                   setDeployments(next);
                 }}
+                aria-label={`${t("triggers.environment", "Environment")} ${i + 1}`}
                 className="h-9 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 {ENVIRONMENTS.map((env) => (
@@ -340,7 +328,7 @@ function TriggerDialog({
                 className="text-muted-foreground hover:text-destructive"
                 aria-label={t("common.delete")}
               >
-                <X className="h-4 w-4" />
+                <X className="h-4 w-4" aria-hidden="true" />
               </button>
             </div>
           ))}
@@ -349,7 +337,7 @@ function TriggerDialog({
             onClick={() => setDeployments([...deployments, { environment: "production", agentId: "" }])}
             className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
           >
-            <Plus className="h-3 w-3" />
+            <Plus className="h-3 w-3" aria-hidden="true" />
             {t("triggers.addDeployment", "Add Agent")}
           </button>
         </div>
@@ -361,6 +349,6 @@ function TriggerDialog({
           </Button>
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }

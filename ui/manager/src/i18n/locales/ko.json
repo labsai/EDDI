@@ -1437,6 +1437,9 @@
     "agents": "에이전트",
     "actions": "빠른 작업",
     "createAgent": "새 에이전트 만들기",
-    "openChat": "채팅 열기"
+    "openChat": "채팅 열기",
+    "kbdNavigate": "탐색",
+    "kbdSelect": "선택",
+    "kbdClose": "닫기"
   }
 }

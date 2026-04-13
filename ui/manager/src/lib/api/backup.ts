@@ -1,4 +1,4 @@
-const BASE_URL = window.location.origin;
+import { api } from "../api-client";
 
 // ==================== Export Types ====================
 
@@ -81,9 +81,16 @@ export function parseResourceUri(resource: string): { id: string; version: numbe
   return { id: parts[parts.length - 1] || resource, version: null };
 }
 
-/** Build auth headers conditionally — avoids sending empty X-Source-Authorization */
-function authHeaders(sourceAuth: string): Record<string, string> {
-  return sourceAuth ? { "X-Source-Authorization": sourceAuth } : {};
+/**
+ * Build auth headers for cross-instance sync.
+ * Merges the local auth token (if set via Keycloak) with the optional
+ * X-Source-Authorization header used for authenticating with the remote instance.
+ */
+function mergedHeaders(sourceAuth?: string): Record<string, string> {
+  return {
+    ...api.getAuthHeader(),
+    ...(sourceAuth ? { "X-Source-Authorization": sourceAuth } : {}),
+  };
 }
 
 // ==================== Existing Export Functions ==
@@ -97,8 +104,8 @@ export async function exportAgent(
   version = 1
 ): Promise<string> {
   const res = await fetch(
-    `${BASE_URL}/backup/export/${agentId}?agentVersion=${version}`,
-    { method: "POST" }
+    `${api.getBaseUrl()}/backup/export/${agentId}?agentVersion=${version}`,
+    { method: "POST", headers: api.getAuthHeader() }
   );
   if (!res.ok) {
     throw new Error(`Export failed: ${res.statusText}`);
@@ -118,9 +125,9 @@ export async function exportAgent(
 export async function downloadAgentZip(downloadPath: string): Promise<void> {
   const url = downloadPath.startsWith("http")
     ? downloadPath
-    : `${BASE_URL}${downloadPath}`;
+    : `${api.getBaseUrl()}${downloadPath}`;
 
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: api.getAuthHeader() });
   if (!res.ok) {
     throw new Error(`Download failed: ${res.statusText}`);
   }
@@ -157,9 +164,9 @@ export async function exportAndDownloadAgent(
  * Returns the Location of the newly created agent.
  */
 export async function importAgent(file: File): Promise<string> {
-  const res = await fetch(`${BASE_URL}/backup/import`, {
+  const res = await fetch(`${api.getBaseUrl()}/backup/import`, {
     method: "POST",
-    headers: { "Content-Type": "application/zip" },
+    headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
     body: file,
   });
 
@@ -176,9 +183,9 @@ export async function importAgent(file: File): Promise<string> {
  * POST /backup/import/preview
  */
 export async function previewImport(file: File): Promise<ImportPreview> {
-  const res = await fetch(`${BASE_URL}/backup/import/preview`, {
+  const res = await fetch(`${api.getBaseUrl()}/backup/import/preview`, {
     method: "POST",
-    headers: { "Content-Type": "application/zip" },
+    headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
     body: file,
   });
 
@@ -202,9 +209,9 @@ export async function importAgentMerge(
     params.set("selectedResources", selectedSourceIds.join(","));
   }
 
-  const res = await fetch(`${BASE_URL}/backup/import?${params}`, {
+  const res = await fetch(`${api.getBaseUrl()}/backup/import?${params}`, {
     method: "POST",
-    headers: { "Content-Type": "application/zip" },
+    headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
     body: file,
   });
 
@@ -226,12 +233,9 @@ export async function previewExport(
   agentId: string,
   version = 1
 ): Promise<ExportPreview> {
-  const res = await fetch(
-    `${BASE_URL}/backup/export/${agentId}/preview?agentVersion=${version}`,
-    { method: "POST" }
+  return api.post<ExportPreview>(
+    `/backup/export/${agentId}/preview?agentVersion=${version}`
   );
-  if (!res.ok) throw new Error(`Export preview failed: ${res.statusText}`);
-  return res.json();
 }
 
 /**
@@ -248,8 +252,8 @@ export async function exportAgentSelective(
     params.set("selectedResources", selectedResourceIds.join(","));
   }
   const res = await fetch(
-    `${BASE_URL}/backup/export/${agentId}?${params}`,
-    { method: "POST" }
+    `${api.getBaseUrl()}/backup/export/${agentId}?${params}`,
+    { method: "POST", headers: api.getAuthHeader() }
   );
   if (!res.ok) throw new Error(`Export failed: ${res.statusText}`);
   const location = res.headers.get("Location");
@@ -267,9 +271,9 @@ export async function previewUpgrade(
   targetAgentId: string
 ): Promise<ImportPreview> {
   const params = new URLSearchParams({ targetAgentId });
-  const res = await fetch(`${BASE_URL}/backup/import/preview?${params}`, {
+  const res = await fetch(`${api.getBaseUrl()}/backup/import/preview?${params}`, {
     method: "POST",
-    headers: { "Content-Type": "application/zip" },
+    headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
     body: file,
   });
   if (!res.ok) throw new Error(`Upgrade preview failed: ${res.statusText}`);
@@ -294,9 +298,9 @@ export async function importAgentUpgrade(
     params.set("workflowOrder", workflowOrder.join(","));
   }
 
-  const res = await fetch(`${BASE_URL}/backup/import?${params}`, {
+  const res = await fetch(`${api.getBaseUrl()}/backup/import?${params}`, {
     method: "POST",
-    headers: { "Content-Type": "application/zip" },
+    headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
     body: file,
   });
   if (!res.ok) throw new Error(`Upgrade import failed: ${res.statusText}`);
@@ -314,8 +318,8 @@ export async function listRemoteAgents(
   sourceAuth: string
 ): Promise<DocumentDescriptor[]> {
   const params = new URLSearchParams({ sourceUrl });
-  const res = await fetch(`${BASE_URL}/backup/import/sync/agents?${params}`, {
-    headers: authHeaders(sourceAuth),
+  const res = await fetch(`${api.getBaseUrl()}/backup/import/sync/agents?${params}`, {
+    headers: mergedHeaders(sourceAuth),
   });
   if (!res.ok) throw new Error(`Failed to list remote agents: ${res.statusText}`);
   return res.json();
@@ -336,9 +340,9 @@ export async function previewSync(
   if (sourceVersion != null) params.set("sourceAgentVersion", String(sourceVersion));
   if (targetAgentId) params.set("targetAgentId", targetAgentId);
 
-  const res = await fetch(`${BASE_URL}/backup/import/sync/preview?${params}`, {
+  const res = await fetch(`${api.getBaseUrl()}/backup/import/sync/preview?${params}`, {
     method: "POST",
-    headers: authHeaders(sourceAuth),
+    headers: mergedHeaders(sourceAuth),
   });
   if (!res.ok) throw new Error(`Sync preview failed: ${res.statusText}`);
   return res.json();
@@ -354,11 +358,11 @@ export async function previewSyncBatch(
   sourceAuth: string
 ): Promise<ImportPreview[]> {
   const params = new URLSearchParams({ sourceUrl });
-  const res = await fetch(`${BASE_URL}/backup/import/sync/preview/batch?${params}`, {
+  const res = await fetch(`${api.getBaseUrl()}/backup/import/sync/preview/batch?${params}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...authHeaders(sourceAuth),
+      ...mergedHeaders(sourceAuth),
     },
     body: JSON.stringify(mappings),
   });
@@ -385,9 +389,9 @@ export async function executeSync(
   if (selectedResources?.length) params.set("selectedResources", selectedResources.join(","));
   if (workflowOrder?.length) params.set("workflowOrder", workflowOrder.join(","));
 
-  const res = await fetch(`${BASE_URL}/backup/import/sync?${params}`, {
+  const res = await fetch(`${api.getBaseUrl()}/backup/import/sync?${params}`, {
     method: "POST",
-    headers: authHeaders(sourceAuth),
+    headers: mergedHeaders(sourceAuth),
   });
   if (!res.ok) throw new Error(`Sync execute failed: ${res.statusText}`);
 }
@@ -402,11 +406,11 @@ export async function executeSyncBatch(
   sourceAuth: string
 ): Promise<void> {
   const params = new URLSearchParams({ sourceUrl });
-  const res = await fetch(`${BASE_URL}/backup/import/sync/batch?${params}`, {
+  const res = await fetch(`${api.getBaseUrl()}/backup/import/sync/batch?${params}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...authHeaders(sourceAuth),
+      ...mergedHeaders(sourceAuth),
     },
     body: JSON.stringify(requests),
   });

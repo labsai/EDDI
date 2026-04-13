@@ -128,7 +128,7 @@ export function DashboardPage() {
       </div>
 
       {/* ─── Platform Health Strip ─── */}
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card/50 px-4 py-2.5" data-testid="platform-health-strip">
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card/50 px-4 py-2.5" role="status" aria-label={t("dashboard.platformHealth", "Platform health")} data-testid="platform-health-strip">
         {/* Platform connectivity */}
         <div className="flex items-center gap-2 text-xs">
           <span className={`inline-flex h-2 w-2 rounded-full ${
@@ -202,7 +202,7 @@ export function DashboardPage() {
               </Card>
             ))
           : visibleStatCards.map((stat) => (
-              <Link key={stat.label} to={stat.to}>
+              <Link key={stat.label} to={stat.to} aria-label={`${stat.label}: ${stat.value}`}>
                 <Card className="group relative overflow-hidden transition-all hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0">
                   {/* Gradient background */}
                   <div className={cn("absolute inset-0 bg-linear-to-br opacity-0 transition-opacity group-hover:opacity-100", stat.gradient)} />

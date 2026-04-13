@@ -18,7 +18,7 @@ import { useChatDrawerStore } from "@/hooks/use-chat-drawer";
 import { useChatStore, useStartConversation } from "@/hooks/use-chat";
 import { getErrorMessage } from "@/lib/api-client";
 import type { AgentDescriptor } from "@/lib/api/agents";
-import { useState } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -40,10 +40,16 @@ const statusIcons = {
 export function AgentCard({ agent, onDuplicate, onDelete, onExport }: AgentCardProps) {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const { data: deployment } = useDeploymentStatus(agent.id, agent.version);
   const deployMutation = useDeployAgent();
   const undeployMutation = useUndeployAgent();
   const startConversation = useStartConversation();
+
+  const closeMenuAndRestore = useCallback(() => {
+    setMenuOpen(false);
+    requestAnimationFrame(() => menuTriggerRef.current?.focus());
+  }, []);
 
   const status = deployment?.status ?? "NOT_FOUND";
   const config = statusIcons[status];
@@ -110,8 +116,9 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport }: AgentCardP
         {/* Context menu */}
         <div className="relative">
           <button
+            ref={menuTriggerRef}
             onClick={() => setMenuOpen(!menuOpen)}
-            className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100 focus:opacity-100"
+            className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100 focus:opacity-100 group-focus-within:opacity-100"
             data-testid={`agent-menu-${agent.id}`}
             aria-label={t("common.moreActions", "More actions")}
             aria-haspopup="true"
@@ -123,51 +130,24 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport }: AgentCardP
             <>
               <div
                 className="fixed inset-0 z-40"
-                onClick={() => setMenuOpen(false)}
+                onClick={closeMenuAndRestore}
                 aria-hidden="true"
               />
-              <div
-                className="absolute inset-e-0 z-50 mt-1 w-44 rounded-lg border bg-popover py-1 shadow-lg"
-                role="menu"
-                aria-label={t("common.moreActions", "More actions")}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape") setMenuOpen(false);
+              <AgentCardMenu
+                onDuplicate={() => {
+                  onDuplicate(agent.id, agent.version);
+                  setMenuOpen(false);
                 }}
-              >
-                <button
-                  onClick={() => {
-                    onDuplicate(agent.id, agent.version);
-                    setMenuOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-secondary"
-                  role="menuitem"
-                >
-                  <Copy className="h-4 w-4" aria-hidden="true" />
-                  {t("common.duplicate", "Duplicate")}
-                </button>
-                <button
-                  onClick={() => {
-                    onExport?.(agent.id, agent.version);
-                    setMenuOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-secondary disabled:opacity-50"
-                  role="menuitem"
-                >
-                  <Download className="h-4 w-4" aria-hidden="true" />
-                  {t("agents.export", "Export")}
-                </button>
-                <button
-                  onClick={() => {
-                    onDelete(agent.id, agent.version);
-                    setMenuOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-destructive/10"
-                  role="menuitem"
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden="true" />
-                  {t("common.delete")}
-                </button>
-              </div>
+                onExport={() => {
+                  onExport?.(agent.id, agent.version);
+                  setMenuOpen(false);
+                }}
+                onDelete={() => {
+                  onDelete(agent.id, agent.version);
+                  setMenuOpen(false);
+                }}
+                onClose={closeMenuAndRestore}
+              />
             </>
           )}
         </div>
@@ -247,4 +227,100 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport }: AgentCardP
   );
 }
 
+/* ─── AgentCardMenu — context menu with full ARIA keyboard nav ─── */
 
+function AgentCardMenu({
+  onDuplicate,
+  onExport,
+  onDelete,
+  onClose,
+}: {
+  onDuplicate: () => void;
+  onExport: () => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Auto-focus first item on mount
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      const firstItem = menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]');
+      firstItem?.focus();
+    });
+  }, []);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      const items = menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]');
+      if (!items || items.length === 0) return;
+      const itemArray = Array.from(items);
+      const currentIndex = itemArray.indexOf(document.activeElement as HTMLElement);
+
+      let nextIndex: number | null = null;
+      switch (e.key) {
+        case "ArrowDown":
+          nextIndex = (currentIndex + 1) % itemArray.length;
+          break;
+        case "ArrowUp":
+          nextIndex = (currentIndex - 1 + itemArray.length) % itemArray.length;
+          break;
+        case "Home":
+          nextIndex = 0;
+          break;
+        case "End":
+          nextIndex = itemArray.length - 1;
+          break;
+        default:
+          return;
+      }
+      e.preventDefault();
+      itemArray[nextIndex]?.focus();
+    },
+    [onClose],
+  );
+
+  return (
+    <div
+      ref={menuRef}
+      className="absolute inset-e-0 z-50 mt-1 w-44 rounded-lg border bg-popover py-1 shadow-lg"
+      role="menu"
+      aria-label={t("common.moreActions", "More actions")}
+      onKeyDown={handleKeyDown}
+    >
+      <button
+        onClick={onDuplicate}
+        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-secondary focus:bg-secondary"
+        role="menuitem"
+        tabIndex={-1}
+      >
+        <Copy className="h-4 w-4" aria-hidden="true" />
+        {t("common.duplicate", "Duplicate")}
+      </button>
+      <button
+        onClick={onExport}
+        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-popover-foreground hover:bg-secondary focus:bg-secondary disabled:opacity-50"
+        role="menuitem"
+        tabIndex={-1}
+      >
+        <Download className="h-4 w-4" aria-hidden="true" />
+        {t("agents.export", "Export")}
+      </button>
+      <button
+        onClick={onDelete}
+        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-destructive hover:bg-destructive/10 focus:bg-destructive/10"
+        role="menuitem"
+        tabIndex={-1}
+      >
+        <Trash2 className="h-4 w-4" aria-hidden="true" />
+        {t("common.delete")}
+      </button>
+    </div>
+  );
+}

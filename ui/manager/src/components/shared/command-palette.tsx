@@ -85,6 +85,7 @@ export function CommandPalette() {
       <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-in fade-in duration-150"
         onClick={close}
+        aria-hidden="true"
       />
 
       {/* Dialog */}
@@ -234,15 +235,15 @@ export function CommandPalette() {
               <span className="flex items-center gap-1">
                 <Keyboard className="h-3 w-3" />
                 <kbd className="rounded border border-border/50 px-1 font-mono">↑↓</kbd>
-                navigate
+                {t("commandPalette.kbdNavigate", "navigate")}
               </span>
               <span className="flex items-center gap-1">
                 <kbd className="rounded border border-border/50 px-1 font-mono">Enter</kbd>
-                select
+                {t("commandPalette.kbdSelect", "select")}
               </span>
               <span className="flex items-center gap-1">
                 <kbd className="rounded border border-border/50 px-1 font-mono">Esc</kbd>
-                close
+                {t("commandPalette.kbdClose", "close")}
               </span>
             </div>
             <span className="font-mono">Ctrl+K</span>

@@ -416,7 +416,10 @@
     "agents": "Agents",
     "actions": "Quick Actions",
     "createAgent": "Create New Agent",
-    "openChat": "Open Chat"
+    "openChat": "Open Chat",
+    "kbdNavigate": "navigate",
+    "kbdSelect": "select",
+    "kbdClose": "close"
   },
   "resources": {
     "unnamed": "Unnamed Resource",

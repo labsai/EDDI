@@ -1437,6 +1437,9 @@
     "agents": "代理",
     "actions": "快捷操作",
     "createAgent": "创建新代理",
-    "openChat": "打开聊天"
+    "openChat": "打开聊天",
+    "kbdNavigate": "导航",
+    "kbdSelect": "选择",
+    "kbdClose": "关闭"
   }
 }

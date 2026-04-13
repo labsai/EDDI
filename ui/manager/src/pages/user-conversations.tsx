@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { ENVIRONMENTS } from "@/lib/api/agents";
+import { ENVIRONMENTS } from "@/lib/constants";
 import {
   useUserConversation,
   useCreateUserConversation,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, type ReactNode } from "react";
+import { useEffect, useRef, useCallback, useId, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -40,6 +40,7 @@ export function AccessibleDialog({
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const titleId = useId();
 
   // Store the previously focused element and focus the dialog on open
   useEffect(() => {
@@ -114,7 +115,7 @@ export function AccessibleDialog({
           ref={dialogRef}
           role="dialog"
           aria-modal="true"
-          aria-labelledby="dialog-title"
+          aria-labelledby={titleId}
           className={`w-full ${maxWidth} rounded-xl border bg-card shadow-2xl`}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={handleKeyDown}
@@ -123,7 +124,7 @@ export function AccessibleDialog({
           {/* Header */}
           <div className="flex items-center justify-between border-b border-border p-5">
             <h2
-              id="dialog-title"
+              id={titleId}
               className="text-lg font-semibold text-foreground"
             >
               {title}

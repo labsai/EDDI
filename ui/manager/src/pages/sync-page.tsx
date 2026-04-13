@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, Fragment } from "react";
 import { useTranslation } from "react-i18next";
 import {
   RefreshCw,
@@ -355,58 +355,50 @@ function AgentSyncDetail({ preview }: { preview: ImportPreview }) {
               const isExpanded = expandedRow === r.sourceId;
 
               return (
-                <tr key={r.sourceId} className="group">
-                  <td className="px-3 py-1.5 font-medium text-foreground">
-                    <span className={r.action === "SKIP" ? "opacity-50" : ""}>
-                      {r.name || r.sourceId.substring(0, 12)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <ResourceTypeBadge type={r.resourceType} />
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <ActionBadge action={r.action} />
-                  </td>
-                  <td className="px-3 py-1.5">
-                    {hasDiff && (
-                      <button
-                        onClick={() =>
-                          setExpandedRow(isExpanded ? null : r.sourceId)
-                        }
-                        className="rounded p-0.5 text-muted-foreground hover:text-foreground"
-                      >
-                        {isExpanded ? (
-                          <ChevronDown className="h-4 w-4" />
-                        ) : (
-                          <ChevronRight className="h-4 w-4" />
-                        )}
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                <Fragment key={r.sourceId}>
+                  <tr className="group">
+                    <td className="px-3 py-1.5 font-medium text-foreground">
+                      <span className={r.action === "SKIP" ? "opacity-50" : ""}>
+                        {r.name || r.sourceId.substring(0, 12)}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <ResourceTypeBadge type={r.resourceType} />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      <ActionBadge action={r.action} />
+                    </td>
+                    <td className="px-3 py-1.5">
+                      {hasDiff && (
+                        <button
+                          onClick={() =>
+                            setExpandedRow(isExpanded ? null : r.sourceId)
+                          }
+                          className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                        >
+                          {isExpanded ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {isExpanded && hasDiff && (
+                    <tr>
+                      <td colSpan={4} className="px-3 py-2">
+                        <ResourceDiffViewer
+                          sourceContent={r.sourceContent}
+                          targetContent={r.targetContent}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>
-          {/* Expanded diff rows rendered outside the main tbody to avoid nesting issues */}
-          {preview.resources
-            .filter(
-              (r) =>
-                expandedRow === r.sourceId &&
-                r.action === "UPDATE" &&
-                (r.sourceContent || r.targetContent)
-            )
-            .map((r) => (
-              <tbody key={`diff-${r.sourceId}`}>
-                <tr>
-                  <td colSpan={4} className="px-3 py-2">
-                    <ResourceDiffViewer
-                      sourceContent={r.sourceContent}
-                      targetContent={r.targetContent}
-                    />
-                  </td>
-                </tr>
-              </tbody>
-            ))}
         </table>
       </div>
     </div>
