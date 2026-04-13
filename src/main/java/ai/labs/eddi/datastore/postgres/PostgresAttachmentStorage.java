@@ -92,22 +92,25 @@ public class PostgresAttachmentStorage implements IAttachmentStorage {
         try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement(INSERT)) {
 
-            byte[] bytes = data.readAllBytes();
-
+            long storedSizeBytes = Math.max(sizeBytes, 0L);
             ps.setObject(1, UUID.fromString(id));
             ps.setString(2, conversationId);
             ps.setString(3, fileName);
             ps.setString(4, mimeType);
-            ps.setLong(5, sizeBytes > 0 ? sizeBytes : bytes.length);
-            ps.setBytes(6, bytes);
+            ps.setLong(5, storedSizeBytes);
+            if (sizeBytes > 0) {
+                ps.setBinaryStream(6, data, sizeBytes);
+            } else {
+                ps.setBinaryStream(6, data);
+            }
             ps.executeUpdate();
 
             String storageRef = "pg://" + id;
             LOGGER.debugf("Stored attachment '%s' (%s, %d bytes) → %s",
-                    fileName, mimeType, bytes.length, storageRef);
+                    fileName, mimeType, storedSizeBytes, storageRef);
             return storageRef;
 
-        } catch (SQLException | IOException e) {
+        } catch (SQLException e) {
             throw new RuntimeException("Failed to store attachment: " + e.getMessage(), e);
         }
     }

@@ -183,6 +183,11 @@ public class RestAgentStore implements IRestAgentStore {
                     // Extract URI from X-Resource-URI entity fallback since getLocation() fails for
                     // eddi:// URIs
                     URI newResourceLocation = extractCreatedUri(duplicateResourceResponse);
+                    if (newResourceLocation == null) {
+                        throw new IllegalStateException(String.format(
+                                "Could not determine created workflow URI while duplicating workflow '%s' (id=%s, version=%s); response status=%s",
+                                workflowUri, wfResId.getId(), wfResId.getVersion(), duplicateResourceResponse.getStatus()));
+                    }
                     packages.set(i, newResourceLocation);
                 }
             }

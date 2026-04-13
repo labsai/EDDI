@@ -180,11 +180,15 @@ public class PromptSnippetService {
         if (resourceUri == null)
             return 1;
         String query = resourceUri.getQuery();
-        if (query != null && query.startsWith("version=")) {
-            try {
-                return Integer.parseInt(query.substring("version=".length()));
-            } catch (NumberFormatException e) {
-                return 1;
+        if (query != null) {
+            for (String param : query.split("&")) {
+                if (param.startsWith("version=")) {
+                    try {
+                        return Integer.parseInt(param.substring("version=".length()));
+                    } catch (NumberFormatException e) {
+                        return 1;
+                    }
+                }
             }
         }
         return 1;

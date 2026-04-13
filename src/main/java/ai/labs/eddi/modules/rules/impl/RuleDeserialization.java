@@ -116,7 +116,7 @@ public class RuleDeserialization implements IRuleDeserialization {
                 throw new DeserializationException(format("No condition for type %s was created (%s)", type, conditionsKey));
             } catch (CloneNotSupportedException | DeserializationException e) {
                 log.error(e.getLocalizedMessage(), e);
-                return null;
+                throw new IllegalArgumentException("Failed to instantiate rule condition: " + e.getMessage(), e);
             }
         }).filter(Objects::nonNull).toList();
     }

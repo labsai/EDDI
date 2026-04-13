@@ -232,7 +232,7 @@ public class Conversation implements IConversation {
         // Extract attachments from context (attachment_0, attachment_1, etc.)
         var attachments = AttachmentContextExtractor.extractAttachments(contexts);
         if (!attachments.isEmpty()) {
-            var data = new Data<>("attachments", attachments);
+            var data = new Data<>(MemoryKeys.ATTACHMENTS.key(), attachments);
             data.setPublic(true);
             currentStep.storeData(data);
         }

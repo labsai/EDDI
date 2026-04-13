@@ -70,6 +70,9 @@ public class ContentTypeMatcher implements IRuleCondition {
             if (configs.containsKey(KEY_MIN_COUNT)) {
                 try {
                     minCount = Integer.parseInt(configs.get(KEY_MIN_COUNT));
+                    if (minCount < 1) {
+                        minCount = 1;
+                    }
                 } catch (NumberFormatException e) {
                     minCount = 1;
                 }

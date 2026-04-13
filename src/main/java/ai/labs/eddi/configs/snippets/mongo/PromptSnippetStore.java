@@ -5,6 +5,11 @@ import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.datastore.IResourceStore.IResourceId;
+import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceModifiedException;
+import ai.labs.eddi.datastore.IResourceStore.ConfigurationUpdate;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;

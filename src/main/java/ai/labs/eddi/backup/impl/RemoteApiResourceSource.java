@@ -223,10 +223,15 @@ public class RemoteApiResourceSource implements IResourceSource {
                     .connectTimeout(CONNECT_TIMEOUT)
                     .build();
 
+            if (!normalized.endsWith("/")) {
+                normalized += "/";
+            }
+            URI baseUri = URI.create(normalized);
+
             // codeql[java/ssrf] False Positive: It is an intended feature to connect to a
             // user-provided remote EDDI instance
             HttpRequest.Builder builder = HttpRequest.newBuilder()
-                    .uri(URI.create(normalized + "/agentstore/agents/descriptors?index=0&limit=0"))
+                    .uri(baseUri.resolve("agentstore/agents/descriptors?index=0&limit=0"))
                     .timeout(REQUEST_TIMEOUT)
                     .header("Accept", "application/json");
             if (authToken != null && !authToken.isBlank()) {
@@ -387,11 +392,19 @@ public class RemoteApiResourceSource implements IResourceSource {
      *             on HTTP errors or connection failures
      */
     private String httpGet(String path) {
+        if (path == null || !path.startsWith("/")) {
+            throw new IllegalArgumentException("Path must start with '/'.");
+        }
+        String normalized = this.baseUrl;
+        if (!normalized.endsWith("/")) {
+            normalized += "/";
+        }
+        URI requestUri = URI.create(normalized).resolve(path.substring(1));
         try {
             // codeql[java/ssrf] False Positive: It is an intended feature to connect to a
             // user-provided remote EDDI instance
             HttpRequest.Builder builder = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + path))
+                    .uri(requestUri)
                     .timeout(REQUEST_TIMEOUT)
                     .header("Accept", "application/json");
 

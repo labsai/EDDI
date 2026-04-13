@@ -58,9 +58,17 @@ public class RestAttachmentUpload {
                                      @PathParam("conversationId") String conversationId,
                                      @RestForm("file") FileUpload file) {
 
-        if (!attachmentStorageInstance.isResolvable()) {
+
+        if (attachmentStorageInstance.isUnsatisfied()) {
             return Response.status(Response.Status.SERVICE_UNAVAILABLE)
                     .entity(Map.of("error", "No attachment storage configured"))
+                    .build();
+        }
+        if (attachmentStorageInstance.isAmbiguous()) {
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of(
+                            "error", "Multiple attachment storage implementations configured",
+                            "code", "ATTACHMENT_STORAGE_AMBIGUOUS"))
                     .build();
         }
 

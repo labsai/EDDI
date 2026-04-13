@@ -41,7 +41,7 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
      */
     private static final Map<String, String> PATH_REWRITES = Map.ofEntries(
             Map.entry("/regulardictionarystore/regulardictionaries", "/dictionarystore/dictionaries"),
-            Map.entry("/bottriggerstore/bottriggers", "/AgentTriggerStore/agenttriggers"),
+            Map.entry("/bottriggerstore/bottriggers", "/agenttriggerstore/agenttriggers"),
             Map.entry("/behaviorstore/behaviorsets", "/rulestore/rulesets"),
             Map.entry("/langchainstore/langchains", "/llmstore/llms"), Map.entry("/httpcallsstore/httpcalls", "/apicallstore/apicalls"),
             Map.entry("/packagestore/packages", "/workflowstore/workflows"), Map.entry("/botstore/bots", "/agentstore/agents"),

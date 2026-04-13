@@ -335,9 +335,11 @@ class UpgradeExecutorTest {
             var ragDirectStore = Mockito.mock(ai.labs.eddi.configs.rag.IRagStore.class);
             var ragRestStore = Mockito.mock(ai.labs.eddi.configs.rag.IRestRagStore.class);
             var ragResourceId = new ai.labs.eddi.datastore.IResourceStore.IResourceId() {
+                @Override
                 public String getId() {
                     return "newragid1234567890123456";
                 }
+                @Override
                 public Integer getVersion() {
                     return 1;
                 }
@@ -405,9 +407,11 @@ class UpgradeExecutorTest {
             String newWfId = "newwfid123456789012";
             var wfDirectStore = Mockito.mock(ai.labs.eddi.configs.workflows.IWorkflowStore.class);
             var wfResourceId = new ai.labs.eddi.datastore.IResourceStore.IResourceId() {
+                @Override
                 public String getId() {
                     return newWfId;
                 }
+                @Override
                 public Integer getVersion() {
                     return 1;
                 }

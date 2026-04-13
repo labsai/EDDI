@@ -35,6 +35,9 @@ public class ComplianceStartupChecks {
     }
 
     void onStartup(@Observes StartupEvent event) {
+        if (event != null) {
+            LOGGER.debug("Compliance startup checks running.");
+        }
         checkTls();
         checkDatabaseEncryption();
     }
