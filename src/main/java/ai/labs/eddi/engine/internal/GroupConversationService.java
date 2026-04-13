@@ -118,7 +118,8 @@ public class GroupConversationService implements IGroupConversationService {
             throw new GroupDepthExceededException("Maximum group discussion depth (%d) exceeded".formatted(maxDepth));
         }
 
-        // Load group config — null-safe: getCurrentResourceId may return null on PostgreSQL
+        // Load group config — null-safe: getCurrentResourceId may return null on
+        // PostgreSQL
         IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(groupId);
         if (currentGroupId == null) {
             throw new IResourceStore.ResourceNotFoundException("Group not found: " + groupId);

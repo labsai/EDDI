@@ -493,7 +493,7 @@ class AgentOrchestrator {
                                 try {
                                     @SuppressWarnings("unchecked")
                                     Map<String, Object> args = jsonSerialization.deserialize(toolRequest.arguments(), Map.class);
-                                    templateData.putAll(args);
+                                    safeTemplateMerge(templateData, args);
                                 } catch (IOException e) {
                                     LOGGER.warn("Failed to parse tool arguments: " + toolRequest.arguments(), e);
                                 }
@@ -581,5 +581,33 @@ class AgentOrchestrator {
         }
 
         return new McpToolProviderManager.McpToolsResult(toolSpecs, executors);
+    }
+
+    // ─── Template data protection ───
+
+    /**
+     * Keys produced by {@link IMemoryItemConverter#convert} that carry
+     * authenticated identity and session state. LLM-provided tool arguments must
+     * never override these — a prompt-injection attack could otherwise manipulate
+     * userId/agentId in HTTP call templates.
+     */
+    private static final Set<String> RESERVED_TEMPLATE_KEYS = Set.of(
+            "context", "properties", "memory",
+            "userInfo", "conversationInfo", "conversationLog");
+
+    /**
+     * Merge LLM tool arguments into template data, blocking any keys that collide
+     * with internal pipeline data. Blocked keys are logged as warnings so config
+     * authors can rename their parameters if needed.
+     */
+    private static void safeTemplateMerge(Map<String, Object> templateData, Map<String, Object> args) {
+        for (var entry : args.entrySet()) {
+            if (RESERVED_TEMPLATE_KEYS.contains(entry.getKey())) {
+                LOGGER.warnf("Blocked LLM tool argument '%s' — collides with reserved template key. " +
+                        "Rename the httpcall parameter to avoid this conflict.", entry.getKey());
+                continue;
+            }
+            templateData.put(entry.getKey(), entry.getValue());
+        }
     }
 }

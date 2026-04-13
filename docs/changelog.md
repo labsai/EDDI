@@ -13,6 +13,48 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Security & AI Audit Hardening (2026-04-13)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+Three findings from the critical v6.0.0 security & AI audit, all addressed:
+
+### SEC-1: MCP Auth Documentation
+
+MCP tools default to unauthenticated (`authorization.enabled=false`). Added a prominent security banner in `application.properties` above the MCP Server section documenting that operators MUST enable OIDC for production deployments exposed to untrusted MCP clients.
+
+| File | What |
+|------|------|
+| `application.properties` | Added 17-line security warning box above MCP Server section |
+
+### AI-1: Model Cache Write-Through Invalidation (Surgical)
+
+`ChatModelRegistry` cached `ChatModel`/`StreamingChatModel` instances forever — so if a vault secret was rotated (API key change), the old model instance persisted until restart. Fixed with surgical write-through invalidation:
+
+- `SecretResolver` fires `Consumer<SecretReference>` listeners (not `Runnable`) — passes the specific changed reference, or `null` for bulk rotation
+- `ChatModelRegistry` registers via `@PostConstruct` and receives the reference
+- **Single secret change:** scans cache entries, evicts only models whose parameter values contain the matching vault reference (checks both `${eddivault:keyName}` and `${eddivault:tenantId/keyName}` forms)
+- **DEK/KEK rotation (null reference):** clears all models (every secret is affected)
+
+**Design decision:** Surgical eviction (not full clear, not TTL) because: (a) most deployments have multiple agents with different API keys — rotating one key shouldn't rebuild models for all providers; (b) `ConcurrentHashMap` iterator is safe for concurrent removal; (c) `CopyOnWriteArrayList` listeners are lock-free for reads.
+
+| File | What |
+|------|------|
+| `SecretResolver.java` | Changed listener type to `Consumer<SecretReference>`, passes reference on invalidation |
+| `ChatModelRegistry.java` | `invalidateForSecret(SecretReference)` does surgical eviction via vault reference string matching |
+
+### AI-2: Template Data Collision Protection
+
+`AgentOrchestrator.discoverHttpCallTools()` merged LLM tool arguments into template data via `putAll(args)`, which allowed the LLM to potentially override internal keys (`userInfo`, `context`, `properties`, etc.) via prompt injection. Fixed with a deny-list: `RESERVED_TEMPLATE_KEYS` blocks the 6 internal keys, logging a warning when collision is detected.
+
+**Design decision:** Deny-list (not namespace) because namespacing (`toolArgs.city` instead of `city`) would break existing httpcall templates. The deny-list blocks only internally-produced keys, preserving backward compatibility.
+
+| File | What |
+|------|------|
+| `AgentOrchestrator.java` | Added `RESERVED_TEMPLATE_KEYS` set, `safeTemplateMerge()` replaces `putAll(args)` |
+
+---
+
 ## Fix Response.getLocation() Null for eddi:// URIs (2026-04-13)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)

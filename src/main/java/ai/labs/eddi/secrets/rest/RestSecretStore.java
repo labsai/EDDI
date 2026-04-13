@@ -97,10 +97,11 @@ public class RestSecretStore implements IRestSecretStore {
 
             secretProvider.store(ref, body.value(), body.description(), body.allowedAgents());
 
-            // Invalidate resolver cache on update
-            if (exists) {
-                secretResolver.invalidateCache(ref);
-            }
+            // Always invalidate: on update, the SecretResolver cache has stale plaintext.
+            // On new creation, the ChatModelRegistry may have cached a model that was
+            // built with the unresolved vault reference as a literal string (failed
+            // resolution).
+            secretResolver.invalidateCache(ref);
 
             var responseRef = Map.of("reference", ref.toReferenceString(), "tenantId", tenantId, "keyName", keyName);
 

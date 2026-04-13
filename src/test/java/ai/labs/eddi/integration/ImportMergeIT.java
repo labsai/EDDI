@@ -43,11 +43,6 @@ public class ImportMergeIT extends BaseIntegrationIT {
         Response response = given()
                 .contentType("application/zip").body(agentZip).post("/backup/import");
 
-        System.out.println("=== IMPORT RESPONSE ===");
-        System.out.println("Status: " + response.statusCode());
-        System.out.println("Headers: " + response.headers().asList());
-        System.out.println("Body: " + response.body().asString().substring(0, Math.min(500, response.body().asString().length())));
-
         response.then().statusCode(201);
 
         String resourceUri = response.getHeader("location");
