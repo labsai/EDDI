@@ -2,8 +2,9 @@ import { useTranslation } from "react-i18next";
 import { LayoutGrid, List } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCallback } from "react";
+import type { ViewMode } from "./view-mode";
 
-export type ViewMode = "card" | "list";
+export type { ViewMode };
 
 interface ViewToggleProps {
   view: ViewMode;
@@ -77,26 +78,4 @@ export function ViewToggle({ view, onChange }: ViewToggleProps) {
       </button>
     </div>
   );
-}
-
-const STORAGE_KEY = "eddi-view-mode";
-
-/** Read persisted view preference from localStorage */
-export function getStoredViewMode(page: string): ViewMode {
-  try {
-    const stored = localStorage.getItem(`${STORAGE_KEY}-${page}`);
-    if (stored === "card" || stored === "list") return stored;
-  } catch {
-    // SSR or localStorage not available
-  }
-  return "card";
-}
-
-/** Persist view preference to localStorage */
-export function setStoredViewMode(page: string, mode: ViewMode) {
-  try {
-    localStorage.setItem(`${STORAGE_KEY}-${page}`, mode);
-  } catch {
-    // Ignore
-  }
 }

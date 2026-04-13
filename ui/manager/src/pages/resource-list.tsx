@@ -34,10 +34,9 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
 import {
   ViewToggle,
-  getStoredViewMode,
-  setStoredViewMode,
   type ViewMode,
 } from "@/components/shared/view-toggle";
+import { getStoredViewMode, setStoredViewMode } from "@/components/shared/view-mode";
 
 const ICON_MAP: Record<string, LucideIcon> = {
   GitBranch,

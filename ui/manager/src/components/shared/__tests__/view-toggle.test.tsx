@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ViewToggle, getStoredViewMode, setStoredViewMode } from "../view-toggle";
+import { ViewToggle } from "../view-toggle";
+import { getStoredViewMode, setStoredViewMode } from "../view-mode";
 
 // Mock i18n
 vi.mock("react-i18next", () => ({

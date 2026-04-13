@@ -20,10 +20,9 @@ import { ErrorState } from "@/components/shared/error-state";
 import { InfiniteScrollSentinel } from "@/components/shared/infinite-scroll-sentinel";
 import {
   ViewToggle,
-  getStoredViewMode,
-  setStoredViewMode,
   type ViewMode,
 } from "@/components/shared/view-toggle";
+import { getStoredViewMode, setStoredViewMode } from "@/components/shared/view-mode";
 import { Link } from "react-router-dom";
 
 type SortField = "name" | "version" | "modified";
