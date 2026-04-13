@@ -260,6 +260,10 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
                 return -1;
             }
         } catch (SQLException e) {
+            // Invalid UUID format (e.g., MongoDB ObjectId) → treat as not found
+            if (e.getMessage() != null && e.getMessage().contains("invalid input syntax for type uuid")) {
+                return -1;
+            }
             throw new RuntimeException("Failed to get current version", e);
         }
     }

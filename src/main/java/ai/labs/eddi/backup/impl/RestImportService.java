@@ -23,7 +23,6 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
-import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
@@ -40,7 +39,6 @@ import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
-import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
@@ -1002,37 +1000,61 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     // ==================== Shared helpers ====================
 
-    private void updateDocumentDescriptor(Path directoryPath, URI oldUri, URI newUri) throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private void updateDocumentDescriptor(Path directoryPath, URI oldUri, URI newUri) {
         updateDocumentDescriptor(directoryPath, Collections.singletonList(oldUri), Collections.singletonList(newUri));
     }
 
-    private void updateDocumentDescriptor(Path directoryPath, List<URI> oldUris, List<URI> newUris)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private void updateDocumentDescriptor(Path directoryPath, List<URI> oldUris, List<URI> newUris) {
 
-        IRestDocumentDescriptorStore restDocumentDescriptorStore = getRestResourceStore(IRestDocumentDescriptorStore.class);
         IntStream.range(0, oldUris.size()).forEach(idx -> {
             try {
                 URI oldUri = oldUris.get(idx);
                 IResourceId oldResourceId = RestUtilities.extractResourceId(oldUri);
                 if (oldResourceId != null) {
-                    var oldDocumentDescriptor = readDocumentDescriptorFromFile(directoryPath, oldResourceId);
+                    var zipDescriptor = readDocumentDescriptorFromFile(directoryPath, oldResourceId);
 
                     URI newUri = newUris.get(idx);
                     IResourceId newResourceId = RestUtilities.extractResourceId(newUri);
 
                     if (newResourceId != null) {
-                        // Update the resource URI to point to the new location
-                        // (the old descriptor from the ZIP file still has the old URI)
-                        oldDocumentDescriptor.setResource(newUri);
+                        // Use documentDescriptorStore directly instead of the REST layer's
+                        // patchDescriptor. CDI-direct resource updates bypass the
+                        // DocumentDescriptorFilter, so the descriptor stays at its original
+                        // version. We must read the current descriptor version and update it
+                        // with a proper version bump (updateDescriptor, not setDescriptor)
+                        // so the descriptor version advances to match the new resource version.
+                        // This prevents the DocumentDescriptorFilter from creating a duplicate
+                        // descriptor when it sees the 201 response.
+                        try {
+                            IResourceId currentDescriptorId = documentDescriptorStore.getCurrentResourceId(newResourceId.getId());
+                            if (currentDescriptorId != null) {
+                                DocumentDescriptor existingDescriptor = documentDescriptorStore.readDescriptor(
+                                        currentDescriptorId.getId(), currentDescriptorId.getVersion());
 
-                        PatchInstruction<DocumentDescriptor> patchInstruction = new PatchInstruction<>();
-                        patchInstruction.setOperation(PatchInstruction.PatchOperation.SET);
-                        patchInstruction.setDocument(oldDocumentDescriptor);
+                                // Apply name/description from the ZIP's descriptor
+                                if (zipDescriptor.getName() != null) {
+                                    existingDescriptor.setName(zipDescriptor.getName());
+                                }
+                                if (zipDescriptor.getDescription() != null) {
+                                    existingDescriptor.setDescription(zipDescriptor.getDescription());
+                                }
+                                // Update the resource URI to point to the new version
+                                existingDescriptor.setResource(newUri);
 
-                        restDocumentDescriptorStore.patchDescriptor(newResourceId.getId(), newResourceId.getVersion(), patchInstruction);
+                                // Use updateDescriptor to properly bump the descriptor version
+                                // (archives v1 to history, creates v2 as current)
+                                documentDescriptorStore.updateDescriptor(
+                                        currentDescriptorId.getId(), currentDescriptorId.getVersion(), existingDescriptor);
+                            }
+                        } catch (IResourceStore.ResourceNotFoundException e) {
+                            // No existing descriptor — create one for the new resource
+                            zipDescriptor.setResource(newUri);
+                            documentDescriptorStore.createDescriptor(
+                                    newResourceId.getId(), newResourceId.getVersion(), zipDescriptor);
+                        }
                     }
                 }
-            } catch (IOException e) {
+            } catch (IOException | IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException e) {
                 log.error(e.getLocalizedMessage(), e);
             }
         });

@@ -12,7 +12,7 @@
 
 Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker image**. Native support for **MCP** (Model Context Protocol), **A2A** (Agent-to-Agent), **OpenAPI**, and **OAuth 2.0**.
 
-**Latest version: 6.0.0-RC1** · [Website](https://eddi.labs.ai/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
+**Latest version: 6.0.0-RC2** · [Website](https://eddi.labs.ai/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
 
 ---
 

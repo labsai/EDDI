@@ -2,17 +2,17 @@ name: CI/CD
 
 on:
   push:
-    branches: [ main ]
-    tags: [ '[0-9]*' ]
+    branches: [main]
+    tags: ["[0-9]*"]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 permissions:
   contents: read
 
 env:
   DOCKER_IMAGE: labsai/eddi
-  JAVA_VERSION: '25'
+  JAVA_VERSION: "25"
 
 jobs:
   # ─── Job 1: Build & Test ────────────────────────────────────────
@@ -125,7 +125,7 @@ jobs:
         id: meta
         run: |
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            # Tag push: 6.0.0-RC1
+            # Tag push: 6.0.0-RC2
             PRIMARY_TAG="${GITHUB_REF#refs/tags/}"
             IS_RELEASE="true"
           else
@@ -345,7 +345,8 @@ jobs:
     name: Slack Notification
     runs-on: ubuntu-latest
     if: always()
-    needs: [build-and-test, integration-test, docker, smoke-test, preflight-check]
+    needs:
+      [build-and-test, integration-test, docker, smoke-test, preflight-check]
 
     steps:
       - name: Send build notification
