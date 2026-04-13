@@ -13,6 +13,28 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Fix Response.getLocation() Null for eddi:// URIs (2026-04-13)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**Problem:** `Response.getLocation()` returns `null` for `eddi://` scheme URIs when the Response is consumed in-process via CDI. This broke all resource creation in the import/sync pipeline, extension creates in UpgradeExecutor, capability registration in `RestAgentStore`, and duplicate operations.
+
+**Fix — Two-pronged approach:**
+
+1. **`RestVersionInfo.createDocument(T)`** — Returns `IResourceId` directly, bypassing the Response wrapper.
+2. **Direct store access via CDI** — `RestImportService` and `UpgradeExecutor` now call `I*Store.create()` directly instead of going through `IRest*Store` → Response → `getLocation()`.
+
+| File | What |
+|------|------|
+| `RestVersionInfo.java` | Added `createDocument(T)` returning `IResourceId` directly |
+| `RestAgentStore.java` | `createAgent()` + `duplicateAgent()` use `createDocument()` |
+| `RestWorkflowStore.java` | `duplicateWorkflow()` uses `createDocument()` + entity body fallback |
+| `RestImportService.java` | All 10 create + 8 update fallbacks use `createResourceDirect()` via CDI. Removed `extractLocationUri()`, `IRestInterfaceFactory`. Net -90 lines |
+| `UpgradeExecutor.java` | Removed `IRestInterfaceFactory`. `getStore()` → CDI. `dispatchCreateDirect()` replaces `dispatchCreate()`. `ExtensionStoreOps` extended with `directStoreClass` |
+| `UpgradeExecutorTest.java` | Updated constructor, 3 tests updated with `mockStatic(CDI.class)` |
+
+**Verification:** Compile clean, all ~2000 unit tests pass.
+
 ---
 
 ## AI Documentation Audit — Stale Naming Fix (2026-04-12)

@@ -14,12 +14,12 @@ import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
 import java.net.URI;
@@ -38,7 +38,6 @@ class UpgradeExecutorTest {
 
     private IRestAgentStore agentStore;
     private IRestWorkflowStore workflowStore;
-    private IRestInterfaceFactory restInterfaceFactory;
     private IRestPromptSnippetStore snippetStore;
     private IJsonSerialization jsonSerialization;
     private StructuralMatcher structuralMatcher;
@@ -49,13 +48,12 @@ class UpgradeExecutorTest {
     void setUp() {
         agentStore = Mockito.mock(IRestAgentStore.class);
         workflowStore = Mockito.mock(IRestWorkflowStore.class);
-        restInterfaceFactory = Mockito.mock(IRestInterfaceFactory.class);
         snippetStore = Mockito.mock(IRestPromptSnippetStore.class);
         jsonSerialization = Mockito.mock(IJsonSerialization.class);
         structuralMatcher = Mockito.mock(StructuralMatcher.class);
         descriptorStore = Mockito.mock(IDocumentDescriptorStore.class);
 
-        executor = new UpgradeExecutor(agentStore, workflowStore, restInterfaceFactory,
+        executor = new UpgradeExecutor(agentStore, workflowStore,
                 snippetStore, jsonSerialization, structuralMatcher, descriptorStore);
     }
 
@@ -269,9 +267,8 @@ class UpgradeExecutorTest {
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
             when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
 
-            // Mock LLM store for extension update
+            // Mock LLM store via CDI (getStore now uses CDI.current().select())
             var llmStore = Mockito.mock(ai.labs.eddi.configs.llm.IRestLlmStore.class);
-            when(restInterfaceFactory.get(ai.labs.eddi.configs.llm.IRestLlmStore.class)).thenReturn(llmStore);
             when(jsonSerialization.deserialize(eq("{\"model\":\"gpt-4\"}"), any()))
                     .thenReturn(new ai.labs.eddi.modules.llm.model.LlmConfiguration(List.of()));
             when(llmStore.updateLlm(eq(extId), eq(2), any())).thenReturn(Response.ok().build());
@@ -292,11 +289,22 @@ class UpgradeExecutorTest {
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
             when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
 
-            URI result = executor.executeUpgrade(source, "target-1", null, null);
+            try (MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class)) {
+                @SuppressWarnings("unchecked")
+                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
+                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
+                @SuppressWarnings("unchecked")
+                var instanceLlm = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.llm.IRestLlmStore>) Mockito
+                        .mock(jakarta.enterprise.inject.Instance.class);
+                when(cdiInstance.select(ai.labs.eddi.configs.llm.IRestLlmStore.class)).thenReturn(instanceLlm);
+                when(instanceLlm.get()).thenReturn(llmStore);
 
-            assertNotNull(result);
-            verify(llmStore).updateLlm(eq(extId), eq(2), any());
-            verify(workflowStore).updateWorkflow(eq(wfId), eq(1), any());
+                URI result = executor.executeUpgrade(source, "target-1", null, null);
+
+                assertNotNull(result);
+                verify(llmStore).updateLlm(eq(extId), eq(2), any());
+                verify(workflowStore).updateWorkflow(eq(wfId), eq(1), any());
+            }
         }
 
         @Test
@@ -323,13 +331,20 @@ class UpgradeExecutorTest {
             descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target-1?version=1"));
             when(descriptorStore.readDescriptor(eq("target-1"), isNull())).thenReturn(descriptor);
 
-            // Mock RAG store for create
-            var ragStore = Mockito.mock(ai.labs.eddi.configs.rag.IRestRagStore.class);
-            when(restInterfaceFactory.get(ai.labs.eddi.configs.rag.IRestRagStore.class)).thenReturn(ragStore);
+            // Mock RAG direct store via CDI for create (dispatchCreateDirect uses CDI)
+            var ragDirectStore = Mockito.mock(ai.labs.eddi.configs.rag.IRagStore.class);
+            var ragRestStore = Mockito.mock(ai.labs.eddi.configs.rag.IRestRagStore.class);
+            var ragResourceId = new ai.labs.eddi.datastore.IResourceStore.IResourceId() {
+                public String getId() {
+                    return "newragid1234567890123456";
+                }
+                public Integer getVersion() {
+                    return 1;
+                }
+            };
             when(jsonSerialization.deserialize(eq("{\"vectorStore\":\"pgvector\"}"), any()))
                     .thenReturn(new ai.labs.eddi.configs.rag.model.RagConfiguration());
-            URI newRagUri = URI.create("eddi://ai.labs.rag/ragstore/rags/newragid?version=1");
-            when(ragStore.createRag(any())).thenReturn(Response.created(newRagUri).build());
+            when(ragDirectStore.create(any())).thenReturn(ragResourceId);
 
             // Workflow config (empty steps — no URI rewriting needed for CREATE)
             when(workflowStore.readWorkflow(wfId, 1)).thenReturn(new WorkflowConfiguration());
@@ -340,9 +355,29 @@ class UpgradeExecutorTest {
             when(agentStore.readAgent("target-1", 1)).thenReturn(agentConfig);
             when(agentStore.updateAgent(eq("target-1"), eq(1), any())).thenReturn(Response.ok().build());
 
-            executor.executeUpgrade(source, "target-1", null, null);
+            try (MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class)) {
+                @SuppressWarnings("unchecked")
+                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
+                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
 
-            verify(ragStore).createRag(any());
+                // CDI lookup for IRestRagStore (getStore in resolveExtensionOps)
+                @SuppressWarnings("unchecked")
+                var instanceRestRag = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.rag.IRestRagStore>) Mockito
+                        .mock(jakarta.enterprise.inject.Instance.class);
+                when(cdiInstance.select(ai.labs.eddi.configs.rag.IRestRagStore.class)).thenReturn(instanceRestRag);
+                when(instanceRestRag.get()).thenReturn(ragRestStore);
+
+                // CDI lookup for IRagStore (dispatchCreateDirect)
+                @SuppressWarnings("unchecked")
+                var instanceRag = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.rag.IRagStore>) Mockito
+                        .mock(jakarta.enterprise.inject.Instance.class);
+                when(cdiInstance.select(ai.labs.eddi.configs.rag.IRagStore.class)).thenReturn(instanceRag);
+                when(instanceRag.get()).thenReturn(ragDirectStore);
+
+                executor.executeUpgrade(source, "target-1", null, null);
+
+                verify(ragDirectStore).create(any());
+            }
         }
     }
 
@@ -366,18 +401,39 @@ class UpgradeExecutorTest {
 
             setupPreviewAndAgent("target-1", 1, diffs);
 
-            URI newWfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/newwfid123456789012?version=1");
-            when(workflowStore.createWorkflow(any())).thenReturn(Response.created(newWfUri).build());
+            // Mock IWorkflowStore via CDI for direct create
+            String newWfId = "newwfid123456789012";
+            var wfDirectStore = Mockito.mock(ai.labs.eddi.configs.workflows.IWorkflowStore.class);
+            var wfResourceId = new ai.labs.eddi.datastore.IResourceStore.IResourceId() {
+                public String getId() {
+                    return newWfId;
+                }
+                public Integer getVersion() {
+                    return 1;
+                }
+            };
+            when(wfDirectStore.create(any())).thenReturn(wfResourceId);
 
-            URI result = executor.executeUpgrade(source, "target-1", null, null);
+            try (MockedStatic<jakarta.enterprise.inject.spi.CDI> cdiMock = Mockito.mockStatic(jakarta.enterprise.inject.spi.CDI.class)) {
+                @SuppressWarnings("unchecked")
+                var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
+                cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
+                @SuppressWarnings("unchecked")
+                var instanceWf = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.workflows.IWorkflowStore>) Mockito
+                        .mock(jakarta.enterprise.inject.Instance.class);
+                when(cdiInstance.select(ai.labs.eddi.configs.workflows.IWorkflowStore.class)).thenReturn(instanceWf);
+                when(instanceWf.get()).thenReturn(wfDirectStore);
 
-            assertNotNull(result);
-            verify(workflowStore).createWorkflow(any());
-            // Verify agent was updated with new workflow appended
-            var captor = org.mockito.ArgumentCaptor.forClass(AgentConfiguration.class);
-            verify(agentStore).updateAgent(eq("target-1"), eq(1), captor.capture());
-            assertTrue(captor.getValue().getWorkflows().stream()
-                    .anyMatch(uri -> uri.toString().contains("newwfid123456789012")));
+                URI result = executor.executeUpgrade(source, "target-1", null, null);
+
+                assertNotNull(result);
+                verify(wfDirectStore).create(any());
+                // Verify agent was updated with new workflow appended
+                var captor = org.mockito.ArgumentCaptor.forClass(AgentConfiguration.class);
+                verify(agentStore).updateAgent(eq("target-1"), eq(1), captor.capture());
+                assertTrue(captor.getValue().getWorkflows().stream()
+                        .anyMatch(uri -> uri.toString().contains(newWfId)));
+            }
         }
     }
 

@@ -7,8 +7,19 @@ import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import ai.labs.eddi.backup.model.SyncMapping;
 import ai.labs.eddi.backup.model.SyncRequest;
+import ai.labs.eddi.configs.IRestVersionInfo;
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.apicalls.IApiCallsStore;
+import ai.labs.eddi.configs.dictionary.IDictionaryStore;
+import ai.labs.eddi.configs.llm.ILlmStore;
+import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
+import ai.labs.eddi.configs.output.IOutputStore;
+import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
+import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -39,7 +50,6 @@ import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
-import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -48,8 +58,6 @@ import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.container.AsyncResponse;
-import jakarta.ws.rs.container.TimeoutHandler;
 import jakarta.ws.rs.core.Response;
 import org.bson.Document;
 import org.jboss.logging.Logger;
@@ -61,7 +69,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -84,7 +91,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp", "import"));
     private final IZipArchive zipArchive;
     private final IJsonSerialization jsonSerialization;
-    private final IRestInterfaceFactory restInterfaceFactory;
+
     private final IRestAgentAdministration restAgentAdministration;
     private final IMigrationManager migrationManager;
     private final IDeploymentListener deploymentListener;
@@ -96,13 +103,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private static final Logger log = Logger.getLogger(RestImportService.class);
 
     @Inject
-    public RestImportService(IZipArchive zipArchive, IJsonSerialization jsonSerialization, IRestInterfaceFactory restInterfaceFactory,
+    public RestImportService(IZipArchive zipArchive, IJsonSerialization jsonSerialization,
             IRestAgentAdministration restAgentAdministration, IMigrationManager migrationManager, IDeploymentListener deploymentListener,
             IDocumentDescriptorStore documentDescriptorStore, TemplateSyntaxMigrator templateSyntaxMigrator,
             StructuralMatcher structuralMatcher, UpgradeExecutor upgradeExecutor) {
         this.zipArchive = zipArchive;
         this.jsonSerialization = jsonSerialization;
-        this.restInterfaceFactory = restInterfaceFactory;
         this.restAgentAdministration = restAgentAdministration;
         this.migrationManager = migrationManager;
         this.deploymentListener = deploymentListener;
@@ -119,23 +125,19 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             List<CompletableFuture<Void>> deploymentFutures = new ArrayList<>();
 
             for (var agentFileName : agentExampleFiles) {
-                importAgent(getResourceAsStream("/initial-agents/" + agentFileName), "create", null, null, null, new MockAsyncResponse() {
-                    @Override
-                    public boolean resume(Object responseObj) {
-                        if (responseObj instanceof Response response) {
-                            var agentId = RestUtilities.extractResourceId(response.getLocation());
-                            if (agentId != null) {
-                                var deploymentFuture = deploymentListener.registerAgentDeployment(agentId.getId(), agentId.getVersion());
-                                deploymentFutures.add(deploymentFuture);
+                Response result = importAgent(getResourceAsStream("/initial-agents/" + agentFileName), "create", null, null, null);
+                if (result != null && result.getStatus() == 200 && result.getEntity() instanceof Map<?, ?> body) {
+                    String resourceUri = (String) body.get("resourceUri");
+                    if (resourceUri != null && !resourceUri.isBlank()) {
+                        var agentId = RestUtilities.extractResourceId(URI.create(resourceUri));
+                        if (agentId != null) {
+                            var deploymentFuture = deploymentListener.registerAgentDeployment(agentId.getId(), agentId.getVersion());
+                            deploymentFutures.add(deploymentFuture);
 
-                                restAgentAdministration.deployAgent(production, agentId.getId(), agentId.getVersion(), true, false);
-
-                                return true;
-                            }
+                            restAgentAdministration.deployAgent(production, agentId.getId(), agentId.getVersion(), true, false);
                         }
-                        return false;
                     }
-                });
+                }
             }
 
             // Wait for all deployments to complete
@@ -337,28 +339,22 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     // ==================== Import ====================
 
     @Override
-    public void importAgent(InputStream zippedAgentConfigFiles, String strategy, String selectedOriginIds,
-                            String targetAgentId, String workflowOrder, AsyncResponse response) {
+    public Response importAgent(InputStream zippedAgentConfigFiles, String strategy, String selectedOriginIds,
+                                String targetAgentId, String workflowOrder) {
         try {
-            if (response != null)
-                response.setTimeout(60, TimeUnit.SECONDS);
-
             // "upgrade" strategy → use the new structural matcher + upgrade executor
             if ("upgrade".equalsIgnoreCase(strategy) && targetAgentId != null) {
-                executeUpgradeFromZip(zippedAgentConfigFiles, targetAgentId, selectedOriginIds, workflowOrder, response);
-                return;
+                return executeUpgradeFromZip(zippedAgentConfigFiles, targetAgentId, selectedOriginIds, workflowOrder);
             }
             File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
 
             Set<String> selectedSet = parseSelectedResources(selectedOriginIds);
             boolean isMerge = STRATEGY_MERGE.equalsIgnoreCase(strategy);
 
-            importAgentZipFile(zippedAgentConfigFiles, targetDir, response, isMerge, selectedSet);
-        } catch (IOException e) {
+            return importAgentZipFile(zippedAgentConfigFiles, targetDir, isMerge, selectedSet);
+        } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
-            if (response != null) {
-                response.resume(new InternalServerErrorException());
-            }
+            throw new InternalServerErrorException(e.getMessage(), e);
         }
     }
 
@@ -372,8 +368,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return selectedSet == null || selectedSet.contains(originId);
     }
 
-    private void importAgentZipFile(InputStream zippedAgentConfigFiles, File targetDir, AsyncResponse response, boolean isMerge,
-                                    Set<String> selectedSet)
+    private Response importAgentZipFile(InputStream zippedAgentConfigFiles, File targetDir, boolean isMerge,
+                                        Set<String> selectedSet)
             throws IOException {
 
         this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
@@ -382,8 +378,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // Import snippets (global resources, not workflow-embedded)
         importSnippets(Paths.get(targetDirPath), isMerge);
 
+        URI lastAgentUri = null;
         try (var directoryStream = Files.newDirectoryStream(Paths.get(targetDirPath), path -> path.toString().endsWith(AGENT_FILE_ENDING))) {
-            directoryStream.forEach(agentFilePath -> {
+            for (var agentFilePath : directoryStream) {
                 try {
                     String agentOriginId = extractIdFromAgentFilename(agentFilePath);
                     String agentFileString = readFile(agentFilePath);
@@ -393,7 +390,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                     AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString, AgentConfiguration.class);
                     agentConfig.getWorkflows()
-                            .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, response, isMerge, selectedSet));
+                            .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, isMerge, selectedSet));
 
                     URI newAgentUri;
                     if (isMerge && isSelected(selectedSet, agentOriginId)) {
@@ -407,13 +404,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     // Set originId on the new agent's descriptor
                     setOriginIdOnDescriptor(newAgentUri, agentOriginId);
 
-                    response.resume(Response.ok().location(newAgentUri).build());
+                    lastAgentUri = newAgentUri;
                 } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException e) {
                     log.error(e.getLocalizedMessage(), e);
-                    response.resume(new InternalServerErrorException());
+                    throw new InternalServerErrorException(e.getLocalizedMessage(), e);
                 }
-            });
+            }
         }
+        log.infof("Import complete: lastAgentUri=%s", lastAgentUri);
+        return Response.ok(Map.of("resourceUri", lastAgentUri != null ? lastAgentUri.toString() : "")).build();
     }
 
     private URI buildOldAgentUri(Path agentPath) {
@@ -424,7 +423,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return URI.create(IRestAgentStore.resourceURI + oldAgentId + IRestAgentStore.versionQueryParam + "1");
     }
 
-    private void parseWorkflow(String targetDirPath, URI workflowUri, AgentConfiguration agentConfig, AsyncResponse response, boolean isMerge,
+    private void parseWorkflow(String targetDirPath, URI workflowUri, AgentConfiguration agentConfig, boolean isMerge,
                                Set<String> selectedSet) {
         try {
             IResourceId workflowResourceId = RestUtilities.extractResourceId(workflowUri);
@@ -537,7 +536,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                     } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException | CallbackMatcher.CallbackMatcherException e) {
                         log.error(e.getLocalizedMessage(), e);
-                        response.resume(new InternalServerErrorException());
+                        throw new InternalServerErrorException(e.getMessage(), e);
                     }
                 });
 
@@ -545,7 +544,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
         } catch (IOException e) {
             log.error(e.getLocalizedMessage(), e);
-            response.resume(new InternalServerErrorException());
+            throw new InternalServerErrorException(e.getMessage(), e);
         }
     }
 
@@ -687,82 +686,63 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
-    // ==================== Resource Creation (original logic) ====================
+    // ==================== Resource Creation ====================
+    //
+    // All create methods use direct I*Store.create() via CDI instead of going
+    // through
+    // the IRest*Store layer. This bypasses Response.getLocation() which returns
+    // null
+    // for eddi:// scheme URIs when called in-process (CDI direct calls).
 
-    private URI createNewAgent(AgentConfiguration agentConfiguration) throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestAgentStore restWorkflowStore = getRestResourceStore(IRestAgentStore.class);
-        Response agentResponse = restWorkflowStore.createAgent(agentConfiguration);
-        checkIfCreatedResponse(agentResponse);
-        return agentResponse.getLocation();
+    /**
+     * Creates a resource directly via CDI store lookup, bypassing the REST layer
+     * entirely. Returns the constructed URI for the new resource.
+     */
+    @SuppressWarnings("unchecked")
+    private <T> URI createResourceDirect(Class<?> storeClass, T document, String resourceUri) {
+        try {
+            IResourceStore<T> store = (IResourceStore<T>) jakarta.enterprise.inject.spi.CDI.current().select(storeClass).get();
+            IResourceId resourceId = store.create(document);
+            return RestUtilities.createURI(resourceUri, resourceId.getId(), IRestVersionInfo.versionQueryParam, resourceId.getVersion());
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
+        }
     }
 
-    private URI createNewWorkflow(String workflowFileString) throws RestInterfaceFactory.RestInterfaceFactoryException, IOException {
+    private URI createNewAgent(AgentConfiguration agentConfiguration) {
+        return createResourceDirect(IAgentStore.class, agentConfiguration, IRestAgentStore.resourceURI);
+    }
+
+    private URI createNewWorkflow(String workflowFileString) throws IOException {
         WorkflowConfiguration workflowConfig = jsonSerialization.deserialize(workflowFileString, WorkflowConfiguration.class);
-        IRestWorkflowStore restWorkflowStore = getRestResourceStore(IRestWorkflowStore.class);
-        Response workflowResponse = restWorkflowStore.createWorkflow(workflowConfig);
-        checkIfCreatedResponse(workflowResponse);
-        return workflowResponse.getLocation();
+        return createResourceDirect(IWorkflowStore.class, workflowConfig, IRestWorkflowStore.resourceURI);
     }
 
-    private List<URI> createNewDictionaries(List<DictionaryConfiguration> dictionaryConfigurations)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestDictionaryStore restDictionaryStore = getRestResourceStore(IRestDictionaryStore.class);
-        return dictionaryConfigurations.stream().map(regularDictionaryConfiguration -> {
-            Response dictionaryResponse = restDictionaryStore.createRegularDictionary(regularDictionaryConfiguration);
-            checkIfCreatedResponse(dictionaryResponse);
-            return dictionaryResponse.getLocation();
-        }).toList();
+    private List<URI> createNewDictionaries(List<DictionaryConfiguration> configs) {
+        return configs.stream().map(c -> createResourceDirect(IDictionaryStore.class, c, IRestDictionaryStore.resourceURI)).toList();
     }
 
-    private List<URI> createNewBehaviors(List<RuleSetConfiguration> behaviorConfigurations)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestRuleSetStore restRuleSetStore = getRestResourceStore(IRestRuleSetStore.class);
-        return behaviorConfigurations.stream().map(behaviorConfiguration -> {
-            Response behaviorResponse = restRuleSetStore.createRuleSet(behaviorConfiguration);
-            checkIfCreatedResponse(behaviorResponse);
-            return behaviorResponse.getLocation();
-        }).toList();
+    private List<URI> createNewBehaviors(List<RuleSetConfiguration> configs) {
+        return configs.stream().map(c -> createResourceDirect(IRuleSetStore.class, c, IRestRuleSetStore.resourceURI)).toList();
     }
 
-    private List<URI> createNewApiCalls(List<ApiCallsConfiguration> httpCallsConfigurations)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestApiCallsStore restApiCallsStore = getRestResourceStore(IRestApiCallsStore.class);
-        return httpCallsConfigurations.stream().map(httpCallsConfiguration -> {
-            Response httpCallsResponse = restApiCallsStore.createApiCalls(httpCallsConfiguration);
-            checkIfCreatedResponse(httpCallsResponse);
-            return httpCallsResponse.getLocation();
-        }).toList();
+    private List<URI> createNewApiCalls(List<ApiCallsConfiguration> configs) {
+        return configs.stream().map(c -> createResourceDirect(IApiCallsStore.class, c, IRestApiCallsStore.resourceURI)).toList();
     }
 
-    private List<URI> createNewLlm(List<LlmConfiguration> llmConfigurations) throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestLlmStore restLlmStore = getRestResourceStore(IRestLlmStore.class);
-        return llmConfigurations.stream().map(llmConfiguration -> {
-            Response llmResponse = restLlmStore.createLlm(llmConfiguration);
-            checkIfCreatedResponse(llmResponse);
-            return llmResponse.getLocation();
-        }).toList();
+    private List<URI> createNewLlm(List<LlmConfiguration> configs) {
+        return configs.stream().map(c -> createResourceDirect(ILlmStore.class, c, IRestLlmStore.resourceURI)).toList();
     }
 
-    private List<URI> createNewProperties(List<PropertySetterConfiguration> propertySetterConfigurations)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestPropertySetterStore restPropertySetterStore = getRestResourceStore(IRestPropertySetterStore.class);
-        return propertySetterConfigurations.stream().map(propertySetterConfiguration -> {
-            Response propertySetter = restPropertySetterStore.createPropertySetter(propertySetterConfiguration);
-            checkIfCreatedResponse(propertySetter);
-            return propertySetter.getLocation();
-        }).toList();
+    private List<URI> createNewProperties(List<PropertySetterConfiguration> configs) {
+        return configs.stream().map(c -> createResourceDirect(IPropertySetterStore.class, c, IRestPropertySetterStore.resourceURI)).toList();
     }
 
-    private List<URI> createNewOutputs(List<OutputConfigurationSet> outputConfigurations) throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestOutputStore restOutputStore = getRestResourceStore(IRestOutputStore.class);
-        return outputConfigurations.stream().map(outputConfiguration -> {
-            Response outputResponse = restOutputStore.createOutputSet(outputConfiguration);
-            checkIfCreatedResponse(outputResponse);
-            return outputResponse.getLocation();
-        }).toList();
+    private List<URI> createNewOutputs(List<OutputConfigurationSet> configs) {
+        return configs.stream().map(c -> createResourceDirect(IOutputStore.class, c, IRestOutputStore.resourceURI)).toList();
     }
 
-    // ==================== Resource Update (new merge logic) ====================
+    // ==================== Resource Update (merge logic) ====================
 
     private URI updateDictionary(DictionaryConfiguration config, String localId, Integer localVersion)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
@@ -771,10 +751,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (response.getStatus() == 200) {
             return URI.create(IRestDictionaryStore.resourceURI + localId + IRestDictionaryStore.versionQueryParam + (localVersion + 1));
         }
-        // Fallback: create new
-        Response createResp = store.createRegularDictionary(config);
-        checkIfCreatedResponse(createResp);
-        return createResp.getLocation();
+        return createResourceDirect(IDictionaryStore.class, config, IRestDictionaryStore.resourceURI);
     }
 
     private URI updateBehavior(RuleSetConfiguration config, String localId, Integer localVersion)
@@ -784,9 +761,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (response.getStatus() == 200) {
             return URI.create(IRestRuleSetStore.resourceURI + localId + IRestRuleSetStore.versionQueryParam + (localVersion + 1));
         }
-        Response createResp = store.createRuleSet(config);
-        checkIfCreatedResponse(createResp);
-        return createResp.getLocation();
+        return createResourceDirect(IRuleSetStore.class, config, IRestRuleSetStore.resourceURI);
     }
 
     private URI updateApiCalls(ApiCallsConfiguration config, String localId, Integer localVersion)
@@ -796,9 +771,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (response.getStatus() == 200) {
             return URI.create(IRestApiCallsStore.resourceURI + localId + IRestApiCallsStore.versionQueryParam + (localVersion + 1));
         }
-        Response createResp = store.createApiCalls(config);
-        checkIfCreatedResponse(createResp);
-        return createResp.getLocation();
+        return createResourceDirect(IApiCallsStore.class, config, IRestApiCallsStore.resourceURI);
     }
 
     private URI updateLangchain(LlmConfiguration config, String localId, Integer localVersion)
@@ -808,9 +781,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (response.getStatus() == 200) {
             return URI.create(IRestLlmStore.resourceURI + localId + IRestLlmStore.versionQueryParam + (localVersion + 1));
         }
-        Response createResp = store.createLlm(config);
-        checkIfCreatedResponse(createResp);
-        return createResp.getLocation();
+        return createResourceDirect(ILlmStore.class, config, IRestLlmStore.resourceURI);
     }
 
     private URI updateProperty(PropertySetterConfiguration config, String localId, Integer localVersion)
@@ -820,9 +791,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (response.getStatus() == 200) {
             return URI.create(IRestPropertySetterStore.resourceURI + localId + IRestPropertySetterStore.versionQueryParam + (localVersion + 1));
         }
-        Response createResp = store.createPropertySetter(config);
-        checkIfCreatedResponse(createResp);
-        return createResp.getLocation();
+        return createResourceDirect(IPropertySetterStore.class, config, IRestPropertySetterStore.resourceURI);
     }
 
     private URI updateOutput(OutputConfigurationSet config, String localId, Integer localVersion)
@@ -832,19 +801,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (response.getStatus() == 200) {
             return URI.create(IRestOutputStore.resourceURI + localId + IRestOutputStore.versionQueryParam + (localVersion + 1));
         }
-        Response createResp = store.createOutputSet(config);
-        checkIfCreatedResponse(createResp);
-        return createResp.getLocation();
+        return createResourceDirect(IOutputStore.class, config, IRestOutputStore.resourceURI);
     }
 
-    private List<URI> createNewMcpCalls(List<McpCallsConfiguration> mcpCallsConfigurations)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestMcpCallsStore restMcpCallsStore = getRestResourceStore(IRestMcpCallsStore.class);
-        return mcpCallsConfigurations.stream().map(mcpCallsConfiguration -> {
-            Response mcpCallsResponse = restMcpCallsStore.createMcpCalls(mcpCallsConfiguration);
-            checkIfCreatedResponse(mcpCallsResponse);
-            return mcpCallsResponse.getLocation();
-        }).toList();
+    private List<URI> createNewMcpCalls(List<McpCallsConfiguration> configs) {
+        return configs.stream().map(c -> createResourceDirect(IMcpCallsStore.class, c, IRestMcpCallsStore.resourceURI)).toList();
     }
 
     private URI updateMcpCalls(McpCallsConfiguration config, String localId, Integer localVersion)
@@ -854,19 +815,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (response.getStatus() == 200) {
             return URI.create(IRestMcpCallsStore.resourceURI + localId + IRestMcpCallsStore.versionQueryParam + (localVersion + 1));
         }
-        Response createResp = store.createMcpCalls(config);
-        checkIfCreatedResponse(createResp);
-        return createResp.getLocation();
+        return createResourceDirect(IMcpCallsStore.class, config, IRestMcpCallsStore.resourceURI);
     }
 
-    private List<URI> createNewRags(List<RagConfiguration> ragConfigurations)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestRagStore restRagStore = getRestResourceStore(IRestRagStore.class);
-        return ragConfigurations.stream().map(ragConfiguration -> {
-            Response ragResponse = restRagStore.createRag(ragConfiguration);
-            checkIfCreatedResponse(ragResponse);
-            return ragResponse.getLocation();
-        }).toList();
+    private List<URI> createNewRags(List<RagConfiguration> configs) {
+        return configs.stream().map(c -> createResourceDirect(IRagStore.class, c, IRestRagStore.resourceURI)).toList();
     }
 
     private URI updateRag(RagConfiguration config, String localId, Integer localVersion)
@@ -876,9 +829,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (response.getStatus() == 200) {
             return URI.create(IRestRagStore.resourceURI + localId + IRestRagStore.versionQueryParam + (localVersion + 1));
         }
-        Response createResp = store.createRag(config);
-        checkIfCreatedResponse(createResp);
-        return createResp.getLocation();
+        return createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI);
     }
 
     // ==================== Snippet Import ====================
@@ -1085,7 +1036,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private <T> T getRestResourceStore(Class<T> clazz) throws RestInterfaceFactory.RestInterfaceFactoryException {
-        return restInterfaceFactory.get(clazz);
+        // Use direct CDI lookup instead of HTTP loopback proxy.
+        // The MP REST Client proxy strips response headers (Location, X-Resource-URI)
+        // and runs on the Vert.x IO event loop, causing deadlocks during import.
+        return jakarta.enterprise.inject.spi.CDI.current().select(clazz).get();
     }
 
     @SuppressWarnings("unchecked")
@@ -1176,8 +1130,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
-    private void executeUpgradeFromZip(InputStream zippedAgentConfigFiles, String targetAgentId,
-                                       String selectedOriginIds, String workflowOrderString, AsyncResponse response) {
+    private Response executeUpgradeFromZip(InputStream zippedAgentConfigFiles, String targetAgentId,
+                                           String selectedOriginIds, String workflowOrderString) {
         try {
             File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
             this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
@@ -1187,14 +1141,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             List<String> workflowOrder = parseWorkflowOrder(workflowOrderString);
 
             URI resultUri = upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, workflowOrder);
-            if (response != null) {
-                response.resume(Response.ok().location(resultUri).build());
-            }
+            return Response.ok(Map.of("resourceUri", resultUri.toString())).build();
         } catch (Exception e) {
             log.error("Upgrade from ZIP failed: " + e.getMessage(), e);
-            if (response != null) {
-                response.resume(new InternalServerErrorException("Upgrade failed: " + e.getMessage(), e));
-            }
+            throw new InternalServerErrorException("Upgrade failed: " + e.getMessage(), e);
         }
     }
 
@@ -1270,40 +1220,30 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     @Override
-    public void executeSync(String sourceUrl, String sourceAgentId, Integer sourceVersion,
-                            String targetAgentId, String selectedResources, String workflowOrder,
-                            String sourceAuth, AsyncResponse response) {
+    public Response executeSync(String sourceUrl, String sourceAgentId, Integer sourceVersion,
+                                String targetAgentId, String selectedResources, String workflowOrder,
+                                String sourceAuth) {
         validateSourceUrl(sourceUrl);
         try {
-            if (response != null)
-                response.setTimeout(120, TimeUnit.SECONDS);
-
             try (var source = new RemoteApiResourceSource(
                     sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization)) {
                 Set<String> selectedSet = parseSelectedResources(selectedResources);
                 List<String> wfOrder = parseWorkflowOrder(workflowOrder);
 
                 URI resultUri = upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, wfOrder);
-                if (response != null) {
-                    response.resume(Response.ok().location(resultUri).build());
-                }
+                return Response.ok(Map.of("resourceUri", resultUri.toString())).build();
             }
         } catch (Exception e) {
             log.errorf("Sync execution failed for agent %s from %s: %s",
                     sourceAgentId, sourceUrl, e.getMessage());
-            if (response != null) {
-                response.resume(new InternalServerErrorException("Sync failed: " + e.getMessage(), e));
-            }
+            throw new InternalServerErrorException("Sync failed: " + e.getMessage(), e);
         }
     }
 
     @Override
-    public void executeSyncBatch(String sourceUrl, List<SyncRequest> requests, String sourceAuth, AsyncResponse response) {
+    public Response executeSyncBatch(String sourceUrl, List<SyncRequest> requests, String sourceAuth) {
         validateSourceUrl(sourceUrl);
         try {
-            if (response != null)
-                response.setTimeout(300, TimeUnit.SECONDS);
-
             List<URI> resultUris = new ArrayList<>();
             for (SyncRequest request : requests) {
                 try (var source = new RemoteApiResourceSource(
@@ -1320,89 +1260,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 }
             }
 
-            if (response != null) {
-                response.resume(Response.ok(resultUris).build());
-            }
+            return Response.ok(resultUris).build();
         } catch (Exception e) {
             log.errorf("Batch sync execution failed: %s", e.getMessage());
-            if (response != null) {
-                response.resume(new InternalServerErrorException("Batch sync failed: " + e.getMessage(), e));
-            }
+            throw new InternalServerErrorException("Batch sync failed: " + e.getMessage(), e);
         }
     }
 
-    // ==================== Inner Classes ====================
-
-    private static class MockAsyncResponse implements AsyncResponse {
-
-        @Override
-        public boolean resume(Object response) {
-            return false;
-        }
-
-        @Override
-        public boolean resume(Throwable response) {
-            return false;
-        }
-
-        @Override
-        public boolean cancel() {
-            return false;
-        }
-
-        @Override
-        public boolean cancel(int retryAfter) {
-            return false;
-        }
-
-        @Override
-        public boolean cancel(Date retryAfter) {
-            return false;
-        }
-
-        @Override
-        public boolean isSuspended() {
-            return false;
-        }
-
-        @Override
-        public boolean isCancelled() {
-            return false;
-        }
-
-        @Override
-        public boolean isDone() {
-            return false;
-        }
-
-        @Override
-        public boolean setTimeout(long time, TimeUnit unit) {
-            return false;
-        }
-
-        @Override
-        public void setTimeoutHandler(TimeoutHandler handler) {
-
-        }
-
-        @Override
-        public Collection<Class<?>> register(Class<?> callback) {
-            return null;
-        }
-
-        @Override
-        public Map<Class<?>, Collection<Class<?>>> register(Class<?> callback, Class<?>... callbacks) {
-            return null;
-        }
-
-        @Override
-        public Collection<Class<?>> register(Object callback) {
-            return null;
-        }
-
-        @Override
-        public Map<Class<?>, Collection<Class<?>>> register(Object callback, Object... callbacks) {
-            return null;
-        }
-    }
 }

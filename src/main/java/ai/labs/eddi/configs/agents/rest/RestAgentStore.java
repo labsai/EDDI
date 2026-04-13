@@ -154,18 +154,19 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public Response createAgent(AgentConfiguration agentConfiguration) {
-        Response response = restVersionInfo.create(agentConfiguration);
-        // Extract the newly created agent ID from the Location header
-        URI location = response.getLocation();
-        if (location != null) {
-            try {
-                var resourceId = RestUtilities.extractResourceId(location);
-                capabilityRegistryService.register(resourceId.getId(), agentConfiguration);
-            } catch (Exception e) {
-                log.debugf("Could not register capabilities for new agent: %s", e.getMessage());
-            }
+        // Use createDocument() to get IResourceId directly — Response.getLocation()
+        // returns null for eddi:// scheme URIs in CDI direct calls
+        IResourceId resourceId = restVersionInfo.createDocument(agentConfiguration);
+        URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
+
+        try {
+            capabilityRegistryService.register(resourceId.getId(), agentConfiguration);
+        } catch (Exception e) {
+            log.debugf("Could not register capabilities for new agent: %s", e.getMessage());
         }
-        return response;
+
+        return Response.created(createdUri).location(createdUri)
+                .header("X-Resource-URI", createdUri.toString()).build();
     }
 
     @Override
@@ -177,20 +178,51 @@ public class RestAgentStore implements IRestAgentStore {
                 List<URI> packages = agentConfig.getWorkflows();
                 for (int i = 0; i < packages.size(); i++) {
                     URI workflowUri = packages.get(i);
-                    IResourceId resourceId = RestUtilities.extractResourceId(workflowUri);
-                    Response duplicateResourceResponse = restWorkflowStore.duplicateWorkflow(resourceId.getId(), resourceId.getVersion(), true);
-                    URI newResourceLocation = duplicateResourceResponse.getLocation();
+                    IResourceId wfResId = RestUtilities.extractResourceId(workflowUri);
+                    Response duplicateResourceResponse = restWorkflowStore.duplicateWorkflow(wfResId.getId(), wfResId.getVersion(), true);
+                    // Extract URI from X-Resource-URI entity fallback since getLocation() fails for
+                    // eddi:// URIs
+                    URI newResourceLocation = extractCreatedUri(duplicateResourceResponse);
                     packages.set(i, newResourceLocation);
                 }
             }
 
-            Response createAgentResponse = restVersionInfo.create(agentConfig);
-            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createAgentResponse.getLocation());
+            // Use createDocument() — bypasses broken Response.getLocation() for eddi://
+            // URIs
+            IResourceId newAgentId = restVersionInfo.createDocument(agentConfig);
+            URI createdUri = RestUtilities.createURI(resourceURI, newAgentId.getId(), versionQueryParam, newAgentId.getVersion());
+            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createdUri);
 
-            return createAgentResponse;
+            return Response.created(createdUri).location(createdUri)
+                    .header("X-Resource-URI", createdUri.toString()).build();
         } catch (Exception e) {
             throw sneakyThrow(e);
         }
+    }
+
+    /**
+     * Extracts the created resource URI from a Response, trying multiple strategies
+     * since {@code getLocation()} returns null for {@code eddi://} scheme URIs.
+     */
+    private URI extractCreatedUri(Response response) {
+        URI location = response.getLocation();
+        if (location != null)
+            return location;
+
+        String header = response.getHeaderString("X-Resource-URI");
+        if (header != null && !header.isBlank())
+            return URI.create(header);
+
+        if (response.hasEntity()) {
+            Object entity = response.getEntity();
+            if (entity instanceof String s && !s.isBlank()) {
+                try {
+                    return URI.create(s);
+                } catch (Exception ignored) {
+                    /* not a URI */ }
+            }
+        }
+        return null;
     }
 
     @Override
