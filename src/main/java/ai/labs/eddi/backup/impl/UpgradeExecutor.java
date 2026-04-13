@@ -51,6 +51,8 @@ import java.net.URI;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import static ai.labs.eddi.configs.descriptors.ResourceUtilities.createDocumentDescriptor;
+
 /**
  * Executes an upgrade by syncing content from a source into an existing target
  * agent. For each selected resource in the preview, writes the source content
@@ -394,7 +396,14 @@ public class UpgradeExecutor {
         T config = jsonSerialization.deserialize(json, ops.configClass());
         IResourceStore<T> store = (IResourceStore<T>) CDI.current().select(ops.directStoreClass()).get();
         IResourceId resourceId = store.create(config);
-        return RestUtilities.createURI(ops.resourceUri(), resourceId.getId(), ops.versionQueryParam(), resourceId.getVersion());
+        URI createdUri = RestUtilities.createURI(ops.resourceUri(), resourceId.getId(), ops.versionQueryParam(), resourceId.getVersion());
+
+        // Create the DocumentDescriptor that the DocumentDescriptorFilter would
+        // normally create on a 201 response.
+        documentDescriptorStore.createDescriptor(
+                resourceId.getId(), resourceId.getVersion(), createDocumentDescriptor(createdUri));
+
+        return createdUri;
     }
 
     // ==================== Workflow Updates ====================
@@ -407,8 +416,15 @@ public class UpgradeExecutor {
         try {
             IWorkflowStore store = CDI.current().select(IWorkflowStore.class).get();
             IResourceId resourceId = store.create(sourceWf.config());
-            return RestUtilities.createURI(IRestWorkflowStore.resourceURI, resourceId.getId(),
+            URI createdUri = RestUtilities.createURI(IRestWorkflowStore.resourceURI, resourceId.getId(),
                     IRestWorkflowStore.versionQueryParam, resourceId.getVersion());
+
+            // Create the DocumentDescriptor that the DocumentDescriptorFilter would
+            // normally create on a 201 response.
+            documentDescriptorStore.createDescriptor(
+                    resourceId.getId(), resourceId.getVersion(), createDocumentDescriptor(createdUri));
+
+            return createdUri;
         } catch (Exception e) {
             log.warnf("Failed to create workflow '%s': %s", sourceWf.name(), e.getMessage());
             return null;

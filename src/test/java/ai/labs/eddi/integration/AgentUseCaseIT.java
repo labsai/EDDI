@@ -105,13 +105,14 @@ public class AgentUseCaseIT extends BaseIntegrationIT {
 
         response.then().statusCode(200);
 
-        String location = response.getHeader("location");
-        if (location == null) {
-            throw new RuntimeException("Import response did not contain a location header. " + "Status: " + response.getStatusCode() + ", Body: "
+        // Import endpoint returns the agent URI in the JSON body under "resourceUri"
+        String resourceUri = response.jsonPath().getString("resourceUri");
+        if (resourceUri == null || resourceUri.isBlank()) {
+            throw new RuntimeException("Import response did not contain a resourceUri. " + "Status: " + response.getStatusCode() + ", Body: "
                     + response.getBody().asString());
         }
 
-        ResourceId resourceId = extractResourceId(location);
+        ResourceId resourceId = extractResourceId(resourceUri);
         deployAgent(resourceId.id(), resourceId.version());
         return resourceId;
     }

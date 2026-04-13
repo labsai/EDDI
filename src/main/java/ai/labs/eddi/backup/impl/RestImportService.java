@@ -73,6 +73,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static ai.labs.eddi.configs.descriptors.ResourceUtilities.createDocumentDescriptor;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static ai.labs.eddi.engine.model.Deployment.Environment.production;
 import static ai.labs.eddi.utils.RuntimeUtilities.getResourceAsStream;
@@ -673,12 +674,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion());
                 if (descriptor != null && !originId.equals(descriptor.getOriginId())) {
                     descriptor.setOriginId(originId);
-                    PatchInstruction<DocumentDescriptor> patchInstruction = new PatchInstruction<>();
-                    patchInstruction.setOperation(PatchInstruction.PatchOperation.SET);
-                    patchInstruction.setDocument(descriptor);
-
-                    IRestDocumentDescriptorStore restDescriptorStore = getRestResourceStore(IRestDocumentDescriptorStore.class);
-                    restDescriptorStore.patchDescriptor(resourceId.getId(), resourceId.getVersion(), patchInstruction);
+                    // Use setDescriptor directly — patchDescriptor only patches name/description
+                    documentDescriptorStore.setDescriptor(resourceId.getId(), resourceId.getVersion(), descriptor);
                 }
             }
         } catch (Exception e) {
@@ -703,7 +700,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         try {
             IResourceStore<T> store = (IResourceStore<T>) jakarta.enterprise.inject.spi.CDI.current().select(storeClass).get();
             IResourceId resourceId = store.create(document);
-            return RestUtilities.createURI(resourceUri, resourceId.getId(), IRestVersionInfo.versionQueryParam, resourceId.getVersion());
+            URI createdUri = RestUtilities.createURI(resourceUri, resourceId.getId(), IRestVersionInfo.versionQueryParam, resourceId.getVersion());
+
+            // Create the DocumentDescriptor that the DocumentDescriptorFilter would
+            // normally create on a 201 response. Since we bypass the REST layer,
+            // the filter never runs, so we must create it manually.
+            documentDescriptorStore.createDescriptor(
+                    resourceId.getId(), resourceId.getVersion(), createDocumentDescriptor(createdUri));
+
+            return createdUri;
         } catch (IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
