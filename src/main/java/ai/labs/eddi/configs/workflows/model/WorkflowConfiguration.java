@@ -50,6 +50,11 @@ public class WorkflowConfiguration {
         return workflowSteps;
     }
 
+    // Note: Alias required for backward compatibility with v5 exported agent
+    // schemas (ZIP files / MongoDB)
+    // where the property was natively named "workflowExtensions" instead of
+    // "workflowSteps".
+    @com.fasterxml.jackson.annotation.JsonAlias("workflowExtensions")
     public void setWorkflowSteps(List<WorkflowStep> workflowSteps) {
         this.workflowSteps = workflowSteps;
     }

@@ -40,6 +40,9 @@ Each entry follows this format:
 - **Two-tier strategy:** Container-based for E2E agent tests (import→deploy→converse); `@QuarkusTest` kept for lightweight CRUD/API ITs that work fine on CI
 - **`ImageFromDockerfile`** builds the EDDI image from current code during test — no pre-pushed image needed, always tests current code
 - **Cleaned up v5 legacy:** `docker-compose.testing.yml` and `integration-tests.sh` were remnants of the old container-to-container approach; replaced by Maven-native Testcontainers
+- **Fixed `WorkflowConfiguration` Deserialization:** Added `@JsonAlias("workflowExtensions")` mapping to bridge legacy v5 `.zip` exports logic when testing older agent architectures under Testcontainers. This resolved `AgentUseCaseIT` failing to parse the `weather-agent` behavior rules.
+- **Fixed `PostgresAgentUseCaseIT` 503:** Added `QUARKUS_DATASOURCE_ACTIVE=true` to properly instantiate Agroal beans circumventing synthetic bean issues in un-configured test environments. Also resolved the intent ID bug caused by directly loading the `weather-agent` payload out of scope.
+- **Fixed `CreateApiAgentIT` 500:** Addressed the location header extracting logic resolving the remaining `startConversation` loopback test to directly test against `conversationstore/conversations` natively ensuring zero container logic leaks.
 
 ---
 

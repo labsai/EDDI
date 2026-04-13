@@ -312,10 +312,14 @@ public class CreateApiAgentIT extends ContainerBaseIT {
     @DisplayName("should start a conversation with the API agent")
     void startConversation() {
         Response response = given().post("agents/" + agentId + "/start?environment=production&userId=apIAgent-test-user");
+        response.then().statusCode(201);
         String location = response.getHeader("location");
 
         Assertions.assertNotNull(location, "Conversation location should be returned");
-        Assertions.assertTrue(location.contains(agentId), "Conversation should reference the agent");
+        // Verify we get a valid URI pointing to the new conversation resource instead
+        // of looking for the agentId,
+        // which is no longer embedded directly in the conversation resource URI.
+        Assertions.assertTrue(location.contains("conversationstore/conversations"), "Conversation should reference the correct store");
     }
 
     // ==================== Cleanup ====================

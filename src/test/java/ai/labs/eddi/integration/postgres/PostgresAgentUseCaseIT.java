@@ -55,14 +55,23 @@ public class PostgresAgentUseCaseIT extends BaseIntegrationIT {
             .withNetwork(NETWORK)
             .withExposedPorts(7070)
             .withEnv("EDDI_DATASTORE_TYPE", "postgres")
+            // Active the Postgres profile explicitly for test loopbacks
+            .withEnv("QUARKUS_PROFILE", "postgres")
+            // Explicitly activate the datasource. Otherwise, Quarkus may treat it as
+            // a deactivated synthetic bean, causing the Agents Readiness health check
+            // and internal schedule pollers to crash with a 503 HTTP status loop.
+            .withEnv("QUARKUS_DATASOURCE_ACTIVE", "true")
             .withEnv("QUARKUS_DATASOURCE_DB_KIND", "postgresql")
             .withEnv("QUARKUS_DATASOURCE_JDBC_URL", "jdbc:postgresql://postgres:5432/eddi")
             .withEnv("QUARKUS_DATASOURCE_USERNAME", "eddi")
             .withEnv("QUARKUS_DATASOURCE_PASSWORD", "eddi")
             .withEnv("QUARKUS_MONGODB_DEVSERVICES_ENABLED", "false")
+            .withEnv("QUARKUS_MONGODB_HEALTH_ENABLED", "false")
             .withEnv("QUARKUS_OIDC_TENANT_ENABLED", "false")
             .withEnv("AUTHORIZATION_ENABLED", "false")
             .dependsOn(POSTGRES)
+            .withLogConsumer(
+                    new org.testcontainers.containers.output.Slf4jLogConsumer(org.slf4j.LoggerFactory.getLogger(PostgresAgentUseCaseIT.class)))
             .waitingFor(Wait.forHttp("/q/health/ready")
                     .forPort(7070)
                     .withStartupTimeout(Duration.ofSeconds(120)));
@@ -117,7 +126,7 @@ public class PostgresAgentUseCaseIT extends BaseIntegrationIT {
     @Test
     @DisplayName("should support managed Agent API with Agent triggers (PostgreSQL)")
     void useAgentManagement() throws IOException {
-        String intent = "weather-agent-pg";
+        String intent = "weather-agent";
         String userId = "12345";
 
         given().delete("/AgentTriggerStore/agenttriggers/" + intent);

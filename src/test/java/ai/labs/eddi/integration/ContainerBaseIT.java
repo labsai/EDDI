@@ -47,6 +47,8 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
     @Container
     static final GenericContainer<?> EDDI = new GenericContainer<>(
             new ImageFromDockerfile("eddi-it", false)
+                    // The build context must be the project root to include target/ dependency
+                    // layers
                     .withFileFromPath(".", Path.of("."))
                     .withDockerfilePath("src/main/docker/Dockerfile.jvm"))
             .withNetwork(NETWORK)
