@@ -105,12 +105,11 @@ public class AgentConfigurationIT extends BaseIntegrationIT {
         String setupRequest = """
                 {
                   "agentName": "Setup Wizard Test Agent",
-                  "agentDescription": "Created by integration test",
-                  "llmType": "openai",
-                  "llmApiKey": "sk-test-not-real",
-                  "llmModelName": "gpt-4o-mini",
-                  "systemMessage": "You are a test assistant.",
-                  "autoDeploy": false
+                  "systemPrompt": "You are a test assistant.",
+                  "provider": "openai",
+                  "apiKey": "sk-test-not-real",
+                  "model": "gpt-4o-mini",
+                  "deploy": false
                 }
                 """;
 
@@ -118,7 +117,7 @@ public class AgentConfigurationIT extends BaseIntegrationIT {
                 .post("/administration/agents/setup");
 
         response.then().assertThat()
-                .statusCode(200)
+                .statusCode(201)
                 .contentType(ContentType.JSON);
     }
 

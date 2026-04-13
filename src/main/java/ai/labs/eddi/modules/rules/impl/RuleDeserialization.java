@@ -18,6 +18,7 @@ import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Objects;
 
 import static ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.CONDITION_PREFIX;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
@@ -117,7 +118,7 @@ public class RuleDeserialization implements IRuleDeserialization {
                 log.error(e.getLocalizedMessage(), e);
                 return null;
             }
-        }).toList();
+        }).filter(Objects::nonNull).toList();
     }
 
     private IRuleCondition createCondition(String conditionsKey) {

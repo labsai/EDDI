@@ -66,7 +66,7 @@ import java.util.Map;
  * @since 6.0.0
  */
 public class CapabilityMatchCondition implements IRuleCondition {
-    public static final String ID = "capabilitymatch";
+    public static final String ID = "capabilityMatch";
     private static final Logger LOGGER = Logger.getLogger(CapabilityMatchCondition.class);
     private static final String KEY_SKILL = "skill";
     private static final String KEY_STRATEGY = "strategy";

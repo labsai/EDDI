@@ -113,10 +113,11 @@ public class GroupConversationIT extends BaseIntegrationIT {
                 .post("/groups/" + groupResourceId.id() + "/conversations");
 
         // 200 = discussion completed successfully
+        // 201 = discussion created (REST convention for new group conversation)
         // 404 = group or agent not found (valid if deployment state changed)
         // 500 is NOT acceptable — server errors indicate bugs, not valid behavior
         response.then().assertThat()
-                .statusCode(anyOf(equalTo(200), equalTo(404)));
+                .statusCode(anyOf(equalTo(200), equalTo(201), equalTo(404)));
     }
 
     @Test

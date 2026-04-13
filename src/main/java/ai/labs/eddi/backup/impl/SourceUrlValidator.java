@@ -86,14 +86,18 @@ public final class SourceUrlValidator {
 
     private static boolean isPrivateIp(String host) {
         try {
-            InetAddress addr = InetAddress.getByName(host);
-            return addr.isSiteLocalAddress() || addr.isLoopbackAddress()
-                    || addr.isLinkLocalAddress() || addr.isAnyLocalAddress();
-        } catch (UnknownHostException e) {
-            // DNS resolution failed — could be a non-existent host.
-            // We let the actual HTTP request fail with a clear connection error.
-            log.debugf("Could not resolve host %s — skipping IP validation", host);
+            InetAddress[] addresses = InetAddress.getAllByName(host);
+            for (InetAddress addr : addresses) {
+                if (addr.isSiteLocalAddress() || addr.isLoopbackAddress()
+                        || addr.isLinkLocalAddress() || addr.isAnyLocalAddress()) {
+                    return true;
+                }
+            }
             return false;
+        } catch (UnknownHostException e) {
+            // DNS resolution failed — fail closed to prevent DNS rebinding attacks
+            log.debugf("Could not resolve host %s — rejecting source URL", host);
+            throw new IllegalArgumentException("Source URL host could not be resolved: " + host, e);
         }
     }
 }

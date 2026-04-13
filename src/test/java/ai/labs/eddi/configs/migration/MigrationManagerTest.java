@@ -344,7 +344,7 @@ class MigrationManagerTest {
             outputValue.put("text", "Already typed");
 
             Document doc = buildOutputDoc(List.of(outputValue));
-            Document result = migrationManager.migrateOutput().migrate(doc);
+            migrationManager.migrateOutput().migrate(doc);
 
             // removeNonSupportedProperties is still called but no type conversion
             // The document still gets processed (type is reset in the outer output)

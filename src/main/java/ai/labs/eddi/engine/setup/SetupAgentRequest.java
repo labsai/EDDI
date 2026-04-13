@@ -9,7 +9,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *
  * @author ginccc
  */
-public record SetupAgentRequest(@JsonProperty(required = true) String name, @JsonProperty(required = true) String systemPrompt, String provider,
+public record SetupAgentRequest(@JsonProperty(required = true) String agentName, @JsonProperty(required = true) String systemPrompt, String provider,
         String model, String apiKey, String baseUrl, String introMessage, Boolean enableBuiltInTools, String builtInToolsWhitelist,
         Boolean enableQuickReplies, Boolean enableSentimentAnalysis, String mcpServerUrls, Boolean deploy, String environment) {
 }

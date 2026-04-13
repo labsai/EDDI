@@ -41,7 +41,7 @@ import static ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.Executio
  * @since 6.0.0
  */
 public class ContentTypeMatcher implements IRuleCondition {
-    public static final String ID = "contenttypematcher";
+    public static final String ID = "contentTypeMatcher";
     private static final String KEY_MIME_TYPE = "mimeType";
     private static final String KEY_MIN_COUNT = "minCount";
 

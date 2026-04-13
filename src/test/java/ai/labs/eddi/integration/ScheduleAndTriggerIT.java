@@ -36,7 +36,7 @@ public class ScheduleAndTriggerIT extends BaseIntegrationIT {
                   "name": "Test Integration Schedule",
                   "agentId": "test-agent-id",
                   "triggerType": "CRON",
-                  "cronExpression": "0 0 * * * ?",
+                  "cronExpression": "0 0 * * *",
                   "timeZone": "UTC",
                   "enabled": false,
                   "userId": "system:scheduler",

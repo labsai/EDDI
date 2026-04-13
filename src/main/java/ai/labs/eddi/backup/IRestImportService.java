@@ -10,9 +10,8 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.*;
-import jakarta.ws.rs.container.AsyncResponse;
-import jakarta.ws.rs.container.Suspended;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import java.io.InputStream;
 import java.util.List;
 
@@ -34,13 +33,12 @@ public interface IRestImportService {
             + "strategy=create (default) always creates new resources. "
             + "strategy=merge looks up existing resources by origin ID and updates them. "
             + "strategy=upgrade syncs content into the targetAgentId by structural matching.")
-    void importAgent(InputStream zippedAgentConfigFiles,
-                     @QueryParam("strategy")
-                     @DefaultValue("create") String strategy,
-                     @QueryParam("selectedResources") String selectedOriginIds,
-                     @QueryParam("targetAgentId") String targetAgentId,
-                     @QueryParam("workflowOrder") String workflowOrder,
-                     @Suspended AsyncResponse response);
+    Response importAgent(InputStream zippedAgentConfigFiles,
+                         @QueryParam("strategy")
+                         @DefaultValue("create") String strategy,
+                         @QueryParam("selectedResources") String selectedOriginIds,
+                         @QueryParam("targetAgentId") String targetAgentId,
+                         @QueryParam("workflowOrder") String workflowOrder);
 
     @POST
     @Path("/preview")
@@ -85,22 +83,20 @@ public interface IRestImportService {
     @POST
     @Path("/sync")
     @Operation(description = "Execute a single-agent sync from a remote EDDI instance to a local target agent.")
-    void executeSync(@QueryParam("sourceUrl") String sourceUrl,
-                     @QueryParam("sourceAgentId") String sourceAgentId,
-                     @QueryParam("sourceAgentVersion") Integer sourceVersion,
-                     @QueryParam("targetAgentId") String targetAgentId,
-                     @QueryParam("selectedResources") String selectedResources,
-                     @QueryParam("workflowOrder") String workflowOrder,
-                     @HeaderParam("X-Source-Authorization") String sourceAuth,
-                     @Suspended AsyncResponse response);
+    Response executeSync(@QueryParam("sourceUrl") String sourceUrl,
+                         @QueryParam("sourceAgentId") String sourceAgentId,
+                         @QueryParam("sourceAgentVersion") Integer sourceVersion,
+                         @QueryParam("targetAgentId") String targetAgentId,
+                         @QueryParam("selectedResources") String selectedResources,
+                         @QueryParam("workflowOrder") String workflowOrder,
+                         @HeaderParam("X-Source-Authorization") String sourceAuth);
 
     @POST
     @Path("/sync/batch")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Execute a multi-agent sync from a remote EDDI instance. "
             + "Each request specifies a source→target agent pair with selected resources and workflow order.")
-    void executeSyncBatch(@QueryParam("sourceUrl") String sourceUrl,
-                          List<SyncRequest> requests,
-                          @HeaderParam("X-Source-Authorization") String sourceAuth,
-                          @Suspended AsyncResponse response);
+    Response executeSyncBatch(@QueryParam("sourceUrl") String sourceUrl,
+                              List<SyncRequest> requests,
+                              @HeaderParam("X-Source-Authorization") String sourceAuth);
 }

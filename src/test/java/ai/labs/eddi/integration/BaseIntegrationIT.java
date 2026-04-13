@@ -1,7 +1,11 @@
 package ai.labs.eddi.integration;
 
+import io.restassured.RestAssured;
+import io.restassured.config.HttpClientConfig;
+import io.restassured.config.RestAssuredConfig;
 import io.restassured.http.ContentType;
 import io.restassured.response.Response;
+import org.junit.jupiter.api.BeforeEach;
 
 import java.io.IOException;
 import java.net.URI;
@@ -29,6 +33,19 @@ import static org.hamcrest.Matchers.*;
  * </ul>
  */
 public abstract class BaseIntegrationIT {
+
+    /**
+     * Configure RestAssured timeouts for all integration tests. Must be @BeforeEach
+     * (not @BeforeAll) so it runs AFTER Quarkus configures RestAssured's baseURI
+     * and port.
+     */
+    @BeforeEach
+    void configureRestAssuredTimeouts() {
+        RestAssured.config = RestAssuredConfig.config().httpClient(
+                HttpClientConfig.httpClientConfig()
+                        .setParam("http.socket.timeout", 600_000)
+                        .setParam("http.connection.timeout", 10_000));
+    }
 
     protected static final String VERSION_STRING = "?version=";
 

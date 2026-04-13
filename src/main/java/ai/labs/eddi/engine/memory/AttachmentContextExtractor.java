@@ -14,11 +14,17 @@ import java.util.Map;
  * <p>
  * Supports two input paths from the client:
  * <ul>
- * <li><strong>URL reference</strong>: {@code {"attachment_0": {"type":"object",
- * "value":{"mimeType":"image/png","url":"https://..."}}}}</li>
- * <li><strong>Base64 inline</strong>: {@code {"attachment_0": {"type":"object",
- * "value":{"mimeType":"image/png","data":"iVBOR...","fileName":"icon.png"}}}}</li>
+ * <li><strong>URL reference</strong>: {@code {"attachment_0":
+ * Context(type=object,
+ * value={"mimeType":"image/png","url":"https://..."})}}</li>
+ * <li><strong>Base64 inline</strong>: {@code {"attachment_0":
+ * Context(type=object,
+ * value={"mimeType":"image/png","data":"iVBOR...","fileName":"icon.png"})}}</li>
  * </ul>
+ * <p>
+ * The {@link Context#getValue()} is expected to be a
+ * {@code Map<String, Object>} containing the attachment fields directly
+ * (mimeType, url/data, fileName).
  * <p>
  * Context keys matching {@code attachment_*} are extracted. Other context keys
  * are ignored.

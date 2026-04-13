@@ -49,7 +49,7 @@ public class RulesCrudIT extends BaseIntegrationIT {
     @Order(3)
     @DisplayName("Update behavior rule set")
     void updateBehavior() {
-        assertUpdate(TEST_JSON2, ROOT_PATH, RESOURCE_URI, resourceId).then().assertThat().body("behaviorGroups[0].behaviorRules[0].name",
+        assertUpdate(TEST_JSON2, ROOT_PATH, RESOURCE_URI, resourceId).then().assertThat().body("behaviorGroups[0].rules[0].name",
                 equalTo("Welcome_changed"));
     }
 

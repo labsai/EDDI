@@ -19,35 +19,35 @@ class SourceUrlValidatorTest {
         @Test
         @DisplayName("should accept HTTPS URL in production mode")
         void acceptsHttpsInProd() {
-            assertDoesNotThrow(() -> SourceUrlValidator.validate("https://staging.example.com", false));
+            assertDoesNotThrow(() -> SourceUrlValidator.validate("https://example.com", false));
         }
 
         @Test
         @DisplayName("should reject HTTP URL in production mode")
         void rejectsHttpInProd() {
             var ex = assertThrows(IllegalArgumentException.class,
-                    () -> SourceUrlValidator.validate("http://staging.example.com", false));
+                    () -> SourceUrlValidator.validate("http://example.com", false));
             assertTrue(ex.getMessage().contains("HTTPS"));
         }
 
         @Test
         @DisplayName("should accept HTTP URL in dev mode")
         void acceptsHttpInDev() {
-            assertDoesNotThrow(() -> SourceUrlValidator.validate("http://staging.example.com", true));
+            assertDoesNotThrow(() -> SourceUrlValidator.validate("http://example.com", true));
         }
 
         @Test
         @DisplayName("should reject non-HTTP schemes")
         void rejectsNonHttpSchemes() {
             assertThrows(IllegalArgumentException.class,
-                    () -> SourceUrlValidator.validate("ftp://staging.example.com", true));
+                    () -> SourceUrlValidator.validate("ftp://example.com", true));
         }
 
         @Test
         @DisplayName("should reject URL without scheme")
         void rejectsNoScheme() {
             assertThrows(IllegalArgumentException.class,
-                    () -> SourceUrlValidator.validate("staging.example.com", true));
+                    () -> SourceUrlValidator.validate("example.com", true));
         }
     }
 
@@ -102,6 +102,14 @@ class SourceUrlValidatorTest {
             assertThrows(IllegalArgumentException.class,
                     () -> SourceUrlValidator.validate("http://172.16.0.1:8080", true));
         }
+
+        @Test
+        @DisplayName("should reject unresolvable hosts (fail closed)")
+        void rejectsUnresolvableHost() {
+            var ex = assertThrows(IllegalArgumentException.class,
+                    () -> SourceUrlValidator.validate("http://this-host-does-not-exist.invalid:8080", true));
+            assertTrue(ex.getMessage().contains("could not be resolved"));
+        }
     }
 
     @Nested
@@ -138,7 +146,7 @@ class SourceUrlValidatorTest {
         @DisplayName("should accept valid HTTPS URL with port")
         void acceptsHttpsWithPort() {
             assertDoesNotThrow(
-                    () -> SourceUrlValidator.validate("https://staging.eddi.example.com:8443", false));
+                    () -> SourceUrlValidator.validate("https://example.com:8443", false));
         }
 
         @Test
@@ -152,7 +160,7 @@ class SourceUrlValidatorTest {
         @DisplayName("should accept valid HTTP URL in dev mode with path")
         void acceptsHttpWithPath() {
             assertDoesNotThrow(
-                    () -> SourceUrlValidator.validate("http://staging.example.com/api", true));
+                    () -> SourceUrlValidator.validate("http://example.com/api", true));
         }
     }
 }

@@ -300,7 +300,6 @@ public class RemoteApiResourceSource implements IResourceSource {
                 String contentJson = httpGet(restPath + extResId.getId() + "?version=" + extResId.getVersion());
 
                 // Try to read the descriptor name
-                String descriptorsPath = restPath.replace("/" + restPath.split("/")[restPath.split("/").length - 1] + "/", "/descriptors");
                 String name = tryReadDescriptorName(restPath, extResId.getId());
 
                 extensions.put(stepTypeStr, new ExtensionSourceData(

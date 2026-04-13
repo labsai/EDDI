@@ -73,18 +73,18 @@ public class AgentUseCaseIT extends BaseIntegrationIT {
         String userId = "12345";
 
         // Delete any stale trigger from a previous test run
-        given().delete("/triggerstore/triggers/" + intent);
+        given().delete("/AgentTriggerStore/agenttriggers/" + intent);
 
         // Register Agent trigger (create via POST)
         given().contentType(ContentType.JSON).body(String.format(load("useCases/AgentDeployment.json"), weatherAgentId.id()))
-                .post("/triggerstore/triggers").then().statusCode(200);
+                .post("/AgentTriggerStore/agenttriggers").then().statusCode(anyOf(equalTo(200), equalTo(201)));
 
         // End any existing conversation
-        given().post("/managedagents/" + intent + "/" + userId + "/endConversation");
+        given().post("/agents/managed/" + intent + "/" + userId + "/endConversation");
 
         // Send input via managed Agent API
         Response response = given().contentType(ContentType.JSON).body("{\"input\":\"weather\"}").queryParam("returnCurrentStepOnly", "false")
-                .post("/managedagents/" + intent + "/" + userId);
+                .post("/agents/managed/" + intent + "/" + userId);
 
         response.then().assertThat().statusCode(200).body("agentId", equalTo(weatherAgentId.id()))
                 .body("agentVersion", equalTo(weatherAgentId.version())).body("conversationSteps[1].conversationStep[1].key", equalTo("actions"))
@@ -100,7 +100,8 @@ public class AgentUseCaseIT extends BaseIntegrationIT {
         }
         File file = new File(resource.getFile().replaceFirst("^/([A-Z]:)", "$1"));
 
-        Response response = given().contentType("application/zip").body(file).post("/backup/import");
+        Response response = given()
+                .contentType("application/zip").body(file).post("/backup/import");
 
         response.then().statusCode(200);
 

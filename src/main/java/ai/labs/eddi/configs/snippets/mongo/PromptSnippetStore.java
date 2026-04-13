@@ -51,11 +51,10 @@ public class PromptSnippetStore extends AbstractResourceStore<PromptSnippet> imp
 
     @Override
     public List<PromptSnippet> readAll() throws ResourceStoreException {
-        // This delegates to the descriptor store via the PromptSnippetService.
-        // The store itself doesn't implement enumeration — that's the service's job
-        // via IDocumentDescriptorStore. This method exists for future direct-query
-        // implementations (e.g., a MongoDB aggregation pipeline).
-        throw new ResourceStoreException("readAll is implemented via PromptSnippetService using descriptor store enumeration");
+        // Snippet enumeration uses PromptSnippetService → IDocumentDescriptorStore,
+        // not direct store queries. This method exists to satisfy the interface
+        // contract but is not called in production code.
+        throw new ResourceStoreException("Direct readAll not supported. Use PromptSnippetService for snippet enumeration.");
     }
 
     private static void validateName(PromptSnippet snippet) throws ResourceStoreException {

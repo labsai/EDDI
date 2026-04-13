@@ -37,9 +37,10 @@ public class ResultManipulator<T> {
 
         filter = StringUtilities.convertToSearchString(filter);
 
-        // Pre-compile the pattern to (a) fail fast on invalid regex and
-        // (b) satisfy CodeQL's java/regex-injection taint analysis — the
-        // compile() call acts as a sanitization boundary.
+        // Pre-compile the pattern for performance. User input is already escaped
+        // by StringUtilities.convertToSearchString() → escapeRegexChars(), so regex
+        // injection is mitigated before reaching this point. The compile() call
+        // provides an additional safety net by failing fast on invalid patterns.
         Pattern filterPattern;
         try {
             filterPattern = Pattern.compile(filter);

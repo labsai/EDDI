@@ -40,14 +40,20 @@ public class ImportMergeIT extends BaseIntegrationIT {
     void importCreate() throws Exception {
         File agentZip = loadTestZip("weather_agent_v1");
 
-        Response response = given().contentType("application/zip").body(agentZip).post("/backup/import");
+        Response response = given()
+                .contentType("application/zip").body(agentZip).post("/backup/import");
+
+        System.out.println("=== IMPORT RESPONSE ===");
+        System.out.println("Status: " + response.statusCode());
+        System.out.println("Headers: " + response.headers().asList());
+        System.out.println("Body: " + response.body().asString().substring(0, Math.min(500, response.body().asString().length())));
 
         response.then().statusCode(200);
 
-        String location = response.getHeader("location");
-        assertThat("Import should return a location header", location, notNullValue());
+        String resourceUri = response.jsonPath().getString("resourceUri");
+        assertThat("Import should return a resourceUri", resourceUri, notNullValue());
 
-        firstImportAgentId = extractResourceId(location);
+        firstImportAgentId = extractResourceId(resourceUri);
         assertThat("Agent ID should not be null", firstImportAgentId.id(), notNullValue());
         assertThat("Agent version should be 1", firstImportAgentId.version(), equalTo(1));
 
@@ -127,8 +133,8 @@ public class ImportMergeIT extends BaseIntegrationIT {
 
         mergeResponse.then().statusCode(200);
 
-        String mergeLocation = mergeResponse.getHeader("location");
-        assertThat("Merge import should return a location header", mergeLocation, notNullValue());
+        String mergeLocation = mergeResponse.jsonPath().getString("resourceUri");
+        assertThat("Merge import should return a resourceUri", mergeLocation, notNullValue());
 
         ResourceId mergedAgentId = extractResourceId(mergeLocation);
 
@@ -182,8 +188,8 @@ public class ImportMergeIT extends BaseIntegrationIT {
 
         selectiveResponse.then().statusCode(200);
 
-        String location = selectiveResponse.getHeader("location");
-        assertThat("Selective merge should return a location header", location, notNullValue());
+        String location = selectiveResponse.jsonPath().getString("resourceUri");
+        assertThat("Selective merge should return a resourceUri", location, notNullValue());
     }
 
     // ==================== Test 7: Second create import should produce different ID
@@ -195,12 +201,13 @@ public class ImportMergeIT extends BaseIntegrationIT {
     void createAlwaysNew() throws Exception {
         File agentZip = loadTestZip("weather_agent_v1");
 
-        Response response = given().contentType("application/zip").body(agentZip).post("/backup/import");
+        Response response = given()
+                .contentType("application/zip").body(agentZip).post("/backup/import");
 
         response.then().statusCode(200);
 
-        String location = response.getHeader("location");
-        assertThat("Import should return a location header", location, notNullValue());
+        String location = response.jsonPath().getString("resourceUri");
+        assertThat("Import should return a resourceUri", location, notNullValue());
 
         ResourceId secondAgentId = extractResourceId(location);
 

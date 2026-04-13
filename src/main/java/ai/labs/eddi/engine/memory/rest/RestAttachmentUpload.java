@@ -92,7 +92,9 @@ public class RestAttachmentUpload {
         } catch (IOException e) {
             LOGGER.errorf(e, "Failed to read uploaded file: %s", fileName);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                    .entity(Map.of("error", "Failed to process upload: " + e.getMessage()))
+                    .entity(Map.of(
+                            "error", "Failed to process upload",
+                            "code", "ATTACHMENT_UPLOAD_FAILED"))
                     .build();
         }
     }

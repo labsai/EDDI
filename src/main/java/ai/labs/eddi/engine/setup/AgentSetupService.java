@@ -82,7 +82,7 @@ public class AgentSetupService {
      */
     public SetupResult setupAgent(SetupAgentRequest request) throws AgentSetupException {
         // Validate required params
-        if (request.name() == null || request.name().isBlank()) {
+        if (request.agentName() == null || request.agentName().isBlank()) {
             throw new AgentSetupException("Agent name is required");
         }
         if (request.systemPrompt() == null || request.systemPrompt().isBlank()) {
@@ -109,7 +109,7 @@ public class AgentSetupService {
             String parserId = extractIdFromLocation(parserLocation);
             int parserVersion = extractVersionFromLocation(parserLocation);
             createdResources.put("parserLocation", parserLocation);
-            patchDescriptor(parserId, parserVersion, request.name());
+            patchDescriptor(parserId, parserVersion, request.agentName());
 
             // --- Step 2: Create Behavior Rules ---
             var behaviorConfig = createBehaviorConfig();
@@ -118,7 +118,7 @@ public class AgentSetupService {
             String behaviorId = extractIdFromLocation(behaviorLocation);
             int behaviorVersion = extractVersionFromLocation(behaviorLocation);
             createdResources.put("behaviorLocation", behaviorLocation);
-            patchDescriptor(behaviorId, behaviorVersion, request.name());
+            patchDescriptor(behaviorId, behaviorVersion, request.agentName());
 
             // --- Step 3: Create LLM Configuration ---
             var llmConfig = createLlmConfig(params.providerType, params.modelId, request.apiKey(), request.systemPrompt(), toolsEnabled,
@@ -128,7 +128,7 @@ public class AgentSetupService {
             String langchainId = extractIdFromLocation(langchainLocation);
             int langchainVersion = extractVersionFromLocation(langchainLocation);
             createdResources.put("langchainLocation", langchainLocation);
-            patchDescriptor(langchainId, langchainVersion, request.name());
+            patchDescriptor(langchainId, langchainVersion, request.agentName());
 
             // --- Step 4: Create MCP Calls Configurations (if MCP server URLs provided) ---
             List<String> mcpCallsLocations = null;
@@ -145,7 +145,7 @@ public class AgentSetupService {
                     int mcpVersion = extractVersionFromLocation(mcpLocation);
                     mcpCallsLocations.add(mcpLocation);
                     createdResources.put("mcpCallsLocation_" + mcpCallsLocations.size(), mcpLocation);
-                    patchDescriptor(mcpId, mcpVersion, request.name());
+                    patchDescriptor(mcpId, mcpVersion, request.agentName());
                 }
             }
 
@@ -158,7 +158,7 @@ public class AgentSetupService {
                 String outputId = extractIdFromLocation(outputLocation);
                 int outputVersion = extractVersionFromLocation(outputLocation);
                 createdResources.put("outputLocation", outputLocation);
-                patchDescriptor(outputId, outputVersion, request.name());
+                patchDescriptor(outputId, outputVersion, request.agentName());
             }
 
             // --- Step 6: Create Workflow ---
@@ -168,7 +168,7 @@ public class AgentSetupService {
             String workflowId = extractIdFromLocation(workflowLocation);
             int workflowVersion = extractVersionFromLocation(workflowLocation);
             createdResources.put("packageLocation", workflowLocation);
-            patchDescriptor(workflowId, workflowVersion, request.name());
+            patchDescriptor(workflowId, workflowVersion, request.agentName());
 
             // --- Step 7: Create Agent ---
             var agentConfig = new AgentConfiguration();
@@ -178,11 +178,11 @@ public class AgentSetupService {
             String agentId = extractIdFromLocation(agentLocation);
             int agentVersion = extractVersionFromLocation(agentLocation);
             createdResources.put("agentLocation", agentLocation);
-            patchDescriptor(agentId, agentVersion, request.name());
+            patchDescriptor(agentId, agentVersion, request.agentName());
 
             // --- Step 8: Deploy ---
             var resultBuilder = SetupResult.builder().action("setup_complete").agentId(agentId != null ? agentId : "unknown")
-                    .agentName(request.name()).provider(params.providerType).model(params.modelId);
+                    .agentName(request.agentName()).provider(params.providerType).model(params.modelId);
 
             if (quickReplies)
                 resultBuilder.quickRepliesEnabled(true);
@@ -216,7 +216,7 @@ public class AgentSetupService {
      */
     public SetupResult createApiAgent(CreateApiAgentRequest request) throws AgentSetupException {
         // Validate required params
-        if (request.name() == null || request.name().isBlank()) {
+        if (request.agentName() == null || request.agentName().isBlank()) {
             throw new AgentSetupException("Agent name is required");
         }
         if (request.systemPrompt() == null || request.systemPrompt().isBlank()) {
@@ -255,7 +255,7 @@ public class AgentSetupService {
 
                 String httpCallsId = extractIdFromLocation(httpCallsLocation);
                 int httpCallsVersion = extractVersionFromLocation(httpCallsLocation);
-                patchDescriptor(httpCallsId, httpCallsVersion, request.name() + " - " + groupName);
+                patchDescriptor(httpCallsId, httpCallsVersion, request.agentName() + " - " + groupName);
             }
             createdResources.put("httpCallsGroups", groupNames);
             createdResources.put("httpCallsLocations", httpCallsLocations);
@@ -265,14 +265,14 @@ public class AgentSetupService {
             Response parserResponse = getRestStore(IRestParserStore.class).createParser(parserConfig);
             String parserLocation = parserResponse.getHeaderString("Location");
             createdResources.put("parserLocation", parserLocation);
-            patchDescriptor(extractIdFromLocation(parserLocation), extractVersionFromLocation(parserLocation), request.name());
+            patchDescriptor(extractIdFromLocation(parserLocation), extractVersionFromLocation(parserLocation), request.agentName());
 
             // --- Step 4: Create Behavior Rules ---
             var behaviorConfig = createBehaviorConfig();
             Response behaviorResponse = getRestStore(IRestRuleSetStore.class).createRuleSet(behaviorConfig);
             String behaviorLocation = behaviorResponse.getHeaderString("Location");
             createdResources.put("behaviorLocation", behaviorLocation);
-            patchDescriptor(extractIdFromLocation(behaviorLocation), extractVersionFromLocation(behaviorLocation), request.name());
+            patchDescriptor(extractIdFromLocation(behaviorLocation), extractVersionFromLocation(behaviorLocation), request.agentName());
 
             // Enrich the system prompt with API endpoint summary so the LLM
             // understands which endpoints are available and how to use them.
@@ -285,14 +285,14 @@ public class AgentSetupService {
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);
-            patchDescriptor(extractIdFromLocation(langchainLocation), extractVersionFromLocation(langchainLocation), request.name());
+            patchDescriptor(extractIdFromLocation(langchainLocation), extractVersionFromLocation(langchainLocation), request.agentName());
 
             // --- Step 6: Create Workflow (with httpcalls in pipeline) ---
             var workflowConfig = createWorkflowConfig(parserLocation, behaviorLocation, httpCallsLocations, null, langchainLocation, null);
             Response workflowResponse = getRestStore(IRestWorkflowStore.class).createWorkflow(workflowConfig);
             String workflowLocation = workflowResponse.getHeaderString("Location");
             createdResources.put("packageLocation", workflowLocation);
-            patchDescriptor(extractIdFromLocation(workflowLocation), extractVersionFromLocation(workflowLocation), request.name());
+            patchDescriptor(extractIdFromLocation(workflowLocation), extractVersionFromLocation(workflowLocation), request.agentName());
 
             // --- Step 7: Create Agent ---
             var agentConfig = new AgentConfiguration();
@@ -302,11 +302,11 @@ public class AgentSetupService {
             String agentId = extractIdFromLocation(agentLocation);
             int agentVersion = extractVersionFromLocation(agentLocation);
             createdResources.put("agentLocation", agentLocation);
-            patchDescriptor(agentId, agentVersion, request.name());
+            patchDescriptor(agentId, agentVersion, request.agentName());
 
             // --- Step 8: Deploy ---
             var resultBuilder = SetupResult.builder().action("api_agent_created").agentId(agentId != null ? agentId : "unknown")
-                    .agentName(request.name()).provider(params.providerType).model(params.modelId).endpointCount(buildResult.endpointCount())
+                    .agentName(request.agentName()).provider(params.providerType).model(params.modelId).endpointCount(buildResult.endpointCount())
                     .groups(groupNames);
 
             if (params.shouldDeploy && agentId != null) {

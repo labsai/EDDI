@@ -44,7 +44,7 @@ public class McpSetupTools {
             + "This creates all necessary resources (behavior rules, LLM connection, "
             + "output set, package, agent), names them, and optionally deploys the agent. "
             + "This is the fastest way to get a new Agent running — equivalent to the Agent Father workflow.")
-    public String setupAgent(@ToolArg(description = "Agent name (required)") String name,
+    public String setupAgent(@ToolArg(description = "Agent name (required)") String agentName,
                              @ToolArg(description = "System prompt / role for the LLM (required). "
                                      + "Describes the agent's personality and purpose.") String systemPrompt,
                              @ToolArg(description = "LLM provider type: 'anthropic' (default), 'openai', 'gemini', "
@@ -77,7 +77,7 @@ public class McpSetupTools {
                              @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         requireRole(identity, authEnabled, "eddi-editor");
         try {
-            var request = new SetupAgentRequest(name, systemPrompt, provider, model, apiKey, baseUrl, introMessage, enableBuiltInTools,
+            var request = new SetupAgentRequest(agentName, systemPrompt, provider, model, apiKey, baseUrl, introMessage, enableBuiltInTools,
                     builtInToolsWhitelist, enableQuickReplies, enableSentimentAnalysis, mcpServerUrls, deploy, environment);
             var result = agentSetupService.setupAgent(request);
             return jsonSerialization.serialize(result);
@@ -94,7 +94,7 @@ public class McpSetupTools {
             + "creates behavior rules with API-specific actions, and deploys a Agent that the LLM "
             + "can use to call the API endpoints. Endpoints are grouped by OpenAPI tag into separate "
             + "ApiCalls resources. Deprecated endpoints are automatically skipped.")
-    public String createApIAgent(@ToolArg(description = "Agent name (required)") String name,
+    public String createApIAgent(@ToolArg(description = "Agent name (required)") String agentName,
                                  @ToolArg(description = "System prompt for the LLM (required). "
                                          + "Include instructions on how to use the API.") String systemPrompt,
                                  @ToolArg(description = "OpenAPI 3.x spec as JSON/YAML string or a URL (required)") String openApiSpec,
@@ -115,7 +115,7 @@ public class McpSetupTools {
                                  @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
         requireRole(identity, authEnabled, "eddi-editor");
         try {
-            var request = new CreateApiAgentRequest(name, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints,
+            var request = new CreateApiAgentRequest(agentName, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints,
                     enableQuickReplies, enableSentimentAnalysis, deploy, environment);
             var result = agentSetupService.createApiAgent(request);
             return jsonSerialization.serialize(result);

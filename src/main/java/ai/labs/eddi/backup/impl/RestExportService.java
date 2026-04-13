@@ -132,6 +132,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             // java/path-injection)
             sanitizePathComponent(agentId, "agentId");
 
+            // Parse selective export filter — null means "export all"
+            Set<String> selectedIds = parseSelectedResourceIds(selectedResourceIds);
+
             AgentConfiguration agentConfig = agentStore.read(agentId, agentVersion);
             Path agentPath = writeDirAndDocument(agentId, agentVersion, jsonSerialization.serialize(agentConfig), tmpPath, AGENT_EXT);
             Map<IResourceId, WorkflowConfiguration> workflowConfigurations = readConfigs(workflowStore, agentConfig.getWorkflows());
@@ -144,49 +147,49 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             for (IResourceId resourceId : workflowConfigurations.keySet()) {
                 WorkflowConfiguration workflowConfig = workflowConfigurations.get(resourceId);
                 String workflowConfigString = jsonSerialization.serialize(workflowConfig);
+                // Workflow skeletons are always included (required)
                 Path workflowPath = writeDirAndDocument(resourceId.getId(), resourceId.getVersion(), workflowConfigString, agentPath, WORKFLOW_EXT);
                 writeDocumentDescriptor(workflowPath, resourceId.getId(), resourceId.getVersion());
 
                 Map<IResourceId, String> dictionaryConfigs = convertConfigsToString(
                         readConfigs(regularDictionaryStore, extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN)));
-                writeConfigs(workflowPath, dictionaryConfigs, DICTIONARY_EXT);
+                writeSelectedConfigs(workflowPath, dictionaryConfigs, DICTIONARY_EXT, selectedIds);
 
                 Map<IResourceId, String> behaviorConfigs = convertConfigsToString(
                         readConfigs(behaviorStore, extractResourcesUris(workflowConfigString, BEHAVIOR_URI_PATTERN)));
-                writeConfigs(workflowPath, behaviorConfigs, BEHAVIOR_EXT);
+                writeSelectedConfigs(workflowPath, behaviorConfigs, BEHAVIOR_EXT, selectedIds);
 
                 Map<IResourceId, String> httpCallsConfigs = convertConfigsToString(
                         readConfigs(httpCallsStore, extractResourcesUris(workflowConfigString, HTTPCALLS_URI_PATTERN)));
-                writeConfigs(workflowPath, httpCallsConfigs, HTTPCALLS_EXT);
+                writeSelectedConfigs(workflowPath, httpCallsConfigs, HTTPCALLS_EXT, selectedIds);
 
                 Map<IResourceId, String> llmConfigs = convertConfigsToString(
                         readConfigs(llmStore, extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN)));
-                writeConfigs(workflowPath, llmConfigs, LLM_EXT);
+                writeSelectedConfigs(workflowPath, llmConfigs, LLM_EXT, selectedIds);
 
                 Map<IResourceId, String> propertyConfigs = convertConfigsToString(
                         readConfigs(propertySetterStore, extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN)));
-                writeConfigs(workflowPath, propertyConfigs, PROPERTY_EXT);
+                writeSelectedConfigs(workflowPath, propertyConfigs, PROPERTY_EXT, selectedIds);
 
                 Map<IResourceId, String> outputConfigs = convertConfigsToString(
                         readConfigs(outputStore, extractResourcesUris(workflowConfigString, OUTPUT_URI_PATTERN)));
-                writeConfigs(workflowPath, outputConfigs, OUTPUT_EXT);
+                writeSelectedConfigs(workflowPath, outputConfigs, OUTPUT_EXT, selectedIds);
 
                 Map<IResourceId, String> mcpConfigs = convertConfigsToString(
                         readConfigs(mcpCallsStore, extractResourcesUris(workflowConfigString, MCPCALLS_URI_PATTERN)));
-                writeConfigs(workflowPath, mcpConfigs, MCPCALLS_EXT);
+                writeSelectedConfigs(workflowPath, mcpConfigs, MCPCALLS_EXT, selectedIds);
 
                 Map<IResourceId, String> ragConfigs = convertConfigsToString(
                         readConfigs(ragStore, extractResourcesUris(workflowConfigString, RAG_URI_PATTERN)));
-                writeConfigs(workflowPath, ragConfigs, RAG_EXT);
+                writeSelectedConfigs(workflowPath, ragConfigs, RAG_EXT, selectedIds);
 
                 // Collect serialized configs for snippet reference scanning
-                // (snippet refs like {{snippets.name}} can appear in LLM system prompts,
-                // httpCall templates, property setter instructions, and output templates)
+                // Only scan configs that were actually selected for export
                 allExtensionConfigs.add(workflowConfigString);
-                allExtensionConfigs.addAll(llmConfigs.values());
-                allExtensionConfigs.addAll(httpCallsConfigs.values());
-                allExtensionConfigs.addAll(propertyConfigs.values());
-                allExtensionConfigs.addAll(outputConfigs.values());
+                collectSelectedConfigs(allExtensionConfigs, llmConfigs, selectedIds);
+                collectSelectedConfigs(allExtensionConfigs, httpCallsConfigs, selectedIds);
+                collectSelectedConfigs(allExtensionConfigs, propertyConfigs, selectedIds);
+                collectSelectedConfigs(allExtensionConfigs, outputConfigs, selectedIds);
 
                 Path unusedPath = Files.createDirectories(Paths.get(tmpPath.toString(), agentId, "unused")).normalize();
 
@@ -203,7 +206,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
             }
 
-            // Export only snippets actually referenced by this agent's configs
+            // Export only snippets actually referenced by the exported configs
             Set<String> referencedSnippetNames = extractReferencedSnippetNames(allExtensionConfigs);
             exportSnippets(agentPath, referencedSnippetNames);
 
@@ -250,7 +253,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
                 // Walk extensions within this workflow
                 String wfJson = jsonSerialization.serialize(wfConfig);
-                addExtensionResources(resources, wfJson, wfId, wfIndex);
+                addExtensionResources(resources, wfJson, wfId);
 
                 wfIndex++;
             }
@@ -277,7 +280,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     }
 
     private void addExtensionResources(List<ExportableResource> resources, String wfJson,
-                                       String parentWorkflowId, int workflowIndex) {
+                                       String parentWorkflowId) {
         addExtensionResourcesForType(resources, wfJson, DICTIONARY_URI_PATTERN, "regulardictionary", parentWorkflowId);
         addExtensionResourcesForType(resources, wfJson, BEHAVIOR_URI_PATTERN, "behavior", parentWorkflowId);
         addExtensionResourcesForType(resources, wfJson, HTTPCALLS_URI_PATTERN, "httpcalls", parentWorkflowId);
@@ -404,6 +407,52 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 log.error(e.getLocalizedMessage(), e);
             }
         });
+    }
+
+    /**
+     * Writes only configs whose resource ID is in the selection set. If
+     * {@code selectedIds} is null, all configs are written (full export).
+     */
+    private void writeSelectedConfigs(Path path, Map<IResourceId, String> configs,
+                                      String fileExtension, Set<String> selectedIds) {
+        if (selectedIds == null) {
+            writeConfigs(path, configs, fileExtension);
+            return;
+        }
+        Map<IResourceId, String> filtered = configs.entrySet().stream()
+                .filter(e -> selectedIds.contains(e.getKey().getId()))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        writeConfigs(path, filtered, fileExtension);
+    }
+
+    /**
+     * Collects config values for snippet reference scanning, respecting the
+     * selection filter. If {@code selectedIds} is null, all values are collected.
+     */
+    private void collectSelectedConfigs(List<String> target, Map<IResourceId, String> configs,
+                                        Set<String> selectedIds) {
+        if (selectedIds == null) {
+            target.addAll(configs.values());
+            return;
+        }
+        configs.entrySet().stream()
+                .filter(e -> selectedIds.contains(e.getKey().getId()))
+                .map(Map.Entry::getValue)
+                .forEach(target::add);
+    }
+
+    /**
+     * Parses a comma-separated list of resource IDs from the query parameter.
+     * Returns {@code null} if the input is null or blank (meaning "export all").
+     */
+    private Set<String> parseSelectedResourceIds(String selectedResourceIds) {
+        if (isNullOrEmpty(selectedResourceIds) || selectedResourceIds.isBlank()) {
+            return null;
+        }
+        return Arrays.stream(selectedResourceIds.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
     private void writeUnusedConfigs(Path path, Map<IResourceId, String> configs, String fileExtension) {
