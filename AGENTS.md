@@ -172,8 +172,8 @@ When tasks process templates (system prompts, HTTP call bodies, property instruc
 | Key | Type | Source | Example Access |
 |---|---|---|---|
 | `context` | `Map<String, Object>` | Input context variables set per turn | `{{context.language}}` |
-| `properties` | `Map<String, Property>` | **All conversation properties** — includes both session-scoped and `longTerm` properties loaded from persistent storage | `{{properties.preferred_language.valueString}}` |
-| `memory` | `Map` with `current`, `last`, `past` | Conversation step data from the pipeline | `{{memory.current.output}}`, `{{memory.last.input}}` |
+| `properties` | `Map<String, Object>` | Conversation properties — raw values from `ConversationProperties.toMap()` | `{properties.preferred_language}` |
+| `memory` | `Map` with `current`, `last`, `past` | Conversation step data from the pipeline | `{memory.current.output}`, `{memory.last.input}` |
 | `userInfo` | `Map` with `userId` | Authenticated user identity | `{{userInfo.userId}}` |
 | `conversationInfo` | `Map` with `conversationId`, `agentId`, etc. | Conversation metadata | `{{conversationInfo.agentId}}` |
 | `conversationLog` | `String` | Formatted conversation history | `{{conversationLog}}` |
@@ -541,10 +541,195 @@ When designing any new feature, always consider these before finalizing the desi
 | `docs/`                                     | 40 markdown files, published at docs.labs.ai              |
 | `docs/v6-planning/`                         | Architecture analysis, changelog, business logic analysis |
 | `docker-compose.yml`                        | EDDI + MongoDB local setup                                |
+| `docs/agent-configs/`                       | Agent config sources (e.g. Agent Father) — reference for AI |
 
 ---
 
-## 5. Session Protocol
+## 5. Agent Config Authoring Reference
+
+> **This section prevents wrong assumptions when writing agent JSON configs.** Always consult this when building behavior rules, property setters, output configs, or HTTP calls.
+
+### 5.1 Template Syntax
+
+EDDI v6 uses **Qute templates** with `{expression}` syntax, NOT Thymeleaf `[[${expression}]]`.
+
+#### ⚠️ Critical: `properties` returns RAW values, NOT Property objects
+
+`MemoryItemConverter.convert()` puts `ConversationProperties.toMap()` into the template context. The `toMap()` method returns **raw Java values** (String, Integer, Map, etc.), NOT `Property` objects.
+
+```
+✅ CORRECT:   {properties.agentName}        → returns the String value
+❌ WRONG:     {properties.agentName.valueString}  → fails at runtime (String has no .valueString)
+```
+
+This is because `ConversationProperties.put()` stores `property.getValueString()` (or `getValueObject()`, etc.) directly into the internal `propertiesMap`. By the time templates see it, the Property wrapper is gone.
+
+#### Template variables available in all contexts
+
+| Variable | Returns | Example |
+|---|---|---|
+| `{properties.key}` | Raw value (string, int, map) | `{properties.agentName}` |
+| `{memory.current.input}` | User's input text for current step | Used in property setter to capture free-text |
+| `{memory.current.output}` | Output text for current step | |
+| `{memory.last.input}` | Previous step's input | |
+| `{context.key}` | Context variable set by client | `{context.language}` |
+| `{userInfo.userId}` | Authenticated user ID | |
+| `{conversationInfo.agentId}` | Current agent ID | |
+| `{conversationInfo.conversationId}` | Current conversation ID | |
+| `{conversationLog}` | Formatted conversation history | |
+
+### 5.2 Conversation Lifecycle for Rule-Based Agents
+
+```
+1. Conversation.init()
+   └─→ Step 0 created
+   └─→ CONVERSATION_START action added to step 0
+   └─→ Pipeline runs with empty input ("")
+   └─→ Output for CONVERSATION_START fires (greeting shown BEFORE user says anything)
+
+2. User sends first message → say(message)
+   └─→ Step 1 created (startNextStep)
+   └─→ User input stored in memory
+   └─→ Behavior rules evaluate:
+       • lastStep = Step 0 (has CONVERSATION_START action)
+       • currentStep = Step 1 (has user's input/expressions)
+   └─→ Output fires for matched actions
+
+3. User sends second message → say(message)
+   └─→ Step 2 created
+   └─→ lastStep = Step 1, currentStep = Step 2
+   └─→ ... and so on
+```
+
+> **Key insight**: The greeting output fires automatically at `init()` — the user doesn't need to type anything first.
+
+### 5.3 Behavior Rule Safety Rules
+
+#### Every rule MUST have an `actionmatcher` on `lastStep`
+
+Behavior rules within a group ALL fire if their conditions match. Rules with only `inputmatcher` conditions are dangerous — they match globally regardless of conversation state.
+
+```
+❌ DANGEROUS: Rule fires on ANY step if user somehow sends matching expression
+{
+  "name" : "Start over",
+  "actions" : [ "ask_for_agent_name" ],
+  "conditions" : [ {
+    "type" : "inputmatcher",
+    "configs" : { "expressions" : "start_over", "occurrence" : "currentStep" }
+  } ]
+}
+
+✅ SAFE: Rule only fires when the confirmation step was the previous step
+{
+  "name" : "Start over",
+  "actions" : [ "ask_for_agent_name" ],
+  "conditions" : [ {
+    "type" : "actionmatcher",
+    "configs" : { "actions" : "confirm_creation", "occurrence" : "lastStep" }
+  }, {
+    "type" : "inputmatcher",
+    "configs" : { "expressions" : "start_over", "occurrence" : "currentStep" }
+  } ]
+}
+```
+
+#### Quick reply expressions must be unique identifiers
+
+Do NOT reuse system action names (like `CONVERSATION_START`) as quick reply expressions. Use dedicated identifiers:
+
+```
+❌ WRONG:  "expressions" : "CONVERSATION_START"   (system action name)
+✅ RIGHT:  "expressions" : "get_started"           (dedicated identifier)
+```
+
+### 5.4 Property Setter Patterns
+
+#### Scope values
+
+| Scope | Behavior |
+|---|---|
+| `step` | Cleared at end of turn |
+| `conversation` | Lives for the session (default for most agent-building properties) |
+| `longTerm` | Persisted to `usermemories` collection across conversations |
+| `secret` | Auto-vaulted: plaintext stored in SecretsVault, raw input scrubbed from memory, vault reference (`${eddivault:...}`) stored as property value |
+
+#### Capturing user input vs. setting fixed values
+
+```json
+// Capture free-text input from user
+{ "name" : "agentName", "valueString" : "{memory.current.input}", "scope" : "conversation" }
+
+// Set a fixed value (from quick reply selection)
+{ "name" : "provider", "valueString" : "anthropic", "scope" : "conversation" }
+
+// When a quick reply has a default value, use a dedicated action + fixed value
+{ "name" : "baseUrl", "valueString" : "http://localhost:11434", "scope" : "conversation" }
+```
+
+### 5.5 ZIP Structure for Agent Import
+
+Agent ZIP files are imported via `RestImportService`. The file naming convention determines resource type:
+
+```
+agent-name.agent.json            → Agent configuration
+agent-name.descriptor.json       → Agent descriptor (name, description, version)
+workflow-name/
+  1/
+    workflow-name.workflow.json  → Workflow definition
+    workflow-name.descriptor.json
+    behavior.behavior.json       → Behavior rules
+    behavior.descriptor.json
+    property.property.json       → Property setter
+    property.descriptor.json
+    httpcalls.httpcalls.json     → HTTP API calls
+    httpcalls.descriptor.json
+    output.output.json           → Output messages + quick replies
+    output.descriptor.json
+    langchain.langchain.json     → LLM configuration (if applicable)
+    langchain.descriptor.json
+```
+
+#### URI format (v6 canonical)
+
+Always use v6 canonical URIs in new configs:
+
+| Resource | URI Pattern |
+|---|---|
+| Agent | `eddi://ai.labs.agent/agentstore/agents/{id}?version=1` |
+| Workflow | `eddi://ai.labs.workflow/workflowstore/workflows/{id}?version=1` |
+| Rules | `eddi://ai.labs.rules/rulestore/rulesets/{id}?version=1` |
+| ApiCalls | `eddi://ai.labs.apicalls/apicallstore/apicalls/{id}?version=1` |
+| Property | `eddi://ai.labs.property/propertysetterstore/propertysetters/{id}?version=1` |
+| Output | `eddi://ai.labs.output/outputstore/outputsets/{id}?version=1` |
+| LLM | `eddi://ai.labs.llm/llmstore/llms/{id}?version=1` |
+| Dictionary | `eddi://ai.labs.dictionary/dictionarystore/dictionaries/{id}?version=1` |
+
+> Legacy URIs (e.g. `ai.labs.bot/botstore/bots/`) are auto-normalized by `AbstractBackupService.normalizeLegacyUris()` during import, but new configs should always use v6 format.
+
+#### Workflow step types
+
+| Step `type` | Config URI prefix | Required? |
+|---|---|---|
+| `eddi://ai.labs.parser` | — (no config URI) | Yes — always first |
+| `eddi://ai.labs.behavior` | `eddi://ai.labs.rules/...` | Yes — the orchestrator |
+| `eddi://ai.labs.property` | `eddi://ai.labs.property/...` | Optional — slot-filling |
+| `eddi://ai.labs.httpcalls` | `eddi://ai.labs.apicalls/...` | Optional — API calls |
+| `eddi://ai.labs.output` | `eddi://ai.labs.output/...` | Usually yes — user messages |
+| `eddi://ai.labs.langchain` | `eddi://ai.labs.llm/...` | Optional — LLM interaction |
+
+### 5.6 Reference Implementation
+
+The **Agent Father** (`docs/agent-configs/agent-father/`) is a complete, working, rule-based agent config. Use it as the canonical reference for:
+- Behavior rule patterns with `actionmatcher` + `inputmatcher`
+- Property setter with `scope: "secret"` for auto-vault
+- HTTP call template syntax
+- Output with quick replies
+- Provider-aware branching (local vs. cloud LLM providers)
+
+---
+
+## 6. Session Protocol
 
 **If picking up from a previous session:**
 

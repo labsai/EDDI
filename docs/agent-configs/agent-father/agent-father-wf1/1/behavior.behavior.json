@@ -337,6 +337,12 @@
       "name" : "Create Agent",
       "actions" : [ "create_agent", "CONVERSATION_END" ],
       "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "confirm_creation",
+          "occurrence" : "lastStep"
+        }
+      }, {
         "type" : "inputmatcher",
         "configs" : {
           "expressions" : "confirm_create_agent",
@@ -347,6 +353,12 @@
       "name" : "Start over",
       "actions" : [ "ask_for_agent_name" ],
       "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "confirm_creation",
+          "occurrence" : "lastStep"
+        }
+      }, {
         "type" : "inputmatcher",
         "configs" : {
           "expressions" : "start_over",

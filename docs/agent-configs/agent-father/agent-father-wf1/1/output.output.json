@@ -17,7 +17,7 @@
     } ],
     "quickReplies" : [ {
       "value" : "Let's get started!",
-      "expressions" : "CONVERSATION_START"
+      "expressions" : "get_started"
     }, {
       "value" : "Not now",
       "expressions" : "exit_conversation, CONVERSATION_END"
