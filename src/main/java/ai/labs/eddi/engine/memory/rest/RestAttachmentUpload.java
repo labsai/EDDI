@@ -58,7 +58,6 @@ public class RestAttachmentUpload {
                                      @PathParam("conversationId") String conversationId,
                                      @RestForm("file") FileUpload file) {
 
-
         if (attachmentStorageInstance.isUnsatisfied()) {
             return Response.status(Response.Status.SERVICE_UNAVAILABLE)
                     .entity(Map.of("error", "No attachment storage configured"))

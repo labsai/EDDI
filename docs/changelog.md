@@ -13,6 +13,27 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Code Cleanup & Test Stabilization (2026-04-13)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**What changed:**
+
+Comprehensive code quality remediation across 21 files, resolving all build warnings, fixing 5 test failures, and deduplicating Maven dependencies.
+
+| Category | Changes |
+|----------|---------|
+| **pom.xml** | Deduplicated testcontainers dependencies (3 duplicates removed), unified version to 1.21.4, added `<?m2e ignore?>` for checkstyle plugin to silence Eclipse/m2e lifecycle warning |
+| **Unused imports** | Removed across 9 files: `PromptSnippetStore`, `PostgresAttachmentStorage`, `RestExportServiceTest`, `ZipResourceSourceTest`, `ConversationMemoryUtilitiesTest`, `ConversationStoreIT`, `PrePostUtilsVerifyHttpCodeTest`, `OutputGenerationTest`, `ToolRateLimiterTest` |
+| **Redundant annotations** | Removed `@SuppressWarnings` in `UpgradeExecutor`, `StructuralMatcherTest`, `MigrationManagerTest`, `A2ATaskHandlerTest` |
+| **Resource management** | `ZipResourceSource`: removed redundant `AutoCloseable` interface; tests use try-with-resources |
+| **Test fixes** | `RestAttachmentUploadTest`: mocked `isUnsatisfied()`/`isAmbiguous()` (production code) instead of `isResolvable()` (not used); `ContentTypeMatcherTest`: aligned 3 assertions with production minCount clamping (≥1); `LlmTaskTest`: relaxed CDI boundary assertion to accept `RuntimeException`; `AgentEngineIT`: added missing `assertNotNull` import |
+| **Deprecated API** | `ContainerBaseIT`/`PostgresAgentUseCaseIT`: migrated from `withDockerfilePath()` to `withDockerfile(Path)` |
+
+**Verification:** 2117 unit tests pass, 0 failures, 0 checkstyle violations.
+
+---
+
 ## README Restructure — Table of Contents & Quick Start (2026-04-13)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)

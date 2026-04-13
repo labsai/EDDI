@@ -4,6 +4,7 @@ Thumbs.db
 desktop.ini
 *~
 bot-father/
+tmp_botfather/
 
 # === Java ===
 *.class

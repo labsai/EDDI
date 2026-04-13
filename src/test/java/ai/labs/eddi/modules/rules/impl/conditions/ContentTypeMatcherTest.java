@@ -128,23 +128,22 @@ class ContentTypeMatcherTest {
         }
 
         @Test
-        @DisplayName("should parse negative minCount — consistent with SizeMatcher/Occurrence sentinel pattern")
-        void parsesNegativeMinCount() {
+        @DisplayName("should clamp negative minCount to 1")
+        void clampsNegativeMinCount() {
             matcher.setConfigs(Map.of("mimeType", "image/*", "minCount", "-1"));
 
-            // Negative values are an established pattern in the rules engine:
-            // SizeMatcher.min defaults to -1 (meaning "not configured"),
-            // Occurrence.minTimesOccurred defaults to -1. ContentTypeMatcher
-            // follows the same convention for consistency.
-            assertEquals("-1", matcher.getConfigs().get("minCount"));
+            // Negative values are clamped to 1 by the production code.
+            // Unlike SizeMatcher which uses -1 as a sentinel, ContentTypeMatcher
+            // enforces minCount >= 1 for safety.
+            assertEquals("1", matcher.getConfigs().get("minCount"));
         }
 
         @Test
-        @DisplayName("should parse zero minCount")
-        void parsesZeroMinCount() {
+        @DisplayName("should clamp zero minCount to 1")
+        void clampsZeroMinCount() {
             matcher.setConfigs(Map.of("mimeType", "image/*", "minCount", "0"));
 
-            assertEquals("0", matcher.getConfigs().get("minCount"));
+            assertEquals("1", matcher.getConfigs().get("minCount"));
         }
     }
 
@@ -525,13 +524,13 @@ class ContentTypeMatcherTest {
         }
 
         @Test
-        @DisplayName("should SUCCESS with minCount 0 and no matching attachments")
-        void minCountZeroAlwaysSucceeds() {
+        @DisplayName("should FAIL with minCount 0 (clamped to 1) and no matching attachments")
+        void minCountZeroClampedToOne() {
             matcher.setConfigs(Map.of("mimeType", "image/*", "minCount", "0"));
             stubAttachmentList(new Attachment("application/pdf", "d.pdf", 5000, "ref"));
 
-            // 0 matching >= 0 minCount → SUCCESS
-            assertEquals(SUCCESS, matcher.execute(memory, List.of()));
+            // minCount=0 is clamped to 1, so 0 matching attachments → FAIL
+            assertEquals(FAIL, matcher.execute(memory, List.of()));
         }
 
         @Test

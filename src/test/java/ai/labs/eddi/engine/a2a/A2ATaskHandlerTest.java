@@ -309,7 +309,6 @@ class A2ATaskHandlerTest {
 
     // ─── Test helper: simple ConcurrentHashMap-based ICache ─────
 
-    @SuppressWarnings("serial")
     private static class MapCache<K, V> extends ConcurrentHashMap<K, V> implements ICache<K, V> {
 
         @Override

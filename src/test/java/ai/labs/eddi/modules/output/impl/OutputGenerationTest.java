@@ -3,7 +3,6 @@ package ai.labs.eddi.modules.output.impl;
 import ai.labs.eddi.modules.output.IOutputFilter;
 import ai.labs.eddi.modules.output.model.OutputEntry;
 import ai.labs.eddi.modules.output.model.OutputValue;
-import ai.labs.eddi.modules.output.model.QuickReply;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -12,7 +11,6 @@ import org.junit.jupiter.api.Test;
 
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 

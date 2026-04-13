@@ -52,7 +52,7 @@ import static ai.labs.eddi.backup.impl.AbstractBackupService.*;
  *
  * @since 6.0.0
  */
-public class ZipResourceSource implements IResourceSource, AutoCloseable {
+public class ZipResourceSource implements IResourceSource {
 
     private static final Logger log = Logger.getLogger(ZipResourceSource.class);
 

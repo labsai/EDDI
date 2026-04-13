@@ -365,7 +365,6 @@ public class UpgradeExecutor {
      * Deserializes JSON and calls the store's update method via reflection-free
      * type-safe dispatch.
      */
-    @SuppressWarnings("unchecked")
     private <T> Response dispatchUpdate(ExtensionStoreOps<T> ops, String json,
                                         String targetId, Integer targetVersion)
             throws Exception {

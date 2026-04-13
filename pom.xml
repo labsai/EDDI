@@ -338,25 +338,25 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers</artifactId>
-            <version>1.21.0</version>
+            <version>1.21.4</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>1.21.0</version>
+            <version>1.21.4</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>mongodb</artifactId>
-            <version>1.21.0</version>
+            <version>1.21.4</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>postgresql</artifactId>
-            <version>1.21.0</version>
+            <version>1.21.4</version>
             <scope>test</scope>
         </dependency>
         <!-- NATS JetStream client for async conversation processing (Phase 5) -->
@@ -386,24 +386,7 @@
             <artifactId>swagger-parser</artifactId>
             <version>2.1.39</version>
         </dependency>
-        <!-- Testcontainers for NATS integration tests (Phase 5.29) -->
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>testcontainers</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>testcontainers-junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <!-- Testcontainers PostgreSQL module (Phase 6.31) -->
-        <dependency>
-            <groupId>org.testcontainers</groupId>
-            <artifactId>postgresql</artifactId>
-            <version>1.21.4</version>
-            <scope>test</scope>
-        </dependency>
+
     </dependencies>
     <build>
         <plugins>
@@ -505,6 +488,7 @@
                     <linkXRef>false</linkXRef>
                 </configuration>
                 <executions>
+                    <?m2e ignore?>
                     <execution>
                         <id>validate</id>
                         <phase>validate</phase>

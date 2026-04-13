@@ -8,6 +8,7 @@ import org.junit.jupiter.api.*;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
  * Integration test for Agent Engine conversation lifecycle.
@@ -77,6 +78,7 @@ public class AgentEngineIT extends BaseIntegrationIT {
             Thread.sleep(500);
         }
 
+        assertNotNull(response);
         response.then().assertThat().statusCode(200).body("agentId", equalTo(agentResourceId.id()))
                 .body("agentVersion", equalTo(agentResourceId.version())).body("conversationSteps", hasSize(1))
                 .body("conversationSteps[0].conversationStep[0].key", equalTo("actions"))

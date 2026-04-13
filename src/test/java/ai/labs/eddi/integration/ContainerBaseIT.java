@@ -38,6 +38,7 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
 
     static final Network NETWORK = Network.newNetwork();
 
+    @SuppressWarnings("resource")
     @Container
     static final MongoDBContainer MONGO = new MongoDBContainer("mongo:6.0")
             .withNetwork(NETWORK)
@@ -50,7 +51,7 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
                     // The build context must be the project root to include target/ dependency
                     // layers
                     .withFileFromPath(".", Path.of("."))
-                    .withDockerfilePath("src/main/docker/Dockerfile.jvm"))
+                    .withDockerfile(Path.of("src/main/docker/Dockerfile.jvm")))
             .withNetwork(NETWORK)
             .withExposedPorts(7070)
             .withEnv("MONGODB_CONNECTIONSTRING",

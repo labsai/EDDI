@@ -5,7 +5,7 @@ import ai.labs.eddi.backup.IResourceSource.SnippetSourceData;
 import ai.labs.eddi.backup.IResourceSource.WorkflowSourceData;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
-import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import org.junit.jupiter.api.*;
 import org.mockito.Mockito;
@@ -65,19 +65,21 @@ class ZipResourceSourceTest {
             when(jsonSerialization.deserialize(anyString(), eq(AgentConfiguration.class)))
                     .thenReturn(agentConfig);
 
-            var source = new ZipResourceSource(tempDir, jsonSerialization);
-            AgentSourceData agent = source.readAgent();
+            try (var source = new ZipResourceSource(tempDir, jsonSerialization)) {
+                AgentSourceData agent = source.readAgent();
 
-            assertNotNull(agent);
-            assertEquals("agent123", agent.sourceId());
-            assertEquals("test", agent.config().getDescription());
+                assertNotNull(agent);
+                assertEquals("agent123", agent.sourceId());
+                assertEquals("test", agent.config().getDescription());
+            }
         }
 
         @Test
         @DisplayName("should throw when no agent file exists")
         void throwsWhenNoAgentFile() {
-            var source = new ZipResourceSource(tempDir, jsonSerialization);
-            assertThrows(RuntimeException.class, source::readAgent);
+            try (var source = new ZipResourceSource(tempDir, jsonSerialization)) {
+                assertThrows(RuntimeException.class, source::readAgent);
+            }
         }
 
         @Test
@@ -97,10 +99,11 @@ class ZipResourceSourceTest {
             when(jsonSerialization.deserialize(eq("{}"), eq(AgentConfiguration.class)))
                     .thenReturn(new AgentConfiguration());
 
-            var source = new ZipResourceSource(tempDir, jsonSerialization);
-            AgentSourceData agent = source.readAgent();
+            try (var source = new ZipResourceSource(tempDir, jsonSerialization)) {
+                AgentSourceData agent = source.readAgent();
 
-            assertEquals("My Agent", agent.name());
+                assertEquals("My Agent", agent.name());
+            }
         }
 
         @Test
@@ -111,11 +114,12 @@ class ZipResourceSourceTest {
             when(jsonSerialization.deserialize(anyString(), eq(AgentConfiguration.class)))
                     .thenReturn(new AgentConfiguration());
 
-            var source = new ZipResourceSource(tempDir, jsonSerialization);
-            AgentSourceData first = source.readAgent();
-            AgentSourceData second = source.readAgent();
+            try (var source = new ZipResourceSource(tempDir, jsonSerialization)) {
+                AgentSourceData first = source.readAgent();
+                AgentSourceData second = source.readAgent();
 
-            assertSame(first, second); // same object reference = cached
+                assertSame(first, second); // same object reference = cached
+            }
         }
     }
 
@@ -140,12 +144,13 @@ class ZipResourceSourceTest {
                     eq(ai.labs.eddi.configs.snippets.model.PromptSnippet.class)))
                     .thenReturn(snippet);
 
-            var source = new ZipResourceSource(tempDir, jsonSerialization);
-            List<SnippetSourceData> snippets = source.readSnippets();
+            try (var source = new ZipResourceSource(tempDir, jsonSerialization)) {
+                List<SnippetSourceData> snippets = source.readSnippets();
 
-            assertThat(snippets, hasSize(1));
-            assertEquals("greeting", snippets.get(0).name());
-            assertEquals("snp1", snippets.get(0).sourceId());
+                assertThat(snippets, hasSize(1));
+                assertEquals("greeting", snippets.get(0).name());
+                assertEquals("snp1", snippets.get(0).sourceId());
+            }
         }
 
         @Test
@@ -165,21 +170,23 @@ class ZipResourceSourceTest {
                     eq(ai.labs.eddi.configs.snippets.model.PromptSnippet.class)))
                     .thenReturn(snippet);
 
-            var source = new ZipResourceSource(tempDir, jsonSerialization);
-            List<SnippetSourceData> snippets = source.readSnippets();
+            try (var source = new ZipResourceSource(tempDir, jsonSerialization)) {
+                List<SnippetSourceData> snippets = source.readSnippets();
 
-            assertThat(snippets, hasSize(1));
-            assertEquals("persona", snippets.get(0).name());
+                assertThat(snippets, hasSize(1));
+                assertEquals("persona", snippets.get(0).name());
+            }
         }
 
         @Test
         @DisplayName("should return empty list when no snippets directory exists")
         void emptyWhenNoSnippetsDir() throws Exception {
             setupAgentFile();
-            var source = new ZipResourceSource(tempDir, jsonSerialization);
-            List<SnippetSourceData> snippets = source.readSnippets();
+            try (var source = new ZipResourceSource(tempDir, jsonSerialization)) {
+                List<SnippetSourceData> snippets = source.readSnippets();
 
-            assertThat(snippets, empty());
+                assertThat(snippets, empty());
+            }
         }
     }
 
@@ -199,10 +206,11 @@ class ZipResourceSourceTest {
             when(jsonSerialization.deserialize(anyString(), eq(AgentConfiguration.class)))
                     .thenReturn(config);
 
-            var source = new ZipResourceSource(tempDir, jsonSerialization);
-            List<WorkflowSourceData> workflows = source.readWorkflows();
+            try (var source = new ZipResourceSource(tempDir, jsonSerialization)) {
+                List<WorkflowSourceData> workflows = source.readWorkflows();
 
-            assertThat(workflows, empty());
+                assertThat(workflows, empty());
+            }
         }
     }
 

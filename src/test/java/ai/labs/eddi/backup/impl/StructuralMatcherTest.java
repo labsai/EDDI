@@ -503,13 +503,11 @@ class StructuralMatcherTest {
         }
 
         @Override
-        @SuppressWarnings("unchecked")
         public <T> T deserialize(String json) {
             return null;
         }
 
         @Override
-        @SuppressWarnings("unchecked")
         public <T> T deserialize(String json, Class<T> clazz) {
             // For tests that need deserialization, return a new default instance
             try {

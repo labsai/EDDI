@@ -32,7 +32,8 @@ class RestAttachmentUploadTest {
 
     @Test
     void shouldReturn503WhenNoStorageConfigured() {
-        when(storageInstance.isResolvable()).thenReturn(false);
+        when(storageInstance.isUnsatisfied()).thenReturn(true);
+        when(storageInstance.isAmbiguous()).thenReturn(false);
 
         FileUpload file = mockFileUpload("test.jpg", "image/jpeg", 100);
         Response response = endpoint.uploadAttachment("conv-1", file);
@@ -42,7 +43,8 @@ class RestAttachmentUploadTest {
 
     @Test
     void shouldReturn400WhenNoFileProvided() {
-        when(storageInstance.isResolvable()).thenReturn(true);
+        when(storageInstance.isUnsatisfied()).thenReturn(false);
+        when(storageInstance.isAmbiguous()).thenReturn(false);
 
         Response response = endpoint.uploadAttachment("conv-1", null);
 
@@ -51,7 +53,8 @@ class RestAttachmentUploadTest {
 
     @Test
     void shouldReturn400WhenFileNameIsNull() {
-        when(storageInstance.isResolvable()).thenReturn(true);
+        when(storageInstance.isUnsatisfied()).thenReturn(false);
+        when(storageInstance.isAmbiguous()).thenReturn(false);
 
         FileUpload file = mock(FileUpload.class);
         when(file.fileName()).thenReturn(null);
@@ -63,7 +66,8 @@ class RestAttachmentUploadTest {
 
     @Test
     void shouldReturn201OnSuccessfulUpload() throws Exception {
-        when(storageInstance.isResolvable()).thenReturn(true);
+        when(storageInstance.isUnsatisfied()).thenReturn(false);
+        when(storageInstance.isAmbiguous()).thenReturn(false);
         when(storageInstance.get()).thenReturn(storage);
         when(storage.store(eq("conv-1"), eq("photo.png"), eq("image/png"), any(), eq(42L)))
                 .thenReturn("gridfs://abc123");
@@ -94,7 +98,8 @@ class RestAttachmentUploadTest {
 
     @Test
     void shouldDefaultMimeTypeToOctetStream() throws Exception {
-        when(storageInstance.isResolvable()).thenReturn(true);
+        when(storageInstance.isUnsatisfied()).thenReturn(false);
+        when(storageInstance.isAmbiguous()).thenReturn(false);
         when(storageInstance.get()).thenReturn(storage);
         when(storage.store(eq("conv-1"), eq("data.bin"), eq("application/octet-stream"), any(), eq(10L)))
                 .thenReturn("pg://uuid-123");

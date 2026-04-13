@@ -38,6 +38,7 @@ public class PostgresAgentUseCaseIT extends BaseIntegrationIT {
 
     static final Network NETWORK = Network.newNetwork();
 
+    @SuppressWarnings("resource")
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine")
             .withNetwork(NETWORK)
@@ -51,7 +52,7 @@ public class PostgresAgentUseCaseIT extends BaseIntegrationIT {
     static final GenericContainer<?> EDDI = new GenericContainer<>(
             new ImageFromDockerfile("eddi-pg-it", false)
                     .withFileFromPath(".", Path.of("."))
-                    .withDockerfilePath("src/main/docker/Dockerfile.jvm"))
+                    .withDockerfile(Path.of("src/main/docker/Dockerfile.jvm")))
             .withNetwork(NETWORK)
             .withExposedPorts(7070)
             .withEnv("EDDI_DATASTORE_TYPE", "postgres")
