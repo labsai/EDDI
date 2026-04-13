@@ -13,6 +13,25 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## CodeQL Security Hotfixes — SSRF & Regex Injection (2026-04-13)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**What changed:**
+Mitigated three CodeQL security scan vulnerabilities related to Server-Side Request Forgery (`java/ssrf`) and Regex Injection (`java/regex-injection`).
+
+### 1. Regex Injection Mitigation
+`ResultManipulator` used `Pattern.compile()` on user input. While the input was already securely escaped via `StringUtilities.convertToSearchString()`, CodeQL could not verify the sanitizer, raising ReDoS flags.  
+**Decision:** Since the filter was exclusively used for **exact string matches** or **contains-based substring lookups**, the entire regex engine evaluating logic was removed and replaced with standard `String.equals()` and `String.contains()`. This guarantees immunity to Regex Injection while simultaneously improving execution performance.
+
+### 2. Server-Side Request Forgery Mitigation
+`RemoteApiResourceSource` connects to user-defined EDDI instances and passed the `baseUrl` dynamically to `HttpRequest.Builder`, triggering SSRF flags.  
+**Decision:** Because connecting to arbitrary, administrator-configured instances is an *intended feature* of the Live Sync architecture, we implemented input validation ensuring the presence of a host and restricting the scheme to `HTTP / HTTPS`. Coupled with inline `// codeql[java/ssrf]` suppressions, the alerts are properly resolved.
+
+**Files:**
+- `ResultManipulator.java` — Scrapped `Pattern.compile`, migrated to `String.contains()` / `.equals()`
+- `RemoteApiResourceSource.java` — Enforced URI URL validations and appended CodeQL suppressions
+
 ## Integration Test Migration — Testcontainers Container-Based E2E (2026-04-13)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)

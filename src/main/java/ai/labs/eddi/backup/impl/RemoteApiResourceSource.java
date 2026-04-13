@@ -223,6 +223,8 @@ public class RemoteApiResourceSource implements IResourceSource {
                     .connectTimeout(CONNECT_TIMEOUT)
                     .build();
 
+            // codeql[java/ssrf] False Positive: It is an intended feature to connect to a
+            // user-provided remote EDDI instance
             HttpRequest.Builder builder = HttpRequest.newBuilder()
                     .uri(URI.create(normalized + "/agentstore/agents/descriptors?index=0&limit=0"))
                     .timeout(REQUEST_TIMEOUT)
@@ -386,6 +388,8 @@ public class RemoteApiResourceSource implements IResourceSource {
      */
     private String httpGet(String path) {
         try {
+            // codeql[java/ssrf] False Positive: It is an intended feature to connect to a
+            // user-provided remote EDDI instance
             HttpRequest.Builder builder = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + path))
                     .timeout(REQUEST_TIMEOUT)
@@ -412,6 +416,26 @@ public class RemoteApiResourceSource implements IResourceSource {
         if (url == null)
             return "";
         // Remove trailing slash
-        return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
+        String normalized = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
+
+        try {
+            // Validate URL to mitigate SSRF concerns by ensuring a valid network scheme and
+            // host.
+            // Note: Connecting to a user-provided instance is an intended feature.
+            URI uri = URI.create(normalized);
+            String scheme = uri.getScheme();
+            if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
+                throw new IllegalArgumentException("Only HTTP or HTTPS schemes are allowed: " + url);
+            }
+            if (uri.getHost() == null || uri.getHost().isBlank()) {
+                throw new IllegalArgumentException("Invalid base URL host: " + url);
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid base URL: " + url, e);
+        }
+
+        return normalized;
     }
 }

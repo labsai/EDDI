@@ -1,7 +1,6 @@
 package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.utils.RuntimeUtilities;
-import ai.labs.eddi.utils.StringUtilities;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -9,8 +8,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-import java.util.regex.Pattern;
-import java.util.regex.PatternSyntaxException;
 
 /**
  * @author ginccc
@@ -35,17 +32,12 @@ public class ResultManipulator<T> {
 
         Method[] methods = clazz.getMethods();
 
-        filter = StringUtilities.convertToSearchString(filter);
-
-        // Pre-compile the pattern for performance. User input is already escaped
-        // by StringUtilities.convertToSearchString() → escapeRegexChars(), so regex
-        // injection is mitigated before reaching this point. The compile() call
-        // provides an additional safety net by failing fast on invalid patterns.
-        Pattern filterPattern;
-        try {
-            filterPattern = Pattern.compile(filter);
-        } catch (PatternSyntaxException e) {
-            throw new FilterEntriesException("Invalid filter pattern", e);
+        boolean exactMatch = filter.startsWith("\"") && filter.endsWith("\"");
+        final String searchString;
+        if (exactMatch) {
+            searchString = filter.length() > 2 ? filter.substring(1, filter.length() - 1) : "";
+        } else {
+            searchString = filter;
         }
 
         boolean matches;
@@ -62,9 +54,19 @@ public class ResultManipulator<T> {
                 if (method.getName().startsWith("get")) {
                     try {
                         Object returnValue = method.invoke(obj);
-                        if (!RuntimeUtilities.isNullOrEmpty(returnValue) && filterPattern.matcher(returnValue.toString()).matches()) {
-                            matches = true;
-                            break;
+                        if (!RuntimeUtilities.isNullOrEmpty(returnValue)) {
+                            String valueStr = returnValue.toString();
+                            if (exactMatch) {
+                                if (valueStr.equals(searchString)) {
+                                    matches = true;
+                                    break;
+                                }
+                            } else {
+                                if (valueStr.contains(searchString)) {
+                                    matches = true;
+                                    break;
+                                }
+                            }
                         }
                     } catch (IllegalAccessException e) {
                         String message = "Error while filtering. Cannot access method: %s";
