@@ -105,19 +105,10 @@ public class AgentUseCaseIT extends BaseIntegrationIT {
 
         response.then().statusCode(201);
 
-        // Try Location header first (RESTful standard), then X-Resource-URI fallback,
-        // then JSON body — eddi:// URIs may be stripped from the Location header by
-        // JAX-RS
         String resourceUri = response.getHeader("location");
         if (resourceUri == null || resourceUri.isBlank()) {
-            resourceUri = response.getHeader("X-Resource-URI");
-        }
-        if (resourceUri == null || resourceUri.isBlank()) {
-            resourceUri = response.jsonPath().getString("resourceUri");
-        }
-        if (resourceUri == null || resourceUri.isBlank()) {
-            throw new RuntimeException("Import response did not contain a resource URI. " + "Status: " + response.getStatusCode() + ", Body: "
-                    + response.getBody().asString());
+            throw new RuntimeException("Import response missing Location header. " + "Status: " + response.getStatusCode() + ", Headers: "
+                    + response.headers().asList());
         }
 
         ResourceId resourceId = extractResourceId(resourceUri);

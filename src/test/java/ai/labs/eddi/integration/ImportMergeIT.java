@@ -50,8 +50,8 @@ public class ImportMergeIT extends BaseIntegrationIT {
 
         response.then().statusCode(201);
 
-        String resourceUri = response.jsonPath().getString("resourceUri");
-        assertThat("Import should return a resourceUri", resourceUri, notNullValue());
+        String resourceUri = response.getHeader("location");
+        assertThat("Import should return a Location header", resourceUri, notNullValue());
 
         firstImportAgentId = extractResourceId(resourceUri);
         assertThat("Agent ID should not be null", firstImportAgentId.id(), notNullValue());
@@ -133,8 +133,8 @@ public class ImportMergeIT extends BaseIntegrationIT {
 
         mergeResponse.then().statusCode(201);
 
-        String mergeLocation = mergeResponse.jsonPath().getString("resourceUri");
-        assertThat("Merge import should return a resourceUri", mergeLocation, notNullValue());
+        String mergeLocation = mergeResponse.getHeader("location");
+        assertThat("Merge import should return a Location header", mergeLocation, notNullValue());
 
         ResourceId mergedAgentId = extractResourceId(mergeLocation);
 
@@ -188,8 +188,8 @@ public class ImportMergeIT extends BaseIntegrationIT {
 
         selectiveResponse.then().statusCode(201);
 
-        String location = selectiveResponse.jsonPath().getString("resourceUri");
-        assertThat("Selective merge should return a resourceUri", location, notNullValue());
+        String location = selectiveResponse.getHeader("location");
+        assertThat("Selective merge should return a Location header", location, notNullValue());
     }
 
     // ==================== Test 7: Second create import should produce different ID
@@ -206,8 +206,8 @@ public class ImportMergeIT extends BaseIntegrationIT {
 
         response.then().statusCode(201);
 
-        String location = response.jsonPath().getString("resourceUri");
-        assertThat("Import should return a resourceUri", location, notNullValue());
+        String location = response.getHeader("location");
+        assertThat("Import should return a Location header", location, notNullValue());
 
         ResourceId secondAgentId = extractResourceId(location);
 

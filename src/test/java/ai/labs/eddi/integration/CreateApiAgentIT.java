@@ -1,6 +1,7 @@
 package ai.labs.eddi.integration;
 
-import io.restassured.RestAssured;
+import io.quarkus.test.junit.QuarkusIntegrationTest;
+import io.quarkus.test.junit.TestProfile;
 import io.restassured.http.ContentType;
 import io.restassured.response.Response;
 import org.junit.jupiter.api.*;
@@ -9,12 +10,16 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
 
 /**
- * Integration test for the create_api_agent workflow, testing against a
- * <b>running EDDI instance</b>.
+ * Integration test for the create_api_agent workflow.
  * <p>
- * This is a standalone JUnit test (not {@code @QuarkusTest}) that exercises the
- * full REST API. It validates the resource creation workflow that
- * {@code create_api_agent} produces:
+ * Uses {@code @QuarkusIntegrationTest} which builds and launches the
+ * application in a <b>separate JVM process</b>. This avoids the CDI
+ * augmentation issue caused by the {@code quarkus-mcp-server-http} extension's
+ * build-time processor generating injection points from {@code @ToolArg}
+ * parameters (which breaks {@code @QuarkusTest} but not production builds).
+ * <p>
+ * Validates the resource creation workflow that {@code create_api_agent}
+ * produces:
  * <ol>
  * <li>Create 2 ApiCallsConfiguration resources (grouped by tag: users,
  * orders)</li>
@@ -26,24 +31,10 @@ import static org.hamcrest.Matchers.*;
  * <li>Deploy the Agent and verify READY status</li>
  * <li>Start a conversation to verify the workflow is wired correctly</li>
  * </ol>
- * <p>
- * <b>Why not {@code @QuarkusTest}?</b><br>
- * The {@code quarkus-mcp-server-http} extension's build-time deployment
- * processor generates CDI injection points from {@code @ToolArg} parameters
- * during test augmentation, causing {@code UnsatisfiedResolutionException}.
- * This is an MCP extension limitation — production builds work fine.
- * <p>
- * <b>Running:</b><br>
- * Start EDDI first, then run:
- *
- * <pre>
- *   mvn verify -Dit.test=CreateApiAgentIT -Deddi.base-url=http://localhost:7070
- * </pre>
- *
- * Default base URL: {@code http://localhost:7070}
  */
+@QuarkusIntegrationTest
+@TestProfile(IntegrationTestProfile.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-@Tag("running-instance")
 public class CreateApiAgentIT {
 
     // Shared state across ordered test methods
@@ -54,12 +45,6 @@ public class CreateApiAgentIT {
     private static String packageLocation;
     private static String agentId;
     private static int agentVersion;
-
-    @BeforeAll
-    static void configureBaseUrl() {
-        String baseUrl = System.getProperty("eddi.base-url", "http://localhost:7070");
-        RestAssured.baseURI = baseUrl;
-    }
 
     // ==================== Test Data ====================
 

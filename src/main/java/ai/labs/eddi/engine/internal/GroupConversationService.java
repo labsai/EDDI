@@ -118,8 +118,12 @@ public class GroupConversationService implements IGroupConversationService {
             throw new GroupDepthExceededException("Maximum group discussion depth (%d) exceeded".formatted(maxDepth));
         }
 
-        // Load group config
-        AgentGroupConfiguration config = groupStore.read(groupId, groupStore.getCurrentResourceId(groupId).getVersion());
+        // Load group config — null-safe: getCurrentResourceId may return null on PostgreSQL
+        IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(groupId);
+        if (currentGroupId == null) {
+            throw new IResourceStore.ResourceNotFoundException("Group not found: " + groupId);
+        }
+        AgentGroupConfiguration config = groupStore.read(groupId, currentGroupId.getVersion());
         if (config == null) {
             throw new IResourceStore.ResourceNotFoundException("Group configuration not found: " + groupId);
         }
@@ -139,7 +143,11 @@ public class GroupConversationService implements IGroupConversationService {
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         // Validate early — so errors are returned synchronously
-        AgentGroupConfiguration config = groupStore.read(groupId, groupStore.getCurrentResourceId(groupId).getVersion());
+        IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(groupId);
+        if (currentGroupId == null) {
+            throw new IResourceStore.ResourceNotFoundException("Group not found: " + groupId);
+        }
+        AgentGroupConfiguration config = groupStore.read(groupId, currentGroupId.getVersion());
         if (config == null) {
             throw new IResourceStore.ResourceNotFoundException("Group configuration not found: " + groupId);
         }
