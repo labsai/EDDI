@@ -37,6 +37,37 @@ Each entry follows this format:
 
 ---
 
+## Import IT Stabilization — Test ZIP, Descriptors, OriginId (2026-04-13)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**Problem 1:** `weather_agent_v1.zip` contained v5 legacy naming (`.bot.json`, `.package.json`, `"packages"` field, old-style `eddi://` URIs). The v6 import service scans for `.agent.json` files and found none — resulting in empty `resourceUri` responses.
+
+**Fix:** Repacked the test ZIP with all v6 canonical naming: file extensions, field names, and URI authorities.
+
+**Problem 2:** When bypassing the REST layer with `createResourceDirect()`, the `DocumentDescriptorFilter` (JAX-RS response filter that creates descriptors on `201 Created`) never runs. Resources were created without descriptors, causing `ResourceNotFoundException` during descriptor patching.
+
+**Fix:** Added explicit `documentDescriptorStore.createDescriptor()` calls to `RestImportService.createResourceDirect()`, `UpgradeExecutor.dispatchCreateDirect()`, and `UpgradeExecutor.createNewWorkflow()`.
+
+**Problem 3:** `setOriginIdOnDescriptor()` used `RestDocumentDescriptorStore.patchDescriptor()` which only patches `name` and `description` — it silently drops `originId`.
+
+**Fix:** Changed to `documentDescriptorStore.setDescriptor()` directly, which persists the full descriptor.
+
+**Problem 4:** `AgentUseCaseIT.importAgent()` read the agent URI from the `Location` response header, but the import endpoint returns `200 OK` with the URI in the JSON body.
+
+**Fix:** Updated to read from `response.jsonPath().getString("resourceUri")`.
+
+| File | What |
+|------|------|
+| `weather_agent_v1.zip` | Repacked: `.bot.json`→`.agent.json`, `.package.json`→`.workflow.json`, all URIs normalized |
+| `RestImportService.java` | `createResourceDirect()` now creates DocumentDescriptor; `setOriginIdOnDescriptor()` uses `setDescriptor()` directly |
+| `UpgradeExecutor.java` | `dispatchCreateDirect()` + `createNewWorkflow()` now create DocumentDescriptors |
+| `AgentUseCaseIT.java` | `importAgent()` reads `resourceUri` from JSON body instead of `Location` header |
+
+**IT Results (366 total):** 335 passing, 12 skipped. Remaining 19 failures are pre-existing (CreateApiAgentIT standalone infra, weather agent v5 behavior rules, merge originId round-trip, minor pre-existing bugs).
+
+---
+
 ## AI Documentation Audit — Stale Naming Fix (2026-04-12)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
