@@ -13,6 +13,36 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Integration Test Migration — Testcontainers Container-Based E2E (2026-04-13)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**Problem:** E2E integration tests (`AgentUseCaseIT`, `CreateApiAgentIT`) were untestable locally on Windows due to:
+1. JaCoCo path quoting bug (`InvalidPathException`) in `@QuarkusTest` / `@QuarkusIntegrationTest`
+2. MCP `@ToolArg` CDI augmentation breaking test classloader for `CreateApiAgentIT`
+3. Platform-dependent behavior between Windows dev and Linux CI
+
+**Solution:** Migrated E2E agent tests from `@QuarkusTest` to **Testcontainers `GenericContainer`** with `ImageFromDockerfile`. EDDI + MongoDB/PostgreSQL run in real Docker containers, providing true black-box testing that works identically on all platforms.
+
+| File | What |
+|------|------|
+| `ContainerBaseIT.java` | **NEW** — Base class with MongoDB + EDDI containers (built from `Dockerfile.jvm`) |
+| `AgentUseCaseIT.java` | Removed `@QuarkusTest`, now extends `ContainerBaseIT` |
+| `CreateApiAgentIT.java` | Removed `@Tag("running-instance")`, now extends `ContainerBaseIT` |
+| `PostgresAgentUseCaseIT.java` | Rewritten with PostgreSQL + EDDI containers (standalone, no inheritance from `AgentUseCaseIT`) |
+| `pom.xml` | Added `testcontainers`, `junit-jupiter`, `mongodb`, `postgresql` dependencies |
+| `docker-compose.testing.yml` | **DELETED** — replaced by Testcontainers |
+| `integration-tests.sh` | **DELETED** — replaced by `mvn verify` |
+| `README.md` | Removed `docker-compose.testing.yml` from compose overlays list |
+| `getting-started.md` | Updated integration test instructions to `mvn verify` |
+
+**Design decisions:**
+- **Two-tier strategy:** Container-based for E2E agent tests (import→deploy→converse); `@QuarkusTest` kept for lightweight CRUD/API ITs that work fine on CI
+- **`ImageFromDockerfile`** builds the EDDI image from current code during test — no pre-pushed image needed, always tests current code
+- **Cleaned up v5 legacy:** `docker-compose.testing.yml` and `integration-tests.sh` were remnants of the old container-to-container approach; replaced by Maven-native Testcontainers
+
+---
+
 ## Security & AI Audit Hardening (2026-04-13)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
