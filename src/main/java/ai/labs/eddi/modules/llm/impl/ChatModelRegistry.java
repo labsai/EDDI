@@ -170,14 +170,18 @@ public class ChatModelRegistry {
             return;
         }
 
-        // Build both possible vault reference forms that config authors may use:
-        // Short form: ${eddivault:keyName} (resolves to default tenant)
-        // Full form: ${eddivault:tenantId/keyName}
-        String shortRef = "${eddivault:" + reference.keyName() + "}";
+        // Build the vault reference forms to search for in cached parameters.
+        // Full form: ${eddivault:tenantId/keyName} — always valid
         String fullRef = "${eddivault:" + reference.tenantId() + "/" + reference.keyName() + "}";
+        // Short form: ${eddivault:keyName} — only valid for the default tenant.
+        // The short form always resolves to "default", so a non-default tenant's
+        // secret must NOT match short-form references (that would be a false positive).
+        String shortRef = SecretReference.DEFAULT_TENANT.equals(reference.tenantId())
+                ? "${eddivault:" + reference.keyName() + "}"
+                : null;
 
-        int evicted = evictMatching(modelCache, shortRef, fullRef)
-                + evictMatching(streamingModelCache, shortRef, fullRef);
+        int evicted = evictMatching(modelCache, fullRef, shortRef)
+                + evictMatching(streamingModelCache, fullRef, shortRef);
 
         if (evicted > 0) {
             LOGGER.infof("Evicted %d model(s) using secret '%s/%s'",
@@ -204,7 +208,7 @@ public class ChatModelRegistry {
 
     private static boolean parametersContainRef(Map<String, String> params, String ref1, String ref2) {
         for (String value : params.values()) {
-            if (value != null && (value.contains(ref1) || value.contains(ref2))) {
+            if (value != null && (value.contains(ref1) || (ref2 != null && value.contains(ref2)))) {
                 return true;
             }
         }

@@ -628,12 +628,27 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI findLocalUriByOriginId(String originId) {
         try {
+            // Try by originId first (standard merge path)
             List<DocumentDescriptor> existing = documentDescriptorStore.findByOriginId(originId);
             if (!existing.isEmpty()) {
                 return existing.getFirst().getResource();
             }
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             log.debug("Could not look up origin ID " + originId + ": " + e.getMessage());
+        }
+
+        // Fallback: try by resource ID directly (handles export→re-import round-trip
+        // where the exported filename IS the resource ID, not the original originId)
+        try {
+            IResourceId currentId = documentDescriptorStore.getCurrentResourceId(originId);
+            if (currentId != null) {
+                DocumentDescriptor desc = documentDescriptorStore.readDescriptor(currentId.getId(), currentId.getVersion());
+                if (desc != null) {
+                    return desc.getResource();
+                }
+            }
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            log.debugf("Fallback resource ID lookup for '%s' not found: %s", originId, e.getMessage());
         }
         return null;
     }
