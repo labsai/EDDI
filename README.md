@@ -2,13 +2,149 @@
 
 # E.D.D.I — Multi-Agent Orchestration Middleware for Conversational AI
 
-[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12355/badge)](https://www.bestpractices.dev/projects/12355) ![Tests](https://img.shields.io/badge/tests-2%2C000%2B-brightgreen) [![Docker Pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi) [![Repository: AI Ready](https://img.shields.io/badge/Repository-AI_Ready-blueviolet?logo=robot)](AGENTS.md)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12355/badge)](https://www.bestpractices.dev/projects/12355) ![Tests](https://img.shields.io/badge/tests-2%2C000%2B-brightgreen)
+
+[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml)
+
+[![Docker Pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi) [![Repository: AI Ready](https://img.shields.io/badge/Repository-AI_Ready-blueviolet?logo=robot)](AGENTS.md)
 
 **E.D.D.I** (Enhanced Dialog Driven Interface) is a production-grade, **config-driven multi-agent orchestration middleware** for conversational AI. It coordinates users, AI agents, and business systems through **intelligent routing, persistent memory, and API orchestration** — without writing code.
 
 Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker image**. Native support for **MCP** (Model Context Protocol), **A2A** (Agent-to-Agent), **OpenAPI**, and **OAuth 2.0**.
 
 **Latest version: 6.0.0-RC1** · [Website](https://eddi.labs.ai/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
+
+---
+
+## 📑 Table of Contents
+
+- [🏁 Quick Start](#-quick-start)
+- [💡 Why EDDI?](#-why-eddi)
+- [✨ Features](#-features)
+- [🧩 Quarkus SDK](#-quarkus-sdk)
+- [📖 Documentation](#-documentation)
+- [📋 Compliance & Privacy](#-compliance--privacy)
+- [🏗️ Development](#️-development)
+  - [Prerequisites](#prerequisites)
+  - [Quarkus Dev Mode](#quarkus-dev-mode)
+  - [Maven Command Reference](#maven-command-reference)
+  - [Build & Docker](#build--docker)
+  - [Kubernetes](#️-kubernetes)
+- [🤝 Contributing](#-contributing)
+- [🔒 Security](#-security)
+- [📜 Code of Conduct](#-code-of-conduct)
+
+---
+
+## 🏁 Quick Start
+
+The fastest way to get EDDI running is the **one-command installer**. It sets up EDDI + your choice of database via Docker Compose, deploys the [Agent Father](docs/agent-father-deep-dive.md) starter agent, and walks you through creating your first AI agent.
+
+**Linux / macOS / WSL2:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/labsai/EDDI/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1 | iex
+```
+
+> **Note:** If your Antivirus blocks this command as "malicious content", securely download and run it instead:
+>
+> ```powershell
+> Invoke-WebRequest -Uri "https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1" -OutFile "install.ps1"
+> Unblock-File .\install.ps1
+> .\install.ps1
+> ```
+
+Requires [Docker](https://docs.docker.com/get-docker/). The wizard auto-generates a unique vault encryption key for secret management.
+
+<details>
+<summary><strong>🔧 Installer options</strong></summary>
+
+```bash
+bash install.sh --defaults                 # All defaults, no prompts
+bash install.sh --db=postgres --with-auth  # PostgreSQL + Keycloak
+bash install.sh --full                     # Everything enabled (DB + auth + monitoring)
+bash install.sh --local                    # Build Docker image from local source
+```
+
+The `--local` flag is for contributors testing pre-release builds:
+
+```bash
+./mvnw package -DskipTests    # Build the Java app
+bash install.sh --local        # Build Docker image + start containers
+```
+
+</details>
+
+### 🔄 Updating
+
+The installer creates an `eddi` CLI wrapper that makes updating easy:
+
+```bash
+eddi update
+```
+
+This pulls the latest Docker image from the registry and restarts the containers. It works even when the same tag (e.g. `latest`) was re-published — Docker always checks the remote digest for changes.
+
+> **`eddi` command not found?** The CLI lives at `~/.eddi/eddi` (Linux/macOS) or `~/.eddi/eddi.cmd` (Windows). Either restart your terminal so the PATH takes effect, or use the full path:
+>
+> ```bash
+> # Linux / macOS
+> ~/.eddi/eddi update
+>
+> # Windows (PowerShell)
+> & "$HOME\.eddi\eddi.cmd" update
+> ```
+
+<details>
+<summary><strong>Manual update (without the CLI)</strong></summary>
+
+If the `eddi` CLI isn't available, run the equivalent docker commands from your install directory (`~/.eddi` by default):
+
+```bash
+cd ~/.eddi
+docker compose --env-file .env -f docker-compose.yml pull
+docker compose --env-file .env -f docker-compose.yml up -d
+```
+
+Adjust the `-f` flags to match your setup (e.g. add `-f docker-compose.auth.yml` if using Keycloak).
+
+</details>
+
+### 🐳 Docker Compose (Manual)
+
+If you prefer manual control over Docker Compose:
+
+```bash
+# Default (EDDI + MongoDB)
+docker compose up
+
+# PostgreSQL instead of MongoDB
+EDDI_DATASTORE_TYPE=postgres docker compose -f docker-compose.yml -f docker-compose.postgres.yml up
+
+# With Keycloak authentication
+docker compose -f docker-compose.yml -f docker-compose.auth.yml up
+
+# With Prometheus + Grafana monitoring
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up
+
+# Full stack (all overlays)
+docker compose -f docker-compose.yml -f docker-compose.auth.yml \
+  -f docker-compose.monitoring.yml -f docker-compose.nats.yml up
+```
+
+Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.postgres.yml` / `docker-compose.postgres-only.yml`, `docker-compose.local.yml` (build from source).
+
+```bash
+docker pull labsai/eddi    # Pull latest from Docker Hub
+```
+
+→ [hub.docker.com/r/labsai/eddi](https://hub.docker.com/r/labsai/eddi)
 
 ---
 
@@ -169,118 +305,6 @@ EDDI implements open standards — not proprietary APIs:
 - 📋 **Logs Panel** — Live SSE log streaming + searchable history
 - 🔑 **Secrets Manager** — Write-only vault UI with copy-reference support
 - 🌍 **11 Languages** — English, German, Spanish, French, Portuguese, Chinese, Japanese, Korean, Arabic (RTL), Hindi, Thai
-
----
-
-## 🏁 Quick Start
-
-The fastest way to get EDDI running is the **one-command installer**. It sets up EDDI + your choice of database via Docker Compose, deploys the [Agent Father](docs/agent-father-deep-dive.md) starter agent, and walks you through creating your first AI agent.
-
-**Linux / macOS / WSL2:**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/labsai/EDDI/main/install.sh | bash
-```
-
-**Windows (PowerShell):**
-
-```powershell
-iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1 | iex
-```
-
-> **Note:** If your Antivirus blocks this command as "malicious content", securely download and run it instead:
->
-> ```powershell
-> Invoke-WebRequest -Uri "https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1" -OutFile "install.ps1"
-> Unblock-File .\install.ps1
-> .\install.ps1
-> ```
-
-Requires [Docker](https://docs.docker.com/get-docker/). The wizard auto-generates a unique vault encryption key for secret management.
-
-<details>
-<summary><strong>🔧 Installer options</strong></summary>
-
-```bash
-bash install.sh --defaults                 # All defaults, no prompts
-bash install.sh --db=postgres --with-auth  # PostgreSQL + Keycloak
-bash install.sh --full                     # Everything enabled (DB + auth + monitoring)
-bash install.sh --local                    # Build Docker image from local source
-```
-
-The `--local` flag is for contributors testing pre-release builds:
-
-```bash
-./mvnw package -DskipTests    # Build the Java app
-bash install.sh --local        # Build Docker image + start containers
-```
-
-</details>
-
-### 🔄 Updating
-
-The installer creates an `eddi` CLI wrapper that makes updating easy:
-
-```bash
-eddi update
-```
-
-This pulls the latest Docker image from the registry and restarts the containers. It works even when the same tag (e.g. `latest`) was re-published — Docker always checks the remote digest for changes.
-
-> **`eddi` command not found?** The CLI lives at `~/.eddi/eddi` (Linux/macOS) or `~/.eddi/eddi.cmd` (Windows). Either restart your terminal so the PATH takes effect, or use the full path:
->
-> ```bash
-> # Linux / macOS
-> ~/.eddi/eddi update
->
-> # Windows (PowerShell)
-> & "$HOME\.eddi\eddi.cmd" update
-> ```
-
-<details>
-<summary><strong>Manual update (without the CLI)</strong></summary>
-
-If the `eddi` CLI isn't available, run the equivalent docker commands from your install directory (`~/.eddi` by default):
-
-```bash
-cd ~/.eddi
-docker compose --env-file .env -f docker-compose.yml pull
-docker compose --env-file .env -f docker-compose.yml up -d
-```
-
-Adjust the `-f` flags to match your setup (e.g. add `-f docker-compose.auth.yml` if using Keycloak).
-
-</details>
-
-### 🐳 Docker Compose (Manual)
-
-If you prefer manual control over Docker Compose:
-
-```bash
-# Default (EDDI + MongoDB)
-docker compose up
-
-# PostgreSQL instead of MongoDB
-EDDI_DATASTORE_TYPE=postgres docker compose -f docker-compose.yml -f docker-compose.postgres.yml up
-
-# With Keycloak authentication
-docker compose -f docker-compose.yml -f docker-compose.auth.yml up
-
-# With Prometheus + Grafana monitoring
-docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up
-
-# Full stack (all overlays)
-docker compose -f docker-compose.yml -f docker-compose.auth.yml \
-  -f docker-compose.monitoring.yml -f docker-compose.nats.yml up
-```
-
-Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.postgres.yml` / `docker-compose.postgres-only.yml`, `docker-compose.local.yml` (build from source).
-
-```bash
-docker pull labsai/eddi    # Pull latest from Docker Hub
-```
-
-→ [hub.docker.com/r/labsai/eddi](https://hub.docker.com/r/labsai/eddi)
 
 ---
 

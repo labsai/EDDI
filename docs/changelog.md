@@ -13,6 +13,20 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## README Restructure — Table of Contents & Quick Start (2026-04-13)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**What changed:**
+Improved the `README.md` structure by adding a Table of Contents right after the introduction and moving the "Quick Start" section up.
+
+**Decision:** This eliminates excessive scrolling to find installation commands and gives users a more immediate onboarding path before diving into the detailed feature breakdown. 
+
+**Files:**
+- `README.md` — Added ToC, moved Quick Start up
+
+---
+
 ## CodeQL Security Hotfixes — SSRF & Regex Injection (2026-04-13)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
