@@ -369,7 +369,7 @@ function buildHighlightedPreview(original: string, resolved: string): string {
 
   // Simple approach: highlight any part of the resolved text that doesn't
   // appear verbatim in the original template
-  let result = resolved;
+  const result = resolved;
   const highlights: Array<{ start: number; end: number }> = [];
 
   // Find static anchors in the resolved text

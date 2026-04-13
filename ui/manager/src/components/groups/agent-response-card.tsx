@@ -75,8 +75,7 @@ function hasHtml(content: string): boolean {
 }
 
 function badgeVariant(
-  type: TranscriptEntryType,
-  _style?: DiscussionStyle
+  type: TranscriptEntryType
 ): "default" | "secondary" | "success" | "warning" | "destructive" | "outline" {
   switch (type) {
     case "SYNTHESIS":
@@ -97,7 +96,7 @@ function badgeVariant(
   }
 }
 
-export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyle, className }: AgentResponseCardProps) {
+export function AgentResponseCard({ entry, isSpeaking, allowHtml, className }: AgentResponseCardProps) {
   const { t } = useTranslation();
   const info = ENTRY_TYPE_INFO[entry.type];
   const isUser = entry.speakerAgentId === "user";
@@ -138,7 +137,7 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
           <span className="text-sm font-semibold text-foreground">
             {entry.speakerDisplayName}
           </span>
-          <Badge variant={badgeVariant(entry.type, discussionStyle)} className="text-[10px] px-1.5 py-0">
+          <Badge variant={badgeVariant(entry.type)} className="text-[10px] px-1.5 py-0">
             {info.label}
           </Badge>
           {entry.targetAgentId && (
