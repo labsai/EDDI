@@ -68,6 +68,21 @@ Each entry follows this format:
 
 ---
 
+## Import Response: 201 Created + Location Header (2026-04-13)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**Problem:** Import endpoint returned `200 OK` with URI only in JSON body — non-RESTful. The `Location` header (the HTTP standard for resource creation) was not set.
+
+**Fix:** Import endpoint now returns `201 Created` with three redundant URI channels:
+- `Location` header (RESTful standard — may be stripped by JAX-RS for `eddi://` URIs)
+- `X-Resource-URI` header (reliable custom fallback)
+- `resourceUri` in JSON body (always available)
+
+Updated all IT tests (`AgentUseCaseIT`, `ImportMergeIT`) to expect `201` and try all three URI channels with priority: Location → X-Resource-URI → body. Also updated `importInitialAgents()` to accept both 200 and 201.
+
+---
+
 ## AI Documentation Audit — Stale Naming Fix (2026-04-12)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
