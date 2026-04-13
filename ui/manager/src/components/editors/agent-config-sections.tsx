@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, memo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ShieldCheck,
@@ -10,7 +10,6 @@ import {
   Sparkles,
   ShieldBan,
   Cable,
-  Trash2,
 } from "lucide-react";
 import { useUpdateAgent } from "@/hooks/use-agents";
 import type { Agent } from "@/lib/api/agents";
@@ -103,7 +102,7 @@ function DebouncedNumberInput({
 
 // ─── Security & Identity ────────────────────────────────────────────────────
 
-export function SecurityIdentitySection({
+export const SecurityIdentitySection = memo(function SecurityIdentitySection({
   agent,
   agentId,
   version,
@@ -207,11 +206,11 @@ export function SecurityIdentitySection({
       </div>
     </EditorSection>
   );
-}
+});
 
 // ─── Capabilities ───────────────────────────────────────────────────────────
 
-export function CapabilitiesSection({
+export const CapabilitiesSection = memo(function CapabilitiesSection({
   agent,
   agentId,
   version,
@@ -304,11 +303,11 @@ export function CapabilitiesSection({
       </div>
     </EditorSection>
   );
-}
+});
 
 // ─── User Memory ────────────────────────────────────────────────────────────
 
-export function UserMemorySection({
+export const UserMemorySection = memo(function UserMemorySection({
   agent,
   agentId,
   version,
@@ -522,11 +521,11 @@ export function UserMemorySection({
       </div>
     </EditorSection>
   );
-}
+});
 
 // ─── Memory Policy ──────────────────────────────────────────────────────────
 
-export function MemoryPolicySection({
+export const MemoryPolicySection = memo(function MemoryPolicySection({
   agent,
   agentId,
   version,
@@ -605,58 +604,17 @@ export function MemoryPolicySection({
       </div>
     </EditorSection>
   );
-}
+});
 
 // ─── Channel Connectors ────────────────────────────────────────────────────
 
-export function ChannelsSection({
-  agent,
-  agentId,
-  version,
-}: {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const ChannelsSection = memo(function ChannelsSection(_props: {
   agent: Agent;
   agentId: string;
   version: number;
 }) {
   const { t } = useTranslation();
-  const updateAgent = useUpdateAgent();
-  const [newType, setNewType] = useState("");
-
-  const channels = agent.channels ?? [];
-
-  function addChannel() {
-    if (!newType.trim()) return;
-    const updated = [...channels, { type: newType.trim(), config: {} }];
-    updateAgent.mutate({ id: agentId, version, agent: { ...agent, channels: updated } });
-    setNewType("");
-  }
-
-  function removeChannel(idx: number) {
-    const updated = channels.filter((_, i) => i !== idx);
-    updateAgent.mutate({ id: agentId, version, agent: { ...agent, channels: updated } });
-  }
-
-  function updateChannelConfig(idx: number, key: string, value: string) {
-    const updated = channels.map((ch, i) =>
-      i === idx ? { ...ch, config: { ...ch.config, [key]: value } } : ch
-    );
-    updateAgent.mutate({ id: agentId, version, agent: { ...agent, channels: updated } });
-  }
-
-  function removeChannelConfigKey(idx: number, key: string) {
-    const updated = channels.map((ch, i) => {
-      if (i !== idx) return ch;
-      const config = { ...ch.config };
-      delete config[key];
-      return { ...ch, config };
-    });
-    updateAgent.mutate({ id: agentId, version, agent: { ...agent, channels: updated } });
-  }
-
-  function addChannelConfigKey(idx: number) {
-    const nextKey = `key${Object.keys(channels[idx]?.config ?? {}).length}`;
-    updateChannelConfig(idx, nextKey, "");
-  }
 
   return (
     <EditorSection
@@ -664,79 +622,20 @@ export function ChannelsSection({
       icon={Cable}
       accent="text-indigo-500"
       variant="card"
-      defaultOpen={channels.length > 0}
+      defaultOpen={false}
     >
-      <div className="space-y-3" data-testid="channels-section">
-        <p className="text-[10px] text-muted-foreground">
-          {t("agentDetail.channelsDesc", "Configure external channel connectors (webhook URLs, Slack, Teams, etc.) that can receive output from this agent.")}
+      <div className="flex flex-col items-center justify-center py-10 text-center" data-testid="channels-section">
+        <Cable className="h-10 w-10 text-muted-foreground/40" />
+        <p className="mt-3 text-sm font-medium text-muted-foreground">
+          {t("agentDetail.channelsComingSoon", "Coming Soon")}
         </p>
-
-        {channels.map((ch, i) => (
-          <div key={i} className="rounded-lg border border-border bg-background p-3 space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="flex-1 text-xs font-medium text-foreground font-mono">{ch.type}</span>
-              <button
-                type="button"
-                onClick={() => removeChannel(i)}
-                disabled={updateAgent.isPending}
-                className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            {Object.entries(ch.config).map(([k, v]) => (
-              <div key={k} className="flex items-center gap-1.5">
-                <input
-                  type="text"
-                  value={k}
-                  readOnly
-                  className="h-7 w-28 rounded border border-input bg-muted px-2 text-xs text-foreground"
-                />
-                <input
-                  type="text"
-                  value={v}
-                  onChange={(e) => updateChannelConfig(i, k, e.target.value)}
-                  className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-                <button
-                  type="button"
-                  onClick={() => removeChannelConfigKey(i, k)}
-                  className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
-            <button
-              type="button"
-              onClick={() => addChannelConfigKey(i)}
-              className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <Plus className="h-2.5 w-2.5" />
-              {t("agentDetail.addConfigKey", "Add Config Key")}
-            </button>
-          </div>
-        ))}
-
-        <div className="flex gap-1.5">
-          <input
-            type="text"
-            value={newType}
-            onChange={(e) => setNewType(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addChannel(); } }}
-            placeholder={t("agentDetail.channelTypePlaceholder", "e.g. slack, teams, webhook")}
-            className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-          />
-          <button
-            type="button"
-            onClick={addChannel}
-            disabled={!newType.trim() || updateAgent.isPending}
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
-          >
-            <Plus className="h-3 w-3" />
-          </button>
-        </div>
+        <p className="mt-1 max-w-sm text-xs text-muted-foreground/70">
+          {t("agentDetail.channelsComingSoonDesc", "Channel connectors (Slack, Teams, Webhooks) are being developed and will be available in an upcoming release.")}
+        </p>
+        <span className="mt-3 inline-flex items-center rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+          {t("agentDetail.channelsComingSoonBadge", "In Development")}
+        </span>
       </div>
     </EditorSection>
   );
-}
+});

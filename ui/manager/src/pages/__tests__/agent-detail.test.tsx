@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
@@ -24,6 +25,15 @@ function renderAgentDetail(id = "agent1") {
       </QueryClientProvider>
     </MemoryRouter>
   );
+}
+
+/** Wait for section to load, then expand the A2A collapsible header */
+async function expandA2ASection() {
+  const section = await screen.findByTestId("a2a-section");
+  const header = section.querySelector("button");
+  if (header) {
+    await userEvent.click(header);
+  }
 }
 
 describe("AgentDetailPage", () => {
@@ -100,7 +110,8 @@ describe("AgentDetailPage", () => {
 
   it("shows A2A enabled state with description and skills", async () => {
     renderAgentDetail();
-    // MSW mock returns a2aEnabled: true, description, a2aSkills
+    // A2A is now collapsed by default — expand it first
+    await expandA2ASection();
     await waitFor(() => {
       expect(screen.getByTestId("a2a-description")).toBeInTheDocument();
       expect(screen.getByTestId("a2a-skill-input")).toBeInTheDocument();
@@ -109,6 +120,7 @@ describe("AgentDetailPage", () => {
 
   it("shows A2A endpoint URLs when enabled", async () => {
     renderAgentDetail();
+    await expandA2ASection();
     await waitFor(() => {
       // Should show both GET and POST endpoint badges
       expect(screen.getByText("GET")).toBeInTheDocument();
@@ -118,6 +130,7 @@ describe("AgentDetailPage", () => {
 
   it("shows Agent Card Preview toggle when A2A is enabled", async () => {
     renderAgentDetail();
+    await expandA2ASection();
     await waitFor(() => {
       expect(screen.getByTestId("a2a-card-toggle")).toBeInTheDocument();
     });
@@ -125,6 +138,7 @@ describe("AgentDetailPage", () => {
 
   it("shows A2A skills from mock data", async () => {
     renderAgentDetail();
+    await expandA2ASection();
     await waitFor(() => {
       expect(screen.getByText("order-tracking")).toBeInTheDocument();
       expect(screen.getByText("return-processing")).toBeInTheDocument();

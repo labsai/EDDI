@@ -62,6 +62,16 @@
     border-color: var(--color-border);
   }
 
+  /* Ensure all interactive elements show pointer cursor */
+  button,
+  [role="button"],
+  a,
+  select,
+  label:has(input[type="checkbox"]),
+  label:has(input[type="radio"]) {
+    cursor: pointer;
+  }
+
   body {
     font-family: var(--font-sans);
   }

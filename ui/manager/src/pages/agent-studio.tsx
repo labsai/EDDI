@@ -58,11 +58,11 @@ export function AgentStudioPage() {
     return parseResourceUri(agentDescriptor.resource).version;
   }, [agentDescriptor]);
 
-  // Fetch agent config
+  // Fetch agent config — must pass version for the API to return data
   const { data: agentConfig, isLoading: agentLoading } = useQuery({
-    queryKey: ["studio", "agent", agentId],
-    queryFn: () => getAgent(agentId!),
-    enabled: !!agentId,
+    queryKey: ["studio", "agent", agentId, agentVersion],
+    queryFn: () => getAgent(agentId!, agentVersion),
+    enabled: !!agentId && !!agentDescriptor,
     staleTime: 30_000,
   });
 
