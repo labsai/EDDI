@@ -182,17 +182,13 @@ public class GdprComplianceIT extends BaseIntegrationIT {
         given().post(GDPR_BASE + userId + "/restrict")
                 .then().statusCode(204);
 
-        // Attempt to send input — should be rejected
+        // Attempt to send input — should be rejected with 403 Forbidden (GDPR Art. 18)
         Response response = given().contentType(ContentType.TEXT).body("hello")
                 .post(String.format("agents/%s?returnDetailed=false&returnCurrentStepOnly=false",
                         convId.id()));
 
-        // Ideally should be 403 (Forbidden) or 409 (Conflict).
-        // TODO: Backend currently throws unhandled exception for restricted users →
-        // 500.
-        // Fix ConversationService to check GDPR restriction before pipeline execution.
         response.then().assertThat()
-                .statusCode(anyOf(equalTo(403), equalTo(409), equalTo(500)));
+                .statusCode(403);
 
         // Clean up restriction
         given().delete(GDPR_BASE + userId + "/restrict");

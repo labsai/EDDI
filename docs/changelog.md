@@ -13,6 +13,30 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## CI Fix: GDPR 403 Response & Docker Build Context (2026-04-14)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+### Fix 1: GDPR Processing Restriction → 403 Forbidden (was 500)
+
+`RestAgentEngine` did not catch `ProcessingRestrictedException`. When a GDPR Art. 18 restricted user attempted to converse or start a conversation, the exception fell through to the generic `catch (Exception)` handler, producing a 500 Internal Server Error and noisy ERROR-level log output in CI.
+
+**Fix:** Added explicit `catch (ProcessingRestrictedException)` in both `startConversationWithContext()` and `sayInternal()`, returning `403 Forbidden` with the restriction message. Logged at WARN level (expected business condition, not an error). Updated `GdprComplianceIT.restrictedUser_cannotConverse()` to assert `403` instead of the `anyOf(403, 409, 500)` workaround.
+
+### Fix 2: .dockerignore — Explicit Directory Re-Includes
+
+Container-based ITs (`AgentUseCaseIT`, `CreateApiAgentIT`) failed with `COPY failed: file not found in build context` because `.dockerignore` only re-included file globs (`!target/quarkus-app/**`) but not the parent directories themselves. Some Docker daemon/BuildKit versions require explicit directory entries to traverse into excluded parents.
+
+**Fix:** Added explicit directory re-includes (`!target/quarkus-app/`, `!licenses/`, `!docs/`) alongside the existing recursive glob patterns.
+
+| File | What |
+|------|------|
+| `RestAgentEngine.java` | Catch `ProcessingRestrictedException` → 403 in `startConversationWithContext()` and `sayInternal()` |
+| `GdprComplianceIT.java` | Assert `403` instead of `anyOf(403, 409, 500)`, removed TODO |
+| `.dockerignore` | Added explicit directory re-includes for `target/quarkus-app/`, `licenses/`, `docs/` |
+
+---
+
 ## Red Hat Preflight — Defense-in-Depth on Push (2026-04-14)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
