@@ -13,6 +13,35 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Import Descriptor Versioning & PostgreSQL UUID Fix (2026-04-14)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**Problem 1 — ImportMergeIT failures:** The import/merge pipeline produced 500 errors and duplicate key exceptions because:
+1. `RestImportService.updateDocumentDescriptor()` used `patchDescriptor()` which relied on the REST-layer `DocumentDescriptorFilter` for version management — but CDI-direct resource updates bypass that filter entirely
+2. The unconditional version bump (`updateDescriptor`) on CREATE imports caused history collection duplicate key errors when `setOriginIdOnDescriptor()` subsequently tried to archive the same version
+3. `setOriginIdOnDescriptor()` assumed the descriptor version matched the resource URI version, but during merge the descriptor lags behind
+4. `buildResourceDiff()` (merge preview) lacked a direct resource ID fallback, so export→re-import round-trips showed CREATE instead of UPDATE
+
+**Fix:**
+- `updateDocumentDescriptor()` now uses CDI-direct `documentDescriptorStore` instead of the REST layer
+- Conditionally uses `updateDescriptor` (version bump) only when descriptor version < resource version (merge path); uses `setDescriptor` (in-place) when versions match (create path)
+- `setOriginIdOnDescriptor()` now uses `getCurrentResourceId()` to find the descriptor's actual version
+- `buildResourceDiff()` adds a resource ID fallback matching the pattern in `findLocalUriByOriginId()`
+
+**Problem 2 — PostgresGroupConversationIT 500 error:** `PostgresResourceStorage.getCurrentVersion()` threw a `RuntimeException` wrapping `PSQLException` when passed a MongoDB-style ObjectId (24-char hex) as a group ID. The database-level "invalid input syntax for type uuid" error propagated as a 500 instead of a clean 404.
+
+**Fix:** `getCurrentVersion()` now catches `SQLException` with "invalid input syntax for type uuid" and returns `-1` (not found), matching the behavior callers expect.
+
+| File | What |
+|------|------|
+| `RestImportService.java` | CDI-direct descriptor management, conditional version bump, originId version lookup fix, preview fallback |
+| `PostgresResourceStorage.java` | Graceful UUID validation in `getCurrentVersion()` |
+
+**Verification:** 2117 unit tests pass, ImportMergeIT 7/7 pass, GroupConversationIT 6/6 pass.
+
+---
+
 ## Code Cleanup & Test Stabilization (2026-04-13)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
