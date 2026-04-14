@@ -499,9 +499,10 @@ public class AgentSetupService {
         }
 
         try {
-            // Namespace: setup.<sanitized-agent-name>.apiKey
+            // Namespace: setup.<sanitized-agent-name>.<timestamp>.apiKey
+            // Timestamp suffix prevents collision when two agents share the same name
             String sanitizedName = agentName.toLowerCase().replaceAll("[^a-z0-9]", "-");
-            String keyName = "setup." + sanitizedName + ".apiKey";
+            String keyName = "setup." + sanitizedName + "." + System.currentTimeMillis() + ".apiKey";
             var ref = new SecretReference(SecretReference.DEFAULT_TENANT, keyName);
             secretProvider.store(ref, apiKey, "Auto-vaulted by AgentSetupService for agent: " + agentName,
                     List.of("*"));

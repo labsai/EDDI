@@ -126,8 +126,15 @@
     }, {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "Don't worry \u2014 it will be <b>encrypted and stored securely</b> in the vault. It is never stored in plaintext.",
+        "text" : "Your key will be <b>auto-encrypted</b> in the vault when available.",
         "delay" : 0
+      } ]
+    }, {
+      "valueAlternatives" : [ {
+        "type" : "inputField",
+        "subType" : "password",
+        "placeholder" : "Paste your API key here",
+        "label" : "API Key"
       } ]
     } ],
     "quickReplies" : [ ]
