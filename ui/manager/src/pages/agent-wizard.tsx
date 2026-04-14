@@ -1170,25 +1170,56 @@ function FeaturesStep({
           </div>
         )}
 
-        {/* Quick Replies */}
-        <FeatureToggle
-          icon={Sparkles}
-          label={t("setupWizard.quickReplies", "Quick Replies")}
-          description={t("setupWizard.quickRepliesDesc", "LLM generates clickable reply suggestions")}
-          checked={state.enableQuickReplies}
-          onChange={(on) => onChange({ enableQuickReplies: on })}
-          data-testid="wizard-toggle-qr"
-        />
+        {/* Structured Output group */}
+        <div className="rounded-lg border border-border p-4 space-y-3">
+          <FeatureToggle
+            icon={FileCode2}
+            label={t("setupWizard.structuredOutput", "Structured Output")}
+            description={t("setupWizard.structuredOutputDesc", "LLM responds with a JSON object instead of plain text")}
+            checked={state.enableQuickReplies || state.enableSentimentAnalysis}
+            onChange={(on) => {
+              if (!on) {
+                onChange({ enableQuickReplies: false, enableSentimentAnalysis: false });
+              } else {
+                onChange({ enableQuickReplies: true });
+              }
+            }}
+            data-testid="wizard-toggle-structured"
+          />
+          {(state.enableQuickReplies || state.enableSentimentAnalysis) && (
+            <div className="space-y-3 ps-9">
+              <div className="flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400" data-testid="structured-output-info">
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  {t(
+                    "setupWizard.structuredOutputInfo",
+                    "Enabling this changes how the LLM responds: instead of plain text, it returns a JSON object with structured fields. A JSON schema is appended to your system prompt, and the model is set to JSON response mode."
+                  )}
+                </span>
+              </div>
 
-        {/* Sentiment Analysis */}
-        <FeatureToggle
-          icon={BarChart3}
-          label={t("setupWizard.sentiment", "Sentiment Analysis")}
-          description={t("setupWizard.sentimentDesc", "Track user mood, intent and urgency in real-time")}
-          checked={state.enableSentimentAnalysis}
-          onChange={(on) => onChange({ enableSentimentAnalysis: on })}
-          data-testid="wizard-toggle-sentiment"
-        />
+              {/* Quick Replies */}
+              <FeatureToggle
+                icon={Sparkles}
+                label={t("setupWizard.quickReplies", "Quick Replies")}
+                description={t("setupWizard.quickRepliesDesc", "LLM generates clickable reply suggestions")}
+                checked={state.enableQuickReplies}
+                onChange={(on) => onChange({ enableQuickReplies: on })}
+                data-testid="wizard-toggle-qr"
+              />
+
+              {/* Sentiment Analysis */}
+              <FeatureToggle
+                icon={BarChart3}
+                label={t("setupWizard.sentiment", "Sentiment Analysis")}
+                description={t("setupWizard.sentimentDesc", "Track user mood, intent and urgency in real-time")}
+                checked={state.enableSentimentAnalysis}
+                onChange={(on) => onChange({ enableSentimentAnalysis: on })}
+                data-testid="wizard-toggle-sentiment"
+              />
+            </div>
+          )}
+        </div>
 
         {/* Built-in Tools (standard only) */}
         {state.mode === "standard" && (
