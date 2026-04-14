@@ -702,6 +702,25 @@ When embedding `{properties.x}` in HTTP call body templates, be aware:
 - Do NOT use `.orEmpty` on properties — it's for Qute iterables, not strings, and fails on `NOT_FOUND`
 - User-entered text containing `{` or `}` will be interpreted as Qute expressions, potentially eating content
 
+#### Requesting specialized input fields from the UI
+
+The output system supports an `inputField` output type that tells the UI to switch its input control. Both **EDDI-Manager** (`SecretInputField` in `chat-panel.tsx`) and **eddi-chat-ui** (`SecretInput.tsx`) handle this natively.
+
+```json
+{
+  "valueAlternatives": [{
+    "type": "inputField",
+    "subType": "password",
+    "placeholder": "Paste your API key here",
+    "label": "API Key"
+  }]
+}
+```
+
+Supported `subType` values: `"password"`, `"text"`, `"email"`. When the UI receives an `inputField` in the output array, it replaces the standard text input with the appropriate specialized field for that turn. The field reverts to normal text input on the next response.
+
+> **Key pattern**: Add the `inputField` output item alongside regular `text` outputs in the same action's output set. The text explains what the user should enter, and the `inputField` controls how the input is rendered.
+
 ### 5.5 ZIP Structure for Agent Import
 
 Agent ZIP files are imported via `RestImportService`. **All IDs in URIs and filenames must be valid hex identifiers** (24-char hex strings like MongoDB ObjectIds, or UUIDs). The import service validates IDs via `RestUtilities.isValidId()` which requires ≥18 hex characters (`0-9a-fA-F` and dashes). Semantic names like `agent-father-wf1` will be rejected.

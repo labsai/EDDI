@@ -86,11 +86,16 @@ public class RestLogAdmin implements IRestLogAdmin {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } finally {
-                boundedLogStore.removeListener(listenerId);
-                if (!eventSink.isClosed()) {
-                    eventSink.close();
+                try {
+                    boundedLogStore.removeListener(listenerId);
+                    if (!eventSink.isClosed()) {
+                        eventSink.close();
+                    }
+                    log.debugv("SSE log listener {0} removed (client disconnected or max lifetime reached)", listenerId);
+                } catch (Exception e) {
+                    // CDI container may already be shut down (e.g. during test teardown) —
+                    // swallow to avoid noisy "ArC container not initialized" stacktraces
                 }
-                log.debugv("SSE log listener {0} removed (client disconnected or max lifetime reached)", listenerId);
             }
         });
 

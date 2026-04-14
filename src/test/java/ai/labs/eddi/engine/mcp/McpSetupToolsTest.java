@@ -238,6 +238,51 @@ class McpSetupToolsTest {
     }
 
     @Test
+    void setupAgent_withVaultActive_storesVaultReference() throws Exception {
+        // Create a separate service instance with vault enabled
+        var vaultProvider = mock(ISecretProvider.class);
+        when(vaultProvider.isAvailable()).thenReturn(true);
+
+        var restInterfaceFactory = mock(IRestInterfaceFactory.class);
+        when(restInterfaceFactory.get(IRestRuleSetStore.class)).thenReturn(behaviorStore);
+        when(restInterfaceFactory.get(IRestLlmStore.class)).thenReturn(langchainStore);
+        when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(WorkflowStore);
+        when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(AgentStore);
+        when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
+        when(restInterfaceFactory.get(IRestParserStore.class)).thenReturn(parserStore);
+
+        var vaultService = new AgentSetupService(restInterfaceFactory, agentAdmin, vaultProvider, "http://localhost:11434");
+
+        when(behaviorStore.createRuleSet(any())).thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1")).build());
+        when(langchainStore.createLlm(any())).thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1")).build());
+        when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
+
+        var vaultTools = new McpSetupTools(vaultService, jsonSerialization,
+                mock(io.quarkus.security.identity.SecurityIdentity.class), false);
+
+        vaultTools.setupAgent("Vault Agent", "You are helpful", "openai", "gpt-4o", "sk-live-secret", null, null, null,
+                null, null, null, null, false, null);
+
+        // Verify the API key was stored in the vault
+        var refCaptor = ArgumentCaptor.forClass(ai.labs.eddi.secrets.model.SecretReference.class);
+        verify(vaultProvider).store(refCaptor.capture(), eq("sk-live-secret"), contains("Vault Agent"), any());
+        assertTrue(refCaptor.getValue().keyName().startsWith("setup.vault-agent."),
+                "Vault key should start with 'setup.<sanitized-name>.'");
+        assertTrue(refCaptor.getValue().keyName().endsWith(".apiKey"),
+                "Vault key should end with '.apiKey'");
+
+        // Verify LLM config has vault reference, not plaintext
+        var lcCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
+        verify(langchainStore).createLlm(lcCaptor.capture());
+        String storedKey = lcCaptor.getValue().tasks().get(0).getParameters().get("apiKey");
+        assertTrue(storedKey.startsWith("${eddivault:"),
+                "API key should be vault reference, got: " + storedKey);
+        assertFalse(storedKey.contains("sk-live-secret"),
+                "Plaintext key must NOT appear in LLM config when vault is active");
+    }
+
+    @Test
     void setupAgent_capturesWorkflowConfig() throws Exception {
         when(behaviorStore.createRuleSet(any())).thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1")).build());
         when(langchainStore.createLlm(any())).thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1")).build());

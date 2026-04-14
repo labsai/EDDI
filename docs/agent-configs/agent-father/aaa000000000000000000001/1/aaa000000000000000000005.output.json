@@ -257,7 +257,7 @@
     "outputs" : [ {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "\ud83d\udccb <b>Agent Summary</b><br><br>\ud83c\udfaf <b>Name:</b> {properties.agentName}<br>\u2699\ufe0f <b>Provider:</b> {properties.provider}<br>\ud83e\udd16 <b>Model:</b> {properties.model}<br>\ud83d\udd10 <b>API Key:</b> stored in vault \u2713<br><br>Ready to create and deploy?",
+        "text" : "\ud83d\udccb <b>Agent Summary</b><br><br>\ud83c\udfaf <b>Name:</b> {properties.agentName}<br>\u2699\ufe0f <b>Provider:</b> {properties.provider}<br>\ud83e\udd16 <b>Model:</b> {properties.model}<br><br>Ready to create and deploy?",
         "delay" : 0
       } ]
     } ],
