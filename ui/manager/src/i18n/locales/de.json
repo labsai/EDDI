@@ -146,6 +146,9 @@
     "importing": "Wird importiert...",
     "importSuccess": "Agent erfolgreich importiert",
     "importError": "Agent konnte nicht importiert werden",
+    "chat": "Chat",
+    "deployAndChat": "Bereitstellen & Chatten",
+    "openExternalChat": "In neuem Tab öffnen",
     "emptyDescription": "Erstellen Sie mit dem Wizard in wenigen Minuten einen fertig konfigurierten Agent."
   },
   "agentDetail": {

@@ -146,6 +146,9 @@
     "importing": "Importation en cours...",
     "importSuccess": "Agent importé avec succès",
     "importError": "Échec de l'importation de l'agent",
+    "chat": "Chat",
+    "deployAndChat": "Déployer & Discuter",
+    "openExternalChat": "Ouvrir dans un nouvel onglet",
     "emptyDescription": "Utilisez l'assistant pour créer un agent entièrement configuré en quelques minutes."
   },
   "agentDetail": {

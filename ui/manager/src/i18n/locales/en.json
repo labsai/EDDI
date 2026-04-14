@@ -173,7 +173,10 @@
     "import": "Import Agent",
     "importing": "Importing...",
     "importSuccess": "Agent imported successfully",
-    "importError": "Failed to import agent"
+    "importError": "Failed to import agent",
+    "chat": "Chat",
+    "deployAndChat": "Deploy & Chat",
+    "openExternalChat": "Open in new tab"
   },
   "agentDetail": {
     "title": "Agent Detail",

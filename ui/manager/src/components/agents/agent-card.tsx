@@ -177,31 +177,44 @@ export function AgentCard({ agent, onDuplicate, onDelete, onExport }: AgentCardP
         </span>
 
         <div className="flex items-center gap-2">
-          {/* Chat button — only when deployed */}
+          {/* Chat button group — inline + external, only when deployed */}
           {isDeployed && (
-            <button
-              onClick={async () => {
-                const drawerStore = useChatDrawerStore.getState();
-                const chatStore = useChatStore.getState();
-                const agentName = agent.name || t("agents.unnamed", "Unnamed Agent");
-                drawerStore.open(agent.id, agentName);
-                drawerStore.setStep("starting");
-                chatStore.clearMessages();
-                chatStore.setSelectedAgent(agent.id, agentName);
-                try {
-                  await startConversation.mutateAsync({ agentId: agent.id });
-                  drawerStore.setStep("ready");
-                } catch (err) {
-                  drawerStore.setStep("error", getErrorMessage(err));
-                }
-              }}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400"
-              data-testid={`agent-chat-${agent.id}`}
-              aria-label={t("agents.chat", "Chat")}
-            >
-              <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
-              {t("agents.chat", "Chat")}
-            </button>
+            <div className="inline-flex">
+              <button
+                onClick={async () => {
+                  const drawerStore = useChatDrawerStore.getState();
+                  const chatStore = useChatStore.getState();
+                  const agentName = agent.name || t("agents.unnamed", "Unnamed Agent");
+                  drawerStore.open(agent.id, agentName);
+                  drawerStore.setStep("starting");
+                  chatStore.clearMessages();
+                  chatStore.setSelectedAgent(agent.id, agentName);
+                  try {
+                    await startConversation.mutateAsync({ agentId: agent.id });
+                    drawerStore.setStep("ready");
+                  } catch (err) {
+                    drawerStore.setStep("error", getErrorMessage(err));
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 rounded-s-lg bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400"
+                data-testid={`agent-chat-${agent.id}`}
+                aria-label={t("agents.chat", "Chat")}
+              >
+                <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
+                {t("agents.chat", "Chat")}
+              </button>
+              <a
+                href={`/chat/production/${agent.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center rounded-e-lg border-s border-emerald-500/20 bg-emerald-500/10 px-1.5 py-1.5 text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400"
+                title={t("agents.openExternalChat", "Open in new tab")}
+                aria-label={t("agents.openExternalChat", "Open in new tab")}
+                data-testid={`agent-external-chat-${agent.id}`}
+              >
+                <ExternalLink className="h-3 w-3" aria-hidden="true" />
+              </a>
+            </div>
           )}
 
           <button
