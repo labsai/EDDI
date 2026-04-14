@@ -19,6 +19,24 @@ import static org.hamcrest.Matchers.*;
 @TestProfile(IntegrationTestProfile.class)
 public class ApiContractIT extends BaseIntegrationIT {
 
+    // Track resources for cleanup
+    private static final java.util.List<String[]> createdResources = new java.util.ArrayList<>();
+
+    @AfterAll
+    static void cleanup() {
+        for (String[] res : createdResources) {
+            deleteResourceQuietly(res[0], res[1], Integer.parseInt(res[2]));
+        }
+        createdResources.clear();
+    }
+
+    private String createAndTrack(String body, String path) {
+        String location = createResource(body, path);
+        ResourceId id = extractResourceId(location);
+        createdResources.add(new String[]{path, id.id(), String.valueOf(id.version())});
+        return location;
+    }
+
     // ==================== CRUD Endpoint Contracts ====================
 
     @Test
@@ -29,13 +47,14 @@ public class ApiContractIT extends BaseIntegrationIT {
         Response response = given().contentType(ContentType.JSON).body(json).post("/rulestore/rulesets/");
 
         response.then().assertThat().statusCode(201).header("location", allOf(containsString("eddi://ai.labs.rules"), containsString("?version=1")));
+        trackLocation(response.getHeader("location"), "/rulestore/rulesets/");
     }
 
     @Test
     @DisplayName("GET should return JSON with correct content type")
     void readBehavior_returnsJson() throws Exception {
         String json = load("rules/createRules.json");
-        String location = createResource(json, "/rulestore/rulesets/");
+        String location = createAndTrack(json, "/rulestore/rulesets/");
         ResourceId id = extractResourceId(location);
 
         given().get("/rulestore/rulesets/" + id.id() + "?version=" + id.version()).then().assertThat().statusCode(200).contentType(ContentType.JSON);
@@ -52,8 +71,10 @@ public class ApiContractIT extends BaseIntegrationIT {
     void createOutput_returns201WithLocation() throws Exception {
         String json = load("output/createOutput.json");
 
-        given().contentType(ContentType.JSON).body(json).post("/outputstore/outputsets/").then().assertThat().statusCode(201).header("location",
+        Response response = given().contentType(ContentType.JSON).body(json).post("/outputstore/outputsets/");
+        response.then().assertThat().statusCode(201).header("location",
                 allOf(containsString("eddi://ai.labs.output"), containsString("?version=1")));
+        trackLocation(response.getHeader("location"), "/outputstore/outputsets/");
     }
 
     @Test
@@ -61,8 +82,10 @@ public class ApiContractIT extends BaseIntegrationIT {
     void createDictionary_returns201WithLocation() throws Exception {
         String json = load("dictionary/createDictionary.json");
 
-        given().contentType(ContentType.JSON).body(json).post("/dictionarystore/dictionaries/").then().assertThat().statusCode(201).header("location",
+        Response response = given().contentType(ContentType.JSON).body(json).post("/dictionarystore/dictionaries/");
+        response.then().assertThat().statusCode(201).header("location",
                 allOf(containsString("eddi://ai.labs.dictionary"), containsString("?version=1")));
+        trackLocation(response.getHeader("location"), "/dictionarystore/dictionaries/");
     }
 
     // ==================== Conversation API Contract ====================
@@ -120,9 +143,9 @@ public class ApiContractIT extends BaseIntegrationIT {
         String behavior = load("agentengine/rules.json");
         String output = load("agentengine/output.json");
 
-        String locationDictionary = createResource(dictionary, "/dictionarystore/dictionaries");
-        String locationBehavior = createResource(behavior, "/rulestore/rulesets");
-        String locationOutput = createResource(output, "/outputstore/outputsets");
+        String locationDictionary = createAndTrack(dictionary, "/dictionarystore/dictionaries/");
+        String locationBehavior = createAndTrack(behavior, "/rulestore/rulesets/");
+        String locationOutput = createAndTrack(output, "/outputstore/outputsets/");
 
         String packageBody = String.format("""
                 {
@@ -144,13 +167,20 @@ public class ApiContractIT extends BaseIntegrationIT {
                   ]
                 }""", locationDictionary, locationBehavior, locationOutput);
 
-        String locationWorkflow = createResource(packageBody, "/workflowstore/workflows");
+        String locationWorkflow = createAndTrack(packageBody, "/workflowstore/workflows/");
         String agentBody = String.format("""
                 {"packages": ["%s"]}""", locationWorkflow);
-        String agentLocation = createResource(agentBody, "/agentstore/agents");
+        String agentLocation = createAndTrack(agentBody, "/agentstore/agents/");
 
         ResourceId agentId = extractResourceId(agentLocation);
         deployAgent(agentId.id(), agentId.version());
         return agentId;
+    }
+
+    private void trackLocation(String location, String path) {
+        if (location != null) {
+            ResourceId id = extractResourceId(location);
+            createdResources.add(new String[]{path, id.id(), String.valueOf(id.version())});
+        }
     }
 }

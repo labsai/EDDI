@@ -25,6 +25,13 @@ public class RulesCrudIT extends BaseIntegrationIT {
     private static String TEST_JSON2;
     private static final ResourceId[] resourceId = new ResourceId[1];
 
+    @AfterAll
+    static void cleanup() {
+        if (resourceId[0] != null) {
+            deleteResourceQuietly(ROOT_PATH, resourceId[0].id(), resourceId[0].version());
+        }
+    }
+
     @BeforeAll
     static void loadResources() throws IOException {
         TEST_JSON = load("rules/createRules.json");

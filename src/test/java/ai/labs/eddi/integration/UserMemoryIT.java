@@ -23,6 +23,14 @@ public class UserMemoryIT extends BaseIntegrationIT {
     private static final String TEST_USER = "memory-test-user-" + System.currentTimeMillis();
     private static String createdEntryId;
 
+    @AfterAll
+    static void cleanup() {
+        try {
+            given().delete(BASE + TEST_USER);
+        } catch (Exception ignored) {
+        }
+    }
+
     // ==================== Upsert & Read ====================
 
     @Test

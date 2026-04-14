@@ -13,6 +13,63 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Integration Test Stability & Cleanup Hardening (2026-04-14)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**Problem:** Integration tests left orphaned data in the database between runs, causing cascading failures:
+- `ConversationStoreIT` returned 400 due to corrupted/orphaned descriptors from prior runs
+- `AuditAndSecurityIT` vault tests were skipped (no master key) or failed (stale DEKs from prior runs with different keys)
+- CRUD tests had no `@AfterAll` cleanup — if a test failed mid-sequence, resources were permanently orphaned
+
+### Production Hardening
+
+**`RestConversationStore.readConversationDescriptors()`** — Wrapped per-descriptor processing in try-catch so a single corrupted/orphaned descriptor no longer crashes the entire listing endpoint with 400/500. Corrupt descriptors are logged at DEBUG and skipped gracefully.
+
+### Test Infrastructure
+
+| Change | Files | Rationale |
+|--------|-------|-----------|
+| **Vault master key** | `IntegrationTestProfile`, `PostgresIntegrationTestProfile` | Configures `eddi.vault.master-key` so vault CRUD tests execute instead of being skipped |
+| **Dynamic tenant ID** | `AuditAndSecurityIT` | Timestamp-based tenant avoids stale DEK conflicts from prior runs |
+| **@AfterAll cleanup** | All 16 CRUD/complex IT classes | Safety-net deletion of resources even when mid-test failures leave orphaned data |
+| **Resource tracking** | `ApiContractIT` | `createAndTrack()` helper tracks all created resources for batch cleanup |
+| **Descriptor limit** | `ConversationStoreIT` | `limit=5` reduces iteration over orphaned descriptors |
+
+### Files Modified
+
+| File | What |
+|------|------|
+| `RestConversationStore.java` | Per-descriptor error handling in `readConversationDescriptors()` |
+| `IntegrationTestProfile.java` | Add vault master key, switch to `Map.ofEntries()` |
+| `PostgresIntegrationTestProfile.java` | Add vault master key |
+| `AuditAndSecurityIT.java` | Dynamic tenant, `@AfterAll` cleanup |
+| `ConversationStoreIT.java` | `limit=5` for filter test |
+| `LlmCrudIT.java` | `@AfterAll` cleanup |
+| `ApiCallsCrudIT.java` | `@AfterAll` cleanup |
+| `McpCallsCrudIT.java` | `@AfterAll` cleanup |
+| `RagCrudIT.java` | `@AfterAll` cleanup |
+| `PropertySetterCrudIT.java` | `@AfterAll` cleanup |
+| `WorkflowCrudIT.java` | `@AfterAll` cleanup |
+| `AgentGroupCrudIT.java` | `@AfterAll` cleanup |
+| `PromptSnippetCrudIT.java` | `@AfterAll` cleanup |
+| `OutputCrudIT.java` | `@AfterAll` cleanup |
+| `DictionaryCrudIT.java` | `@AfterAll` cleanup |
+| `RulesCrudIT.java` | `@AfterAll` cleanup |
+| `ImportMergeIT.java` | `@AfterAll` cleanup |
+| `ScheduleAndTriggerIT.java` | `@AfterAll` cleanup |
+| `UserMemoryIT.java` | `@AfterAll` cleanup |
+| `ApiContractIT.java` | Resource tracking + `@AfterAll` cleanup |
+
+### Test Results
+
+| Suite | Tests | Pass | Fail | Skip |
+|-------|-------|------|------|------|
+| Unit Tests | 2117 | 2117 | 0 | 0 |
+| MongoDB ITs | 164 | 164 | 0 | 0 |
+| Postgres ITs | 122 | 122 | 0 | 0 |
+| **Total** | **2403** | **2403** | **0** | **0** |
+
 ## API Key Auto-Vaulting & Agent Father Hardening (2026-04-14)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)

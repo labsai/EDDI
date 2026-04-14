@@ -23,6 +23,13 @@ public class ApiCallsCrudIT extends BaseIntegrationIT {
 
     private static final ResourceId[] resourceId = new ResourceId[1];
 
+    @AfterAll
+    static void cleanup() {
+        if (resourceId[0] != null) {
+            deleteResourceQuietly(ROOT_PATH, resourceId[0].id(), resourceId[0].version());
+        }
+    }
+
     private static final String CREATE_JSON = """
             {
               "targetServerUrl": "https://api.example.com/v1",

@@ -22,6 +22,15 @@ public class AuditAndSecurityIT extends BaseIntegrationIT {
     private static final String SECRET_BASE = "/secretstore/secrets/";
     private static final String TEST_TENANT = "test-tenant-" + System.currentTimeMillis();
 
+    @AfterAll
+    static void cleanup() {
+        // Clean up any vault secrets created during test
+        try {
+            given().delete(SECRET_BASE + TEST_TENANT + "/test-key");
+        } catch (Exception ignored) {
+        }
+    }
+
     // ==================== Audit Trail ====================
 
     @Test

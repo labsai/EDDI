@@ -25,6 +25,16 @@ public class ScheduleAndTriggerIT extends BaseIntegrationIT {
 
     private static String createdScheduleId;
 
+    @AfterAll
+    static void cleanup() {
+        if (createdScheduleId != null) {
+            try {
+                given().delete(SCHEDULE_BASE + createdScheduleId);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
     // ==================== Schedule CRUD ====================
 
     @Test

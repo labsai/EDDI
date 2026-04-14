@@ -31,6 +31,14 @@ public class ImportMergeIT extends BaseIntegrationIT {
     private static String firstImportAgentOriginId;
     private static byte[] exportedZipBytes;
 
+    @AfterAll
+    static void cleanup() {
+        if (firstImportAgentId != null) {
+            undeployAgentQuietly(firstImportAgentId.id(), firstImportAgentId.version());
+            deleteResourceQuietly("/agentstore/agents/", firstImportAgentId.id(), firstImportAgentId.version());
+        }
+    }
+
     // ==================== Test 1: Initial import (strategy=create)
     // ====================
 

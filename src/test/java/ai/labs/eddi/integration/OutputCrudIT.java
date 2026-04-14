@@ -26,6 +26,13 @@ public class OutputCrudIT extends BaseIntegrationIT {
     private static String PATCH_JSON;
     private static final ResourceId[] resourceId = new ResourceId[1];
 
+    @AfterAll
+    static void cleanup() {
+        if (resourceId[0] != null) {
+            deleteResourceQuietly(ROOT_PATH, resourceId[0].id(), resourceId[0].version());
+        }
+    }
+
     @BeforeAll
     static void loadResources() throws IOException {
         TEST_JSON = load("output/createOutput.json");
