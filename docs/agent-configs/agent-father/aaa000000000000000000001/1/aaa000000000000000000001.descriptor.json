@@ -1,5 +1,5 @@
 {
-  "resource" : "eddi://ai.labs.workflow/workflowstore/workflows/agent-father-wf1?version=1",
+  "resource" : "eddi://ai.labs.workflow/workflowstore/workflows/aaa000000000000000000001?version=1",
   "name" : "Agent Father",
   "description" : "Agent creation wizard workflow",
   "deleted" : false

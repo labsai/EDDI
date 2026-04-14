@@ -102,7 +102,7 @@
       } ]
     }, {
       "name" : "Select Jlama, skip key, ask for model",
-      "actions" : [ "set_provider_jlama", "ask_for_model_jlama" ],
+      "actions" : [ "set_provider_jlama", "ask_for_model", "ask_for_model_jlama" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
@@ -118,7 +118,7 @@
       } ]
     }, {
       "name" : "Select Bedrock, skip key, ask for model",
-      "actions" : [ "set_provider_bedrock", "ask_for_model_bedrock" ],
+      "actions" : [ "set_provider_bedrock", "ask_for_model", "ask_for_model_bedrock" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
@@ -134,7 +134,7 @@
       } ]
     }, {
       "name" : "Select Oracle GenAI, skip key, ask for model",
-      "actions" : [ "set_provider_oracle_genai", "ask_for_model_oracle" ],
+      "actions" : [ "set_provider_oracle_genai", "ask_for_model", "ask_for_model_oracle" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
@@ -262,7 +262,7 @@
       } ]
     }, {
       "name" : "Use default Ollama URL, ask for model",
-      "actions" : [ "set_default_base_url", "ask_for_model_ollama" ],
+      "actions" : [ "set_default_base_url", "ask_for_model", "ask_for_model_ollama" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
@@ -278,7 +278,7 @@
       } ]
     }, {
       "name" : "Set custom base URL, ask for model (ollama)",
-      "actions" : [ "set_base_url", "ask_for_model_ollama" ],
+      "actions" : [ "set_base_url", "ask_for_model", "ask_for_model_ollama" ],
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
@@ -323,7 +323,7 @@
       "conditions" : [ {
         "type" : "actionmatcher",
         "configs" : {
-          "actions" : "ask_for_model,ask_for_model_ollama,ask_for_model_jlama,ask_for_model_bedrock,ask_for_model_oracle",
+          "actions" : "ask_for_model",
           "occurrence" : "lastStep"
         }
       }, {

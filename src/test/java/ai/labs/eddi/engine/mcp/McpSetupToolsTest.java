@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService;
+import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -76,7 +77,11 @@ class McpSetupToolsTest {
         // Default parser mock (needed by all setupAgent calls)
         lenient().when(parserStore.createParser(any())).thenReturn(Response.created(URI.create("/parserstore/parsers/par-1?version=1")).build());
 
-        service = new AgentSetupService(restInterfaceFactory, agentAdmin, "http://localhost:11434");
+        var secretProvider = mock(ISecretProvider.class);
+        // Vault disabled in tests — vaultApiKey() falls back to plaintext
+        when(secretProvider.isAvailable()).thenReturn(false);
+
+        service = new AgentSetupService(restInterfaceFactory, agentAdmin, secretProvider, "http://localhost:11434");
         var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         tools = new McpSetupTools(service, jsonSerialization, mockIdentity, false);

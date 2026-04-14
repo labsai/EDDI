@@ -124,7 +124,7 @@
     "setProperties" : [ {
       "name" : "apiKey",
       "valueString" : "{memory.current.input}",
-      "scope" : "secret",
+      "scope" : "conversation",
       "override" : true
     } ]
   }, {

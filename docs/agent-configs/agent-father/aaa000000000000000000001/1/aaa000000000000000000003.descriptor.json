@@ -1,5 +1,5 @@
 {
-  "resource" : "eddi://ai.labs.property/propertysetterstore/propertysetters/agent-father-property?version=1",
+  "resource" : "eddi://ai.labs.property/propertysetterstore/propertysetters/aaa000000000000000000003?version=1",
   "name" : "Agent Father",
   "description" : "Property extraction with auto-vault for API keys",
   "deleted" : false

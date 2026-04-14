@@ -643,6 +643,32 @@ Do NOT reuse system action names (like `CONVERSATION_START`) as quick reply expr
 ✅ RIGHT:  "expressions" : "get_started"           (dedicated identifier)
 ```
 
+#### `actionmatcher` comma-separated values = AND (contiguous sublist), NOT OR
+
+When you specify `"actions" : "action_a,action_b"`, the engine checks if BOTH actions appear as a **contiguous sublist** of the step's action list (`Collections.indexOfSubList`). This means ALL listed actions must be present — it is AND semantics, not OR.
+
+```
+❌ WRONG — tries to match any of these, but actually requires ALL FIVE contiguously:
+"actions" : "ask_for_model,ask_for_model_ollama,ask_for_model_jlama,ask_for_model_bedrock,ask_for_model_oracle"
+
+✅ RIGHT — Option A: emit a common action alongside provider-specific ones:
+Rule actions: [ "set_provider_ollama", "ask_for_model", "ask_for_model_ollama" ]
+Matcher:      "actions" : "ask_for_model"
+
+✅ RIGHT — Option B: use a connector with OR operator:
+{
+  "type" : "connector",
+  "configs" : { "operator" : "OR" },
+  "conditions" : [ {
+    "type" : "actionmatcher",
+    "configs" : { "actions" : "ask_for_model", "occurrence" : "lastStep" }
+  }, {
+    "type" : "actionmatcher",
+    "configs" : { "actions" : "ask_for_model_ollama", "occurrence" : "lastStep" }
+  } ]
+}
+```
+
 ### 5.4 Property Setter Patterns
 
 #### Scope values
@@ -653,6 +679,8 @@ Do NOT reuse system action names (like `CONVERSATION_START`) as quick reply expr
 | `conversation` | Lives for the session (default for most agent-building properties)                                                                            |
 | `longTerm`     | Persisted to `usermemories` collection across conversations                                                                                   |
 | `secret`       | Auto-vaulted: plaintext stored in SecretsVault, raw input scrubbed from memory, vault reference (`${eddivault:...}`) stored as property value |
+
+> **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If vault is disabled (common in dev mode), `autoVaultSecret()` fails and falls back to storing plaintext — but logs an ERROR that may confuse users. For wizard-style agents that collect API keys and pass them to an endpoint (like the Agent Father), prefer `scope: "conversation"` and delegate vaulting to the receiving service.
 
 #### Capturing user input vs. setting fixed values
 
@@ -667,28 +695,42 @@ Do NOT reuse system action names (like `CONVERSATION_START`) as quick reply expr
 { "name" : "baseUrl", "valueString" : "http://localhost:11434", "scope" : "conversation" }
 ```
 
+#### Qute template safety in HTTP call bodies
+
+When embedding `{properties.x}` in HTTP call body templates, be aware:
+- `quarkus.qute.strict-rendering=false` renders missing properties as empty strings (no error)
+- Do NOT use `.orEmpty` on properties — it's for Qute iterables, not strings, and fails on `NOT_FOUND`
+- User-entered text containing `{` or `}` will be interpreted as Qute expressions, potentially eating content
+
 ### 5.5 ZIP Structure for Agent Import
 
-Agent ZIP files are imported via `RestImportService`. The file naming convention determines resource type:
+Agent ZIP files are imported via `RestImportService`. **All IDs in URIs and filenames must be valid hex identifiers** (24-char hex strings like MongoDB ObjectIds, or UUIDs). The import service validates IDs via `RestUtilities.isValidId()` which requires ≥18 hex characters (`0-9a-fA-F` and dashes). Semantic names like `agent-father-wf1` will be rejected.
+
+The file naming convention is `{id}.{type}.json` where `{id}` matches the last path segment of the resource URI:
 
 ```
-agent-name.agent.json            → Agent configuration
-agent-name.descriptor.json       → Agent descriptor (name, description, version)
-workflow-name/
+{agentId}.agent.json              → Agent configuration
+{agentId}.descriptor.json         → Agent descriptor (name, description, version)
+{workflowId}/
   1/
-    workflow-name.workflow.json  → Workflow definition
-    workflow-name.descriptor.json
-    behavior.behavior.json       → Behavior rules
-    behavior.descriptor.json
-    property.property.json       → Property setter
-    property.descriptor.json
-    httpcalls.httpcalls.json     → HTTP API calls
-    httpcalls.descriptor.json
-    output.output.json           → Output messages + quick replies
-    output.descriptor.json
-    langchain.langchain.json     → LLM configuration (if applicable)
-    langchain.descriptor.json
+    {workflowId}.workflow.json    → Workflow definition
+    {workflowId}.descriptor.json
+    {behaviorId}.behavior.json    → Behavior rules (file ext stays "behavior", URI uses "rules")
+    {behaviorId}.descriptor.json
+    {propertyId}.property.json    → Property setter
+    {propertyId}.descriptor.json
+    {httpcallsId}.httpcalls.json  → HTTP API calls (file ext stays "httpcalls", URI uses "apicalls")
+    {httpcallsId}.descriptor.json
+    {outputId}.output.json        → Output messages + quick replies
+    {outputId}.descriptor.json
+    {llmId}.langchain.json        → LLM configuration (file ext stays "langchain", URI uses "llm")
+    {llmId}.descriptor.json
 ```
+
+> **Important**: File extensions use legacy names (`behavior`, `httpcalls`, `langchain`) while URIs use v6 names (`rules`, `apicalls`, `llm`). The import service maps between them via `AbstractBackupService` constants.
+
+> **Pipeline step**: If your output templates contain `{properties.x}` placeholders, you **must** include `eddi://ai.labs.templating` as the last workflow step. Without it, Qute expressions are not resolved.
+
 
 #### URI format (v6 canonical)
 

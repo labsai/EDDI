@@ -1,5 +1,5 @@
 {
-  "resource" : "eddi://ai.labs.agent/agentstore/agents/agent-father?version=1",
+  "resource" : "eddi://ai.labs.agent/agentstore/agents/aaa000000000000000000000?version=1",
   "name" : "Agent Father",
   "description" : "EDDI's built-in agent creation wizard. Creates and deploys fully working AI agents through a guided conversation. Supports 12 LLM providers (Anthropic, OpenAI, Gemini, Ollama, Mistral, and more). API keys are auto-encrypted in the vault.\nv6.0.0",
   "deleted" : false

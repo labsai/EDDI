@@ -146,15 +146,20 @@
       "expressions" : "use_default_ollama_url"
     } ]
   }, {
-    "action" : "ask_for_model",
+    "action" : "set_api_key",
     "timesOccurred" : 0,
     "outputs" : [ {
       "valueAlternatives" : [ {
         "type" : "text",
-        "text" : "\ud83d\udd10 API key stored securely in vault \u2713",
+        "text" : "\ud83d\udd10 API key received \u2713",
         "delay" : 0
       } ]
-    }, {
+    } ],
+    "quickReplies" : [ ]
+  }, {
+    "action" : "ask_for_model",
+    "timesOccurred" : 0,
+    "outputs" : [ {
       "valueAlternatives" : [ {
         "type" : "text",
         "text" : "\ud83e\udd16 Which <b>model</b> should your agent use?",

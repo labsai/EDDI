@@ -32,6 +32,8 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
+import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -60,13 +62,16 @@ public class AgentSetupService {
 
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IRestAgentAdministration agentAdmin;
+    private final ISecretProvider secretProvider;
     private final String ollamaDefaultBaseUrl;
 
     @Inject
     public AgentSetupService(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin,
+            ISecretProvider secretProvider,
             @ConfigProperty(name = "eddi.ollama.default-base-url", defaultValue = "http://localhost:11434") String ollamaDefaultBaseUrl) {
         this.restInterfaceFactory = restInterfaceFactory;
         this.agentAdmin = agentAdmin;
+        this.secretProvider = secretProvider;
         this.ollamaDefaultBaseUrl = ollamaDefaultBaseUrl;
     }
 
@@ -121,7 +126,10 @@ public class AgentSetupService {
             patchDescriptor(behaviorId, behaviorVersion, request.agentName());
 
             // --- Step 3: Create LLM Configuration ---
-            var llmConfig = createLlmConfig(params.providerType, params.modelId, request.apiKey(), request.systemPrompt(), toolsEnabled,
+            // Auto-vault the API key: store encrypted in vault, use vault reference in
+            // config
+            String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName());
+            var llmConfig = createLlmConfig(params.providerType, params.modelId, effectiveApiKey, request.systemPrompt(), toolsEnabled,
                     request.builtInToolsWhitelist(), request.baseUrl(), promptResponseJson, quickReplies, sentiment, null);
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
@@ -280,7 +288,9 @@ public class AgentSetupService {
             boolean quickReplies = request.enableQuickReplies() != null && request.enableQuickReplies();
             boolean sentiment = request.enableSentimentAnalysis() != null && request.enableSentimentAnalysis();
             String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
-            var llmConfig = createLlmConfig(params.providerType, params.modelId, request.apiKey(), enrichedPrompt, false, null, null,
+            // Auto-vault the API key before storing in LLM config
+            String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName());
+            var llmConfig = createLlmConfig(params.providerType, params.modelId, effectiveApiKey, enrichedPrompt, false, null, null,
                     promptResponseJson, quickReplies, sentiment, httpCallsLocations);
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
@@ -456,6 +466,52 @@ public class AgentSetupService {
         }
 
         return new LlmConfiguration(List.of(task));
+    }
+
+    /**
+     * Auto-vault an API key if the vault is available. When the vault is active,
+     * the plaintext key is stored encrypted and a vault reference string
+     * ({@code ${eddivault:keyName}}) is returned. Downstream consumers
+     * ({@link ai.labs.eddi.modules.llm.impl.ChatModelRegistry}) resolve vault
+     * references transparently at model-load time.
+     *
+     * <p>
+     * When the vault is <b>not</b> configured (common in dev mode without
+     * {@code EDDI_VAULT_MASTER_KEY}), the plaintext key is returned as-is. This
+     * ensures the setup flow never breaks due to missing vault config.
+     *
+     * @param apiKey
+     *            the plaintext API key (may be null for local LLM providers)
+     * @param agentName
+     *            used for the vault key namespace and description
+     * @return the vault reference string, or the plaintext key if vault is
+     *         unavailable
+     */
+    private String vaultApiKey(String apiKey, String agentName) {
+        if (apiKey == null || apiKey.isBlank()) {
+            return apiKey;
+        }
+
+        if (!secretProvider.isAvailable()) {
+            LOGGER.warn("Secrets Vault is not configured — API key will be stored in plaintext. "
+                    + "Set EDDI_VAULT_MASTER_KEY to enable encrypted storage.");
+            return apiKey;
+        }
+
+        try {
+            // Namespace: setup.<sanitized-agent-name>.apiKey
+            String sanitizedName = agentName.toLowerCase().replaceAll("[^a-z0-9]", "-");
+            String keyName = "setup." + sanitizedName + ".apiKey";
+            var ref = new SecretReference(SecretReference.DEFAULT_TENANT, keyName);
+            secretProvider.store(ref, apiKey, "Auto-vaulted by AgentSetupService for agent: " + agentName,
+                    List.of("*"));
+            LOGGER.infof("API key vaulted for agent '%s' (key: %s)", agentName, keyName);
+            return ref.toReferenceString();
+        } catch (ISecretProvider.SecretProviderException e) {
+            LOGGER.error("Failed to vault API key for agent '" + agentName + "': " + e.getMessage()
+                    + " — falling back to plaintext storage.");
+            return apiKey;
+        }
     }
 
     /**
