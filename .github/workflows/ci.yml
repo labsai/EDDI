@@ -125,14 +125,27 @@ jobs:
         id: meta
         run: |
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            # Tag push: 6.0.0-RC2
+            # Tag push: 6.0.0 or 6.0.0-RC2
             PRIMARY_TAG="${GITHUB_REF#refs/tags/}"
             IS_RELEASE="true"
+
+            # Compute semver aliases for stable releases (no pre-release suffix)
+            if [[ "$PRIMARY_TAG" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              MAJOR="${BASH_REMATCH[1]}"
+              MINOR="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+              echo "major-tag=${MAJOR}" >> $GITHUB_OUTPUT
+              echo "minor-tag=${MINOR}" >> $GITHUB_OUTPUT
+              IS_STABLE="true"
+            else
+              IS_STABLE="false"
+            fi
+            echo "is-stable=${IS_STABLE}" >> $GITHUB_OUTPUT
           else
             # Branch push: version from pom.xml + build number
             POM_VERSION=$(grep -m1 '<version>' pom.xml | sed 's/.*<version>\(.*\)<\/version>.*/\1/')
             PRIMARY_TAG="${POM_VERSION}-b${{ github.run_number }}"
             IS_RELEASE="false"
+            echo "is-stable=false" >> $GITHUB_OUTPUT
           fi
 
           echo "primary-tag=${PRIMARY_TAG}" >> $GITHUB_OUTPUT
@@ -140,6 +153,10 @@ jobs:
 
           echo "### 🐳 Docker Tags" >> $GITHUB_STEP_SUMMARY
           echo "- \`${DOCKER_IMAGE}:${PRIMARY_TAG}\`" >> $GITHUB_STEP_SUMMARY
+          if [[ "${IS_STABLE:-false}" == "true" ]]; then
+            echo "- \`${DOCKER_IMAGE}:${MINOR}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`${DOCKER_IMAGE}:${MAJOR}\`" >> $GITHUB_STEP_SUMMARY
+          fi
           if [[ "$IS_RELEASE" == "true" ]]; then
             echo "- \`${DOCKER_IMAGE}:latest\`" >> $GITHUB_STEP_SUMMARY
           fi
@@ -151,8 +168,13 @@ jobs:
         run: |
           PRIMARY_TAG="${{ steps.meta.outputs.primary-tag }}"
           IS_RELEASE="${{ steps.meta.outputs.is-release }}"
+          IS_STABLE="${{ steps.meta.outputs.is-stable }}"
 
           TAGS="-t ${DOCKER_IMAGE}:${PRIMARY_TAG}"
+          if [[ "$IS_STABLE" == "true" ]]; then
+            TAGS="${TAGS} -t ${DOCKER_IMAGE}:${{ steps.meta.outputs.minor-tag }}"
+            TAGS="${TAGS} -t ${DOCKER_IMAGE}:${{ steps.meta.outputs.major-tag }}"
+          fi
           if [[ "$IS_RELEASE" == "true" ]]; then
             TAGS="${TAGS} -t ${DOCKER_IMAGE}:latest"
           fi
@@ -174,8 +196,13 @@ jobs:
         run: |
           PRIMARY_TAG="${{ steps.meta.outputs.primary-tag }}"
           IS_RELEASE="${{ steps.meta.outputs.is-release }}"
+          IS_STABLE="${{ steps.meta.outputs.is-stable }}"
 
           docker push ${DOCKER_IMAGE}:${PRIMARY_TAG}
+          if [[ "$IS_STABLE" == "true" ]]; then
+            docker push ${DOCKER_IMAGE}:${{ steps.meta.outputs.minor-tag }}
+            docker push ${DOCKER_IMAGE}:${{ steps.meta.outputs.major-tag }}
+          fi
           if [[ "$IS_RELEASE" == "true" ]]; then
             docker push ${DOCKER_IMAGE}:latest
           fi
