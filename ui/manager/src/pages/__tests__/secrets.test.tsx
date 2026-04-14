@@ -67,7 +67,7 @@ describe("SecretsPage", () => {
     renderSecrets();
     await waitFor(() => {
       expect(
-        screen.getByText("OpenAI API key for production agents")
+        screen.getByText("OpenAI API key for GPT-5.4 production agents")
       ).toBeInTheDocument();
     });
   });

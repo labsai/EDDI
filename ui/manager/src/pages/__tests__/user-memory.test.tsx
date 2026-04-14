@@ -98,7 +98,7 @@ describe("UserMemoryPage", () => {
     await waitFor(() => {
       expect(screen.getByText("preferred_language")).toBeInTheDocument();
       expect(screen.getByText("account_type")).toBeInTheDocument();
-      expect(screen.getByText("last_topic")).toBeInTheDocument();
+      expect(screen.getByText("last_order_id")).toBeInTheDocument();
     });
     vi.useRealTimers();
   });

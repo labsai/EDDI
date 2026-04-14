@@ -59,7 +59,7 @@ describe("CapabilitiesPage", () => {
     await waitFor(() => {
       expect(screen.getByTestId("skill-customer-support")).toBeInTheDocument();
       expect(screen.getByTestId("skill-faq")).toBeInTheDocument();
-      expect(screen.getByTestId("skill-code-review")).toBeInTheDocument();
+      expect(screen.getByTestId("skill-contract-analysis")).toBeInTheDocument();
     });
   });
 

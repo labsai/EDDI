@@ -55,11 +55,12 @@ describe("TriggersPage", () => {
   it("shows agent count per trigger", async () => {
     renderPage();
     await waitFor(() => {
-      // booking_request (2) and escalation (2) both show "2 agents"
+      // booking_request (2), escalation (2), product_recommendation (2), onboarding_start (2) show "2 agents"
       const twoCounts = screen.getAllByText("2 agents");
       expect(twoCounts.length).toBeGreaterThanOrEqual(1);
-      // faq_query shows "1 agents"
-      expect(screen.getByText("1 agents")).toBeInTheDocument();
+      // faq_query, payment_issue, contract_review, password_reset show "1 agents"
+      const oneCounts = screen.getAllByText("1 agents");
+      expect(oneCounts.length).toBeGreaterThanOrEqual(1);
     });
   });
 

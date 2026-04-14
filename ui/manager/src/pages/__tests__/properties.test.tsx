@@ -67,10 +67,10 @@ describe("PropertiesPage", () => {
     await waitFor(() => {
       expect(screen.getByText("user_name")).toBeInTheDocument();
       expect(screen.getByText("Jane Doe")).toBeInTheDocument();
-      // Type badges
-      expect(screen.getByText("string")).toBeInTheDocument();
-      expect(screen.getByText("number")).toBeInTheDocument();
-      expect(screen.getByText("boolean")).toBeInTheDocument();
+      // Type badges (multiple entries may share the same type)
+      expect(screen.getAllByText("string").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("number").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("boolean").length).toBeGreaterThanOrEqual(1);
     });
     vi.useRealTimers();
   });
@@ -82,7 +82,7 @@ describe("PropertiesPage", () => {
     vi.advanceTimersByTime(600);
 
     await waitFor(() => {
-      expect(screen.getByText("5 properties")).toBeInTheDocument();
+      expect(screen.getByText("10 properties")).toBeInTheDocument();
     });
     vi.useRealTimers();
   });
