@@ -13,6 +13,28 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Documentation Cleanup — Stale Docs Purge (2026-04-14)
+
+**Repo:** EDDI (`feature/v6-hardening`)
+
+**What changed:** Removed ~6 MB of stale documentation for v6.0.0 final release.
+
+| Category | Files Removed | Size |
+|---|---|---|
+| Agent Father orphans | 3 transient impl notes | ~21 KB |
+| `docs/v6-planning/` | Entire folder (5 files) | ~341 KB |
+| Research dumps | `research-1/2/3.md` | ~1.1 MB |
+| Implemented plans | `llm-provider-expansion.md`, `persistent-memory-architecture.md`, `rag-foundation.md` | ~63 KB |
+| Legacy GitBook | `.gitbook/assets/` | ~4.6 MB |
+
+**Preserved:** Key early planning decisions (March 2026) consolidated into "Historical" section at bottom of this changelog before deleting `v6-planning/changelog.md`.
+
+**6 planning docs retained** (contain unimplemented roadmap items): `agentic-improvements-plan.md`, `conversation-window-management.md`, `memory-architecture-plan.md`, `guardrails-architecture.md`, `multi-agent-ux-improvements.md`, `native-image-migration.md`.
+
+**Broken references fixed:** `SUMMARY.md` (removed 3 deleted Agent Father links), `multi-agent-ux-improvements.md` (removed `research-1.md` links), `changelog.md` (updated stale v6-planning reference).
+
+---
+
 ## Architecture Doc — Added Multi-Agent, MCP, Memory, Sync Sections (2026-04-14)
 
 **Repo:** EDDI (`feature/v6-hardening`)
@@ -613,7 +635,7 @@ Comprehensive audit of all AI-agent-relevant documentation, cross-referencing cl
 **Design decisions:**
 - **Branch-agnostic instructions**: AI agents should check `git branch --show-current` to discover the active branch rather than following hardcoded branch names
 - **Pointer files over copies**: Copilot/Cursor files point to `AGENTS.md` to prevent maintenance drift
-- **Historical docs left as-is**: `docs/v6-planning/` research docs contain old names but are clearly historical
+- **Historical docs removed**: `docs/v6-planning/` deleted during docs cleanup (2026-04-14), key decisions preserved in Historical section below
 
 **Files:** 5 modified, 2 new.
 
@@ -4216,6 +4238,44 @@ Introduced a factory-based abstraction layer so that the datastore can support m
 
 **Commit:** `feat(scope): message`
 ```
+
+---
+
+## Historical: Early v6 Planning Decisions (March 2026)
+
+> Consolidated from `docs/v6-planning/changelog.md` during docs cleanup (2026-04-14).
+
+### Planning Phase (2026-03-05)
+
+**Key decisions:**
+
+| # | Decision | Reasoning |
+|---|---|---|
+| 1 | UI framework: **React + Vite + shadcn/ui + Tailwind CSS** | AI-friendly (components are plain files), no dependency rot, accessible (Radix), fast DX |
+| 2 | Keep Chat UI **standalone** + extract **shared component** | EDDI has a dedicated single-agent chat endpoint; standalone deployment is needed |
+| 3 | Website: **Astro** on GitHub Pages | Static output, built-in i18n routing, zero JS by default, Tailwind integration |
+| 4 | **Skip API versioning** | Only clients are Manager + Chat UI, both first-party controlled |
+| 5 | **Remove internal snapshot tests** | Never production-ready; integration tests provide sufficient coverage |
+| 6 | **Trunk-based branching** | Short-lived feature branches, squash merge, clean main history |
+| 7 | **Mobile-first responsive** is Phase 1 | Core requirement, not afterthought; Tailwind breakpoints make this natural |
+
+**Biggest gap discovered:** No CI/CD anywhere — all builds, tests, and deployments were manual.
+
+### Phase 6E Decision (2026-03-15) — quarkus-langchain4j → langchain4j Core
+
+Dropped `quarkus-langchain4j` entirely, using core `langchain4j` only. 4 of 7 model builders already used core `dev.langchain4j`; quarkiverse CDI features (`@RegisterAiService`, Dev Services) were architecturally incompatible with EDDI's runtime JSON-config-driven model building.
+
+### Phase 6C (2026-03-15) — Infinispan → Caffeine
+
+Replaced Infinispan `EmbeddedCacheManager` with Caffeine (provided transitively by `quarkus-cache`). Removed 4 Infinispan dependencies. Key finding: Infinispan was NOT used for cross-instance coordination — agent deployment uses DB-backed polling.
+
+### Lombok Removal Analysis (2026-03-15)
+
+114 files, 371 annotation usages. Lombok uses `sun.misc.Unsafe::objectFieldOffset` — terminally deprecated in Java 25. Replaced with IntelliJ Delombok + records + JBoss Logger.
+
+### Roadmap Restructuring (2026-03-15)
+
+Restructured from 8 phases to 14 phases. Created `docs/project-philosophy.md` (7 architectural pillars). Key decisions: Secrets Vault + Audit Ledger promoted to Phase 7 (EU AI Act), MCP split into server/client phases, RAG pulled forward as quick win.
 
 ---
 

@@ -1,6 +1,6 @@
 # Multi-Agent UX Improvements
 
-> **Based on**: [research-1.md](research-1.md) — *"Architecting Multi-Agent User Experiences in Enterprise Workspaces: Integrating EDDI v6.0.0-RC1 into Slack and Microsoft Teams"*
+> **Based on**: Research paper — *"Architecting Multi-Agent User Experiences in Enterprise Workspaces: Integrating EDDI v6.0.0-RC1 into Slack and Microsoft Teams"* (source removed during docs cleanup)
 >
 > **Status**: Planning (pre-approval)
 
@@ -248,7 +248,7 @@ enum FeedbackRating { POSITIVE, NEGATIVE, NEUTRAL }
 
 ## 4. References
 
-- [research-1.md](research-1.md) — Source research paper
+- Source research paper (removed during docs cleanup — distilled into this document)
 - [architecture.md](../architecture.md) — EDDI architecture overview
 - [project-philosophy.md](../project-philosophy.md) — The Nine Pillars
 - [GroupConversationService.java](../../src/main/java/ai/labs/eddi/engine/internal/GroupConversationService.java) — Phase-based orchestrator

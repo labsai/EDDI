@@ -71,9 +71,6 @@
 - [Agent Father: A Deep Dive](agent-father-deep-dive.md)
 - [Agent Father: LangChain Tools Guide](agent-father-langchain-tools-guide.md)
 - [Agent Father: Conversation Flow](agent-father-conversation-flow.md)
-- [Agent Father: Implementation Summary](agent-father-implementation-summary.md)
-- [Agent Father: LangChain Updates](agent-father-langchain-updates.md)
-- [Agent Father: Tools Configuration Fix](agent-father-tools-configuration-fix.md)
 
 ## Deployment & Infrastructure
 
