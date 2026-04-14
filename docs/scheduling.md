@@ -71,7 +71,7 @@ curl -X POST http://localhost:7070/schedulestore/schedules \
 
 EDDI uses **standard 5-field cron expressions**:
 
-```
+```text
 ┌────── minute (0-59)
 │ ┌──── hour (0-23)
 │ │ ┌── day of month (1-31)
@@ -186,11 +186,17 @@ Dream consolidation is configured in the agent configuration:
 
 ### Cost Control
 
-Dream cycles consume LLM tokens. Use `maxCostPerRun` to set a dollar ceiling per run:
+Dream cycles consume LLM tokens. Use `maxCostPerRun` (in the **Agent Configuration**) to set a dollar ceiling per run:
 
 ```json
 {
-  "maxCostPerRun": 0.50
+  "agentConfiguration": {
+    "userMemoryConfig": {
+      "dream": {
+        "maxCostPerRun": 0.50
+      }
+    }
+  }
 }
 ```
 
@@ -214,7 +220,7 @@ curl http://localhost:7070/schedulestore/schedules/admin/failed?limit=50
 
 Each schedule follows a state machine:
 
-```
+```text
 PENDING → CLAIMED → EXECUTING → COMPLETED
                               → FAILED → (retry) → PENDING
                               → DEAD_LETTERED → (manual retry/dismiss)

@@ -594,7 +594,7 @@ public record LlmConfiguration(List<Task> tasks) {
         /** Transport type: "http" (default) or "sse" */
         private String transport = "http";
 
-        /** Optional API key or vault reference (e.g., "${vault:my-api-key}") */
+        /** Optional API key or vault reference (e.g., "${eddivault:my-api-key}") */
         private String apiKey;
 
         /** Timeout for MCP operations in milliseconds (default: 30000) */
@@ -659,8 +659,8 @@ public record LlmConfiguration(List<Task> tasks) {
         private List<String> skillsFilter;
 
         /**
-         * API key as a vault reference (e.g., {@code ${vault:my-a2a-key}}). Raw keys
-         * are strongly discouraged — always use vault references to prevent secret
+         * API key as a vault reference (e.g., {@code ${eddivault:my-a2a-key}}). Raw
+         * keys are strongly discouraged — always use vault references to prevent secret
          * leakage in configuration exports.
          */
         private String apiKey;

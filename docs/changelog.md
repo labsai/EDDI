@@ -15,7 +15,7 @@ Each entry follows this format:
 
 ## Architecture Doc — Added Multi-Agent, MCP, Memory, Sync Sections (2026-04-14)
 
-**Repo:** EDDI (`main`)
+**Repo:** EDDI (`feature/v6-hardening`)
 
 **What changed:** Added 4 architectural overview sections to `docs/architecture.md` that were completely missing:
 
@@ -36,7 +36,7 @@ Also expanded the Related Documentation section from 11 → 22 entries to includ
 
 ## Project Philosophy — Seven Pillars → Nine Pillars (2026-04-14)
 
-**Repo:** EDDI (`main`)
+**Repo:** EDDI (`feature/v6-hardening`)
 
 **What changed:**
 
@@ -81,7 +81,7 @@ All 5 files referencing "Seven Pillars" or "7 architectural pillars" updated to 
 
 ## Fix Keycloak Auth Blocking SPA + Static Assets (2026-04-14)
 
-**Repo:** EDDI (`main`, unstaged)
+**Repo:** EDDI (`feature/v6-hardening`)
 
 **Problem:** With `--with-auth` (Keycloak enabled), both the Manager and Chat UI were completely broken. Three compounding issues:
 
@@ -1856,7 +1856,7 @@ Complete re-architecture of the EDDI Secrets Vault from agent-scoped ephemeral s
 | **Model** | `SecretReference` dual-format regex, `SecretMetadata` gains `description`, `lastRotatedAt`, `allowedAgents`, `@JsonFormat(STRING)` timestamps |
 | **REST API** | 3-segment → 2-segment paths (removed agentId), `SecretRequest` with description/allowedAgents |
 | **Auto-Vaulting** | `PropertySetterTask.autoVaultSecret()` namespaces keys with `agentId.keyName` to prevent cross-agent collision |
-| **A2A Security** | `A2AToolProviderManager` recognizes both `${eddivault:}` (legacy) and `${eddivault:}` prefixes |
+| **A2A Security** | `A2AToolProviderManager` recognizes both `${vault:}` (legacy) and `${eddivault:}` prefixes |
 
 **Manager UI changes:**
 

@@ -81,7 +81,7 @@ public class RagConfiguration {
 
     /**
      * Provider-specific parameters. Keys vary by provider:
-     * - OpenAI: {"model": "text-embedding-3-small", "apiKey": "${vault:openai-key}"}
+     * - OpenAI: {"model": "text-embedding-3-small", "apiKey": "${eddivault:openai-key}"}
      * - Ollama: {"model": "nomic-embed-text", "baseUrl": "http://localhost:11434"}
      * - Vertex: {"model": "text-embedding-005", "project": "my-project", "location": "us-central1"}
      */
@@ -237,7 +237,7 @@ The existing `Task.retrievalAugmentor` field (`RetrievalAugmentorConfiguration`)
   "embeddingProvider": "openai",
   "embeddingParameters": {
     "model": "text-embedding-3-small",
-    "apiKey": "${vault:openai-key}"
+    "apiKey": "${eddivault:openai-key}"
   },
   "storeType": "in-memory",
   "storeParameters": {},
@@ -274,7 +274,7 @@ The existing `Task.retrievalAugmentor` field (`RetrievalAugmentorConfiguration`)
     "parameters": {
       "model": "gpt-4o",
       "systemMessage": "You are a product expert. Use the provided context to answer questions.",
-      "apiKey": "${vault:openai-key}"
+      "apiKey": "${eddivault:openai-key}"
     },
     "knowledgeBases": [
       { "name": "product-docs", "maxResults": 5, "minScore": 0.7 },

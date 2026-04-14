@@ -84,7 +84,7 @@ Configure remote A2A agents in your LLM task configuration. They are discovered 
     {
       "url": "https://remote-eddi.example.com/a2a/agents/support-agent",
       "name": "support-agent",
-      "apiKey": "${vault:remote-agent-key}",
+      "apiKey": "${eddivault:remote-agent-key}",
       "timeoutMs": 30000,
       "skillsFilter": ["order-tracking"]
     }
@@ -96,11 +96,11 @@ Configure remote A2A agents in your LLM task configuration. They are discovered 
 |---|---|---|---|
 | `url` | string | *required* | Base URL of the remote A2A agent |
 | `name` | string | from Agent Card | Display name (used in tool naming) |
-| `apiKey` | string | — | **Must be a vault reference** (`${vault:...}`) to prevent secret leakage |
+| `apiKey` | string | — | **Must be a vault reference** (`${eddivault:...}`) to prevent secret leakage |
 | `timeoutMs` | long | `30000` | Timeout for A2A operations |
 | `skillsFilter` | string[] | all skills | Only expose specific skills (by id or name) |
 
-> **⚠️ Security:** Always use vault references (`${vault:my-key}`) for API keys. Raw keys trigger a runtime warning and risk leakage in configuration exports. See [Secrets Vault](secrets-vault.md).
+> **⚠️ Security:** Always use vault references (`${eddivault:my-key}`) for API keys. Raw keys trigger a runtime warning and risk leakage in configuration exports. See [Secrets Vault](secrets-vault.md).
 
 ### How It Works
 

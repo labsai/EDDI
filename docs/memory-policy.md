@@ -28,7 +28,7 @@ Memory Policy is configured at the agent level in the agent configuration JSON:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | boolean | `false` | Enable strict write discipline |
-| `onFailure` | string | `"digest"` | What to do with failed task output |
+| `onFailure` | string | `"keep_all"` | What to do with failed task output |
 
 ### Failure Modes
 
@@ -42,7 +42,7 @@ Memory Policy is configured at the agent level in the agent configuration JSON:
 
 ### Without Strict Write Discipline (Default)
 
-```
+```text
 Turn 1: User asks "What's the weather?"
   → WeatherTool fails with HTTP 503
   → Raw error: "java.net.ConnectException: Connection refused..."
@@ -53,7 +53,7 @@ Turn 1: User asks "What's the weather?"
 
 ### With Strict Write Discipline (`digest` mode)
 
-```
+```text
 Turn 1: User asks "What's the weather?"
   → WeatherTool fails with HTTP 503
   → Raw error is marked as UNCOMMITTED (hidden from LLM)

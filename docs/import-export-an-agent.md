@@ -32,12 +32,13 @@ When you export an agent, EDDI packages:
 
 ### Import Strategies
 
-EDDI supports two import strategies:
+EDDI supports three import strategies:
 
-| Strategy             | Behavior                                          | Use Case                            |
-| -------------------- | ------------------------------------------------- | ----------------------------------- |
-| **Create** (default) | Always creates a new agent with new IDs           | First-time import, creating copies  |
-| **Merge**            | Updates existing resources by matching origin IDs | Syncing changes across environments |
+| Strategy             | Behavior                                                        | Use Case                            |
+| -------------------- | --------------------------------------------------------------- | ----------------------------------- |
+| **Create** (default) | Always creates a new agent with new IDs                         | First-time import, creating copies  |
+| **Merge**            | Updates existing resources by matching origin IDs               | Syncing changes across environments |
+| **Upgrade**          | Updates existing agent by structural matching (no origin IDs needed) | Syncing independently created agents |
 
 ### Export/Import Workflow
 

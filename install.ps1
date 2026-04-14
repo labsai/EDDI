@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     E.D.D.I — One-Command Install & Onboarding Wizard
 

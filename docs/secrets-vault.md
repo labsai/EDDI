@@ -223,7 +223,7 @@ When creating agents through the **Agent Father** wizard or the Setup API, API k
 1. User provides an API key during agent setup
 2. `AgentSetupService.vaultApiKey()` stores the key in the vault
 3. A vault reference (`${eddivault:setup.<agent-name>.<timestamp>.apiKey}`) is written to the LLM configuration
-4. The plaintext key is never persisted in MongoDB
+4. When the vault is enabled, the plaintext key is never persisted in MongoDB — only the vault reference is stored
 
 ### Collision Prevention
 
