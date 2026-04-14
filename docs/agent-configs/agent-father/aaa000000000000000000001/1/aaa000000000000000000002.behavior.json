@@ -1,0 +1,370 @@
+{
+  "expressionsAsActions" : true,
+  "behaviorGroups" : [ {
+    "behaviorRules" : [ {
+      "name" : "Ask for Agent Name",
+      "actions" : [ "ask_for_agent_name" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "CONVERSATION_START",
+          "occurrence" : "lastStep"
+        }
+      } ]
+    }, {
+      "name" : "Set name, ask for system prompt",
+      "actions" : [ "set_agent_name", "ask_for_system_prompt" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_agent_name",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set prompt, ask for intro message",
+      "actions" : [ "set_system_prompt", "ask_for_intro_message" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_system_prompt",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Skip intro, ask for provider",
+      "actions" : [ "skip_intro", "ask_for_provider" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_intro_message",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "skip_intro",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set intro, ask for provider",
+      "actions" : [ "set_intro_message", "ask_for_provider" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_intro_message",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "negation",
+        "conditions" : [ {
+          "type" : "inputmatcher",
+          "configs" : {
+            "expressions" : "skip_intro",
+            "occurrence" : "currentStep"
+          }
+        } ]
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Select Ollama, ask for base URL",
+      "actions" : [ "set_provider_ollama", "ask_for_base_url" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_provider",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "select_ollama",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Select Jlama, skip key, ask for model",
+      "actions" : [ "set_provider_jlama", "ask_for_model", "ask_for_model_jlama" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_provider",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "select_jlama",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Select Bedrock, skip key, ask for model",
+      "actions" : [ "set_provider_bedrock", "ask_for_model", "ask_for_model_bedrock" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_provider",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "select_bedrock",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Select Oracle GenAI, skip key, ask for model",
+      "actions" : [ "set_provider_oracle_genai", "ask_for_model", "ask_for_model_oracle" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_provider",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "select_oracle_genai",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Select Anthropic, ask for key",
+      "actions" : [ "set_provider_anthropic", "ask_for_api_key" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_provider",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "select_anthropic",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Select OpenAI, ask for key",
+      "actions" : [ "set_provider_openai", "ask_for_api_key" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_provider",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "select_openai",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Select Gemini, ask for key",
+      "actions" : [ "set_provider_gemini", "ask_for_api_key" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_provider",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "select_gemini",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Select Mistral, ask for key",
+      "actions" : [ "set_provider_mistral", "ask_for_api_key" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_provider",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "select_mistral",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Select HuggingFace, ask for key",
+      "actions" : [ "set_provider_huggingface", "ask_for_api_key" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_provider",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "select_huggingface",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Select Azure OpenAI, ask for key",
+      "actions" : [ "set_provider_azure_openai", "ask_for_api_key" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_provider",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "select_azure_openai",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Select Gemini Vertex, ask for key",
+      "actions" : [ "set_provider_gemini_vertex", "ask_for_api_key" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_provider",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "select_gemini_vertex",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Use default Ollama URL, ask for model",
+      "actions" : [ "set_default_base_url", "ask_for_model", "ask_for_model_ollama" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_base_url",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "use_default_ollama_url",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set custom base URL, ask for model (ollama)",
+      "actions" : [ "set_base_url", "ask_for_model", "ask_for_model_ollama" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_base_url",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "negation",
+        "conditions" : [ {
+          "type" : "inputmatcher",
+          "configs" : {
+            "expressions" : "use_default_ollama_url",
+            "occurrence" : "currentStep"
+          }
+        } ]
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set API key, ask for model",
+      "actions" : [ "set_api_key", "ask_for_model" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_api_key",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Set model, confirm creation",
+      "actions" : [ "set_model", "confirm_creation" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "ask_for_model",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "*",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Create Agent",
+      "actions" : [ "create_agent", "CONVERSATION_END" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "confirm_creation",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "confirm_create_agent",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    }, {
+      "name" : "Start over",
+      "actions" : [ "ask_for_agent_name" ],
+      "conditions" : [ {
+        "type" : "actionmatcher",
+        "configs" : {
+          "actions" : "confirm_creation",
+          "occurrence" : "lastStep"
+        }
+      }, {
+        "type" : "inputmatcher",
+        "configs" : {
+          "expressions" : "start_over",
+          "occurrence" : "currentStep"
+        }
+      } ]
+    } ]
+  } ]
+}

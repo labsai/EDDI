@@ -52,6 +52,11 @@ public class AgentStoreClientLibrary implements IAgentStoreClientLibrary {
             ((Agent) agent).setUserMemoryConfig(agentConfig.getUserMemoryConfig());
         }
 
+        // Memory Policy (Phase A: Strict Write Discipline)
+        if (agentConfig.getMemoryPolicy() != null) {
+            ((Agent) agent).setMemoryPolicy(agentConfig.getMemoryPolicy());
+        }
+
         return agent;
     }
 }

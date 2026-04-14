@@ -31,6 +31,14 @@ public class ImportMergeIT extends BaseIntegrationIT {
     private static String firstImportAgentOriginId;
     private static byte[] exportedZipBytes;
 
+    @AfterAll
+    static void cleanup() {
+        if (firstImportAgentId != null) {
+            undeployAgentQuietly(firstImportAgentId.id(), firstImportAgentId.version());
+            deleteResourceQuietly("/agentstore/agents/", firstImportAgentId.id(), firstImportAgentId.version());
+        }
+    }
+
     // ==================== Test 1: Initial import (strategy=create)
     // ====================
 
@@ -40,14 +48,15 @@ public class ImportMergeIT extends BaseIntegrationIT {
     void importCreate() throws Exception {
         File agentZip = loadTestZip("weather_agent_v1");
 
-        Response response = given().contentType("application/zip").body(agentZip).post("/backup/import");
+        Response response = given()
+                .contentType("application/zip").body(agentZip).post("/backup/import");
 
-        response.then().statusCode(200);
+        response.then().statusCode(201);
 
-        String location = response.getHeader("location");
-        assertThat("Import should return a location header", location, notNullValue());
+        String resourceUri = response.getHeader("location");
+        assertThat("Import should return a Location header", resourceUri, notNullValue());
 
-        firstImportAgentId = extractResourceId(location);
+        firstImportAgentId = extractResourceId(resourceUri);
         assertThat("Agent ID should not be null", firstImportAgentId.id(), notNullValue());
         assertThat("Agent version should be 1", firstImportAgentId.version(), equalTo(1));
 
@@ -100,7 +109,7 @@ public class ImportMergeIT extends BaseIntegrationIT {
 
         ImportPreview preview = previewResponse.as(ImportPreview.class);
 
-        assertThat("Preview should identify the agent", preview.agentOriginId(), notNullValue());
+        assertThat("Preview should identify the agent", preview.sourceAgentId(), notNullValue());
         assertThat("Preview should have resources", preview.resources(), not(empty()));
 
         // Since we already imported this agent, all resources should show UPDATE
@@ -125,10 +134,10 @@ public class ImportMergeIT extends BaseIntegrationIT {
 
         Response mergeResponse = given().contentType("application/zip").queryParam("strategy", "merge").body(exportedZipBytes).post("/backup/import");
 
-        mergeResponse.then().statusCode(200);
+        mergeResponse.then().statusCode(201);
 
         String mergeLocation = mergeResponse.getHeader("location");
-        assertThat("Merge import should return a location header", mergeLocation, notNullValue());
+        assertThat("Merge import should return a Location header", mergeLocation, notNullValue());
 
         ResourceId mergedAgentId = extractResourceId(mergeLocation);
 
@@ -174,16 +183,16 @@ public class ImportMergeIT extends BaseIntegrationIT {
         assertThat("Preview should have resources", preview.resources(), not(empty()));
 
         // Select only the Agent resource
-        String agentOriginId = preview.resources().stream().filter(r -> "agent".equals(r.resourceType())).map(ImportPreview.ResourceDiff::originId)
+        String agentOriginId = preview.resources().stream().filter(r -> "agent".equals(r.resourceType())).map(ImportPreview.ResourceDiff::sourceId)
                 .findFirst().orElseThrow();
 
         Response selectiveResponse = given().contentType("application/zip").queryParam("strategy", "merge")
                 .queryParam("selectedResources", agentOriginId).body(exportedZipBytes).post("/backup/import");
 
-        selectiveResponse.then().statusCode(200);
+        selectiveResponse.then().statusCode(201);
 
         String location = selectiveResponse.getHeader("location");
-        assertThat("Selective merge should return a location header", location, notNullValue());
+        assertThat("Selective merge should return a Location header", location, notNullValue());
     }
 
     // ==================== Test 7: Second create import should produce different ID
@@ -195,12 +204,13 @@ public class ImportMergeIT extends BaseIntegrationIT {
     void createAlwaysNew() throws Exception {
         File agentZip = loadTestZip("weather_agent_v1");
 
-        Response response = given().contentType("application/zip").body(agentZip).post("/backup/import");
+        Response response = given()
+                .contentType("application/zip").body(agentZip).post("/backup/import");
 
-        response.then().statusCode(200);
+        response.then().statusCode(201);
 
         String location = response.getHeader("location");
-        assertThat("Import should return a location header", location, notNullValue());
+        assertThat("Import should return a Location header", location, notNullValue());
 
         ResourceId secondAgentId = extractResourceId(location);
 

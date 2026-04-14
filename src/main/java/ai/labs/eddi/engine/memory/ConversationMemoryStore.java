@@ -155,6 +155,20 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
+    public List<String> getConversationIdsByUserId(String userId) {
+        List<String> ids = new ArrayList<>();
+        conversationCollectionDocument.find(new Document("userId", userId))
+                .projection(new Document(OBJECT_ID, 1))
+                .forEach(document -> ids.add(document.get(OBJECT_ID).toString()));
+        return ids;
+    }
+
+    @Override
+    public long deleteConversationsByUserId(String userId) {
+        return conversationCollectionDocument.deleteMany(new Document("userId", userId)).getDeletedCount();
+    }
+
+    @Override
     public ConversationMemorySnapshot readIncludingDeleted(String id, Integer version)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
 

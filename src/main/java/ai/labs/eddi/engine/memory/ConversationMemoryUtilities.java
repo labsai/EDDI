@@ -73,7 +73,7 @@ public class ConversationMemoryUtilities {
             conversationStepSnapshot.getWorkflows().add(packageRunSnapshot);
             for (var data : conversationStep.getAllElements()) {
                 var resultSnapshot = new ResultSnapshot(data.getKey(), data.getResult(), data.getPossibleResults(), data.getTimestamp(),
-                        data.getOriginWorkflowId(), data.isPublic());
+                        data.getOriginWorkflowId(), data.isPublic(), data.isCommitted());
                 packageRunSnapshot.getLifecycleTasks().add(resultSnapshot);
             }
         }
@@ -91,6 +91,7 @@ public class ConversationMemoryUtilities {
                     @SuppressWarnings("unchecked")
                     var data = new Data<Object>(resultSnapshot.getKey(), resultSnapshot.getResult(),
                             (List<Object>) resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(), resultSnapshot.isPublic());
+                    data.setCommitted(resultSnapshot.isCommitted());
                     conversationStep.storeData(data);
                 }
             }
@@ -127,6 +128,7 @@ public class ConversationMemoryUtilities {
                     @SuppressWarnings("unchecked")
                     var data = new Data<Object>(resultSnapshot.getKey(), resultSnapshot.getResult(),
                             (List<Object>) resultSnapshot.getPossibleResults(), resultSnapshot.getTimestamp(), resultSnapshot.isPublic());
+                    data.setCommitted(resultSnapshot.isCommitted());
                     conversationMemory.getCurrentStep().storeData(data);
                 }
             }

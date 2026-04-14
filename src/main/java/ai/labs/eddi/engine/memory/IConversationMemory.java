@@ -99,6 +99,26 @@ public interface IConversationMemory extends Serializable {
         // no-op by default
     }
 
+    /**
+     * Get the memory policy configuration for this conversation. Returns
+     * {@code null} when no memory policy is configured on the agent.
+     *
+     * @since 6.0.0
+     */
+    default AgentConfiguration.MemoryPolicy getMemoryPolicy() {
+        return null;
+    }
+
+    /**
+     * Set the memory policy configuration. Called from {@code Conversation.init()}
+     * when the agent has a memory policy configured.
+     *
+     * @since 6.0.0
+     */
+    default void setMemoryPolicy(AgentConfiguration.MemoryPolicy memoryPolicy) {
+        // no-op by default
+    }
+
     interface IConversationStepStack {
         <T> IData<T> getLatestData(String key);
 

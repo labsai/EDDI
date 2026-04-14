@@ -5,20 +5,20 @@ import ai.labs.eddi.configs.rules.model.RuleConditionConfiguration;
 import ai.labs.eddi.datastore.serialization.DeserializationException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
-import ai.labs.eddi.modules.rules.bootstrap.RuleConditions;
 import ai.labs.eddi.modules.rules.impl.RuleGroup.ExecutionStrategy;
 import ai.labs.eddi.modules.rules.impl.conditions.*;
+import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
+import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import jakarta.inject.Provider;
 import java.io.IOException;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
+import java.util.Objects;
 
 import static ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.CONDITION_PREFIX;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
@@ -32,21 +32,24 @@ import static java.lang.String.format;
 @ApplicationScoped
 public class RuleDeserialization implements IRuleDeserialization {
     private final ObjectMapper objectMapper;
-    private final Map<String, Provider<IRuleCondition>> conditionProvider;
 
     private static final Logger log = Logger.getLogger(RuleDeserialization.class);
     private final IExpressionProvider expressionProvider;
     private final IJsonSerialization jsonSerialization;
     private final IMemoryItemConverter memoryItemConverter;
+    private final ITemplatingEngine templatingEngine;
+    private final CapabilityRegistryService capabilityRegistryService;
 
     @Inject
     public RuleDeserialization(ObjectMapper objectMapper, IExpressionProvider expressionProvider, IJsonSerialization jsonSerialization,
-            IMemoryItemConverter memoryItemConverter, @RuleConditions Map<String, Provider<IRuleCondition>> conditionProvider) {
+            IMemoryItemConverter memoryItemConverter,
+            CapabilityRegistryService capabilityRegistryService, ITemplatingEngine templatingEngine) {
         this.objectMapper = objectMapper;
         this.expressionProvider = expressionProvider;
-        this.conditionProvider = conditionProvider;
         this.jsonSerialization = jsonSerialization;
         this.memoryItemConverter = memoryItemConverter;
+        this.templatingEngine = templatingEngine;
+        this.capabilityRegistryService = capabilityRegistryService;
     }
 
     @Override
@@ -91,13 +94,12 @@ public class RuleDeserialization implements IRuleDeserialization {
                 checkNotNull(type, "behaviorRule.condition.type");
 
                 var conditionsKey = CONDITION_PREFIX + type;
-                if (!conditionProvider.containsKey(conditionsKey)) {
-                    var errorMessage = format("behaviorRule.condition.type=%s does not exist", conditionsKey);
-                    throw new IllegalArgumentException(errorMessage);
-                }
+
+                // Factory creates all known condition types
                 IRuleCondition condition = createCondition(conditionsKey);
-                var configs = conditionConfiguration.getConfigs();
+
                 if (condition != null) {
+                    var configs = conditionConfiguration.getConfigs();
                     if (!isNullOrEmpty(configs)) {
                         condition.setConfigs(configs);
                     }
@@ -114,9 +116,9 @@ public class RuleDeserialization implements IRuleDeserialization {
                 throw new DeserializationException(format("No condition for type %s was created (%s)", type, conditionsKey));
             } catch (CloneNotSupportedException | DeserializationException e) {
                 log.error(e.getLocalizedMessage(), e);
-                return null;
+                throw new IllegalArgumentException("Failed to instantiate rule condition: " + e.getMessage(), e);
             }
-        }).toList();
+        }).filter(Objects::nonNull).toList();
     }
 
     private IRuleCondition createCondition(String conditionsKey) {
@@ -130,6 +132,9 @@ public class RuleDeserialization implements IRuleDeserialization {
             case CONDITION_PREFIX + DynamicValueMatcher.ID -> new DynamicValueMatcher(memoryItemConverter);
             case CONDITION_PREFIX + SizeMatcher.ID -> new SizeMatcher(memoryItemConverter);
             case CONDITION_PREFIX + Dependency.ID -> new Dependency();
+            case CONDITION_PREFIX + CapabilityMatchCondition.ID ->
+                new CapabilityMatchCondition(capabilityRegistryService, memoryItemConverter, templatingEngine);
+            case CONDITION_PREFIX + ContentTypeMatcher.ID -> new ContentTypeMatcher();
             default -> null;
         };
 

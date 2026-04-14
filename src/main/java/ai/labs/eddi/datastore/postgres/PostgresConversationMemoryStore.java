@@ -291,6 +291,38 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         };
     }
 
+    // === GDPR ===
+
+    @Override
+    public List<String> getConversationIdsByUserId(String userId) {
+        ensureSchema();
+        String sql = "SELECT id FROM conversation_memories WHERE data->>'userId' = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<String> ids = new ArrayList<>();
+                while (rs.next()) {
+                    ids.add(rs.getString("id"));
+                }
+                return ids;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to find conversations by userId", e);
+        }
+    }
+
+    @Override
+    public long deleteConversationsByUserId(String userId) {
+        ensureSchema();
+        String sql = "DELETE FROM conversation_memories WHERE data->>'userId' = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, userId);
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to delete conversations by userId", e);
+        }
+    }
+
     /**
      * Fix deserialized context types — same logic as the MongoDB implementation.
      * When deserialized from JSON, Context objects may be represented as

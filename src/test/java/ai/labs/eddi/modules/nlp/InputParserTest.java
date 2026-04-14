@@ -11,6 +11,7 @@ import ai.labs.eddi.modules.nlp.model.Phrase;
 import ai.labs.eddi.modules.nlp.model.Word;
 import ai.labs.eddi.utils.StringUtilities;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 /**
  * @author ginccc
  */
+@DisplayName("InputParser")
 public class InputParserTest {
     private static IExpressionProvider expressionProvider;
 

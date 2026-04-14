@@ -13,8 +13,9 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -53,6 +54,15 @@ public class SecretResolver {
     private final int cacheMaxSize;
 
     private Cache<String, String> cache;
+
+    /**
+     * Listeners notified when cached secrets are invalidated. Used by downstream
+     * caches (e.g., ChatModelRegistry) to evict stale model instances that were
+     * built with old API keys. Receives the specific {@link SecretReference} that
+     * changed, or {@code null} when all secrets are invalidated (e.g., DEK/KEK
+     * rotation). Thread-safe via CopyOnWriteArrayList.
+     */
+    private final List<Consumer<SecretReference>> invalidationListeners = new CopyOnWriteArrayList<>();
 
     // ─── Metrics ───
     private Counter cacheHitCounter;
@@ -199,6 +209,7 @@ public class SecretResolver {
         String cacheKey = reference.tenantId() + "/" + reference.keyName();
         cache.invalidate(cacheKey);
         LOGGER.infof("Cache invalidated for: %s", cacheKey);
+        fireInvalidationListeners(reference);
     }
 
     /**
@@ -207,5 +218,30 @@ public class SecretResolver {
     public void invalidateAll() {
         cache.invalidateAll();
         LOGGER.info("All cached secrets invalidated");
+        fireInvalidationListeners(null);
+    }
+
+    /**
+     * Register a listener that is called whenever cached secrets are invalidated.
+     * The listener receives the specific {@link SecretReference} that changed, or
+     * {@code null} when all secrets are being invalidated. This allows downstream
+     * caches to perform surgical eviction.
+     *
+     * @param listener
+     *            a callback that receives the affected SecretReference (or null for
+     *            all)
+     */
+    public void registerInvalidationListener(Consumer<SecretReference> listener) {
+        invalidationListeners.add(listener);
+    }
+
+    private void fireInvalidationListeners(SecretReference reference) {
+        for (Consumer<SecretReference> listener : invalidationListeners) {
+            try {
+                listener.accept(reference);
+            } catch (Exception e) {
+                LOGGER.warnf("Invalidation listener failed: %s", e.getMessage());
+            }
+        }
     }
 }

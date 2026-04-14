@@ -5,18 +5,20 @@ import ai.labs.eddi.engine.lifecycle.internal.ComponentCache;
 import ai.labs.eddi.engine.lifecycle.internal.LifecycleManager;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
 
 /**
  * @author ginccc
  */
+@DisplayName("LifecycleManager")
 public class LifecycleManagerTest {
     private ILifecycleManager lifecycleManager;
     private IConversationMemory memory;
@@ -30,6 +32,7 @@ public class LifecycleManagerTest {
     }
 
     @Test
+    @DisplayName("should execute lifecycle task when memory is valid")
     public void testExecuteLifecycle() throws Exception {
         // setup
         ILifecycleTask lifecycleTask = mock(ILifecycleTask.class);
@@ -43,34 +46,23 @@ public class LifecycleManagerTest {
     }
 
     @Test
+    @DisplayName("should throw IllegalArgumentException when memory is null")
     public void testValidationWhenMemoryIsNull() {
-        // test
-        try {
-            lifecycleManager.executeLifecycle(null, null);
-            Assertions.fail();
-        } catch (Exception e) {
-            if (!e.getClass().equals(IllegalArgumentException.class)) {
-                Assertions.fail();
-            }
-        }
+        assertThrows(IllegalArgumentException.class,
+                () -> lifecycleManager.executeLifecycle(null, null));
     }
 
     @Test
+    @DisplayName("should throw IllegalArgumentException when lifecycle task is null")
     public void testValidationWhenLifecycleIsNull() {
-        // test
-        try {
-            lifecycleManager.addLifecycleTask(null);
-            Assertions.fail();
-        } catch (Exception e) {
-            if (!e.getClass().equals(IllegalArgumentException.class)) {
-                Assertions.fail();
-            }
-        }
+        assertThrows(IllegalArgumentException.class,
+                () -> lifecycleManager.addLifecycleTask(null));
     }
 
     // === L4 Fix: Prefix match direction tests ===
 
     @Test
+    @DisplayName("should only execute tasks matching filter type and after")
     public void testExecuteLifecycle_FilterByType_MatchesPrefix() throws Exception {
         // Setup: tasks with types "behavior_rules" and "langchain"
         ILifecycleTask behaviorTask = mock(ILifecycleTask.class);
@@ -92,6 +84,7 @@ public class LifecycleManagerTest {
     }
 
     @Test
+    @DisplayName("should match task type by prefix (e.g., 'behavior' matches 'behavior_rules')")
     public void testExecuteLifecycle_FilterByType_PrefixMatchWorks() throws Exception {
         // Setup: task with type "behavior_rules"
         ILifecycleTask behaviorTask = mock(ILifecycleTask.class);
@@ -113,6 +106,7 @@ public class LifecycleManagerTest {
     }
 
     @Test
+    @DisplayName("should NOT match when filter is longer than task type (no reverse prefix)")
     public void testExecuteLifecycle_FilterByType_DoesNotMatchReversed() throws Exception {
         // With L4 fix: type.startsWith(filter) not filter.startsWith(type)
         // Filter "behavior_rules_extended" should NOT match task type "behavior_rules"
@@ -130,6 +124,7 @@ public class LifecycleManagerTest {
     }
 
     @Test
+    @DisplayName("should execute all tasks when no filter is applied")
     public void testExecuteLifecycle_NoFilter_ExecutesAll() throws Exception {
         ILifecycleTask task1 = mock(ILifecycleTask.class);
         when(task1.getType()).thenReturn("parser");
@@ -149,6 +144,7 @@ public class LifecycleManagerTest {
     }
 
     @Test
+    @DisplayName("should execute all tasks when filter is empty list")
     public void testExecuteLifecycle_EmptyFilter_ExecutesAll() throws Exception {
         ILifecycleTask task = mock(ILifecycleTask.class);
         when(task.getType()).thenReturn("parser");

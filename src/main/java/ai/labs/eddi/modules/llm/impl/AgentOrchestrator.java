@@ -33,6 +33,8 @@ import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
 
+import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+
 import java.io.IOException;
 import java.util.*;
 
@@ -77,13 +79,15 @@ class AgentOrchestrator {
     private final IJsonSerialization jsonSerialization;
     private final IMemoryItemConverter memoryItemConverter;
     private final IUserMemoryStore userMemoryStore;
+    private final ToolResponseTruncator toolResponseTruncator;
+    private final TenantQuotaService tenantQuotaService;
 
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager, A2AToolProviderManager a2aToolProviderManager,
             IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore, IResourceClientLibrary resourceClientLibrary,
             IApiCallExecutor apiCallExecutor, IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter,
-            IUserMemoryStore userMemoryStore) {
+            IUserMemoryStore userMemoryStore, ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService) {
         this.calculatorTool = calculatorTool;
         this.dateTimeTool = dateTimeTool;
         this.webSearchTool = webSearchTool;
@@ -102,6 +106,8 @@ class AgentOrchestrator {
         this.jsonSerialization = jsonSerialization;
         this.memoryItemConverter = memoryItemConverter;
         this.userMemoryStore = userMemoryStore;
+        this.toolResponseTruncator = toolResponseTruncator;
+        this.tenantQuotaService = tenantQuotaService;
     }
 
     /**
@@ -256,7 +262,7 @@ class AgentOrchestrator {
                         callStep.put("arguments", toolRequest.arguments());
                         trace.add(callStep);
 
-                        // Check budget before executing tool
+                        // Check per-conversation budget before executing tool
                         if (maxBudget != null && conversationId != null
                                 && !toolExecutionService.getCostTracker().isWithinBudget(conversationId, maxBudget)) {
                             String budgetError = "Budget exceeded for conversation " + conversationId;
@@ -270,6 +276,23 @@ class AgentOrchestrator {
 
                             currentMessages.add(ToolExecutionResultMessage.from(toolRequest, "Error: " + budgetError));
                             continue;
+                        }
+
+                        // Check tenant-level monthly cost budget (MCP governance)
+                        if (tenantQuotaService != null) {
+                            var costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
+                            if (!costCheck.allowed()) {
+                                LOGGER.warnf("Tenant cost budget exceeded during tool call: %s", costCheck.reason());
+
+                                Map<String, Object> quotaStep = new HashMap<>();
+                                quotaStep.put("type", "tool_error");
+                                quotaStep.put("tool", toolRequest.name());
+                                quotaStep.put("error", costCheck.reason());
+                                trace.add(quotaStep);
+
+                                currentMessages.add(ToolExecutionResultMessage.from(toolRequest, "Error: " + costCheck.reason()));
+                                continue;
+                            }
                         }
 
                         // Execute through ToolExecutionService for rate limiting, caching, cost
@@ -286,6 +309,10 @@ class AgentOrchestrator {
                         } else {
                             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
                         }
+
+                        // Apply response truncation (MCP governance)
+                        toolResult = toolResponseTruncator.truncateIfNeeded(
+                                toolRequest.name(), toolResult, task.getToolResponseLimits());
 
                         Map<String, Object> resultStep = new HashMap<>();
                         resultStep.put("type", "tool_result");
@@ -466,7 +493,7 @@ class AgentOrchestrator {
                                 try {
                                     @SuppressWarnings("unchecked")
                                     Map<String, Object> args = jsonSerialization.deserialize(toolRequest.arguments(), Map.class);
-                                    templateData.putAll(args);
+                                    safeTemplateMerge(templateData, args);
                                 } catch (IOException e) {
                                     LOGGER.warn("Failed to parse tool arguments: " + toolRequest.arguments(), e);
                                 }
@@ -554,5 +581,33 @@ class AgentOrchestrator {
         }
 
         return new McpToolProviderManager.McpToolsResult(toolSpecs, executors);
+    }
+
+    // ─── Template data protection ───
+
+    /**
+     * Keys produced by {@link IMemoryItemConverter#convert} that carry
+     * authenticated identity and session state. LLM-provided tool arguments must
+     * never override these — a prompt-injection attack could otherwise manipulate
+     * userId/agentId in HTTP call templates.
+     */
+    private static final Set<String> RESERVED_TEMPLATE_KEYS = Set.of(
+            "context", "properties", "memory",
+            "userInfo", "conversationInfo", "conversationLog");
+
+    /**
+     * Merge LLM tool arguments into template data, blocking any keys that collide
+     * with internal pipeline data. Blocked keys are logged as warnings so config
+     * authors can rename their parameters if needed.
+     */
+    private static void safeTemplateMerge(Map<String, Object> templateData, Map<String, Object> args) {
+        for (var entry : args.entrySet()) {
+            if (RESERVED_TEMPLATE_KEYS.contains(entry.getKey())) {
+                LOGGER.warnf("Blocked LLM tool argument '%s' — collides with reserved template key. " +
+                        "Rename the httpcall parameter to avoid this conflict.", entry.getKey());
+                continue;
+            }
+            templateData.put(entry.getKey(), entry.getValue());
+        }
     }
 }

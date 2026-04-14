@@ -83,4 +83,18 @@ public interface IUserMemoryStore {
     void deleteAllForUser(String userId) throws IResourceStore.ResourceStoreException;
 
     long countEntries(String userId) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Delete user memory entries older than the given number of days. Used by
+     * scheduled retention cleanup.
+     * <p>
+     * <strong>Important:</strong> Entries with keys starting with {@code _gdpr_}
+     * are excluded from deletion to prevent accidental lifting of GDPR processing
+     * restrictions (Art. 18).
+     *
+     * @param olderThanDays
+     *            entries with updatedAt older than this many days ago are deleted
+     * @return number of entries deleted
+     */
+    long deleteOlderThan(int olderThanDays) throws IResourceStore.ResourceStoreException;
 }

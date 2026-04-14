@@ -1,7 +1,9 @@
 package ai.labs.eddi.engine.memory.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.memory.IAttachmentStorage;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
@@ -14,6 +16,7 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.ThreadContext;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import jakarta.ws.rs.core.Response;
@@ -44,8 +47,11 @@ public class RestConversationStore implements IRestConversationStore {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IConversationMemoryStore conversationMemoryStore;
+    private final IUserMemoryStore userMemoryStore;
     private final IRuntime runtime;
     private final Integer deleteEndedConversationsOnceOlderThanDays;
+    private final Integer deleteMemoriesOlderThanDays;
+    private final Instance<IAttachmentStorage> attachmentStorageInstance;
 
     private static final Logger log = Logger.getLogger(RestConversationStore.class);
 
@@ -55,16 +61,23 @@ public class RestConversationStore implements IRestConversationStore {
             IDocumentDescriptorStore documentDescriptorStore,
             IConversationDescriptorStore conversationDescriptorStore,
             IConversationMemoryStore conversationMemoryStore,
+            IUserMemoryStore userMemoryStore,
             IRuntime runtime,
             @ConfigProperty(name = "eddi.conversations.deleteEndedConversationsOnceOlderThanDays")
-            Integer deleteEndedConversationsOnceOlderThanDays) {
+            Integer deleteEndedConversationsOnceOlderThanDays,
+            @ConfigProperty(name = "eddi.usermemories.deleteOlderThanDays")
+            Integer deleteMemoriesOlderThanDays,
+            Instance<IAttachmentStorage> attachmentStorageInstance) {
     // @formatter:on
 
         this.documentDescriptorStore = documentDescriptorStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.conversationMemoryStore = conversationMemoryStore;
+        this.userMemoryStore = userMemoryStore;
         this.runtime = runtime;
         this.deleteEndedConversationsOnceOlderThanDays = deleteEndedConversationsOnceOlderThanDays;
+        this.deleteMemoriesOlderThanDays = deleteMemoriesOlderThanDays;
+        this.attachmentStorageInstance = attachmentStorageInstance;
     }
 
     @Override
@@ -82,36 +95,41 @@ public class RestConversationStore implements IRestConversationStore {
                 }
 
                 for (var conversationDescriptor : conversationDescriptors) {
-                    URI resourceUri = conversationDescriptor.getResource();
-                    var agentResourceId = extractResourceId(resourceUri);
-                    if (agentResourceId == null) {
-                        log.warn(format("agentResourceId was null, this should never happen. (%s)", resourceUri));
-                        continue;
-                    }
-
-                    populateDataToDescriptor(conversationDescriptor, agentResourceId);
-
-                    if (!isNullOrEmpty(agentId) && !agentId.equals(agentResourceId.getId())) {
-                        continue;
-                    }
-
-                    if (!isNullOrEmpty(agentVersion) && !agentVersion.equals(agentResourceId.getVersion())) {
-                        continue;
-                    }
-
-                    if (!isNullOrEmpty(conversationState)) {
-                        if (!conversationState.equals(conversationDescriptor.getConversationState())) {
+                    try {
+                        URI resourceUri = conversationDescriptor.getResource();
+                        var agentResourceId = extractResourceId(resourceUri);
+                        if (agentResourceId == null) {
+                            log.warn(format("agentResourceId was null, this should never happen. (%s)", resourceUri));
                             continue;
                         }
-                    }
 
-                    if (!isNullOrEmpty(viewState)) {
-                        if (!viewState.equals(conversationDescriptor.getViewState())) {
+                        populateDataToDescriptor(conversationDescriptor, agentResourceId);
+
+                        if (!isNullOrEmpty(agentId) && !agentId.equals(agentResourceId.getId())) {
                             continue;
                         }
-                    }
 
-                    retConversationDescriptors.add(conversationDescriptor);
+                        if (!isNullOrEmpty(agentVersion) && !agentVersion.equals(agentResourceId.getVersion())) {
+                            continue;
+                        }
+
+                        if (!isNullOrEmpty(conversationState)) {
+                            if (!conversationState.equals(conversationDescriptor.getConversationState())) {
+                                continue;
+                            }
+                        }
+
+                        if (!isNullOrEmpty(viewState)) {
+                            if (!viewState.equals(conversationDescriptor.getViewState())) {
+                                continue;
+                            }
+                        }
+
+                        retConversationDescriptors.add(conversationDescriptor);
+                    } catch (Exception e) {
+                        // Skip individual corrupted/orphaned descriptors gracefully
+                        log.debug(format("Skipping descriptor due to error: %s", e.getMessage()));
+                    }
                 }
 
                 index++;
@@ -135,6 +153,12 @@ public class RestConversationStore implements IRestConversationStore {
 
         try {
             var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
+
+            if (memorySnapshot == null) {
+                log.warn(format("Memory snapshot not found for conversation [%s, %s]. Descriptor is orphaned.",
+                        resourceId.getId(), resourceId.getVersion()));
+                return;
+            }
 
             if (conversationDescriptor.getUserId() == null) {
                 // fallback for older conversations pre v5.1.6
@@ -189,6 +213,7 @@ public class RestConversationStore implements IRestConversationStore {
         checkNotNull(conversationId, "conversationId");
 
         if (deletePermanently) {
+            deleteAttachmentsForConversation(conversationId);
             conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
             log.info(format("Conversation has been permanently deleted (conversationId=%s)", conversationId));
         }
@@ -215,6 +240,26 @@ public class RestConversationStore implements IRestConversationStore {
         }, ThreadContext.getResources());
     }
 
+    @Scheduled(every = "24h", delayed = "2m")
+    void cleanupOldUserMemories() {
+        if (deleteMemoriesOlderThanDays == null || deleteMemoriesOlderThanDays <= 0) {
+            return; // Disabled
+        }
+
+        runtime.submitCallable(() -> {
+            try {
+                long deleted = userMemoryStore.deleteOlderThan(deleteMemoriesOlderThanDays);
+                if (deleted > 0) {
+                    log.infof("User memory retention: deleted %d entries older than %d days",
+                            deleted, deleteMemoriesOlderThanDays);
+                }
+            } catch (Exception e) {
+                log.error("User memory retention cleanup failed", e);
+            }
+            return null;
+        }, ThreadContext.getResources());
+    }
+
     @Override
     public Integer permanentlyDeleteEndedConversationLogs(Integer deleteOlderThanDays)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
@@ -229,10 +274,12 @@ public class RestConversationStore implements IRestConversationStore {
                     var descriptor = documentDescriptorStore.readDescriptor(endedConversationId, 0);
                     if (descriptor.getLastModifiedOn().before(deleteOlderThanThisDate)) {
                         documentDescriptorStore.deleteAllDescriptor(endedConversationId);
+                        deleteAttachmentsForConversation(endedConversationId);
                         conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
                         amountOfEndedConversations++;
                     }
                 } catch (IResourceStore.ResourceNotFoundException e) {
+                    deleteAttachmentsForConversation(endedConversationId);
                     conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
                     log.debug(format("Cleaned up orphaned conversation memory without descriptor (id=%s)", endedConversationId));
                 }
@@ -284,6 +331,24 @@ public class RestConversationStore implements IRestConversationStore {
             return Response.ok().build();
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
+        }
+    }
+
+    /**
+     * Delete any binary attachments stored for a conversation. Silently skips if no
+     * attachment storage is configured.
+     */
+    private void deleteAttachmentsForConversation(String conversationId) {
+        if (attachmentStorageInstance.isResolvable()) {
+            try {
+                long deleted = attachmentStorageInstance.get().deleteByConversation(conversationId);
+                if (deleted > 0) {
+                    log.debug(format("Deleted %d attachments for conversation %s", deleted, conversationId));
+                }
+            } catch (Exception e) {
+                log.warn(format("Failed to delete attachments for conversation %s: %s",
+                        conversationId, e.getMessage()));
+            }
         }
     }
 }

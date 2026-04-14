@@ -4,6 +4,7 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.Data;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedList;
@@ -13,6 +14,7 @@ import java.util.Set;
 /**
  * @author ginccc
  */
+@DisplayName("ConversationStep")
 public class ConversationStepTest {
     private static IConversationMemory.IWritableConversationStep conversationStep;
 
@@ -121,14 +123,162 @@ public class ConversationStepTest {
     }
 
     @Test
-    public void testEquals() {
-        // setup
+    public void testEquals_identicalData_shouldBeEqual() {
+        // setup — two DISTINCT instances with the same data
         final var data = new Data<>("testKey", new LinkedList<>());
         conversationStep.storeData(data);
-        ConversationStep conversationStep = new ConversationStep(new ConversationOutput());
-        conversationStep.storeData(data);
+
+        ConversationStep otherStep = new ConversationStep(new ConversationOutput());
+        otherStep.storeData(data);
+
+        // assert — compare two different objects, not the same reference
+        Assertions.assertEquals(conversationStep, otherStep);
+        Assertions.assertEquals(otherStep, conversationStep);
+    }
+
+    @Test
+    public void testEquals_differentData_shouldNotBeEqual() {
+        // setup — two instances with different data
+        conversationStep.storeData(new Data<>("keyA", "valueA"));
+
+        ConversationStep otherStep = new ConversationStep(new ConversationOutput());
+        otherStep.storeData(new Data<>("keyB", "valueB"));
 
         // assert
+        Assertions.assertNotEquals(conversationStep, otherStep);
+    }
+
+    @Test
+    public void testEquals_sameReference_shouldBeEqual() {
+        conversationStep.storeData(new Data<>("key", "value"));
         Assertions.assertEquals(conversationStep, conversationStep);
+    }
+
+    @Test
+    public void testRemoveData() {
+        final var data1 = new Data<>("prefix:key1", "val1");
+        final var data2 = new Data<>("prefix:key2", "val2");
+        final var data3 = new Data<>("other:key3", "val3");
+        conversationStep.storeData(data1);
+        conversationStep.storeData(data2);
+        conversationStep.storeData(data3);
+
+        conversationStep.removeData("prefix");
+
+        Assertions.assertEquals(1, conversationStep.size());
+        Assertions.assertNotNull(conversationStep.getData("other:key3"));
+    }
+
+    @Test
+    public void testSnapshotDataIdentities() {
+        final var data = new Data<>("key", "value");
+        conversationStep.storeData(data);
+
+        var snapshot = ((ConversationStep) conversationStep).snapshotDataIdentities();
+        Assertions.assertEquals(1, snapshot.size());
+        Assertions.assertSame(data, snapshot.get("key"));
+
+        // Snapshot is a defensive copy — modifying it should not affect the step
+        snapshot.clear();
+        Assertions.assertEquals(1, conversationStep.size());
+    }
+
+    @Test
+    public void testSnapshotOutputKeys() {
+        conversationStep.addConversationOutputObject("key1", "val1");
+        conversationStep.addConversationOutputString("key2", "val2");
+
+        var keys = ((ConversationStep) conversationStep).snapshotOutputKeys();
+        Assertions.assertTrue(keys.contains("key1"));
+        Assertions.assertTrue(keys.contains("key2"));
+    }
+
+    @Test
+    public void testGetLatestDataReverseScan() {
+        // Store multiple data entries and verify getLatestData returns the last one
+        // with matching prefix
+        conversationStep.storeData(new Data<>("output:text:greet", "Hello"));
+        conversationStep.storeData(new Data<>("output:text:farewell", "Bye"));
+
+        IData<String> latest = conversationStep.getLatestData("output");
+        // getLatestData reverses elements and returns first match
+        Assertions.assertNotNull(latest);
+        Assertions.assertEquals("output:text:farewell", latest.getKey());
+    }
+
+    @Test
+    public void testGetLatestDataNoMatch() {
+        conversationStep.storeData(new Data<>("actions", List.of("greet")));
+        IData<String> latest = conversationStep.getLatestData("nonexistent");
+        Assertions.assertNull(latest);
+    }
+
+    @Test
+    public void testSetWithMemoryKey() {
+        var key = MemoryKey.ofPublic("input");
+        conversationStep.set(key, "hello world");
+
+        IData<String> data = conversationStep.getData("input");
+        Assertions.assertNotNull(data);
+        Assertions.assertEquals("hello world", data.getResult());
+        Assertions.assertTrue(data.isPublic());
+    }
+
+    @Test
+    public void testGetWithMemoryKey() {
+        var key = MemoryKey.<String>of("internal:data");
+        conversationStep.set(key, "secret");
+
+        String result = conversationStep.get(key);
+        Assertions.assertEquals("secret", result);
+    }
+
+    @Test
+    public void testGetWithMemoryKeyReturnsNullIfMissing() {
+        var key = MemoryKey.<String>of("missing:key");
+        String result = conversationStep.get(key);
+        Assertions.assertNull(result);
+    }
+
+    @Test
+    public void testAddConversationOutputList() {
+        conversationStep.addConversationOutputList("items", List.of("a", "b"));
+        conversationStep.addConversationOutputList("items", List.of("c"));
+
+        var output = conversationStep.getConversationOutput();
+        @SuppressWarnings("unchecked")
+        var items = (List<Object>) output.get("items");
+        Assertions.assertEquals(3, items.size());
+    }
+
+    @Test
+    public void testAddConversationOutputMap() {
+        conversationStep.addConversationOutputMap("data", java.util.Map.of("k1", "v1"));
+        conversationStep.addConversationOutputMap("data", java.util.Map.of("k2", "v2"));
+
+        var output = conversationStep.getConversationOutput();
+        @SuppressWarnings("unchecked")
+        var data = (java.util.Map<String, Object>) output.get("data");
+        Assertions.assertEquals("v1", data.get("k1"));
+        Assertions.assertEquals("v2", data.get("k2"));
+    }
+
+    @Test
+    public void testReplaceConversationOutputObject() {
+        conversationStep.addConversationOutputList("items", List.of("old"));
+        conversationStep.replaceConversationOutputObject("items", "old", "new");
+
+        var output = conversationStep.getConversationOutput();
+        @SuppressWarnings("unchecked")
+        var items = (List<Object>) output.get("items");
+        Assertions.assertTrue(items.contains("new"));
+        Assertions.assertFalse(items.contains("old"));
+    }
+
+    @Test
+    public void testToString() {
+        conversationStep.storeData(new Data<>("input", "hello"));
+        String str = conversationStep.toString();
+        Assertions.assertTrue(str.contains("ConversationStep"));
     }
 }

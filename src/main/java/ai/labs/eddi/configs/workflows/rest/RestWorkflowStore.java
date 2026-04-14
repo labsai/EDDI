@@ -233,10 +233,15 @@ public class RestWorkflowStore implements IRestWorkflowStore {
                 }
             }
 
-            Response createWorkflowResponse = restVersionInfo.create(workflowConfig);
-            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createWorkflowResponse.getLocation());
+            // Use createDocument() — bypasses broken Response.getLocation() for eddi://
+            // URIs
+            IResourceStore.IResourceId resourceId = restVersionInfo.createDocument(workflowConfig);
+            URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
+            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createdUri);
 
-            return createWorkflowResponse;
+            return Response.created(createdUri).location(createdUri)
+                    .header("X-Resource-URI", createdUri.toString())
+                    .entity(createdUri.toString()).build();
         } catch (Exception e) {
             throw sneakyThrow(e);
         }

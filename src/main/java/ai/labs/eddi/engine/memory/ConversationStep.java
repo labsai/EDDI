@@ -113,6 +113,29 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
         return conversationOutput;
     }
 
+    /**
+     * Returns a snapshot of the current data store as a map of key to {@code IData}
+     * reference. Used by LifecycleManager to detect both new entries AND
+     * overwritten entries after task execution (by comparing object identity).
+     *
+     * @return defensive copy mapping keys to their current IData references
+     * @since 6.0.0
+     */
+    public Map<String, IData<?>> snapshotDataIdentities() {
+        return new LinkedHashMap<>(store);
+    }
+
+    /**
+     * Returns a snapshot of the current ConversationOutput keys. Used by
+     * LifecycleManager to rollback output entries added by a failed task.
+     *
+     * @return defensive copy of current output key set
+     * @since 6.0.0
+     */
+    public Set<String> snapshotOutputKeys() {
+        return new LinkedHashSet<>(conversationOutput.keySet());
+    }
+
     @Override
     public Set<String> getAllKeys() {
         return store.keySet();

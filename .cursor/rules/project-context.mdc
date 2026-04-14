@@ -1,0 +1,7 @@
+---
+description: EDDI Backend — AI Agent Instructions. Complete project context, architecture, and coding guidelines.
+globs:
+alwaysApply: true
+---
+
+Read and follow all instructions in the repository root file AGENTS.md.

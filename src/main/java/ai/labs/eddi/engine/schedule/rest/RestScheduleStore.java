@@ -100,7 +100,8 @@ public class RestScheduleStore implements IRestScheduleStore {
 
             return Response.created(URI.create("/schedulestore/schedules/" + id)).entity(schedule).build();
         } catch (IllegalArgumentException e) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(e.getMessage()).build();
+            LOGGER.warn("Invalid schedule configuration: " + e.getMessage());
+            return Response.status(Response.Status.BAD_REQUEST).entity("Invalid schedule configuration").build();
         } catch (Exception e) {
             LOGGER.error("Failed to create schedule", e);
             throw new InternalServerErrorException("Failed to create schedule");
@@ -120,7 +121,8 @@ public class RestScheduleStore implements IRestScheduleStore {
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException("Schedule not found: " + scheduleId);
         } catch (IllegalArgumentException e) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(e.getMessage()).build();
+            LOGGER.warn("Invalid schedule update for " + scheduleId + ": " + e.getMessage());
+            return Response.status(Response.Status.BAD_REQUEST).entity("Invalid schedule configuration").build();
         } catch (Exception e) {
             LOGGER.error("Failed to update schedule " + scheduleId, e);
             throw new InternalServerErrorException("Failed to update schedule");

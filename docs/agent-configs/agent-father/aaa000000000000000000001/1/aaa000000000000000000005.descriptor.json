@@ -1,0 +1,6 @@
+{
+  "resource" : "eddi://ai.labs.output/outputstore/outputsets/aaa000000000000000000005?version=1",
+  "name" : "Agent Father",
+  "description" : "Conversation messages and quick replies",
+  "deleted" : false
+}

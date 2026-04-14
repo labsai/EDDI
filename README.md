@@ -1,103 +1,38 @@
-![EDDI Banner Image](/screenshots/EDDI-landing-page-image.png)
+![EDDI Banner Image](/screenshots/EDDI-Readme-banner-image.webp)
 
 # E.D.D.I — Multi-Agent Orchestration Middleware for Conversational AI
 
-[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade) [![Docker Pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12355/badge)](https://www.bestpractices.dev/projects/12355) ![Tests](https://img.shields.io/badge/tests-2%2C000%2B-brightgreen)
 
-**E.D.D.I** (Enhanced Dialog Driven Interface) is a production-grade **multi-agent orchestration middleware** that coordinates between users, AI agents (LLMs), and business systems. It provides intelligent routing, conversation management, and API orchestration for building sophisticated AI-powered applications — all through configuration, not code.
+[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml)
 
-Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker image**. Deploy on Docker, Kubernetes, or OpenShift.
+[![Docker Pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi) [![Repository: AI Ready](https://img.shields.io/badge/Repository-AI_Ready-blueviolet?logo=robot)](AGENTS.md)
 
-**Latest version: 6.0.0-RC1** · [Website](https://eddi.labs.ai/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
+**E.D.D.I** (Enhanced Dialog Driven Interface) is a production-grade, **config-driven multi-agent orchestration middleware** for conversational AI. It coordinates users, AI agents, and business systems through **intelligent routing, persistent memory, and API orchestration** — without writing code.
+
+Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker image**. Native support for **MCP** (Model Context Protocol), **A2A** (Agent-to-Agent), **OpenAPI**, and **OAuth 2.0**.
+
+**Latest version: 6.0.0-RC2** · [Website](https://eddi.labs.ai/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
 
 ---
 
-## ✨ Features at a Glance
+## 📑 Table of Contents
 
-### 🤖 Multi-Agent Orchestration
-
-- 🔀 **Intelligent Routing** — Direct conversations to different agents based on context, rules, and intent
-- 🗣️ **Group Conversations** — Multi-agent debates with 5 built-in styles (Round Table, Peer Review, Devil's Advocate, Delphi, Debate)
-- 🪆 **Nested Groups** — Compose groups of groups for tournament brackets, red-team vs blue-team, and panel reviews
-- 👥 **Managed Conversations** — Intent-based auto-routing with one conversation per user per intent
-- 🧙 **Agent Father** — Meta-agent that creates other agents through conversation (ships out of the box)
-
-### 🧠 LLM Provider Support (12 Providers)
-
-- 🟢 **OpenAI** · **Anthropic Claude** · **Google Gemini** · **Mistral AI**
-- ☁️ **Azure OpenAI** · **Amazon Bedrock** · **Oracle GenAI** · **Google Vertex AI**
-- 🏠 **Ollama** · **Jlama** · **Hugging Face** — Run models locally or in your own cloud
-- 🔗 **OpenAI-compatible endpoints** — DeepSeek, Cohere, and any compatible API via `baseUrl`
-
-### 🔗 Protocol & Interoperability
-
-- 🧩 **MCP Server** (48+ tools) — Full EDDI control from Claude Desktop, IDE plugins, or any MCP client
-- 🧩 **MCP Client** — Connect agents to external MCP tool servers
-- 🤝 **A2A Protocol** — Agent-to-Agent peer communication with skill discovery and Agent Cards
-- 📋 **OpenAPI-to-Agent** — Paste an OpenAPI spec, get a fully deployed API-calling agent
-
-### 🛠️ Built-In AI Agent Tools
-
-- 🔍 **Web Search** — DuckDuckGo or Google Custom Search
-- 🧮 **Calculator** — Sandboxed math parser (no code injection)
-- 🌐 **Web Scraper** · 📄 **PDF Reader** — SSRF-protected content extraction
-- ☁️ **Weather** · 🕐 **DateTime** · 📊 **Data Formatter** · 📝 **Text Summarizer**
-- 🔌 **HTTP Calls as Tools** — Expose your own APIs as LLM-callable tools with full security sandboxing
-
-### 📚 RAG (Retrieval-Augmented Generation)
-
-- 📦 **7 Embedding Providers** — OpenAI, Ollama, Azure OpenAI, Mistral, Bedrock, Cohere, Vertex AI
-- 🗄️ **5 Vector Stores** — pgvector, In-Memory, MongoDB Atlas, Elasticsearch, Qdrant
-- 🌐 **httpCall RAG** — Zero-infrastructure RAG via any search API
-- 📥 **REST Ingestion API** — Async document ingestion with status tracking
-
-### 💭 Memory & Context
-
-- 💾 **Persistent User Memory** — Agents remember facts, preferences, and context across conversations
-- 🪟 **Token-Aware Windowing** — Intelligent context packing with anchored opening steps
-- 📝 **Property Extraction** — Config-driven slot-filling for structured data capture
-- 🔄 **Conversation State** — Full history with undo/redo support
-
-### 📈 Smart Model Cascading
-
-- 📉 **Cost Optimization** — Try cheap/fast models first, escalate to powerful models only when needed
-- 📊 **4 Confidence Strategies** — Structured output, heuristic, judge model, or none
-- 💰 **Per-Conversation Budgets** — Automatic cost tracking with budget caps
-
-### 🔐 Enterprise Security
-
-- 🏦 **Secrets Vault** — Envelope encryption (PBKDF2 + AES) for API keys, never plaintext in DB
-- 🛡️ **SSRF Protection** — URL validation blocks private/internal addresses on all tools
-- 🔒 **Sandboxed Evaluation** — No `eval()`, no script engines — safe recursive-descent math parser
-- 🔑 **OAuth 2.0 / Keycloak** — Authentication, authorization, and tenant isolation
-- 📜 **Immutable Audit Ledger** — Write-once trail with HMAC integrity for EU AI Act compliance
-- 🚫 **No Dynamic Code Execution** — Custom logic runs in external MCP servers, outside the EDDI perimeter
-
-### ⚙️ Configuration-Driven Architecture
-
-- 📄 **JSON Configs, Not Code** — Agent behavior defined in versioned JSON documents
-- 🔧 **Lifecycle Pipeline** — Pluggable task pipeline: Input → Parse → Rules → API/LLM → Output
-- 📦 **Composable Agents** — Agents assembled from reusable, version-controlled workflows and extensions
-- 🧪 **Behavior Rules** — IF-THEN logic engine for routing, orchestration, and business logic
-- 📤 **Import / Export** — Agents are portable as ZIP files with secret scrubbing on export
-
-### 🚀 Cloud-Native & Observable
-
-- 🐳 **One-Command Install** — Interactive wizard sets up EDDI + database + starter agent via Docker
-- ☸️ **Kubernetes / OpenShift** — Kustomize overlays, Helm charts, HPA, PDB, NetworkPolicy
-- 📊 **Prometheus & Grafana** — Built-in Micrometer instrumentation at `/q/metrics`
-- 🩺 **Health Checks** — Liveness & readiness probes at `/q/health/live` and `/q/health/ready`
-- 🔄 **NATS JetStream** — Async event bus for distributed processing
-- ⚡ **Virtual Threads** — Java 25 virtual threads for true concurrency, no GIL
-- 🗃️ **DB-Agnostic** — Choose MongoDB or PostgreSQL, switch with one env var
-
-### 🖥️ Manager Dashboard & Chat UI
-
-- 🎨 **React 19 Manager UI** — Modern admin dashboard for agent building, testing, deployment, and monitoring
-- 💬 **Chat Widget** — Embeddable React chat UI with SSE streaming and Keycloak auth
-- 🔍 **Audit Trail Viewer** — Timeline-based compliance and debugging UI
-- 📋 **Logs Panel** — Live SSE log streaming + searchable history
-- 🔑 **Secrets Manager** — Write-only UI for vault entries
+- [🏁 Quick Start](#-quick-start)
+- [💡 Why EDDI?](#-why-eddi)
+- [✨ Features](#-features)
+- [🧩 Quarkus SDK](#-quarkus-sdk)
+- [📖 Documentation](#-documentation)
+- [📋 Compliance & Privacy](#-compliance--privacy)
+- [🏗️ Development](#️-development)
+  - [Prerequisites](#prerequisites)
+  - [Quarkus Dev Mode](#quarkus-dev-mode)
+  - [Maven Command Reference](#maven-command-reference)
+  - [Build & Docker](#build--docker)
+  - [Kubernetes](#️-kubernetes)
+- [🤝 Contributing](#-contributing)
+- [🔒 Security](#-security)
+- [📜 Code of Conduct](#-code-of-conduct)
 
 ---
 
@@ -154,7 +89,7 @@ The installer creates an `eddi` CLI wrapper that makes updating easy:
 eddi update
 ```
 
-This pulls the latest Docker image from the registry and restarts the containers. It works even when the same tag (e.g. `6.0.0-RC1`) was re-published — Docker always checks the remote digest for changes.
+This pulls the latest Docker image from the registry and restarts the containers. It works even when the same tag (e.g. `latest`) was re-published — Docker always checks the remote digest for changes.
 
 > **`eddi` command not found?** The CLI lives at `~/.eddi/eddi` (Linux/macOS) or `~/.eddi/eddi.cmd` (Windows). Either restart your terminal so the PATH takes effect, or use the full path:
 >
@@ -203,13 +138,173 @@ docker compose -f docker-compose.yml -f docker-compose.auth.yml \
   -f docker-compose.monitoring.yml -f docker-compose.nats.yml up
 ```
 
-Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.postgres.yml` / `docker-compose.postgres-only.yml`, `docker-compose.local.yml` (build from source), `docker-compose.testing.yml` (integration tests).
+Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (NATS JetStream), `docker-compose.postgres.yml` / `docker-compose.postgres-only.yml`, `docker-compose.local.yml` (build from source).
 
 ```bash
 docker pull labsai/eddi    # Pull latest from Docker Hub
 ```
 
 → [hub.docker.com/r/labsai/eddi](https://hub.docker.com/r/labsai/eddi)
+
+---
+
+## 💡 Why EDDI?
+
+Most multi-agent frameworks (LangGraph, CrewAI, AutoGen) are Python/Node libraries — great for prototyping, hard to govern in production. EDDI approaches from the opposite direction: **a deterministic engine built to safely govern non-deterministic AI.**
+
+| Dimension          | Typical Python/Node Frameworks           | EDDI                                                                        |
+| ------------------ | ---------------------------------------- | --------------------------------------------------------------------------- |
+| **Concurrency**    | GIL or single-threaded event loop        | Java 25 Virtual Threads — true OS-level parallelism                         |
+| **Agent Logic**    | Embedded in application code             | Versioned JSON configurations — update behavior without redeployment        |
+| **Security Model** | Often relies on sandboxed code execution | No dynamic code execution at all; envelope-encrypted vault, SSRF protection |
+| **Compliance**     | Requires custom implementation           | GDPR, HIPAA, EU AI Act infrastructure built-in                              |
+| **Audit Trail**    | Application-level logging                | HMAC-SHA256 immutable ledger with cryptographic agent signing               |
+| **Deployment**     | pip/npm + manual infrastructure          | One-command Docker install, Kubernetes/OpenShift-ready                      |
+
+> _"The engine is strict so the AI can be creative."_ — [Project Philosophy](docs/project-philosophy.md)
+
+---
+
+## ✨ Features
+
+### 🤖 Multi-Agent Orchestration
+
+- 🔀 **Intelligent Routing** — Direct conversations to different agents based on context, rules, and intent
+- 🗣️ **Group Conversations** — Multi-agent debates with 5 built-in discussion styles: Round Table, Peer Review, Devil's Advocate, Delphi, and Debate
+- 🪆 **Nested Groups** — Compose groups of groups for tournament brackets, red-team vs blue-team, and panel reviews
+- 👥 **Managed Conversations** — Intent-based auto-routing with one conversation per user per intent
+- 🎯 **Capability Matching** — Discover and route to agents by skill, confidence score, and custom attributes
+- 🧙 **Agent Father** — Meta-agent that creates other agents through conversation (ships out of the box)
+
+### 🧠 LLM Provider Support (12 Providers)
+
+| Category             | Providers                                                             |
+| -------------------- | --------------------------------------------------------------------- |
+| **Cloud APIs**       | OpenAI · Anthropic Claude · Google Gemini · Mistral AI                |
+| **Enterprise Cloud** | Azure OpenAI · Amazon Bedrock · Oracle GenAI · Google Vertex AI       |
+| **Self-Hosted**      | Ollama · Jlama · Hugging Face                                         |
+| **Compatible**       | Any OpenAI-compatible endpoint (DeepSeek, Cohere, etc.) via `baseUrl` |
+
+### 🔗 Standards & Interoperability
+
+EDDI implements open standards — not proprietary APIs:
+
+| Standard                                                             | Role                            | What It Enables                                                                                          |
+| -------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (42 tools) + Client      | Control EDDI from Claude Desktop, Cursor, or any MCP client. Connect agents to external MCP tool servers |
+| **[A2A](https://google.github.io/A2A/)** (Agent-to-Agent Protocol)   | Full implementation             | Cross-platform agent communication, Agent Cards, and skill discovery                                     |
+| **[OpenAPI](https://www.openapis.org/)** 3.1                         | Native generation + consumption | Auto-generated spec. Paste any OpenAPI spec → get a fully deployed API-calling agent                     |
+| **OAuth 2.0 / OIDC**                                                 | Keycloak integration            | Authentication, authorization, and multi-tenant isolation                                                |
+| **SSE** (Server-Sent Events)                                         | Streaming transport             | Real-time chat responses, group discussion feeds, and live log streaming                                 |
+
+### 💭 Memory & Context Management
+
+- 💾 **Persistent User Memory** — Agents remember facts, preferences, and context across conversations via structured key-value entries with visibility scoping (`global`, `agent`, `group`)
+- 🧠 **LLM Memory Tools** — Built-in tools agents can call to read, write, and search their own persistent memory
+- 💤 **Dream Consolidation** — Background memory maintenance: stale entry pruning, contradiction detection, and fact summarization (inspired by [Anthropic's](https://www.anthropic.com/research) research on background memory consolidation)
+- 🪟 **Token-Aware Windowing** — Intelligent context packing with model-specific tokenizer support and anchored opening steps
+- 📝 **Rolling Summary** — Incremental LLM-powered summarization of older turns with a **Conversation Recall Tool** for drill-back into compressed history
+- 🔧 **Property Extraction** — Config-driven slot-filling with `longTerm` / `conversation` / `step` scoping — EDDI's importance extraction mechanism
+- 🔄 **Conversation State** — Full history with undo/redo support
+
+### 📚 RAG (Retrieval-Augmented Generation)
+
+- 📦 **7 Embedding Providers** — OpenAI, Ollama, Azure OpenAI, Mistral, Bedrock, Cohere, Vertex AI
+- 🗄️ **5 Vector Stores** — pgvector, In-Memory, MongoDB Atlas, Elasticsearch, Qdrant
+- 🌐 **httpCall RAG** — Zero-infrastructure RAG via any search API (BM25, Elasticsearch, custom)
+- 📥 **REST Ingestion API** — Async document ingestion with status tracking
+
+### 🛠️ Built-In AI Agent Tools
+
+| Tool                                           | Description                                                                   |
+| ---------------------------------------------- | ----------------------------------------------------------------------------- |
+| 🔍 **Web Search**                              | DuckDuckGo or Google Custom Search                                            |
+| 🧮 **Calculator**                              | Sandboxed recursive-descent math parser (no `eval()`, no code injection)      |
+| 🌐 **Web Scraper**                             | SSRF-protected content extraction from web pages                              |
+| 📄 **PDF Reader**                              | SSRF-protected document extraction                                            |
+| ☁️ **Weather** · 🕐 **DateTime**               | Real-time data tools                                                          |
+| 📊 **Data Formatter** · 📝 **Text Summarizer** | Data transformation tools                                                     |
+| 🔌 **HTTP Calls as Tools**                     | Expose your own REST APIs as LLM-callable tools with full security sandboxing |
+| 🧠 **User Memory**                             | Read/write/search persistent user memory                                      |
+| 🔙 **Conversation Recall**                     | Drill back into summarized conversation history                               |
+| 📎 **Multimodal Attachments**                  | Image, PDF, audio, and video input with MIME-based routing                    |
+
+### ⏰ Scheduled Execution & Heartbeats
+
+- 🫀 **Heartbeat Triggers** — Periodic agent wake-ups at configurable intervals for proactive behavior (inspired by [OpenClaw's](https://openclaw.ai) heartbeat architecture)
+- ⏲️ **Cron Scheduling** — Standard cron expressions for timed agent execution
+- 🔄 **Conversation Strategies** — `persistent` (reuse same conversation across fires) or `new` (fresh context each time)
+- 📊 **Fire Logging** — Complete execution history with status, duration, cost tracking, and retry logic
+- 🌙 **Dream Cycles** — Scheduled background memory consolidation with cost ceilings per run
+
+### 📈 Smart Model Cascading
+
+- 📉 **Cost Optimization** — Try cheap/fast models first, escalate to powerful models only when confidence is low
+- 📊 **4 Confidence Strategies** — Structured output, heuristic, judge model, or none
+- 💰 **Per-Conversation Budgets** — Automatic cost tracking with budget caps and eviction
+- 🏢 **Tenant Cost Ceilings** — Monthly cost budgets per tenant with automatic enforcement
+
+### 🔐 Enterprise Security & Compliance
+
+<details open>
+<summary><strong>Security Architecture</strong></summary>
+
+- 🏦 **Secrets Vault** — Envelope encryption (PBKDF2 + AES-256) with tenant-scoped DEK/KEK rotation. Never plaintext in DB
+- 🛡️ **SSRF Protection** — All tools validate URLs against private IPs, internal hostnames, and non-HTTP schemes before any request
+- 🔒 **Sandboxed Evaluation** — Recursive-descent math parser only. No `eval()`, no script engines, no reflection-based execution
+- 🔑 **OAuth 2.0 / Keycloak** — Multi-tenant authentication, authorization, and role-based access control
+- ✍️ **Agent Signing** — Ed25519 cryptographic identity per agent; audit entries signed with agent private keys
+- 🚫 **No Dynamic Code Execution** — Custom logic runs in external MCP servers, outside the EDDI security perimeter
+
+</details>
+
+<details open>
+<summary><strong>Regulatory Compliance</strong></summary>
+
+| Regulation                                             | EDDI Support                                                                                                                                   |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **[EU AI Act](https://artificialintelligenceact.eu/)** | Immutable HMAC-SHA256 audit ledger, decision traceability, risk classification guidance                                                        |
+| **[GDPR](https://gdpr.eu/)**                           | Cascading data erasure (Art. 17), data portability (Art. 15/20), restriction of processing (Art. 18), per-category retention, pseudonymization |
+| **[CCPA](https://oag.ca.gov/privacy/ccpa)**            | Right to delete, right to know, data portability                                                                                               |
+| **[HIPAA](https://www.hhs.gov/hipaa/)**                | Deployment guide, BAA template, LLM provider BAA matrix, session timeout guidance                                                              |
+| **International**                                      | PIPEDA 🇨🇦 · LGPD 🇧🇷 · APPI 🇯🇵 · POPIA 🇿🇦 · PDPA 🇸🇬🇹🇭🇲🇾 · PIPL 🇨🇳 compatibility documented                                                      |
+
+- 📜 **Audit Ledger** — Every agent decision recorded in a write-once, HMAC-secured, append-only ledger
+- 🔍 **Compliance Startup Checks** — Advisory warnings on boot for TLS and database encryption gaps
+- 🗑️ **GDPR Orchestration** — One-call cascading erasure across 6 stores + audit trail pseudonymization
+- 📤 **Data Portability** — Complete user data export (memories, conversations, audit entries) via REST and MCP
+
+</details>
+
+### ⚙️ Configuration-Driven Architecture
+
+- 📄 **JSON Configs, Not Code** — Agent behavior defined in versioned, diffable JSON documents
+- 🔧 **Lifecycle Pipeline** — Pluggable task pipeline: Input → Parse → Rules → API/LLM → Output
+- 📦 **Composable Agents** — Agents assembled from reusable, version-controlled workflows and extensions
+- 🧪 **Behavior Rules** — IF-THEN logic engine for routing, orchestration, and business logic
+- 📤 **Import / Export** — Agents portable as ZIP files with automatic secret scrubbing on export
+- 📝 **Prompt Snippets** — Reusable, versioned system prompt building blocks available as `{{snippets.safety_rules}}`
+- 📎 **Content Type Routing** — MIME-based behavior rule conditions for multimodal attachment routing
+
+### 🚀 Cloud-Native & Observable
+
+- 🐳 **One-Command Install** — Interactive wizard sets up EDDI + database + starter agent via Docker
+- ☸️ **Kubernetes / OpenShift** — Kustomize overlays, Helm charts, HPA, PDB, NetworkPolicy
+- 📊 **Prometheus & Grafana** — 50+ Micrometer metrics at `/q/metrics` (tools, vault, memory, scheduling, conversations)
+- 🩺 **Health Checks** — Liveness & readiness probes at `/q/health/live` and `/q/health/ready`
+- 🔄 **NATS JetStream** — Async event bus for distributed processing
+- ⚡ **Virtual Threads** — Java 25 virtual threads for true OS-level concurrency (no Python GIL or Node.js event loop bottleneck)
+- 🗃️ **DB-Agnostic** — Choose MongoDB or PostgreSQL; switch with one env var. Single Docker image for both
+- 🏗️ **Red Hat Certified** — Container certification with automated preflight checks in CI/CD
+
+### 🖥️ Manager Dashboard & Chat UI
+
+- 🎨 **React 19 Manager** — Modern admin dashboard for agent building, testing, deployment, and monitoring
+- 💬 **Chat Widget** — Embeddable React chat UI with SSE streaming and Keycloak auth
+- 🔍 **Audit Trail Viewer** — Timeline-based compliance and debugging UI
+- 📋 **Logs Panel** — Live SSE log streaming + searchable history
+- 🔑 **Secrets Manager** — Write-only vault UI with copy-reference support
+- 🌍 **11 Languages** — English, German, Spanish, French, Portuguese, Chinese, Japanese, Korean, Arabic (RTL), Hindi, Thai
 
 ---
 
@@ -242,15 +337,18 @@ Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming
 | **[Getting Started](docs/getting-started.md)**               | Setup and first steps                      |
 | **[Developer Quickstart](docs/developer-quickstart.md)**     | Build your first agent in 5 minutes        |
 | **[Architecture](docs/architecture.md)**                     | Deep dive into EDDI's design and pipeline  |
-| **[LangChain Integration](docs/langchain.md)**               | Connecting to 12 LLM providers             |
+| **[LLM Configuration](docs/langchain.md)**                   | Connecting to 12 LLM providers             |
 | **[Behavior Rules](docs/behavior-rules.md)**                 | Configuring agent routing logic            |
 | **[HTTP Calls](docs/httpcalls.md)**                          | External API integration                   |
 | **[RAG](docs/rag.md)**                                       | Knowledge base retrieval setup             |
-| **[MCP Server](docs/mcp-server.md)**                         | 48+ tools for AI-assisted agent management |
+| **[MCP Server](docs/mcp-server.md)**                         | 42 tools for AI-assisted agent management  |
 | **[A2A Protocol](docs/a2a-protocol.md)**                     | Agent-to-Agent peer communication          |
 | **[Group Conversations](docs/group-conversations.md)**       | Multi-agent debate orchestration           |
 | **[User Memory](docs/user-memory.md)**                       | Cross-conversation fact retention          |
 | **[Model Cascading](docs/model-cascade.md)**                 | Cost-optimized multi-model routing         |
+| **[Prompt Snippets](docs/prompt-snippets-guide.md)**         | Reusable system prompt building blocks     |
+| **[Attachments](docs/attachments-guide.md)**                 | Multimodal attachment pipeline             |
+| **[Capability Matching](docs/capability-match-guide.md)**    | A2A skill discovery and routing            |
 | **[Security](docs/security.md)**                             | SSRF protection, sandboxing, and hardening |
 | **[Secrets Vault](docs/secrets-vault.md)**                   | Envelope encryption for sensitive data     |
 | **[Audit Ledger](docs/audit-ledger.md)**                     | EU AI Act-compliant audit trail            |
@@ -261,21 +359,53 @@ Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming
 
 ---
 
+## 📋 Compliance & Privacy
+
+EDDI provides built-in infrastructure for regulatory compliance:
+
+| Guide                                                    | Covers                                                                                                |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **[GDPR / CCPA](docs/gdpr-compliance.md)**               | Data erasure, export, Art. 18 restriction of processing, per-category retention, and consent guidance |
+| **[HIPAA](docs/hipaa-compliance.md)**                    | Healthcare deployment guide — encryption, BAAs, LLM provider matrix, session management               |
+| **[EU AI Act](docs/eu-ai-act-compliance.md)**            | AI risk classification, decision traceability, immutable audit ledger                                 |
+| **[Privacy & Data Processing](PRIVACY.md)**              | Data flows, LLM provider matrix, international regulations (PIPEDA, LGPD, APPI, POPIA, PDPA, PIPL)    |
+| **[Compliance Data Flow](docs/compliance-data-flow.md)** | Single-page data flow diagram for auditors                                                            |
+| **[Incident Response](docs/incident-response.md)**       | Breach response runbook (GDPR 72h, CCPA 45 days, HIPAA 60 days)                                       |
+
+---
+
 ## 🏗️ Development
 
 ### Prerequisites
 
-- Java 25
-- Maven 3.9+ (bundled via `mvnw` wrapper)
-- MongoDB ≥ 6.0 or PostgreSQL
+| Tool           | Version | Notes                                                             |
+| -------------- | ------- | ----------------------------------------------------------------- |
+| **Java (JDK)** | 25      | [Eclipse Temurin](https://adoptium.net/) recommended              |
+| **Maven**      | 3.9+    | Bundled via `mvnw` / `mvnw.cmd` wrapper — no install needed       |
+| **MongoDB**    | 6.0+    | Local instance or Docker (`docker run -d -p 27017:27017 mongo:7`) |
+| **Docker**     | Latest  | For integration tests and container builds                        |
 
-### Run Locally
+> **Windows users:** Replace `./mvnw` with `.\mvnw.cmd` in all commands below.
+
+### Quarkus Dev Mode
+
+Dev mode starts the application with **live reload** — code changes are picked up automatically without restarting:
 
 ```bash
+# Linux / macOS
 ./mvnw compile quarkus:dev
+
+# Windows (PowerShell)
+.\mvnw.cmd compile quarkus:dev
 ```
 
-Then open [http://localhost:7070](http://localhost:7070).
+Then open [http://localhost:7070](http://localhost:7070). The Quarkus Dev UI is available at [http://localhost:7070/q/dev](http://localhost:7070/q/dev).
+
+Dev mode also enables:
+
+- **Continuous testing** — press `r` in the terminal to re-run tests on changes
+- **Dev UI** — browse endpoints, CDI beans, configuration, and health checks
+- **Live reload** — Java and resource changes apply instantly
 
 > **💡 Secrets Vault:** To use the secrets vault (storing API keys encrypted), set the master key before starting:
 >
@@ -291,6 +421,48 @@ Then open [http://localhost:7070](http://localhost:7070).
 > ```
 >
 > Without this, the vault is disabled and secret management returns HTTP 503. Any passphrase works for local development. See [Secrets Vault](docs/secrets-vault.md) for production setup.
+
+### Maven Command Reference
+
+| Command                                                       | What It Does                                                                |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `./mvnw compile quarkus:dev`                                  | **Start dev mode** with live reload (port 7070)                             |
+| `./mvnw compile`                                              | Compile sources only (fast feedback)                                        |
+| `./mvnw clean compile`                                        | Clean build — delete `target/` and recompile from scratch                   |
+| `./mvnw test`                                                 | Run **unit tests** (excludes `*IT.java` integration tests)                  |
+| `./mvnw verify -DskipITs`                                     | Compile + unit tests + package (no integration tests)                       |
+| `./mvnw verify`                                               | **Full build** — compile + unit tests + integration tests (requires Docker) |
+| `./mvnw validate`                                             | Run **Checkstyle** code style checks                                        |
+| `./mvnw formatter:format`                                     | **Auto-format** Java sources using the project Eclipse formatter            |
+| `./mvnw package -DskipTests`                                  | Build the JAR without running tests (for `install.sh --local`)              |
+| `./mvnw clean package '-Dquarkus.container-image.build=true'` | Build the app **+ Docker image**                                            |
+| `./mvnw package -Plicense-gen -DskipTests`                    | Generate **third-party licenses** (Red Hat certification)                   |
+| `./mvnw quarkus:dev -Dsuspend`                                | Start dev mode and **wait for debugger** on port 5005                       |
+| `./mvnw quarkus:dev -Ddebug=false`                            | Start dev mode **without** the debug agent                                  |
+
+<details>
+<summary><strong>Code coverage</strong></summary>
+
+JaCoCo is configured to run automatically during `./mvnw test`. After tests complete, find the coverage report at:
+
+```
+target/site/jacoco/index.html
+```
+
+</details>
+
+<details>
+<summary><strong>Useful system properties</strong></summary>
+
+| Property                                    | Default                     | Description                                    |
+| ------------------------------------------- | --------------------------- | ---------------------------------------------- |
+| `-Dquarkus.http.port=<port>`                | `7070`                      | Override the HTTP port                         |
+| `-Dquarkus.mongodb.connection-string=<uri>` | `mongodb://localhost:27017` | MongoDB connection                             |
+| `-Dquarkus.profile=<profile>`               | `dev`                       | Active Quarkus profile (`dev`, `test`, `prod`) |
+| `-DskipTests`                               | `false`                     | Skip all tests                                 |
+| `-DskipITs`                                 | `true`                      | Skip integration tests only                    |
+
+</details>
 
 ### Build & Docker
 

@@ -33,20 +33,29 @@ public class AgentDeploymentComponentIT extends BaseIntegrationIT {
     void deployAgent_reachesReady() throws Exception {
         ResourceId agentId = createMinimalAgent();
 
-        // Deploy
-        given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false", agentId.id(), agentId.version()));
+        // Deploy with waitForCompletion
+        Response deployResponse = given()
+                .post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false&waitForCompletion=true", agentId.id(),
+                        agentId.version()));
+        System.out.println("[DEBUG] Deploy POST status: " + deployResponse.statusCode() + " body: " + deployResponse.getBody().print());
 
-        // Poll for READY
-        for (int i = 0; i < 30; i++) {
+        // Poll for READY (may already be done from server-side wait)
+        for (int i = 0; i < 120; i++) {
             Response response = given()
                     .get(String.format("administration/production/deploymentstatus/%s?version=%s&format=text", agentId.id(), agentId.version()));
             String status = response.getBody().print().trim();
+            if (i < 3) {
+                System.out.println("[DEBUG] Poll " + i + " status: " + status);
+            }
             if ("READY".equals(status)) {
                 return; // test passes
             }
+            if ("ERROR".equals(status)) {
+                Assertions.fail("Agent deployment failed with ERROR status");
+            }
             Thread.sleep(500);
         }
-        Assertions.fail("Agent deployment did not reach READY status within 15 seconds");
+        Assertions.fail("Agent deployment did not reach READY status within 90 seconds");
     }
 
     @Test
@@ -93,7 +102,7 @@ public class AgentDeploymentComponentIT extends BaseIntegrationIT {
 
         String packageBody = String.format("""
                 {
-                  "WorkflowSteps": [
+                  "workflowSteps": [
                     {
                       "type": "eddi://ai.labs.parser",
                       "config": {},

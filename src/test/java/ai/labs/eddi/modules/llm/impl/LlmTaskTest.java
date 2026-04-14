@@ -94,11 +94,15 @@ class LlmTaskTest {
         when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
         var chatModelRegistry = new ChatModelRegistry(languageModelApiConnectorBuilders, secretResolver);
 
+        var toolResponseTruncator = new ToolResponseTruncator(new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+
         langChainTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter, templatingEngine, jsonSerialization, prePostUtils,
                 chatModelRegistry, calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool,
                 weatherTool, apiCallExecutor, toolExecutionService, mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
                 mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(RagContextProvider.class), mock(IUserMemoryStore.class),
-                mock(TokenCounterFactory.class), mock(ConversationSummarizer.class));
+                mock(TokenCounterFactory.class), mock(ConversationSummarizer.class),
+                mock(PromptSnippetService.class),
+                toolResponseTruncator, mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
     }
 
     static Stream<Arguments> provideParameters() {
@@ -148,10 +152,6 @@ class LlmTaskTest {
         IData outputData = mock(IData.class);
         when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
 
-        // Adding debug statements
-        System.out.println("Setting up mocks with parameters:");
-        parameters.forEach((key, value) -> System.out.println(key + ": " + value));
-
         var systemMessage = parameters.getOrDefault("systemMessage", "-1");
         var apiKey = parameters.getOrDefault("apiKey", "-1");
         var logSizeLimit = parameters.getOrDefault("logSizeLimit", "-1");
@@ -178,6 +178,7 @@ class LlmTaskTest {
     }
 
     @Test
+    @DisplayName("Agent Mode — should reach CDI boundary via executeWithTools path")
     void testExecute_AgentMode() throws Exception {
         // Setup
         IConversationMemory memory = mock(IConversationMemory.class);
@@ -196,7 +197,7 @@ class LlmTaskTest {
         task.setActions(List.of("agent_action"));
         task.setId("agentTask");
         task.setType("openai");
-        // Enable Agent Mode to test the new integration
+        // Enable Agent Mode to test the executeWithTools path
         task.setEnableBuiltInTools(true);
         task.setBuiltInToolsWhitelist(List.of("calculator"));
         task.setParameters(Map.of("systemMessage", "Agent System Message"));
@@ -209,22 +210,36 @@ class LlmTaskTest {
         // Mock templating to return inputs as-is
         when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
 
-        // Execute
-        // Note: This test validates that the Agent Mode path (executeWithTools) is
-        // invoked.
-        // In a real unit test without Quarkus CDI context, the AiServices.builder()
-        // will fail
-        // because it requires Arc.container(). This is expected behavior and validates
-        // that
-        // the Agent Mode code path is executed.
-        // The exception may be NullPointerException or ExceptionInInitializerError
-        // (wrapping NPE)
-        // depending on whether the CDI class initializer has already been attempted.
-        assertThrows(Throwable.class, () -> {
+        // Execute: The agent mode path reaches AiServices.builder() which requires
+        // Arc.container() — a CDI API not available in plain unit tests.
+        // We catch Throwable because CDI failures are Error subclasses
+        // (ExceptionInInitializerError, NoClassDefFoundError), not Exceptions.
+        // We then verify we got a SPECIFIC CDI-boundary error — not just "any crash."
+        Throwable thrown = null;
+        try {
             langChainTask.execute(memory, llmConfig);
-        }, "Expected exception due to missing Quarkus CDI context when using Agent Mode");
+            fail("Expected CDI boundary exception when Agent Mode reaches AiServices.builder()");
+        } catch (Throwable t) {
+            thrown = t;
+        }
 
-        // Verify that templating was called for system message (happens before the NPE)
+        // Verify this is specifically a CDI/tools-path exception, not some random NPE
+        // from bad setup. The exact exception type depends on langchain4j version
+        // and CDI availability — it may be ExceptionInInitializerError,
+        // NoClassDefFoundError,
+        // LifecycleException, or RuntimeException("Not implemented").
+        assertNotNull(thrown, "Expected an exception to be thrown");
+        Throwable rootCause = thrown;
+        while (rootCause.getCause() != null) {
+            rootCause = rootCause.getCause();
+        }
+        assertFalse(
+                rootCause instanceof NullPointerException,
+                "Should NOT be NullPointerException (that indicates bad test setup), "
+                        + "but was: " + rootCause.getClass().getSimpleName() + ": " + rootCause.getMessage());
+
+        // Verify that templating was called for system message (happens before CDI
+        // call)
         verify(templatingEngine, atLeastOnce()).processTemplate(anyString(), anyMap());
     }
 

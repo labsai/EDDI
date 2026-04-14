@@ -1,6 +1,7 @@
 package ai.labs.eddi.configs.agents.rest;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -41,13 +42,16 @@ class RestAgentStoreTest {
     private IJsonSchemaCreator jsonSchemaCreator;
     @Mock
     private IScheduleStore scheduleStore;
+    @Mock
+    private CapabilityRegistryService capabilityRegistryService;
 
     private RestAgentStore restAgentStore;
 
     @BeforeEach
     void setUp() {
         openMocks(this);
-        restAgentStore = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore);
+        restAgentStore = new RestAgentStore(AgentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore,
+                capabilityRegistryService);
     }
 
     /** Helper to create a dummy DocumentDescriptor for reference-count mocking */

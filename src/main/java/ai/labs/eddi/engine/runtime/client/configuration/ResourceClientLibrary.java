@@ -7,6 +7,7 @@ import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
+import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.utils.RestUtilities;
@@ -35,6 +36,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
     private final IRestOutputStore restOutputStore;
     private final IRestPropertySetterStore restPropertySetterStore;
     private final IRestMcpCallsStore restMcpCallsStore;
+    private final IRestRagStore restRagStore;
     private Map<String, IResourceService> restInterfaces;
 
     private static final Logger log = Logger.getLogger(ResourceClientLibrary.class);
@@ -42,7 +44,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
     @Inject
     public ResourceClientLibrary(IRestParserStore restParserStore, IRestDictionaryStore restDictionaryStore, IRestRuleSetStore restRuleSetStore,
             IRestApiCallsStore restApiCallsStore, IRestLlmStore restLlmStore, IRestOutputStore restOutputStore,
-            IRestPropertySetterStore restPropertySetterStore, IRestMcpCallsStore restMcpCallsStore) {
+            IRestPropertySetterStore restPropertySetterStore, IRestMcpCallsStore restMcpCallsStore, IRestRagStore restRagStore) {
         this.restParserStore = restParserStore;
         this.restDictionaryStore = restDictionaryStore;
         this.restRuleSetStore = restRuleSetStore;
@@ -51,6 +53,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         this.restOutputStore = restOutputStore;
         this.restPropertySetterStore = restPropertySetterStore;
         this.restMcpCallsStore = restMcpCallsStore;
+        this.restRagStore = restRagStore;
 
         init();
     }
@@ -91,6 +94,9 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
                 return restDictionaryStore.deleteRegularDictionary(id, version, permanent);
             }
         });
+
+        // Alias: IRestDictionaryStore uses resourceBaseType "ai.labs.dictionary"
+        restInterfaces.put("ai.labs.dictionary", restInterfaces.get("ai.labs.regulardictionary"));
 
         restInterfaces.put("ai.labs.behavior", new IResourceService() {
             @Override
@@ -197,6 +203,23 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
             @Override
             public Response delete(String id, Integer version, boolean permanent) {
                 return restMcpCallsStore.deleteMcpCalls(id, version, permanent);
+            }
+        });
+
+        restInterfaces.put("ai.labs.rag", new IResourceService() {
+            @Override
+            public Object read(String id, Integer version) {
+                return restRagStore.readRag(id, version);
+            }
+
+            @Override
+            public Response duplicate(String id, Integer version) {
+                return restRagStore.duplicateRag(id, version);
+            }
+
+            @Override
+            public Response delete(String id, Integer version, boolean permanent) {
+                return restRagStore.deleteRag(id, version, permanent);
             }
         });
     }

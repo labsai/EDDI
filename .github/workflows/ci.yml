@@ -2,17 +2,17 @@ name: CI/CD
 
 on:
   push:
-    branches: [ main ]
-    tags: [ '[0-9]*' ]
+    branches: [main]
+    tags: ["[0-9]*"]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 permissions:
   contents: read
 
 env:
   DOCKER_IMAGE: labsai/eddi
-  JAVA_VERSION: '25'
+  JAVA_VERSION: "25"
 
 jobs:
   # ─── Job 1: Build & Test ────────────────────────────────────────
@@ -22,10 +22,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
@@ -39,7 +39,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: test-results
           path: target/surefire-reports/
@@ -47,13 +47,52 @@ jobs:
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: jacoco-report
           path: target/site/jacoco/
           retention-days: 14
 
-  # ─── Job 2: Docker Build & Push ─────────────────────────────────
+  # ─── Job 2: Integration Tests ─────────────────────────────────
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Set execute permission for mvnw
+        run: chmod +x mvnw
+
+      - name: Run integration tests
+        run: ./mvnw verify -DskipITs=false -B
+
+      - name: Upload integration test results
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: integration-test-results
+          path: target/failsafe-reports/
+          retention-days: 14
+
+      - name: Upload integration coverage report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: jacoco-it-report
+          path: target/site/jacoco-it/
+          retention-days: 14
+
+  # ─── Job 3: Docker Build & Push ─────────────────────────────────
   docker:
     name: Docker Build & Push
     runs-on: ubuntu-latest
@@ -70,10 +109,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
@@ -86,7 +125,7 @@ jobs:
         id: meta
         run: |
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            # Tag push: 6.0.0-RC1
+            # Tag push: 6.0.0-RC2
             PRIMARY_TAG="${GITHUB_REF#refs/tags/}"
             IS_RELEASE="true"
           else
@@ -126,7 +165,7 @@ jobs:
             .
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v4
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
@@ -143,7 +182,7 @@ jobs:
 
           echo "### ✅ Pushed to Docker Hub" >> $GITHUB_STEP_SUMMARY
 
-  # ─── Job 3: Smoke Test ──────────────────────────────────────────
+  # ─── Job 4: Smoke Test ──────────────────────────────────────────
   smoke-test:
     name: Smoke Test
     runs-on: ubuntu-latest
@@ -211,19 +250,19 @@ jobs:
           docker rm -f eddi 2>/dev/null || true
           docker rm -f mongodb 2>/dev/null || true
 
-  # ─── Job 4: Red Hat Preflight (PRs only) ────────────────────────
+  # ─── Job 5: Red Hat Preflight — PR Dry-Run ──────────────────────
   preflight-check:
-    name: Preflight Dry-Run (Red Hat Certification)
+    name: Preflight Dry-Run (PR)
     runs-on: ubuntu-latest
     needs: build-and-test
     if: github.event_name == 'pull_request'
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
@@ -295,8 +334,190 @@ jobs:
 
       - name: Upload preflight dry-run results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: preflight-dryrun
           path: preflight-dryrun.txt
           retention-days: 14
+
+  # ─── Job 6: Red Hat Preflight — Push Verification ───────────────
+  preflight-push:
+    name: Preflight Verify (Pushed Image)
+    runs-on: ubuntu-latest
+    needs: docker
+    if: >
+      github.event_name == 'push' &&
+      needs.docker.result == 'success'
+
+    steps:
+      - name: Login to Docker Hub
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Pull pushed image
+        run: |
+          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
+          echo "Pulling ${DOCKER_IMAGE}:${PRIMARY_TAG}..."
+          docker pull ${DOCKER_IMAGE}:${PRIMARY_TAG}
+
+      - name: Verify Red Hat labels present
+        run: |
+          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
+          echo "=== Checking required Red Hat labels ==="
+          LABELS=$(docker inspect ${DOCKER_IMAGE}:${PRIMARY_TAG} --format '{{json .Config.Labels}}')
+          echo "$LABELS" | python3 -m json.tool
+          MISSING=0
+          for label in name vendor version release summary description; do
+            if echo "$LABELS" | python3 -c "import sys,json; d=json.load(sys.stdin); assert '$label' in d" 2>/dev/null; then
+              echo "✅ Label '$label' present"
+            else
+              echo "❌ Label '$label' MISSING"
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" -eq 1 ]; then
+            echo "::error::Required Red Hat labels are missing on pushed image"
+            exit 1
+          fi
+
+      - name: Verify /licenses in container
+        run: |
+          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
+          echo "=== /licenses directory ==="
+          docker run --rm --entrypoint="" ${DOCKER_IMAGE}:${PRIMARY_TAG} ls -la /licenses/
+          echo ""
+          echo "=== THIRD-PARTY.txt exists ==="
+          docker run --rm --entrypoint="" ${DOCKER_IMAGE}:${PRIMARY_TAG} \
+            test -f /licenses/THIRD-PARTY.txt && echo "✅ THIRD-PARTY.txt found" || { echo "❌ THIRD-PARTY.txt missing"; exit 1; }
+
+      - name: Install preflight
+        run: |
+          PREFLIGHT_VERSION=$(curl -s https://api.github.com/repos/redhat-openshift-ecosystem/openshift-preflight/releases/latest | jq -r .tag_name)
+          echo "Installing preflight ${PREFLIGHT_VERSION}..."
+          curl -sL "https://github.com/redhat-openshift-ecosystem/openshift-preflight/releases/download/${PREFLIGHT_VERSION}/preflight-linux-amd64" \
+            -o /usr/local/bin/preflight
+          chmod +x /usr/local/bin/preflight
+          preflight --version
+
+      - name: Preflight check (pushed image, no submit)
+        run: |
+          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
+          preflight check container \
+            docker.io/${DOCKER_IMAGE}:${PRIMARY_TAG} \
+            --docker-config=${HOME}/.docker/config.json \
+            2>&1 | tee preflight-push-results.txt
+          echo ""
+          echo "=== Preflight Summary ==="
+          if grep -q "FAILED" preflight-push-results.txt; then
+            echo "::warning::Preflight check has failures on pushed image — review output above."
+          else
+            echo "✅ All preflight checks passed on pushed image"
+          fi
+
+      - name: Upload preflight results
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: preflight-push-results
+          path: preflight-push-results.txt
+          retention-days: 14
+
+  # ─── Job 7: Slack Notification ─────────────────────────────────
+  notify-slack:
+    name: Slack Notification
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      [build-and-test, integration-test, docker, smoke-test, preflight-check, preflight-push]
+
+    steps:
+      - name: Send build notification
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          # Skip if no webhook configured
+          if [ -z "$SLACK_WEBHOOK" ]; then
+            echo "No SLACK_WEBHOOK_URL configured, skipping"
+            exit 0
+          fi
+
+          # Determine overall status
+          BUILD="${{ needs.build-and-test.result }}"
+          IT="${{ needs.integration-test.result }}"
+          DOCKER="${{ needs.docker.result }}"
+          SMOKE="${{ needs.smoke-test.result }}"
+          PREFLIGHT_PR="${{ needs.preflight-check.result }}"
+          PREFLIGHT_PUSH="${{ needs.preflight-push.result }}"
+          # Merge: whichever preflight job actually ran wins (the other is "skipped")
+          if [ "$PREFLIGHT_PUSH" != "skipped" ]; then
+            PREFLIGHT="$PREFLIGHT_PUSH"
+          else
+            PREFLIGHT="$PREFLIGHT_PR"
+          fi
+
+          # Map result to emoji
+          status_icon() {
+            case "$1" in
+              success)  echo "✅" ;;
+              failure)  echo "❌" ;;
+              skipped)  echo "⏭️" ;;
+              cancelled) echo "🚫" ;;
+              *)        echo "❓" ;;
+            esac
+          }
+
+          # Overall status
+          if [ "$BUILD" = "success" ] && [ "$IT" != "failure" ] && [ "$DOCKER" != "failure" ] && [ "$SMOKE" != "failure" ]; then
+            OVERALL_ICON="✅"
+            OVERALL_TEXT="Build Passed"
+            COLOR="#36a64f"
+          else
+            OVERALL_ICON="❌"
+            OVERALL_TEXT="Build Failed"
+            COLOR="#cc0000"
+          fi
+
+          # Branch or tag name
+          REF="${GITHUB_REF#refs/heads/}"
+          REF="${REF#refs/tags/}"
+          REF="${REF#refs/pull/}"
+
+          # Sanitize commit message for JSON embedding
+          RAW_MSG="${{ github.event.head_commit.message || github.event.pull_request.title || 'Manual run' }}"
+          COMMIT_MSG=$(echo "$RAW_MSG" | head -1 | cut -c1-80 | sed 's/[\"\\]//g' | sed "s/[']//g")
+
+          curl -sf -X POST "$SLACK_WEBHOOK" \
+            -H 'Content-type: application/json' \
+            -d "{
+              \"blocks\": [
+                {
+                  \"type\": \"header\",
+                  \"text\": { \"type\": \"plain_text\", \"text\": \"${OVERALL_ICON}  EDDI CI: ${OVERALL_TEXT}\", \"emoji\": true }
+                },
+                {
+                  \"type\": \"section\",
+                  \"text\": {
+                    \"type\": \"mrkdwn\",
+                    \"text\": \"*Branch:* \`${REF}\`  ·  *By:* ${{ github.actor }}\n${COMMIT_MSG}\"
+                  }
+                },
+                {
+                  \"type\": \"section\",
+                  \"fields\": [
+                    { \"type\": \"mrkdwn\", \"text\": \"$(status_icon $BUILD) Build & Test\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"$(status_icon $IT) Integration Tests\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"$(status_icon $DOCKER) Docker Push\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"$(status_icon $SMOKE) Smoke Test\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"$(status_icon $PREFLIGHT) Red Hat Preflight\" }
+                  ]
+                },
+                {
+                  \"type\": \"context\",
+                  \"elements\": [
+                    { \"type\": \"mrkdwn\", \"text\": \"<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run #${{ github.run_number }}>\" }
+                  ]
+                }
+              ]
+            }"

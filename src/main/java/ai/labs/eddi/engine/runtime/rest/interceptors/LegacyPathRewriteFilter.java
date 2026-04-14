@@ -26,7 +26,7 @@ import java.util.Map;
  * <li>/httpcallsstore/httpcalls → /apicallstore/apicalls</li>
  * <li>/regulardictionarystore/regulardictionaries →
  * /dictionarystore/dictionaries</li>
- * <li>/bottriggerstore/bottriggers → /triggerstore/triggers</li>
+ * <li>/bottriggerstore/bottriggers → /AgentTriggerStore/agenttriggers</li>
  * <li>/{production|production}/ → /production/</li>
  * </ul>
  */
@@ -41,7 +41,8 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
      */
     private static final Map<String, String> PATH_REWRITES = Map.ofEntries(
             Map.entry("/regulardictionarystore/regulardictionaries", "/dictionarystore/dictionaries"),
-            Map.entry("/bottriggerstore/bottriggers", "/triggerstore/triggers"), Map.entry("/behaviorstore/behaviorsets", "/rulestore/rulesets"),
+            Map.entry("/bottriggerstore/bottriggers", "/agenttriggerstore/agenttriggers"),
+            Map.entry("/behaviorstore/behaviorsets", "/rulestore/rulesets"),
             Map.entry("/langchainstore/langchains", "/llmstore/llms"), Map.entry("/httpcallsstore/httpcalls", "/apicallstore/apicalls"),
             Map.entry("/packagestore/packages", "/workflowstore/workflows"), Map.entry("/botstore/bots", "/agentstore/agents"),
             Map.entry("/langchain/tools", "/llm/tools"));

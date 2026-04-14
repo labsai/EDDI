@@ -1,7 +1,6 @@
 package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.utils.RuntimeUtilities;
-import ai.labs.eddi.utils.StringUtilities;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -33,7 +32,14 @@ public class ResultManipulator<T> {
 
         Method[] methods = clazz.getMethods();
 
-        filter = StringUtilities.convertToSearchString(filter);
+        boolean exactMatch = filter.startsWith("\"") && filter.endsWith("\"");
+        final String searchString;
+        if (exactMatch) {
+            searchString = filter.length() > 2 ? filter.substring(1, filter.length() - 1) : "";
+        } else {
+            searchString = filter;
+        }
+
         boolean matches;
         for (int i = 0; i < listForManipulation.size();) {
             T obj = listForManipulation.get(i);
@@ -48,9 +54,19 @@ public class ResultManipulator<T> {
                 if (method.getName().startsWith("get")) {
                     try {
                         Object returnValue = method.invoke(obj);
-                        if (!RuntimeUtilities.isNullOrEmpty(returnValue) && returnValue.toString().matches(filter)) {
-                            matches = true;
-                            break;
+                        if (!RuntimeUtilities.isNullOrEmpty(returnValue)) {
+                            String valueStr = returnValue.toString();
+                            if (exactMatch) {
+                                if (valueStr.equals(searchString)) {
+                                    matches = true;
+                                    break;
+                                }
+                            } else {
+                                if (valueStr.contains(searchString)) {
+                                    matches = true;
+                                    break;
+                                }
+                            }
                         }
                     } catch (IllegalAccessException e) {
                         String message = "Error while filtering. Cannot access method: %s";

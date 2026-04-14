@@ -129,4 +129,10 @@ public class DatabaseLogs implements IDatabaseLogs {
 
         return ret;
     }
+    @Override
+    public long pseudonymizeByUserId(String userId, String pseudonym) {
+        return logsCollection.updateMany(
+                new Document(KEY_USER_ID, userId),
+                new Document("$set", new Document(KEY_USER_ID, pseudonym))).getModifiedCount();
+    }
 }

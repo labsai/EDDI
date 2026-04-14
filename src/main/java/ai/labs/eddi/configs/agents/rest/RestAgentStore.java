@@ -2,6 +2,7 @@ package ai.labs.eddi.configs.agents.rest;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
@@ -15,6 +16,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import org.jboss.logging.Logger;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
@@ -39,18 +41,48 @@ public class RestAgentStore implements IRestAgentStore {
     private final RestVersionInfo<AgentConfiguration> restVersionInfo;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IScheduleStore scheduleStore;
+    private final CapabilityRegistryService capabilityRegistryService;
 
     private static final Logger log = Logger.getLogger(RestAgentStore.class);
 
     @Inject
     public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
-            IJsonSchemaCreator jsonSchemaCreator, IScheduleStore scheduleStore) {
+            IJsonSchemaCreator jsonSchemaCreator, IScheduleStore scheduleStore, CapabilityRegistryService capabilityRegistryService) {
         restVersionInfo = new RestVersionInfo<>(resourceURI, agentStore, documentDescriptorStore);
         this.documentDescriptorStore = documentDescriptorStore;
         this.agentStore = agentStore;
         this.restWorkflowStore = restWorkflowStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
         this.scheduleStore = scheduleStore;
+        this.capabilityRegistryService = capabilityRegistryService;
+    }
+
+    /**
+     * Populate the capability registry at startup from all existing agents.
+     */
+    @PostConstruct
+    void populateCapabilityRegistry() {
+        try {
+            var descriptors = documentDescriptorStore.readDescriptors("ai.labs.agent", null, 0, 0, false);
+            int registered = 0;
+            for (var descriptor : descriptors) {
+                try {
+                    var resourceId = RestUtilities.extractResourceId(descriptor.getResource());
+                    var config = agentStore.read(resourceId.getId(), resourceId.getVersion());
+                    if (config.getCapabilities() != null && !config.getCapabilities().isEmpty()) {
+                        capabilityRegistryService.register(resourceId.getId(), config);
+                        registered++;
+                    }
+                } catch (Exception e) {
+                    log.debugf("Skipping capability registration for agent: %s", e.getMessage());
+                }
+            }
+            if (registered > 0) {
+                log.infof("Capability registry populated: %d agent(s) with capabilities", registered);
+            }
+        } catch (Exception e) {
+            log.warnf("Failed to populate capability registry at startup: %s", e.getMessage());
+        }
     }
 
     @Override
@@ -91,7 +123,9 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public Response updateAgent(String id, Integer version, AgentConfiguration agentConfiguration) {
-        return restVersionInfo.update(id, version, agentConfiguration);
+        Response response = restVersionInfo.update(id, version, agentConfiguration);
+        capabilityRegistryService.register(id, agentConfiguration);
+        return response;
     }
 
     @Override
@@ -120,7 +154,19 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public Response createAgent(AgentConfiguration agentConfiguration) {
-        return restVersionInfo.create(agentConfiguration);
+        // Use createDocument() to get IResourceId directly — Response.getLocation()
+        // returns null for eddi:// scheme URIs in CDI direct calls
+        IResourceId resourceId = restVersionInfo.createDocument(agentConfiguration);
+        URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
+
+        try {
+            capabilityRegistryService.register(resourceId.getId(), agentConfiguration);
+        } catch (Exception e) {
+            log.debugf("Could not register capabilities for new agent: %s", e.getMessage());
+        }
+
+        return Response.created(createdUri).location(createdUri)
+                .header("X-Resource-URI", createdUri.toString()).build();
     }
 
     @Override
@@ -132,20 +178,56 @@ public class RestAgentStore implements IRestAgentStore {
                 List<URI> packages = agentConfig.getWorkflows();
                 for (int i = 0; i < packages.size(); i++) {
                     URI workflowUri = packages.get(i);
-                    IResourceId resourceId = RestUtilities.extractResourceId(workflowUri);
-                    Response duplicateResourceResponse = restWorkflowStore.duplicateWorkflow(resourceId.getId(), resourceId.getVersion(), true);
-                    URI newResourceLocation = duplicateResourceResponse.getLocation();
+                    IResourceId wfResId = RestUtilities.extractResourceId(workflowUri);
+                    Response duplicateResourceResponse = restWorkflowStore.duplicateWorkflow(wfResId.getId(), wfResId.getVersion(), true);
+                    // Extract URI from X-Resource-URI entity fallback since getLocation() fails for
+                    // eddi:// URIs
+                    URI newResourceLocation = extractCreatedUri(duplicateResourceResponse);
+                    if (newResourceLocation == null) {
+                        throw new IllegalStateException(String.format(
+                                "Could not determine created workflow URI while duplicating workflow '%s' (id=%s, version=%s); response status=%s",
+                                workflowUri, wfResId.getId(), wfResId.getVersion(), duplicateResourceResponse.getStatus()));
+                    }
                     packages.set(i, newResourceLocation);
                 }
             }
 
-            Response createAgentResponse = restVersionInfo.create(agentConfig);
-            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createAgentResponse.getLocation());
+            // Use createDocument() — bypasses broken Response.getLocation() for eddi://
+            // URIs
+            IResourceId newAgentId = restVersionInfo.createDocument(agentConfig);
+            URI createdUri = RestUtilities.createURI(resourceURI, newAgentId.getId(), versionQueryParam, newAgentId.getVersion());
+            createDocumentDescriptorForDuplicate(documentDescriptorStore, id, version, createdUri);
 
-            return createAgentResponse;
+            return Response.created(createdUri).location(createdUri)
+                    .header("X-Resource-URI", createdUri.toString()).build();
         } catch (Exception e) {
             throw sneakyThrow(e);
         }
+    }
+
+    /**
+     * Extracts the created resource URI from a Response, trying multiple strategies
+     * since {@code getLocation()} returns null for {@code eddi://} scheme URIs.
+     */
+    private URI extractCreatedUri(Response response) {
+        URI location = response.getLocation();
+        if (location != null)
+            return location;
+
+        String header = response.getHeaderString("X-Resource-URI");
+        if (header != null && !header.isBlank())
+            return URI.create(header);
+
+        if (response.hasEntity()) {
+            Object entity = response.getEntity();
+            if (entity instanceof String s && !s.isBlank()) {
+                try {
+                    return URI.create(s);
+                } catch (Exception ignored) {
+                    /* not a URI */ }
+            }
+        }
+        return null;
     }
 
     @Override
@@ -186,6 +268,7 @@ public class RestAgentStore implements IRestAgentStore {
                 log.warnf("Error reading Agent %s for cascade: %s", id, e.getMessage());
             }
         }
+        capabilityRegistryService.unregister(id);
         return restVersionInfo.delete(id, version, permanent);
     }
 

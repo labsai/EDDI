@@ -25,6 +25,7 @@ public class Agent implements IAgent {
 
     private Deployment.Status deploymentStatus;
     private AgentConfiguration.UserMemoryConfig userMemoryConfig;
+    private AgentConfiguration.MemoryPolicy memoryPolicy;
 
     public Agent(String agentId, Integer agentVersion) {
         this.agentId = agentId;
@@ -41,7 +42,11 @@ public class Agent implements IAgent {
     public IConversation startConversation(final String userId, final Map<String, Context> context, IPropertiesHandler propertiesHandler,
                                            final IConversation.IConversationOutputRenderer outputProvider)
             throws LifecycleException, IllegalAccessException {
-        Conversation conversation = new Conversation(executableWorkflows, new ConversationMemory(agentId, agentVersion, userId), propertiesHandler,
+        var conversationMemory = new ConversationMemory(agentId, agentVersion, userId);
+        if (memoryPolicy != null) {
+            conversationMemory.setMemoryPolicy(memoryPolicy);
+        }
+        Conversation conversation = new Conversation(executableWorkflows, conversationMemory, propertiesHandler,
                 outputProvider);
         conversation.init(context);
         return conversation;
@@ -51,6 +56,9 @@ public class Agent implements IAgent {
     public IConversation continueConversation(final IConversationMemory conversationMemory, final IPropertiesHandler propertiesHandler,
                                               final IConversation.IConversationOutputRenderer outputProvider)
             throws IllegalAccessException {
+        if (memoryPolicy != null) {
+            conversationMemory.setMemoryPolicy(memoryPolicy);
+        }
         return new Conversation(executableWorkflows, conversationMemory, propertiesHandler, outputProvider);
     }
 
@@ -77,5 +85,14 @@ public class Agent implements IAgent {
 
     public void setUserMemoryConfig(AgentConfiguration.UserMemoryConfig userMemoryConfig) {
         this.userMemoryConfig = userMemoryConfig;
+    }
+
+    @Override
+    public AgentConfiguration.MemoryPolicy getMemoryPolicy() {
+        return memoryPolicy;
+    }
+
+    public void setMemoryPolicy(AgentConfiguration.MemoryPolicy memoryPolicy) {
+        this.memoryPolicy = memoryPolicy;
     }
 }

@@ -61,12 +61,16 @@ import java.util.Map;
  *            When the task completed
  * @param hmac
  *            HMAC-SHA256 integrity hash of all fields above
+ * @param agentSignature
+ *            Optional cryptographic agent signature for tamper-evident identity
+ *            proof (null when signing not configured)
  * @author ginccc
  * @since 6.0.0
  */
 public record AuditEntry(String id, String conversationId, String agentId, Integer agentVersion, String userId, String environment, int stepIndex,
         String taskId, String taskType, int taskIndex, long durationMs, Map<String, Object> input, Map<String, Object> output,
-        Map<String, Object> llmDetail, Map<String, Object> toolCalls, List<String> actions, double cost, Instant timestamp, String hmac) {
+        Map<String, Object> llmDetail, Map<String, Object> toolCalls, List<String> actions, double cost, Instant timestamp, String hmac,
+        String agentSignature) {
 
     /**
      * Return a copy of this entry with the environment field set. Used by
@@ -74,7 +78,7 @@ public record AuditEntry(String id, String conversationId, String agentId, Integ
      */
     public AuditEntry withEnvironment(String env) {
         return new AuditEntry(id, conversationId, agentId, agentVersion, userId, env, stepIndex, taskId, taskType, taskIndex, durationMs, input,
-                output, llmDetail, toolCalls, actions, cost, timestamp, hmac);
+                output, llmDetail, toolCalls, actions, cost, timestamp, hmac, agentSignature);
     }
 
     /**
@@ -83,6 +87,15 @@ public record AuditEntry(String id, String conversationId, String agentId, Integ
      */
     public AuditEntry withHmac(String hmacValue) {
         return new AuditEntry(id, conversationId, agentId, agentVersion, userId, environment, stepIndex, taskId, taskType, taskIndex, durationMs,
-                input, output, llmDetail, toolCalls, actions, cost, timestamp, hmacValue);
+                input, output, llmDetail, toolCalls, actions, cost, timestamp, hmacValue, agentSignature);
+    }
+
+    /**
+     * Return a copy of this entry with the agent signature set. Used by
+     * AuditLedgerService when agent signing is configured.
+     */
+    public AuditEntry withAgentSignature(String signature) {
+        return new AuditEntry(id, conversationId, agentId, agentVersion, userId, environment, stepIndex, taskId, taskType, taskIndex, durationMs,
+                input, output, llmDetail, toolCalls, actions, cost, timestamp, hmac, signature);
     }
 }

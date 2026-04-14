@@ -1,7 +1,11 @@
 package ai.labs.eddi.integration;
 
+import io.restassured.RestAssured;
+import io.restassured.config.HttpClientConfig;
+import io.restassured.config.RestAssuredConfig;
 import io.restassured.http.ContentType;
 import io.restassured.response.Response;
+import org.junit.jupiter.api.BeforeEach;
 
 import java.io.IOException;
 import java.net.URI;
@@ -29,6 +33,19 @@ import static org.hamcrest.Matchers.*;
  * </ul>
  */
 public abstract class BaseIntegrationIT {
+
+    /**
+     * Configure RestAssured timeouts for all integration tests. Must be @BeforeEach
+     * (not @BeforeAll) so it runs AFTER Quarkus configures RestAssured's baseURI
+     * and port.
+     */
+    @BeforeEach
+    void configureRestAssuredTimeouts() {
+        RestAssured.config = RestAssuredConfig.config().httpClient(
+                HttpClientConfig.httpClientConfig()
+                        .setParam("http.socket.timeout", 600_000)
+                        .setParam("http.connection.timeout", 10_000));
+    }
 
     protected static final String VERSION_STRING = "?version=";
 
@@ -97,9 +114,11 @@ public abstract class BaseIntegrationIT {
     // ==================== Agent Deployment Helpers ====================
 
     protected void deployAgent(String id, Integer version) throws InterruptedException {
-        given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false", id, version));
+        // Use waitForCompletion=true — server waits up to 30s
+        given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false&waitForCompletion=true", id, version));
 
-        for (int i = 0; i < 60; i++) { // max 30 seconds
+        // Verify deployment reached READY (may already be done from server-side wait)
+        for (int i = 0; i < 120; i++) { // max 60 seconds additional polling
             Response response = given().get(String.format("administration/production/deploymentstatus/%s?version=%s&format=text", id, version));
             String status = response.getBody().print().trim();
             if ("READY".equals(status))
@@ -113,19 +132,30 @@ public abstract class BaseIntegrationIT {
     }
 
     protected ResourceId createConversation(String agentId, String userId) {
-        Response response = given().post("agents/production/" + agentId + "?userId=" + userId);
+        Response response = given().post("agents/" + agentId + "/start?environment=production&userId=" + userId);
+        int statusCode = response.statusCode();
+        if (statusCode != 201 && statusCode != 200) {
+            throw new RuntimeException(String.format(
+                    "Failed to create conversation for agent %s: status=%d, body=%s",
+                    agentId, statusCode, response.getBody().print()));
+        }
         String location = response.getHeader("location");
+        if (location == null) {
+            throw new RuntimeException(String.format(
+                    "No Location header in conversation creation response for agent %s: status=%d, headers=%s",
+                    agentId, statusCode, response.getHeaders()));
+        }
         return extractResourceId(location);
     }
 
     protected Response sendUserInput(String agentId, String conversationId, String userInput, boolean returnDetailed, boolean returnCurrentStepOnly) {
         return given().contentType(ContentType.TEXT).body(userInput)
-                .post(String.format("agents/production/%s/%s?returnDetailed=%s&returnCurrentStepOnly=%s", agentId, conversationId, returnDetailed,
+                .post(String.format("agents/%s?returnDetailed=%s&returnCurrentStepOnly=%s", conversationId, returnDetailed,
                         returnCurrentStepOnly));
     }
 
     protected Response getConversationLog(String agentId, String conversationId, boolean returnDetailed) {
-        return given().get(String.format("agents/production/%s/%s?returnDetailed=%s", agentId, conversationId, returnDetailed));
+        return given().get(String.format("agents/%s?returnDetailed=%s", conversationId, returnDetailed));
     }
 
     // ==================== URI Utilities ====================
@@ -162,6 +192,54 @@ public abstract class BaseIntegrationIT {
             given().delete(path + id + VERSION_STRING + version);
         } catch (Exception ignored) {
         }
+    }
+
+    // ==================== Shared Agent Fixture ====================
+
+    /**
+     * Creates and deploys a minimal agent with dictionary, rules, output,
+     * templating, and property extraction. Shared across IT classes to avoid
+     * copy-pasting the same setup in every test.
+     *
+     * @return the deployed agent's ResourceId
+     */
+    protected ResourceId setupAndDeployMinimalAgent() throws Exception {
+        String dictionary = load("agentengine/dictionary.json");
+        String behavior = load("agentengine/rules.json");
+        String output = load("agentengine/output.json");
+
+        String locationDictionary = createResource(dictionary, "/dictionarystore/dictionaries");
+        String locationBehavior = createResource(behavior, "/rulestore/rulesets");
+        String locationOutput = createResource(output, "/outputstore/outputsets");
+
+        String packageBody = String.format("""
+                {
+                  "workflowSteps": [
+                    {
+                      "type": "eddi://ai.labs.parser",
+                      "config": {},
+                      "extensions": {
+                        "dictionaries": [
+                          {"type": "eddi://ai.labs.parser.dictionaries.regular", "config": {"uri": "%s"}}
+                        ],
+                        "corrections": []
+                      }
+                    },
+                    {"type": "eddi://ai.labs.rules", "config": {"uri": "%s"}},
+                    {"type": "eddi://ai.labs.output", "config": {"uri": "%s"}},
+                    {"type": "eddi://ai.labs.templating", "config": {}},
+                    {"type": "eddi://ai.labs.property", "config": {}}
+                  ]
+                }""", locationDictionary, locationBehavior, locationOutput);
+
+        String locationWorkflow = createResource(packageBody, "/workflowstore/workflows");
+        String agentBody = String.format("""
+                {"packages": ["%s"]}""", locationWorkflow);
+        String agentLocation = createResource(agentBody, "/agentstore/agents");
+
+        ResourceId agentId = extractResourceId(agentLocation);
+        deployAgent(agentId.id(), agentId.version());
+        return agentId;
     }
 
     public record ResourceId(String id, int version) {

@@ -30,8 +30,41 @@ public class AgentConfiguration {
      */
     private List<String> a2aSkills = new ArrayList<>();
 
+    /**
+     * Structured capabilities for A2A capability registry. Each capability declares
+     * a skill, optional attributes, and a confidence level. Used by
+     * {@code CapabilityRegistryService} for runtime agent discovery and by the
+     * {@code capabilityMatch} behavior rule condition for soft routing.
+     *
+     * @since 6.0.0
+     */
+    private List<Capability> capabilities = new ArrayList<>();
+
     /** Human-readable description for the A2A Agent Card */
     private String description;
+
+    /**
+     * Cryptographic identity for inter-agent trust. Auto-generated on agent
+     * creation. The public key is stored here; the private key is in SecretsVault.
+     *
+     * @since 6.0.0
+     */
+    private AgentIdentity identity;
+
+    /**
+     * Security configuration for cryptographic signing.
+     *
+     * @since 6.0.0
+     */
+    private SecurityConfig security;
+
+    /**
+     * Memory management policy for this agent. Controls how failed task data is
+     * handled in conversation history.
+     *
+     * @since 6.0.0
+     */
+    private MemoryPolicy memoryPolicy;
 
     public static class ChannelConnector {
         private URI type;
@@ -92,6 +125,163 @@ public class AgentConfiguration {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public List<Capability> getCapabilities() {
+        return capabilities;
+    }
+
+    public void setCapabilities(List<Capability> capabilities) {
+        this.capabilities = capabilities;
+    }
+
+    /**
+     * Structured capability declaration for A2A discovery and soft routing.
+     * <p>
+     * Example JSON:
+     *
+     * <pre>
+     * {
+     *   "skill": "language-translation",
+     *   "attributes": { "languages": "en,de,fr", "domain": "legal" },
+     *   "confidence": "high"
+     * }
+     * </pre>
+     *
+     * @since 6.0.0
+     */
+    public static class Capability {
+        private String skill;
+        private Map<String, String> attributes = new HashMap<>();
+        private String confidence = "medium";
+
+        public Capability() {
+        }
+
+        public Capability(String skill, Map<String, String> attributes, String confidence) {
+            this.skill = skill;
+            this.attributes = attributes != null ? attributes : new HashMap<>();
+            this.confidence = confidence != null ? confidence : "medium";
+        }
+
+        public String getSkill() {
+            return skill;
+        }
+
+        public void setSkill(String skill) {
+            this.skill = skill;
+        }
+
+        public Map<String, String> getAttributes() {
+            return attributes;
+        }
+
+        public void setAttributes(Map<String, String> attributes) {
+            this.attributes = attributes;
+        }
+
+        public String getConfidence() {
+            return confidence;
+        }
+
+        public void setConfidence(String confidence) {
+            this.confidence = confidence;
+        }
+    }
+
+    public AgentIdentity getIdentity() {
+        return identity;
+    }
+
+    public void setIdentity(AgentIdentity identity) {
+        this.identity = identity;
+    }
+
+    public SecurityConfig getSecurity() {
+        return security;
+    }
+
+    public void setSecurity(SecurityConfig security) {
+        this.security = security;
+    }
+
+    public MemoryPolicy getMemoryPolicy() {
+        return memoryPolicy;
+    }
+
+    public void setMemoryPolicy(MemoryPolicy memoryPolicy) {
+        this.memoryPolicy = memoryPolicy;
+    }
+
+    /**
+     * Cryptographic identity for an agent. The public key is stored in the agent
+     * configuration; the private key is in SecretsVault.
+     *
+     * @since 6.0.0
+     */
+    public static class AgentIdentity {
+        private String agentDid;
+        private String publicKey;
+
+        public AgentIdentity() {
+        }
+
+        public AgentIdentity(String agentDid, String publicKey) {
+            this.agentDid = agentDid;
+            this.publicKey = publicKey;
+        }
+
+        public String getAgentDid() {
+            return agentDid;
+        }
+
+        public void setAgentDid(String agentDid) {
+            this.agentDid = agentDid;
+        }
+
+        public String getPublicKey() {
+            return publicKey;
+        }
+
+        public void setPublicKey(String publicKey) {
+            this.publicKey = publicKey;
+        }
+    }
+
+    /**
+     * Security configuration for cryptographic signing. All defaults are
+     * {@code false} for backwards compatibility.
+     *
+     * @since 6.0.0
+     */
+    public static class SecurityConfig {
+        private boolean signInterAgentMessages = false;
+        private boolean signMcpInvocations = false;
+        private boolean requirePeerVerification = false;
+
+        public boolean isSignInterAgentMessages() {
+            return signInterAgentMessages;
+        }
+
+        public void setSignInterAgentMessages(boolean signInterAgentMessages) {
+            this.signInterAgentMessages = signInterAgentMessages;
+        }
+
+        public boolean isSignMcpInvocations() {
+            return signMcpInvocations;
+        }
+
+        public void setSignMcpInvocations(boolean signMcpInvocations) {
+            this.signMcpInvocations = signMcpInvocations;
+        }
+
+        public boolean isRequirePeerVerification() {
+            return requirePeerVerification;
+        }
+
+        public void setRequirePeerVerification(boolean requirePeerVerification) {
+            this.requirePeerVerification = requirePeerVerification;
+        }
     }
 
     // === Persistent User Memory (Phase 11a) ===
@@ -352,6 +542,69 @@ public class AgentConfiguration {
 
         public void setMaxUsersPerRun(int maxUsersPerRun) {
             this.maxUsersPerRun = maxUsersPerRun;
+        }
+    }
+
+    /**
+     * Memory management policy. Currently contains strict write discipline
+     * settings; will be extended in future phases with context selection,
+     * auto-compaction, and consolidation.
+     *
+     * @since 6.0.0
+     */
+    public static class MemoryPolicy {
+        private StrictWriteDiscipline strictWriteDiscipline = new StrictWriteDiscipline();
+
+        public StrictWriteDiscipline getStrictWriteDiscipline() {
+            return strictWriteDiscipline;
+        }
+
+        public void setStrictWriteDiscipline(StrictWriteDiscipline strictWriteDiscipline) {
+            this.strictWriteDiscipline = strictWriteDiscipline;
+        }
+
+        /**
+         * Returns true if strict write discipline is enabled and its mode is not
+         * "keep_all" (which preserves backwards-compatible behavior).
+         */
+        public boolean isEffectivelyEnabled() {
+            return strictWriteDiscipline != null && strictWriteDiscipline.isEnabled()
+                    && !"keep_all".equals(strictWriteDiscipline.getOnFailure());
+        }
+    }
+
+    /**
+     * Strict write discipline: on task failure, raw data is marked uncommitted and
+     * an error digest is injected into the conversation output.
+     * <p>
+     * Modes:
+     * <ul>
+     * <li>{@code digest} (default) — raw data hidden, concise error summary visible
+     * to LLM as a special output type</li>
+     * <li>{@code exclude_all} — raw data hidden, no error info visible</li>
+     * <li>{@code keep_all} — everything visible (backwards-compatible)</li>
+     * </ul>
+     *
+     * @since 6.0.0
+     */
+    public static class StrictWriteDiscipline {
+        private boolean enabled = false;
+        private String onFailure = "digest";
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getOnFailure() {
+            return onFailure;
+        }
+
+        public void setOnFailure(String onFailure) {
+            this.onFailure = onFailure;
         }
     }
 }

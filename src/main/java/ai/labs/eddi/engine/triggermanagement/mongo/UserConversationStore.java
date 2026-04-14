@@ -17,6 +17,8 @@ import jakarta.inject.Inject;
 import org.bson.Document;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * MongoDB implementation of {@link IUserConversationStore}. Annotated
@@ -73,6 +75,29 @@ public class UserConversationStore implements IUserConversationStore {
         RuntimeUtilities.checkNotNull(userId, USER_ID_FIELD);
 
         userConversationStore.deleteUserConversation(intent, userId);
+    }
+
+    @Override
+    public long deleteAllForUser(String userId) {
+        return collection.deleteMany(new Document(USER_ID_FIELD, userId)).getDeletedCount();
+    }
+
+    @Override
+    public List<UserConversation> getAllForUser(String userId) throws IResourceStore.ResourceStoreException {
+        try {
+            List<UserConversation> results = new ArrayList<>();
+            collection.find(new Document(USER_ID_FIELD, userId))
+                    .forEach(doc -> {
+                        try {
+                            results.add(documentBuilder.build(doc, UserConversation.class));
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+            return results;
+        } catch (RuntimeException e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
     }
 
     private class UserConversationResourceStore {

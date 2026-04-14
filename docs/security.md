@@ -273,9 +273,43 @@ When adding a new tool to EDDI:
 
 ---
 
+## TLS Requirements
+
+EDDI does not enforce TLS directly — it is designed to run behind a reverse
+proxy (nginx, Traefik, Caddy, cloud load balancer) that handles TLS
+termination.
+
+**For regulated deployments (HIPAA, EU AI Act)**, all traffic to and from
+EDDI must be encrypted in transit. A compliance startup warning is logged
+if no TLS certificate is detected.
+
+### Option 1: TLS at Reverse Proxy (Recommended)
+
+Configure your reverse proxy to terminate TLS and forward traffic to EDDI
+on `localhost:7070`. This is the standard production pattern.
+
+### Option 2: TLS Directly in Quarkus
+
+```properties
+quarkus.http.ssl.certificate.file=/path/to/cert.pem
+quarkus.http.ssl.certificate.key-file=/path/to/key.pem
+quarkus.http.ssl-port=8443
+```
+
+### Internal Traffic
+
+If EDDI and its database run on the same host or within a private network,
+internal traffic may be unencrypted. However, HIPAA deployments should
+evaluate whether this meets their security requirements.
+
+---
+
 ## See Also
 
 - [LangChain Integration](langchain.md) — Full agent configuration reference
 - [Agent Father LangChain Tools Guide](agent-father-langchain-tools-guide.md) — Guided tool setup
 - [Architecture](architecture.md) — EDDI's lifecycle pipeline and concurrency model
 - [Metrics](metrics.md) — Monitoring tool execution performance
+- [HIPAA Compliance](hipaa-compliance.md) — HIPAA deployment guide
+- [EU AI Act Compliance](eu-ai-act-compliance.md) — EU AI Act compliance
+- [Compliance Data Flow](compliance-data-flow.md) — Data flow diagram for auditors

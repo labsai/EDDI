@@ -129,6 +129,7 @@ public class ConversationMemorySnapshot {
         private Date timestamp;
         private String originWorkflowId;
         private boolean isPublic;
+        private boolean committed = true;
 
         @Override
         public boolean equals(Object o) {
@@ -156,12 +157,18 @@ public class ConversationMemorySnapshot {
         }
 
         public ResultSnapshot(String key, Object result, List<?> possibleResults, Date timestamp, String originWorkflowId, boolean isPublic) {
+            this(key, result, possibleResults, timestamp, originWorkflowId, isPublic, true);
+        }
+
+        public ResultSnapshot(String key, Object result, List<?> possibleResults, Date timestamp, String originWorkflowId, boolean isPublic,
+                boolean committed) {
             this.key = key;
             this.result = result;
             this.possibleResults = possibleResults;
             this.timestamp = timestamp;
             this.originWorkflowId = originWorkflowId;
             this.isPublic = isPublic;
+            this.committed = committed;
         }
 
         public String getKey() {
@@ -212,10 +219,18 @@ public class ConversationMemorySnapshot {
             this.isPublic = isPublic;
         }
 
+        public boolean isCommitted() {
+            return committed;
+        }
+
+        public void setCommitted(boolean committed) {
+            this.committed = committed;
+        }
+
         @Override
         public String toString() {
             return "ResultSnapshot(" + "key=" + key + ", result=" + result + ", possibleResults=" + possibleResults + ", timestamp=" + timestamp
-                    + ", originWorkflowId=" + originWorkflowId + ", isPublic=" + isPublic + ")";
+                    + ", originWorkflowId=" + originWorkflowId + ", isPublic=" + isPublic + ", committed=" + committed + ")";
         }
     }
 

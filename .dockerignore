@@ -2,6 +2,9 @@
 !target/*-runner
 !target/*-runner.jar
 !target/lib/*
-!target/quarkus-app/*
-!licenses/*
-!docs/*
+!target/quarkus-app/
+!target/quarkus-app/**
+!licenses/
+!licenses/**
+!docs/
+!docs/**

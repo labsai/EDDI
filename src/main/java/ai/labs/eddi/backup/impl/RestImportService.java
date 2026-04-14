@@ -5,23 +5,40 @@ import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
+import ai.labs.eddi.backup.model.SyncMapping;
+import ai.labs.eddi.backup.model.SyncRequest;
+import ai.labs.eddi.configs.IRestVersionInfo;
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.apicalls.IApiCallsStore;
+import ai.labs.eddi.configs.dictionary.IDictionaryStore;
+import ai.labs.eddi.configs.llm.ILlmStore;
+import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
+import ai.labs.eddi.configs.output.IOutputStore;
+import ai.labs.eddi.configs.propertysetter.IPropertySetterStore;
+import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
-import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
+import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
+import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
+import ai.labs.eddi.configs.rag.IRestRagStore;
+import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
+import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
-import ai.labs.eddi.configs.patch.PatchInstruction;
 import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
@@ -31,7 +48,6 @@ import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
-import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -40,8 +56,6 @@ import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
-import jakarta.ws.rs.container.AsyncResponse;
-import jakarta.ws.rs.container.TimeoutHandler;
 import jakarta.ws.rs.core.Response;
 import org.bson.Document;
 import org.jboss.logging.Logger;
@@ -53,11 +67,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static ai.labs.eddi.configs.descriptors.ResourceUtilities.createDocumentDescriptor;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static ai.labs.eddi.engine.model.Deployment.Environment.production;
 import static ai.labs.eddi.utils.RuntimeUtilities.getResourceAsStream;
@@ -76,27 +90,31 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp", "import"));
     private final IZipArchive zipArchive;
     private final IJsonSerialization jsonSerialization;
-    private final IRestInterfaceFactory restInterfaceFactory;
+
     private final IRestAgentAdministration restAgentAdministration;
     private final IMigrationManager migrationManager;
     private final IDeploymentListener deploymentListener;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final TemplateSyntaxMigrator templateSyntaxMigrator;
+    private final StructuralMatcher structuralMatcher;
+    private final UpgradeExecutor upgradeExecutor;
 
     private static final Logger log = Logger.getLogger(RestImportService.class);
 
     @Inject
-    public RestImportService(IZipArchive zipArchive, IJsonSerialization jsonSerialization, IRestInterfaceFactory restInterfaceFactory,
+    public RestImportService(IZipArchive zipArchive, IJsonSerialization jsonSerialization,
             IRestAgentAdministration restAgentAdministration, IMigrationManager migrationManager, IDeploymentListener deploymentListener,
-            IDocumentDescriptorStore documentDescriptorStore, TemplateSyntaxMigrator templateSyntaxMigrator) {
+            IDocumentDescriptorStore documentDescriptorStore, TemplateSyntaxMigrator templateSyntaxMigrator,
+            StructuralMatcher structuralMatcher, UpgradeExecutor upgradeExecutor) {
         this.zipArchive = zipArchive;
         this.jsonSerialization = jsonSerialization;
-        this.restInterfaceFactory = restInterfaceFactory;
         this.restAgentAdministration = restAgentAdministration;
         this.migrationManager = migrationManager;
         this.deploymentListener = deploymentListener;
         this.documentDescriptorStore = documentDescriptorStore;
         this.templateSyntaxMigrator = templateSyntaxMigrator;
+        this.structuralMatcher = structuralMatcher;
+        this.upgradeExecutor = upgradeExecutor;
     }
 
     @Override
@@ -106,23 +124,19 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             List<CompletableFuture<Void>> deploymentFutures = new ArrayList<>();
 
             for (var agentFileName : agentExampleFiles) {
-                importAgent(getResourceAsStream("/initial-agents/" + agentFileName), "create", null, new MockAsyncResponse() {
-                    @Override
-                    public boolean resume(Object responseObj) {
-                        if (responseObj instanceof Response response) {
-                            var agentId = RestUtilities.extractResourceId(response.getLocation());
-                            if (agentId != null) {
-                                var deploymentFuture = deploymentListener.registerAgentDeployment(agentId.getId(), agentId.getVersion());
-                                deploymentFutures.add(deploymentFuture);
+                Response result = importAgent(getResourceAsStream("/initial-agents/" + agentFileName), "create", null, null, null);
+                if (result != null && result.getStatus() == 201) {
+                    String resourceUri = result.getHeaderString("Location");
+                    if (resourceUri != null && !resourceUri.isBlank()) {
+                        var agentId = RestUtilities.extractResourceId(URI.create(resourceUri));
+                        if (agentId != null) {
+                            var deploymentFuture = deploymentListener.registerAgentDeployment(agentId.getId(), agentId.getVersion());
+                            deploymentFutures.add(deploymentFuture);
 
-                                restAgentAdministration.deployAgent(production, agentId.getId(), agentId.getVersion(), true, false);
-
-                                return true;
-                            }
+                            restAgentAdministration.deployAgent(production, agentId.getId(), agentId.getVersion(), true, false);
                         }
-                        return false;
                     }
-                });
+                }
             }
 
             // Wait for all deployments to complete
@@ -152,7 +166,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     // ==================== Preview ====================
 
     @Override
-    public ImportPreview previewImport(InputStream zippedAgentConfigFiles) {
+    public ImportPreview previewImport(InputStream zippedAgentConfigFiles, String targetAgentId) {
+        // When targetAgentId is provided, use the new structural matching pipeline
+        if (targetAgentId != null && !targetAgentId.isBlank()) {
+            return previewUpgrade(zippedAgentConfigFiles, targetAgentId);
+        }
+        // Legacy merge preview path
         try {
             File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
             this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
@@ -194,12 +213,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                             }
                         }
                     }
+                    // Snippets (global resources, not workflow-embedded)
+                    addSnippetDiffs(diffs, Paths.get(targetDirPath));
 
-                    return new ImportPreview(agentOriginId, agentName, diffs);
+                    return new ImportPreview(agentOriginId, agentName, null, null, diffs);
                 }
             }
 
-            return new ImportPreview(null, null, List.of());
+            return new ImportPreview(null, null, null, null, List.of());
         } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Preview failed: " + e.getMessage(), e);
@@ -215,6 +236,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         addDiffsForType(diffs, workflowFileString, LANGCHAIN_URI_PATTERN, LLM_EXT, workflowDir);
         addDiffsForType(diffs, workflowFileString, PROPERTY_URI_PATTERN, PROPERTY_EXT, workflowDir);
         addDiffsForType(diffs, workflowFileString, OUTPUT_URI_PATTERN, OUTPUT_EXT, workflowDir);
+        addDiffsForType(diffs, workflowFileString, MCPCALLS_URI_PATTERN, MCPCALLS_EXT, workflowDir);
+        addDiffsForType(diffs, workflowFileString, RAG_URI_PATTERN, RAG_EXT, workflowDir);
     }
 
     private void addDiffsForType(List<ResourceDiff> diffs, String workflowFileString, Pattern uriPattern, String ext, Path workflowDir)
@@ -230,6 +253,52 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
+    /**
+     * Scans the snippets/ directory in the ZIP and adds preview diffs. Uses
+     * name-based lookup to match existing snippets — consistent with the import
+     * logic's name-based deduplication.
+     */
+    private void addSnippetDiffs(List<ResourceDiff> diffs, Path targetDirPath) {
+        Path snippetsDir = findSnippetsDir(targetDirPath);
+        if (snippetsDir == null || !Files.exists(snippetsDir)) {
+            return;
+        }
+
+        try {
+            // Build name→IResourceId map of existing snippets for accurate CREATE/UPDATE
+            IRestPromptSnippetStore restSnippetStore = getRestResourceStore(IRestPromptSnippetStore.class);
+            Map<String, IResourceId> existingByName = buildExistingSnippetNameMap(restSnippetStore);
+
+            try (var snippetStream = Files.newDirectoryStream(snippetsDir,
+                    p -> p.toString().endsWith("." + SNIPPET_EXT + ".json"))) {
+                for (Path snippetFilePath : snippetStream) {
+                    try {
+                        String json = readFile(snippetFilePath);
+                        PromptSnippet snippet = jsonSerialization.deserialize(json, PromptSnippet.class);
+                        if (snippet == null || snippet.getName() == null)
+                            continue;
+
+                        String snippetName = snippet.getName();
+                        IResourceId existing = existingByName.get(snippetName);
+                        if (existing != null) {
+                            diffs.add(new ResourceDiff(existing.getId(), SNIPPET_EXT, snippetName,
+                                    DiffAction.UPDATE, existing.getId(), existing.getVersion(),
+                                    "name", null, null, -1));
+                        } else {
+                            diffs.add(new ResourceDiff(null, SNIPPET_EXT, snippetName,
+                                    DiffAction.CREATE, null, null,
+                                    null, null, null, -1));
+                        }
+                    } catch (Exception e) {
+                        log.debugf("Could not preview snippet %s: %s", snippetFilePath.getFileName(), e.getMessage());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debugf("Could not scan snippets for preview: %s", e.getMessage());
+        }
+    }
+
     private ResourceDiff buildResourceDiff(String originId, String resourceType, String name) {
         try {
             List<DocumentDescriptor> existing = documentDescriptorStore.findByOriginId(originId);
@@ -237,13 +306,33 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 DocumentDescriptor desc = existing.getFirst();
                 IResourceId localResourceId = RestUtilities.extractResourceId(desc.getResource());
                 if (localResourceId != null) {
-                    return new ResourceDiff(originId, resourceType, name, DiffAction.UPDATE, localResourceId.getId(), localResourceId.getVersion());
+                    return new ResourceDiff(originId, resourceType, name, DiffAction.UPDATE, localResourceId.getId(), localResourceId.getVersion(),
+                            "originId", null, null, -1);
                 }
             }
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             log.debug("Could not look up origin ID " + originId + ": " + e.getMessage());
         }
-        return new ResourceDiff(originId, resourceType, name, DiffAction.CREATE, null, null);
+
+        // Fallback: try by resource ID directly (handles export→re-import round-trip
+        // where the ZIP's resource IDs match the local resource IDs, not an originId)
+        try {
+            IResourceId currentId = documentDescriptorStore.getCurrentResourceId(originId);
+            if (currentId != null) {
+                DocumentDescriptor desc = documentDescriptorStore.readDescriptor(currentId.getId(), currentId.getVersion());
+                if (desc != null) {
+                    IResourceId localResourceId = RestUtilities.extractResourceId(desc.getResource());
+                    if (localResourceId != null) {
+                        return new ResourceDiff(originId, resourceType, name, DiffAction.UPDATE, localResourceId.getId(),
+                                localResourceId.getVersion(), "resourceId", null, null, -1);
+                    }
+                }
+            }
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            log.debugf("Fallback resource ID lookup for '%s' not found: %s", originId, e.getMessage());
+        }
+
+        return new ResourceDiff(originId, resourceType, name, DiffAction.CREATE, null, null, null, null, null, -1);
     }
 
     private String readNameFromDescriptor(Path dir, String resourceId) {
@@ -268,21 +357,22 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     // ==================== Import ====================
 
     @Override
-    public void importAgent(InputStream zippedAgentConfigFiles, String strategy, String selectedOriginIds, AsyncResponse response) {
+    public Response importAgent(InputStream zippedAgentConfigFiles, String strategy, String selectedOriginIds,
+                                String targetAgentId, String workflowOrder) {
         try {
-            if (response != null)
-                response.setTimeout(60, TimeUnit.SECONDS);
+            // "upgrade" strategy → use the new structural matcher + upgrade executor
+            if ("upgrade".equalsIgnoreCase(strategy) && targetAgentId != null) {
+                return executeUpgradeFromZip(zippedAgentConfigFiles, targetAgentId, selectedOriginIds, workflowOrder);
+            }
             File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
 
             Set<String> selectedSet = parseSelectedResources(selectedOriginIds);
             boolean isMerge = STRATEGY_MERGE.equalsIgnoreCase(strategy);
 
-            importAgentZipFile(zippedAgentConfigFiles, targetDir, response, isMerge, selectedSet);
-        } catch (IOException e) {
+            return importAgentZipFile(zippedAgentConfigFiles, targetDir, isMerge, selectedSet);
+        } catch (Exception e) {
             log.error(e.getLocalizedMessage(), e);
-            if (response != null) {
-                response.resume(new InternalServerErrorException());
-            }
+            throw new InternalServerErrorException(e.getMessage(), e);
         }
     }
 
@@ -296,14 +386,19 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return selectedSet == null || selectedSet.contains(originId);
     }
 
-    private void importAgentZipFile(InputStream zippedAgentConfigFiles, File targetDir, AsyncResponse response, boolean isMerge,
-                                    Set<String> selectedSet)
+    private Response importAgentZipFile(InputStream zippedAgentConfigFiles, File targetDir, boolean isMerge,
+                                        Set<String> selectedSet)
             throws IOException {
 
         this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
         var targetDirPath = targetDir.getPath();
+
+        // Import snippets (global resources, not workflow-embedded)
+        importSnippets(Paths.get(targetDirPath), isMerge);
+
+        URI lastAgentUri = null;
         try (var directoryStream = Files.newDirectoryStream(Paths.get(targetDirPath), path -> path.toString().endsWith(AGENT_FILE_ENDING))) {
-            directoryStream.forEach(agentFilePath -> {
+            for (var agentFilePath : directoryStream) {
                 try {
                     String agentOriginId = extractIdFromAgentFilename(agentFilePath);
                     String agentFileString = readFile(agentFilePath);
@@ -313,7 +408,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                     AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString, AgentConfiguration.class);
                     agentConfig.getWorkflows()
-                            .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, response, isMerge, selectedSet));
+                            .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, isMerge, selectedSet));
 
                     URI newAgentUri;
                     if (isMerge && isSelected(selectedSet, agentOriginId)) {
@@ -327,13 +422,22 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     // Set originId on the new agent's descriptor
                     setOriginIdOnDescriptor(newAgentUri, agentOriginId);
 
-                    response.resume(Response.ok().location(newAgentUri).build());
+                    lastAgentUri = newAgentUri;
                 } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException e) {
                     log.error(e.getLocalizedMessage(), e);
-                    response.resume(new InternalServerErrorException());
+                    throw new InternalServerErrorException(e.getLocalizedMessage(), e);
                 }
-            });
+            }
         }
+        log.infof("Import complete: lastAgentUri=%s", lastAgentUri);
+        if (lastAgentUri != null) {
+            // Use manual .header("Location", ...) instead of Response.created(URI)
+            // because Response.created() validates the URI scheme and may strip eddi://
+            // URIs
+            return Response.status(Response.Status.CREATED)
+                    .header("Location", lastAgentUri.toString()).build();
+        }
+        return Response.ok(Map.of("resourceUri", "")).build();
     }
 
     private URI buildOldAgentUri(Path agentPath) {
@@ -344,7 +448,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return URI.create(IRestAgentStore.resourceURI + oldAgentId + IRestAgentStore.versionQueryParam + "1");
     }
 
-    private void parseWorkflow(String targetDirPath, URI workflowUri, AgentConfiguration agentConfig, AsyncResponse response, boolean isMerge,
+    private void parseWorkflow(String targetDirPath, URI workflowUri, AgentConfiguration agentConfig, boolean isMerge,
                                Set<String> selectedSet) {
         try {
             IResourceId workflowResourceId = RestUtilities.extractResourceId(workflowUri);
@@ -422,6 +526,24 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         updateDocumentDescriptor(workflowPath, outputUris, newOutputUris);
                         workflowFileString = replaceURIs(workflowFileString, outputUris, newOutputUris);
 
+                        // ... for mcp calls
+                        List<URI> mcpCallsUris = extractResourcesUris(workflowFileString, MCPCALLS_URI_PATTERN);
+                        List<URI> newMcpCallsUris = createOrUpdateResources(
+                                readResources(mcpCallsUris, workflowPath, MCPCALLS_EXT, McpCallsConfiguration.class), mcpCallsUris, isMerge,
+                                selectedSet, this::createNewMcpCalls, this::updateMcpCalls);
+
+                        updateDocumentDescriptor(workflowPath, mcpCallsUris, newMcpCallsUris);
+                        workflowFileString = replaceURIs(workflowFileString, mcpCallsUris, newMcpCallsUris);
+
+                        // ... for rag
+                        List<URI> ragUris = extractResourcesUris(workflowFileString, RAG_URI_PATTERN);
+                        List<URI> newRagUris = createOrUpdateResources(
+                                readResources(ragUris, workflowPath, RAG_EXT, RagConfiguration.class), ragUris, isMerge, selectedSet,
+                                this::createNewRags, this::updateRag);
+
+                        updateDocumentDescriptor(workflowPath, ragUris, newRagUris);
+                        workflowFileString = replaceURIs(workflowFileString, ragUris, newRagUris);
+
                         // creating updated workflow and replacing references in Agent config
                         URI newWorkflowUri;
                         if (isMerge && isSelected(selectedSet, workflowId)) {
@@ -439,7 +561,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                     } catch (IOException | RestInterfaceFactory.RestInterfaceFactoryException | CallbackMatcher.CallbackMatcherException e) {
                         log.error(e.getLocalizedMessage(), e);
-                        response.resume(new InternalServerErrorException());
+                        throw new InternalServerErrorException(e.getMessage(), e);
                     }
                 });
 
@@ -447,7 +569,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
         } catch (IOException e) {
             log.error(e.getLocalizedMessage(), e);
-            response.resume(new InternalServerErrorException());
+            throw new InternalServerErrorException(e.getMessage(), e);
         }
     }
 
@@ -523,12 +645,27 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI findLocalUriByOriginId(String originId) {
         try {
+            // Try by originId first (standard merge path)
             List<DocumentDescriptor> existing = documentDescriptorStore.findByOriginId(originId);
             if (!existing.isEmpty()) {
                 return existing.getFirst().getResource();
             }
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             log.debug("Could not look up origin ID " + originId + ": " + e.getMessage());
+        }
+
+        // Fallback: try by resource ID directly (handles export→re-import round-trip
+        // where the exported filename IS the resource ID, not the original originId)
+        try {
+            IResourceId currentId = documentDescriptorStore.getCurrentResourceId(originId);
+            if (currentId != null) {
+                DocumentDescriptor desc = documentDescriptorStore.readDescriptor(currentId.getId(), currentId.getVersion());
+                if (desc != null) {
+                    return desc.getResource();
+                }
+            }
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            log.debugf("Fallback resource ID lookup for '%s' not found: %s", originId, e.getMessage());
         }
         return null;
     }
@@ -573,15 +710,19 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         try {
             IResourceId resourceId = RestUtilities.extractResourceId(resourceUri);
             if (resourceId != null) {
-                DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion());
-                if (descriptor != null && !originId.equals(descriptor.getOriginId())) {
-                    descriptor.setOriginId(originId);
-                    PatchInstruction<DocumentDescriptor> patchInstruction = new PatchInstruction<>();
-                    patchInstruction.setOperation(PatchInstruction.PatchOperation.SET);
-                    patchInstruction.setDocument(descriptor);
-
-                    IRestDocumentDescriptorStore restDescriptorStore = getRestResourceStore(IRestDocumentDescriptorStore.class);
-                    restDescriptorStore.patchDescriptor(resourceId.getId(), resourceId.getVersion(), patchInstruction);
+                // Use getCurrentResourceId to find the descriptor's actual version.
+                // During merge, the resource may be at v2 but the descriptor still at v1
+                // (updateDocumentDescriptor runs later). Reading at the resource version
+                // would fail with ResourceNotFoundException.
+                IResourceId currentDescId = documentDescriptorStore.getCurrentResourceId(resourceId.getId());
+                if (currentDescId != null) {
+                    DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(
+                            currentDescId.getId(), currentDescId.getVersion());
+                    if (descriptor != null && !originId.equals(descriptor.getOriginId())) {
+                        descriptor.setOriginId(originId);
+                        documentDescriptorStore.setDescriptor(
+                                currentDescId.getId(), currentDescId.getVersion(), descriptor);
+                    }
                 }
             }
         } catch (Exception e) {
@@ -589,82 +730,71 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
-    // ==================== Resource Creation (original logic) ====================
+    // ==================== Resource Creation ====================
+    //
+    // All create methods use direct I*Store.create() via CDI instead of going
+    // through
+    // the IRest*Store layer. This bypasses Response.getLocation() which returns
+    // null
+    // for eddi:// scheme URIs when called in-process (CDI direct calls).
 
-    private URI createNewAgent(AgentConfiguration agentConfiguration) throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestAgentStore restWorkflowStore = getRestResourceStore(IRestAgentStore.class);
-        Response agentResponse = restWorkflowStore.createAgent(agentConfiguration);
-        checkIfCreatedResponse(agentResponse);
-        return agentResponse.getLocation();
+    /**
+     * Creates a resource directly via CDI store lookup, bypassing the REST layer
+     * entirely. Returns the constructed URI for the new resource.
+     */
+    @SuppressWarnings("unchecked")
+    private <T> URI createResourceDirect(Class<?> storeClass, T document, String resourceUri) {
+        try {
+            IResourceStore<T> store = (IResourceStore<T>) jakarta.enterprise.inject.spi.CDI.current().select(storeClass).get();
+            IResourceId resourceId = store.create(document);
+            URI createdUri = RestUtilities.createURI(resourceUri, resourceId.getId(), IRestVersionInfo.versionQueryParam, resourceId.getVersion());
+
+            // Create the DocumentDescriptor that the DocumentDescriptorFilter would
+            // normally create on a 201 response. Since we bypass the REST layer,
+            // the filter never runs, so we must create it manually.
+            documentDescriptorStore.createDescriptor(
+                    resourceId.getId(), resourceId.getVersion(), createDocumentDescriptor(createdUri));
+
+            return createdUri;
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
+        }
     }
 
-    private URI createNewWorkflow(String workflowFileString) throws RestInterfaceFactory.RestInterfaceFactoryException, IOException {
+    private URI createNewAgent(AgentConfiguration agentConfiguration) {
+        return createResourceDirect(IAgentStore.class, agentConfiguration, IRestAgentStore.resourceURI);
+    }
+
+    private URI createNewWorkflow(String workflowFileString) throws IOException {
         WorkflowConfiguration workflowConfig = jsonSerialization.deserialize(workflowFileString, WorkflowConfiguration.class);
-        IRestWorkflowStore restWorkflowStore = getRestResourceStore(IRestWorkflowStore.class);
-        Response workflowResponse = restWorkflowStore.createWorkflow(workflowConfig);
-        checkIfCreatedResponse(workflowResponse);
-        return workflowResponse.getLocation();
+        return createResourceDirect(IWorkflowStore.class, workflowConfig, IRestWorkflowStore.resourceURI);
     }
 
-    private List<URI> createNewDictionaries(List<DictionaryConfiguration> dictionaryConfigurations)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestDictionaryStore restDictionaryStore = getRestResourceStore(IRestDictionaryStore.class);
-        return dictionaryConfigurations.stream().map(regularDictionaryConfiguration -> {
-            Response dictionaryResponse = restDictionaryStore.createRegularDictionary(regularDictionaryConfiguration);
-            checkIfCreatedResponse(dictionaryResponse);
-            return dictionaryResponse.getLocation();
-        }).toList();
+    private List<URI> createNewDictionaries(List<DictionaryConfiguration> configs) {
+        return configs.stream().map(c -> createResourceDirect(IDictionaryStore.class, c, IRestDictionaryStore.resourceURI)).toList();
     }
 
-    private List<URI> createNewBehaviors(List<RuleSetConfiguration> behaviorConfigurations)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestRuleSetStore restRuleSetStore = getRestResourceStore(IRestRuleSetStore.class);
-        return behaviorConfigurations.stream().map(behaviorConfiguration -> {
-            Response behaviorResponse = restRuleSetStore.createRuleSet(behaviorConfiguration);
-            checkIfCreatedResponse(behaviorResponse);
-            return behaviorResponse.getLocation();
-        }).toList();
+    private List<URI> createNewBehaviors(List<RuleSetConfiguration> configs) {
+        return configs.stream().map(c -> createResourceDirect(IRuleSetStore.class, c, IRestRuleSetStore.resourceURI)).toList();
     }
 
-    private List<URI> createNewApiCalls(List<ApiCallsConfiguration> httpCallsConfigurations)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestApiCallsStore restApiCallsStore = getRestResourceStore(IRestApiCallsStore.class);
-        return httpCallsConfigurations.stream().map(httpCallsConfiguration -> {
-            Response httpCallsResponse = restApiCallsStore.createApiCalls(httpCallsConfiguration);
-            checkIfCreatedResponse(httpCallsResponse);
-            return httpCallsResponse.getLocation();
-        }).toList();
+    private List<URI> createNewApiCalls(List<ApiCallsConfiguration> configs) {
+        return configs.stream().map(c -> createResourceDirect(IApiCallsStore.class, c, IRestApiCallsStore.resourceURI)).toList();
     }
 
-    private List<URI> createNewLlm(List<LlmConfiguration> llmConfigurations) throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestLlmStore restLlmStore = getRestResourceStore(IRestLlmStore.class);
-        return llmConfigurations.stream().map(llmConfiguration -> {
-            Response llmResponse = restLlmStore.createLlm(llmConfiguration);
-            checkIfCreatedResponse(llmResponse);
-            return llmResponse.getLocation();
-        }).toList();
+    private List<URI> createNewLlm(List<LlmConfiguration> configs) {
+        return configs.stream().map(c -> createResourceDirect(ILlmStore.class, c, IRestLlmStore.resourceURI)).toList();
     }
 
-    private List<URI> createNewProperties(List<PropertySetterConfiguration> propertySetterConfigurations)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestPropertySetterStore restPropertySetterStore = getRestResourceStore(IRestPropertySetterStore.class);
-        return propertySetterConfigurations.stream().map(propertySetterConfiguration -> {
-            Response propertySetter = restPropertySetterStore.createPropertySetter(propertySetterConfiguration);
-            checkIfCreatedResponse(propertySetter);
-            return propertySetter.getLocation();
-        }).toList();
+    private List<URI> createNewProperties(List<PropertySetterConfiguration> configs) {
+        return configs.stream().map(c -> createResourceDirect(IPropertySetterStore.class, c, IRestPropertySetterStore.resourceURI)).toList();
     }
 
-    private List<URI> createNewOutputs(List<OutputConfigurationSet> outputConfigurations) throws RestInterfaceFactory.RestInterfaceFactoryException {
-        IRestOutputStore restOutputStore = getRestResourceStore(IRestOutputStore.class);
-        return outputConfigurations.stream().map(outputConfiguration -> {
-            Response outputResponse = restOutputStore.createOutputSet(outputConfiguration);
-            checkIfCreatedResponse(outputResponse);
-            return outputResponse.getLocation();
-        }).toList();
+    private List<URI> createNewOutputs(List<OutputConfigurationSet> configs) {
+        return configs.stream().map(c -> createResourceDirect(IOutputStore.class, c, IRestOutputStore.resourceURI)).toList();
     }
 
-    // ==================== Resource Update (new merge logic) ====================
+    // ==================== Resource Update (merge logic) ====================
 
     private URI updateDictionary(DictionaryConfiguration config, String localId, Integer localVersion)
             throws RestInterfaceFactory.RestInterfaceFactoryException {
@@ -673,10 +803,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (response.getStatus() == 200) {
             return URI.create(IRestDictionaryStore.resourceURI + localId + IRestDictionaryStore.versionQueryParam + (localVersion + 1));
         }
-        // Fallback: create new
-        Response createResp = store.createRegularDictionary(config);
-        checkIfCreatedResponse(createResp);
-        return createResp.getLocation();
+        return createResourceDirect(IDictionaryStore.class, config, IRestDictionaryStore.resourceURI);
     }
 
     private URI updateBehavior(RuleSetConfiguration config, String localId, Integer localVersion)
@@ -686,9 +813,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (response.getStatus() == 200) {
             return URI.create(IRestRuleSetStore.resourceURI + localId + IRestRuleSetStore.versionQueryParam + (localVersion + 1));
         }
-        Response createResp = store.createRuleSet(config);
-        checkIfCreatedResponse(createResp);
-        return createResp.getLocation();
+        return createResourceDirect(IRuleSetStore.class, config, IRestRuleSetStore.resourceURI);
     }
 
     private URI updateApiCalls(ApiCallsConfiguration config, String localId, Integer localVersion)
@@ -698,9 +823,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (response.getStatus() == 200) {
             return URI.create(IRestApiCallsStore.resourceURI + localId + IRestApiCallsStore.versionQueryParam + (localVersion + 1));
         }
-        Response createResp = store.createApiCalls(config);
-        checkIfCreatedResponse(createResp);
-        return createResp.getLocation();
+        return createResourceDirect(IApiCallsStore.class, config, IRestApiCallsStore.resourceURI);
     }
 
     private URI updateLangchain(LlmConfiguration config, String localId, Integer localVersion)
@@ -710,9 +833,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (response.getStatus() == 200) {
             return URI.create(IRestLlmStore.resourceURI + localId + IRestLlmStore.versionQueryParam + (localVersion + 1));
         }
-        Response createResp = store.createLlm(config);
-        checkIfCreatedResponse(createResp);
-        return createResp.getLocation();
+        return createResourceDirect(ILlmStore.class, config, IRestLlmStore.resourceURI);
     }
 
     private URI updateProperty(PropertySetterConfiguration config, String localId, Integer localVersion)
@@ -722,9 +843,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (response.getStatus() == 200) {
             return URI.create(IRestPropertySetterStore.resourceURI + localId + IRestPropertySetterStore.versionQueryParam + (localVersion + 1));
         }
-        Response createResp = store.createPropertySetter(config);
-        checkIfCreatedResponse(createResp);
-        return createResp.getLocation();
+        return createResourceDirect(IPropertySetterStore.class, config, IRestPropertySetterStore.resourceURI);
     }
 
     private URI updateOutput(OutputConfigurationSet config, String localId, Integer localVersion)
@@ -734,44 +853,243 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         if (response.getStatus() == 200) {
             return URI.create(IRestOutputStore.resourceURI + localId + IRestOutputStore.versionQueryParam + (localVersion + 1));
         }
-        Response createResp = store.createOutputSet(config);
-        checkIfCreatedResponse(createResp);
-        return createResp.getLocation();
+        return createResourceDirect(IOutputStore.class, config, IRestOutputStore.resourceURI);
+    }
+
+    private List<URI> createNewMcpCalls(List<McpCallsConfiguration> configs) {
+        return configs.stream().map(c -> createResourceDirect(IMcpCallsStore.class, c, IRestMcpCallsStore.resourceURI)).toList();
+    }
+
+    private URI updateMcpCalls(McpCallsConfiguration config, String localId, Integer localVersion)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestMcpCallsStore store = getRestResourceStore(IRestMcpCallsStore.class);
+        Response response = store.updateMcpCalls(localId, localVersion, config);
+        if (response.getStatus() == 200) {
+            return URI.create(IRestMcpCallsStore.resourceURI + localId + IRestMcpCallsStore.versionQueryParam + (localVersion + 1));
+        }
+        return createResourceDirect(IMcpCallsStore.class, config, IRestMcpCallsStore.resourceURI);
+    }
+
+    private List<URI> createNewRags(List<RagConfiguration> configs) {
+        return configs.stream().map(c -> createResourceDirect(IRagStore.class, c, IRestRagStore.resourceURI)).toList();
+    }
+
+    private URI updateRag(RagConfiguration config, String localId, Integer localVersion)
+            throws RestInterfaceFactory.RestInterfaceFactoryException {
+        IRestRagStore store = getRestResourceStore(IRestRagStore.class);
+        Response response = store.updateRag(localId, localVersion, config);
+        if (response.getStatus() == 200) {
+            return URI.create(IRestRagStore.resourceURI + localId + IRestRagStore.versionQueryParam + (localVersion + 1));
+        }
+        return createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI);
+    }
+
+    // ==================== Snippet Import ====================
+
+    private void importSnippets(Path targetDirPath, boolean isMerge) {
+        try {
+            // Look for snippets directory — could be inside the agent subdirectory
+            Path snippetsDir = findSnippetsDir(targetDirPath);
+            if (snippetsDir == null || !Files.exists(snippetsDir)) {
+                return;
+            }
+
+            try (var snippetStream = Files.newDirectoryStream(snippetsDir,
+                    p -> p.toString().endsWith("." + SNIPPET_EXT + ".json"))) {
+
+                IRestPromptSnippetStore restSnippetStore = getRestResourceStore(IRestPromptSnippetStore.class);
+
+                // Build a name → (id, version) map of existing snippets for name-based
+                // deduplication.
+                // Snippet name is the natural key (e.g., "cautious_mode") — not the MongoDB
+                // document ID
+                // which differs across EDDI instances.
+                Map<String, IResourceId> existingSnippetsByName = buildExistingSnippetNameMap(restSnippetStore);
+
+                int importedCount = 0;
+                int skippedCount = 0;
+                for (Path snippetFilePath : snippetStream) {
+                    try {
+                        String snippetJson = readFile(snippetFilePath);
+                        PromptSnippet snippet = jsonSerialization.deserialize(snippetJson, PromptSnippet.class);
+                        if (snippet == null || snippet.getName() == null)
+                            continue;
+
+                        String snippetName = snippet.getName();
+
+                        // Always check for name collision — snippets are global resources,
+                        // duplicates cause unpredictable runtime behavior regardless of strategy
+                        if (existingSnippetsByName.containsKey(snippetName)) {
+                            if (isMerge) {
+                                // Merge strategy: update existing snippet with imported content
+                                IResourceId localResId = existingSnippetsByName.get(snippetName);
+                                Response updateResp = restSnippetStore.updateSnippet(
+                                        localResId.getId(), localResId.getVersion(), snippet);
+                                if (updateResp.getStatus() == 200) {
+                                    log.debugf("Updated existing snippet '%s' (id=%s, v=%d)",
+                                            snippetName, localResId.getId(), localResId.getVersion());
+                                    importedCount++;
+                                    continue;
+                                }
+                                // Update failed (e.g., version conflict) — fall through to create
+                                log.warnf("Update failed for snippet '%s' (status=%d), creating new",
+                                        snippetName, updateResp.getStatus());
+                            } else {
+                                // Create strategy: snippet already exists globally, skip to avoid duplicates
+                                log.debugf("Snippet '%s' already exists, skipping (create strategy)", snippetName);
+                                skippedCount++;
+                                continue;
+                            }
+                        }
+
+                        // Create new snippet
+                        Response createResp = restSnippetStore.createSnippet(snippet);
+                        checkIfCreatedResponse(createResp);
+                        importedCount++;
+                        log.debugf("Created new snippet '%s'", snippetName);
+                    } catch (Exception e) {
+                        log.warnf("Failed to import snippet from %s: %s", snippetFilePath, e.getMessage());
+                    }
+                }
+                if (importedCount > 0 || skippedCount > 0) {
+                    log.infof("Snippets: imported %d, skipped %d (already exist)", importedCount, skippedCount);
+                }
+            }
+        } catch (Exception e) {
+            log.warnf("Failed to import snippets: %s", e.getMessage());
+        }
+    }
+
+    /**
+     * Builds a map of existing snippet names → resource IDs by loading all snippet
+     * descriptors and their configs. This enables name-based deduplication during
+     * import — the natural key for snippets is their {@code name} field, not the
+     * MongoDB document ID.
+     */
+    private Map<String, IResourceId> buildExistingSnippetNameMap(IRestPromptSnippetStore restSnippetStore) {
+        Map<String, IResourceId> nameMap = new LinkedHashMap<>();
+        try {
+            List<DocumentDescriptor> descriptors = restSnippetStore.readSnippetDescriptors("", 0, 0);
+            if (descriptors == null)
+                return nameMap;
+
+            for (DocumentDescriptor descriptor : descriptors) {
+                try {
+                    IResourceId resourceId = RestUtilities.extractResourceId(descriptor.getResource());
+                    if (resourceId == null)
+                        continue;
+
+                    PromptSnippet existing = restSnippetStore.readSnippet(resourceId.getId(), resourceId.getVersion());
+                    if (existing != null && existing.getName() != null) {
+                        nameMap.put(existing.getName(), resourceId);
+                    }
+                } catch (Exception e) {
+                    log.debugf("Could not load snippet for dedup: %s", e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.warnf("Could not build snippet name map: %s", e.getMessage());
+        }
+        return nameMap;
+    }
+
+    private Path findSnippetsDir(Path targetDirPath) {
+        // Check directly under target dir
+        Path direct = Paths.get(targetDirPath.toString(), "snippets");
+        if (Files.exists(direct)) {
+            return direct;
+        }
+
+        // Check inside agent subdirectories (the ZIP structure nests under
+        // agentId/version/)
+        try (var dirStream = Files.newDirectoryStream(targetDirPath, Files::isDirectory)) {
+            for (Path subDir : dirStream) {
+                // Look in agentId/ directory
+                Path nested = Paths.get(subDir.toString(), "snippets");
+                if (Files.exists(nested)) {
+                    return nested;
+                }
+                // Look in agentId/version/ directories
+                try (var versionStream = Files.newDirectoryStream(subDir, Files::isDirectory)) {
+                    for (Path versionDir : versionStream) {
+                        Path deepNested = Paths.get(versionDir.toString(), "snippets");
+                        if (Files.exists(deepNested)) {
+                            return deepNested;
+                        }
+                    }
+                }
+            }
+        } catch (IOException e) {
+            log.debug("Error searching for snippets directory: " + e.getMessage());
+        }
+        return null;
     }
 
     // ==================== Shared helpers ====================
 
-    private void updateDocumentDescriptor(Path directoryPath, URI oldUri, URI newUri) throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private void updateDocumentDescriptor(Path directoryPath, URI oldUri, URI newUri) {
         updateDocumentDescriptor(directoryPath, Collections.singletonList(oldUri), Collections.singletonList(newUri));
     }
 
-    private void updateDocumentDescriptor(Path directoryPath, List<URI> oldUris, List<URI> newUris)
-            throws RestInterfaceFactory.RestInterfaceFactoryException {
+    private void updateDocumentDescriptor(Path directoryPath, List<URI> oldUris, List<URI> newUris) {
 
-        IRestDocumentDescriptorStore restDocumentDescriptorStore = getRestResourceStore(IRestDocumentDescriptorStore.class);
         IntStream.range(0, oldUris.size()).forEach(idx -> {
             try {
                 URI oldUri = oldUris.get(idx);
                 IResourceId oldResourceId = RestUtilities.extractResourceId(oldUri);
                 if (oldResourceId != null) {
-                    var oldDocumentDescriptor = readDocumentDescriptorFromFile(directoryPath, oldResourceId);
+                    var zipDescriptor = readDocumentDescriptorFromFile(directoryPath, oldResourceId);
 
                     URI newUri = newUris.get(idx);
                     IResourceId newResourceId = RestUtilities.extractResourceId(newUri);
 
                     if (newResourceId != null) {
-                        // Update the resource URI to point to the new location
-                        // (the old descriptor from the ZIP file still has the old URI)
-                        oldDocumentDescriptor.setResource(newUri);
+                        // Use documentDescriptorStore directly instead of the REST layer's
+                        // patchDescriptor. CDI-direct resource updates bypass the
+                        // DocumentDescriptorFilter, so the descriptor stays at its original
+                        // version.
+                        try {
+                            IResourceId currentDescriptorId = documentDescriptorStore.getCurrentResourceId(newResourceId.getId());
+                            if (currentDescriptorId != null) {
+                                DocumentDescriptor existingDescriptor = documentDescriptorStore.readDescriptor(
+                                        currentDescriptorId.getId(), currentDescriptorId.getVersion());
 
-                        PatchInstruction<DocumentDescriptor> patchInstruction = new PatchInstruction<>();
-                        patchInstruction.setOperation(PatchInstruction.PatchOperation.SET);
-                        patchInstruction.setDocument(oldDocumentDescriptor);
+                                // Apply name/description from the ZIP's descriptor
+                                if (zipDescriptor.getName() != null) {
+                                    existingDescriptor.setName(zipDescriptor.getName());
+                                }
+                                if (zipDescriptor.getDescription() != null) {
+                                    existingDescriptor.setDescription(zipDescriptor.getDescription());
+                                }
+                                // Update the resource URI to point to the new version
+                                existingDescriptor.setResource(newUri);
 
-                        restDocumentDescriptorStore.patchDescriptor(newResourceId.getId(), newResourceId.getVersion(), patchInstruction);
+                                if (currentDescriptorId.getVersion() < newResourceId.getVersion()) {
+                                    // MERGE path: descriptor version is behind the resource version
+                                    // (e.g., descriptor v1 but resource v2). Use updateDescriptor to
+                                    // bump the descriptor version. This prevents the
+                                    // DocumentDescriptorFilter from creating a duplicate when it
+                                    // sees the 201 response with the new resource version.
+                                    documentDescriptorStore.updateDescriptor(
+                                            currentDescriptorId.getId(), currentDescriptorId.getVersion(), existingDescriptor);
+                                } else {
+                                    // CREATE path: descriptor version already matches the resource
+                                    // version (both v1). Use setDescriptor for an in-place update
+                                    // without archiving to history. This avoids conflicts with
+                                    // subsequent setOriginIdOnDescriptor calls.
+                                    documentDescriptorStore.setDescriptor(
+                                            currentDescriptorId.getId(), currentDescriptorId.getVersion(), existingDescriptor);
+                                }
+                            }
+                        } catch (IResourceStore.ResourceNotFoundException e) {
+                            // No existing descriptor — create one for the new resource
+                            zipDescriptor.setResource(newUri);
+                            documentDescriptorStore.createDescriptor(
+                                    newResourceId.getId(), newResourceId.getVersion(), zipDescriptor);
+                        }
                     }
                 }
-            } catch (IOException e) {
+            } catch (IOException | IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException e) {
                 log.error(e.getLocalizedMessage(), e);
             }
         });
@@ -802,7 +1120,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private <T> T getRestResourceStore(Class<T> clazz) throws RestInterfaceFactory.RestInterfaceFactoryException {
-        return restInterfaceFactory.get(clazz);
+        // Use direct CDI lookup instead of HTTP loopback proxy.
+        // The MP REST Client proxy strips response headers (Location, X-Resource-URI)
+        // and runs on the Vert.x IO event loop, causing deadlocks during import.
+        return jakarta.enterprise.inject.spi.CDI.current().select(clazz).get();
     }
 
     @SuppressWarnings("unchecked")
@@ -878,76 +1199,158 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
-    private static class MockAsyncResponse implements AsyncResponse {
+    // ==================== Upgrade (Structural) Flow ====================
 
-        @Override
-        public boolean resume(Object response) {
-            return false;
-        }
+    private ImportPreview previewUpgrade(InputStream zippedAgentConfigFiles, String targetAgentId) {
+        try {
+            File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
+            this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
 
-        @Override
-        public boolean resume(Throwable response) {
-            return false;
-        }
-
-        @Override
-        public boolean cancel() {
-            return false;
-        }
-
-        @Override
-        public boolean cancel(int retryAfter) {
-            return false;
-        }
-
-        @Override
-        public boolean cancel(Date retryAfter) {
-            return false;
-        }
-
-        @Override
-        public boolean isSuspended() {
-            return false;
-        }
-
-        @Override
-        public boolean isCancelled() {
-            return false;
-        }
-
-        @Override
-        public boolean isDone() {
-            return false;
-        }
-
-        @Override
-        public boolean setTimeout(long time, TimeUnit unit) {
-            return false;
-        }
-
-        @Override
-        public void setTimeoutHandler(TimeoutHandler handler) {
-
-        }
-
-        @Override
-        public Collection<Class<?>> register(Class<?> callback) {
-            return null;
-        }
-
-        @Override
-        public Map<Class<?>, Collection<Class<?>>> register(Class<?> callback, Class<?>... callbacks) {
-            return null;
-        }
-
-        @Override
-        public Collection<Class<?>> register(Object callback) {
-            return null;
-        }
-
-        @Override
-        public Map<Class<?>, Collection<Class<?>>> register(Object callback, Object... callbacks) {
-            return null;
+            ZipResourceSource source = new ZipResourceSource(targetDir.toPath(), jsonSerialization);
+            return structuralMatcher.buildPreview(source, targetAgentId, true);
+        } catch (Exception e) {
+            log.error("Upgrade preview failed: " + e.getMessage(), e);
+            throw new InternalServerErrorException("Upgrade preview failed: " + e.getMessage(), e);
         }
     }
+
+    private Response executeUpgradeFromZip(InputStream zippedAgentConfigFiles, String targetAgentId,
+                                           String selectedOriginIds, String workflowOrderString) {
+        try {
+            File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
+            this.zipArchive.unzip(zippedAgentConfigFiles, targetDir);
+
+            ZipResourceSource source = new ZipResourceSource(targetDir.toPath(), jsonSerialization);
+            Set<String> selectedSet = parseSelectedResources(selectedOriginIds);
+            List<String> workflowOrder = parseWorkflowOrder(workflowOrderString);
+
+            URI resultUri = upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, workflowOrder);
+            return Response.status(Response.Status.CREATED)
+                    .header("Location", resultUri.toString()).build();
+        } catch (Exception e) {
+            log.error("Upgrade from ZIP failed: " + e.getMessage(), e);
+            throw new InternalServerErrorException("Upgrade failed: " + e.getMessage(), e);
+        }
+    }
+
+    private List<String> parseWorkflowOrder(String workflowOrderString) {
+        if (isNullOrEmpty(workflowOrderString))
+            return null;
+        return Arrays.stream(workflowOrderString.split(","))
+                .map(String::trim).filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
+    }
+
+    // ==================== Live Sync Endpoints ====================
+
+    /**
+     * In development mode, allow HTTP for remote sync (easier local testing). In
+     * production, enforce HTTPS to prevent credential leakage.
+     */
+    private boolean isDevMode() {
+        String profile = System.getProperty("quarkus.profile", "prod");
+        return "dev".equalsIgnoreCase(profile) || "test".equalsIgnoreCase(profile);
+    }
+
+    private void validateSourceUrl(String sourceUrl) {
+        SourceUrlValidator.validate(sourceUrl, isDevMode());
+    }
+
+    @Override
+    public List<DocumentDescriptor> listRemoteAgents(String sourceUrl, String sourceAuth) {
+        validateSourceUrl(sourceUrl);
+        try {
+            return RemoteApiResourceSource.listRemoteAgentDescriptors(sourceUrl, sourceAuth, jsonSerialization);
+        } catch (Exception e) {
+            log.errorf("Failed to list remote agents from %s: %s", sourceUrl, e.getMessage());
+            throw new InternalServerErrorException("Failed to connect to remote instance: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public ImportPreview previewSync(String sourceUrl, String sourceAgentId, Integer sourceVersion,
+                                     String targetAgentId, String sourceAuth) {
+        validateSourceUrl(sourceUrl);
+        try (var source = new RemoteApiResourceSource(sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization)) {
+            return structuralMatcher.buildPreview(source, targetAgentId, true);
+        } catch (Exception e) {
+            log.errorf("Sync preview failed for agent %s from %s: %s", sourceAgentId, sourceUrl, e.getMessage());
+            throw new InternalServerErrorException("Sync preview failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public List<ImportPreview> previewSyncBatch(String sourceUrl, List<SyncMapping> mappings, String sourceAuth) {
+        validateSourceUrl(sourceUrl);
+        if (mappings == null || mappings.isEmpty()) {
+            return List.of();
+        }
+
+        List<ImportPreview> previews = new ArrayList<>();
+        for (SyncMapping mapping : mappings) {
+            try (var source = new RemoteApiResourceSource(
+                    sourceUrl, mapping.sourceAgentId(), mapping.sourceAgentVersion(),
+                    sourceAuth, jsonSerialization)) {
+                ImportPreview preview = structuralMatcher.buildPreview(source, mapping.targetAgentId(), true);
+                previews.add(preview);
+            } catch (Exception e) {
+                log.warnf("Batch preview failed for agent %s: %s", mapping.sourceAgentId(), e.getMessage());
+                // Add a failed preview entry so the caller knows which agent failed
+                previews.add(new ImportPreview(
+                        mapping.sourceAgentId(), "Error: " + e.getMessage(),
+                        mapping.targetAgentId(), null, List.of()));
+            }
+        }
+        return previews;
+    }
+
+    @Override
+    public Response executeSync(String sourceUrl, String sourceAgentId, Integer sourceVersion,
+                                String targetAgentId, String selectedResources, String workflowOrder,
+                                String sourceAuth) {
+        validateSourceUrl(sourceUrl);
+        try {
+            try (var source = new RemoteApiResourceSource(
+                    sourceUrl, sourceAgentId, sourceVersion, sourceAuth, jsonSerialization)) {
+                Set<String> selectedSet = parseSelectedResources(selectedResources);
+                List<String> wfOrder = parseWorkflowOrder(workflowOrder);
+
+                URI resultUri = upgradeExecutor.executeUpgrade(source, targetAgentId, selectedSet, wfOrder);
+                return Response.status(Response.Status.CREATED)
+                        .header("Location", resultUri.toString()).build();
+            }
+        } catch (Exception e) {
+            log.errorf("Sync execution failed for agent %s from %s: %s",
+                    sourceAgentId, sourceUrl, e.getMessage());
+            throw new InternalServerErrorException("Sync failed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public Response executeSyncBatch(String sourceUrl, List<SyncRequest> requests, String sourceAuth) {
+        validateSourceUrl(sourceUrl);
+        try {
+            List<URI> resultUris = new ArrayList<>();
+            for (SyncRequest request : requests) {
+                try (var source = new RemoteApiResourceSource(
+                        sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(),
+                        sourceAuth, jsonSerialization)) {
+                    URI resultUri = upgradeExecutor.executeUpgrade(
+                            source, request.targetAgentId(),
+                            request.selectedResources(), request.workflowOrder());
+                    resultUris.add(resultUri);
+                } catch (Exception e) {
+                    log.warnf("Batch sync failed for agent %s→%s: %s",
+                            request.sourceAgentId(), request.targetAgentId(), e.getMessage());
+                    // Continue with remaining agents — partial success is better than total failure
+                }
+            }
+
+            return Response.ok(resultUris).build();
+        } catch (Exception e) {
+            log.errorf("Batch sync execution failed: %s", e.getMessage());
+            throw new InternalServerErrorException("Batch sync failed: " + e.getMessage(), e);
+        }
+    }
+
 }

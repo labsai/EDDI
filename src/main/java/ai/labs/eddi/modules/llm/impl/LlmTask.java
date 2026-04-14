@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
@@ -84,6 +85,7 @@ public class LlmTask implements ILifecycleTask {
     private final RagContextProvider ragContextProvider;
     private final TokenCounterFactory tokenCounterFactory;
     private final ConversationSummarizer conversationSummarizer;
+    private final PromptSnippetService promptSnippetService;
 
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
@@ -100,7 +102,9 @@ public class LlmTask implements ILifecycleTask {
             IApiCallExecutor apiCallExecutor, ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager,
             A2AToolProviderManager a2aToolProviderManager, IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore,
             RagContextProvider ragContextProvider, IUserMemoryStore userMemoryStore, TokenCounterFactory tokenCounterFactory,
-            ConversationSummarizer conversationSummarizer) {
+            ConversationSummarizer conversationSummarizer,
+            PromptSnippetService promptSnippetService,
+            ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -114,13 +118,15 @@ public class LlmTask implements ILifecycleTask {
         this.streamingLegacyChatExecutor = new StreamingLegacyChatExecutor();
         this.agentOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
                 textSummarizerTool, pdfReaderTool, weatherTool, toolExecutionService, mcpToolProviderManager, a2aToolProviderManager, restAgentStore,
-                restWorkflowStore, resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter, userMemoryStore);
+                restWorkflowStore, resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter, userMemoryStore,
+                toolResponseTruncator, tenantQuotaService);
         this.ragContextProvider = ragContextProvider;
         this.tokenCounterFactory = tokenCounterFactory;
         this.apiCallExecutor = apiCallExecutor;
         this.restAgentStore = restAgentStore;
         this.restWorkflowStore = restWorkflowStore;
         this.conversationSummarizer = conversationSummarizer;
+        this.promptSnippetService = promptSnippetService;
     }
 
     @Override
@@ -145,6 +151,14 @@ public class LlmTask implements ILifecycleTask {
             }
 
             var templateDataObjects = memoryItemConverter.convert(memory);
+
+            // Inject prompt snippets into template data — makes all snippets
+            // auto-available as {{snippets.<name>}} in system prompts
+            Map<String, Object> snippets = promptSnippetService.getAll();
+            if (!snippets.isEmpty()) {
+                templateDataObjects.put("snippets", snippets);
+            }
+
             var actions = latestData.getResult();
             if (actions == null) {
                 return;
@@ -171,6 +185,7 @@ public class LlmTask implements ILifecycleTask {
 
         // Parse history parameters
         String systemMessage = processedParams.getOrDefault(KEY_SYSTEM_MESSAGE, "");
+
         int logSizeLimit = task.getConversationHistoryLimit() != null ? task.getConversationHistoryLimit() : -1;
         if (!isNullOrEmpty(processedParams.get(KEY_LOG_SIZE_LIMIT))) {
             logSizeLimit = Integer.parseInt(processedParams.get(KEY_LOG_SIZE_LIMIT));
@@ -261,6 +276,11 @@ public class LlmTask implements ILifecycleTask {
             messages = conversationHistoryBuilder.buildMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), logSizeLimit,
                     includeFirstAgentMessage, summaryPrefix, skipSteps);
         }
+
+        // Enhance the last user message with multimodal attachment content (images,
+        // etc.)
+        MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+
         if (messages.isEmpty()) {
             return;
         }

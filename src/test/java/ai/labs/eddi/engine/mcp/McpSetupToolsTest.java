@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService;
+import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -76,7 +77,11 @@ class McpSetupToolsTest {
         // Default parser mock (needed by all setupAgent calls)
         lenient().when(parserStore.createParser(any())).thenReturn(Response.created(URI.create("/parserstore/parsers/par-1?version=1")).build());
 
-        service = new AgentSetupService(restInterfaceFactory, agentAdmin, "http://localhost:11434");
+        var secretProvider = mock(ISecretProvider.class);
+        // Vault disabled in tests — vaultApiKey() falls back to plaintext
+        when(secretProvider.isAvailable()).thenReturn(false);
+
+        service = new AgentSetupService(restInterfaceFactory, agentAdmin, secretProvider, "http://localhost:11434");
         var mockIdentity = mock(io.quarkus.security.identity.SecurityIdentity.class);
         lenient().when(mockIdentity.isAnonymous()).thenReturn(true);
         tools = new McpSetupTools(service, jsonSerialization, mockIdentity, false);
@@ -230,6 +235,51 @@ class McpSetupToolsTest {
         assertEquals("You are a pirate", task.getParameters().get("systemMessage"));
         assertEquals("claude-3-5-sonnet", task.getParameters().get("modelName"));
         assertEquals("sk-ant-key", task.getParameters().get("apiKey"));
+    }
+
+    @Test
+    void setupAgent_withVaultActive_storesVaultReference() throws Exception {
+        // Create a separate service instance with vault enabled
+        var vaultProvider = mock(ISecretProvider.class);
+        when(vaultProvider.isAvailable()).thenReturn(true);
+
+        var restInterfaceFactory = mock(IRestInterfaceFactory.class);
+        when(restInterfaceFactory.get(IRestRuleSetStore.class)).thenReturn(behaviorStore);
+        when(restInterfaceFactory.get(IRestLlmStore.class)).thenReturn(langchainStore);
+        when(restInterfaceFactory.get(IRestWorkflowStore.class)).thenReturn(WorkflowStore);
+        when(restInterfaceFactory.get(IRestAgentStore.class)).thenReturn(AgentStore);
+        when(restInterfaceFactory.get(IRestDocumentDescriptorStore.class)).thenReturn(descriptorStore);
+        when(restInterfaceFactory.get(IRestParserStore.class)).thenReturn(parserStore);
+
+        var vaultService = new AgentSetupService(restInterfaceFactory, agentAdmin, vaultProvider, "http://localhost:11434");
+
+        when(behaviorStore.createRuleSet(any())).thenReturn(Response.created(URI.create("/rulestore/rulesets/beh-1?version=1")).build());
+        when(langchainStore.createLlm(any())).thenReturn(Response.created(URI.create("/llmstore/llms/lc-1?version=1")).build());
+        when(WorkflowStore.createWorkflow(any())).thenReturn(Response.created(URI.create("/workflowstore/workflows/pkg-1?version=1")).build());
+        when(AgentStore.createAgent(any())).thenReturn(Response.created(URI.create("/agentstore/agents/agent-1?version=1")).build());
+
+        var vaultTools = new McpSetupTools(vaultService, jsonSerialization,
+                mock(io.quarkus.security.identity.SecurityIdentity.class), false);
+
+        vaultTools.setupAgent("Vault Agent", "You are helpful", "openai", "gpt-4o", "sk-live-secret", null, null, null,
+                null, null, null, null, false, null);
+
+        // Verify the API key was stored in the vault
+        var refCaptor = ArgumentCaptor.forClass(ai.labs.eddi.secrets.model.SecretReference.class);
+        verify(vaultProvider).store(refCaptor.capture(), eq("sk-live-secret"), contains("Vault Agent"), any());
+        assertTrue(refCaptor.getValue().keyName().startsWith("setup.vault-agent."),
+                "Vault key should start with 'setup.<sanitized-name>.'");
+        assertTrue(refCaptor.getValue().keyName().endsWith(".apiKey"),
+                "Vault key should end with '.apiKey'");
+
+        // Verify LLM config has vault reference, not plaintext
+        var lcCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
+        verify(langchainStore).createLlm(lcCaptor.capture());
+        String storedKey = lcCaptor.getValue().tasks().get(0).getParameters().get("apiKey");
+        assertTrue(storedKey.startsWith("${eddivault:"),
+                "API key should be vault reference, got: " + storedKey);
+        assertFalse(storedKey.contains("sk-live-secret"),
+                "Plaintext key must NOT appear in LLM config when vault is active");
     }
 
     @Test
@@ -440,7 +490,7 @@ class McpSetupToolsTest {
         assertTrue(params.get("systemMessage").contains("\"score\":"), "System message should contain score field");
         assertTrue(params.get("systemMessage").contains("htmlResponseText"), "System message should contain htmlResponseText");
         assertFalse(params.get("systemMessage").contains("quickReplies"), "System message should NOT contain quickReplies");
-        assertEquals("json", params.get("responseFormat"), "Gemini should have responseFormat=json");
+        assertNull(params.get("responseFormat"), "Gemini should NOT have responseFormat param (conflicts with function calling)");
 
         // PostResponse should NOT have QR instructions (only sentiment, no QR)
         assertNotNull(task.getPostResponse());
@@ -534,10 +584,10 @@ class McpSetupToolsTest {
     }
 
     @Test
-    void supportsResponseFormat_openaiAndGemini() {
+    void supportsResponseFormat_openaiAndMistral() {
         assertTrue(McpSetupTools.supportsResponseFormat("openai"));
-        assertTrue(McpSetupTools.supportsResponseFormat("gemini"));
-        assertTrue(McpSetupTools.supportsResponseFormat("gemini-vertex"));
+        assertFalse(McpSetupTools.supportsResponseFormat("gemini"), "Gemini conflicts with function calling");
+        assertFalse(McpSetupTools.supportsResponseFormat("gemini-vertex"), "Gemini-Vertex conflicts with function calling");
         assertTrue(McpSetupTools.supportsResponseFormat("mistral"));
         assertTrue(McpSetupTools.supportsResponseFormat("azure-openai"));
         assertFalse(McpSetupTools.supportsResponseFormat("anthropic"));

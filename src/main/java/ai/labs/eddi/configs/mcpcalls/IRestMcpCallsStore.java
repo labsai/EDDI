@@ -23,6 +23,7 @@ import java.util.List;
 public interface IRestMcpCallsStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.mcpcalls";
     String resourceURI = resourceBaseType + "/mcpcallsstore/mcpcalls/";
+    String versionQueryParam = "?version=";
 
     @GET
     @Path("/jsonSchema")

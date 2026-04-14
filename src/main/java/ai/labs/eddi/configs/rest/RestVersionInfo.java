@@ -41,7 +41,30 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
         try {
             IResourceStore.IResourceId resourceId = resourceStore.create(document);
             URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(), versionQueryParam, resourceId.getVersion());
-            return Response.created(createdUri).location(createdUri).build();
+            return Response.created(createdUri).location(createdUri)
+                    .header("X-Resource-URI", createdUri.toString()).build();
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
+        }
+    }
+
+    /**
+     * Creates a new resource and returns the {@link IResourceStore.IResourceId}
+     * directly, bypassing the JAX-RS {@link Response} wrapper entirely.
+     * <p>
+     * Use this method for in-process callers (CDI direct calls, import service,
+     * duplicate operations) where {@code Response.getLocation()} returns
+     * {@code null} for {@code eddi://} scheme URIs.
+     *
+     * @param document
+     *            the resource to create
+     * @return the created resource's ID and version
+     */
+    public IResourceStore.IResourceId createDocument(T document) {
+        RuntimeUtilities.checkNotNull(document, "document");
+
+        try {
+            return resourceStore.create(document);
         } catch (IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }

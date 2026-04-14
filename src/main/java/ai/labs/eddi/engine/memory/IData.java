@@ -31,4 +31,26 @@ public interface IData<T> {
     void setResult(T result);
 
     void setPublic(boolean isPublic);
+
+    /**
+     * Whether this data entry was committed (task succeeded) or uncommitted (task
+     * failed). Uncommitted data is excluded from LLM prompt assembly in subsequent
+     * turns but remains in memory for debugging and audit.
+     * <p>
+     * Default: {@code true} (backwards-compatible — all existing data is
+     * committed).
+     *
+     * @return true if the data is committed
+     * @since 6.0.0
+     */
+    boolean isCommitted();
+
+    /**
+     * Mark this data entry as committed or uncommitted.
+     *
+     * @param committed
+     *            true to mark as committed, false for uncommitted
+     * @since 6.0.0
+     */
+    void setCommitted(boolean committed);
 }

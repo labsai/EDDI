@@ -1,5 +1,6 @@
 package ai.labs.eddi.engine.lifecycle.internal;
 
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.lifecycle.IComponentCache;
@@ -8,8 +9,10 @@ import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.memory.ConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
+import ai.labs.eddi.engine.memory.model.Data;
 
 import java.time.Instant;
 import java.util.*;
@@ -18,6 +21,8 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.utils.LifecycleUtilities.createComponentKey;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
+
+import org.jboss.logging.Logger;
 
 /**
  * Executes the Lifecycle Workflow - EDDI's core processing engine.
@@ -82,6 +87,11 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * @see ai.labs.eddi.engine.runtime.internal.ConversationCoordinator
  */
 public class LifecycleManager implements ILifecycleManager {
+
+    private static final Logger LOGGER = Logger.getLogger(LifecycleManager.class);
+
+    /** Maximum length for error digest message shown to the LLM. */
+    private static final int MAX_ERROR_DIGEST_LENGTH = 200;
 
     /**
      * The ordered list of lifecycle tasks to execute. Tasks are added during Agent
@@ -174,6 +184,10 @@ public class LifecycleManager implements ILifecycleManager {
             lifecycleTasks = getLifecycleTasks(lifecycleTaskTypes);
         }
 
+        // Resolve memory policy once (null-safe)
+        var memoryPolicy = conversationMemory.getMemoryPolicy();
+        boolean strictWriteEnabled = memoryPolicy != null && memoryPolicy.isEffectivelyEnabled();
+
         // Execute each task in sequence
         for (int index = 0; index < lifecycleTasks.size(); index++) {
             ILifecycleTask task = lifecycleTasks.get(index);
@@ -181,6 +195,21 @@ public class LifecycleManager implements ILifecycleManager {
             // Check if execution should be interrupted (graceful shutdown)
             if (Thread.currentThread().isInterrupted()) {
                 throw new LifecycleException.LifecycleInterruptedException("Execution was interrupted!");
+            }
+
+            // Snapshot state before task execution (for rollback on failure)
+            var currentStep = conversationMemory.getCurrentStep();
+            Map<String, IData<?>> dataIdentitiesBefore = Map.of();
+            Set<String> outputKeysBefore = Set.of();
+            List<String> actionsBefore = List.of();
+            if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
+                dataIdentitiesBefore = cs.snapshotDataIdentities();
+                outputKeysBefore = cs.snapshotOutputKeys();
+                // Capture pre-failure actions for Bug 3 fix
+                IData<List<String>> preActionData = currentStep.getLatestData(ACTIONS);
+                if (preActionData != null && preActionData.getResult() != null) {
+                    actionsBefore = List.copyOf(preActionData.getResult());
+                }
             }
 
             try {
@@ -218,15 +247,29 @@ public class LifecycleManager implements ILifecycleManager {
 
                 // Check if task triggered a STOP_CONVERSATION action
                 checkIfStopConversationAction(conversationMemory);
-            } catch (LifecycleException e) {
+
+            } catch (LifecycleException | RuntimeException e) {
+                if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
+                    // === Strict Write Discipline: handle task failure ===
+                    String onFailureMode = resolveOnFailureMode(memoryPolicy);
+                    handleTaskFailure(cs, task, e, dataIdentitiesBefore,
+                            outputKeysBefore, actionsBefore, onFailureMode);
+                }
+
+                // Re-throw — pipeline stops (current behavior preserved).
+                // The error digest and task_failed action are stored in the
+                // conversation output for the next turn's behavior rules.
+                if (e instanceof LifecycleException le) {
+                    throw new LifecycleException("Error while executing lifecycle!", le);
+                }
                 throw new LifecycleException("Error while executing lifecycle!", e);
             }
         }
     }
 
     /**
-     * Build a summary map for the task_complete event. Includes emitted actions for
-     * behavior tasks so the Manager UI can display them.
+     * Build a summary map for the task_complete event. Includes emitted actions,
+     * tool execution traces, and cascade confidence for the Manager UI.
      */
     private Map<String, Object> buildTaskSummary(IConversationMemory conversationMemory, ILifecycleTask task) {
         var summary = new HashMap<String, Object>();
@@ -234,6 +277,16 @@ public class LifecycleManager implements ILifecycleManager {
         IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(ACTIONS);
         if (actionData != null && actionData.getResult() != null) {
             summary.put("actions", actionData.getResult());
+        }
+        // Tool execution trace (for LLM tasks) — enables live tool call display in UI
+        IData<?> traceData = conversationMemory.getCurrentStep().getLatestData("langchain:trace:" + task.getId());
+        if (traceData != null && traceData.getResult() != null) {
+            summary.put("toolTrace", traceData.getResult());
+        }
+        // Cascade confidence (when model cascade is active)
+        IData<Double> confidenceData = conversationMemory.getCurrentStep().getLatestData("audit:confidence");
+        if (confidenceData != null && confidenceData.getResult() != null) {
+            summary.put("confidence", confidenceData.getResult());
         }
         return summary;
     }
@@ -287,7 +340,7 @@ public class LifecycleManager implements ILifecycleManager {
                 llmDetail, null, // toolCalls — set by LlmTask in memory
                 actions, 0.0, // cost — set by ToolCostTracker integration
                 Instant.now(), null // HMAC computed by AuditLedgerService
-        );
+                , null);
     }
 
     /**
@@ -385,5 +438,139 @@ public class LifecycleManager implements ILifecycleManager {
     public void addLifecycleTask(ILifecycleTask lifecycleTask) {
         checkNotNull(lifecycleTask, "lifecycleTask");
         lifecycleTasks.add(lifecycleTask);
+    }
+
+    // === Strict Write Discipline: failure handling ===
+
+    /** Valid onFailure modes. */
+    private static final Set<String> VALID_ON_FAILURE_MODES = Set.of("digest", "exclude_all", "keep_all");
+
+    /**
+     * Resolve and validate the onFailure mode from the memory policy. Logs a
+     * warning and defaults to "digest" for unknown values.
+     */
+    private String resolveOnFailureMode(AgentConfiguration.MemoryPolicy memoryPolicy) {
+        var swd = memoryPolicy != null ? memoryPolicy.getStrictWriteDiscipline() : null;
+        String mode = swd != null ? swd.getOnFailure() : "digest";
+        if (mode == null || !VALID_ON_FAILURE_MODES.contains(mode)) {
+            LOGGER.warnf("[STRICT_WRITE] Unknown onFailure mode '%s', defaulting to 'digest'", mode);
+            return "digest";
+        }
+        return mode;
+    }
+
+    /**
+     * Handle a task failure under strict write discipline. Performs three
+     * operations:
+     * <ol>
+     * <li>Marks all IData entries added or overwritten by the failed task as
+     * uncommitted (using identity comparison against pre-execution snapshot)</li>
+     * <li>Rolls back ConversationOutput entries added by the failed task</li>
+     * <li>Injects an error digest (if mode is "digest") under a separate
+     * "taskErrors" key, and a {@code task_failed_<taskId>} action rebuilt from the
+     * pre-failure action state</li>
+     * </ol>
+     */
+    private void handleTaskFailure(ConversationStep step, ILifecycleTask task, Exception exception,
+                                   Map<String, IData<?>> dataIdentitiesBefore,
+                                   Set<String> outputKeysBefore, List<String> actionsBefore,
+                                   String onFailureMode) {
+
+        LOGGER.warnf("[STRICT_WRITE] Task '%s' (type=%s) failed — applying write discipline (mode=%s): %s",
+                task.getId(), task.getType(), onFailureMode, exception.getMessage());
+
+        // 1. Mark new or overwritten IData entries as uncommitted.
+        // An entry is "dirty" if its key didn't exist before OR if the
+        // IData reference changed (task overwrote an existing key).
+        for (var entry : step.getAllElements()) {
+            IData<?> before = dataIdentitiesBefore.get(entry.getKey());
+            if (before == null || before != entry) {
+                // New key or different IData instance → written by failed task
+                entry.setCommitted(false);
+            }
+        }
+
+        // 2. Rollback ConversationOutput entries added by the failed task
+        var output = step.getConversationOutput();
+        Set<String> currentKeys = new LinkedHashSet<>(output.keySet());
+        for (String key : currentKeys) {
+            if (!outputKeysBefore.contains(key)) {
+                output.remove(key);
+            }
+        }
+
+        // 3. Inject error digest and task_failed action
+        if ("digest".equals(onFailureMode)) {
+            injectErrorDigest(step, task, exception);
+        }
+        injectFailureAction(step, task, actionsBefore);
+    }
+
+    /**
+     * Injects a compact error digest into the conversation output under the
+     * dedicated "taskErrors" key (NOT mixed into "output"). This ensures
+     * {@link ConversationLogGenerator} doesn't concatenate error text with regular
+     * assistant output. The UI can render taskErrors with distinct styling (warning
+     * icon, different color).
+     */
+    private void injectErrorDigest(ConversationStep step, ILifecycleTask task, Exception exception) {
+        String summary = summarizeException(exception);
+        String digestText = String.format("Task '%s' failed: %s", task.getId(), summary);
+
+        // Store under separate "taskErrors" key — never mixed into "output"
+        var errorOutput = new LinkedHashMap<String, Object>();
+        errorOutput.put("type", "errorDigest");
+        errorOutput.put("taskId", task.getId());
+        errorOutput.put("taskType", task.getType());
+        errorOutput.put("text", digestText);
+        step.addConversationOutputList("taskErrors", List.of(errorOutput));
+
+        // Also store as committed IData so it's visible in memory
+        Data<String> digestData = new Data<>("taskError:" + task.getId(), digestText);
+        digestData.setPublic(true);
+        digestData.setCommitted(true);
+        step.storeData(digestData);
+    }
+
+    /**
+     * Injects a {@code task_failed_<taskId>} action into the conversation step.
+     * Rebuilds the actions list from the pre-failure snapshot to avoid including
+     * actions that the failed task may have added.
+     *
+     * @param actionsBefore
+     *            the actions list captured before the failed task ran
+     */
+    private void injectFailureAction(ConversationStep step, ILifecycleTask task,
+                                     List<String> actionsBefore) {
+        String failureAction = "task_failed_" + task.getId();
+
+        // Rebuild from pre-failure state + failure action
+        List<String> actions = new ArrayList<>(actionsBefore);
+        actions.add(failureAction);
+
+        // Store as fresh committed IData (replaces any uncommitted actions data)
+        step.set(ACTIONS, actions);
+        step.addConversationOutputList(ACTIONS.key(), List.of(failureAction));
+    }
+
+    /**
+     * Creates a concise, sanitized error summary suitable for LLM consumption.
+     * Strips stack traces, internal URLs, and class names to avoid context
+     * pollution.
+     */
+    private String summarizeException(Exception e) {
+        String msg = e.getMessage();
+        if (msg == null || msg.isBlank()) {
+            msg = e.getClass().getSimpleName();
+        }
+
+        // Strip common noise patterns
+        msg = msg.replaceAll("https?://[^\\s]+", "[url]");
+        msg = msg.replaceAll("at [a-zA-Z0-9.$]+\\([^)]+\\)", "");
+
+        if (msg.length() > MAX_ERROR_DIGEST_LENGTH) {
+            msg = msg.substring(0, MAX_ERROR_DIGEST_LENGTH) + "...";
+        }
+        return msg.trim();
     }
 }

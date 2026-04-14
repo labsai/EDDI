@@ -47,6 +47,18 @@ class RestSecretStoreTest {
     }
 
     @Test
+    void storeSecret_invalidatesCacheOnNewCreation() throws Exception {
+        // Bug regression: invalidateCache must fire on NEW creation, not just updates.
+        // A model may have been cached with a failed (passthrough) vault reference,
+        // so creating the secret must evict that stale cache entry.
+        when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
+
+        rest.storeSecret("default", "myKey", new IRestSecretStore.SecretRequest("secret123", null, null));
+
+        verify(secretResolver).invalidateCache(any(SecretReference.class));
+    }
+
+    @Test
     void storeSecret_returns200WhenUpdating() throws Exception {
         when(secretProvider.getMetadata(any())).thenReturn(new SecretMetadata("default", "myKey", Instant.now(), null, null, "cs", null, null));
 

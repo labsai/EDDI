@@ -35,6 +35,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
         @Tag(name = "Secrets Vault", description = "Encrypted secret storage and management"),
         @Tag(name = "Tenant Quotas", description = "Per-tenant rate limits and usage metering"),
         @Tag(name = "Audit Trail", description = "Immutable audit ledger queries"),
+        @Tag(name = "GDPR / Privacy", description = "User data erasure and export for GDPR/CCPA compliance"),
         @Tag(name = "Coordinator Admin", description = "Conversation coordinator monitoring and dead letters"),
         @Tag(name = "Orphan Admin", description = "Detect and clean up orphaned resources"),
         @Tag(name = "Log Admin", description = "Real-time log streaming and historical queries"),

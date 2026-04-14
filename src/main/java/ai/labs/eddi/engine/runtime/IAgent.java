@@ -38,4 +38,14 @@ public interface IAgent {
     default AgentConfiguration.UserMemoryConfig getUserMemoryConfig() {
         return null;
     }
+
+    /**
+     * Memory policy from agent deployment. {@code null} when no policy is
+     * configured.
+     *
+     * @since 6.0.0
+     */
+    default AgentConfiguration.MemoryPolicy getMemoryPolicy() {
+        return null;
+    }
 }

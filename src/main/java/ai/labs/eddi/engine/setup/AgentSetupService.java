@@ -32,6 +32,8 @@ import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
+import ai.labs.eddi.secrets.ISecretProvider;
+import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -60,13 +62,16 @@ public class AgentSetupService {
 
     private final IRestInterfaceFactory restInterfaceFactory;
     private final IRestAgentAdministration agentAdmin;
+    private final ISecretProvider secretProvider;
     private final String ollamaDefaultBaseUrl;
 
     @Inject
     public AgentSetupService(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin,
+            ISecretProvider secretProvider,
             @ConfigProperty(name = "eddi.ollama.default-base-url", defaultValue = "http://localhost:11434") String ollamaDefaultBaseUrl) {
         this.restInterfaceFactory = restInterfaceFactory;
         this.agentAdmin = agentAdmin;
+        this.secretProvider = secretProvider;
         this.ollamaDefaultBaseUrl = ollamaDefaultBaseUrl;
     }
 
@@ -82,7 +87,7 @@ public class AgentSetupService {
      */
     public SetupResult setupAgent(SetupAgentRequest request) throws AgentSetupException {
         // Validate required params
-        if (request.name() == null || request.name().isBlank()) {
+        if (request.agentName() == null || request.agentName().isBlank()) {
             throw new AgentSetupException("Agent name is required");
         }
         if (request.systemPrompt() == null || request.systemPrompt().isBlank()) {
@@ -109,7 +114,7 @@ public class AgentSetupService {
             String parserId = extractIdFromLocation(parserLocation);
             int parserVersion = extractVersionFromLocation(parserLocation);
             createdResources.put("parserLocation", parserLocation);
-            patchDescriptor(parserId, parserVersion, request.name());
+            patchDescriptor(parserId, parserVersion, request.agentName());
 
             // --- Step 2: Create Behavior Rules ---
             var behaviorConfig = createBehaviorConfig();
@@ -118,17 +123,20 @@ public class AgentSetupService {
             String behaviorId = extractIdFromLocation(behaviorLocation);
             int behaviorVersion = extractVersionFromLocation(behaviorLocation);
             createdResources.put("behaviorLocation", behaviorLocation);
-            patchDescriptor(behaviorId, behaviorVersion, request.name());
+            patchDescriptor(behaviorId, behaviorVersion, request.agentName());
 
             // --- Step 3: Create LLM Configuration ---
-            var llmConfig = createLlmConfig(params.providerType, params.modelId, request.apiKey(), request.systemPrompt(), toolsEnabled,
+            // Auto-vault the API key: store encrypted in vault, use vault reference in
+            // config
+            String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName());
+            var llmConfig = createLlmConfig(params.providerType, params.modelId, effectiveApiKey, request.systemPrompt(), toolsEnabled,
                     request.builtInToolsWhitelist(), request.baseUrl(), promptResponseJson, quickReplies, sentiment, null);
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
             String langchainId = extractIdFromLocation(langchainLocation);
             int langchainVersion = extractVersionFromLocation(langchainLocation);
             createdResources.put("langchainLocation", langchainLocation);
-            patchDescriptor(langchainId, langchainVersion, request.name());
+            patchDescriptor(langchainId, langchainVersion, request.agentName());
 
             // --- Step 4: Create MCP Calls Configurations (if MCP server URLs provided) ---
             List<String> mcpCallsLocations = null;
@@ -145,7 +153,7 @@ public class AgentSetupService {
                     int mcpVersion = extractVersionFromLocation(mcpLocation);
                     mcpCallsLocations.add(mcpLocation);
                     createdResources.put("mcpCallsLocation_" + mcpCallsLocations.size(), mcpLocation);
-                    patchDescriptor(mcpId, mcpVersion, request.name());
+                    patchDescriptor(mcpId, mcpVersion, request.agentName());
                 }
             }
 
@@ -158,7 +166,7 @@ public class AgentSetupService {
                 String outputId = extractIdFromLocation(outputLocation);
                 int outputVersion = extractVersionFromLocation(outputLocation);
                 createdResources.put("outputLocation", outputLocation);
-                patchDescriptor(outputId, outputVersion, request.name());
+                patchDescriptor(outputId, outputVersion, request.agentName());
             }
 
             // --- Step 6: Create Workflow ---
@@ -168,7 +176,7 @@ public class AgentSetupService {
             String workflowId = extractIdFromLocation(workflowLocation);
             int workflowVersion = extractVersionFromLocation(workflowLocation);
             createdResources.put("packageLocation", workflowLocation);
-            patchDescriptor(workflowId, workflowVersion, request.name());
+            patchDescriptor(workflowId, workflowVersion, request.agentName());
 
             // --- Step 7: Create Agent ---
             var agentConfig = new AgentConfiguration();
@@ -178,11 +186,11 @@ public class AgentSetupService {
             String agentId = extractIdFromLocation(agentLocation);
             int agentVersion = extractVersionFromLocation(agentLocation);
             createdResources.put("agentLocation", agentLocation);
-            patchDescriptor(agentId, agentVersion, request.name());
+            patchDescriptor(agentId, agentVersion, request.agentName());
 
             // --- Step 8: Deploy ---
             var resultBuilder = SetupResult.builder().action("setup_complete").agentId(agentId != null ? agentId : "unknown")
-                    .agentName(request.name()).provider(params.providerType).model(params.modelId);
+                    .agentName(request.agentName()).provider(params.providerType).model(params.modelId);
 
             if (quickReplies)
                 resultBuilder.quickRepliesEnabled(true);
@@ -216,7 +224,7 @@ public class AgentSetupService {
      */
     public SetupResult createApiAgent(CreateApiAgentRequest request) throws AgentSetupException {
         // Validate required params
-        if (request.name() == null || request.name().isBlank()) {
+        if (request.agentName() == null || request.agentName().isBlank()) {
             throw new AgentSetupException("Agent name is required");
         }
         if (request.systemPrompt() == null || request.systemPrompt().isBlank()) {
@@ -255,7 +263,7 @@ public class AgentSetupService {
 
                 String httpCallsId = extractIdFromLocation(httpCallsLocation);
                 int httpCallsVersion = extractVersionFromLocation(httpCallsLocation);
-                patchDescriptor(httpCallsId, httpCallsVersion, request.name() + " - " + groupName);
+                patchDescriptor(httpCallsId, httpCallsVersion, request.agentName() + " - " + groupName);
             }
             createdResources.put("httpCallsGroups", groupNames);
             createdResources.put("httpCallsLocations", httpCallsLocations);
@@ -265,14 +273,14 @@ public class AgentSetupService {
             Response parserResponse = getRestStore(IRestParserStore.class).createParser(parserConfig);
             String parserLocation = parserResponse.getHeaderString("Location");
             createdResources.put("parserLocation", parserLocation);
-            patchDescriptor(extractIdFromLocation(parserLocation), extractVersionFromLocation(parserLocation), request.name());
+            patchDescriptor(extractIdFromLocation(parserLocation), extractVersionFromLocation(parserLocation), request.agentName());
 
             // --- Step 4: Create Behavior Rules ---
             var behaviorConfig = createBehaviorConfig();
             Response behaviorResponse = getRestStore(IRestRuleSetStore.class).createRuleSet(behaviorConfig);
             String behaviorLocation = behaviorResponse.getHeaderString("Location");
             createdResources.put("behaviorLocation", behaviorLocation);
-            patchDescriptor(extractIdFromLocation(behaviorLocation), extractVersionFromLocation(behaviorLocation), request.name());
+            patchDescriptor(extractIdFromLocation(behaviorLocation), extractVersionFromLocation(behaviorLocation), request.agentName());
 
             // Enrich the system prompt with API endpoint summary so the LLM
             // understands which endpoints are available and how to use them.
@@ -280,19 +288,21 @@ public class AgentSetupService {
             boolean quickReplies = request.enableQuickReplies() != null && request.enableQuickReplies();
             boolean sentiment = request.enableSentimentAnalysis() != null && request.enableSentimentAnalysis();
             String promptResponseJson = buildPromptResponseJson(quickReplies, sentiment);
-            var llmConfig = createLlmConfig(params.providerType, params.modelId, request.apiKey(), enrichedPrompt, false, null, null,
+            // Auto-vault the API key before storing in LLM config
+            String effectiveApiKey = vaultApiKey(request.apiKey(), request.agentName());
+            var llmConfig = createLlmConfig(params.providerType, params.modelId, effectiveApiKey, enrichedPrompt, false, null, null,
                     promptResponseJson, quickReplies, sentiment, httpCallsLocations);
             Response llmResponse = getRestStore(IRestLlmStore.class).createLlm(llmConfig);
             String langchainLocation = llmResponse.getHeaderString("Location");
             createdResources.put("langchainLocation", langchainLocation);
-            patchDescriptor(extractIdFromLocation(langchainLocation), extractVersionFromLocation(langchainLocation), request.name());
+            patchDescriptor(extractIdFromLocation(langchainLocation), extractVersionFromLocation(langchainLocation), request.agentName());
 
             // --- Step 6: Create Workflow (with httpcalls in pipeline) ---
             var workflowConfig = createWorkflowConfig(parserLocation, behaviorLocation, httpCallsLocations, null, langchainLocation, null);
             Response workflowResponse = getRestStore(IRestWorkflowStore.class).createWorkflow(workflowConfig);
             String workflowLocation = workflowResponse.getHeaderString("Location");
             createdResources.put("packageLocation", workflowLocation);
-            patchDescriptor(extractIdFromLocation(workflowLocation), extractVersionFromLocation(workflowLocation), request.name());
+            patchDescriptor(extractIdFromLocation(workflowLocation), extractVersionFromLocation(workflowLocation), request.agentName());
 
             // --- Step 7: Create Agent ---
             var agentConfig = new AgentConfiguration();
@@ -302,11 +312,11 @@ public class AgentSetupService {
             String agentId = extractIdFromLocation(agentLocation);
             int agentVersion = extractVersionFromLocation(agentLocation);
             createdResources.put("agentLocation", agentLocation);
-            patchDescriptor(agentId, agentVersion, request.name());
+            patchDescriptor(agentId, agentVersion, request.agentName());
 
             // --- Step 8: Deploy ---
             var resultBuilder = SetupResult.builder().action("api_agent_created").agentId(agentId != null ? agentId : "unknown")
-                    .agentName(request.name()).provider(params.providerType).model(params.modelId).endpointCount(buildResult.endpointCount())
+                    .agentName(request.agentName()).provider(params.providerType).model(params.modelId).endpointCount(buildResult.endpointCount())
                     .groups(groupNames);
 
             if (params.shouldDeploy && agentId != null) {
@@ -459,6 +469,53 @@ public class AgentSetupService {
     }
 
     /**
+     * Auto-vault an API key if the vault is available. When the vault is active,
+     * the plaintext key is stored encrypted and a vault reference string
+     * ({@code ${eddivault:keyName}}) is returned. Downstream consumers
+     * ({@link ai.labs.eddi.modules.llm.impl.ChatModelRegistry}) resolve vault
+     * references transparently at model-load time.
+     *
+     * <p>
+     * When the vault is <b>not</b> configured (common in dev mode without
+     * {@code EDDI_VAULT_MASTER_KEY}), the plaintext key is returned as-is. This
+     * ensures the setup flow never breaks due to missing vault config.
+     *
+     * @param apiKey
+     *            the plaintext API key (may be null for local LLM providers)
+     * @param agentName
+     *            used for the vault key namespace and description
+     * @return the vault reference string, or the plaintext key if vault is
+     *         unavailable
+     */
+    private String vaultApiKey(String apiKey, String agentName) {
+        if (apiKey == null || apiKey.isBlank()) {
+            return apiKey;
+        }
+
+        if (!secretProvider.isAvailable()) {
+            LOGGER.warn("Secrets Vault is not configured — API key will be stored in plaintext. "
+                    + "Set EDDI_VAULT_MASTER_KEY to enable encrypted storage.");
+            return apiKey;
+        }
+
+        try {
+            // Namespace: setup.<sanitized-agent-name>.<timestamp>.apiKey
+            // Timestamp suffix prevents collision when two agents share the same name
+            String sanitizedName = agentName.toLowerCase().replaceAll("[^a-z0-9]", "-");
+            String keyName = "setup." + sanitizedName + "." + System.currentTimeMillis() + ".apiKey";
+            var ref = new SecretReference(SecretReference.DEFAULT_TENANT, keyName);
+            secretProvider.store(ref, apiKey, "Auto-vaulted by AgentSetupService for agent: " + agentName,
+                    List.of("*"));
+            LOGGER.infof("API key vaulted for agent '%s' (key: %s)", agentName, keyName);
+            return ref.toReferenceString();
+        } catch (ISecretProvider.SecretProviderException e) {
+            LOGGER.error("Failed to vault API key for agent '" + agentName + "': " + e.getMessage()
+                    + " — falling back to plaintext storage.");
+            return apiKey;
+        }
+    }
+
+    /**
      * Build the postResponse that extracts structured data from LLM JSON output.
      */
     public PostResponse buildPostResponse(boolean quickReplies, boolean sentiment) {
@@ -589,7 +646,16 @@ public class AgentSetupService {
      * Check if the provider supports builder-level responseFormat=json.
      */
     public static boolean supportsResponseFormat(String modelType) {
-        return "openai".equals(modelType) || "gemini".equals(modelType) || "gemini-vertex".equals(modelType) || "mistral".equals(modelType)
+        // NOTE: Gemini and Gemini-Vertex are intentionally excluded here.
+        // The Gemini API does NOT support combining responseFormat=JSON
+        // (responseMimeType=
+        // application/json) with function calling (tools). Setting responseFormat on
+        // the
+        // model builder causes "Function calling with a response mime type:
+        // 'application/json'
+        // is unsupported" errors. JSON mode is instead enforced at the REQUEST level by
+        // LegacyChatExecutor, which only applies it when no tools are present.
+        return "openai".equals(modelType) || "mistral".equals(modelType)
                 || "azure-openai".equals(modelType);
     }
 

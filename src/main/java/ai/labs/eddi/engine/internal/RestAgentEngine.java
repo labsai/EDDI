@@ -4,6 +4,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.*;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -61,8 +62,12 @@ public class RestAgentEngine implements IRestAgentEngine {
         try {
             var result = conversationService.startConversation(environment, agentId, userId, context);
             return Response.created(result.conversationUri()).build();
+        } catch (ProcessingRestrictedException e) {
+            LOGGER.warnf("GDPR processing restricted for user: %s", e.getMessage());
+            return Response.status(Response.Status.FORBIDDEN).type(TEXT_PLAIN).entity(e.getMessage()).build();
         } catch (AgentNotReadyException e) {
-            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN).entity(e.getMessage()).build();
+            LOGGER.warn("Agent not ready: " + e.getMessage());
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN).entity("Agent is not deployed or not ready").build();
         } catch (ResourceStoreException | ResourceNotFoundException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Failed to start conversation");
@@ -143,11 +148,16 @@ public class RestAgentEngine implements IRestAgentEngine {
         try {
             conversationService.say(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly, response::resume);
         } catch (AgentMismatchException e) {
-            response.resume(Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(e.getMessage()).build());
+            LOGGER.warn("Agent mismatch for conversation " + conversationId + ": " + e.getMessage());
+            response.resume(Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity("Agent version mismatch").build());
         } catch (AgentNotReadyException e) {
-            response.resume(new NotFoundException(e.getMessage()));
+            LOGGER.warn("Agent not ready for conversation " + conversationId + ": " + e.getMessage());
+            response.resume(new NotFoundException("Agent is not deployed or not ready"));
         } catch (ConversationEndedException e) {
-            response.resume(Response.status(Response.Status.GONE).entity(e.getMessage()).build());
+            response.resume(Response.status(Response.Status.GONE).entity("Conversation has ended").build());
+        } catch (ProcessingRestrictedException e) {
+            LOGGER.warnf("GDPR processing restricted: %s", e.getMessage());
+            response.resume(Response.status(Response.Status.FORBIDDEN).type(TEXT_PLAIN).entity(e.getMessage()).build());
         } catch (ResourceNotFoundException e) {
             response.resume(new NotFoundException());
         } catch (Exception e) {

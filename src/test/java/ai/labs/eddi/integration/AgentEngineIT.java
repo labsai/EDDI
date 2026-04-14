@@ -8,6 +8,7 @@ import org.junit.jupiter.api.*;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
  * Integration test for Agent Engine conversation lifecycle.
@@ -65,9 +66,19 @@ public class AgentEngineIT extends BaseIntegrationIT {
     @Test
     @DisplayName("should return welcome message on conversation start")
     void checkWelcomeMessage() throws Exception {
-        Thread.sleep(1000); // wait for async welcome processing
-        Response response = getConversationLog(agentResourceId.id(), conversationResourceId.id(), false);
+        // Poll until the async welcome message has been processed
+        Response response = null;
+        for (int i = 0; i < 20; i++) { // max 10 seconds
+            response = getConversationLog(agentResourceId.id(), conversationResourceId.id(), false);
+            if (response.statusCode() == 200) {
+                var steps = response.jsonPath().getList("conversationSteps");
+                if (steps != null && !steps.isEmpty())
+                    break;
+            }
+            Thread.sleep(500);
+        }
 
+        assertNotNull(response);
         response.then().assertThat().statusCode(200).body("agentId", equalTo(agentResourceId.id()))
                 .body("agentVersion", equalTo(agentResourceId.version())).body("conversationSteps", hasSize(1))
                 .body("conversationSteps[0].conversationStep[0].key", equalTo("actions"))
@@ -137,9 +148,10 @@ public class AgentEngineIT extends BaseIntegrationIT {
         Response response = sendUserInput(agentResourceId.id(), conversationResourceId.id(), "question", false, false);
 
         response.then().assertThat().statusCode(200).body("conversationSteps", hasSize(2))
-                .body("conversationSteps[1].conversationStep[3].key", equalTo("quickReplies:giving_two_options"))
-                .body("conversationSteps[1].conversationStep[3].value[0].value", equalTo("Option 1"))
-                .body("conversationSteps[1].conversationStep[3].value[1].value", equalTo("Option 2"));
+                .body("conversationSteps[1].conversationStep.find { it.key == 'quickReplies:giving_two_options' }.value[0].value",
+                        equalTo("Option 1"))
+                .body("conversationSteps[1].conversationStep.find { it.key == 'quickReplies:giving_two_options' }.value[1].value",
+                        equalTo("Option 2"));
     }
 
     // ==================== Context Handling ====================
@@ -178,8 +190,9 @@ public class AgentEngineIT extends BaseIntegrationIT {
                 {"input":"hello","context":{"userInfo":{"type":"object","value":{"username":"John"}}}}""";
         Response response = sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
 
-        response.then().assertThat().statusCode(200).body("conversationSteps[1].conversationStep[8].key", equalTo("output:text:greet_personally"))
-                .body("conversationSteps[1].conversationStep[8].value.text", equalTo("Hello John! Nice to meet you! :-)"));
+        response.then().assertThat().statusCode(200)
+                .body("conversationSteps[1].conversationStep.find { it.key == 'output:text:greet_personally' }.value.text",
+                        equalTo("Hello John! Nice to meet you! :-)"));
     }
 
     // ==================== Property Extraction ====================
@@ -191,8 +204,9 @@ public class AgentEngineIT extends BaseIntegrationIT {
                 {"input":"property","context":{}}""";
         Response response = sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
 
-        response.then().assertThat().statusCode(200).body("conversationSteps[1].conversationStep[6].key", equalTo("properties:someMeaning"))
-                .body("conversationSteps[1].conversationStep[6].value[0].valueString", equalTo("someValue"));
+        response.then().assertThat().statusCode(200)
+                .body("conversationSteps[1].conversationStep.find { it.key == 'properties:someMeaning' }.value[0].valueString",
+                        equalTo("someValue"));
     }
 
     // ==================== Conversation Ended ====================
@@ -203,10 +217,19 @@ public class AgentEngineIT extends BaseIntegrationIT {
         String body = """
                 {"input":"bye","context":{"userInfo":{"type":"object","value":{"username":"John"}}}}""";
         sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
-        Thread.sleep(100);
+        // Poll until the conversation state has propagated (avoids hardcoded sleep)
+        for (int i = 0; i < 20; i++) { // max 10 seconds
+            Response probe = sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
+            if (probe.statusCode() == 410) {
+                probe.then().assertThat().statusCode(410).body(equalTo("Conversation has ended"));
+                return;
+            }
+            Thread.sleep(500);
+        }
+        // Final attempt (will fail with assertion error if state never propagated)
         Response response = sendJsonInput(agentResourceId.id(), conversationResourceId.id(), body, true);
 
-        response.then().assertThat().statusCode(410).body(equalTo("Conversation has ended!"));
+        response.then().assertThat().statusCode(410).body(equalTo("Conversation has ended"));
     }
 
     // ==================== Helpers ====================
@@ -223,7 +246,7 @@ public class AgentEngineIT extends BaseIntegrationIT {
         // Create package with all extensions
         String packageBody = String.format("""
                 {
-                  "WorkflowSteps": [
+                  "workflowSteps": [
                     {
                       "type": "eddi://ai.labs.parser",
                       "config": {},
@@ -272,8 +295,11 @@ public class AgentEngineIT extends BaseIntegrationIT {
     }
 
     private void deployAgent(String id, int version) throws InterruptedException {
-        given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false", id, version));
-        for (int i = 0; i < 60; i++) {
+        // Use waitForCompletion=true — server waits up to 30s
+        given().post(String.format("administration/production/deploy/%s?version=%s&autoDeploy=false&waitForCompletion=true", id, version));
+
+        // Verify deployment reached READY (may already be done from server-side wait)
+        for (int i = 0; i < 120; i++) { // max 60 seconds additional polling
             Response response = given().get(String.format("administration/production/deploymentstatus/%s?version=%s&format=text", id, version));
             String status = response.getBody().print().trim();
             if ("READY".equals(status))
@@ -287,6 +313,6 @@ public class AgentEngineIT extends BaseIntegrationIT {
 
     private Response sendJsonInput(String agentId, String conversationId, String jsonBody, boolean returnDetailed) {
         return given().contentType(ContentType.JSON).body(jsonBody).post(
-                String.format("agents/production/%s/%s?returnDetailed=%s&returnCurrentStepOnly=%s", agentId, conversationId, returnDetailed, false));
+                String.format("agents/%s?returnDetailed=%s&returnCurrentStepOnly=%s", conversationId, returnDetailed, false));
     }
 }

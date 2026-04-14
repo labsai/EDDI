@@ -2,14 +2,17 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.SecretReference;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import org.jboss.logging.Logger;
 
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -45,6 +48,18 @@ public class ChatModelRegistry {
     ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders, SecretResolver secretResolver) {
         this.languageModelApiConnectorBuilders = languageModelApiConnectorBuilders;
         this.secretResolver = secretResolver;
+    }
+
+    /**
+     * Register for write-through cache invalidation: when vault secrets are written
+     * or rotated, evict affected model instances so they are rebuilt with the new
+     * API key on next use. Surgical: only models whose parameters contain the
+     * changed vault reference are evicted.
+     */
+    @PostConstruct
+    void registerSecretInvalidation() {
+        secretResolver.registerInvalidationListener(this::invalidateForSecret);
+        LOGGER.info("ChatModelRegistry registered for secret invalidation events");
     }
 
     /**
@@ -127,6 +142,77 @@ public class ChatModelRegistry {
         returnMap.remove(KEY_LOG_REQUESTS);
         returnMap.remove(KEY_LOG_RESPONSES);
         return returnMap;
+    }
+
+    /**
+     * Evict cached model instances affected by a secret change.
+     * <p>
+     * When {@code reference} is non-null (single secret changed), scan cache
+     * entries and evict only those whose parameter values contain a vault reference
+     * to the changed secret — either short form ({@code ${eddivault:keyName}}) or
+     * full form ({@code ${eddivault:tenantId/keyName}}).
+     * <p>
+     * When {@code reference} is null (DEK/KEK rotation — all secrets affected),
+     * clear everything.
+     *
+     * @param reference
+     *            the changed secret, or null for full invalidation
+     */
+    void invalidateForSecret(SecretReference reference) {
+        if (reference == null) {
+            // Full invalidation (DEK/KEK rotation)
+            int total = modelCache.size() + streamingModelCache.size();
+            modelCache.clear();
+            streamingModelCache.clear();
+            if (total > 0) {
+                LOGGER.infof("Invalidated all %d model(s) due to bulk secret rotation", total);
+            }
+            return;
+        }
+
+        // Build the vault reference forms to search for in cached parameters.
+        // Full form: ${eddivault:tenantId/keyName} — always valid
+        String fullRef = "${eddivault:" + reference.tenantId() + "/" + reference.keyName() + "}";
+        // Short form: ${eddivault:keyName} — only valid for the default tenant.
+        // The short form always resolves to "default", so a non-default tenant's
+        // secret must NOT match short-form references (that would be a false positive).
+        String shortRef = SecretReference.DEFAULT_TENANT.equals(reference.tenantId())
+                ? "${eddivault:" + reference.keyName() + "}"
+                : null;
+
+        int evicted = evictMatching(modelCache, fullRef, shortRef)
+                + evictMatching(streamingModelCache, fullRef, shortRef);
+
+        if (evicted > 0) {
+            LOGGER.infof("Evicted %d model(s) using secret '%s/%s'",
+                    evicted, reference.tenantId(), reference.keyName());
+        }
+    }
+
+    /**
+     * Scan a cache and remove entries whose parameter values contain either vault
+     * reference form.
+     */
+    private <T> int evictMatching(Map<ModelCacheKey, T> cache, String ref1, String ref2) {
+        int count = 0;
+        Iterator<ModelCacheKey> it = cache.keySet().iterator();
+        while (it.hasNext()) {
+            ModelCacheKey key = it.next();
+            if (parametersContainRef(key.parameters(), ref1, ref2)) {
+                it.remove();
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static boolean parametersContainRef(Map<String, String> params, String ref1, String ref2) {
+        for (String value : params.values()) {
+            if (value != null && (value.contains(ref1) || (ref2 != null && value.contains(ref2)))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

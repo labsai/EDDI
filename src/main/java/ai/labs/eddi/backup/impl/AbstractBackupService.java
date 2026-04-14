@@ -17,6 +17,9 @@ abstract class AbstractBackupService {
     static final String LLM_EXT = "langchain";
     static final String PROPERTY_EXT = "property";
     static final String OUTPUT_EXT = "output";
+    static final String MCPCALLS_EXT = "mcpcalls";
+    static final String RAG_EXT = "rag";
+    static final String SNIPPET_EXT = "snippet";
 
     // ---- V6 canonical URI patterns ----
     static final Pattern DICTIONARY_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.dictionary/dictionarystore/dictionaries/.*?\"");
@@ -25,6 +28,8 @@ abstract class AbstractBackupService {
     static final Pattern LANGCHAIN_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.llm/llmstore/llms/.*?\"");
     static final Pattern PROPERTY_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.property/propertysetterstore/propertysetters/.*?\"");
     static final Pattern OUTPUT_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.output/outputstore/outputsets/.*?\"");
+    static final Pattern MCPCALLS_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.mcpcalls/mcpcallsstore/mcpcalls/.*?\"");
+    static final Pattern RAG_URI_PATTERN = Pattern.compile("\"eddi://ai.labs.rag/ragstore/rags/.*?\"");
 
     // ---- Legacy (v5) URI patterns for backwards-compatible ZIP import ----
     static final Pattern LEGACY_DICTIONARY_URI_PATTERN = Pattern

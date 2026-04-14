@@ -38,6 +38,13 @@ public final class MemoryKeys {
      */
     public static final MemoryKey<String> EXPRESSIONS_PARSED = MemoryKey.of("expressions:parsed");
 
+    /**
+     * Input-to-expression matches. Written by InputParserTask. Maps each matched
+     * user input word to the expression it triggered. Useful for debugging which
+     * input produced which expression.
+     */
+    public static final MemoryKey<List<String>> EXPRESSIONS_MATCHES = MemoryKey.of("expressions:matches");
+
     /** Extracted intent names. Written by InputParserTask. */
     public static final MemoryKey<List<String>> INTENTS = MemoryKey.ofPublic("intents");
 
@@ -81,4 +88,16 @@ public final class MemoryKeys {
 
     /** Extracted properties. Written by PropertySetterTask. */
     public static final MemoryKey<List<?>> PROPERTIES_EXTRACTED = MemoryKey.ofPublic("properties:extracted");
+
+    // ---- Attachments (Multimodal) ----
+
+    /**
+     * Binary attachment references for the current step. Stored as
+     * {@code List<Attachment>} metadata references — never inline base64. Written
+     * by the REST layer on multipart upload, read by LlmTask for multimodal LLM
+     * forwarding and by ContentTypeMatcher for routing.
+     *
+     * @since 6.0.0
+     */
+    public static final MemoryKey<List<?>> ATTACHMENTS = MemoryKey.ofPublic("attachments");
 }

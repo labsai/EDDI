@@ -160,6 +160,14 @@ public class PostgresAuditStore implements IAuditStore {
         }
     }
 
+    @Override
+    public List<AuditEntry> getEntriesByUserId(String userId, int skip, int limit) {
+        ensureSchema();
+        String sql = "SELECT " + SELECT_ALL + " FROM audit_ledger"
+                + " WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?";
+        return queryEntries(sql, userId, limit, skip);
+    }
+
     // -- Internal helpers --
 
     private void setEntryParams(PreparedStatement ps, AuditEntry entry) throws SQLException, IOException {
@@ -224,6 +232,20 @@ public class PostgresAuditStore implements IAuditStore {
                 rs.getInt("task_index"), rs.getLong("duration_ms"), (Map<String, Object>) data.get("input"), (Map<String, Object>) data.get("output"),
                 (Map<String, Object>) data.get("llmDetail"), (Map<String, Object>) data.get("toolCalls"),
                 data.get("actions") instanceof List<?> list ? (List<String>) list : null, rs.getDouble("cost"), ts != null ? ts.toInstant() : null,
-                rs.getString("hmac"));
+                rs.getString("hmac"), null);
+    }
+    // === GDPR ===
+
+    @Override
+    public long pseudonymizeByUserId(String userId, String pseudonym) {
+        ensureSchema();
+        String sql = "UPDATE audit_ledger SET user_id = ? WHERE user_id = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, pseudonym);
+            ps.setString(2, userId);
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to pseudonymize audit entries for userId", e);
+        }
     }
 }

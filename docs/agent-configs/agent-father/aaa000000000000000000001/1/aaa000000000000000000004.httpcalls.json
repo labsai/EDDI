@@ -1,0 +1,26 @@
+{
+  "targetServerUrl" : "http://localhost:7070",
+  "httpCalls" : [ {
+    "name" : "Setup Agent",
+    "actions" : [ "create_agent" ],
+    "saveResponse" : true,
+    "responseObjectName" : "setupResult",
+    "responseHeaderObjectName" : "setupResultHeader",
+    "fireAndForget" : false,
+    "request" : {
+      "path" : "/administration/agents/setup",
+      "headers" : { },
+      "queryParams" : { },
+      "method" : "post",
+      "contentType" : "application/json",
+      "body" : "{\"agentName\":\"{properties.agentName}\",\"systemPrompt\":\"{properties.systemPrompt}\",\"provider\":\"{properties.provider}\",\"model\":\"{properties.model}\",\"apiKey\":\"{properties.apiKey}\",\"baseUrl\":\"{properties.baseUrl}\",\"introMessage\":\"{properties.introMessage}\",\"deploy\":true}"
+    },
+    "postResponse" : {
+      "retryHttpCallInstruction" : {
+        "maxRetries" : 3,
+        "exponentialBackoffDelayInMillis" : 1000,
+        "retryOnHttpCodes" : [ 502, 503 ]
+      }
+    }
+  } ]
+}

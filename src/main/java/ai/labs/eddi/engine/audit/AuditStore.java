@@ -49,6 +49,7 @@ public class AuditStore implements IAuditStore {
     private static final String F_COST = "cost";
     private static final String F_TIMESTAMP = "timestamp";
     private static final String F_HMAC = "hmac";
+    private static final String F_AGENT_SIGNATURE = "agentSignature";
 
     private final MongoCollection<Document> collection;
 
@@ -100,6 +101,11 @@ public class AuditStore implements IAuditStore {
         return collection.countDocuments(new Document(F_CONVERSATION_ID, conversationId));
     }
 
+    @Override
+    public List<AuditEntry> getEntriesByUserId(String userId, int skip, int limit) {
+        Document filter = new Document(F_USER_ID, userId);
+        return query(filter, skip, limit);
+    }
     // ==================== Private Helpers ====================
 
     private List<AuditEntry> query(Document filter, int skip, int limit) {
@@ -145,6 +151,8 @@ public class AuditStore implements IAuditStore {
             doc.put(F_TIMESTAMP, Date.from(entry.timestamp()));
         if (entry.hmac() != null)
             doc.put(F_HMAC, entry.hmac());
+        if (entry.agentSignature() != null)
+            doc.put(F_AGENT_SIGNATURE, entry.agentSignature());
         return doc;
     }
 
@@ -157,6 +165,13 @@ public class AuditStore implements IAuditStore {
                 doc.get(F_LLM_DETAIL) instanceof Document d ? new LinkedHashMap<>(d) : null,
                 doc.get(F_TOOL_CALLS) instanceof Document d ? new LinkedHashMap<>(d) : null, doc.getList(F_ACTIONS, String.class),
                 doc.getDouble(F_COST) != null ? doc.getDouble(F_COST) : 0.0,
-                doc.getDate(F_TIMESTAMP) != null ? doc.getDate(F_TIMESTAMP).toInstant() : null, doc.getString(F_HMAC));
+                doc.getDate(F_TIMESTAMP) != null ? doc.getDate(F_TIMESTAMP).toInstant() : null, doc.getString(F_HMAC),
+                doc.getString(F_AGENT_SIGNATURE));
+    }
+    @Override
+    public long pseudonymizeByUserId(String userId, String pseudonym) {
+        return collection.updateMany(
+                new Document(F_USER_ID, userId),
+                new Document("$set", new Document(F_USER_ID, pseudonym))).getModifiedCount();
     }
 }

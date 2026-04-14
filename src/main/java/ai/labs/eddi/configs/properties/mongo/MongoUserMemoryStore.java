@@ -280,6 +280,18 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         return memoriesCollection.countDocuments(eq(FIELD_USER_ID, userId));
     }
 
+    @Override
+    public long deleteOlderThan(int olderThanDays) throws IResourceStore.ResourceStoreException {
+        Instant cutoff = Instant.now().minus(java.time.Duration.ofDays(olderThanDays));
+        // Exclude GDPR system keys (e.g. _gdpr_processing_restricted) from retention
+        // cleanup
+        Bson filter = and(
+                Filters.lt(FIELD_UPDATED_AT, cutoff.toString()),
+                Filters.not(Filters.regex(FIELD_KEY, "^_gdpr_")));
+        DeleteResult result = memoriesCollection.deleteMany(filter);
+        return result.getDeletedCount();
+    }
+
     // === Document conversion ===
 
     private Bson buildUpsertFilter(UserMemoryEntry entry) {

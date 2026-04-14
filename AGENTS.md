@@ -24,8 +24,8 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 - **Lifecycle pipeline**: Input → Parse → Behavior Rules → Actions → Tasks → Output
 - **Stateless tasks, stateful memory**: `ILifecycleTask` implementations are singletons; all state lives in `IConversationMemory`
 - **Action-based orchestration**: Tasks emit/listen for string-based actions, never call each other directly
-- **Self-contained platform**: EDDI is a closed platform, not a library consumed by third-party code. Internal interfaces (`IPropertiesStore`, `IResourceStore`, etc.) have no external consumers. Deprecation and replacement of internal APIs is safe — the only backward-compat concern is old JSON configs stored in MongoDB or imported via ZIP.
-- **CI/CD**: GitHub Actions (compile → test → Docker build → smoke test → push to Docker Hub). `[skip docker]` in commit message skips image builds. Tag-based releases (`v6.0.0-RC1` → `labsai/eddi:6.0.0-RC1`)
+- **Self-contained platform**: EDDI is a closed platform, not a library consumed by third-party code. Internal interfaces (`IUserMemoryStore`, `IResourceStore`, etc.) have no external consumers. Deprecation and replacement of internal APIs is safe — the only backward-compat concern is old JSON configs stored in MongoDB or imported via ZIP.
+- **CI/CD**: GitHub Actions (compile → test → Docker build → smoke test → push to Docker Hub). `[skip docker]` in commit message skips image builds. Tag-based releases (`v6.0.0-RC2` → `labsai/eddi:6.0.0-RC2`)
 
 ---
 
@@ -42,7 +42,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 ### During Work
 
-3. **Branch: `feature/version-6.0.0`**: All v6.0 work branches from and merges back to `feature/version-6.0.0`. **Do NOT commit directly to `main`.**
+3. **Branching**: Check `git branch --show-current` and `git log -5 --oneline` to understand the current branch context. **Do NOT commit directly to `main`.** If unsure which branch to use, ask the user.
 4. **Commit often**: Every working unit gets a commit. Use conventional commits:
    ```
    feat(scope): description
@@ -73,7 +73,7 @@ Follow this order unless the user explicitly requests something different.
 | Phase | Area                     | Highlights                                                                                          |
 | ----- | ------------------------ | --------------------------------------------------------------------------------------------------- |
 | 0     | Security Quick Wins      | CORS lockdown, PathNavigator (replaced OGNL)                                                        |
-| 1     | Backend Foundation       | ConversationService extraction, SSE streaming, typed memory, LangchainTask decomposition            |
+| 1     | Backend Foundation       | ConversationService extraction, SSE streaming, typed memory, LlmTask decomposition                  |
 | 2     | Testing Infrastructure   | Integration tests migrated to main repo, Testcontainers, API contract tests                         |
 | 3     | Manager UI               | Greenfield React 19 + Vite + Tailwind rewrite                                                       |
 | 4     | Chat-UI                  | CRA→Vite, SSE streaming, Keycloak auth                                                              |
@@ -81,24 +81,38 @@ Follow this order unless the user explicitly requests something different.
 | 6     | DB-Agnostic Architecture | PostgreSQL adapter, MongoDB sync driver, Caffeine cache, Lombok removal, langchain4j core migration |
 | 7     | Security & Compliance    | Secrets Vault, Audit Ledger (EU AI Act), tenant quota stub                                          |
 | 8     | MCP Integration          | MCP Server (33 tools), MCP Client, agent discovery, managed conversations                           |
-| 8c    | RAG Foundation            | Config-driven vector store retrieval, pgvector, httpCall RAG                                         |
-| 10    | Group Conversations       | Multi-agent debate orchestration, 5 styles, group-of-groups                                          |
-| —     | A2A Protocol              | Agent-to-Agent peer communication, Agent Cards, skill discovery                                      |
-| —     | Multi-Model Cascading     | Sequential model escalation with confidence routing                                                  |
-| —     | LLM Provider Expansion    | 7 → 12 providers (Mistral, Azure OpenAI, Bedrock, Oracle GenAI)                                      |
-| —     | Quarkus 3.34.1            | LTS upgrade, Java 25 module fix                                                                      |
-| 12    | CI/CD                     | GitHub Actions unified pipeline, Docker Hub push, CircleCI removed                                    |
+| 8c    | RAG Foundation           | Config-driven vector store retrieval, pgvector, httpCall RAG                                        |
+| 10    | Group Conversations      | Multi-agent debate orchestration, 5 styles, group-of-groups                                         |
+| —     | A2A Protocol             | Agent-to-Agent peer communication, Agent Cards, skill discovery                                     |
+| —     | Multi-Model Cascading    | Sequential model escalation with confidence routing                                                 |
+| —     | LLM Provider Expansion   | 7 → 12 providers (Mistral, Azure OpenAI, Bedrock, Oracle GenAI)                                     |
+| —     | Quarkus 3.34.1           | LTS upgrade, Java 25 module fix                                                                     |
+| 12    | CI/CD                    | GitHub Actions unified pipeline, Docker Hub push, CircleCI removed                                  |
+| 11a   | Persistent Memory        | IUserMemoryStore, UserMemoryTool, DreamService, McpMemoryTools, Property.Visibility                 |
+| —     | Conversation Windows     | Token-aware windowing, rolling summary, ConversationRecallTool                                      |
+| —     | Agentic Improvements 1–5 | Counterweights, MCP governance, capability registry, multimodal attachments, agent signing          |
+| —     | Compliance Hardening     | HIPAA, EU AI Act, international privacy docs + ComplianceStartupChecks                              |
+| —     | Prompt Snippets          | Config-driven system prompt building blocks, Caffeine-cached, REST CRUD                             |
+| —     | Agent Sync               | Granular export/import, structural matching, live instance-to-instance sync                         |
+| —     | GDPR/CCPA Framework      | Cascading erasure, data portability, Art. 18 restriction, per-category retention                    |
+| —     | Commit Flags             | Strict write discipline for memory — uncommit failed task data, error digest injection              |
+| —     | Template Preview         | REST endpoint for previewing resolved system prompts with sample/live data                          |
+| —     | RC2 Hardening            | 2,000+ unit tests, 250+ integration tests, branding overhaul, rules deserialization fix             |
 
 ### In Progress / Upcoming
 
-| Phase | Area                      | Description                                             |
-| ----- | ------------------------- | ------------------------------------------------------- |
-| 9     | DAG Pipeline              | Parallel tasks, circuit breakers, OpenTelemetry tracing |
-| 9b    | HITL Framework            | Human-in-the-loop pause/resume/approve                  |
-| 11a   | Persistent Memory         | Cross-conversation user memory                          |
-| 11b   | Multi-Channel             | WhatsApp, Telegram, Slack adapters                      |
-| 13    | Debugging & Visualization | Time-traveling debugger, visual pipeline builder        |
-| 14    | Website                   | Astro + Starlight documentation site                    |
+| Phase | Area                      | Description                                                                                                                               |
+| ----- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| —     | Memory Architecture       | Commit flags, RAG threshold, context selection, auto-compaction, property consolidation (see `docs/planning/memory-architecture-plan.md`) |
+| —     | Session Forking           | State snapshotting, conversation forking (see `docs/planning/agentic-improvements-plan.md` §7)                                            |
+| —     | Conversation Chaining     | Cross-session context carry-over (see `docs/planning/conversation-window-management.md` Strategy 3)                                       |
+| 9     | DAG Pipeline              | Parallel tasks, circuit breakers, OpenTelemetry tracing                                                                                   |
+| 9b    | HITL Framework            | Human-in-the-loop pause/resume/approve                                                                                                    |
+| —     | Guardrails                | Config-driven input/output guardrails in LlmTask (see `docs/planning/guardrails-architecture.md`)                                         |
+| 11b   | Multi-Channel             | Slack, Teams adapters (see `docs/planning/multi-agent-ux-improvements.md`)                                                                |
+| 13    | Debugging & Visualization | Time-traveling debugger, visual pipeline builder                                                                                          |
+| 14    | Website                   | Astro + Starlight documentation site                                                                                                      |
+| —     | Native Image              | GraalVM native compilation (see `docs/planning/native-image-migration.md`)                                                                |
 
 ---
 
@@ -106,9 +120,9 @@ Follow this order unless the user explicitly requests something different.
 
 ### 4.1 Golden Rules (Non-Negotiable)
 
-1. **Logic is Configuration, Java is the Engine** — Agent behavior (e.g., "if user says 'hello', call API 'X'") MUST NOT be hard-coded in Java. Agent logic belongs in **JSON configurations** (`behavior.json`, `httpcalls.json`, `langchain.json`). Java code creates the `ILifecycleTask` components that _read and execute_ this configuration.
+1. **Logic is Configuration, Java is the Engine** — Agent behavior (e.g., "if user says 'hello', call API 'X'") MUST NOT be hard-coded in Java. Agent logic belongs in **JSON configurations** (`behavior.json`, `httpcalls.json`, `langchain.json`). Java code creates the `ILifecycleTask` components that _read and execute_ this configuration. (Note: the config file is still named `langchain.json` but the implementing class is `LlmTask`.)
 2. **Stateless Tasks, Stateful Memory** — `ILifecycleTask` implementations MUST be stateless. They are singletons shared by all conversations. All conversational state MUST be read from and written to the `IConversationMemory` object passed into the `execute` method.
-3. **Action-Based Orchestration** — Tasks MUST NOT call other tasks directly. The system is event-driven. Tasks are orchestrated by string-based **actions**. A task (like `BehaviorRulesEvaluationTask`) emits actions, and other tasks (like `OutputGenerationTask` or `HttpCallsTask`) listen for them.
+3. **Action-Based Orchestration** — Tasks MUST NOT call other tasks directly. The system is event-driven. Tasks are orchestrated by string-based **actions**. A task (like `RulesEvaluationTask`) emits actions, and other tasks (like `OutputGenerationTask` or `ApiCallsTask`) listen for them.
 4. **Dependency Injection via Quarkus CDI** — All components (`ILifecycleTask`s, `IResourceStore`s) use `@ApplicationScoped` and `@Inject`. No manual module registration — Quarkus auto-discovers beans.
 5. **Thread Safety** — The `ConversationCoordinator` handles concurrency _between_ conversations. Code must be thread-safe and non-blocking. REST endpoints use JAX-RS `AsyncResponse`. Tasks execute synchronously but must not block for extended periods.
 
@@ -118,7 +132,7 @@ Follow this order unless the user explicitly requests something different.
 
 The `LifecycleManager` is the heart of EDDI. It processes a conversation turn by running a pipeline of `ILifecycleTask` implementations.
 
-A **new feature** (e.g., "Langchain Agents") is implemented as a **new `ILifecycleTask`**:
+A **new feature** (e.g., "LLM Agents") is implemented as a **new `ILifecycleTask`**:
 
 1. Create the task class implementing `ILifecycleTask`
 2. Implement `execute(IConversationMemory memory)`
@@ -146,23 +160,23 @@ Agent definitions are versioned MongoDB documents. A "Agent" is a list of "Workf
 
 #### Core Workflow Extensions
 
-- **`behavior.json`** → `BehaviorRulesEvaluationTask` — the **primary orchestrator**. Its `actions` list is the event that triggers other tasks.
-- **`httpcalls.json`** → `HttpCallsTask` — **Tool Definitions** with templated API calls.
+- **`behavior.json`** → `RulesEvaluationTask` — the **primary orchestrator**. Its `actions` list is the event that triggers other tasks.
+- **`httpcalls.json`** → `ApiCallsTask` — **Tool Definitions** with templated API calls.
 - **`property.json`** → `PropertySetterTask` — **EDDI's importance extraction mechanism.** Config-driven slot-filling that explicitly selects which data to preserve as `longTerm` properties. These properties survive the LLM context window boundary — they're loaded at conversation init and available in all templates regardless of how many turns have passed. When designing context management or memory features, PropertySetter is **not just slot-filling** — it's how EDDI ensures critical facts outlive the conversation window.
-- **`langchain.json`** → `LangchainTask` — **Agent Definition** (prompt, model, tools, or legacy chat).
+- **`langchain.json`** → `LlmTask` — **Agent Definition** (prompt, model, tools, or legacy chat). (Config file retains the `langchain` name for backward compatibility.)
 
 #### The Template Data Model
 
 When tasks process templates (system prompts, HTTP call bodies, property instructions), `MemoryItemConverter.convert(memory)` produces a map with these top-level keys:
 
-| Key | Type | Source | Example Access |
-|---|---|---|---|
-| `context` | `Map<String, Object>` | Input context variables set per turn | `{{context.language}}` |
-| `properties` | `Map<String, Property>` | **All conversation properties** — includes both session-scoped and `longTerm` properties loaded from persistent storage | `{{properties.preferred_language.valueString}}` |
-| `memory` | `Map` with `current`, `last`, `past` | Conversation step data from the pipeline | `{{memory.current.output}}`, `{{memory.last.input}}` |
-| `userInfo` | `Map` with `userId` | Authenticated user identity | `{{userInfo.userId}}` |
-| `conversationInfo` | `Map` with `conversationId`, `agentId`, etc. | Conversation metadata | `{{conversationInfo.agentId}}` |
-| `conversationLog` | `String` | Formatted conversation history | `{{conversationLog}}` |
+| Key                | Type                                         | Source                                                                     | Example Access                                   |
+| ------------------ | -------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------ |
+| `context`          | `Map<String, Object>`                        | Input context variables set per turn                                       | `{{context.language}}`                           |
+| `properties`       | `Map<String, Object>`                        | Conversation properties — raw values from `ConversationProperties.toMap()` | `{properties.preferred_language}`                |
+| `memory`           | `Map` with `current`, `last`, `past`         | Conversation step data from the pipeline                                   | `{memory.current.output}`, `{memory.last.input}` |
+| `userInfo`         | `Map` with `userId`                          | Authenticated user identity                                                | `{{userInfo.userId}}`                            |
+| `conversationInfo` | `Map` with `conversationId`, `agentId`, etc. | Conversation metadata                                                      | `{{conversationInfo.agentId}}`                   |
+| `conversationLog`  | `String`                                     | Formatted conversation history                                             | `{{conversationLog}}`                            |
 
 > **Key insight**: `longTerm` properties are loaded into `conversationProperties` at conversation init and are immediately available via `{properties.key}` in any template. You do NOT need a separate template namespace for persistent data — properties IS the namespace.
 
@@ -172,10 +186,11 @@ Properties have a well-defined lifecycle managed by `Conversation.java`:
 
 ```
 1. Conversation.init()
-   └─→ loadLongTermProperties()
-       └─→ IPropertiesHandler.loadProperties(userId)
-       └─→ Loaded into conversationProperties with scope=longTerm
-       └─→ Available as {properties.key} in all templates
+   └─→ loadUserProperties()
+       └─→ IUserMemoryStore.getVisibleEntries(userId, agentId, groupIds, recallOrder, maxEntries)
+       └─→ Visibility scoping: self + group + global entries are loaded
+       └─→ Converted to Property objects with scope=longTerm
+       └─→ Available as {{properties.key}} in all templates
 
 2. Pipeline runs
    └─→ PropertySetterTask sets properties based on actions
@@ -186,8 +201,8 @@ Properties have a well-defined lifecycle managed by `Conversation.java`:
 
 3. Conversation turn ends
    └─→ storePropertiesPermanently()
-       └─→ All longTerm properties saved via IPropertiesHandler
-       └─→ Secret properties scrubbed and vaulted
+       └─→ All longTerm properties saved via IUserMemoryStore.upsert()
+       └─→ Visibility applied at persistence boundary (explicit or config default)
 ```
 
 > **Key insight**: Persistent state is a **session concern** handled in `Conversation.java` init/teardown — NOT a pipeline task. If your feature needs to load/save cross-conversation state, extend the Conversation init/teardown logic. Do NOT create a new `ILifecycleTask` for session-level concerns.
@@ -213,27 +228,27 @@ LlmTask.execute(memory)
 
 A common mistake when adding new features is to reflexively create a new `ILifecycleTask`. Before doing so, ask:
 
-| Question | If yes → | If no → |
-|---|---|---|
-| Does it process data **during** a pipeline turn? | `ILifecycleTask` | Not a task |
-| Does it need to react to **actions** from BehaviorRules? | `ILifecycleTask` | Not a task |
-| Does it load/save state at **session boundaries**? | Extend `Conversation.java` init/teardown | — |
-| Is it background/scheduled work? | Use `ScheduleFireExecutor` | — |
-| Is it a new LLM capability? | Add to `builtInTools` in existing `LlmConfiguration` | — |
-| Is it a new REST/MCP endpoint? | Add REST resource or MCP tool class | — |
-| Does it add a new agent-level setting? | Add field to `AgentConfiguration` | — |
+| Question                                                 | If yes →                                             | If no →    |
+| -------------------------------------------------------- | ---------------------------------------------------- | ---------- |
+| Does it process data **during** a pipeline turn?         | `ILifecycleTask`                                     | Not a task |
+| Does it need to react to **actions** from BehaviorRules? | `ILifecycleTask`                                     | Not a task |
+| Does it load/save state at **session boundaries**?       | Extend `Conversation.java` init/teardown             | —          |
+| Is it background/scheduled work?                         | Use `ScheduleFireExecutor`                           | —          |
+| Is it a new LLM capability?                              | Add to `builtInTools` in existing `LlmConfiguration` | —          |
+| Is it a new REST/MCP endpoint?                           | Add REST resource or MCP tool class                  | —          |
+| Does it add a new agent-level setting?                   | Add field to `AgentConfiguration`                    | —          |
 
 #### Reusable Infrastructure — Use Before Building
 
 Several infrastructure components are already built and should be reused, not duplicated:
 
-| Infrastructure | What it does | Use it for |
-|---|---|---|
-| **`ScheduleFireExecutor`** + **`SchedulePollerService`** | Cluster-aware scheduled task execution with fire logging, retries, and configurable conversation strategies (persistent vs new) | ANY background/scheduled work: Dream consolidation, async summarization, maintenance jobs. Never build custom schedulers. |
-| **`ToolExecutionService.executeToolWrapped()`** | Rate limiting → cache check → execute → cost tracking pipeline for LLM tool calls | Any operation that needs rate limiting, caching, or cost tracking. |
-| **`CostTracker`** (via ToolExecutionService) | Dollar-based LLM cost tracking per conversation | Cost ceilings for background LLM jobs (use `maxCostPerRun` instead of `maxLlmCallsPerRun` — dollar amounts are more meaningful than call counts because different operations cost vastly different amounts). |
-| **`SecretResolver`** | Vault-based secret resolution for API keys and credentials | Any feature that needs secrets (LLM providers, external APIs). |
-| **Micrometer `MeterRegistry`** | Metrics collection (counters, timers, gauges) exposed at `/q/metrics` | Always add metrics to new features for observability. |
+| Infrastructure                                           | What it does                                                                                                                    | Use it for                                                                                                                                                                                                   |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **`ScheduleFireExecutor`** + **`SchedulePollerService`** | Cluster-aware scheduled task execution with fire logging, retries, and configurable conversation strategies (persistent vs new) | ANY background/scheduled work: Dream consolidation, async summarization, maintenance jobs. Never build custom schedulers.                                                                                    |
+| **`ToolExecutionService.executeToolWrapped()`**          | Rate limiting → cache check → execute → cost tracking pipeline for LLM tool calls                                               | Any operation that needs rate limiting, caching, or cost tracking.                                                                                                                                           |
+| **`CostTracker`** (via ToolExecutionService)             | Dollar-based LLM cost tracking per conversation                                                                                 | Cost ceilings for background LLM jobs (use `maxCostPerRun` instead of `maxLlmCallsPerRun` — dollar amounts are more meaningful than call counts because different operations cost vastly different amounts). |
+| **`SecretResolver`**                                     | Vault-based secret resolution for API keys and credentials                                                                      | Any feature that needs secrets (LLM providers, external APIs).                                                                                                                                               |
+| **Micrometer `MeterRegistry`**                           | Metrics collection (counters, timers, gauges) exposed at `/q/metrics`                                                           | Always add metrics to new features for observability.                                                                                                                                                        |
 
 #### Group Conversations — Context Flow
 
@@ -358,7 +373,7 @@ Pipeline: `Tool Call → Rate Limiter → Cache Check → Execute → Cost Track
 - **Never use `ScriptEngine`** — use `SafeMathParser` (recursive-descent)
 
 ```java
-import static ai.labs.eddi.modules.langchain.tools.UrlValidationUtils.validateUrl;
+import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 
 @Tool("Fetches data from a URL")
 public String fetchData(@P("URL (http or https)") String url) {
@@ -484,7 +499,7 @@ When implementing a new feature, provide:
 
 - Cache expensive resources (models, compiled templates)
 - Use `@PostConstruct` for one-time initialization
-- Track metrics to identify agenttlenecks
+- Track metrics to identify bottlenecks
 - Avoid blocking operations in task execution
 
 #### Memory Management
@@ -514,26 +529,273 @@ When designing any new feature, always consider these before finalizing the desi
 - **Cost at scale**: If a feature uses LLM calls in background jobs, what happens with 10,000 users? Use dollar-based cost ceilings (`maxCostPerRun`) instead of call counts — call counts are meaningless because different operations cost vastly different amounts. Add incremental processing (only process what changed since last run) and round-robin fairness.
 - **Implicit context**: If code runs inside a conversation, don't pass `userId`/`agentId` as explicit parameters — the conversation always knows who the user is. Only external interfaces (REST, MCP) need explicit identification.
 - **Unification over duplication**: Before creating a parallel system (e.g., new store alongside old store), ask: can the new system replace the old one? Prefer unified systems with legacy compat methods over dual storage. When two features need similar infrastructure (e.g., LLM-based summarization for both Dream consolidation and conversation context), build one shared service, not two parallel implementations.
-- **Full data is never deleted by optimization**: Context management strategies (summarization, windowing) are about what the LLM *sees*, not what is *stored*. The full conversation is always preserved in MongoDB. Summaries are derived views, not destructive transformations. If an agent needs to access the full original, it should be able to (via tools, REST API, or debugger).
+- **Full data is never deleted by optimization**: Context management strategies (summarization, windowing) are about what the LLM _sees_, not what is _stored_. The full conversation is always preserved in MongoDB. Summaries are derived views, not destructive transformations. If an agent needs to access the full original, it should be able to (via tools, REST API, or debugger).
 
 ### Key Files
 
-| File                                        | Purpose                                                   |
-| ------------------------------------------- | --------------------------------------------------------- |
-| `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, MongoDB)           |
-| `src/main/resources/initial-agents/`        | Agent Father and sample agent configs                     |
-| `.github/workflows/ci.yml`                  | CI/CD pipeline (build, test, Docker push, smoke test)     |
-| `docs/`                                     | 40 markdown files, published at docs.labs.ai              |
-| `docs/v6-planning/`                         | Architecture analysis, changelog, business logic analysis |
-| `docker-compose.yml`                        | EDDI + MongoDB local setup                                |
+| File                                        | Purpose                                                     |
+| ------------------------------------------- | ----------------------------------------------------------- |
+| `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, MongoDB)             |
+| `src/main/resources/initial-agents/`        | Agent Father and sample agent configs                       |
+| `.github/workflows/ci.yml`                  | CI/CD pipeline (build, test, Docker push, smoke test)       |
+| `docs/`                                     | 40 markdown files, published at docs.labs.ai                |
+| `docs/v6-planning/`                         | Architecture analysis, changelog, business logic analysis   |
+| `docker-compose.yml`                        | EDDI + MongoDB local setup                                  |
+| `docs/agent-configs/`                       | Agent config sources (e.g. Agent Father) — reference for AI |
 
 ---
 
-## 5. Session Protocol
+## 5. Agent Config Authoring Reference
+
+> **This section prevents wrong assumptions when writing agent JSON configs.** Always consult this when building behavior rules, property setters, output configs, or HTTP calls.
+
+### 5.1 Template Syntax
+
+EDDI v6 uses **Qute templates** with `{expression}` syntax, NOT Thymeleaf `[[${expression}]]`.
+
+#### ⚠️ Critical: `properties` returns RAW values, NOT Property objects
+
+`MemoryItemConverter.convert()` puts `ConversationProperties.toMap()` into the template context. The `toMap()` method returns **raw Java values** (String, Integer, Map, etc.), NOT `Property` objects.
+
+```
+✅ CORRECT:   {properties.agentName}        → returns the String value
+❌ WRONG:     {properties.agentName.valueString}  → fails at runtime (String has no .valueString)
+```
+
+This is because `ConversationProperties.put()` stores `property.getValueString()` (or `getValueObject()`, etc.) directly into the internal `propertiesMap`. By the time templates see it, the Property wrapper is gone.
+
+#### Template variables available in all contexts
+
+| Variable                            | Returns                            | Example                                      |
+| ----------------------------------- | ---------------------------------- | -------------------------------------------- |
+| `{properties.key}`                  | Raw value (string, int, map)       | `{properties.agentName}`                     |
+| `{memory.current.input}`            | User's input text for current step | Used in property setter to capture free-text |
+| `{memory.current.output}`           | Output text for current step       |                                              |
+| `{memory.last.input}`               | Previous step's input              |                                              |
+| `{context.key}`                     | Context variable set by client     | `{context.language}`                         |
+| `{userInfo.userId}`                 | Authenticated user ID              |                                              |
+| `{conversationInfo.agentId}`        | Current agent ID                   |                                              |
+| `{conversationInfo.conversationId}` | Current conversation ID            |                                              |
+| `{conversationLog}`                 | Formatted conversation history     |                                              |
+
+### 5.2 Conversation Lifecycle for Rule-Based Agents
+
+```
+1. Conversation.init()
+   └─→ Step 0 created
+   └─→ CONVERSATION_START action added to step 0
+   └─→ Pipeline runs with empty input ("")
+   └─→ Output for CONVERSATION_START fires (greeting shown BEFORE user says anything)
+
+2. User sends first message → say(message)
+   └─→ Step 1 created (startNextStep)
+   └─→ User input stored in memory
+   └─→ Behavior rules evaluate:
+       • lastStep = Step 0 (has CONVERSATION_START action)
+       • currentStep = Step 1 (has user's input/expressions)
+   └─→ Output fires for matched actions
+
+3. User sends second message → say(message)
+   └─→ Step 2 created
+   └─→ lastStep = Step 1, currentStep = Step 2
+   └─→ ... and so on
+```
+
+> **Key insight**: The greeting output fires automatically at `init()` — the user doesn't need to type anything first.
+
+### 5.3 Behavior Rule Safety Rules
+
+#### Every rule MUST have an `actionmatcher` on `lastStep`
+
+Behavior rules within a group ALL fire if their conditions match. Rules with only `inputmatcher` conditions are dangerous — they match globally regardless of conversation state.
+
+```
+❌ DANGEROUS: Rule fires on ANY step if user somehow sends matching expression
+{
+  "name" : "Start over",
+  "actions" : [ "ask_for_agent_name" ],
+  "conditions" : [ {
+    "type" : "inputmatcher",
+    "configs" : { "expressions" : "start_over", "occurrence" : "currentStep" }
+  } ]
+}
+
+✅ SAFE: Rule only fires when the confirmation step was the previous step
+{
+  "name" : "Start over",
+  "actions" : [ "ask_for_agent_name" ],
+  "conditions" : [ {
+    "type" : "actionmatcher",
+    "configs" : { "actions" : "confirm_creation", "occurrence" : "lastStep" }
+  }, {
+    "type" : "inputmatcher",
+    "configs" : { "expressions" : "start_over", "occurrence" : "currentStep" }
+  } ]
+}
+```
+
+#### Quick reply expressions must be unique identifiers
+
+Do NOT reuse system action names (like `CONVERSATION_START`) as quick reply expressions. Use dedicated identifiers:
+
+```
+❌ WRONG:  "expressions" : "CONVERSATION_START"   (system action name)
+✅ RIGHT:  "expressions" : "get_started"           (dedicated identifier)
+```
+
+#### `actionmatcher` comma-separated values = AND (contiguous sublist), NOT OR
+
+When you specify `"actions" : "action_a,action_b"`, the engine checks if BOTH actions appear as a **contiguous sublist** of the step's action list (`Collections.indexOfSubList`). This means ALL listed actions must be present — it is AND semantics, not OR.
+
+```
+❌ WRONG — tries to match any of these, but actually requires ALL FIVE contiguously:
+"actions" : "ask_for_model,ask_for_model_ollama,ask_for_model_jlama,ask_for_model_bedrock,ask_for_model_oracle"
+
+✅ RIGHT — Option A: emit a common action alongside provider-specific ones:
+Rule actions: [ "set_provider_ollama", "ask_for_model", "ask_for_model_ollama" ]
+Matcher:      "actions" : "ask_for_model"
+
+✅ RIGHT — Option B: use a connector with OR operator:
+{
+  "type" : "connector",
+  "configs" : { "operator" : "OR" },
+  "conditions" : [ {
+    "type" : "actionmatcher",
+    "configs" : { "actions" : "ask_for_model", "occurrence" : "lastStep" }
+  }, {
+    "type" : "actionmatcher",
+    "configs" : { "actions" : "ask_for_model_ollama", "occurrence" : "lastStep" }
+  } ]
+}
+```
+
+### 5.4 Property Setter Patterns
+
+#### Scope values
+
+| Scope          | Behavior                                                                                                                                      |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `step`         | Cleared at end of turn                                                                                                                        |
+| `conversation` | Lives for the session (default for most agent-building properties)                                                                            |
+| `longTerm`     | Persisted to `usermemories` collection across conversations                                                                                   |
+| `secret`       | Auto-vaulted: plaintext stored in SecretsVault, raw input scrubbed from memory, vault reference (`${eddivault:...}`) stored as property value |
+
+> **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If vault is disabled (common in dev mode), `autoVaultSecret()` fails and falls back to storing plaintext — but logs an ERROR that may confuse users. For wizard-style agents that collect API keys and pass them to an endpoint (like the Agent Father), prefer `scope: "conversation"` and delegate vaulting to the receiving service.
+
+#### Capturing user input vs. setting fixed values
+
+```json
+// Capture free-text input from user
+{ "name" : "agentName", "valueString" : "{memory.current.input}", "scope" : "conversation" }
+
+// Set a fixed value (from quick reply selection)
+{ "name" : "provider", "valueString" : "anthropic", "scope" : "conversation" }
+
+// When a quick reply has a default value, use a dedicated action + fixed value
+{ "name" : "baseUrl", "valueString" : "http://localhost:11434", "scope" : "conversation" }
+```
+
+#### Qute template safety in HTTP call bodies
+
+When embedding `{properties.x}` in HTTP call body templates, be aware:
+- `quarkus.qute.strict-rendering=false` renders missing properties as empty strings (no error)
+- Do NOT use `.orEmpty` on properties — it's for Qute iterables, not strings, and fails on `NOT_FOUND`
+- User-entered text containing `{` or `}` will be interpreted as Qute expressions, potentially eating content
+
+#### Requesting specialized input fields from the UI
+
+The output system supports an `inputField` output type that tells the UI to switch its input control. Both **EDDI-Manager** (`SecretInputField` in `chat-panel.tsx`) and **eddi-chat-ui** (`SecretInput.tsx`) handle this natively.
+
+```json
+{
+  "valueAlternatives": [{
+    "type": "inputField",
+    "subType": "password",
+    "placeholder": "Paste your API key here",
+    "label": "API Key"
+  }]
+}
+```
+
+Supported `subType` values: `"password"`, `"text"`, `"email"`. When the UI receives an `inputField` in the output array, it replaces the standard text input with the appropriate specialized field for that turn. The field reverts to normal text input on the next response.
+
+> **Key pattern**: Add the `inputField` output item alongside regular `text` outputs in the same action's output set. The text explains what the user should enter, and the `inputField` controls how the input is rendered.
+
+### 5.5 ZIP Structure for Agent Import
+
+Agent ZIP files are imported via `RestImportService`. **All IDs in URIs and filenames must be valid hex identifiers** (24-char hex strings like MongoDB ObjectIds, or UUIDs). The import service validates IDs via `RestUtilities.isValidId()` which requires ≥18 hex characters (`0-9a-fA-F` and dashes). Semantic names like `agent-father-wf1` will be rejected.
+
+The file naming convention is `{id}.{type}.json` where `{id}` matches the last path segment of the resource URI:
+
+```
+{agentId}.agent.json              → Agent configuration
+{agentId}.descriptor.json         → Agent descriptor (name, description, version)
+{workflowId}/
+  1/
+    {workflowId}.workflow.json    → Workflow definition
+    {workflowId}.descriptor.json
+    {behaviorId}.behavior.json    → Behavior rules (file ext stays "behavior", URI uses "rules")
+    {behaviorId}.descriptor.json
+    {propertyId}.property.json    → Property setter
+    {propertyId}.descriptor.json
+    {httpcallsId}.httpcalls.json  → HTTP API calls (file ext stays "httpcalls", URI uses "apicalls")
+    {httpcallsId}.descriptor.json
+    {outputId}.output.json        → Output messages + quick replies
+    {outputId}.descriptor.json
+    {llmId}.langchain.json        → LLM configuration (file ext stays "langchain", URI uses "llm")
+    {llmId}.descriptor.json
+```
+
+> **Important**: File extensions use legacy names (`behavior`, `httpcalls`, `langchain`) while URIs use v6 names (`rules`, `apicalls`, `llm`). The import service maps between them via `AbstractBackupService` constants.
+
+> **Pipeline step**: If your output templates contain `{properties.x}` placeholders, you **must** include `eddi://ai.labs.templating` as the last workflow step. Without it, Qute expressions are not resolved.
+
+
+#### URI format (v6 canonical)
+
+Always use v6 canonical URIs in new configs:
+
+| Resource   | URI Pattern                                                                  |
+| ---------- | ---------------------------------------------------------------------------- |
+| Agent      | `eddi://ai.labs.agent/agentstore/agents/{id}?version=1`                      |
+| Workflow   | `eddi://ai.labs.workflow/workflowstore/workflows/{id}?version=1`             |
+| Rules      | `eddi://ai.labs.rules/rulestore/rulesets/{id}?version=1`                     |
+| ApiCalls   | `eddi://ai.labs.apicalls/apicallstore/apicalls/{id}?version=1`               |
+| Property   | `eddi://ai.labs.property/propertysetterstore/propertysetters/{id}?version=1` |
+| Output     | `eddi://ai.labs.output/outputstore/outputsets/{id}?version=1`                |
+| LLM        | `eddi://ai.labs.llm/llmstore/llms/{id}?version=1`                            |
+| Dictionary | `eddi://ai.labs.dictionary/dictionarystore/dictionaries/{id}?version=1`      |
+
+> Legacy URIs (e.g. `ai.labs.bot/botstore/bots/`) are auto-normalized by `AbstractBackupService.normalizeLegacyUris()` during import, but new configs should always use v6 format.
+
+#### Workflow step types
+
+| Step `type`                | Config URI prefix             | Required?                   |
+| -------------------------- | ----------------------------- | --------------------------- |
+| `eddi://ai.labs.parser`    | — (no config URI)             | Yes — always first          |
+| `eddi://ai.labs.behavior`  | `eddi://ai.labs.rules/...`    | Yes — the orchestrator      |
+| `eddi://ai.labs.property`  | `eddi://ai.labs.property/...` | Optional — slot-filling     |
+| `eddi://ai.labs.httpcalls` | `eddi://ai.labs.apicalls/...` | Optional — API calls        |
+| `eddi://ai.labs.output`    | `eddi://ai.labs.output/...`   | Usually yes — user messages |
+| `eddi://ai.labs.langchain` | `eddi://ai.labs.llm/...`      | Optional — LLM interaction  |
+
+### 5.6 Reference Implementation
+
+The **Agent Father** (`docs/agent-configs/agent-father/`) is a complete, working, rule-based agent config. Use it as the canonical reference for:
+
+- Behavior rule patterns with `actionmatcher` + `inputmatcher`
+- Property setter with `scope: "secret"` for auto-vault
+- HTTP call template syntax
+- Output with quick replies
+- Provider-aware branching (local vs. cloud LLM providers)
+
+---
+
+## 6. Session Protocol
 
 **If picking up from a previous session:**
 
-1. Run `git log -5 --oneline` on `feature/version-6.0.0` to see recent commits
+1. Run `git log -5 --oneline` and `git branch --show-current` to see recent commits and the active branch
 2. Run `git status` to check for uncommitted changes
 3. Check which phase/item from Section 3 is currently in progress
 4. Read [`docs/changelog.md`](docs/changelog.md) for latest changes and decisions
