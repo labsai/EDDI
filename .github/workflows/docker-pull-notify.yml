@@ -71,15 +71,26 @@ jobs:
       - name: Fetch GitHub traffic (views + clones)
         id: traffic
         env:
-          GH_TOKEN: ${{ github.token }}
+          # METRICS_PAT has admin:read scope for traffic API; falls back to GITHUB_TOKEN
+          GH_TOKEN: ${{ secrets.METRICS_PAT || github.token }}
         run: |
-          VIEWS_DATA=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
+          VIEWS_DATA=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
             https://api.github.com/repos/labsai/EDDI/traffic/views)
-          VIEWS=$(echo "$VIEWS_DATA" | jq '.count // 0')
-          UNIQUES=$(echo "$VIEWS_DATA" | jq '.uniques // 0')
+          if echo "$VIEWS_DATA" | jq -e '.count' > /dev/null 2>&1; then
+            VIEWS=$(echo "$VIEWS_DATA" | jq '.count // 0')
+            UNIQUES=$(echo "$VIEWS_DATA" | jq '.uniques // 0')
+          else
+            echo "⚠️  Traffic API unavailable — set METRICS_PAT secret for traffic data"
+            VIEWS=0; UNIQUES=0
+          fi
 
-          CLONES=$(curl -sf -H "Authorization: Bearer $GH_TOKEN" \
-            https://api.github.com/repos/labsai/EDDI/traffic/clones | jq '.count // 0')
+          CLONES_DATA=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/labsai/EDDI/traffic/clones)
+          if echo "$CLONES_DATA" | jq -e '.count' > /dev/null 2>&1; then
+            CLONES=$(echo "$CLONES_DATA" | jq '.count // 0')
+          else
+            CLONES=0
+          fi
 
           echo "views=$VIEWS" >> "$GITHUB_OUTPUT"
           echo "uniques=$UNIQUES" >> "$GITHUB_OUTPUT"
@@ -117,6 +128,7 @@ jobs:
       # ── Push to analytics (always, if data changed) ─────────
       - name: Send to Google Analytics 4
         if: steps.delta.outputs.changed == 'true' && steps.prev.outputs.has_data == 'true'
+        continue-on-error: true
         env:
           GA4_SECRET: ${{ secrets.GA4_API_SECRET }}
         run: |
@@ -141,6 +153,7 @@ jobs:
 
       - name: Send to Umami Cloud
         if: steps.delta.outputs.changed == 'true' && steps.prev.outputs.has_data == 'true'
+        continue-on-error: true
         run: |
           curl -sf -X POST "https://cloud.umami.is/api/send" \
             -H 'Content-Type: application/json' \
@@ -167,6 +180,7 @@ jobs:
       # ── Milestone alert (immediate) ─────────────────────────
       - name: Milestone celebration
         if: steps.delta.outputs.milestone != '0'
+        continue-on-error: true
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
@@ -194,6 +208,7 @@ jobs:
         if: >-
           (github.event.schedule == '0 9 * * 0' || github.event.inputs.force_digest == 'true')
           && steps.prev.outputs.has_data == 'true'
+        continue-on-error: true
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |

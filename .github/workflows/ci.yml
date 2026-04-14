@@ -463,6 +463,10 @@ jobs:
       - name: Send build notification
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+          COMMIT_MSG_RAW: ${{ github.event.head_commit.message || github.event.pull_request.title || 'Manual run' }}
+          GH_ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
           # Skip if no webhook configured
           if [ -z "$SLACK_WEBHOOK" ]; then
@@ -499,11 +503,9 @@ jobs:
           if [ "$BUILD" = "success" ] && [ "$IT" != "failure" ] && [ "$DOCKER" != "failure" ] && [ "$SMOKE" != "failure" ]; then
             OVERALL_ICON="✅"
             OVERALL_TEXT="Build Passed"
-            COLOR="#36a64f"
           else
             OVERALL_ICON="❌"
             OVERALL_TEXT="Build Failed"
-            COLOR="#cc0000"
           fi
 
           # Branch or tag name
@@ -511,40 +513,54 @@ jobs:
           REF="${REF#refs/tags/}"
           REF="${REF#refs/pull/}"
 
-          # Sanitize commit message for JSON embedding
-          RAW_MSG="${{ github.event.head_commit.message || github.event.pull_request.title || 'Manual run' }}"
-          COMMIT_MSG=$(echo "$RAW_MSG" | head -1 | cut -c1-80 | sed 's/[\"\\]//g' | sed "s/[']//g")
+          # Sanitize commit message: first line only, truncate, sourced from env (not inline interpolation)
+          COMMIT_MSG=$(printf '%s' "$COMMIT_MSG_RAW" | head -1 | cut -c1-80)
 
-          curl -sf -X POST "$SLACK_WEBHOOK" \
-            -H 'Content-type: application/json' \
-            -d "{
-              \"blocks\": [
+          # Build JSON payload safely with jq to prevent any injection via user-controlled values
+          PAYLOAD=$(jq -n \
+            --arg header "${OVERALL_ICON}  EDDI CI: ${OVERALL_TEXT}" \
+            --arg branch "$REF" \
+            --arg actor "$GH_ACTOR" \
+            --arg commit "$COMMIT_MSG" \
+            --arg build_icon "$(status_icon $BUILD)" \
+            --arg it_icon "$(status_icon $IT)" \
+            --arg docker_icon "$(status_icon $DOCKER)" \
+            --arg smoke_icon "$(status_icon $SMOKE)" \
+            --arg preflight_icon "$(status_icon $PREFLIGHT)" \
+            --arg run_url "$RUN_URL" \
+            --arg run_number "$RUN_NUMBER" \
+            '{
+              blocks: [
                 {
-                  \"type\": \"header\",
-                  \"text\": { \"type\": \"plain_text\", \"text\": \"${OVERALL_ICON}  EDDI CI: ${OVERALL_TEXT}\", \"emoji\": true }
+                  type: "header",
+                  text: { type: "plain_text", text: $header, emoji: true }
                 },
                 {
-                  \"type\": \"section\",
-                  \"text\": {
-                    \"type\": \"mrkdwn\",
-                    \"text\": \"*Branch:* \`${REF}\`  ·  *By:* ${{ github.actor }}\n${COMMIT_MSG}\"
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: ("*Branch:* `" + $branch + "`  ·  *By:* " + $actor + "\n" + $commit)
                   }
                 },
                 {
-                  \"type\": \"section\",
-                  \"fields\": [
-                    { \"type\": \"mrkdwn\", \"text\": \"$(status_icon $BUILD) Build & Test\" },
-                    { \"type\": \"mrkdwn\", \"text\": \"$(status_icon $IT) Integration Tests\" },
-                    { \"type\": \"mrkdwn\", \"text\": \"$(status_icon $DOCKER) Docker Push\" },
-                    { \"type\": \"mrkdwn\", \"text\": \"$(status_icon $SMOKE) Smoke Test\" },
-                    { \"type\": \"mrkdwn\", \"text\": \"$(status_icon $PREFLIGHT) Red Hat Preflight\" }
+                  type: "section",
+                  fields: [
+                    { type: "mrkdwn", text: ($build_icon + " Build & Test") },
+                    { type: "mrkdwn", text: ($it_icon + " Integration Tests") },
+                    { type: "mrkdwn", text: ($docker_icon + " Docker Push") },
+                    { type: "mrkdwn", text: ($smoke_icon + " Smoke Test") },
+                    { type: "mrkdwn", text: ($preflight_icon + " Red Hat Preflight") }
                   ]
                 },
                 {
-                  \"type\": \"context\",
-                  \"elements\": [
-                    { \"type\": \"mrkdwn\", \"text\": \"<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run #${{ github.run_number }}>\" }
+                  type: "context",
+                  elements: [
+                    { type: "mrkdwn", text: ("<" + $run_url + "|View Run #" + $run_number + ">") }
                   ]
                 }
               ]
-            }"
+            }')
+
+          curl -sf -X POST "$SLACK_WEBHOOK" \
+            -H 'Content-type: application/json' \
+            -d "$PAYLOAD"
