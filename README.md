@@ -318,7 +318,7 @@ Building a Quarkus app that talks to EDDI? Use the **[quarkus-eddi](https://gith
 <dependency>
     <groupId>io.quarkiverse.eddi</groupId>
     <artifactId>quarkus-eddi</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>6.0.0-SNAPSHOT</version>
 </dependency>
 ```
 
