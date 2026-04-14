@@ -785,7 +785,15 @@ print_success() {
   echo -e "  ${BOLD}API docs${RESET}   →  ${CYAN}http://localhost:${EDDI_PORT}/q/swagger-ui${RESET}"
 
   if [[ "$WITH_AUTH" == "true" ]]; then
-    echo -e "  ${BOLD}Keycloak${RESET}   →  ${CYAN}http://localhost:8180${RESET}  ${DIM}(admin/admin)${RESET}"
+    echo ""
+    echo -e "  ${BOLD}┌─ 🔐 Login Credentials ─────────────────────────────┐${RESET}"
+    echo -e "  ${BOLD}│${RESET}                                                    ${BOLD}│${RESET}"
+    echo -e "  ${BOLD}│${RESET}  EDDI Admin:  ${CYAN}eddi / eddi${RESET}  (change on first login) ${BOLD}│${RESET}"
+    echo -e "  ${BOLD}│${RESET}  Read-only:   ${CYAN}viewer / viewer${RESET}                      ${BOLD}│${RESET}"
+    echo -e "  ${BOLD}│${RESET}                                                    ${BOLD}│${RESET}"
+    echo -e "  ${BOLD}│${RESET}  Keycloak Console:  ${CYAN}http://localhost:8180${RESET}           ${BOLD}│${RESET}"
+    echo -e "  ${BOLD}│${RESET}  Console Admin:     ${CYAN}admin / admin${RESET}                  ${BOLD}│${RESET}"
+    echo -e "  ${BOLD}└────────────────────────────────────────────────────┘${RESET}"
   fi
 
   echo ""
@@ -815,8 +823,11 @@ print_success() {
   echo -e "  ${DIM}Install dir: ${EDDI_DIR}${RESET}"
   echo ""
 
-  # Try to open browser automatically
+  # Try to open browser automatically — use dashboard path when auth is enabled
   local url="http://localhost:${EDDI_PORT}"
+  if [[ "$WITH_AUTH" == "true" ]]; then
+    url="http://localhost:${EDDI_PORT}/chat/production/"
+  fi
   case "$PLATFORM" in
     macos) open "$url" 2>/dev/null || true ;;
     wsl)   explorer.exe "$url" 2>/dev/null || true ;;

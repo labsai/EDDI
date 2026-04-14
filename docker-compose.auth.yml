@@ -3,7 +3,7 @@
 #
 # Usage: docker compose -f docker-compose.yml -f docker-compose.auth.yml up -d
 #
-# Pre-configured test users:
+# Pre-configured test users (password change required on first login):
 #   eddi  / eddi   (admin)
 #   viewer / viewer (read-only)
 
@@ -13,6 +13,7 @@ services:
       QUARKUS_OIDC_TENANT_ENABLED: "true"
       QUARKUS_OIDC_AUTH_SERVER_URL: "http://keycloak:8080/realms/eddi"
       QUARKUS_OIDC_CLIENT_ID: "eddi-backend"
+      QUARKUS_OIDC_APPLICATION_TYPE: "service"
       QUARKUS_HTTP_CORS_ORIGINS: "http://localhost:3000,http://localhost:${EDDI_PORT:-7070},https://localhost:${EDDI_HTTPS_PORT:-7443}"
     depends_on:
       keycloak:
@@ -32,7 +33,7 @@ services:
       - keycloak-data:/opt/keycloak/data
       - ./keycloak:/opt/keycloak/data/import:ro
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000; echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; timeout 2 cat <&3 | grep -q '200'"]
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && timeout 2 cat <&3 | grep -q '200'"]
       interval: 10s
       timeout: 10s
       retries: 18

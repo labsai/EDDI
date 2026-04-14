@@ -28,7 +28,7 @@
     {
       "clientId": "eddi-backend",
       "name": "EDDI Backend",
-      "description": "Server-side OIDC client for the EDDI Quarkus backend",
+      "description": "Server-side OIDC client for the EDDI Quarkus backend — validates Bearer tokens only",
       "enabled": true,
       "publicClient": false,
       "bearerOnly": true,
@@ -84,7 +84,7 @@
         {
           "type": "password",
           "value": "eddi",
-          "temporary": false
+          "temporary": true
         }
       ],
       "realmRoles": [
@@ -101,7 +101,7 @@
         {
           "type": "password",
           "value": "viewer",
-          "temporary": false
+          "temporary": true
         }
       ],
       "realmRoles": [

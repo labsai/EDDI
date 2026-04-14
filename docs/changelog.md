@@ -13,6 +13,42 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Keycloak Auth Setup — Three Bug Fixes (2026-04-14)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**Problem:** The `--with-auth` install path was completely broken. Three issues compounded:
+
+### Bug 1: OIDC Hybrid Mode + Docker-Internal Hostname (Critical)
+
+`application-type=hybrid` caused Quarkus to redirect browser requests to Keycloak's authorization endpoint using the Docker-internal URL (`http://keycloak:8080/realms/eddi`). The browser can't resolve Docker hostnames → `ERR_NAME_NOT_RESOLVED`. Additionally, `eddi-backend` has `standardFlowEnabled: false`, so even with a reachable URL, Keycloak would reject code flow.
+
+**Fix:** Changed `application-type` to `service` (bearer-only). The Manager SPA handles login via JavaScript using `eddi-frontend`; the backend only validates Bearer tokens. Removed stale code-flow properties (`redirect-path`, `restore-path-after-redirect`, `force-redirect-https-scheme`) and the `callback` permission. Added `QUARKUS_OIDC_APPLICATION_TYPE: "service"` to `docker-compose.auth.yml`.
+
+### Bug 2: Missing User Credentials (UX)
+
+Success banner showed `admin/admin` (KC console credentials) but not the EDDI application user credentials (`eddi/eddi`, `viewer/viewer`). Users had no idea how to log in.
+
+**Fix:** Added login credentials box to both install scripts. Changed `eddi-realm.json` to set `"temporary": true` on both user passwords — forces password change on first login.
+
+### Bug 3: Browser Opens Root Path (UX)
+
+Install script opened `http://localhost:7070/` which requires auth. With `service` mode, this returns 401. Dashboard is at the permitted `/chat/production/*` path.
+
+**Fix:** When auth is enabled, install scripts now open `/chat/production/` instead of `/`.
+
+**Additional:** Simplified Keycloak healthcheck from fragile raw HTTP to a reliable TCP probe on port 9000. Added `http://localhost:8180` to CORS origins for Keycloak-initiated requests.
+
+| File | What |
+|------|------|
+| `docker-compose.auth.yml` | `APPLICATION_TYPE=service`, simplified healthcheck, Keycloak CORS origin |
+| `application.properties` | `application-type=service`, removed code-flow settings, removed callback permission |
+| `keycloak/eddi-realm.json` | `"temporary": true` on both user passwords |
+| `install.ps1` | Login credentials box, auth-aware browser URL |
+| `install.sh` | Login credentials box, auth-aware browser URL |
+
+---
+
 ## Import Descriptor Versioning & PostgreSQL UUID Fix (2026-04-14)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)

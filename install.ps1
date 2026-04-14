@@ -749,7 +749,15 @@ function Write-Success {
     Write-Information -MessageData "  API docs   →  http://localhost:${EddiPort}/q/swagger-ui"
 
     if ($WithAuth) {
-        Write-Information -MessageData "  Keycloak   →  http://localhost:8180  (admin/admin)"
+        Write-Information -MessageData ""
+        Write-Information -MessageData "  ┌─ 🔐 Login Credentials ─────────────────────────────┐"
+        Write-Information -MessageData "  │                                                    │"
+        Write-Information -MessageData "  │  EDDI Admin:  eddi / eddi  (change on first login) │"
+        Write-Information -MessageData "  │  Read-only:   viewer / viewer                      │"
+        Write-Information -MessageData "  │                                                    │"
+        Write-Information -MessageData "  │  Keycloak Console:  http://localhost:8180           │"
+        Write-Information -MessageData "  │  Console Admin:     admin / admin                  │"
+        Write-Information -MessageData "  └────────────────────────────────────────────────────┘"
     }
 
     Write-Information -MessageData ""
@@ -773,8 +781,9 @@ function Write-Success {
     Write-Information -MessageData "  Install dir: $EddiDir"
     Write-Information -MessageData ""
 
-    # Open browser
-    try { Start-Process "http://localhost:${EddiPort}" } catch { Write-Verbose "Browser failed to launch: $($_.Exception.Message)" }
+    # Open browser — use dashboard path when auth is enabled (root returns 401)
+    $dashUrl = if ($WithAuth) { "http://localhost:${EddiPort}/chat/production/" } else { "http://localhost:${EddiPort}" }
+    try { Start-Process $dashUrl } catch { Write-Verbose "Browser failed to launch: $($_.Exception.Message)" }
 }
 
 # ── Config summary ───────────────────────────────────────
