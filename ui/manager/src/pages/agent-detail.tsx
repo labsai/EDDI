@@ -350,36 +350,55 @@ export function AgentDetailPage() {
                 className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed"
                 data-testid="deploy-chat-btn"
               >
-                <Rocket className="h-4 w-4" />
-                {t("agentDetail.deployAndChat", "Deploy & Chat")}
+                <Rocket className="h-4 w-4" aria-hidden="true" />
+                {t("agents.deployAndChat", "Deploy & Chat")}
               </button>
             )}
 
-            {/* Chat */}
-            <button
-              onClick={async () => {
-                const drawerStore = useChatDrawerStore.getState();
-                const chatStore = useChatStore.getState();
-                drawerStore.open(id!, id!);
-                if (isDeployed) {
-                  drawerStore.setStep("starting");
-                  chatStore.clearMessages();
-                  chatStore.setSelectedAgent(id!, id!);
-                  try {
-                    await startConversationMutation.mutateAsync({ agentId: id! });
-                    drawerStore.setStep("ready");
-                  } catch (err) {
-                    drawerStore.setStep("error", getErrorMessage(err));
+            {/* Chat — split button: inline drawer + external chat UI */}
+            <div className="inline-flex">
+              <button
+                onClick={async () => {
+                  const drawerStore = useChatDrawerStore.getState();
+                  const chatStore = useChatStore.getState();
+                  drawerStore.open(id!, id!);
+                  if (isDeployed) {
+                    drawerStore.setStep("starting");
+                    chatStore.clearMessages();
+                    chatStore.setSelectedAgent(id!, id!);
+                    try {
+                      await startConversationMutation.mutateAsync({ agentId: id! });
+                      drawerStore.setStep("ready");
+                    } catch (err) {
+                      drawerStore.setStep("error", getErrorMessage(err));
+                    }
                   }
-                }
-              }}
-              disabled={startConversationMutation.isPending}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed"
-              data-testid="chat-btn"
-            >
-              <MessageSquare className="h-4 w-4" />
-              {t("agents.chat", "Chat")}
-            </button>
+                }}
+                disabled={startConversationMutation.isPending}
+                className={cn(
+                  "inline-flex items-center gap-1.5 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400 disabled:opacity-50 disabled:cursor-not-allowed",
+                  isDeployed ? "rounded-s-lg" : "rounded-lg"
+                )}
+                data-testid="chat-btn"
+                aria-label={t("agents.chat", "Chat")}
+              >
+                <MessageSquare className="h-4 w-4" aria-hidden="true" />
+                {t("agents.chat", "Chat")}
+              </button>
+              {isDeployed && (
+                <a
+                  href={`/chat/production/${id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center rounded-e-lg border-s border-emerald-500/20 bg-emerald-500/10 px-2.5 py-2 text-emerald-600 hover:bg-emerald-500/20 transition-colors dark:text-emerald-400"
+                  title={t("agents.openExternalChat", "Open in new tab")}
+                  aria-label={t("agents.openExternalChat", "Open in new tab")}
+                  data-testid="external-chat-btn"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                </a>
+              )}
+            </div>
           </div>
 
           {/* Secondary actions: studio, duplicate, export, delete */}
