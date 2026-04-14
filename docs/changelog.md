@@ -13,6 +13,46 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## API Key Auto-Vaulting & Agent Father Hardening (2026-04-14)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**Problem:** `AgentSetupService` stored API keys as plaintext in MongoDB's LLM config documents. Additionally, the Agent Father wizard broke in dev mode (vault disabled) and had incorrect output messages for local LLM providers.
+
+### Security Fix: Auto-Vault API Keys
+
+`AgentSetupService.vaultApiKey()` — new method that automatically stores API keys in the Secrets Vault when available, persisting only the vault reference (`${eddivault:setup.<agent-name>.apiKey}`) in the LLM config. `ChatModelRegistry.resolveSecrets()` already resolves vault references at model-load time, so no downstream changes needed.
+
+**Degraded mode:** When vault is disabled (no `EDDI_VAULT_MASTER_KEY`), logs a warning and falls back to plaintext storage. This ensures the Agent Father wizard works in dev mode without requiring vault setup.
+
+### Agent Father Config Fixes
+
+| Fix | Details |
+|-----|---------|
+| **Removed `.orEmpty`** | Qute's `.orEmpty` is for iterables, not strings — calling it on `NOT_FOUND` caused template errors. With `strict-rendering=false`, missing properties render as empty automatically |
+| **Split `set_api_key` output** | "API key stored securely in vault" was shown for ALL providers including local ones. Split into a separate `set_api_key` action output |
+| **apiKey scope: `conversation`** | Was `secret` which requires vault. Changed to `conversation` — the setup endpoint handles vaulting |
+| **Hex-based filenames** | Migrated from semantic names to `aaa000000000000000000001.workflow.json` etc. |
+
+### Documentation
+
+Added to `AGENTS.md`:
+- Vault dependency warning for `scope: "secret"`
+- Qute template safety rules (no `.orEmpty` on properties, curly brace escaping caveat)
+
+| File | What |
+|------|------|
+| `AgentSetupService.java` | Inject `ISecretProvider`, add `vaultApiKey()`, call from both `setupAgent` and `createApiAgent` |
+| `McpSetupToolsTest.java` | Mock `ISecretProvider` (vault disabled), fix constructor |
+| `aaa000000000000000000004.httpcalls.json` | Remove `.orEmpty` from all property refs |
+| `aaa000000000000000000005.output.json` | Split `set_api_key` confirmation, fix `ask_for_model` output |
+| `aaa000000000000000000003.property.json` | apiKey scope: `conversation` |
+| `AGENTS.md` | Vault + Qute documentation |
+
+**Verification:** 2117 unit tests pass, McpSetupToolsTest 30/30 pass.
+
+---
+
 ## Keycloak Auth Setup — Three Bug Fixes (2026-04-14)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
