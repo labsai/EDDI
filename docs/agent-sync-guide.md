@@ -27,8 +27,7 @@ Agent Sync lets you synchronize agent configurations between two running EDDI in
 First, discover which agents are available on the remote instance:
 
 ```bash
-curl -X GET "http://localhost:7070/backup/import/sync/agents" \
-  -H "X-Source-Url: https://source-eddi.example.com" \
+curl -X GET "http://localhost:7070/backup/import/sync/agents?sourceUrl=https://source-eddi.example.com" \
   -H "X-Source-Authorization: Bearer <token>"
 ```
 
@@ -39,15 +38,8 @@ curl -X GET "http://localhost:7070/backup/import/sync/agents" \
 Before syncing, preview what would change:
 
 ```bash
-curl -X POST "http://localhost:7070/backup/import/sync/preview" \
-  -H "Content-Type: application/json" \
-  -H "X-Source-Url: https://source-eddi.example.com" \
-  -H "X-Source-Authorization: Bearer <token>" \
-  -d '{
-    "sourceAgentId": "remote-agent-id",
-    "sourceAgentVersion": 1,
-    "targetAgentId": "local-agent-id"
-  }'
+curl -X POST "http://localhost:7070/backup/import/sync/preview?sourceUrl=https://source-eddi.example.com&sourceAgentId=remote-agent-id&sourceAgentVersion=1&targetAgentId=local-agent-id" \
+  -H "X-Source-Authorization: Bearer <token>"
 ```
 
 **Response:** An `ImportPreview` with resource diffs:
@@ -88,50 +80,60 @@ curl -X POST "http://localhost:7070/backup/import/sync/preview" \
 
 ### 3. Preview Batch (Multiple Agents)
 
-Preview sync for multiple agents at once:
+Preview sync for multiple agents at once. The request body is a JSON array of `SyncMapping` objects:
 
 ```bash
-curl -X POST "http://localhost:7070/backup/import/sync/preview/batch" \
+curl -X POST "http://localhost:7070/backup/import/sync/preview/batch?sourceUrl=https://source-eddi.example.com" \
   -H "Content-Type: application/json" \
-  -H "X-Source-Url: https://source-eddi.example.com" \
-  -d '{
-    "mappings": [
-      { "sourceAgentId": "agent-1", "sourceAgentVersion": 1, "targetAgentId": "local-1" },
-      { "sourceAgentId": "agent-2", "sourceAgentVersion": 2, "targetAgentId": "local-2" }
-    ]
-  }'
+  -H "X-Source-Authorization: Bearer <token>" \
+  -d '[
+    { "sourceAgentId": "agent-1", "sourceAgentVersion": 1, "targetAgentId": "local-1" },
+    { "sourceAgentId": "agent-2", "sourceAgentVersion": 2, "targetAgentId": "local-2" }
+  ]'
 ```
+
+**Response:** A JSON array of `ImportPreview` objects, one per mapping.
 
 ### 4. Execute Sync
 
 Once you've reviewed the preview and are satisfied:
 
 ```bash
-curl -X POST "http://localhost:7070/backup/import/sync" \
-  -H "Content-Type: application/json" \
-  -H "X-Source-Url: https://source-eddi.example.com" \
-  -H "X-Source-Authorization: Bearer <token>" \
-  -d '{
-    "sourceAgentId": "remote-agent-id",
-    "sourceAgentVersion": 1,
-    "targetAgentId": "local-agent-id"
-  }'
+curl -X POST "http://localhost:7070/backup/import/sync?sourceUrl=https://source-eddi.example.com&sourceAgentId=remote-agent-id&sourceAgentVersion=1&targetAgentId=local-agent-id" \
+  -H "X-Source-Authorization: Bearer <token>"
+```
+
+You can also pass `selectedResources` and `workflowOrder` as query parameters for fine-grained control:
+
+```bash
+curl -X POST "http://localhost:7070/backup/import/sync?sourceUrl=https://source-eddi.example.com&sourceAgentId=remote-agent-id&sourceAgentVersion=1&targetAgentId=local-agent-id&selectedResources=res-1,res-2" \
+  -H "X-Source-Authorization: Bearer <token>"
 ```
 
 ### 5. Execute Batch Sync
 
-Sync multiple agents in one call:
+Sync multiple agents in one call. The request body is a JSON array of `SyncRequest` objects:
 
 ```bash
-curl -X POST "http://localhost:7070/backup/import/sync/batch" \
+curl -X POST "http://localhost:7070/backup/import/sync/batch?sourceUrl=https://source-eddi.example.com" \
   -H "Content-Type: application/json" \
-  -H "X-Source-Url: https://source-eddi.example.com" \
-  -d '{
-    "mappings": [
-      { "sourceAgentId": "agent-1", "sourceAgentVersion": 1, "targetAgentId": "local-1" },
-      { "sourceAgentId": "agent-2", "sourceAgentVersion": 2, "targetAgentId": "local-2" }
-    ]
-  }'
+  -H "X-Source-Authorization: Bearer <token>" \
+  -d '[
+    {
+      "sourceAgentId": "agent-1",
+      "sourceAgentVersion": 1,
+      "targetAgentId": "local-1",
+      "selectedResources": null,
+      "workflowOrder": null
+    },
+    {
+      "sourceAgentId": "agent-2",
+      "sourceAgentVersion": 2,
+      "targetAgentId": "local-2",
+      "selectedResources": ["res-a", "res-b"],
+      "workflowOrder": null
+    }
+  ]'
 ```
 
 > **Partial success:** If one agent fails during batch sync, the remaining agents still sync. The response indicates success/failure per agent.
@@ -146,11 +148,25 @@ curl -X POST "http://localhost:7070/backup/import/sync/batch" \
 | `POST` | `/backup/import/sync` | Execute single-agent sync |
 | `POST` | `/backup/import/sync/batch` | Execute multi-agent sync |
 
-### Request Headers
+### Parameters
+
+**Query parameters (all endpoints):**
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `sourceUrl` | Yes | Base URL of the source EDDI instance |
+| `sourceAgentId` | Yes (single) | Agent ID on the remote instance |
+| `sourceAgentVersion` | No | Version to sync (null = latest) |
+| `targetAgentId` | No | Local agent to upgrade (null = create new) |
+| `selectedResources` | No (execute only) | Comma-separated resource IDs to sync |
+| `workflowOrder` | No (execute only) | Desired workflow order after sync |
+
+> **Note:** `sourceUrl` and agent parameters are query parameters. Batch endpoints accept `SyncMapping[]` / `SyncRequest[]` as a JSON request body for the per-agent mappings.
+
+**Request header:**
 
 | Header | Required | Description |
 |--------|----------|-------------|
-| `X-Source-Url` | Yes | Base URL of the source EDDI instance |
 | `X-Source-Authorization` | No | Bearer token for authenticated source instances |
 
 ## How Structural Matching Works
@@ -195,13 +211,13 @@ Export only the resources you want:
 
 ```bash
 # 1. Preview the export tree
-curl -X POST "http://localhost:7070/backup/export/agent-id/preview"
+curl -X POST "http://localhost:7070/backup/export/agent-id/preview?agentVersion=1"
 
 # 2. Select specific resources and export
-curl -X POST "http://localhost:7070/backup/export/agent-id?selectedResources=res1,res2,res3"
+curl -X POST "http://localhost:7070/backup/export/agent-id?agentVersion=1&selectedResources=res1,res2,res3"
 ```
 
-The preview returns a resource tree with selectability flags. Agent and workflow skeleton are always included — you can deselect individual extensions, behavior rules, or prompt snippets.
+The preview returns a resource tree with selectability flags. Agent and workflow skeletons are always included — you can deselect individual extensions, behavior rules, or prompt snippets.
 
 ## See Also
 

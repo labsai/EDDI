@@ -60,7 +60,7 @@ This starts Keycloak alongside EDDI with pre-configured realm, clients, and test
 | `quarkus.oidc.auth-server-url` | Runtime        | `http://localhost:8180/realms/eddi` | Keycloak realm URL                              |
 | `quarkus.oidc.client-id`       | Runtime        | `eddi-backend`                      | OIDC client ID (bearer-only)                    |
 | `quarkus.oidc.application-type` | Runtime       | `service`                           | Bearer-only mode (no login redirects)           |
-| `authorization.enabled`        | Runtime        | `false`                             | Fine-grained authorization checks               |
+| `authorization.enabled`        | Runtime        | `${quarkus.oidc.tenant-enabled}`    | Fine-grained `@RolesAllowed` authorization      |
 
 > **Important:** `quarkus.oidc.enabled` is a **build-time** property — it cannot be changed at container start. The OIDC extension must always be active in the binary. Use `quarkus.oidc.tenant-enabled` (runtime) to toggle auth on/off via environment variables.
 
@@ -78,10 +78,13 @@ docker run -e QUARKUS_OIDC_TENANT_ENABLED=true \
 
 When OIDC is enabled, the following permission rules apply (see `application.properties`):
 
-| Path Pattern                                                                                    | Policy                                   |
-| ----------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `/q/metrics/*`, `/q/health/*`, `/chat/production/*`, `/agents/production/*`, `/agents/managed/*` | **Permit** (no auth)                     |
-| `/`, `/*`                                                                                       | **Authenticated** (valid token required) |
+| Path Pattern | Policy |
+| --- | --- |
+| `/q/metrics/*`, `/q/health/*` | **Permit** — Infrastructure endpoints |
+| `/`, `/manage`, `/manage/*`, `/chat`, `/chat/*` | **Permit** — SPA entry points (the SPA loads and handles Keycloak login via keycloak-js) |
+| `/agents/production/*` | **Permit** — Production conversation endpoints (public-facing) |
+| `/scripts/*`, `/fonts/*`, `/css/*`, `/js/*`, `/img/*` | **Permit** — Static assets for Manager SPA |
+| `/*` (catch-all) | **Authenticated** — All other API endpoints require a valid Bearer token |
 
 ### RestAgentManagement Gate
 
