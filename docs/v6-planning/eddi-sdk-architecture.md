@@ -218,7 +218,7 @@ var result = mcp.agents().setup(SetupAgentRequest.builder()
     .systemPrompt("You are a helpful assistant")
     .provider(LlmProvider.ANTHROPIC)           // typed enum
     .model("claude-sonnet-4-6")
-    .apiKey("${vault:anthropic-key}")
+    .apiKey("${eddivault:anthropic-key}")
     .build());
 
 // Discover deployed agents
@@ -406,7 +406,7 @@ jobs:
 - [ ] API key never logged (redacted in health check, redacted in debug logs)
 - [ ] TLS configuration support (`quarkus.eddi.tls.*`)
 - [ ] mTLS support for Kubernetes service mesh environments
-- [ ] Vault reference passthrough (`${vault:key}`) in API key property
+- [ ] Vault reference passthrough (`${eddivault:key}`) in API key property
 
 ### Testing
 

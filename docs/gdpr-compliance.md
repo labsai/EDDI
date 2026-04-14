@@ -75,8 +75,8 @@ curl -X DELETE https://your-eddi-instance/admin/gdpr/{userId}/restrict \
 ```
 
 **What happens when restricted:**
-- New conversation creation is blocked (`ProcessingRestrictedException`)
-- Message processing (`say`) is blocked
+- New conversation creation is blocked → returns **403 Forbidden**
+- Message processing (`say`) is blocked → returns **403 Forbidden**
 - Existing data is preserved (not deleted)
 - Restriction status is stored as a user memory entry
 - All restriction/unrestriction events are logged in the audit ledger

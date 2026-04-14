@@ -214,6 +214,29 @@ The default Agent Father agent demonstrates vault integration during API key set
 
 The `scope: secret` instruction causes `PropertySetterTask` to store the API key in the vault and replace the memory value with a `${eddivault:...}` reference.
 
+## Auto-Vaulting (Agent Setup)
+
+When creating agents through the **Agent Father** wizard or the Setup API, API keys are **automatically stored in the vault**. You don't need to manually create vault entries.
+
+### How It Works
+
+1. User provides an API key during agent setup
+2. `AgentSetupService.vaultApiKey()` stores the key in the vault
+3. A vault reference (`${eddivault:setup.<agent-name>.<timestamp>.apiKey}`) is written to the LLM configuration
+4. When the vault is enabled, the plaintext key is never persisted in MongoDB — only the vault reference is stored
+
+### Collision Prevention
+
+Each vault key includes an epoch-millisecond timestamp suffix. This prevents key collisions when two agents share the same name — each gets a unique vault entry.
+
+### Graceful Degradation
+
+When the vault is disabled (no `EDDI_VAULT_MASTER_KEY`), the setup service logs a warning and falls back to plaintext storage. This ensures the Agent Father wizard works in local development without requiring vault configuration.
+
+> **Production recommendation:** Always set `EDDI_VAULT_MASTER_KEY` in production. The installer does this automatically.
+
+---
+
 ## REST API
 
 ### Endpoints

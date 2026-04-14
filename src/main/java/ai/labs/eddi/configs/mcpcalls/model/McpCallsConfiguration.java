@@ -32,8 +32,8 @@ public class McpCallsConfiguration {
     private String transport = "http";
 
     /**
-     * Optional API key or vault reference (e.g., "${vault:my-api-key}"). Resolved
-     * at connection time via {@code SecretResolver}.
+     * Optional API key or vault reference (e.g., "${eddivault:my-api-key}").
+     * Resolved at connection time via {@code SecretResolver}.
      */
     private String apiKey;
 

@@ -549,7 +549,7 @@ Step-by-step wizard for new users:
 
 | #   | Item                                                                                                                      | SP  | Status |
 | --- | ------------------------------------------------------------------------------------------------------------------------- | --- | ------ |
-| 33  | **Secrets Vault** — `${vault:key}` references resolved at runtime, export sanitization scrubs plaintext keys              | 5   | ✅     |
+| 33  | **Secrets Vault** — `${eddivault:key}` references resolved at runtime, export sanitization scrubs plaintext keys              | 5   | ✅     |
 | 33b | **Chat UI password field + Manager vault integration**                                                                    | 2   |        |
 | 34  | **Immutable Audit Ledger** — write-once append-only trail of compiled prompts, tool calls, responses, costs (EU AI Act)   | 5   | ✅     |
 | 34b | **Tenant Quota Stub** — per-tenant API rate limits, usage metering counters, configurable resource caps (SaaS foundation) | 2   | ✅     |

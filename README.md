@@ -2,7 +2,7 @@
 
 # E.D.D.I — Multi-Agent Orchestration Middleware for Conversational AI
 
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12355/badge)](https://www.bestpractices.dev/projects/12355) ![Tests](https://img.shields.io/badge/tests-2%2C000%2B-brightgreen)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12355/badge)](https://www.bestpractices.dev/projects/12355) ![Tests](https://img.shields.io/badge/tests-2%2C400%2B-brightgreen)
 
 [![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml)
 
@@ -12,7 +12,7 @@
 
 Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker image**. Native support for **MCP** (Model Context Protocol), **A2A** (Agent-to-Agent), **OpenAPI**, and **OAuth 2.0**.
 
-**Latest version: 6.0.0-RC2** · [Website](https://eddi.labs.ai/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
+**Latest version: 6.0.0** · [Website](https://eddi.labs.ai/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
 
 ---
 
@@ -205,6 +205,7 @@ EDDI implements open standards — not proprietary APIs:
 - 🪟 **Token-Aware Windowing** — Intelligent context packing with model-specific tokenizer support and anchored opening steps
 - 📝 **Rolling Summary** — Incremental LLM-powered summarization of older turns with a **Conversation Recall Tool** for drill-back into compressed history
 - 🔧 **Property Extraction** — Config-driven slot-filling with `longTerm` / `conversation` / `step` scoping — EDDI's importance extraction mechanism
+- 🛡️ **Memory Policy (Commit Flags)** — Strict write discipline marks failed task output as uncommitted (hidden from LLM context) and injects concise error digests for graceful degradation
 - 🔄 **Conversation State** — Full history with undo/redo support
 
 ### 📚 RAG (Retrieval-Augmented Generation)
@@ -283,6 +284,7 @@ EDDI implements open standards — not proprietary APIs:
 - 📦 **Composable Agents** — Agents assembled from reusable, version-controlled workflows and extensions
 - 🧪 **Behavior Rules** — IF-THEN logic engine for routing, orchestration, and business logic
 - 📤 **Import / Export** — Agents portable as ZIP files with automatic secret scrubbing on export
+- 🔄 **Agent Sync** — Live instance-to-instance sync with structural matching, content diffing, and selective resource picking — no ZIP intermediary needed
 - 📝 **Prompt Snippets** — Reusable, versioned system prompt building blocks available as `{{snippets.safety_rules}}`
 - 📎 **Content Type Routing** — MIME-based behavior rule conditions for multimodal attachment routing
 
@@ -332,30 +334,34 @@ Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming
 
 ## 📖 Documentation
 
-| Guide                                                        | Description                                |
-| ------------------------------------------------------------ | ------------------------------------------ |
-| **[Getting Started](docs/getting-started.md)**               | Setup and first steps                      |
-| **[Developer Quickstart](docs/developer-quickstart.md)**     | Build your first agent in 5 minutes        |
-| **[Architecture](docs/architecture.md)**                     | Deep dive into EDDI's design and pipeline  |
-| **[LLM Configuration](docs/langchain.md)**                   | Connecting to 12 LLM providers             |
-| **[Behavior Rules](docs/behavior-rules.md)**                 | Configuring agent routing logic            |
-| **[HTTP Calls](docs/httpcalls.md)**                          | External API integration                   |
-| **[RAG](docs/rag.md)**                                       | Knowledge base retrieval setup             |
-| **[MCP Server](docs/mcp-server.md)**                         | 42 tools for AI-assisted agent management  |
-| **[A2A Protocol](docs/a2a-protocol.md)**                     | Agent-to-Agent peer communication          |
-| **[Group Conversations](docs/group-conversations.md)**       | Multi-agent debate orchestration           |
-| **[User Memory](docs/user-memory.md)**                       | Cross-conversation fact retention          |
-| **[Model Cascading](docs/model-cascade.md)**                 | Cost-optimized multi-model routing         |
-| **[Prompt Snippets](docs/prompt-snippets-guide.md)**         | Reusable system prompt building blocks     |
-| **[Attachments](docs/attachments-guide.md)**                 | Multimodal attachment pipeline             |
-| **[Capability Matching](docs/capability-match-guide.md)**    | A2A skill discovery and routing            |
-| **[Security](docs/security.md)**                             | SSRF protection, sandboxing, and hardening |
-| **[Secrets Vault](docs/secrets-vault.md)**                   | Envelope encryption for sensitive data     |
-| **[Audit Ledger](docs/audit-ledger.md)**                     | EU AI Act-compliant audit trail            |
-| **[Kubernetes](docs/kubernetes.md)**                         | Deploy with Kustomize or Helm              |
-| **[Red Hat OpenShift](docs/redhat-openshift.md)**            | Certified container, automated release     |
-| **[Agent Father Deep Dive](docs/agent-father-deep-dive.md)** | How the meta-agent works                   |
-| **[Full Documentation](https://docs.labs.ai/)**              | Complete documentation site                |
+| Guide                                                        | Description                                        |
+| ------------------------------------------------------------ | -------------------------------------------------- |
+| **[Getting Started](docs/getting-started.md)**               | Setup and first steps                              |
+| **[Developer Quickstart](docs/developer-quickstart.md)**     | Build your first agent in 5 minutes                |
+| **[Architecture](docs/architecture.md)**                     | Deep dive into EDDI's design and pipeline          |
+| **[LLM Configuration](docs/langchain.md)**                   | Connecting to 12 LLM providers                     |
+| **[Behavior Rules](docs/behavior-rules.md)**                 | Configuring agent routing logic                    |
+| **[HTTP Calls](docs/httpcalls.md)**                          | External API integration                           |
+| **[RAG](docs/rag.md)**                                       | Knowledge base retrieval setup                     |
+| **[MCP Server](docs/mcp-server.md)**                         | 42 tools for AI-assisted agent management          |
+| **[A2A Protocol](docs/a2a-protocol.md)**                     | Agent-to-Agent peer communication                  |
+| **[Group Conversations](docs/group-conversations.md)**       | Multi-agent debate orchestration                   |
+| **[User Memory](docs/user-memory.md)**                       | Cross-conversation fact retention                  |
+| **[Memory Policy](docs/memory-policy.md)**                   | Commit flags and strict write discipline            |
+| **[Model Cascading](docs/model-cascade.md)**                 | Cost-optimized multi-model routing                 |
+| **[Scheduling & Heartbeats](docs/scheduling.md)**            | Cron schedules, heartbeats, dream consolidation    |
+| **[Agent Sync](docs/agent-sync-guide.md)**                   | Live instance-to-instance sync and upgrade imports |
+| **[Import / Export](docs/import-export-an-agent.md)**        | ZIP-based agent portability and merge              |
+| **[Prompt Snippets](docs/prompt-snippets-guide.md)**         | Reusable system prompt building blocks             |
+| **[Attachments](docs/attachments-guide.md)**                 | Multimodal attachment pipeline                     |
+| **[Capability Matching](docs/capability-match-guide.md)**    | A2A skill discovery and routing                    |
+| **[Security](docs/security.md)**                             | SSRF protection, sandboxing, and hardening         |
+| **[Secrets Vault](docs/secrets-vault.md)**                   | Envelope encryption and auto-vaulting              |
+| **[Audit Ledger](docs/audit-ledger.md)**                     | EU AI Act-compliant audit trail                    |
+| **[Kubernetes](docs/kubernetes.md)**                         | Deploy with Kustomize or Helm                      |
+| **[Red Hat OpenShift](docs/redhat-openshift.md)**            | Certified container, automated release             |
+| **[Agent Father Deep Dive](docs/agent-father-deep-dive.md)** | How the meta-agent works                           |
+| **[Full Documentation](https://docs.labs.ai/)**              | Complete documentation site                        |
 
 ---
 

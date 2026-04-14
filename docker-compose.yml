@@ -1,6 +1,6 @@
 services:
   eddi:
-    image: labsai/eddi:latest
+    image: labsai/eddi:6.0.0
     environment:
       - "EDDI_VAULT_MASTER_KEY=${EDDI_VAULT_MASTER_KEY:-}"
       - "EDDI_DATASTORE_TYPE=${EDDI_DATASTORE_TYPE:-mongodb}"

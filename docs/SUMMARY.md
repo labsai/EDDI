@@ -20,6 +20,7 @@
 - [Architecture Overview](architecture.md)
 - [Project Philosophy](project-philosophy.md)
 - [Conversation Memory & State Management](conversation-memory.md)
+- [Memory Policy (Commit Flags)](memory-policy.md)
 - [Properties](properties.md)
 - [Persistent User Memory](user-memory.md)
 - [Extensions](extensions.md)
@@ -31,17 +32,22 @@
 - [LLM Integration](langchain.md)
 - [RAG (Retrieval-Augmented Generation)](rag.md)
 - [Model Cascade](model-cascade.md)
+- [Prompt Snippets](prompt-snippets-guide.md)
 - [Output Configuration](output-configuration.md)
 - [Output Templating](output-templating.md)
 - [Semantic Parser](semantic-parser.md)
 - [Passing Context Information](passing-context-information.md)
+- [Multimodal Attachments](attachments-guide.md)
 
 ## Conversations & Orchestration
 
 - [Conversations](conversations.md)
 - [Group Conversations](group-conversations.md)
 - [Managed Agents](managed-agents.md)
+- [Scheduled Execution & Heartbeats](scheduling.md)
+- [Capability Matching](capability-match-guide.md)
 - [Deployment Management of Agents](deployment-management-of-agents.md)
+- [Agent Sync (Live & ZIP)](agent-sync-guide.md)
 
 ## Protocols & Integration
 
@@ -53,7 +59,10 @@
 - [Security](security.md)
 - [Secrets Vault](secrets-vault.md)
 - [Audit Ledger](audit-ledger.md)
-- [GDPR Compliance Guide](gdpr-compliance.md)
+- [GDPR / CCPA Compliance](gdpr-compliance.md)
+- [HIPAA Compliance](hipaa-compliance.md)
+- [EU AI Act Compliance](eu-ai-act-compliance.md)
+- [Compliance Data Flow](compliance-data-flow.md)
 - [Incident Response Plan](incident-response.md)
 - [Privacy & Data Processing](../PRIVACY.md)
 
@@ -78,4 +87,5 @@
 
 ## Reference
 
+- [Agent Sync Architecture](agent-sync-architecture.md)
 - [FAQs](how-to....md)

@@ -14,8 +14,10 @@ EDDI supports optional authentication via [Keycloak](https://www.keycloak.org/) 
 
 ### Architecture
 
+EDDI uses **bearer-only (service) mode** — the backend never redirects to Keycloak. The Manager SPA and Chat UI handle login via `keycloak-js`, then send Bearer tokens to the backend for validation.
+
 ```
-Browser (EDDI Manager)
+Browser (EDDI Manager / Chat UI)
     │
     ├── keycloak-js → Keycloak login → JWT access token
     │
@@ -28,6 +30,27 @@ Browser (EDDI Manager)
     └── Token refresh (automatic, every 30s before expiry)
 ```
 
+> **Note:** The backend runs with `application-type=service` (bearer-only). It does not handle authorization code flows or login redirects. All login UI is handled client-side.
+
+### Quick Setup with Installer
+
+The easiest way to enable auth is to use the installer:
+
+```bash
+# Linux / macOS
+bash install.sh --with-auth
+
+# PowerShell
+.\install.ps1 -WithAuth
+```
+
+This starts Keycloak alongside EDDI with pre-configured realm, clients, and test users:
+
+| User | Password | Role | Notes |
+|------|----------|------|-------|
+| `eddi` | `eddi` | admin | Full access, forced password change on first login |
+| `viewer` | `viewer` | viewer | Read-only access, forced password change on first login |
+
 ### Configuration Properties
 
 | Property                       | Type           | Default                             | Description                                     |
@@ -36,7 +59,8 @@ Browser (EDDI Manager)
 | `quarkus.oidc.tenant-enabled`  | **Runtime**    | `false`                             | Enables/disables auth enforcement               |
 | `quarkus.oidc.auth-server-url` | Runtime        | `http://localhost:8180/realms/eddi` | Keycloak realm URL                              |
 | `quarkus.oidc.client-id`       | Runtime        | `eddi-backend`                      | OIDC client ID (bearer-only)                    |
-| `authorization.enabled`        | Runtime        | `false`                             | Fine-grained authorization checks               |
+| `quarkus.oidc.application-type` | Runtime       | `service`                           | Bearer-only mode (no login redirects)           |
+| `authorization.enabled`        | Runtime        | `${quarkus.oidc.tenant-enabled}`    | Fine-grained `@RolesAllowed` authorization      |
 
 > **Important:** `quarkus.oidc.enabled` is a **build-time** property — it cannot be changed at container start. The OIDC extension must always be active in the binary. Use `quarkus.oidc.tenant-enabled` (runtime) to toggle auth on/off via environment variables.
 
@@ -46,6 +70,7 @@ Browser (EDDI Manager)
 docker run -e QUARKUS_OIDC_TENANT_ENABLED=true \
            -e QUARKUS_OIDC_AUTH_SERVER_URL=http://keycloak:8080/realms/eddi \
            -e QUARKUS_OIDC_CLIENT_ID=eddi-backend \
+           -e QUARKUS_OIDC_APPLICATION_TYPE=service \
            labsai/eddi:latest
 ```
 
@@ -53,10 +78,13 @@ docker run -e QUARKUS_OIDC_TENANT_ENABLED=true \
 
 When OIDC is enabled, the following permission rules apply (see `application.properties`):
 
-| Path Pattern                                                                                    | Policy                                   |
-| ----------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `/q/metrics/*`, `/q/health/*`, `/chat/production/*`, `/agents/production/*`, `/agents/managed/*` | **Permit** (no auth)                     |
-| `/`, `/*`                                                                                       | **Authenticated** (valid token required) |
+| Path Pattern | Policy |
+| --- | --- |
+| `/q/metrics/*`, `/q/health/*` | **Permit** — Infrastructure endpoints |
+| `/`, `/manage`, `/manage/*`, `/chat`, `/chat/*` | **Permit** — SPA entry points (the SPA loads and handles Keycloak login via keycloak-js) |
+| `/agents/production/*` | **Permit** — Production conversation endpoints (public-facing) |
+| `/scripts/*`, `/fonts/*`, `/css/*`, `/js/*`, `/img/*` | **Permit** — Static assets for Manager SPA |
+| `/*` (catch-all) | **Authenticated** — All other API endpoints require a valid Bearer token |
 
 ### RestAgentManagement Gate
 

@@ -21,7 +21,7 @@ Cascading is configured per-task in a `langchain.json` resource:
       "actions": ["*"],
       "parameters": {
         "systemMessage": "You are a helpful assistant.",
-        "apiKey": "${vault:openai-key}",
+        "apiKey": "${eddivault:openai-key}",
         "logSizeLimit": "10"
       },
       "modelCascade": {

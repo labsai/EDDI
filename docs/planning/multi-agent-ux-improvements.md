@@ -250,7 +250,7 @@ enum FeedbackRating { POSITIVE, NEGATIVE, NEUTRAL }
 
 - [research-1.md](research-1.md) — Source research paper
 - [architecture.md](../architecture.md) — EDDI architecture overview
-- [project-philosophy.md](../project-philosophy.md) — The Seven Pillars
+- [project-philosophy.md](../project-philosophy.md) — The Nine Pillars
 - [GroupConversationService.java](../../src/main/java/ai/labs/eddi/engine/internal/GroupConversationService.java) — Phase-based orchestrator
 - [AgentGroupConfiguration.java](../../src/main/java/ai/labs/eddi/configs/groups/model/AgentGroupConfiguration.java) — Group configuration model
 - [A2ATaskHandler.java](../../src/main/java/ai/labs/eddi/engine/a2a/A2ATaskHandler.java) — A2A protocol handler

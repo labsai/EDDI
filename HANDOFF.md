@@ -886,7 +886,7 @@ Agents now auto-discover `httpcall` configurations from their workflow and expos
 - `src/main/java/ai/labs/eddi/modules/llm/model/LlmConfiguration.java` — `enableHttpCallTools` field
 - `src/test/java/ai/labs/eddi/modules/llm/impl/AgentOrchestratorTest.java` — 7 new tests (30 total)
 
-See `AGENTS.md` for the full roadmap (Phases 7–14b) and `docs/project-philosophy.md` for the 7 architectural pillars.
+See `AGENTS.md` for the full roadmap (Phases 7–14b) and `docs/project-philosophy.md` for the 9 architectural pillars.
 
 ### LLM Provider Expansion: 7 → 12 Providers ✅
 

@@ -2,7 +2,7 @@
 
 > **Scope**: Multi-agent orchestration, A2A evolution, cryptographic agent identity, multimodal context attachments, and behavioral governance.
 >
-> **Governing Principles**: All changes **must** conform to the [Seven Pillars](../project-philosophy.md). Java is the engine, configuration is logic, security is architecture.
+> **Governing Principles**: All changes **must** conform to the [Nine Pillars](../project-philosophy.md). Java is the engine, configuration is logic, security is architecture.
 
 > [!IMPORTANT]
 > **Implementation Status (2026-04-07):**

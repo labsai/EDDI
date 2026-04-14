@@ -1,6 +1,7 @@
 {
   "scanSettings": {
-    "baseBranches": []
+    "baseBranches": [],
+    "skipFolders": ["licenses"]
   },
   "checkRunSettings": {
     "vulnerableCheckRunConclusionLevel": "failure",

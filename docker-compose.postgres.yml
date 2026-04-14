@@ -1,7 +1,7 @@
 
 services:
   eddi:
-    image: labsai/eddi:latest
+    image: labsai/eddi:6.0.0
     ports:
       - "7070:7070"
     environment:

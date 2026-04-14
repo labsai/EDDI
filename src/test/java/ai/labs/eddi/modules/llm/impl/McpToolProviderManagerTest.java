@@ -120,13 +120,13 @@ class McpToolProviderManagerTest {
     void testDiscoverTools_VaultRefResolution() {
         var config = new McpServerConfig();
         config.setUrl("http://localhost:99999/mcp-vault-test");
-        config.setApiKey("${vault:my-secret}");
+        config.setApiKey("${eddivault:my-secret}");
         config.setTimeoutMs(1000L);
 
         // The discoverTools call will fail to connect, but we can verify
         // the secret resolver was called
         manager.discoverTools(List.of(config));
 
-        verify(secretResolver).resolveValue("${vault:my-secret}");
+        verify(secretResolver).resolveValue("${eddivault:my-secret}");
     }
 }

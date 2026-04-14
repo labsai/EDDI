@@ -529,7 +529,7 @@ Add `mcpServers` to a LangChain task configuration:
         {
           "url": "http://localhost:7070/mcp",
           "name": "eddi-docs",
-          "apiKey": "${vault:mcp-api-key}",
+          "apiKey": "${eddivault:mcp-api-key}",
           "timeoutMs": 30000
         },
         {
@@ -547,7 +547,7 @@ Add `mcpServers` to a LangChain task configuration:
 | `url`       | string | **Yes**  | —                  | MCP server URL (Streamable HTTP transport)                                         |
 | `name`      | string | No       | URL                | Human-readable name for logging                                                    |
 | `transport` | string | No       | `"streamableHttp"` | Transport type (only `streamableHttp` supported)                                   |
-| `apiKey`    | string | No       | —                  | API key, sent as `Authorization: Bearer <key>`. Supports `${vault:key}` references |
+| `apiKey`    | string | No       | —                  | API key, sent as `Authorization: Bearer <key>`. Supports `${eddivault:key}` references |
 | `timeoutMs` | long   | No       | `30000`            | Connection and request timeout in milliseconds                                     |
 
 ### Using `setup_agent` with MCP Servers
@@ -592,5 +592,5 @@ The `mcpServers` parameter accepts a comma-separated list of URLs.
 - **Graceful degradation**: Failed MCP connections log warnings but never kill the pipeline
 - **Connection caching**: `McpToolProviderManager` reuses connections across conversation turns
 - **Budget/rate-limiting**: MCP tools are subject to the same `ToolExecutionService` controls as built-in tools
-- **Vault references**: API keys support `${vault:key}` syntax via `SecretResolver`
+- **Vault references**: API keys support `${eddivault:key}` syntax via `SecretResolver`
 - **Clean shutdown**: All MCP clients are closed on application shutdown via `@PreDestroy`

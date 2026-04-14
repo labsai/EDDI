@@ -34,7 +34,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 ### Before Starting Any Work
 
 1. **Read the key docs**:
-   - [`docs/project-philosophy.md`](docs/project-philosophy.md) — **Supreme directive.** 7 architectural pillars governing all EDDI development
+   - [`docs/project-philosophy.md`](docs/project-philosophy.md) — **Supreme directive.** 9 architectural pillars governing all EDDI development
    - [`docs/changelog.md`](docs/changelog.md) — **READ FIRST.** Running log of all changes, decisions, and reasoning across ALL repos and sessions
    - [`docs/architecture.md`](docs/architecture.md) — Architecture overview, configuration model, pipeline, and DB-agnostic design
    - If working on **EDDI-Manager**: also read `EDDI-Manager/AGENTS.md` in the Manager repo

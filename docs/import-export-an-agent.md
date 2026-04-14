@@ -32,12 +32,13 @@ When you export an agent, EDDI packages:
 
 ### Import Strategies
 
-EDDI supports two import strategies:
+EDDI supports three import strategies:
 
-| Strategy             | Behavior                                          | Use Case                            |
-| -------------------- | ------------------------------------------------- | ----------------------------------- |
-| **Create** (default) | Always creates a new agent with new IDs           | First-time import, creating copies  |
-| **Merge**            | Updates existing resources by matching origin IDs | Syncing changes across environments |
+| Strategy             | Behavior                                                        | Use Case                            |
+| -------------------- | --------------------------------------------------------------- | ----------------------------------- |
+| **Create** (default) | Always creates a new agent with new IDs                         | First-time import, creating copies  |
+| **Merge**            | Updates existing resources by matching origin IDs               | Syncing changes across environments |
+| **Upgrade**          | Updates existing agent by structural matching (no origin IDs needed) | Syncing independently created agents |
 
 ### Export/Import Workflow
 
@@ -318,3 +319,35 @@ curl -X POST -H "Content-Type: application/zip" \
 ```
 
 > **Important:** The agent will not be deployed after import — you must deploy it yourself using the [Deployment API](deployment-management-of-agents.md).
+
+---
+
+## Upgrade Strategy
+
+In addition to `create` (new agent) and `merge` (by origin ID), EDDI supports an **`upgrade`** strategy that uses structural matching to sync content into an existing agent — even if the agents were created independently (no shared origin IDs):
+
+```bash
+# Preview what would change
+curl -X POST -H "Content-Type: application/zip" \
+  --data-binary @agent-export.zip \
+  "http://localhost:7070/backup/import/preview?targetAgentId=local-agent-id"
+
+# Execute upgrade
+curl -X POST -H "Content-Type: application/zip" \
+  --data-binary @agent-export.zip \
+  "http://localhost:7070/backup/import?strategy=upgrade&targetAgentId=local-agent-id"
+```
+
+The upgrade strategy matches resources by **structure** (workflow position, extension type, snippet name) rather than by origin ID. See [Agent Sync](agent-sync-guide.md) for details on how structural matching works.
+
+## Live Sync (Without ZIP)
+
+If both EDDI instances are reachable over HTTP, you can skip the ZIP step entirely and sync directly between instances. See the **[Agent Sync Guide](agent-sync-guide.md)** for the full workflow.
+
+---
+
+## See Also
+
+- [Agent Sync Guide](agent-sync-guide.md) — Live instance-to-instance sync and upgrade imports
+- [Deployment Management](deployment-management-of-agents.md) — Deploying agents after import
+- [Secrets Vault](secrets-vault.md) — How API keys are scrubbed and re-vaulted during import

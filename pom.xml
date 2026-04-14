@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>ai.labs</groupId>
     <artifactId>eddi</artifactId>
-    <version>6.0.0-RC2</version>
+    <version>6.0.0</version>
     <properties>
         <compiler-plugin.version>3.15.0</compiler-plugin.version>
         <maven.compiler.source>25</maven.compiler.source>
@@ -43,11 +43,17 @@
                 <artifactId>classgraph</artifactId>
                 <version>4.8.184</version>
             </dependency>
-            <!-- Override jinjava to fix CVE-2025-59340 (pulled by jlama-core) -->
+            <!-- Override jinjava to fix CVE-2026-25526 (pulled by jlama-core via jlama) -->
             <dependency>
                 <groupId>com.hubspot.jinjava</groupId>
                 <artifactId>jinjava</artifactId>
-                <version>2.8.1</version>
+                <version>2.8.3</version>
+            </dependency>
+            <!-- Override reactor-netty-http to fix CVE-2025-22227 (pulled by langchain4j-azure-open-ai) -->
+            <dependency>
+                <groupId>io.projectreactor.netty</groupId>
+                <artifactId>reactor-netty-http</artifactId>
+                <version>1.2.8</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -207,6 +213,23 @@
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-elasticsearch</artifactId>
             <version>${langchain4j-beta.version}</version>
+            <exclusions>
+                <!-- Exclude Jackson 3.x (tools.jackson namespace) to fix WS-2026-0003 / CVE-2026-29062.
+                     Elasticsearch-java 9.x pulls jackson-core 3.0.0 which has a High-severity vuln.
+                     The rest of EDDI uses com.fasterxml.jackson (2.x) managed by Quarkus BOM. -->
+                <exclusion>
+                    <groupId>tools.jackson.core</groupId>
+                    <artifactId>jackson-core</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>tools.jackson.core</groupId>
+                    <artifactId>jackson-databind</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>tools.jackson.core</groupId>
+                    <artifactId>jackson-annotations</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>dev.langchain4j</groupId>
