@@ -1,19 +1,23 @@
 node_modules
 dist
-compiled
 .idea
-*.js
-*.js.map
+.vscode
 *.log
-.nyc_output
 coverage
-.awcache
-!wallaby.js
-!webpack.config.babel.js
-!webpack/*.js
-!server.js
+
+# Auth / secrets
+.npmrc
+.env
+.env.*
+
+# Firebase (legacy)
 .firebaserc
 firebase.json
+
+# Test output
 playwright-report/
+test-results/
+test-results.json
 test-output*.txt
 vitest-results.json
+out.txt
