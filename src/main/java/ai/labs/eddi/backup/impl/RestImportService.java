@@ -313,6 +313,25 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             log.debug("Could not look up origin ID " + originId + ": " + e.getMessage());
         }
+
+        // Fallback: try by resource ID directly (handles export→re-import round-trip
+        // where the ZIP's resource IDs match the local resource IDs, not an originId)
+        try {
+            IResourceId currentId = documentDescriptorStore.getCurrentResourceId(originId);
+            if (currentId != null) {
+                DocumentDescriptor desc = documentDescriptorStore.readDescriptor(currentId.getId(), currentId.getVersion());
+                if (desc != null) {
+                    IResourceId localResourceId = RestUtilities.extractResourceId(desc.getResource());
+                    if (localResourceId != null) {
+                        return new ResourceDiff(originId, resourceType, name, DiffAction.UPDATE, localResourceId.getId(),
+                                localResourceId.getVersion(), "resourceId", null, null, -1);
+                    }
+                }
+            }
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            log.debugf("Fallback resource ID lookup for '%s' not found: %s", originId, e.getMessage());
+        }
+
         return new ResourceDiff(originId, resourceType, name, DiffAction.CREATE, null, null, null, null, null, -1);
     }
 
@@ -691,11 +710,19 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         try {
             IResourceId resourceId = RestUtilities.extractResourceId(resourceUri);
             if (resourceId != null) {
-                DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(resourceId.getId(), resourceId.getVersion());
-                if (descriptor != null && !originId.equals(descriptor.getOriginId())) {
-                    descriptor.setOriginId(originId);
-                    // Use setDescriptor directly — patchDescriptor only patches name/description
-                    documentDescriptorStore.setDescriptor(resourceId.getId(), resourceId.getVersion(), descriptor);
+                // Use getCurrentResourceId to find the descriptor's actual version.
+                // During merge, the resource may be at v2 but the descriptor still at v1
+                // (updateDocumentDescriptor runs later). Reading at the resource version
+                // would fail with ResourceNotFoundException.
+                IResourceId currentDescId = documentDescriptorStore.getCurrentResourceId(resourceId.getId());
+                if (currentDescId != null) {
+                    DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(
+                            currentDescId.getId(), currentDescId.getVersion());
+                    if (descriptor != null && !originId.equals(descriptor.getOriginId())) {
+                        descriptor.setOriginId(originId);
+                        documentDescriptorStore.setDescriptor(
+                                currentDescId.getId(), currentDescId.getVersion(), descriptor);
+                    }
                 }
             }
         } catch (Exception e) {
@@ -1020,11 +1047,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // Use documentDescriptorStore directly instead of the REST layer's
                         // patchDescriptor. CDI-direct resource updates bypass the
                         // DocumentDescriptorFilter, so the descriptor stays at its original
-                        // version. We must read the current descriptor version and update it
-                        // with a proper version bump (updateDescriptor, not setDescriptor)
-                        // so the descriptor version advances to match the new resource version.
-                        // This prevents the DocumentDescriptorFilter from creating a duplicate
-                        // descriptor when it sees the 201 response.
+                        // version.
                         try {
                             IResourceId currentDescriptorId = documentDescriptorStore.getCurrentResourceId(newResourceId.getId());
                             if (currentDescriptorId != null) {
@@ -1041,10 +1064,22 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                                 // Update the resource URI to point to the new version
                                 existingDescriptor.setResource(newUri);
 
-                                // Use updateDescriptor to properly bump the descriptor version
-                                // (archives v1 to history, creates v2 as current)
-                                documentDescriptorStore.updateDescriptor(
-                                        currentDescriptorId.getId(), currentDescriptorId.getVersion(), existingDescriptor);
+                                if (currentDescriptorId.getVersion() < newResourceId.getVersion()) {
+                                    // MERGE path: descriptor version is behind the resource version
+                                    // (e.g., descriptor v1 but resource v2). Use updateDescriptor to
+                                    // bump the descriptor version. This prevents the
+                                    // DocumentDescriptorFilter from creating a duplicate when it
+                                    // sees the 201 response with the new resource version.
+                                    documentDescriptorStore.updateDescriptor(
+                                            currentDescriptorId.getId(), currentDescriptorId.getVersion(), existingDescriptor);
+                                } else {
+                                    // CREATE path: descriptor version already matches the resource
+                                    // version (both v1). Use setDescriptor for an in-place update
+                                    // without archiving to history. This avoids conflicts with
+                                    // subsequent setOriginIdOnDescriptor calls.
+                                    documentDescriptorStore.setDescriptor(
+                                            currentDescriptorId.getId(), currentDescriptorId.getVersion(), existingDescriptor);
+                                }
                             }
                         } catch (IResourceStore.ResourceNotFoundException e) {
                             // No existing descriptor — create one for the new resource
