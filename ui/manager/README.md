@@ -1,140 +1,76 @@
 # EDDI Manager
 
-> Admin dashboard for the [EDDI](https://github.com/labsai/EDDI) conversational AI platform.
+> Admin dashboard for [**EDDI**](https://github.com/labsai/EDDI) — the open-source multi-agent orchestration middleware for conversational AI.
 
-## Tech Stack
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-| Layer              | Technology                                   |
-| ------------------ | -------------------------------------------- |
-| **Build**          | Vite 6                                       |
-| **UI**             | React 19 + TypeScript 5 (strict mode)        |
-| **Styling**        | Tailwind CSS v4 + CSS variables (black/gold) |
-| **State (server)** | TanStack Query v5                            |
-| **State (UI)**     | React hooks (`useState` / `useCallback`)     |
-| **Routing**        | React Router v7                              |
-| **i18n**           | react-i18next — 11 locales with RTL support  |
-| **Editor**         | Monaco (`@monaco-editor/react`)              |
-| **DnD**            | @dnd-kit (package pipeline builder)          |
-| **Tests**          | Vitest + React Testing Library + MSW         |
-| **Auth**           | Keycloak 26 via `keycloak-js` (optional)     |
+EDDI Manager is a modern React SPA that ships **inside** the EDDI Docker image. It provides a visual workspace for building, testing, deploying, and monitoring AI agents — no code required.
 
-## Prerequisites
+**🌐 Website:** [eddi.labs.ai](https://eddi.labs.ai/) · **📖 Docs:** [docs.labs.ai](https://docs.labs.ai/) · **🐳 Docker:** [hub.docker.com/r/labsai/eddi](https://hub.docker.com/r/labsai/eddi)
 
-- **Node.js** ≥ 20
-- **npm** ≥ 10
-- EDDI backend running on `localhost:7070` (for dev proxy)
+---
+
+## What It Does
+
+- **Agent Builder** — Create and configure agents with a drag-and-drop workflow pipeline
+- **Agent Studio** — 3-panel workspace with live chat, debug drawer, and pipeline inspector
+- **Group Discussions** — Orchestrate multi-agent conversations with 5 discussion styles
+- **LLM Configuration** — Connect to 12 providers (OpenAI, Anthropic, Gemini, Ollama, etc.)
+- **Resource Editors** — Form-based editors for rules, API calls, LLM configs, dictionaries, RAG, MCP, and more
+- **Secrets Vault** — Manage encrypted API keys with vault references
+- **Audit Trail** — Timeline-based compliance and debugging viewer
+- **11 Languages** — English, German, French, Spanish, Portuguese, Chinese, Japanese, Korean, Arabic (RTL), Hindi, Thai
 
 ## Quick Start
 
+The easiest way to use EDDI Manager is via the main EDDI project:
+
 ```bash
+# One-command installer (includes Manager)
+curl -fsSL https://raw.githubusercontent.com/labsai/EDDI/main/install.sh | bash
+```
+
+Then open [http://localhost:7070/manage](http://localhost:7070/manage).
+
+See the [EDDI README](https://github.com/labsai/EDDI#-quick-start) for full setup instructions.
+
+## Development
+
+If you want to develop the Manager UI itself:
+
+```bash
+# Prerequisites: Node.js ≥ 20, EDDI backend on localhost:7070
 npm install
 npm run dev          # Vite dev server on http://localhost:5173
 ```
 
-The Vite proxy forwards all API calls to the EDDI backend at `localhost:7070`.
-
-## Testing & Build
+The Vite dev proxy forwards API calls to the EDDI backend. If no backend is available, the Manager auto-starts in **standalone mode** with mock data (via [MSW](https://mswjs.io/)).
 
 ```bash
-npx tsc -b           # TypeScript type-check (zero errors expected)
-npm run test          # Vitest unit + component tests
-npm run build         # Production build
+npm run test         # 540+ Vitest unit/component tests
+npm run build        # Production build
 ```
 
-## Authentication (Optional)
+## Tech Stack
 
-By default, the Manager runs without login. To enable Keycloak auth:
+| Layer      | Technology                                      |
+| ---------- | ----------------------------------------------- |
+| Build      | Vite 6                                          |
+| UI         | React 19 + TypeScript 5 (strict)                |
+| Styling    | Tailwind CSS v4                                 |
+| State      | TanStack Query v5 + Zustand                     |
+| Routing    | React Router v7                                 |
+| Editor     | Monaco                                          |
+| DnD        | @dnd-kit                                        |
+| Auth       | Keycloak 26 (optional)                          |
+| Tests      | Vitest + React Testing Library + MSW + Playwright |
 
-### 1. Start Local Keycloak
+## Related
 
-```bash
-docker compose -f docker-compose.keycloak.yml up
-```
-
-This starts Keycloak 26 + EDDI backend + MongoDB — all pre-configured.
-
-### 2. Start Manager with Auth
-
-```bash
-# PowerShell
-$env:VITE_AUTH_METHOD="keycloak"; npm run dev
-
-# Bash
-VITE_AUTH_METHOD=keycloak npm run dev
-```
-
-### 3. Log In
-
-| User     | Password | Role   |
-| -------- | -------- | ------ |
-| `eddi`   | `eddi`   | admin  |
-| `viewer` | `viewer` | viewer |
-
-### Auth Environment Variables
-
-| Variable              | Default                 | Description          |
-| --------------------- | ----------------------- | -------------------- |
-| `VITE_AUTH_METHOD`    | `none`                  | `keycloak` or `none` |
-| `VITE_AUTH_URL`       | `http://localhost:8180` | Keycloak server URL  |
-| `VITE_AUTH_REALM`     | `eddi`                  | Keycloak realm       |
-| `VITE_AUTH_CLIENT_ID` | `eddi-manager`          | Keycloak client ID   |
-
-### How It Works
-
-The frontend uses PKCE (S256) for login. After authentication, all API requests include `Authorization: Bearer <token>`. The EDDI backend validates tokens via Quarkus OIDC against Keycloak's JWKS endpoint.
-
-## Architecture
-
-```
-src/
-├── components/
-│   ├── auth/                  # AuthProvider, AuthContext
-│   ├── editors/               # Form editors + shared editor chrome
-│   │   ├── config-editor-layout.tsx   # Tabs (Form|JSON), version picker, save
-│   │   ├── behavior-editor.tsx        # Behavior rules form editor
-│   │   ├── httpcalls-editor.tsx       # HTTP calls form editor
-│   │   ├── langchain-editor.tsx       # LangChain/AI config editor
-│   │   ├── output-editor.tsx          # Output sets editor
-│   │   ├── propertysetter-editor.tsx  # Property setter editor
-│   │   ├── dictionary-editor.tsx      # Dictionary editor
-│   │   ├── pipeline-builder.tsx       # Drag-and-drop extension pipeline
-│   │   └── version-picker.tsx         # Version dropdown
-│   └── layout/                # Sidebar, top-bar, theme-provider
-├── hooks/                     # TanStack Query hooks + useAuth
-├── lib/
-│   ├── api/                   # Typed API modules
-│   ├── api-client.ts          # Base fetch wrapper
-│   └── auth-config.ts         # Auth method detection
-├── i18n/locales/              # 11 locale JSON files
-├── pages/                     # Route pages
-│   └── __tests__/             # Component tests
-└── test/mocks/
-    ├── handlers.ts            # MSW request handlers
-    └── server.ts              # MSW server setup
-```
-
-### Key Patterns
-
-- **Editor Render Prop**: All editors plug into `ConfigEditorLayout` via `renderFormEditor` in `resource-detail.tsx`
-- **Generic CRUD**: `src/lib/api/resources.ts` provides typed CRUD for all 6 extension types
-- **API base URL**: `window.location.origin` — no hardcoded URLs
-- **Logical CSS**: Uses `ps-*`/`pe-*`/`ms-*`/`me-*` for RTL support
-- **i18n**: Auto-detects RTL, sets `dir` on `<html>`, supports 11 languages
-- **Optional auth**: `AuthProvider` wraps app tree, renders immediately when auth disabled
-
-### Supported Locales
-
-English, German, French, Spanish, Arabic (RTL), Chinese, Thai, Japanese, Korean, Portuguese, Hindi
-
-## Branch
-
-All v6 development is on `feature/version-6.0.0`.
-
-## Related Repos
-
-- [EDDI](https://github.com/labsai/EDDI) — Backend engine (Java 25, Quarkus, MongoDB)
-- [eddi-chat-ui](https://github.com/labsai/eddi-chat-ui) — Standalone chat widget
+- [**EDDI**](https://github.com/labsai/EDDI) — Backend engine (Java 25, Quarkus)
+- [**eddi-chat-ui**](https://github.com/labsai/eddi-chat-ui) — Embeddable chat widget
+- [**quarkus-eddi**](https://github.com/quarkiverse/quarkus-eddi) — Quarkus SDK
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+[Apache 2.0](LICENSE)
