@@ -229,7 +229,7 @@ function handleSSEEvent(
             transcript[placeholderIdx] = {
               speakerAgentId: prev.speakerAgentId,
               speakerDisplayName: prev.speakerDisplayName,
-              content: payload.content,
+              content: payload.response ?? payload.content ?? null,
               phaseIndex: prev.phaseIndex,
               phaseName: prev.phaseName,
               type: prev.type,
@@ -242,7 +242,7 @@ function handleSSEEvent(
             transcript.push({
               speakerAgentId: payload.agentId,
               speakerDisplayName: payload.displayName,
-              content: payload.content,
+              content: payload.response ?? payload.content ?? null,
               phaseIndex: payload.phaseIndex,
               phaseName: payload.phaseName,
               type: mapPhaseToEntryType(s.currentPhase?.type),

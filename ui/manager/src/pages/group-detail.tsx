@@ -1,8 +1,12 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Users, Trash2, MessageSquareQuote, Clock, PanelRightOpen, PanelRightClose } from "lucide-react";
+import {
+  Users, Trash2, MessageSquareQuote, Clock,
+  PanelRightOpen, PanelRightClose,
+  Maximize2, Minimize2, History,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
   useGroup,
@@ -22,6 +26,7 @@ import { ErrorState } from "@/components/shared/error-state";
 import { cn } from "@/lib/utils";
 import { STYLE_INFO, type DiscussionStyle } from "@/lib/api/groups";
 import { STYLE_THEME } from "@/components/groups/discussion-transcript";
+import { safeFormatDate } from "@/components/groups/group-utils";
 
 const STATE_COLORS: Record<string, string> = {
   COMPLETED: "text-emerald-500",
@@ -39,6 +44,8 @@ export function GroupDetailPage() {
   const queryClient = useQueryClient();
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [showConfig, setShowConfig] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const {
     data: groupConfig,
@@ -101,6 +108,12 @@ export function GroupDetailPage() {
     );
   }
 
+  function handleSelectConversation(convId: string) {
+    if (streamState.isStreaming) abortStream();
+    setSelectedConvId(convId);
+    setHistoryOpen(false);
+  }
+
   if (configLoading) {
     return (
       <div className="space-y-4">
@@ -125,11 +138,78 @@ export function GroupDetailPage() {
   // Determine whether to show streaming or static transcript
   const isStreamActive = streamState.isStreaming || (streamState.state !== "CREATED" && !selectedConvId);
 
+  const conversationCount = conversations?.length ?? 0;
+
+  // ─── Discussion history list (reused in sidebar + popover) ─────
+  const discussionListContent = (
+    <>
+      {convsLoading ? (
+        <div className="p-3 space-y-2">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+        </div>
+      ) : conversationCount > 0 ? (
+        <div className="p-1 space-y-0.5">
+          {conversations!.map((conv) => (
+            <button
+              key={conv.id}
+              onClick={() => handleSelectConversation(conv.id)}
+              className={cn(
+                "w-full text-start rounded-lg px-3 py-2 transition-all group/item",
+                selectedConvId === conv.id && !isStreamActive
+                  ? "bg-primary/10 border border-primary/30"
+                  : "hover:bg-secondary/50 border border-transparent"
+              )}
+              data-testid={`discussion-item-${conv.id}`}
+            >
+              <p className="text-xs font-medium text-foreground line-clamp-2">
+                {conv.originalQuestion}
+              </p>
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className={cn("text-[10px] font-medium", STATE_COLORS[conv.state])}>
+                  {conv.state}
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  {safeFormatDate(conv.created, "date")}
+                </span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteConversation(conv.id);
+                  }}
+                  className="ms-auto opacity-0 group-hover/item:opacity-100 rounded p-0.5 text-muted-foreground hover:text-destructive transition-all"
+                  title={t("common.delete")}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
+          <MessageSquareQuote className="h-8 w-8 text-muted-foreground/20 mb-2" />
+          <p className="text-xs text-muted-foreground">
+            {t("groups.noDiscussions", "No discussions yet")}
+          </p>
+          <p className="text-[10px] text-muted-foreground/50 mt-1">
+            {t("groups.askBelow", "Ask a question below to start")}
+          </p>
+        </div>
+      )}
+    </>
+  );
+
   return (
-    <div className="flex flex-col h-[calc(100vh-(--spacing(16))-(--spacing(12)))]">
+    <div className={cn(
+      "flex flex-col",
+      isFullscreen
+        ? "fixed inset-0 z-50 bg-background p-4"
+        : "h-[calc(100vh-(--spacing(16))-(--spacing(12)))]"
+    )}>
       {/* Header */}
       <div className="flex items-center gap-3 pb-3 border-b border-border shrink-0">
-        <BackLink to="/manage/groups" label="" />
+        {!isFullscreen && <BackLink to="/manage/groups" label="" />}
         <Users className="h-6 w-6 text-primary shrink-0" />
         <div className="flex-1 min-w-0">
           <h1 className="text-xl font-bold text-foreground truncate">{groupConfig.name}</h1>
@@ -147,16 +227,47 @@ export function GroupDetailPage() {
             <Users className="me-1 h-3 w-3" />
             {groupConfig.members.length}
           </Badge>
+
+          {/* History dropdown — visible on mobile, and on all sizes when fullscreen */}
+          <HistoryDropdown
+            historyOpen={historyOpen}
+            setHistoryOpen={setHistoryOpen}
+            conversationCount={conversationCount}
+            isFullscreen={isFullscreen}
+          >
+            {discussionListContent}
+          </HistoryDropdown>
+
+          {/* Config panel toggle */}
+          {!isFullscreen && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowConfig(!showConfig)}
+              title={showConfig ? t("groups.hideConfig", "Hide config panel") : t("groups.showConfig", "Show config panel")}
+              className="max-xl:hidden"
+            >
+              {showConfig ? (
+                <PanelRightClose className="h-4 w-4" />
+              ) : (
+                <PanelRightOpen className="h-4 w-4" />
+              )}
+            </Button>
+          )}
+
+          {/* Fullscreen toggle */}
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setShowConfig(!showConfig)}
-            title={showConfig ? t("groups.hideConfig", "Hide config panel") : t("groups.showConfig", "Show config panel")}
+            onClick={() => setIsFullscreen(!isFullscreen)}
+            title={isFullscreen
+              ? t("groups.exitFullscreen", "Exit fullscreen")
+              : t("groups.enterFullscreen", "Fullscreen")}
           >
-            {showConfig ? (
-              <PanelRightClose className="h-4 w-4" />
+            {isFullscreen ? (
+              <Minimize2 className="h-4 w-4" />
             ) : (
-              <PanelRightOpen className="h-4 w-4" />
+              <Maximize2 className="h-4 w-4" />
             )}
           </Button>
         </div>
@@ -164,92 +275,24 @@ export function GroupDetailPage() {
 
       {/* Three-panel layout */}
       <div className="flex flex-1 min-h-0 mt-2 gap-2">
-        {/* LEFT: Discussion history */}
-        <div className="w-64 shrink-0 flex flex-col rounded-xl border border-border bg-card overflow-hidden max-lg:hidden">
-          <div className="p-3 border-b border-border">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-              <Clock className="h-3 w-3" />
-              {t("groups.discussions", "Discussions")}
-            </h3>
+        {/* LEFT: Discussion history — hidden on small screens and in fullscreen */}
+        {!isFullscreen && (
+          <div className="w-64 shrink-0 flex flex-col rounded-xl border border-border bg-card overflow-hidden max-lg:hidden">
+            <div className="p-3 border-b border-border">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Clock className="h-3 w-3" />
+                {t("groups.discussions", "Discussions")}
+              </h3>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {discussionListContent}
+            </div>
           </div>
+        )}
 
-          <div className="flex-1 overflow-y-auto">
-            {convsLoading ? (
-              <div className="p-3 space-y-2">
-                <Skeleton className="h-12 w-full" />
-                <Skeleton className="h-12 w-full" />
-              </div>
-            ) : conversations && conversations.length > 0 ? (
-              <div className="p-1 space-y-0.5">
-                {conversations.map((conv) => (
-                  <button
-                    key={conv.id}
-                    onClick={() => {
-                      if (streamState.isStreaming) abortStream();
-                      setSelectedConvId(conv.id);
-                    }}
-                    className={cn(
-                      "w-full text-start rounded-lg px-3 py-2 transition-all group/item",
-                      selectedConvId === conv.id && !isStreamActive
-                        ? "bg-primary/10 border border-primary/30"
-                        : "hover:bg-secondary/50 border border-transparent"
-                    )}
-                    data-testid={`discussion-item-${conv.id}`}
-                  >
-                    <p className="text-xs font-medium text-foreground line-clamp-2">
-                      {conv.originalQuestion}
-                    </p>
-                    <div className="flex items-center gap-1.5 mt-1">
-                      <span className={cn("text-[10px] font-medium", STATE_COLORS[conv.state])}>
-                        {conv.state}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground">
-                        {new Date(conv.created).toLocaleDateString()}
-                      </span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteConversation(conv.id);
-                        }}
-                        className="ms-auto opacity-0 group-hover/item:opacity-100 rounded p-0.5 text-muted-foreground hover:text-destructive transition-all"
-                        title={t("common.delete")}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full p-4 text-center">
-                <MessageSquareQuote className="h-8 w-8 text-muted-foreground/20 mb-2" />
-                <p className="text-xs text-muted-foreground">
-                  {t("groups.noDiscussions", "No discussions yet")}
-                </p>
-                <p className="text-[10px] text-muted-foreground/50 mt-1">
-                  {t("groups.askBelow", "Ask a question below to start")}
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Discussion input at bottom */}
-          <DiscussionInput
-            onSubmit={handleStartDiscussion}
-            isLoading={streamState.isStreaming}
-          />
-        </div>
-
-        {/* CENTER: Transcript */}
+        {/* CENTER: Transcript + Input */}
         <div className="flex-1 min-w-0 rounded-xl border border-border bg-card overflow-hidden flex flex-col">
-          {/* Mobile: show discussion input above transcript on small screens */}
-          <div className="lg:hidden border-b border-border">
-            <DiscussionInput
-              onSubmit={handleStartDiscussion}
-              isLoading={streamState.isStreaming}
-            />
-          </div>
-          <div className="flex-1 min-h-0">
+          <div className="flex-1 min-h-0 overflow-hidden">
             <DiscussionTranscript
               conversation={isStreamActive ? null : (selectedConversation ?? null)}
               streamState={isStreamActive ? streamState : undefined}
@@ -257,10 +300,15 @@ export function GroupDetailPage() {
               discussionStyle={groupConfig.style as DiscussionStyle}
             />
           </div>
+          {/* Input always at the bottom of the transcript panel */}
+          <DiscussionInput
+            onSubmit={handleStartDiscussion}
+            isLoading={streamState.isStreaming}
+          />
         </div>
 
-        {/* RIGHT: Config panel */}
-        {showConfig && (
+        {/* RIGHT: Config panel — hidden on small screens and in fullscreen */}
+        {showConfig && !isFullscreen && (
           <div className="w-72 shrink-0 rounded-xl border border-border bg-card overflow-hidden max-xl:hidden">
             <GroupConfigPanel config={groupConfig} groupId={groupId} groupVersion={version} />
           </div>
@@ -270,3 +318,61 @@ export function GroupDetailPage() {
   );
 }
 
+/** Mobile-friendly dropdown for discussion history (replaces Popover) */
+function HistoryDropdown({
+  historyOpen,
+  setHistoryOpen,
+  conversationCount,
+  isFullscreen,
+  children,
+}: {
+  historyOpen: boolean;
+  setHistoryOpen: (v: boolean) => void;
+  conversationCount: number;
+  isFullscreen?: boolean;
+  children: React.ReactNode;
+}) {
+  const { t } = useTranslation();
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Click-outside to close
+  useEffect(() => {
+    if (!historyOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setHistoryOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [historyOpen, setHistoryOpen]);
+
+  return (
+    <div ref={dropdownRef} className={cn("relative", !isFullscreen && "lg:hidden")}>
+      <Button
+        variant="outline"
+        size="sm"
+        className="relative"
+        onClick={() => setHistoryOpen(!historyOpen)}
+      >
+        <History className="h-4 w-4" />
+        {conversationCount > 0 && (
+          <span className="absolute -top-1 -end-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
+            {conversationCount}
+          </span>
+        )}
+      </Button>
+      {historyOpen && (
+        <div className="absolute end-0 top-full mt-1 z-50 w-72 rounded-xl border border-border bg-card shadow-lg max-h-80 overflow-y-auto animate-in fade-in-0 zoom-in-95 duration-150">
+          <div className="p-3 border-b border-border">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <Clock className="h-3 w-3" />
+              {t("groups.discussions", "Discussions")}
+            </h3>
+          </div>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}

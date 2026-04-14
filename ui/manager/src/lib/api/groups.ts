@@ -290,7 +290,10 @@ export interface SpeakerStartPayload {
 export interface SpeakerCompletePayload {
   agentId: string;
   displayName: string;
-  content: string;
+  /** Backend field name is 'response' */
+  response: string;
+  /** Fallback alias */
+  content?: string;
   phaseIndex: number;
   phaseName: string;
 }
