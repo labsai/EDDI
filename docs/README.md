@@ -9,7 +9,7 @@ description: >-
 
 Welcome to the official documentation for **E.D.D.I** (Enhanced Dialog Driven Interface) — a production-grade multi-agent orchestration middleware for conversational AI.
 
-**Latest version: 6.0.0-RC2** · License: Apache 2.0 · [GitHub](https://github.com/labsai/EDDI) · [Website](https://eddi.labs.ai/)
+**Latest version: 6.0.0** · License: Apache 2.0 · [GitHub](https://github.com/labsai/EDDI) · [Website](https://eddi.labs.ai/)
 
 ---
 
