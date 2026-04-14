@@ -146,7 +146,10 @@
     "importing": "Importando...",
     "importSuccess": "Agent importado com sucesso",
     "importError": "Falha ao importar o agent",
-    "emptyDescription": "Use o assistente para criar um agente totalmente configurado em minutos."
+    "emptyDescription": "Use o assistente para criar um agente totalmente configurado em minutos.",
+    "chat": "Chat",
+    "deployAndChat": "Implantar e conversar",
+    "openExternalChat": "Abrir em nova aba"
   },
   "agentDetail": {
     "title": "Detalhes do agent",

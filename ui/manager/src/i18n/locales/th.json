@@ -146,7 +146,10 @@
     "importing": "กำลังนำเข้า...",
     "importSuccess": "นำเข้า Agent สำเร็จ",
     "importError": "นำเข้า Agent ล้มเหลว",
-    "emptyDescription": "ใช้วิซาร์ดสร้าง Agent ที่กำหนดค่าสมบูรณ์ได้ในไม่กี่นาที"
+    "emptyDescription": "ใช้วิซาร์ดสร้าง Agent ที่กำหนดค่าสมบูรณ์ได้ในไม่กี่นาที",
+    "chat": "แชท",
+    "deployAndChat": "ปรับใช้และแชท",
+    "openExternalChat": "เปิดในแท็บใหม่"
   },
   "agentDetail": {
     "title": "รายละเอียด Agent",

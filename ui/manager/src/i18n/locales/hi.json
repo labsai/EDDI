@@ -146,7 +146,10 @@
     "importing": "आयात हो रहा है...",
     "importSuccess": "Agent सफलतापूर्वक आयात हुआ",
     "importError": "Agent आयात विफल",
-    "emptyDescription": "कुछ ही मिनटों में पूरी तरह से कॉन्फ़िगर किया गया Agent बनाने के लिए विज़ार्ड का उपयोग करें।"
+    "emptyDescription": "कुछ ही मिनटों में पूरी तरह से कॉन्फ़िगर किया गया Agent बनाने के लिए विज़ार्ड का उपयोग करें।",
+    "chat": "चैट",
+    "deployAndChat": "डिप्लॉय करें और चैट करें",
+    "openExternalChat": "नए टैब में खोलें"
   },
   "agentDetail": {
     "title": "Agent विवरण",

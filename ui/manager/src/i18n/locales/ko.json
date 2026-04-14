@@ -146,7 +146,10 @@
     "importing": "가져오는 중...",
     "importSuccess": "Agent가 성공적으로 가져와졌습니다",
     "importError": "Agent 가져오기 실패",
-    "emptyDescription": "위자드를 사용하여 몇 분 만에 완전히 구성된 Agent를 만드세요."
+    "emptyDescription": "위자드를 사용하여 몇 분 만에 완전히 구성된 Agent를 만드세요.",
+    "chat": "채팅",
+    "deployAndChat": "배포 후 채팅",
+    "openExternalChat": "새 탭에서 열기"
   },
   "agentDetail": {
     "title": "Agent 상세",
