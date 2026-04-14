@@ -13,6 +13,45 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Multi-Agent UX — maxTurns Safety Cap + Slack Integration (2026-04-15)
+
+**Repo:** EDDI (`feature/multi-agent-ux`)
+
+**What changed:**
+
+### maxTurns Safety Cap
+- Added `maxTurns` field to `ProtocolConfig` record in `AgentGroupConfiguration.java`
+- `AtomicInteger` turn counter in `GroupConversationService.executeDiscussion()` — shared across sequential, parallel, and peer-targeted phases
+- When `maxTurns` exceeded, remaining phases are skipped with a `SKIPPED` transcript entry and synthesis proceeds with existing transcript
+- Backward compatible: old MongoDB documents deserialize `maxTurns=0` (int default), treated as "use default 50"
+- Exposed via `McpGroupTools.create_group()` `maxTurns` parameter
+
+### Slack Integration (built into EDDI)
+- **Architecture decision:** Slack is an interface adapter (like REST, MCP, A2A) — lives inside the engine, NOT a separate service
+- Uses existing `ChannelConnector` placeholder in `AgentConfiguration` for per-agent channel→agent routing
+- Reuses `IUserConversationStore` for thread→conversation mapping (`intent="slack:{channelId}:{threadTs}"`)
+- No external SDK — pure HTTP via Java's `HttpClient`
+- Feature-flagged: `eddi.slack.enabled=false` by default
+
+**Files:**
+- `AgentGroupConfiguration.java` — `maxTurns` in `ProtocolConfig` record
+- `GroupConversationService.java` — turn counter in phase execution loop
+- `McpGroupTools.java` — `maxTurns` param in `create_group()`
+- `SlackIntegrationConfig.java` — `@ConfigMapping(prefix = "eddi.slack")`
+- `SlackSignatureVerifier.java` — HMAC-SHA256 verification + replay protection
+- `SlackChannelRouter.java` — scans `ChannelConnector` configs → agent ID resolution
+- `SlackEventHandler.java` — async event processing, dedup, bot-self-filter
+- `SlackWebApiClient.java` — lightweight `chat.postMessage` via HttpClient
+- `RestSlackWebhook.java` — `POST /integrations/slack/events` endpoint
+- `application.properties` — Slack config section + auth permit for webhook
+
+**Design decisions:**
+- HITL approval descoped: `ConversationState` touches 25+ files, needs its own branch
+- Channel adapters descoped: IChannelAdapter SPI was overengineered; Slack is just a thin webhook handler calling existing services
+- Record vs class for ProtocolConfig: kept record. Jackson deserializes missing int fields as 0; code treats `<=0` as "use default"
+
+---
+
 ## Documentation Cleanup — Stale Docs Purge (2026-04-14)
 
 **Repo:** EDDI (`feature/v6-hardening`)

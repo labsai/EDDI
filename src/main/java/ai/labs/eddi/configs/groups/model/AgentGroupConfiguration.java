@@ -119,8 +119,35 @@ public class AgentGroupConfiguration {
 
     // --- Protocol (error handling / timeouts) ---
 
+    /**
+     * Protocol-level configuration for group discussions: timeouts, retries,
+     * failure policies, and safety caps.
+     *
+     * @param agentTimeoutSeconds
+     *            per-agent timeout in seconds (default: 60)
+     * @param onAgentFailure
+     *            policy when an agent fails (SKIP, RETRY, ABORT)
+     * @param maxRetries
+     *            max retry attempts per agent (default: 2)
+     * @param onMemberUnavailable
+     *            policy when a member is unavailable (SKIP, FAIL)
+     * @param maxTurns
+     *            global hard cap on total agent turns across all phases. Prevents
+     *            runaway discussions from misconfigured rounds. 0 or negative = use
+     *            default (50). When exceeded, remaining phases are skipped and
+     *            synthesis proceeds with whatever transcript exists.
+     */
     public record ProtocolConfig(int agentTimeoutSeconds, MemberFailurePolicy onAgentFailure, int maxRetries,
-            MemberUnavailablePolicy onMemberUnavailable) {
+            MemberUnavailablePolicy onMemberUnavailable, int maxTurns) {
+
+        /**
+         * Backward-compatible constructor — defaults maxTurns to 0 (engine default:
+         * 50).
+         */
+        public ProtocolConfig(int agentTimeoutSeconds, MemberFailurePolicy onAgentFailure, int maxRetries,
+                MemberUnavailablePolicy onMemberUnavailable) {
+            this(agentTimeoutSeconds, onAgentFailure, maxRetries, onMemberUnavailable, 0);
+        }
 
         public enum MemberFailurePolicy {
             SKIP, RETRY, ABORT
