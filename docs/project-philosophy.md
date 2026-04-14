@@ -3,6 +3,8 @@
 > **The Overarching Directive for All Development in EDDI**
 >
 > This document defines the foundational principles that govern every architectural decision, feature implementation, and design trade-off across the EDDI ecosystem. Every contributor — human or AI — must internalize these principles before writing code.
+>
+> This is not a technical specification. Implementation details belong in [`architecture.md`](architecture.md) and [`AGENTS.md`](../AGENTS.md). This document answers **why** — those documents answer **how**.
 
 ---
 
@@ -10,38 +12,31 @@
 
 **EDDI is the "Grown-Up" Enterprise AI Orchestrator.**
 
-While competitors (n8n, LangGraph, CrewAI, Flowise) were built for rapid prototyping and are now frantically reverse-engineering enterprise qualities into architectures that resist them, EDDI approaches from the opposite direction: **a deterministic engine built to safely govern non-deterministic AI.**
+While competitors were built for rapid prototyping and are now frantically reverse-engineering enterprise qualities into architectures that resist them, EDDI approaches from the opposite direction: **a deterministic engine built to safely govern non-deterministic AI — from single agents to multi-agent orchestration.**
 
 EDDI's competitive moat is structural, not feature-based. It emerges from the combination of:
 
-- **Java 25 / Quarkus** — true concurrency without GIL or single-threaded event loops
-- **Configuration-driven logic** — agent behavior is JSON, not compiled code
+- **JVM-native concurrency** — true parallelism without language-level barriers
+- **Configuration-driven logic** — agent behavior is data, not compiled code
 - **Strict pipeline architecture** — deterministic execution of probabilistic components
-- **Enterprise security by default** — no eval(), no sandbox escapes, no plaintext secrets
+- **Multi-agent orchestration** — coordinated reasoning across agent groups
+- **Security & compliance by default** — baked into the architecture, not bolted on
 
 ---
 
-## The Seven Pillars
+## The Nine Pillars
 
 ### Pillar 1: Configuration Is Logic, Java Is the Engine
 
-> _"Agent behavior belongs in JSON configurations. Java code builds the components that read and execute those configurations."_
+> _"Agent behavior belongs in configuration. Code builds the components that read and execute those configurations."_
 
-**The Principle:** EDDI is a **config-driven engine**, not a monolithic application. The intelligence of an agent — its routing rules, API calls, LLM prompts, output templates — is defined entirely in versioned JSON documents. Java code provides the **infrastructure components** (`ILifecycleTask`, `IResourceStore`, tools) that the engine uses to interpret and execute those configurations at runtime. No agent-specific logic may ever be hardcoded in Java.
+EDDI is a **config-driven engine**, not a monolithic application. The intelligence of an agent — its routing rules, API calls, LLM prompts, output templates — is defined in versioned JSON documents. Code provides the **infrastructure components** that interpret and execute those configurations at runtime.
 
-**Why This Matters:** Competitors that embed logic in code (Python scripts, JavaScript eval blocks) suffer from:
+When designing a new feature, always ask: _"Should this be configurable by the agent designer?"_ If yes, expose it as a config field with sensible defaults — don't hardcode behavior.
 
-- **Deployment friction** — every logic change requires recompilation and redeployment
-- **Security vulnerabilities** — dynamic code execution is the #1 source of CVSS 10.0 RCE exploits (n8n CVE-2025-68613, Flowise sandbox escapes)
-- **Operational opacity** — code-embedded logic can't be versioned, diffed, or rolled back independently
+**Why this matters:** Competitors that embed logic in code suffer from deployment friction (every change requires recompilation), security vulnerabilities (dynamic code execution), and operational opacity (logic can't be versioned or rolled back independently).
 
-**Anti-patterns to avoid:**
-
-- Adding `if/else` branches in Java to handle specific agent use cases
-- Introducing dynamic scripting engines (GraalJS, Nashorn) for "flexibility"
-- Hardcoding model names, API endpoints, or prompt templates in Java source
-
-**EDDI's Answer to "I need custom code":** _"Spin up an external MCP server in an isolated container. EDDI will call it as a tool."_ This pushes execution risk outside the EDDI perimeter while providing infinite extensibility.
+**The escape hatch:** When an agent designer genuinely needs custom code, EDDI provides bilateral protocol integration — it can both expose its capabilities to and consume capabilities from external services. Custom logic runs in isolated containers outside the EDDI perimeter.
 
 ---
 
@@ -49,20 +44,14 @@ EDDI's competitive moat is structural, not feature-based. It emerges from the co
 
 > _"The engine is strict so the AI can be creative."_
 
-**The Principle:** LLMs are inherently probabilistic — they hallucinate, loop infinitely, and burn through token budgets unpredictably. EDDI's role is to provide **deterministic guardrails** around this non-determinism: circuit breakers, budget caps, execution hashes, HITL pause points, and immutable audit trails.
+LLMs are inherently probabilistic — they hallucinate, loop infinitely, and burn through token budgets unpredictably. EDDI's role is to provide **deterministic guardrails** around this non-determinism: budget controls, error containment, governance controls, and immutable audit trails.
 
-**Why This Matters:** Competitors built "AI-first" without governance layers and now face:
+**Concrete expectations:**
 
-- **Infinite loops** — CrewAI agents burning $100 in 10 minutes repeating the same hallucinated tool call
-- **State corruption** — AutoGen's parallel agents silently overwriting each other's shared memory
-- **API contract violations** — Semantic Kernel injecting fake "user" messages that crash provider APIs
-
-**Concrete Mandates:**
-
-1. **Execution Hash Circuit Breaker** — if an agent calls the same tool with identical arguments N times, halt the DAG branch
-2. **Budget-Aware Execution** — every tool call flows through `ToolRateLimiter` → `ToolCacheService` → `ToolCostTracker`
-3. **Out-of-Band Error Handling** — never inject framework exceptions into the LLM conversation history; map failures to action strings in the pipeline
-4. **Pessimistic Reducers for Parallelism** — when parallel agents complete, a deterministic Java reducer merges outputs atomically; no concurrent writes to `IConversationMemory`
+- Every tool call must pass through rate limiting, caching, and cost tracking — no unmetered execution paths
+- Framework errors must never leak into LLM conversation history — map failures to structured signals in the pipeline
+- Multi-agent interactions must be serialized through a governance mechanism — no concurrent, uncoordinated writes to shared state
+- External tool integrations must be classified by risk level, with state-changing operations requiring explicit approval
 
 ---
 
@@ -70,72 +59,52 @@ EDDI's competitive moat is structural, not feature-based. It emerges from the co
 
 > _"EDDI provides the components. The admin configures the intelligence."_
 
-**The Principle:** EDDI is middleware — it sits between the user-facing channels and the AI providers. It does not contain business logic; it contains the **machinery** to execute business logic defined as configuration. Adding a new capability means adding a new `ILifecycleTask` component, not modifying existing ones.
+EDDI is middleware — it sits between user-facing channels and AI providers. It does not contain business logic; it contains the **machinery** to execute business logic defined as configuration. Adding a new capability means adding a new component type, not modifying existing ones.
 
-**Why This Matters:** This architecture enables:
+**Why this matters:** This architecture enables multi-tenancy (same engine, different agents), instant iteration (edit config, not code), and clean extensibility (auto-discovery, no registration).
 
-- **Multi-tenancy** — the same engine runs completely different agents for different customers
-- **Instant iteration** — changing agent behavior requires editing a JSON document, not a Java rebuild
-- **Clean extensibility** — new task types are discovered via CDI, no registration code needed
+**Anti-patterns:**
 
-**The Component Lifecycle:**
-
-```
-New Feature Idea -> Configuration POJO -> IResourceStore -> REST API
-                                       -> ILifecycleTask.execute()
-                                       -> ExtensionDescriptor (for Manager UI)
-                                       -> Unit Tests
-```
+- Building custom schedulers or background job infrastructure — reuse the existing scheduling framework
+- Creating new pipeline components for session-level concerns — extend the session lifecycle instead
+- Calling components directly from other components — use event-based orchestration for all inter-component communication
 
 ---
 
-### Pillar 4: Security as Architecture, Not Afterthought
+### Pillar 4: Security & Compliance as Architecture, Not Afterthought
 
 > _"If a security measure can be bypassed by changing a configuration, it is not a security measure."_
 
-**The Principle:** Security is enforced at the **architectural level**: the type system, the classpath, the network topology. It is never delegated to the LLM, the prompt, or the admin's good judgment.
+Security and regulatory compliance are enforced at the **architectural level**: the type system, the classpath, the network topology, and startup checks. They are never delegated to the LLM, the prompt, or the admin's good judgment.
 
-**Concrete Mandates:**
+**Security principles:**
 
-| Domain                    | Mandate                                                                                                            |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| **Expression Evaluation** | `SafeMathParser` (recursive descent) only. Never `ScriptEngine`, never `eval()`                                    |
-| **URL Validation**        | All tools MUST call `UrlValidationUtils.validateUrl()` — blocks private IPs, internal hostnames, non-HTTP schemes  |
-| **Secret Storage**        | No plaintext API keys in MongoDB. Use Vault references (`${vault:key}`) resolved at runtime                        |
-| **Deserialization**       | No `@JsonTypeInfo(use=Id.CLASS)`, no `enableDefaultTyping()` for untrusted payloads                                |
-| **Memory Safety**         | `PathNavigator` replaces OGNL — no `.getClass()`, no reflection, no runtime class instantiation                    |
-| **MCP**                   | Opt-in per agent. External MCP tools flagged as READ_ONLY or STATE_CHANGING. STATE_CHANGING requires HITL approval |
-| **Tenant Isolation**      | Database queries enforce `tenantId` via Java code / SQL WHERE / RLS — never via LLM prompt filtering               |
-| **Export Sanitization**   | Agent ZIP exports scrub API keys, tokens, and high-entropy strings before packaging                                |
+- No dynamic code execution — ever. Expression evaluation uses safe, sandboxed parsers
+- No plaintext secrets in storage — all credentials use vault references resolved at runtime
+- No trusting LLM output for access control — tenant isolation is enforced by code, not by prompt
+- External URLs are validated against SSRF — private IPs and internal hostnames are blocked
+- Agent exports are sanitized — secrets are scrubbed before packaging
 
-**Anti-patterns to avoid:**
+**Compliance principles:**
 
-- Letting admins execute arbitrary code through the UI
-- Trusting LLM output to filter data access ("only search Tenant A's documents")
-- Storing unbounded session maps without TTL (the OpenClaw OOM vulnerability)
+- Data subject rights (erasure, portability, restriction) must be enforceable through the architecture, not just documented
+- AI decision audit trails must be immutable and write-once — they are evidence, not logs
+- Compliance requirements must be enforced at startup — if a required capability is missing, the system should fail fast rather than run without it
 
 ---
 
 ### Pillar 5: Enterprise-Grade Concurrency
 
-> _"Java's concurrency model is our unfair structural advantage."_
+> _"The JVM's concurrency model is our unfair structural advantage."_
 
-**The Principle:** Python's GIL and Node.js's single-threaded event loop are fundamental barriers to scaling multi-agent AI workloads. EDDI leverages Java 25 Virtual Threads and Quarkus's reactive stack to achieve true parallelism without blocking, without heartbeat starvation, and without the serialization panics that plague competitors.
+Language-level concurrency barriers (Python's GIL, Node.js's single-threaded event loop) are fundamental obstacles to scaling multi-agent AI workloads. EDDI leverages the JVM's thread model to achieve true parallelism without blocking, without heartbeat starvation, and without the serialization panics that plague competitors.
 
-**Concrete Architecture:**
+**Principles:**
 
-| Tier                  | Purpose                                   | Technology                         | Lifecycle                  |
-| --------------------- | ----------------------------------------- | ---------------------------------- | -------------------------- |
-| **Execution Token**   | Routing identifiers on the message broker | NATS JetStream payload (kilobytes) | Milliseconds               |
-| **Transient Context** | Active connections, processing buffers    | Virtual Thread local memory        | Flushed on step completion |
-| **Telemetry Ledger**  | Full context snapshot + audit trail       | Write-once append to audit store   | Permanent                  |
-
-**Mandates:**
-
-1. `ILifecycleTask` implementations are **stateless singletons** — all conversational state lives in `IConversationMemory`
-2. Virtual Threads handle all NATS consumer endpoints — the messaging heartbeat thread is never blocked
-3. No raw infrastructure objects (DB connections, HTTP clients) in `IConversationMemory` — use `@RequestScoped` CDI for transient resources
-4. No unbounded `ConcurrentHashMap` — use Caffeine Cache or Redis with strict TTL
+- Pipeline components are **stateless singletons** — all conversational state lives in a dedicated memory object
+- No raw infrastructure objects (DB connections, HTTP clients) in conversational state — transient resources are scoped appropriately
+- No unbounded in-memory collections — all caches have strict size limits and TTLs
+- Messaging infrastructure threads must never be blocked by application logic
 
 ---
 
@@ -143,15 +112,11 @@ New Feature Idea -> Configuration POJO -> IResourceStore -> REST API
 
 > _"If you can't see why the AI made a decision, you can't fix it, audit it, or trust it."_
 
-**The Principle:** Every conversation turn must produce a **complete, immutable trace** of exactly what happened: the compiled prompt (with all template variables resolved), the RAG context ingested, the LLM reasoning tokens, the tool calls, the memory state, and the cost. This is not debugging infrastructure — it is the product.
+Every conversation turn must produce a **complete, immutable trace** of exactly what happened: the compiled prompt, the retrieved context, the tool calls, the memory state, and the cost. This is not debugging infrastructure — it is the product.
 
-**Why This Matters:**
+Observability serves two masters: **developers** who need to understand why an agent behaved a certain way, and **regulators** who need evidence of what the AI decided and why. Both must be served by the same infrastructure — not by separate logging systems.
 
-- The EU AI Act requires immutable audit logs of _why_ an AI made a decision
-- Developers suffer from "reasoning blindness" — standard logs show _what_ tool was called, not _why_ it was chosen
-- EDDI already captures `ConversationMemorySnapshot` data and has undo/redo endpoints — this is a foundation to build on
-
-**Vision:** The Manager UI debugger queries the telemetry ledger (not the operational memory) to provide a "Time-Traveling IDE" experience: step-through replay, exact compiled prompts, memory state at every millisecond, with pause/edit/resume controls for human-in-the-loop debugging.
+**Vision:** A "Time-Traveling IDE" experience — step-through replay of any conversation turn with exact compiled prompts, memory state snapshots, and pause/edit/resume controls.
 
 ---
 
@@ -159,48 +124,58 @@ New Feature Idea -> Configuration POJO -> IResourceStore -> REST API
 
 > _"Easy things should be easy. Hard things should be possible."_
 
-**The Principle:** The Manager UI must serve two audiences simultaneously:
+The management UI must serve two audiences simultaneously: **business users** who want visual forms and guided wizards, and **power users** who want raw configuration editing with validation and autocomplete. Both views are **identical state representations** — editing one updates the other.
 
-- **Business users** who want to configure an agent via visual forms, drag-and-drop pipelines, and guided wizards
-- **Power users** who want raw JSON editing with Monaco, schema validation, and autocomplete
+**Principles:**
 
-both views are **identical state representations**. Editing the form updates the JSON; editing the JSON updates the form. Neither view is "advanced" — they are complementary perspectives on the same configuration.
+- No spaghetti node graphs — use structured layouts with wires only for macro-routing
+- No modals — use side-sheet inspectors so the main view remains visible
+- Trusted vs. untrusted data must be visually distinguishable
+- Surface actionable metrics (resolution rate, cost per agent), not vanity metrics
 
-**UX Mandates:**
+---
 
-1. **No spaghetti node graphs** — use a Linear/Block Hybrid with vertical stacks inside containers and wires only for macro-routing between containers
-2. **No modals** — use side-sheet inspectors so the main pipeline view remains visible
-3. **Visual taint tracking** — trusted data (system properties) gets a green shield; untrusted data (user input, external MCP) gets a yellow warning
-4. **Actionable telemetry** — surface "True Resolution Rate" and LLM cost per agent on the dashboard, not vanity metrics like "Deflection Rate"
+### Pillar 8: Persistent Memory & Cross-Session Intelligence
+
+> _"An agent that forgets everything between sessions is not an intelligent agent."_
+
+Conversational intelligence requires memory that outlives individual sessions. EDDI provides a **layered memory architecture** where short-term pipeline data, medium-term conversation properties, and long-term persistent memories each serve distinct purposes — and the boundaries between them are explicit, configurable, and secure.
+
+**Principles:**
+
+- Memory has two audiences: pipeline components see everything; the LLM sees only a windowed, curated view. Context management strategies must respect this distinction
+- Persistent state is a **session concern** — it is loaded at session start and saved at session end, not managed by pipeline components
+- Memory visibility is enforced at the storage level, not by prompt filtering — an agent cannot leak cross-tenant memories through prompt tricks
+- Background memory operations (consolidation, summarization) use the platform's scheduling infrastructure, not custom jobs
+- Failed pipeline data must be containable — error output should not pollute future LLM context
+
+---
+
+### Pillar 9: Agent Portability & Sync
+
+> _"An agent locked to one instance is an agent locked to one vendor."_
+
+Agent configurations must be fully portable — exportable, importable, diffable, and synchronizable between instances without loss of fidelity. This is the foundation of multi-environment workflows (dev → staging → production) and prevents vendor lock-in.
+
+**Principles:**
+
+- Sync operations are always pull-based from the target's perspective — the source is never modified
+- Content-identical resources are detected and skipped automatically — no unnecessary version churn
+- Secrets are never included in exports — they are scrubbed at the export boundary
+- Sync must support preview-before-apply — operators must see exactly what will change before committing
+- Partial failures in batch operations don't roll back successful ones — each resource syncs independently
 
 ---
 
 ## Strategic Positioning
 
-EDDI occupies a unique vacuum in the market:
-
-```
-                    +-------------------------------------+
-                    |        Visual + Config-Driven        |
-                    |                                     |
-         n8n       |            EDDI v6.0                 |   Flowise
-        Langflow   |         (Only JVM entry)             |   Agentpress
-                    |                                     |
-                    +-------------------------------------+
-                    |        Library / Framework           |
-                    |                                     |
-      LangChain4j  |                                     |   Spring AI
-      Semantic     |        (DIY Orchestration)          |   Quarkus
-       Kernel      |                                     |    LangChain4j
-                    +-------------------------------------+
-                         Python/Node                  Java/JVM
-```
+EDDI occupies a unique position as the **only JVM-native, config-driven AI orchestration platform** in a market dominated by Python/Node.js solutions. While competitors offer either visual orchestration (without enterprise qualities) or enterprise frameworks (without visual configuration), EDDI provides both.
 
 **Three strategic pitches:**
 
-1. **Escape the Prototype Trap** — transition fragile Python/Node prototypes to robust JVM production
-2. **Agility Through Configuration** — update AI logic in seconds without recompilation
-3. **Cloud-Native Scale** — Quarkus + Virtual Threads + GraalVM Native Image = minimal footprint, maximum throughput
+1. **Escape the Prototype Trap** — transition fragile prototypes to robust JVM production with true multi-agent orchestration
+2. **Agility Through Configuration** — update AI logic in seconds without recompilation, sync changes across environments instantly
+3. **Cloud-Native Scale** — JVM virtual threads deliver minimal footprint and maximum throughput without the concurrency compromises of competing language runtimes
 
 ---
 

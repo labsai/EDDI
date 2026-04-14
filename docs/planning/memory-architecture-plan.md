@@ -4,7 +4,7 @@
 >
 > **Focus**: This document deals **exclusively** with memory management — how EDDI stores, validates, curates, and consolidates conversational and cross-conversation state.
 >
-> **Governing Principles**: All changes **must** conform to the [Seven Pillars](../project-philosophy.md). Memory machinery is Java infrastructure; memory *policy* is JSON configuration.
+> **Governing Principles**: All changes **must** conform to the [Nine Pillars](../project-philosophy.md). Memory machinery is Java infrastructure; memory *policy* is JSON configuration.
 
 ---
 

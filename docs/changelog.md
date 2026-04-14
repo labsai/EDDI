@@ -13,6 +13,72 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Architecture Doc — Added Multi-Agent, MCP, Memory, Sync Sections (2026-04-14)
+
+**Repo:** EDDI (`main`)
+
+**What changed:** Added 4 architectural overview sections to `docs/architecture.md` that were completely missing:
+
+| Section | Lines | Content |
+|---------|-------|---------|
+| Multi-Agent Orchestration | ~15 | GroupConversationService, 5 discussion styles, group-of-groups, fault tolerance |
+| MCP Integration (Bilateral) | ~10 | Server (48 tools) + client, graceful degradation, vault-based keys |
+| Persistent User Memory | ~12 | IUserMemoryStore, pipeline integration (init/teardown), Dream consolidation, visibility scoping |
+| Agent Sync & Portability | ~15 | IResourceSource → StructuralMatcher → UpgradeExecutor pipeline, preview-before-apply |
+
+Also expanded the Related Documentation section from 11 → 22 entries to include all v6.0.0 docs (group conversations, user memory, agent sync, memory policy, prompt snippets, model cascade, scheduling, A2A, GDPR, HIPAA, EU AI Act).
+
+**Why:** The architecture doc is the central technical reference, but these 4 architecturally significant capabilities were only documented in their dedicated docs — not discoverable via the main architecture overview. Each new section is concise (~10-15 lines) with a cross-reference to the full dedicated doc.
+
+**Files:** `docs/architecture.md`
+
+---
+
+## Project Philosophy — Seven Pillars → Nine Pillars (2026-04-14)
+
+**Repo:** EDDI (`main`)
+
+**What changed:**
+
+Rewrote `docs/project-philosophy.md` to reflect v6.0.0 capabilities and to elevate the document from a technical inventory to a **principle-focused directive** that should rarely need updating. Implementation details (class names, tool lists, "what's built") were stripped out — those belong in `architecture.md` and `AGENTS.md`. The philosophy doc now answers **why**, not **how**.
+
+### Structural Changes
+
+- **Seven Pillars → Nine Pillars** — Added two new architectural pillars:
+  - **Pillar 8: Persistent Memory & Cross-Session Intelligence** — Layered memory architecture principles, session-scoped persistence, visibility enforcement at storage level
+  - **Pillar 9: Agent Portability & Sync** — Pull-based sync, preview-before-apply, secret scrubbing at export boundary, independent resource sync
+
+### Content Corrections
+
+| Area | Change |
+|------|--------|
+| **Identity Statement** | Added multi-agent orchestration and compliance as core identity traits |
+| **Pillar 1** | Bilateral protocol integration (not just outbound MCP) |
+| **Pillar 2** | Removed aspirational DAG/reducer references; replaced with principle of serialized multi-agent governance |
+| **Pillar 3** | Added anti-patterns: no custom schedulers, no pipeline tasks for session concerns |
+| **Pillar 4** | Expanded to "Security & Compliance" with compliance principles (data subject rights, audit immutability, fail-fast startup checks) |
+| **Pillar 5** | Removed Redis reference (not used) |
+| **Pillar 6** | Reframed around the dual audience of developers and regulators |
+| **Strategic Positioning** | Removed dated competitor quadrant diagram; replaced with principle-level positioning statement |
+
+### Design Decision
+
+The previous version mixed aspirational mandates with implementation specifics (individual class names, CVE numbers, specific tool counts). This made it both fragile (requiring updates on every refactor) and misleading (readers couldn't tell what was built vs. planned). The new version states **enduring principles** with just enough concrete examples to clarify intent.
+
+### Cross-References Updated
+
+All 5 files referencing "Seven Pillars" or "7 architectural pillars" updated to "Nine Pillars" / "9":
+
+| File | What |
+|------|------|
+| `AGENTS.md` | "7 architectural pillars" → "9 architectural pillars" |
+| `HANDOFF.md` | Same |
+| `docs/planning/memory-architecture-plan.md` | "Seven Pillars" → "Nine Pillars" |
+| `docs/planning/multi-agent-ux-improvements.md` | Same |
+| `docs/planning/agentic-improvements-plan.md` | Same |
+
+---
+
 ## Fix Keycloak Auth Blocking SPA + Static Assets (2026-04-14)
 
 **Repo:** EDDI (`main`, unstaged)

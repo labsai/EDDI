@@ -14,6 +14,10 @@ This document provides a comprehensive overview of EDDI's architecture, design p
 6. [Agent Composition Model](#agent-composition-model)
 7. [Key Components](#key-components)
 8. [Technology Stack](#technology-stack)
+9. [Multi-Agent Orchestration](#multi-agent-orchestration)
+10. [MCP Integration (Bilateral)](#mcp-integration-bilateral)
+11. [Persistent User Memory](#persistent-user-memory)
+12. [Agent Sync & Portability](#agent-sync--portability)
 
 ---
 
@@ -826,6 +830,73 @@ eddi.datastore.type=mongodb   # default
 
 ---
 
+## Multi-Agent Orchestration
+
+Beyond single-agent conversations, EDDI supports **group conversations** — structured multi-agent discussions where multiple agents collaborate on a question under the governance of a moderator agent.
+
+A `GroupConversationService` orchestrates discussions through configurable phases. Each participating agent runs through its normal lifecycle pipeline — agents are group-unaware by design. The moderator serializes all contributions, preventing concurrent writes to shared state.
+
+**Key capabilities:**
+
+- **5 built-in discussion styles**: Round Table, Peer Review, Devil's Advocate, Delphi, and Debate — each with distinct phase flows and turn-taking rules
+- **Custom phases**: Define your own phase sequences with configurable context scopes (independent, full transcript, anonymous, own-feedback-only)
+- **Group-of-groups**: Members can themselves be groups, enabling hierarchical multi-agent composition with configurable depth limits
+- **Fault tolerance**: Per-agent timeouts, configurable failure policies (skip, retry, abort), and graceful degradation when members are unavailable
+
+See [Group Conversations](group-conversations.md) for full configuration reference, and [A2A Protocol](a2a-protocol.md) for peer-to-peer agent communication.
+
+---
+
+## MCP Integration (Bilateral)
+
+EDDI provides **bilateral** Model Context Protocol (MCP) integration — it is both an MCP Server and an MCP Client simultaneously.
+
+**As MCP Server:** EDDI exposes its full API surface (conversations, administration, diagnostics, scheduling, group discussions) as MCP tools. This enables AI assistants (Claude Desktop, IDE plugins, custom MCP clients) to interact with deployed agents and manage the platform programmatically. Documentation is also exposed as MCP resources (`eddi://docs/{name}`).
+
+**As MCP Client:** Individual agents can consume external MCP servers as tool providers. MCP server connections are configured per LLM task, support vault-based API key resolution, and are subject to the same rate limiting, caching, and cost tracking as built-in tools. Failed MCP connections degrade gracefully — they never kill the pipeline.
+
+See [MCP Server](mcp-server.md) for the full tool reference and client configuration.
+
+---
+
+## Persistent User Memory
+
+EDDI's memory model extends beyond single conversations. The `IUserMemoryStore` provides persistent key-value memory scoped per user, per agent, with visibility controls (`self`, `group`, `global`).
+
+**How it integrates with the pipeline:**
+
+- At **conversation init**, visible user memories are loaded as `longTerm` properties and made available in all templates via `{{properties.key}}`
+- During the pipeline, the LLM can autonomously store and recall facts using built-in memory tools (when enabled)
+- At **conversation teardown**, `longTerm` properties are persisted back to the user memory store
+- **Background consolidation** (the "Dream" service) performs scheduled maintenance: stale pruning, contradiction detection, and optional LLM-driven summarization
+
+Memory visibility is enforced at the storage level — agents can only see memories matching their visibility scope, preventing cross-tenant memory leaks.
+
+See [Persistent User Memory](user-memory.md) for configuration, LLM tools, REST API, and the Dream consolidation service.
+
+---
+
+## Agent Sync & Portability
+
+Agent configurations are fully portable — exportable, importable, and synchronizable between EDDI instances.
+
+**The sync pipeline:**
+
+```
+IResourceSource (transport) → StructuralMatcher (analysis) → UpgradeExecutor (write)
+```
+
+1. **Transport abstraction**: `IResourceSource` abstracts the source — either a ZIP file (`ZipResourceSource`) or a live remote instance (`RemoteApiResourceSource`)
+2. **Structural matching**: Resources are paired deterministically by position, type, and name — not by ID. This works even for independently-created agents
+3. **Content sync**: The `UpgradeExecutor` updates target resources in-place, preserving IDs and URI references. Version numbers increment; no broken links
+4. **Preview before apply**: All sync operations support a preview step showing exactly what will be created, updated, or skipped
+
+Agent ZIP exports automatically scrub secrets before packaging to prevent credential leaks during transfer.
+
+See [Agent Sync Architecture](agent-sync-architecture.md) for the matching algorithm and data flow, and [Agent Sync Guide](agent-sync-guide.md) for REST API usage.
+
+---
+
 ## Related Documentation
 
 - [Getting Started](getting-started.md) - Setup and installation
@@ -839,3 +910,15 @@ eddi.datastore.type=mongodb   # default
 - [Secrets Vault](secrets-vault.md) - Encrypted secret management
 - [Audit Ledger](audit-ledger.md) - EU AI Act compliance
 - [MCP Server](mcp-server.md) - Model Context Protocol integration
+- [Group Conversations](group-conversations.md) - Multi-agent structured discussions
+- [Persistent User Memory](user-memory.md) - Cross-session memory and Dream consolidation
+- [Agent Sync](agent-sync-architecture.md) - Import, export, and live instance sync
+- [Memory Policy](memory-policy.md) - Commit flags and strict write discipline
+- [Prompt Snippets](prompt-snippets-guide.md) - Reusable system prompt building blocks
+- [Model Cascade](model-cascade.md) - Multi-model sequential escalation
+- [Scheduling](scheduling.md) - Cron and heartbeat agent triggers
+- [A2A Protocol](a2a-protocol.md) - Agent-to-Agent peer communication
+- [GDPR Compliance](gdpr-compliance.md) - Data subject rights and retention
+- [HIPAA Compliance](hipaa-compliance.md) - Healthcare deployment guide
+- [EU AI Act Compliance](eu-ai-act-compliance.md) - AI decision audit requirements
+
