@@ -781,8 +781,8 @@ function Write-Success {
     Write-Information -MessageData "  Install dir: $EddiDir"
     Write-Information -MessageData ""
 
-    # Open browser — use dashboard path when auth is enabled (root returns 401)
-    $dashUrl = if ($WithAuth) { "http://localhost:${EddiPort}/chat/production/" } else { "http://localhost:${EddiPort}" }
+    # Open browser — Manager SPA handles Keycloak login if auth is enabled
+    $dashUrl = "http://localhost:${EddiPort}/manage"
     try { Start-Process $dashUrl } catch { Write-Verbose "Browser failed to launch: $($_.Exception.Message)" }
 }
 

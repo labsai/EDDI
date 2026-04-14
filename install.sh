@@ -823,11 +823,8 @@ print_success() {
   echo -e "  ${DIM}Install dir: ${EDDI_DIR}${RESET}"
   echo ""
 
-  # Try to open browser automatically — use dashboard path when auth is enabled
-  local url="http://localhost:${EDDI_PORT}"
-  if [[ "$WITH_AUTH" == "true" ]]; then
-    url="http://localhost:${EDDI_PORT}/chat/production/"
-  fi
+  # Try to open browser — Manager SPA handles Keycloak login if auth is enabled
+  local url="http://localhost:${EDDI_PORT}/manage"
   case "$PLATFORM" in
     macos) open "$url" 2>/dev/null || true ;;
     wsl)   explorer.exe "$url" 2>/dev/null || true ;;

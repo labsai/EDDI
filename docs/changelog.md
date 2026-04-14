@@ -13,6 +13,33 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Fix Keycloak Auth Blocking SPA + Static Assets (2026-04-14)
+
+**Repo:** EDDI (`main`, unstaged)
+
+**Problem:** With `--with-auth` (Keycloak enabled), both the Manager and Chat UI were completely broken. Three compounding issues:
+
+1. **Static assets blocked** — JS/CSS bundles live under `/scripts/*` and `/fonts/*`, which were not in the auth permit list. Requests returned 401 HTML → browser rejected as wrong MIME type → blank page.
+2. **Chat UI has no Keycloak integration** — The install script opened `/chat/production/` when auth was enabled, but the Chat UI bundle has zero `keycloak-js` integration. Even with assets fixed, it can't authenticate.
+3. **Manager SPA also blocked** — The Manager (which DOES have `keycloak-js`) lives at `/manage`, which was also caught by the `authenticated` catch-all policy. It couldn't load to handle the Keycloak redirect.
+
+**Root cause:** The permit list was designed for the pre-Keycloak era. When OIDC was added, only `/chat/production/*` was permitted, but the actual assets are served from different paths (`/scripts/*`, `/fonts/*`).
+
+**Fix:**
+- Added `/manage`, `/manage/*`, `/chat`, `/chat/*`, `/scripts/*`, `/fonts/*` to the auth permit list
+- Changed install scripts (both `.ps1` and `.sh`) to open `/manage` instead of `/chat/production/` — the Manager SPA handles Keycloak login via `keycloak-js`
+- Note: root `/` could not be permitted because Quarkus evaluates both `permit1` and `authenticated` policies when a path matches both, and the most restrictive wins. `/manage` works because `/*` doesn't exactly match `/manage`.
+
+**Verified:** `/manage` returns 200, `/scripts/js/*.js` returns 200, `/chat/production/` returns 200, API endpoints (`/agentstore/agents`) still return 401. Manager dashboard loads with Keycloak login flow.
+
+| File | What |
+|------|------|
+| `application.properties` | Expanded permit list with SPA entry points + static asset paths |
+| `install.ps1` | Browser opens `/manage` (unconditional) instead of conditional `/chat/production/` |
+| `install.sh` | Same fix for bash installer |
+
+---
+
 ## CI Fix: Container-Based IT Docker Build & Hanging (2026-04-14)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
@@ -1763,7 +1790,7 @@ Complete re-architecture of the EDDI Secrets Vault from agent-scoped ephemeral s
 | **Model** | `SecretReference` dual-format regex, `SecretMetadata` gains `description`, `lastRotatedAt`, `allowedAgents`, `@JsonFormat(STRING)` timestamps |
 | **REST API** | 3-segment → 2-segment paths (removed agentId), `SecretRequest` with description/allowedAgents |
 | **Auto-Vaulting** | `PropertySetterTask.autoVaultSecret()` namespaces keys with `agentId.keyName` to prevent cross-agent collision |
-| **A2A Security** | `A2AToolProviderManager` recognizes both `${vault:}` (legacy) and `${eddivault:}` prefixes |
+| **A2A Security** | `A2AToolProviderManager` recognizes both `${eddivault:}` (legacy) and `${eddivault:}` prefixes |
 
 **Manager UI changes:**
 
@@ -2520,7 +2547,7 @@ Implemented the Agent2Agent (A2A) protocol for distributed peer-to-peer agent co
 | **A2A Client** | `A2AToolProviderManager.java` (mirrors `McpToolProviderManager` — discovers remote agents, wraps skills as `ToolSpecification`) |
 | **Config** | `AgentConfiguration` gains `a2aEnabled`, `a2aSkills`, `description` fields; `LlmConfiguration.Task` gains `a2aAgents` list with `A2AAgentConfig` |
 | **Integration** | `AgentOrchestrator` + `LlmTask` inject `A2AToolProviderManager`; A2A tools merge alongside built-in, MCP, and httpcall tools |
-| **Security** | Vault reference enforcement for API keys (`${vault:...}`), runtime warning on raw key usage |
+| **Security** | Vault reference enforcement for API keys (`${eddivault:...}`), runtime warning on raw key usage |
 | **Endpoints** | `GET /.well-known/agent.json`, `GET/POST /a2a/agents/{id}`, `GET /a2a/agents` |
 
 **Design decisions:**
@@ -2924,7 +2951,7 @@ Agents can now connect to external MCP servers and use their tools during conver
 | **AgentOrchestrator**      | MCP tool specs merged into tool-calling loop with budget/rate-limiting                  |
 | **McpSetupTools**          | `mcpServers` param on `setup_agent` — comma-separated URLs → `McpServerConfig` list     |
 
-**Design:** StreamableHttpMcpTransport (non-deprecated), graceful degradation (MCP failures never kill pipeline), port 7070, `${vault:key}` support.
+**Design:** StreamableHttpMcpTransport (non-deprecated), graceful degradation (MCP failures never kill pipeline), port 7070, `${eddivault:key}` support.
 
 **Tests:** `McpToolProviderManagerTest` (8 tests), updated `AgentOrchestratorTest` + `LangchainTaskTest` + `McpSetupToolsTest` (21 calls).
 
