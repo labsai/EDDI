@@ -843,7 +843,7 @@ function TaskEditor({
                             onChange({ ...task, a2aAgents: agents });
                           }}
                           readOnly={readOnly}
-                          placeholder={t("llmEditor.a2aApiKey", "${vault:my-a2a-key}")}
+                          placeholder={t("llmEditor.a2aApiKey", "${eddivault:my-a2a-key}")}
                           testId={`a2a-apikey-${ai}`}
                         />
                         <input

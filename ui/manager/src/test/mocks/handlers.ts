@@ -1427,7 +1427,7 @@ export const handlers = [
       name: "Document Tools Server",
       mcpServerUrl: "http://localhost:7070/mcp",
       transport: "http",
-      apiKey: "${vault:mcp-doc-key}",
+      apiKey: "${eddivault:mcp-doc-key}",
       timeoutMs: 30000,
       toolsWhitelist: ["search_documents", "index_document"],
       toolsBlacklist: [],
@@ -1454,7 +1454,7 @@ export const handlers = [
       embeddingProvider: "openai",
       embeddingParameters: {
         model: "text-embedding-3-small",
-        apiKey: "${vault:openai-key}",
+        apiKey: "${eddivault:openai-key}",
       },
       storeType: "pgvector",
       storeParameters: {
@@ -1462,8 +1462,8 @@ export const handlers = [
         port: "5432",
         database: "eddi",
         table: "embeddings",
-        user: "${vault:pg-user}",
-        password: "${vault:pg-password}",
+        user: "${eddivault:pg-user}",
+        password: "${eddivault:pg-password}",
       },
       chunkStrategy: "recursive",
       chunkSize: 512,

@@ -8,7 +8,7 @@ import { createPortal } from "react-dom";
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface SecretKeyPickerProps {
-  /** Current value — plain text or `vault:<keyName>` */
+  /** Current value — plain text or `eddivault:<keyName>` */
   value: string;
   /** Callback when value changes */
   onChange: (value: string) => void;
@@ -24,10 +24,10 @@ interface SecretKeyPickerProps {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const VAULT_PREFIX = "vault:";
-const VAULT_EXPR_PREFIX = "${vault:";
+const VAULT_PREFIX = "eddivault:";
+const VAULT_EXPR_PREFIX = "${eddivault:";
 
-/** Check if a value is a vault reference (either `vault:key` or `${vault:key}`) */
+/** Check if a value is a vault reference (either `eddivault:key` or `${eddivault:key}`) */
 function isVaultRef(value: string): boolean {
   return value.startsWith(VAULT_PREFIX) || value.startsWith(VAULT_EXPR_PREFIX);
 }
@@ -43,9 +43,9 @@ function extractVaultKey(value: string): string {
   return value;
 }
 
-/** Create a vault reference string in the `${vault:...}` format */
+/** Create a vault reference string in the `${eddivault:...}` format */
 function toVaultRef(keyName: string): string {
-  return `\${vault:${keyName}}`;
+  return `\${eddivault:${keyName}}`;
 }
 
 // ─── Sub-Component ───────────────────────────────────────────────────────────
@@ -216,8 +216,8 @@ function CreateSecretModal({
  * - **Direct**: password input with show/hide toggle
  * - **Vault**: dropdown listing secret keys from the vault
  *
- * When a vault key is selected → value becomes `${vault:<keyName>}`.
- * When a value starts with `vault:` or `${vault:` → auto-switches to vault mode.
+ * When a vault key is selected → value becomes `${eddivault:<keyName>}`.
+ * When a value starts with `eddivault:` or `${eddivault:` → auto-switches to vault mode.
  */
 export function SecretKeyPicker({
   value,
@@ -378,7 +378,7 @@ export function SecretKeyPicker({
               value={value}
               onChange={(e) => handleDirectChange(e.target.value)}
               readOnly={readOnly}
-              placeholder={placeholder ?? t("secretPicker.placeholder", "API key or ${vault:key-name}")}
+              placeholder={placeholder ?? t("secretPicker.placeholder", "API key or ${eddivault:key-name}")}
               dir="ltr"
               className={`h-7 w-full border border-input bg-background pe-7 ps-2 font-mono text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring ${vaultAvailable && !readOnly ? "rounded-none" : "rounded-e-md"}`}
               data-testid={`${testId}-input`}

@@ -156,6 +156,10 @@ const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "amazon.nova-pro-v1:0",
     "amazon.nova-lite-v1:0",
   ],
+  "oracle-genai": [
+    "cohere.command-r-plus",
+    "meta.llama-3.1-70b-instruct",
+  ],
 };
 
 /** Whether a provider requires a base URL (local providers) or it's just optional */
