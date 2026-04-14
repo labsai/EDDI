@@ -81,7 +81,10 @@ public class ConversationStoreIT extends BaseIntegrationIT {
     @Order(4)
     @DisplayName("List descriptors filtered by agentId should return matching conversations")
     void listDescriptors_filterByAgentId() {
+        // Filter by the agent we created in setUp(). Use small limit to avoid
+        // iterating orphaned descriptors from prior test runs (shared MongoDB).
         given().queryParam("agentId", agentResourceId.id())
+                .queryParam("limit", 5)
                 .get(CONV_STORE_BASE)
                 .then().assertThat()
                 .statusCode(200)

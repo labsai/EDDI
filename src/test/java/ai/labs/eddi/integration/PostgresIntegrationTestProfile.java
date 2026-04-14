@@ -19,20 +19,25 @@ public class PostgresIntegrationTestProfile implements QuarkusTestProfile {
 
     @Override
     public Map<String, String> getConfigOverrides() {
-        return Map.of(
+        return Map.ofEntries(
                 // Datastore type
-                "eddi.datastore.type", "postgres",
+                Map.entry("eddi.datastore.type", "postgres"),
                 // PostgreSQL DevServices
-                "quarkus.datasource.db-kind", "postgresql", "quarkus.datasource.active", "true", "quarkus.datasource.devservices.enabled", "true",
+                Map.entry("quarkus.datasource.db-kind", "postgresql"),
+                Map.entry("quarkus.datasource.active", "true"),
+                Map.entry("quarkus.datasource.devservices.enabled", "true"),
                 // Disable MongoDB
-                "quarkus.mongodb.devservices.enabled", "false",
+                Map.entry("quarkus.mongodb.devservices.enabled", "false"),
                 // Auth disabled
-                "quarkus.oidc.tenant-enabled", "false", "authorization.enabled", "false",
+                Map.entry("quarkus.oidc.tenant-enabled", "false"),
+                Map.entry("authorization.enabled", "false"),
+                // Enable vault for vault CRUD tests
+                Map.entry("eddi.vault.master-key", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
                 // Test HTTP port — different from MongoDB ITs (8081)
-                "quarkus.http.test-port", "8082",
+                Map.entry("quarkus.http.test-port", "8082"),
                 // Must also set quarkus.http.port so RestInterfaceFactory
                 // (used by /backup/import) connects to the correct port
-                "quarkus.http.port", "8082");
+                Map.entry("quarkus.http.port", "8082"));
     }
 
     @Override

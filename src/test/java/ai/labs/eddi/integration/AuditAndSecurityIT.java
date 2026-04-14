@@ -20,7 +20,7 @@ public class AuditAndSecurityIT extends BaseIntegrationIT {
 
     private static final String AUDIT_BASE = "/auditstore/";
     private static final String SECRET_BASE = "/secretstore/secrets/";
-    private static final String TEST_TENANT = "test-tenant";
+    private static final String TEST_TENANT = "test-tenant-" + System.currentTimeMillis();
 
     // ==================== Audit Trail ====================
 

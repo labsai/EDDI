@@ -22,6 +22,8 @@ public class IntegrationTestProfile implements QuarkusTestProfile {
                 Map.entry("quarkus.http.test-port", "8081"),
                 Map.entry("quarkus.http.port", "8081"),
                 Map.entry("quarkus.log.category.\"ai.labs.eddi\".level", "INFO"),
+                // Enable vault for AuditAndSecurityIT vault CRUD tests
+                Map.entry("eddi.vault.master-key", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
                 Map.entry("mongodb.connectionString",
                         "mongodb://localhost:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000"));
     }

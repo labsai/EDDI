@@ -95,36 +95,41 @@ public class RestConversationStore implements IRestConversationStore {
                 }
 
                 for (var conversationDescriptor : conversationDescriptors) {
-                    URI resourceUri = conversationDescriptor.getResource();
-                    var agentResourceId = extractResourceId(resourceUri);
-                    if (agentResourceId == null) {
-                        log.warn(format("agentResourceId was null, this should never happen. (%s)", resourceUri));
-                        continue;
-                    }
-
-                    populateDataToDescriptor(conversationDescriptor, agentResourceId);
-
-                    if (!isNullOrEmpty(agentId) && !agentId.equals(agentResourceId.getId())) {
-                        continue;
-                    }
-
-                    if (!isNullOrEmpty(agentVersion) && !agentVersion.equals(agentResourceId.getVersion())) {
-                        continue;
-                    }
-
-                    if (!isNullOrEmpty(conversationState)) {
-                        if (!conversationState.equals(conversationDescriptor.getConversationState())) {
+                    try {
+                        URI resourceUri = conversationDescriptor.getResource();
+                        var agentResourceId = extractResourceId(resourceUri);
+                        if (agentResourceId == null) {
+                            log.warn(format("agentResourceId was null, this should never happen. (%s)", resourceUri));
                             continue;
                         }
-                    }
 
-                    if (!isNullOrEmpty(viewState)) {
-                        if (!viewState.equals(conversationDescriptor.getViewState())) {
+                        populateDataToDescriptor(conversationDescriptor, agentResourceId);
+
+                        if (!isNullOrEmpty(agentId) && !agentId.equals(agentResourceId.getId())) {
                             continue;
                         }
-                    }
 
-                    retConversationDescriptors.add(conversationDescriptor);
+                        if (!isNullOrEmpty(agentVersion) && !agentVersion.equals(agentResourceId.getVersion())) {
+                            continue;
+                        }
+
+                        if (!isNullOrEmpty(conversationState)) {
+                            if (!conversationState.equals(conversationDescriptor.getConversationState())) {
+                                continue;
+                            }
+                        }
+
+                        if (!isNullOrEmpty(viewState)) {
+                            if (!viewState.equals(conversationDescriptor.getViewState())) {
+                                continue;
+                            }
+                        }
+
+                        retConversationDescriptors.add(conversationDescriptor);
+                    } catch (Exception e) {
+                        // Skip individual corrupted/orphaned descriptors gracefully
+                        log.debug(format("Skipping descriptor due to error: %s", e.getMessage()));
+                    }
                 }
 
                 index++;
