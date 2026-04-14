@@ -78,7 +78,7 @@ Each entry follows this format:
 
 ### Security Fix: Auto-Vault API Keys
 
-`AgentSetupService.vaultApiKey()` — new method that automatically stores API keys in the Secrets Vault when available, persisting only the vault reference (`${eddivault:setup.<agent-name>.apiKey}`) in the LLM config. `ChatModelRegistry.resolveSecrets()` already resolves vault references at model-load time, so no downstream changes needed.
+`AgentSetupService.vaultApiKey()` — new method that automatically stores API keys in the Secrets Vault when available, persisting only the vault reference (`${eddivault:setup.<agent-name>.<timestamp>.apiKey}`) in the LLM config. Timestamp suffix prevents key collision when two agents share the same name. `ChatModelRegistry.resolveSecrets()` already resolves vault references at model-load time, so no downstream changes needed.
 
 **Degraded mode:** When vault is disabled (no `EDDI_VAULT_MASTER_KEY`), logs a warning and falls back to plaintext storage. This ensures the Agent Father wizard works in dev mode without requiring vault setup.
 
@@ -89,6 +89,9 @@ Each entry follows this format:
 | **Removed `.orEmpty`** | Qute's `.orEmpty` is for iterables, not strings — calling it on `NOT_FOUND` caused template errors. With `strict-rendering=false`, missing properties render as empty automatically |
 | **Split `set_api_key` output** | "API key stored securely in vault" was shown for ALL providers including local ones. Split into a separate `set_api_key` action output |
 | **apiKey scope: `conversation`** | Was `secret` which requires vault. Changed to `conversation` — the setup endpoint handles vaulting |
+| **InputField password** | Added `inputField` output item (subType: `password`) to `ask_for_api_key` — both Manager and chat-ui switch to masked input |
+| **Confirm summary cleanup** | Removed hardcoded "API Key: stored in vault ✓" from `confirm_creation` — was wrong for Ollama/Jlama/Bedrock/Oracle |
+| **Vault key collision** | Added epoch-millis suffix to vault key name — two agents with same name no longer overwrite each other's secret |
 | **Hex-based filenames** | Migrated from semantic names to `aaa000000000000000000001.workflow.json` etc. |
 
 ### Documentation
@@ -96,6 +99,7 @@ Each entry follows this format:
 Added to `AGENTS.md`:
 - Vault dependency warning for `scope: "secret"`
 - Qute template safety rules (no `.orEmpty` on properties, curly brace escaping caveat)
+- `InputFieldOutputItem` pattern for requesting specialized UI input fields (password, email, etc.)
 
 | File | What |
 |------|------|
@@ -106,7 +110,7 @@ Added to `AGENTS.md`:
 | `aaa000000000000000000003.property.json` | apiKey scope: `conversation` |
 | `AGENTS.md` | Vault + Qute documentation |
 
-**Verification:** 2117 unit tests pass, McpSetupToolsTest 30/30 pass.
+**Verification:** 2118 unit tests pass, McpSetupToolsTest 31/31 pass (includes new vault-active happy-path test).
 
 ---
 
