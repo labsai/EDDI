@@ -13,6 +13,20 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Red Hat Preflight — Defense-in-Depth on Push (2026-04-14)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**Problem:** The Red Hat preflight certification check only ran as a dry-run on PRs (Job 5). Pushes to `main` and tag pushes built and pushed Docker images without any preflight verification. A squash-merge or direct push could introduce a Dockerfile regression (missing labels, missing `/licenses`) that would go unnoticed until the next manual `redhat-certify.yml` run.
+
+**Fix:** Added **Job 6: `preflight-push`** — runs after the `docker` job on push events, pulling the *already-pushed* image from Docker Hub (no duplicate build). Verifies Red Hat labels, `/licenses/THIRD-PARTY.txt`, and runs `preflight check container` against the registry image. Slack notification merges both preflight jobs into a single status line (only one ever runs per event type).
+
+| File | What |
+|------|------|
+| `.github/workflows/ci.yml` | New `preflight-push` job (Job 6), renamed PR job to "Preflight Dry-Run (PR)", updated Slack needs + status merge |
+
+---
+
 ## CI Stability & Clean Reporting — 5 Fixes (2026-04-14)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)

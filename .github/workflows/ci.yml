@@ -250,9 +250,9 @@ jobs:
           docker rm -f eddi 2>/dev/null || true
           docker rm -f mongodb 2>/dev/null || true
 
-  # ─── Job 5: Red Hat Preflight (PRs only) ────────────────────────
+  # ─── Job 5: Red Hat Preflight — PR Dry-Run ──────────────────────
   preflight-check:
-    name: Preflight Dry-Run (Red Hat Certification)
+    name: Preflight Dry-Run (PR)
     runs-on: ubuntu-latest
     needs: build-and-test
     if: github.event_name == 'pull_request'
@@ -340,13 +340,97 @@ jobs:
           path: preflight-dryrun.txt
           retention-days: 14
 
-  # ─── Job 6: Slack Notification ─────────────────────────────────
+  # ─── Job 6: Red Hat Preflight — Push Verification ───────────────
+  preflight-push:
+    name: Preflight Verify (Pushed Image)
+    runs-on: ubuntu-latest
+    needs: docker
+    if: >
+      github.event_name == 'push' &&
+      needs.docker.result == 'success'
+
+    steps:
+      - name: Login to Docker Hub
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Pull pushed image
+        run: |
+          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
+          echo "Pulling ${DOCKER_IMAGE}:${PRIMARY_TAG}..."
+          docker pull ${DOCKER_IMAGE}:${PRIMARY_TAG}
+
+      - name: Verify Red Hat labels present
+        run: |
+          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
+          echo "=== Checking required Red Hat labels ==="
+          LABELS=$(docker inspect ${DOCKER_IMAGE}:${PRIMARY_TAG} --format '{{json .Config.Labels}}')
+          echo "$LABELS" | python3 -m json.tool
+          MISSING=0
+          for label in name vendor version release summary description; do
+            if echo "$LABELS" | python3 -c "import sys,json; d=json.load(sys.stdin); assert '$label' in d" 2>/dev/null; then
+              echo "✅ Label '$label' present"
+            else
+              echo "❌ Label '$label' MISSING"
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" -eq 1 ]; then
+            echo "::error::Required Red Hat labels are missing on pushed image"
+            exit 1
+          fi
+
+      - name: Verify /licenses in container
+        run: |
+          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
+          echo "=== /licenses directory ==="
+          docker run --rm --entrypoint="" ${DOCKER_IMAGE}:${PRIMARY_TAG} ls -la /licenses/
+          echo ""
+          echo "=== THIRD-PARTY.txt exists ==="
+          docker run --rm --entrypoint="" ${DOCKER_IMAGE}:${PRIMARY_TAG} \
+            test -f /licenses/THIRD-PARTY.txt && echo "✅ THIRD-PARTY.txt found" || { echo "❌ THIRD-PARTY.txt missing"; exit 1; }
+
+      - name: Install preflight
+        run: |
+          PREFLIGHT_VERSION=$(curl -s https://api.github.com/repos/redhat-openshift-ecosystem/openshift-preflight/releases/latest | jq -r .tag_name)
+          echo "Installing preflight ${PREFLIGHT_VERSION}..."
+          curl -sL "https://github.com/redhat-openshift-ecosystem/openshift-preflight/releases/download/${PREFLIGHT_VERSION}/preflight-linux-amd64" \
+            -o /usr/local/bin/preflight
+          chmod +x /usr/local/bin/preflight
+          preflight --version
+
+      - name: Preflight check (pushed image, no submit)
+        run: |
+          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
+          preflight check container \
+            docker.io/${DOCKER_IMAGE}:${PRIMARY_TAG} \
+            --docker-config=${HOME}/.docker/config.json \
+            2>&1 | tee preflight-push-results.txt
+          echo ""
+          echo "=== Preflight Summary ==="
+          if grep -q "FAILED" preflight-push-results.txt; then
+            echo "::warning::Preflight check has failures on pushed image — review output above."
+          else
+            echo "✅ All preflight checks passed on pushed image"
+          fi
+
+      - name: Upload preflight results
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: preflight-push-results
+          path: preflight-push-results.txt
+          retention-days: 14
+
+  # ─── Job 7: Slack Notification ─────────────────────────────────
   notify-slack:
     name: Slack Notification
     runs-on: ubuntu-latest
     if: always()
     needs:
-      [build-and-test, integration-test, docker, smoke-test, preflight-check]
+      [build-and-test, integration-test, docker, smoke-test, preflight-check, preflight-push]
 
     steps:
       - name: Send build notification
@@ -364,7 +448,14 @@ jobs:
           IT="${{ needs.integration-test.result }}"
           DOCKER="${{ needs.docker.result }}"
           SMOKE="${{ needs.smoke-test.result }}"
-          PREFLIGHT="${{ needs.preflight-check.result }}"
+          PREFLIGHT_PR="${{ needs.preflight-check.result }}"
+          PREFLIGHT_PUSH="${{ needs.preflight-push.result }}"
+          # Merge: whichever preflight job actually ran wins (the other is "skipped")
+          if [ "$PREFLIGHT_PUSH" != "skipped" ]; then
+            PREFLIGHT="$PREFLIGHT_PUSH"
+          else
+            PREFLIGHT="$PREFLIGHT_PR"
+          fi
 
           # Map result to emoji
           status_icon() {
