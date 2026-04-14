@@ -1,6 +1,7 @@
 package ai.labs.eddi.integration.postgres;
 
 import ai.labs.eddi.integration.BaseIntegrationIT;
+import ai.labs.eddi.integration.ContainerBaseIT;
 import io.restassured.RestAssured;
 import io.restassured.config.HttpClientConfig;
 import io.restassured.config.RestAssuredConfig;
@@ -11,14 +12,12 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.images.builder.ImageFromDockerfile;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -49,10 +48,7 @@ public class PostgresAgentUseCaseIT extends BaseIntegrationIT {
 
     @SuppressWarnings("resource")
     @Container
-    static final GenericContainer<?> EDDI = new GenericContainer<>(
-            new ImageFromDockerfile("eddi-pg-it", false)
-                    .withFileFromPath(".", Path.of("."))
-                    .withDockerfile(Path.of("src/main/docker/Dockerfile.jvm")))
+    static final GenericContainer<?> EDDI = new GenericContainer<>(ContainerBaseIT.buildEddiImage("eddi-pg-it"))
             .withNetwork(NETWORK)
             .withExposedPorts(7070)
             .withEnv("EDDI_DATASTORE_TYPE", "postgres")

@@ -465,6 +465,10 @@
                     <includes>
                         <include>**/*IT.java</include>
                     </includes>
+                    <!-- Kill the forked test process if it hasn't completed in 15 minutes.
+                         Prevents CI from hanging indefinitely when Docker image builds
+                         or container startup fails to propagate errors. -->
+                    <forkedProcessTimeoutInSeconds>900</forkedProcessTimeoutInSeconds>
                     <systemPropertyVariables>
                         <native.image.path>${project.build.directory}/${project.build.finalName}-runner
                         </native.image.path>

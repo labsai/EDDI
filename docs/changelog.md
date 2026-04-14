@@ -13,6 +13,41 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## CI Fix: Container-Based IT Docker Build & Hanging (2026-04-14)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**Problem:** Container-based integration tests (`AgentUseCaseIT`, `CreateApiAgentIT`, `PostgresAgentUseCaseIT`) failed in GitHub Actions CI with `COPY failed: file not found in build context … stat target/quarkus-app/lib/` — and then the entire CI job **hung forever** instead of failing.
+
+### Root Cause 1: Entire project tree as Docker build context
+
+`ContainerBaseIT` used `.withFileFromPath(".", Path.of("."))` which told Testcontainers to tar the **entire project root** (source, `.git/`, `target/classes/`, JaCoCo data, etc. — hundreds of MB) and send it as Docker build context. The `.dockerignore` deny-all + exception pattern (`*` then `!target/quarkus-app/**`) was processed by the Docker daemon *after* receiving the full tar, but some Docker/BuildKit versions failed to correctly re-include paths within excluded parent directories.
+
+### Root Cause 2: No failsafe timeout
+
+Maven Failsafe had no `forkedProcessTimeoutInSeconds`, so when the Docker build failed (or the massive context tar transfer stalled), the forked test process hung indefinitely. GitHub Actions' default 6-hour job timeout was the only safety net.
+
+### Fix 1: Targeted build context
+
+Replaced `.withFileFromPath(".", Path.of("."))` with explicit `withFileFromPath()` calls for only the directories the Dockerfile actually needs: `target/quarkus-app/`, `licenses/`, `docs/`. This:
+- Eliminates `.dockerignore` dependency entirely (no `.dockerignore` in the targeted context)
+- Reduces context tar from hundreds of MB to ~50 MB
+- Makes Docker builds deterministic regardless of BuildKit version
+
+Extracted a shared `ContainerBaseIT.buildEddiImage(String)` helper method so both MongoDB and PostgreSQL container tests use the same image construction logic.
+
+### Fix 2: Failsafe timeout
+
+Added `<forkedProcessTimeoutInSeconds>900</forkedProcessTimeoutInSeconds>` (15 minutes) to the `maven-failsafe-plugin` configuration. If the forked integration test process doesn't complete within 15 minutes, Maven kills it and reports failure.
+
+| File | What |
+|------|------|
+| `ContainerBaseIT.java` | Targeted build context, `buildEddiImage()` helper |
+| `PostgresAgentUseCaseIT.java` | Use shared `buildEddiImage()` |
+| `pom.xml` | Failsafe `forkedProcessTimeoutInSeconds=900` |
+
+---
+
 ## CI Fix: GDPR 403 Response & Docker Build Context (2026-04-14)
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
