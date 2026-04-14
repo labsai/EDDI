@@ -13,7 +13,57 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## CI Stability & Clean Reporting — 5 Fixes (2026-04-14)
+
+**Repo:** EDDI (`feature/v6-rc2-hardening`)
+
+**Problem:** Integration tests were hanging in GitHub CI and the test output was full of noise — framework warnings, CDI shutdown stacktraces, and unrecognized config key spam made it impossible to quickly assess test results.
+
+### Fix 1: JavaTimeModule for BSON ObjectMapper (Critical)
+
+`PersistenceModule.buildMongoClientOptions()` creates a standalone `ObjectMapper(BsonFactory)` for the MongoDB `JacksonCodec`. This ObjectMapper was missing `JavaTimeModule`, causing `InvalidDefinitionException` when serializing `GroupConversation$TranscriptEntry.timestamp` (`java.time.Instant`). The serialization failure put conversations into `ERROR` state, and tests waiting for responses hung indefinitely.
+
+**Fix:** Registered `JavaTimeModule` and disabled `WRITE_DATES_AS_TIMESTAMPS` on the BSON ObjectMapper.
+
+### Fix 2: SSE Cleanup Thread Crash Protection
+
+The `sse-log-cleanup-*` virtual thread in `RestLogAdmin` outlives Quarkus shutdown during test teardown. When it calls `boundedLogStore.removeListener()`, the CDI proxy throws `RuntimeException: ArC container not initialized` — a full stacktrace that looks like a real error.
+
+**Fix:** Wrapped the finally block in try-catch. CDI shutdown races are expected during test teardown.
+
+### Fix 3: Docker Build Context — Recursive Globs
+
+`.dockerignore` used `!target/quarkus-app/*` which only includes direct children. Docker's glob `*` is non-recursive, so `target/quarkus-app/lib/`, `app/`, `quarkus/` subdirectories were excluded. This caused `AgentUseCaseIT` and `CreateApiAgentIT` Docker builds to fail with `COPY failed: file not found`.
+
+**Fix:** Changed to `!target/quarkus-app/**` (recursive). Same fix applied to `licenses` and `docs`.
+
+### Fix 4: Unrecognized MCP Config Key
+
+`quarkus.mcp-server.http.sse-path=` is not a valid configuration key in the current `quarkus-mcp-server` extension version. Generated a WARN on every startup.
+
+**Fix:** Removed the property.
+
+### Fix 5: Test Framework Log Noise Suppression
+
+Added log category suppressions in `src/test/resources/application.properties`:
+- `tc` + `org.testcontainers` → ERROR (suppresses "Reuse was requested but environment does not support" warnings)
+- `org.junit` → ERROR (suppresses CloseableResource warnings during extension cleanup)
+- `io.quarkus.config` → ERROR (suppresses unrecognized key warnings from test profiles)
+
+### Files Modified
+
+| File | What |
+|------|------|
+| `PersistenceModule.java` | Register `JavaTimeModule`, disable timestamps |
+| `RestLogAdmin.java` | Try-catch in SSE cleanup finally block |
+| `.dockerignore` | `*` → `**` recursive globs |
+| `application.properties` | Remove `quarkus.mcp-server.http.sse-path` |
+| `src/test/resources/application.properties` | Suppress framework noise categories |
+
+---
+
 ## Integration Test Stability & Cleanup Hardening (2026-04-14)
+
 
 **Repo:** EDDI (`feature/v6-rc2-hardening`)
 
