@@ -121,7 +121,7 @@ public class RestSlackWebhook {
                     LOGGER.debugf("Slack event received: type=%s, event_id=%s", eventType, eventId);
 
                     // Delegate to handler (async — returns immediately)
-                    eventHandler.handleEventAsync(eventId, eventType, event);
+                    eventHandler.handleEventAsync(eventId, event);
                 }
             }
 

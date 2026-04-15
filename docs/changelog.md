@@ -41,7 +41,7 @@ Bumped EDDI platform version from `6.0.0` to `6.0.1` across all properties, desc
 
 ### Code Quality & Cleanup
 - Removed unused `beforeCount` variable in `SlackGroupDiscussionListenerTest.java` (CodeQL warning).
-- Removed unused `eventType` parameter from `SlackEventHandler.handleEvent()`.
+- Removed unused `eventType` parameter from `SlackEventHandler.handleEventAsync()`.
 - Replaced hardcoded test secrets in `SlackSignatureVerifierTest.java` with test-prefixed values to avoid CI secret scanner noise.
 
 ### Reliability & Edge Cases

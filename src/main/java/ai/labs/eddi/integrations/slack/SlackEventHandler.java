@@ -121,12 +121,10 @@ public class SlackEventHandler {
      *
      * @param eventId
      *            the unique event ID (for dedup)
-     * @param eventType
-     *            the event type (e.g., "app_mention", "message")
      * @param event
      *            the parsed event JSON as a Map
      */
-    public void handleEventAsync(String eventId, String eventType, Map<String, Object> event) {
+    public void handleEventAsync(String eventId, Map<String, Object> event) {
         if (!config.enabled()) {
             return;
         }
