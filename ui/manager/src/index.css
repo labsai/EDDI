@@ -198,4 +198,50 @@
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: translateY(0); }
   }
+
+  /* ── Container-query responsive grid ─────────── */
+  /* Responds to the ACTUAL content area width, not viewport.
+     This ensures grids adapt when the chat drawer (420px) is open. */
+  .cq-card-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: 1fr;
+  }
+
+  @container main (min-width: 32rem) {
+    .cq-card-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @container main (min-width: 56rem) {
+    .cq-card-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  @container main (min-width: 76rem) {
+    .cq-card-grid {
+      grid-template-columns: repeat(4, 1fr);
+    }
+  }
+
+  /* Variant for stat-style cards (2→4 columns, skipping 3) */
+  .cq-stat-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: 1fr;
+  }
+
+  @container main (min-width: 32rem) {
+    .cq-stat-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @container main (min-width: 56rem) {
+    .cq-stat-grid {
+      grid-template-columns: repeat(4, 1fr);
+    }
+  }
 }

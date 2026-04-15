@@ -188,7 +188,7 @@ export function DashboardPage() {
       </div>
 
       {/* Stats cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" data-tour="dashboard-stats">
+      <div className="cq-stat-grid" data-tour="dashboard-stats">
         {statsLoading
           ? Array.from({ length: 4 }).map((_, i) => (
               <Card key={i}>
@@ -364,7 +364,7 @@ export function DashboardPage() {
         </div>
 
         {agentsLoading ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="cq-stat-grid">
             {Array.from({ length: 4 }).map((_, i) => (
               <Card key={i}>
                 <CardContent className="space-y-3">
@@ -391,7 +391,7 @@ export function DashboardPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="cq-card-grid">
             {recentAgents.map((agent) => (
               <Link key={agent.id} to={`/manage/agentview/${agent.id}`}>
                 <Card className="group relative overflow-hidden transition-all hover:shadow-md hover:border-primary/30 hover:-translate-y-0.5 active:translate-y-0">

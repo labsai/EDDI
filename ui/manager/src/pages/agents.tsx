@@ -21,7 +21,6 @@ import {
   type ViewMode,
 } from "@/components/shared/view-toggle";
 import { getStoredViewMode, setStoredViewMode } from "@/components/shared/view-mode";
-import { cn } from "@/lib/utils";
 import { useOnboarding } from "@/hooks/use-onboarding";
 
 type SortField = "name" | "version" | "modified";
@@ -168,12 +167,7 @@ export function AgentsPage() {
       {/* Content */}
       <div data-tour="agents-content">
       {isLoading && (
-        <div
-          className={cn(
-            "grid gap-4",
-            "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-          )}
-        >
+        <div className="cq-card-grid">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="rounded-xl border border-border bg-card p-5 space-y-3">
               <Skeleton className="h-5 w-3/4" />
@@ -214,10 +208,7 @@ export function AgentsPage() {
           {view === "card" ? (
             /* Card grid */
             <div
-              className={cn(
-                "grid gap-4",
-                "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-              )}
+              className="cq-card-grid"
               data-testid="agent-grid"
             >
               {groupedAgents.map((agent) => (

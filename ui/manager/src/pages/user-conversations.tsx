@@ -172,7 +172,7 @@ export function UserConversationsPage({ embedded }: { embedded?: boolean } = {})
             </h3>
           </div>
           <div className="space-y-3 px-5 py-4">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="cq-stat-grid">
               <InfoItem
                 icon={<Link2 className="h-3.5 w-3.5" />}
                 label={t("userConversations.intent", "Intent")}

@@ -574,7 +574,7 @@ export function SchedulesPage() {
 
       {/* Status Cards */}
       {isLoading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="cq-stat-grid">
           {[...Array(4)].map((_, i) => (
             <div
               key={i}
@@ -586,7 +586,7 @@ export function SchedulesPage() {
           ))}
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" data-tour="schedules-stats">
+        <div className="cq-stat-grid" data-tour="schedules-stats">
           {/* Total */}
           <div
             className="rounded-xl border border-border bg-card p-5"

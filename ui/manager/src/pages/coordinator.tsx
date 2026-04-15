@@ -201,7 +201,7 @@ export function CoordinatorPage() {
 
       {/* ─── Hero: Connection Status ─── */}
       {statusLoading && !currentStatus ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="cq-stat-grid">
           {[...Array(4)].map((_, i) => (
             <div key={i} className="animate-pulse rounded-xl border border-border bg-card p-5">
               <div className="h-4 w-24 rounded bg-muted" />

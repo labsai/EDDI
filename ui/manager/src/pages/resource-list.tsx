@@ -23,7 +23,6 @@ import { parseResourceUri } from "@/lib/api/agents";
 import { useResourceDescriptors, useDeleteResource, useDuplicateResource } from "@/hooks/use-resources";
 import { ResourceCard } from "@/components/resources/resource-card";
 import { CreateResourceDialog } from "@/components/resources/create-resource-dialog";
-import { cn } from "@/lib/utils";
 import type { AgentDescriptor } from "@/lib/api/agents";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -166,12 +165,7 @@ export function ResourceListPage() {
 
       {/* Content */}
       {isLoading && (
-        <div
-          className={cn(
-            "grid gap-4",
-            "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-          )}
-        >
+        <div className="cq-card-grid">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="rounded-xl border border-border bg-card p-5 space-y-3">
               <Skeleton className="h-5 w-3/4" />
@@ -208,10 +202,7 @@ export function ResourceListPage() {
 
           {view === "card" ? (
             <div
-              className={cn(
-                "grid gap-4",
-                "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-              )}
+              className="cq-card-grid"
               data-testid="resource-grid"
             >
               {enrichedItems.map((item) => (

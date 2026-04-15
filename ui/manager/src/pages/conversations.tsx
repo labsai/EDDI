@@ -201,10 +201,7 @@ export function ConversationsPage() {
           {view === "card" ? (
             /* Card grid */
             <div
-              className={cn(
-                "grid gap-4",
-                "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-              )}
+              className="cq-card-grid"
               data-testid="conversation-grid"
             >
               {conversations.map((conv) => {
