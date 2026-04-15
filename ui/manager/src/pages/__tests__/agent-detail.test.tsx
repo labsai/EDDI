@@ -144,4 +144,23 @@ describe("AgentDetailPage", () => {
       expect(screen.getByText("return-processing")).toBeInTheDocument();
     });
   });
+
+  it("renders channels section with add button", async () => {
+    renderAgentDetail();
+    // Channel Connectors section is collapsed by default (no channels) — expand it
+    const header = await screen.findByText("Channel Connectors");
+    await userEvent.click(header);
+    await waitFor(() => {
+      expect(screen.getByTestId("channels-section")).toBeInTheDocument();
+      expect(screen.getByTestId("add-slack-channel-btn")).toBeInTheDocument();
+    });
+  });
+
+  it("shows Slack channel data for agent3", async () => {
+    renderAgentDetail("agent3");
+    await waitFor(() => {
+      expect(screen.getByTestId("slack-channel-0")).toBeInTheDocument();
+      expect(screen.getByTestId("channel-id-0")).toHaveValue("C0123ABCDEF");
+    });
+  });
 });

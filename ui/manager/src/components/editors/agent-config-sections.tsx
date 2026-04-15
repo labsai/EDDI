@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, memo } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ShieldCheck,
@@ -10,10 +10,17 @@ import {
   Sparkles,
   ShieldBan,
   Cable,
+  Hash,
+  Copy,
+  Check,
+  Lightbulb,
+  Trash2,
 } from "lucide-react";
 import { useUpdateAgent } from "@/hooks/use-agents";
-import type { Agent } from "@/lib/api/agents";
+import type { Agent, ChannelConnector } from "@/lib/api/agents";
 import { EditorSection } from "./editor-section";
+import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { toast } from "sonner";
 
 // ─── Debounced input helpers ─────────────────────────────────────────────────
 
@@ -608,13 +615,362 @@ export const MemoryPolicySection = memo(function MemoryPolicySection({
 
 // ─── Channel Connectors ────────────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const ChannelsSection = memo(function ChannelsSection(_props: {
+/** Webhook URL for Slack Events API — same endpoint for all agents. */
+function useWebhookUrl() {
+  return typeof window !== "undefined"
+    ? `${window.location.origin}/integrations/slack/events`
+    : "";
+}
+
+/** Collapsible setup guide shown at the top of the channels section. */
+function SlackSetupGuide() {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const webhookUrl = useWebhookUrl();
+  const [copied, setCopied] = useState(false);
+
+  function copyUrl() {
+    navigator.clipboard.writeText(webhookUrl).then(() => {
+      setCopied(true);
+      toast.success(t("agentDetail.slackWebhookCopied", "Webhook URL copied"));
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {
+      toast.error(t("common.copyFailed", "Failed to copy to clipboard"));
+    });
+  }
+
+  return (
+    <div className="rounded-lg border border-indigo-500/20 bg-indigo-500/5">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 px-4 py-2.5 text-start"
+      >
+        <Lightbulb className="h-4 w-4 text-indigo-500 shrink-0" />
+        <span className="flex-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+          {t("agentDetail.slackSetupGuide", "Slack Setup Guide")}
+        </span>
+        <Cable className={`h-3.5 w-3.5 text-indigo-500/50 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="space-y-4 border-t border-indigo-500/20 px-4 py-3">
+          {/* Webhook URL */}
+          <div>
+            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {t("agentDetail.slackWebhookUrl", "Webhook URL")}
+            </label>
+            <div className="flex items-center gap-1.5">
+              <code className="flex-1 rounded-md border border-input bg-background px-2.5 py-1.5 font-mono text-xs text-foreground break-all">
+                {webhookUrl}
+              </code>
+              <button
+                type="button"
+                onClick={copyUrl}
+                className="shrink-0 rounded-md border border-input p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                title={t("common.copy", "Copy")}
+              >
+                {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+          </div>
+
+          {/* Steps */}
+          <ol className="space-y-1.5 text-xs text-muted-foreground">
+            <li className="flex items-start gap-2">
+              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-indigo-500/10 text-[10px] font-bold text-indigo-500">1</span>
+              {t("agentDetail.slackStep1", "Create a Slack App at api.slack.com/apps and install it to your workspace.")}
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-indigo-500/10 text-[10px] font-bold text-indigo-500">2</span>
+              {t("agentDetail.slackStep2", "Copy the Bot Token (xoxb-…) and Signing Secret into the EDDI vault and configure channels below.")}
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-indigo-500/10 text-[10px] font-bold text-indigo-500">3</span>
+              <span>
+                {t("agentDetail.slackStep3", "Then enable Event Subscriptions in your Slack App, paste the Webhook URL above, and subscribe to:")}
+                <code className="ms-1 rounded bg-muted px-1 py-0.5 font-mono text-[10px]">app_mention</code>,{" "}
+                <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">message.im</code>
+              </span>
+            </li>
+          </ol>
+
+          <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
+            {t("agentDetail.slackSetupNote", "Important: Configure the channel below before enabling Event Subscriptions — Slack sends a URL verification challenge that requires the signing secret to be configured in EDDI.")}
+          </p>
+
+          {/* Required scopes */}
+          <div>
+            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {t("agentDetail.slackRequiredScopes", "Required Bot Token Scopes")}
+            </label>
+            <div className="flex flex-wrap gap-1">
+              {["app_mentions:read", "chat:write", "channels:history", "groups:history", "im:history", "mpim:history"].map((scope) => (
+                <code key={scope} className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                  {scope}
+                </code>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Single Slack channel connector card. */
+function SlackChannelCard({
+  channel,
+  index,
+  onUpdate,
+  onRemove,
+  disabled,
+}: {
+  channel: ChannelConnector;
+  index: number;
+  onUpdate: (idx: number, config: Record<string, string>) => void;
+  onRemove: (idx: number) => void;
+  disabled: boolean;
+}) {
+  const { t } = useTranslation();
+  const cfg = useMemo(() => channel.config ?? {}, [channel.config]);
+
+  // Keep a ref to the latest config so debounced callbacks never use stale state.
+  // Without this, a 600ms channelId debounce could overwrite a botToken change
+  // that fired immediately (via SecretKeyPicker) during the debounce window.
+  const cfgRef = useRef(cfg);
+  useEffect(() => { cfgRef.current = cfg; }, [cfg]);
+
+  // Local state for channelId and groupId to debounce
+  const [localChannelId, setLocalChannelId] = useState(cfg.channelId ?? "");
+  const [localGroupId, setLocalGroupId] = useState(cfg.groupId ?? "");
+  const channelIdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const groupIdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sync from parent on external changes
+  useEffect(() => setLocalChannelId(cfg.channelId ?? ""), [cfg.channelId]);
+  useEffect(() => setLocalGroupId(cfg.groupId ?? ""), [cfg.groupId]);
+
+  // Cleanup timers
+  useEffect(() => () => {
+    if (channelIdTimer.current) clearTimeout(channelIdTimer.current);
+    if (groupIdTimer.current) clearTimeout(groupIdTimer.current);
+  }, []);
+
+  function commitChannelId(v: string) {
+    if (channelIdTimer.current) clearTimeout(channelIdTimer.current);
+    channelIdTimer.current = setTimeout(() => {
+      onUpdate(index, { ...cfgRef.current, channelId: v });
+    }, 600);
+  }
+
+  function commitGroupId(v: string) {
+    if (groupIdTimer.current) clearTimeout(groupIdTimer.current);
+    groupIdTimer.current = setTimeout(() => {
+      if (!v.trim()) {
+        // Remove empty groupId to keep config clean
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { groupId: _discarded, ...rest } = cfgRef.current;
+        onUpdate(index, rest);
+      } else {
+        onUpdate(index, { ...cfgRef.current, groupId: v });
+      }
+    }, 600);
+  }
+
+  function handleSecretChange(key: "botToken" | "signingSecret", value: string) {
+    onUpdate(index, { ...cfgRef.current, [key]: value });
+  }
+
+  const channelIdValid = !localChannelId || /^C[A-Z0-9]+$/.test(localChannelId);
+
+  return (
+    <div className="rounded-lg border border-border bg-background" data-testid={`slack-channel-${index}`}>
+      {/* Card header */}
+      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+        <div className="flex items-center gap-2">
+          <Hash className="h-4 w-4 text-indigo-500" />
+          <span className="text-xs font-semibold text-foreground">
+            {t("agentDetail.slackChannel", "Slack Channel")}
+          </span>
+          {localChannelId && (
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              {localChannelId}
+            </code>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            if (window.confirm(t("agentDetail.removeChannelConfirm", "Remove this Slack channel connector?"))) {
+              onRemove(index);
+            }
+          }}
+          disabled={disabled}
+          className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
+          title={t("agentDetail.removeChannel", "Remove channel")}
+          data-testid={`remove-channel-${index}`}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      {/* Card body */}
+      <div className="space-y-3 p-4">
+        {/* Channel ID */}
+        <div>
+          <label className="mb-1 block text-[10px] font-medium text-muted-foreground">
+            {t("agentDetail.channelId", "Channel ID")} <span className="text-destructive">*</span>
+          </label>
+          <input
+            type="text"
+            value={localChannelId}
+            onChange={(e) => {
+              const v = e.target.value;
+              setLocalChannelId(v);
+              commitChannelId(v);
+            }}
+            disabled={disabled}
+            placeholder="C0123ABCDEF"
+            className={`h-8 w-full rounded-md border bg-background px-2.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60 ${
+              channelIdValid ? "border-input" : "border-amber-500"
+            }`}
+            data-testid={`channel-id-${index}`}
+          />
+          {!channelIdValid && (
+            <p className="mt-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+              {t("agentDetail.channelIdHint", "Channel IDs start with C followed by uppercase alphanumeric characters")}
+            </p>
+          )}
+        </div>
+
+        {/* Bot Token */}
+        <div>
+          <label className="mb-1 block text-[10px] font-medium text-muted-foreground">
+            {t("agentDetail.botToken", "Bot Token")} <span className="text-destructive">*</span>
+          </label>
+          <SecretKeyPicker
+            value={cfg.botToken ?? ""}
+            onChange={(v) => handleSecretChange("botToken", v)}
+            readOnly={disabled}
+            placeholder={t("agentDetail.botTokenPlaceholder", "xoxb-… or ${eddivault:slack-bot-token}")}
+            testId={`bot-token-${index}`}
+          />
+          <p className="mt-0.5 text-[10px] text-muted-foreground/70">
+            {t("agentDetail.botTokenHint", "Slack Bot User OAuth Token. Use a vault reference for security.")}
+          </p>
+        </div>
+
+        {/* Signing Secret */}
+        <div>
+          <label className="mb-1 block text-[10px] font-medium text-muted-foreground">
+            {t("agentDetail.signingSecret", "Signing Secret")} <span className="text-destructive">*</span>
+          </label>
+          <SecretKeyPicker
+            value={cfg.signingSecret ?? ""}
+            onChange={(v) => handleSecretChange("signingSecret", v)}
+            readOnly={disabled}
+            placeholder={t("agentDetail.signingSecretPlaceholder", "Hex string or ${eddivault:slack-signing-secret}")}
+            testId={`signing-secret-${index}`}
+          />
+          <p className="mt-0.5 text-[10px] text-muted-foreground/70">
+            {t("agentDetail.signingSecretHint", "From your Slack App's Basic Information page. Use a vault reference for security.")}
+          </p>
+        </div>
+
+        {/* Group ID (optional) */}
+        <div>
+          <label className="mb-1 block text-[10px] font-medium text-muted-foreground">
+            {t("agentDetail.groupIdOptional", "Group ID (optional)")}
+          </label>
+          <input
+            type="text"
+            value={localGroupId}
+            onChange={(e) => {
+              const v = e.target.value;
+              setLocalGroupId(v);
+              commitGroupId(v);
+            }}
+            disabled={disabled}
+            placeholder={t("agentDetail.groupIdPlaceholder", "Multi-agent group config ID")}
+            className="h-8 w-full rounded-md border border-input bg-background px-2.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+            data-testid={`group-id-${index}`}
+          />
+          <p className="mt-0.5 text-[10px] text-muted-foreground/70">
+            {t("agentDetail.groupIdHint", "Set this to enable \"group: question\" multi-agent discussions from this Slack channel.")}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export const ChannelsSection = memo(function ChannelsSection({
+  agent,
+  agentId,
+  version,
+}: {
   agent: Agent;
   agentId: string;
   version: number;
 }) {
   const { t } = useTranslation();
+  const updateAgent = useUpdateAgent();
+
+  const channels: ChannelConnector[] = agent.channels ?? [];
+  const slackChannels = channels.filter((c) => c.type === "slack");
+  const hasChannels = slackChannels.length > 0;
+
+  function addSlackChannel() {
+    const newChannel: ChannelConnector = {
+      type: "slack",
+      config: { channelId: "", botToken: "", signingSecret: "" },
+    };
+    updateAgent.mutate({
+      id: agentId,
+      version,
+      agent: { ...agent, channels: [...channels, newChannel] },
+    });
+  }
+
+  function updateChannel(idx: number, config: Record<string, string>) {
+    // idx is relative to slackChannels — map back to the full channels array
+    let slackIdx = 0;
+    const updated = channels.map((c) => {
+      if (c.type === "slack") {
+        if (slackIdx === idx) {
+          slackIdx++;
+          return { ...c, config };
+        }
+        slackIdx++;
+      }
+      return c;
+    });
+    updateAgent.mutate({
+      id: agentId,
+      version,
+      agent: { ...agent, channels: updated },
+    });
+  }
+
+  function removeChannel(idx: number) {
+    let slackIdx = 0;
+    const updated = channels.filter((c) => {
+      if (c.type === "slack") {
+        if (slackIdx === idx) {
+          slackIdx++;
+          return false;
+        }
+        slackIdx++;
+      }
+      return true;
+    });
+    updateAgent.mutate({
+      id: agentId,
+      version,
+      agent: { ...agent, channels: updated },
+    });
+  }
 
   return (
     <EditorSection
@@ -622,19 +978,53 @@ export const ChannelsSection = memo(function ChannelsSection(_props: {
       icon={Cable}
       accent="text-indigo-500"
       variant="card"
-      defaultOpen={false}
+      defaultOpen={hasChannels}
     >
-      <div className="flex flex-col items-center justify-center py-10 text-center" data-testid="channels-section">
-        <Cable className="h-10 w-10 text-muted-foreground/40" />
-        <p className="mt-3 text-sm font-medium text-muted-foreground">
-          {t("agentDetail.channelsComingSoon", "Coming Soon")}
+      <div className="space-y-4" data-testid="channels-section">
+        {/* Setup guide */}
+        <SlackSetupGuide />
+
+        {/* Channel description */}
+        <p className="text-[10px] text-muted-foreground leading-relaxed">
+          {t("agentDetail.channelsDesc", "Connect this agent to Slack channels. Each channel connector is independently configured with its own credentials, supporting multi-workspace setups.")}
         </p>
-        <p className="mt-1 max-w-sm text-xs text-muted-foreground/70">
-          {t("agentDetail.channelsComingSoonDesc", "Channel connectors (Slack, Teams, Webhooks) are being developed and will be available in an upcoming release.")}
-        </p>
-        <span className="mt-3 inline-flex items-center rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-          {t("agentDetail.channelsComingSoonBadge", "In Development")}
-        </span>
+
+        {/* Empty state */}
+        {!hasChannels && (
+          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border py-8 text-center">
+            <Cable className="h-8 w-8 text-muted-foreground/30" />
+            <p className="mt-2 text-sm font-medium text-muted-foreground">
+              {t("agentDetail.noChannels", "No channels configured")}
+            </p>
+            <p className="mt-0.5 max-w-xs text-xs text-muted-foreground/70">
+              {t("agentDetail.noChannelsDesc", "Add a Slack channel to let users interact with this agent from Slack.")}
+            </p>
+          </div>
+        )}
+
+        {/* Channel cards */}
+        {slackChannels.map((channel, idx) => (
+          <SlackChannelCard
+            key={channel.config?.channelId || `new-${idx}`}
+            channel={channel}
+            index={idx}
+            onUpdate={updateChannel}
+            onRemove={removeChannel}
+            disabled={updateAgent.isPending}
+          />
+        ))}
+
+        {/* Add channel button */}
+        <button
+          type="button"
+          onClick={addSlackChannel}
+          disabled={updateAgent.isPending}
+          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-indigo-500/30 bg-indigo-500/5 px-4 py-2.5 text-xs font-medium text-indigo-600 transition-colors hover:bg-indigo-500/10 hover:border-indigo-500/50 disabled:opacity-50 dark:text-indigo-400"
+          data-testid="add-slack-channel-btn"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {t("agentDetail.addSlackChannel", "Add Slack Channel")}
+        </button>
       </div>
     </EditorSection>
   );
