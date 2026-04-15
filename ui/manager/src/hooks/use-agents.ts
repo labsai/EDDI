@@ -52,6 +52,7 @@ export function useAgent(id: string, version?: number) {
     queryKey: [...AGENTS_KEY, id, version],
     queryFn: () => getAgent(id, version),
     enabled: !!id,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -107,6 +108,7 @@ export function useDeploymentStatuses(agentId: string, version: number) {
     queryKey: [...AGENTS_KEY, "deploymentStatuses", agentId, version],
     queryFn: () => getDeploymentStatuses(agentId, version),
     enabled: !!agentId && version > 0,
+    placeholderData: keepPreviousData,
     refetchInterval: (query) => {
       const data = query.state.data;
       if (data?.some((d) => d.status === "IN_PROGRESS")) return 3000;

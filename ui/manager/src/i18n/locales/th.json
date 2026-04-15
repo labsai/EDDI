@@ -206,6 +206,7 @@
     "slackChannel": "ช่อง Slack",
     "removeChannel": "ลบช่อง",
     "removeChannelConfirm": "ลบตัวเชื่อมต่อช่อง Slack นี้?",
+      "removeChannelDesc": "This action will permanently disconnect this channel.",
     "channelId": "ID ช่อง",
     "channelIdHint": "ID ช่องเริ่มต้นด้วย C ตามด้วยตัวอักษรและตัวเลขตัวพิมพ์ใหญ่",
     "botToken": "โทเค็นบอท",

@@ -206,6 +206,7 @@
     "slackChannel": "Slackチャネル",
     "removeChannel": "チャネルを削除",
     "removeChannelConfirm": "このSlackチャネルコネクタを削除しますか？",
+      "removeChannelDesc": "This action will permanently disconnect this channel.",
     "channelId": "チャネルID",
     "channelIdHint": "チャネルIDはCで始まり、大文字の英数字が続きます",
     "botToken": "ボットトークン",

@@ -225,7 +225,7 @@ export function AgentDetailPage() {
     setVersion(v);
   }, []);
 
-  if (isLoading) {
+  if (isLoading && !agent) {
     return (
       <div className="flex items-center justify-center py-20">
         <RefreshCw className="h-8 w-8 animate-spin text-primary" />

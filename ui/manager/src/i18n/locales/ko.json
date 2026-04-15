@@ -206,6 +206,7 @@
     "slackChannel": "Slack 채널",
     "removeChannel": "채널 제거",
     "removeChannelConfirm": "이 Slack 채널 커넥터를 제거하시겠습니까?",
+      "removeChannelDesc": "This action will permanently disconnect this channel.",
     "channelId": "채널 ID",
     "channelIdHint": "채널 ID는 C로 시작하고 대문자 영숫자 문자가 뒤따릅니다",
     "botToken": "봇 토큰",

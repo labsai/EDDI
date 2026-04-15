@@ -206,6 +206,7 @@
     "slackChannel": "Slack 频道",
     "removeChannel": "移除频道",
     "removeChannelConfirm": "移除此 Slack 频道连接器？",
+      "removeChannelDesc": "This action will permanently disconnect this channel.",
     "channelId": "频道 ID",
     "channelIdHint": "频道 ID 以 C 开头，后跟大写字母数字字符",
     "botToken": "Bot 令牌",

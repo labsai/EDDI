@@ -206,6 +206,7 @@
     "slackChannel": "Canal Slack",
     "removeChannel": "Supprimer le canal",
     "removeChannelConfirm": "Supprimer ce connecteur de canal Slack ?",
+      "removeChannelDesc": "This action will permanently disconnect this channel.",
     "channelId": "ID du canal",
     "channelIdHint": "Les ID de canal commencent par C suivi de caractères alphanumériques majuscules",
     "botToken": "Token du bot",

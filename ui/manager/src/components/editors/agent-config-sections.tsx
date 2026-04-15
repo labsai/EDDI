@@ -20,6 +20,7 @@ import { useUpdateAgent } from "@/hooks/use-agents";
 import type { Agent, ChannelConnector } from "@/lib/api/agents";
 import { EditorSection } from "./editor-section";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
+import { AlertDialog } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 
 // ─── Debounced input helpers ─────────────────────────────────────────────────
@@ -744,6 +745,7 @@ function SlackChannelCard({
   // Local state for channelId and groupId to debounce
   const [localChannelId, setLocalChannelId] = useState(cfg.channelId ?? "");
   const [localGroupId, setLocalGroupId] = useState(cfg.groupId ?? "");
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const channelIdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const groupIdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -801,11 +803,7 @@ function SlackChannelCard({
         </div>
         <button
           type="button"
-          onClick={() => {
-            if (window.confirm(t("agentDetail.removeChannelConfirm", "Remove this Slack channel connector?"))) {
-              onRemove(index);
-            }
-          }}
+          onClick={() => setShowDeleteDialog(true)}
           disabled={disabled}
           className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
           title={t("agentDetail.removeChannel", "Remove channel")}
@@ -901,6 +899,20 @@ function SlackChannelCard({
           </p>
         </div>
       </div>
+
+      <AlertDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        title={t("agentDetail.removeChannelConfirm", "Remove this Slack channel connector?")}
+        description={t("agentDetail.removeChannelDesc", "This action will permanently disconnect this channel.")}
+        confirmLabel={t("common.delete", "Delete")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        onConfirm={() => {
+          onRemove(index);
+          setShowDeleteDialog(false);
+        }}
+        isPending={disabled}
+      />
     </div>
   );
 }
@@ -1005,7 +1017,7 @@ export const ChannelsSection = memo(function ChannelsSection({
         {/* Channel cards */}
         {slackChannels.map((channel, idx) => (
           <SlackChannelCard
-            key={channel.config?.channelId || `new-${idx}`}
+            key={`slack-chan-${idx}`}
             channel={channel}
             index={idx}
             onUpdate={updateChannel}

@@ -206,6 +206,7 @@
     "slackChannel": "Slack चैनल",
     "removeChannel": "चैनल हटाएं",
     "removeChannelConfirm": "इस Slack चैनल कनेक्टर को हटाएं?",
+      "removeChannelDesc": "This action will permanently disconnect this channel.",
     "channelId": "चैनल आईडी",
     "channelIdHint": "चैनल आईडी C से शुरू होती है जिसके बाद अपरकेस अल्फ़ान्यूमेरिक वर्ण आते हैं",
     "botToken": "बॉट टोकन",
