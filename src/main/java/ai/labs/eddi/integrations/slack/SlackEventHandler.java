@@ -28,6 +28,9 @@ import java.util.regex.Pattern;
  * state (via {@link IUserConversationStore}), and posts responses back to Slack
  * (via {@link SlackWebApiClient}).
  * <p>
+ * All credentials (bot tokens, signing secrets) are resolved per-agent from
+ * {@link SlackChannelRouter.SlackCredentials} — no server-level credentials.
+ * <p>
  * Key behaviors:
  * <ul>
  * <li>De-duplicates events by {@code event_id} (Slack retries up to 3x)</li>
@@ -95,12 +98,6 @@ public class SlackEventHandler {
         this.eventDedup = cacheFactory.getCache("slack-event-dedup", Duration.ofMinutes(10));
         this.activeGroupListeners = cacheFactory.getCache("slack-group-listeners", Duration.ofHours(2));
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
-
-        // Startup validation
-        if (config.enabled() && (config.botToken().isEmpty() || config.botToken().get().isBlank())) {
-            LOGGER.error("Slack integration is ENABLED but eddi.slack.bot-token is NOT SET. "
-                    + "Responses will fail to post to Slack!");
-        }
     }
 
     /**
@@ -226,12 +223,16 @@ public class SlackEventHandler {
         if (groupIdOpt.isEmpty()) {
             postMessage(channelId, threadTs,
                     "⚠️ No group is configured for this channel.\n"
-                            + "Set `eddi.slack.default-group-id` or add a ChannelConnector with `groupId`.");
+                            + "Add a ChannelConnector with `groupId` to your agent config.");
             return;
         }
 
         String groupId = groupIdOpt.get();
-        String token = "Bearer " + config.botToken().orElse("");
+
+        // Resolve bot token for this channel
+        Optional<SlackChannelRouter.SlackCredentials> credsOpt = channelRouter.resolveCredentials(channelId);
+        String botToken = credsOpt.map(SlackChannelRouter.SlackCredentials::botToken).orElse("");
+        String token = "Bearer " + botToken;
 
         // Create the listener that streams discussion into Slack
         var listener = new SlackGroupDiscussionListener(slackApi, token, channelId, threadTs);
@@ -448,11 +449,20 @@ public class SlackEventHandler {
     }
 
     /**
-     * Post a single message to Slack via the Web API.
+     * Post a single message to Slack via the Web API, using the per-agent bot token
+     * resolved from the channel's ChannelConnector config.
      */
     private void postMessage(String channelId, String threadTs, String text) {
-        String token = config.botToken().orElse("");
-        String auth = "Bearer " + token;
+        // Resolve bot token for this channel
+        Optional<SlackChannelRouter.SlackCredentials> credsOpt = channelRouter.resolveCredentials(channelId);
+        String botToken = credsOpt.map(SlackChannelRouter.SlackCredentials::botToken).orElse("");
+
+        if (botToken.isEmpty()) {
+            LOGGER.warnf("No bot token configured for Slack channel %s — cannot post message", channelId);
+            return;
+        }
+
+        String auth = "Bearer " + botToken;
 
         for (int attempt = 1; attempt <= SLACK_API_MAX_RETRIES; attempt++) {
             try {

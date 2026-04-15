@@ -13,6 +13,85 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Slack Integration — Per-Agent Credentials (2026-04-15)
+
+**Repo:** EDDI (`feature/multi-agent-ux`)
+
+**What changed:**
+
+### Architectural: Credentials moved from server-level to per-agent
+
+All Slack credentials (`botToken`, `signingSecret`) moved from `application.properties` environment variables into the agent's `ChannelConnector.config` map. This enables multi-workspace support: each agent can connect to a different Slack workspace.
+
+**Before:**
+```properties
+eddi.slack.bot-token=${eddivault:slack-bot-token}       # one per EDDI instance
+eddi.slack.signing-secret=${eddivault:slack-signing-secret}
+```
+
+**After:**
+```json
+{ "channels": [{ "type": "slack", "config": {
+    "channelId": "C0123...",
+    "botToken": "${eddivault:slack-bot-token}",
+    "signingSecret": "${eddivault:slack-signing-secret}",
+    "groupId": "optional"
+}}]}
+```
+
+### SlackIntegrationConfig — Simplified
+- Removed: `botToken()`, `signingSecret()`, `defaultAgentId()`, `defaultGroupId()`
+- Kept: `enabled()` — infrastructure-level kill switch
+
+### SlackChannelRouter — Credential Cache
+- New `SlackCredentials` record (agentId, botToken, signingSecret, groupId)
+- `resolveCredentials(channelId)` → returns full credentials for a channel
+- `getAllSigningSecrets()` → all unique signing secrets from all deployed agents
+- `SecretResolver` integration for `${eddivault:...}` references at cache refresh time (60s)
+- Removed dependency on `SlackIntegrationConfig` for credentials/defaults
+
+### SlackSignatureVerifier — Multi-Secret Verification
+- New signature: `verify(timestamp, body, signature, Collection<String> signingSecrets)`
+- Tries each signing secret until one matches (standard multi-workspace pattern)
+- Removed dependency on `SlackIntegrationConfig`
+
+### SlackEventHandler — Per-Agent Bot Tokens
+- `postMessage()` resolves bot token from `SlackChannelRouter.resolveCredentials(channelId)`
+- Group discussions get token from router instead of global config
+
+### RestSlackWebhook — Updated Flow
+- Gets all signing secrets from `SlackChannelRouter.getAllSigningSecrets()`
+- Passes collection to `SlackSignatureVerifier.verify()`
+
+### application.properties
+- Removed `eddi.slack.bot-token`, `eddi.slack.signing-secret`, `eddi.slack.default-agent-id`, `eddi.slack.default-group-id`
+- Updated inline documentation describing per-agent config model
+
+### Test Coverage: 30 Slack tests (router + verifier)
+- `SlackChannelRouterTest` — 17 tests: credentials resolution, vault references, signing secrets, edge cases
+- `SlackSignatureVerifierTest` — 13 tests: multi-secret verification, empty/null secrets, timing
+
+### Documentation
+- `docs/slack-integration.md` — completely rewritten for per-agent config model: new setup guide, credential flow diagram, updated config reference, updated troubleshooting
+
+**Design decisions:**
+- **Try-all-secrets for verification**: Instead of requiring `teamId` in config (extra operator friction), the webhook verifier tries all known signing secrets. Typical deployments have 1-3 workspaces — negligible overhead.
+- **Resolve vault refs at cache refresh**: Vault references are resolved every 60s during cache refresh (not per-request). Matches how LLM API keys are already resolved.
+- **No backward compat concern**: Slack integration is new in v6.0.0, not yet released.
+
+**Files:**
+- `SlackIntegrationConfig.java` — stripped to `enabled()` only
+- `SlackChannelRouter.java` — credential cache, SecretResolver integration
+- `SlackSignatureVerifier.java` — multi-secret verification
+- `RestSlackWebhook.java` — uses router for signing secrets
+- `SlackEventHandler.java` — per-agent bot token resolution
+- `application.properties` — removed old Slack properties
+- `SlackChannelRouterTest.java` — rewritten (17 tests)
+- `SlackSignatureVerifierTest.java` — rewritten (13 tests)
+- `docs/slack-integration.md` — rewritten for per-agent model
+
+---
+
 ## Slack Integration — Retry Fix, Cache TTL, Jackson Migration, Docs (2026-04-15)
 
 **Repo:** EDDI (`feature/multi-agent-ux`)

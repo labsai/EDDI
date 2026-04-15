@@ -4,44 +4,62 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
 class SlackSignatureVerifierTest {
 
     private SlackSignatureVerifier verifier;
-    private SlackIntegrationConfig config;
 
     private static final String SIGNING_SECRET = "8f742231b10e8888abcd99yez56789d0";
+    private static final String SIGNING_SECRET_2 = "aaaa1111bbbb2222cccc3333dddd4444";
     private static final String TEST_BODY = "token=xyzz0WbapA4vBCDEFasx0q6G&team_id=T1DC2JH3J&team_domain=testteamnow";
 
     @BeforeEach
     void setUp() {
-        config = mock(SlackIntegrationConfig.class);
-        when(config.signingSecret()).thenReturn(java.util.Optional.of(SIGNING_SECRET));
-        verifier = new SlackSignatureVerifier(config);
+        verifier = new SlackSignatureVerifier();
     }
 
     @Test
     void verify_validSignature_returnsTrue() {
-        // Use a fresh timestamp
         String timestamp = String.valueOf(Instant.now().getEpochSecond());
-
-        // Compute the expected signature manually
         String baseString = "v0:" + timestamp + ":" + TEST_BODY;
         String expectedSignature = computeHmac(SIGNING_SECRET, baseString);
 
-        assertTrue(verifier.verify(timestamp, TEST_BODY, expectedSignature));
+        assertTrue(verifier.verify(timestamp, TEST_BODY, expectedSignature, Set.of(SIGNING_SECRET)));
+    }
+
+    @Test
+    void verify_validSignature_multipleSecrets_returnsTrue() {
+        // Correct secret is the second one in the set
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String baseString = "v0:" + timestamp + ":" + TEST_BODY;
+        String expectedSignature = computeHmac(SIGNING_SECRET, baseString);
+
+        assertTrue(verifier.verify(timestamp, TEST_BODY, expectedSignature,
+                List.of(SIGNING_SECRET_2, SIGNING_SECRET)));
+    }
+
+    @Test
+    void verify_noMatchingSecret_returnsFalse() {
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String baseString = "v0:" + timestamp + ":" + TEST_BODY;
+        String expectedSignature = computeHmac(SIGNING_SECRET, baseString);
+
+        // Only wrong secrets provided
+        assertFalse(verifier.verify(timestamp, TEST_BODY, expectedSignature,
+                Set.of(SIGNING_SECRET_2, "totally-wrong-secret")));
     }
 
     @Test
     void verify_invalidSignature_returnsFalse() {
         String timestamp = String.valueOf(Instant.now().getEpochSecond());
-        assertFalse(verifier.verify(timestamp, TEST_BODY, "v0=invalid_signature"));
+        assertFalse(verifier.verify(timestamp, TEST_BODY, "v0=invalid_signature",
+                Set.of(SIGNING_SECRET)));
     }
 
     @Test
@@ -52,28 +70,45 @@ class SlackSignatureVerifierTest {
         String baseString = "v0:" + expiredTimestamp + ":" + TEST_BODY;
         String validSignature = computeHmac(SIGNING_SECRET, baseString);
 
-        assertFalse(verifier.verify(expiredTimestamp, TEST_BODY, validSignature));
+        assertFalse(verifier.verify(expiredTimestamp, TEST_BODY, validSignature,
+                Set.of(SIGNING_SECRET)));
     }
 
     @ParameterizedTest
     @NullAndEmptySource
     void verify_nullOrEmptyTimestamp_returnsFalse(String timestamp) {
-        assertFalse(verifier.verify(timestamp, TEST_BODY, "v0=anything"));
+        assertFalse(verifier.verify(timestamp, TEST_BODY, "v0=anything",
+                Set.of(SIGNING_SECRET)));
     }
 
     @Test
     void verify_nullBody_returnsFalse() {
-        assertFalse(verifier.verify("12345", null, "v0=anything"));
+        assertFalse(verifier.verify("12345", null, "v0=anything",
+                Set.of(SIGNING_SECRET)));
     }
 
     @Test
     void verify_nullSignature_returnsFalse() {
-        assertFalse(verifier.verify("12345", TEST_BODY, null));
+        assertFalse(verifier.verify("12345", TEST_BODY, null,
+                Set.of(SIGNING_SECRET)));
+    }
+
+    @Test
+    void verify_emptySecrets_returnsFalse() {
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        assertFalse(verifier.verify(timestamp, TEST_BODY, "v0=anything", Set.of()));
+    }
+
+    @Test
+    void verify_nullSecrets_returnsFalse() {
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        assertFalse(verifier.verify(timestamp, TEST_BODY, "v0=anything", null));
     }
 
     @Test
     void verify_invalidTimestampFormat_returnsFalse() {
-        assertFalse(verifier.verify("not-a-number", TEST_BODY, "v0=anything"));
+        assertFalse(verifier.verify("not-a-number", TEST_BODY, "v0=anything",
+                Set.of(SIGNING_SECRET)));
     }
 
     @Test
@@ -83,7 +118,8 @@ class SlackSignatureVerifierTest {
         String baseString = "v0:" + futureTs + ":" + TEST_BODY;
         String signature = computeHmac(SIGNING_SECRET, baseString);
 
-        assertTrue(verifier.verify(futureTs, TEST_BODY, signature));
+        assertTrue(verifier.verify(futureTs, TEST_BODY, signature,
+                Set.of(SIGNING_SECRET)));
     }
 
     /**

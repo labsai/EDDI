@@ -1,5 +1,6 @@
 package ai.labs.eddi.integrations.slack.rest;
 
+import ai.labs.eddi.integrations.slack.SlackChannelRouter;
 import ai.labs.eddi.integrations.slack.SlackEventHandler;
 import ai.labs.eddi.integrations.slack.SlackIntegrationConfig;
 import ai.labs.eddi.integrations.slack.SlackSignatureVerifier;
@@ -13,6 +14,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * JAX-RS webhook endpoint for Slack Events API.
@@ -24,6 +26,9 @@ import java.util.Map;
  * <li><b>Event Callbacks</b> — {@code app_mention} and {@code message} events
  * are delegated to {@link SlackEventHandler} for async processing.</li>
  * </ul>
+ * <p>
+ * Signing secrets are resolved per-agent from {@link SlackChannelRouter}. The
+ * verifier tries all known secrets (supporting multi-workspace deployments).
  * <p>
  * Critical: Slack expects HTTP 200 within 3 seconds. This endpoint responds
  * immediately and processes events asynchronously.
@@ -40,16 +45,19 @@ public class RestSlackWebhook {
     };
 
     private final SlackIntegrationConfig config;
+    private final SlackChannelRouter channelRouter;
     private final SlackSignatureVerifier signatureVerifier;
     private final SlackEventHandler eventHandler;
     private final ObjectMapper objectMapper;
 
     @Inject
     public RestSlackWebhook(SlackIntegrationConfig config,
+            SlackChannelRouter channelRouter,
             SlackSignatureVerifier signatureVerifier,
             SlackEventHandler eventHandler,
             ObjectMapper objectMapper) {
         this.config = config;
+        this.channelRouter = channelRouter;
         this.signatureVerifier = signatureVerifier;
         this.eventHandler = eventHandler;
         this.objectMapper = objectMapper;
@@ -79,8 +87,9 @@ public class RestSlackWebhook {
                     .build();
         }
 
-        // Step 1: Verify signature
-        if (!signatureVerifier.verify(timestamp, rawBody, signature)) {
+        // Step 1: Verify signature against all known signing secrets
+        Set<String> signingSecrets = channelRouter.getAllSigningSecrets();
+        if (!signatureVerifier.verify(timestamp, rawBody, signature, signingSecrets)) {
             LOGGER.warnf("Slack signature verification failed (timestamp=%s)", timestamp);
             return Response.status(Response.Status.FORBIDDEN)
                     .entity("{\"error\":\"Invalid signature\"}")

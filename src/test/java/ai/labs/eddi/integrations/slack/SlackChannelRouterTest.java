@@ -7,14 +7,17 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 /**
@@ -24,39 +27,31 @@ class SlackChannelRouterTest {
 
     private IRestAgentAdministration agentAdmin;
     private IRestAgentStore agentStore;
-    private SlackIntegrationConfig config;
+    private SecretResolver secretResolver;
     private SlackChannelRouter router;
 
     @BeforeEach
     void setUp() {
         agentAdmin = mock(IRestAgentAdministration.class);
         agentStore = mock(IRestAgentStore.class);
-        config = mock(SlackIntegrationConfig.class);
-        when(config.defaultAgentId()).thenReturn(Optional.empty());
-        when(config.defaultGroupId()).thenReturn(Optional.empty());
+        secretResolver = mock(SecretResolver.class);
 
-        router = new SlackChannelRouter(agentAdmin, agentStore, config);
+        // By default, SecretResolver passes through unchanged
+        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+
+        router = new SlackChannelRouter(agentAdmin, agentStore, secretResolver);
     }
 
     // ─── Agent Resolution ───
 
     @Test
     void resolveAgentId_explicitMapping_returnsAgentId() throws Exception {
-        setupDeployedAgent("agent-1", 1, "C0123", null);
+        setupDeployedAgent("agent-1", 1, "C0123", "xoxb-token", "signing-secret", null);
         assertEquals(Optional.of("agent-1"), router.resolveAgentId("C0123"));
     }
 
     @Test
-    void resolveAgentId_noMapping_fallsToDefault() throws Exception {
-        when(config.defaultAgentId()).thenReturn(Optional.of("default-agent"));
-        when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
-                .thenReturn(List.of());
-
-        assertEquals(Optional.of("default-agent"), router.resolveAgentId("C_UNKNOWN"));
-    }
-
-    @Test
-    void resolveAgentId_noMappingNoDefault_returnsEmpty() throws Exception {
+    void resolveAgentId_noMapping_returnsEmpty() throws Exception {
         when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
                 .thenReturn(List.of());
 
@@ -67,23 +62,87 @@ class SlackChannelRouterTest {
 
     @Test
     void resolveGroupId_explicitMapping_returnsGroupId() throws Exception {
-        setupDeployedAgent("agent-1", 1, "C0123", "group-42");
+        setupDeployedAgent("agent-1", 1, "C0123", "xoxb-token", "signing-secret", "group-42");
         assertEquals(Optional.of("group-42"), router.resolveGroupId("C0123"));
     }
 
     @Test
-    void resolveGroupId_noGroupMapping_fallsToDefault() throws Exception {
-        when(config.defaultGroupId()).thenReturn(Optional.of("default-group"));
-        setupDeployedAgent("agent-1", 1, "C0123", null);
+    void resolveGroupId_noGroupMapping_returnsEmpty() throws Exception {
+        setupDeployedAgent("agent-1", 1, "C0123", "xoxb-token", "signing-secret", null);
+        assertEquals(Optional.empty(), router.resolveGroupId("C0123"));
+    }
 
-        assertEquals(Optional.of("default-group"), router.resolveGroupId("C0123"));
+    // ─── Credentials Resolution ───
+
+    @Test
+    void resolveCredentials_returnsFullCredentials() throws Exception {
+        setupDeployedAgent("agent-1", 1, "C0123", "xoxb-my-token", "my-signing-secret", "group-42");
+
+        var credsOpt = router.resolveCredentials("C0123");
+        assertTrue(credsOpt.isPresent());
+
+        var creds = credsOpt.get();
+        assertEquals("agent-1", creds.agentId());
+        assertEquals("xoxb-my-token", creds.botToken());
+        assertEquals("my-signing-secret", creds.signingSecret());
+        assertEquals("group-42", creds.groupId());
     }
 
     @Test
-    void resolveGroupId_noGroupMappingNoDefault_returnsEmpty() throws Exception {
-        setupDeployedAgent("agent-1", 1, "C0123", null);
+    void resolveCredentials_unknownChannel_returnsEmpty() throws Exception {
+        when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
+                .thenReturn(List.of());
 
-        assertEquals(Optional.empty(), router.resolveGroupId("C0123"));
+        assertTrue(router.resolveCredentials("C_UNKNOWN").isEmpty());
+    }
+
+    @Test
+    void resolveCredentials_vaultReferencesResolved() throws Exception {
+        // Configure SecretResolver to resolve vault references
+        when(secretResolver.resolveValue("${eddivault:slack-token}")).thenReturn("xoxb-resolved");
+        when(secretResolver.resolveValue("${eddivault:slack-secret}")).thenReturn("resolved-secret");
+
+        setupDeployedAgent("agent-1", 1, "C0123",
+                "${eddivault:slack-token}", "${eddivault:slack-secret}", null);
+
+        var creds = router.resolveCredentials("C0123");
+        assertTrue(creds.isPresent());
+        assertEquals("xoxb-resolved", creds.get().botToken());
+        assertEquals("resolved-secret", creds.get().signingSecret());
+    }
+
+    // ─── Signing Secrets ───
+
+    @Test
+    void getAllSigningSecrets_returnsAllUniqueSecrets() throws Exception {
+        setupDeployedAgents(
+                new AgentSpec("agent-1", 1, "C0001", "token-1", "secret-A", null),
+                new AgentSpec("agent-2", 1, "C0002", "token-2", "secret-B", null));
+
+        var secrets = router.getAllSigningSecrets();
+        assertEquals(2, secrets.size());
+        assertTrue(secrets.contains("secret-A"));
+        assertTrue(secrets.contains("secret-B"));
+    }
+
+    @Test
+    void getAllSigningSecrets_deduplicatesSameSecret() throws Exception {
+        // Two agents using the same workspace (same signing secret)
+        setupDeployedAgents(
+                new AgentSpec("agent-1", 1, "C0001", "token-1", "shared-secret", null),
+                new AgentSpec("agent-2", 1, "C0002", "token-2", "shared-secret", null));
+
+        var secrets = router.getAllSigningSecrets();
+        assertEquals(1, secrets.size());
+        assertTrue(secrets.contains("shared-secret"));
+    }
+
+    @Test
+    void getAllSigningSecrets_emptyWhenNoAgents() throws Exception {
+        when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
+                .thenReturn(List.of());
+
+        assertTrue(router.getAllSigningSecrets().isEmpty());
     }
 
     // ─── Edge Cases ───
@@ -126,8 +185,8 @@ class SlackChannelRouterTest {
     void resolveAgentId_multipleAgents_lastChannelWins() throws Exception {
         // Both agents map to the same channelId — last one scanned wins
         setupDeployedAgents(
-                new AgentSpec("agent-1", 1, "C_SHARED", null),
-                new AgentSpec("agent-2", 1, "C_SHARED", null));
+                new AgentSpec("agent-1", 1, "C_SHARED", "token-1", "secret-1", null),
+                new AgentSpec("agent-2", 1, "C_SHARED", "token-2", "secret-2", null));
 
         var result = router.resolveAgentId("C_SHARED");
         assertTrue(result.isPresent());
@@ -136,7 +195,7 @@ class SlackChannelRouterTest {
 
     @Test
     void resolveAgentId_cacheRefresh_skipsWhenRecent() throws Exception {
-        setupDeployedAgent("agent-1", 1, "C0123", null);
+        setupDeployedAgent("agent-1", 1, "C0123", "token", "secret", null);
 
         // First call triggers refresh
         router.resolveAgentId("C0123");
@@ -148,17 +207,34 @@ class SlackChannelRouterTest {
     }
 
     @Test
-    void resolveAgentId_refreshFailure_returnsStaleData() throws Exception {
-        setupDeployedAgent("agent-1", 1, "C0123", null);
-        router.resolveAgentId("C0123"); // populate cache
+    void resolveAgentId_missingBotToken_stillMapsAgent() throws Exception {
+        // Agent configured without botToken — still routes, but posting will warn
+        setupDeployedAgent("agent-1", 1, "C0123", null, "secret", null);
 
-        // Cache is still fresh, so stale data is returned
         assertEquals(Optional.of("agent-1"), router.resolveAgentId("C0123"));
+        var creds = router.resolveCredentials("C0123");
+        assertTrue(creds.isPresent());
+        assertNull(creds.get().botToken());
+    }
+
+    @Test
+    void hasAnySlackChannels_trueWhenConfigured() throws Exception {
+        setupDeployedAgent("agent-1", 1, "C0123", "token", "secret", null);
+        assertTrue(router.hasAnySlackChannels());
+    }
+
+    @Test
+    void hasAnySlackChannels_falseWhenEmpty() throws Exception {
+        when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
+                .thenReturn(List.of());
+        assertFalse(router.hasAnySlackChannels());
     }
 
     // ─── Helpers ───
 
-    private void setupDeployedAgent(String agentId, int version, String channelId, String groupId) throws Exception {
+    private void setupDeployedAgent(String agentId, int version, String channelId,
+                                    String botToken, String signingSecret, String groupId)
+            throws Exception {
         var descriptor = new DocumentDescriptor();
         descriptor.setDeleted(false);
 
@@ -172,6 +248,12 @@ class SlackChannelRouterTest {
 
         var channelConfig = new java.util.HashMap<String, String>();
         channelConfig.put("channelId", channelId);
+        if (botToken != null) {
+            channelConfig.put("botToken", botToken);
+        }
+        if (signingSecret != null) {
+            channelConfig.put("signingSecret", signingSecret);
+        }
         if (groupId != null) {
             channelConfig.put("groupId", groupId);
         }
@@ -186,7 +268,8 @@ class SlackChannelRouterTest {
         when(agentStore.readAgent(agentId, version)).thenReturn(agentConfig);
     }
 
-    private record AgentSpec(String agentId, int version, String channelId, String groupId) {
+    private record AgentSpec(String agentId, int version, String channelId,
+            String botToken, String signingSecret, String groupId) {
     }
 
     private void setupDeployedAgents(AgentSpec... specs) throws Exception {
@@ -204,6 +287,12 @@ class SlackChannelRouterTest {
 
             var channelConfig = new java.util.HashMap<String, String>();
             channelConfig.put("channelId", spec.channelId());
+            if (spec.botToken() != null) {
+                channelConfig.put("botToken", spec.botToken());
+            }
+            if (spec.signingSecret() != null) {
+                channelConfig.put("signingSecret", spec.signingSecret());
+            }
             if (spec.groupId() != null) {
                 channelConfig.put("groupId", spec.groupId());
             }

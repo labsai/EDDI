@@ -36,22 +36,34 @@ Add these **Bot Token Scopes**:
 2. Copy the **Bot User OAuth Token** (starts with `xoxb-`)
 3. Copy the **Signing Secret** from **Basic Information**
 
-### 5. Configure EDDI
+### 5. Enable Slack in EDDI
 
-Add to `application.properties` (or use environment variables / SecretsVault):
+Set the master toggle (environment variable or `application.properties`):
 
 ```properties
 eddi.slack.enabled=true
-eddi.slack.bot-token=${eddivault:slack-bot-token}
-eddi.slack.signing-secret=${eddivault:slack-signing-secret}
-# Optional: default agent/group when no ChannelConnector matches
-# eddi.slack.default-agent-id=<agent-id>
-# eddi.slack.default-group-id=<group-id>
 ```
 
-### 6. Map Channels to Agents
+This is the only server-level setting. All credentials are configured per-agent.
 
-Create a `ChannelConnector` on your agent configuration:
+### 6. Store Credentials in Vault
+
+Store your Slack credentials in EDDI's Secrets Vault:
+
+```bash
+# Via REST API
+curl -X POST http://localhost:7070/secretstore/keys \
+  -H "Content-Type: application/json" \
+  -d '{"keyName":"slack-bot-token","secretValue":"xoxb-your-token-here"}'
+
+curl -X POST http://localhost:7070/secretstore/keys \
+  -H "Content-Type: application/json" \
+  -d '{"keyName":"slack-signing-secret","secretValue":"your-signing-secret"}'
+```
+
+### 7. Configure Channel Mapping on Your Agent
+
+Add a `ChannelConnector` to your agent configuration:
 
 ```json
 {
@@ -60,6 +72,8 @@ Create a `ChannelConnector` on your agent configuration:
       "type": "slack",
       "config": {
         "channelId": "C0123ABCDEF",
+        "botToken": "${eddivault:slack-bot-token}",
+        "signingSecret": "${eddivault:slack-signing-secret}",
         "groupId": "optional-group-id-for-discussions"
       }
     }
@@ -69,16 +83,18 @@ Create a `ChannelConnector` on your agent configuration:
 
 The `channelId` is the Slack channel ID (find it in Slack by right-clicking a channel → **View channel details** → copy the ID at the bottom).
 
+> **Multi-workspace**: Each agent can use different bot tokens and signing secrets, allowing a single EDDI instance to serve multiple Slack workspaces.
+
 ---
 
 ## Architecture
 
 ```
-Slack Workspace                          EDDI Cluster
+Slack Workspace(s)                       EDDI Cluster
 ─────────────────                        ─────────────────────────
 ┌─────────────┐   Events API (HTTPS)    ┌─────────────────────┐
 │ Slack App    │ ───────────────────────→│ RestSlackWebhook    │
-│ (Bot Token) │                         │   ├─ Verify sig     │
+│ (per agent)  │                         │   ├─ Try all secrets │
 └─────────────┘                         │   └─ Dedup events   │
                                         └──────────┬──────────┘
                                                    │ async
@@ -86,7 +102,7 @@ Slack Workspace                          EDDI Cluster
                                         │ SlackEventHandler    │
                                         │   ├─ Route to agent  │
                                         │   ├─ Detect group:   │
-                                        │   └─ Follow-up ctx   │
+                                        │   └─ Per-agent token │
                                         └──────────┬──────────┘
                                                    │
                               ┌─────────────────────┼──────────────────┐
@@ -101,12 +117,31 @@ Slack Workspace                          EDDI Cluster
 
 | Component | Responsibility |
 |-----------|---------------|
-| `RestSlackWebhook` | JAX-RS endpoint, signature verification, URL challenge, event dispatching |
-| `SlackSignatureVerifier` | HMAC-SHA256 verification with 5-minute replay protection |
-| `SlackEventHandler` | Core event logic: message routing, group triggers, follow-up detection |
-| `SlackChannelRouter` | Maps Slack channels → EDDI agents/groups via `ChannelConnector` configs |
+| `RestSlackWebhook` | JAX-RS endpoint, multi-secret signature verification, URL challenge, event dispatching |
+| `SlackSignatureVerifier` | HMAC-SHA256 verification with multi-secret support and 5-minute replay protection |
+| `SlackEventHandler` | Core event logic: message routing, group triggers, follow-up detection, per-agent bot tokens |
+| `SlackChannelRouter` | Maps Slack channels → agents with full credential resolution (vault-backed) |
 | `SlackGroupDiscussionListener` | Streams multi-agent discussions into Slack with two UX modes |
 | `SlackWebApiClient` | Minimal HTTP client for `chat.postMessage` |
+
+### Credential Flow
+
+All credentials live in the agent's `ChannelConnector.config` map:
+
+```
+Agent Config → ChannelConnector.config
+  ├─ botToken: "${eddivault:slack-bot-token}"
+  └─ signingSecret: "${eddivault:slack-signing-secret}"
+        │
+        ▼
+SlackChannelRouter (60s cache refresh)
+  ├─ SecretResolver resolves vault references
+  ├─ channelId → SlackCredentials (agentId, botToken, signingSecret, groupId)
+  └─ allSigningSecrets set (for webhook verification)
+        │
+        ├──→ RestSlackWebhook: verify(signature, allSigningSecrets)
+        └──→ SlackEventHandler: postMessage(resolvedBotToken, ...)
+```
 
 ---
 
@@ -185,6 +220,10 @@ The follow-up system:
 
 ## Enterprise & Clustering
 
+### Multi-Workspace Support
+
+Each agent can connect to a different Slack workspace by using different bot tokens and signing secrets. The `SlackChannelRouter` caches all credentials and the `SlackSignatureVerifier` tries all known signing secrets during webhook verification.
+
 ### Retry Logic
 
 All Slack API calls use **exponential backoff** (3 attempts, 500ms/1s/2s base). Failed messages are logged but don't crash the event handler.
@@ -219,19 +258,33 @@ When running EDDI as a multi-instance cluster behind a load balancer:
 
 ## Configuration Reference
 
+### Server-Level
+
 | Property | Default | Description |
 |----------|---------|-------------|
-| `eddi.slack.enabled` | `false` | Master toggle |
-| `eddi.slack.bot-token` | — | Slack Bot User OAuth Token (`xoxb-...`) |
-| `eddi.slack.signing-secret` | — | Slack Signing Secret for request verification |
-| `eddi.slack.default-agent-id` | — | Fallback agent when no `ChannelConnector` matches |
-| `eddi.slack.default-group-id` | — | Fallback group config for `group:` triggers |
+| `eddi.slack.enabled` | `false` | Master toggle — infrastructure-level kill switch |
 
-### ChannelConnector Config Keys
+### Per-Agent ChannelConnector Config
+
+Configure on each agent's `channels[]` array:
+
+```json
+{
+  "type": "slack",
+  "config": {
+    "channelId": "C0123ABCDEF",
+    "botToken": "${eddivault:slack-bot-token}",
+    "signingSecret": "${eddivault:slack-signing-secret}",
+    "groupId": "optional-group-id"
+  }
+}
+```
 
 | Key | Required | Description |
 |-----|----------|-------------|
 | `channelId` | ✅ | Slack channel ID (e.g., `C0123ABCDEF`) |
+| `botToken` | ✅ | Bot User OAuth Token (`xoxb-...`). Use vault reference. |
+| `signingSecret` | ✅ | Slack Signing Secret for request verification. Use vault reference. |
 | `groupId` | ❌ | Group config ID for multi-agent discussions |
 
 ---
@@ -284,32 +337,30 @@ During a multi-agent group discussion, individual Slack post failures do **not**
 | Check | Fix |
 |-------|-----|
 | `eddi.slack.enabled=true` ? | Set in `application.properties` or env var |
-| Bot token set? | Check `eddi.slack.bot-token` — should start with `xoxb-` |
+| Bot token configured? | Check agent's ChannelConnector config — `botToken` should reference a vault key |
 | Bot in channel? | Invite the bot to the channel in Slack |
 | Event subscription active? | Check **Event Subscriptions** in Slack app settings |
 | Request URL verified? | Slack must have verified `https://<host>/integrations/slack/events` |
 | EDDI accessible? | The URL must be publicly reachable (or via tunnel for dev) |
-| Channel mapped? | Check `ChannelConnector` config or set `eddi.slack.default-agent-id` |
+| Channel mapped? | Check the agent's `ChannelConnector` has the correct `channelId` |
+| Signing secret set? | Without a signing secret, webhook verification fails (HTTP 403) |
 
 ### Signature verification fails (HTTP 403)
 
 | Check | Fix |
 |-------|-----|
-| Signing secret correct? | Copy from **Basic Information** in Slack app settings |
+| Signing secret correct? | Copy from **Basic Information** in Slack app settings, store in vault |
 | Clock drift? | Timestamp validation uses 5-minute window — sync clocks |
 | Reverse proxy stripping body? | The raw body must reach EDDI unchanged for HMAC verification |
+| No agents configured? | At least one deployed agent must have a Slack ChannelConnector with `signingSecret` |
 
 ### `No agent configured for this channel`
 
-The bot responds but says no agent is mapped. Either:
-1. Add a `ChannelConnector` with the channel ID to your agent config
-2. Set `eddi.slack.default-agent-id` as a fallback
+The bot responds but says no agent is mapped. Add a `ChannelConnector` with the correct `channelId` to your agent config.
 
 ### `No group configured for this channel`
 
-Triggered by `group:` prefix but no group mapped. Either:
-1. Add `groupId` to the channel's `ChannelConnector` config
-2. Set `eddi.slack.default-group-id` as a fallback
+Triggered by `group:` prefix but no group mapped. Add `groupId` to the channel's `ChannelConnector` config.
 
 ### Messages appear duplicated
 
@@ -345,8 +396,8 @@ Every channel integration follows the same layered pattern:
 └──────────┬──────────┘
            │
 ┌──────────▼──────────┐
-│  Channel Router      │  ← Map platform IDs → EDDI agents
-│  (SlackChannelRouter)│     Scan ChannelConnector configs
+│  Channel Router      │  ← Map platform IDs → EDDI agents + credentials
+│  (SlackChannelRouter)│     Scan ChannelConnector configs, resolve vault refs
 └──────────┬──────────┘
            │
 ┌──────────▼──────────┐
@@ -381,7 +432,8 @@ Add your platform type (e.g., `teams`, `discord`) to the `ChannelConnector.type`
 - Scan `AgentConfiguration.getChannels()` for your platform type
 - Cache the mapping with time-based refresh (60s is good)
 - Use `AtomicBoolean` for refresh gating (prevent thundering herd)
-- Support fallback to `default-agent-id` / `default-group-id`
+- Use `SecretResolver` to resolve vault references for all credentials
+- Store per-agent credentials alongside the routing map
 
 #### 5. API Client (`*ApiClient.java`)
 
@@ -409,3 +461,4 @@ Add your platform type (e.g., `teams`, `discord`) to the `ChannelConnector.type`
 | **Fire-and-forget in listeners** | A failed Slack post should not crash the entire multi-agent discussion. Wrap in try/catch. |
 | **Structured exhaustion logs** | After retry exhaustion, log enough context (channel, thread, text length, error) for operator recovery. |
 | **Never leak internal IDs to users** | Error messages should be generic. Log the details server-side. |
+| **All credentials in ChannelConnector** | Per-agent credentials via vault references. No server-level secrets except the master toggle. |
