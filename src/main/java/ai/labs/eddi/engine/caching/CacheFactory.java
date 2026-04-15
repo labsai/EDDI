@@ -4,6 +4,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -23,6 +24,24 @@ public class CacheFactory implements ICacheFactory {
         String name = cacheName != null ? cacheName : "local";
         Cache<K, V> cache = (Cache<K, V>) caches.computeIfAbsent(name,
                 n -> Caffeine.newBuilder().maximumSize(CACHE_SIZES.getOrDefault(n, DEFAULT_MAX_SIZE)).recordStats().build());
+        return new CacheImpl<>(name, cache);
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public <K, V> ICache<K, V> getCache(String cacheName, Duration ttl) {
+        if (ttl == null) {
+            throw new IllegalArgumentException("TTL must not be null; use getCache(cacheName) for caches without expiry");
+        }
+        String name = cacheName != null ? cacheName : "local";
+        // Use a distinct key to prevent collision with size-only caches
+        String cacheKey = name + ":ttl=" + ttl.toSeconds();
+        Cache<K, V> cache = (Cache<K, V>) caches.computeIfAbsent(cacheKey,
+                n -> Caffeine.newBuilder()
+                        .maximumSize(CACHE_SIZES.getOrDefault(name, DEFAULT_MAX_SIZE))
+                        .expireAfterWrite(ttl)
+                        .recordStats()
+                        .build());
         return new CacheImpl<>(name, cache);
     }
 }

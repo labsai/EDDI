@@ -13,6 +13,273 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Version Bump to 6.0.1 (2026-04-15)
+
+**Repo:** EDDI (`feature/slack-integration`)
+
+**What changed:**
+Bumped EDDI platform version from `6.0.0` to `6.0.1` across all properties, descriptors, build workflows, documentation, and the Agent Father ZIP.
+
+**Files:**
+- `pom.xml` — maven version bumped
+- `application.properties` — projectVersion, info-version, and additional-tags
+- `README.md` — quick reference and examples bumped
+- `.github/workflows/redhat-certify.yml` — default input
+- `k8s/quickstart.yaml`, `k8s/base/eddi-deployment.yaml` — app.kubernetes.io/version labels
+- `helm/eddi/Chart.yaml` — appVersion
+- `Dockerfile.jvm` — EDDI_VERSION build ARG
+- `src/main/resources/initial-agents/available_agents.txt` — initial agent ref updated
+- `src/main/resources/initial-agents/Agent+Father-6.0.1.zip` — renamed
+
+---
+
+## Slack Integration — Code Quality & Edge Case Hardening (2026-04-15)
+
+**Repo:** EDDI (`feature/slack-integration`)
+
+**What changed:**
+
+### Code Quality & Cleanup
+- Removed unused `beforeCount` variable in `SlackGroupDiscussionListenerTest.java` (CodeQL warning).
+- Added missing links to `docs/slack-integration.md` in `README.md` and `docs/SUMMARY.md` so the integration is discoverable
+- Removed unused `eventType` parameter from `SlackEventHandler.handleEventAsync` signature and updated `RestSlackWebhook` caller to fix static analysis warning
+- Verified all Slack-related integration tests pass successfully
+- Replaced hardcoded test secrets in `SlackSignatureVerifierTest.java` with test-prefixed values to avoid CI secret scanner noise.
+
+### Reliability & Edge Cases
+- **Infinite Loop Fix**: Added a safety guard to the message chunking loop in `SlackEventHandler.java`. If a single word exceeds the 3000 character limit without newlines, it now breaks the loop instead of spinning forever.
+- **Cache NPE Fix**: Added a `null` check for the `Duration ttl` parameter in `CacheFactory.getCache()` to prevent `NullPointerException`s when standard size-only caches are requested.
+
+### Slack Delivery Error Handling
+- Updated the catch-all exception block in `SlackWebApiClient.postMessage()`. `JsonProcessingException` and other unexpected exceptions are now logged as warnings and return `null` instead of erroneously triggering a retry loop via `SlackDeliveryException`.
+
+### Group Conversation Turn Limits
+- Refactored `executeParallelPhase()` in `GroupConversationService.java` to properly respect `maxTurns`. The method now calculates remaining turns and caps the parallel speaker batch size to the remaining budget, ensuring strict turn limit enforcement.
+
+### Resource Management
+- **Graceful Shutdown**: Added a `@PreDestroy` method `shutdown()` to `SlackEventHandler.java` to properly terminate the virtual thread `ExecutorService` when the application is shutting down.
+
+**Design decisions:**
+- **JAX-RS AsyncResponse**: A code review suggested using `@Suspended AsyncResponse` for `RestSlackWebhook`. Decided against this because Slack webhooks require a synchronous 200 OK response within 3 seconds. Using `AsyncResponse` would delay the 200 OK until the async work completed, violating the webhook contract. The endpoint correctly delegates to the async handler and returns immediately.
+
+**Files:**
+- `SlackEventHandler.java` — Removed unused params, added infinite loop guard, added `@PreDestroy` shutdown.
+- `SlackWebApiClient.java` — Adjusted retry vs fatal error handling.
+- `CacheFactory.java` — Added null check for TTL.
+- `GroupConversationService.java` — Enforced `maxTurns` cap in parallel phases.
+- `SlackGroupDiscussionListenerTest.java` — CodeQL cleanup.
+- `SlackSignatureVerifierTest.java` — CI security noise cleanup.
+
+---
+
+## Slack Integration — Per-Agent Credentials (2026-04-15)
+
+**Repo:** EDDI (`feature/multi-agent-ux`)
+
+**What changed:**
+
+### Architectural: Credentials moved from server-level to per-agent
+
+All Slack credentials (`botToken`, `signingSecret`) moved from `application.properties` environment variables into the agent's `ChannelConnector.config` map. This enables multi-workspace support: each agent can connect to a different Slack workspace.
+
+**Before:**
+```properties
+eddi.slack.bot-token=${eddivault:slack-bot-token}       # one per EDDI instance
+eddi.slack.signing-secret=${eddivault:slack-signing-secret}
+```
+
+**After:**
+```json
+{ "channels": [{ "type": "slack", "config": {
+    "channelId": "C0123...",
+    "botToken": "${eddivault:slack-bot-token}",
+    "signingSecret": "${eddivault:slack-signing-secret}",
+    "groupId": "optional"
+}}]}
+```
+
+### SlackIntegrationConfig — Simplified
+- Removed: `botToken()`, `signingSecret()`, `defaultAgentId()`, `defaultGroupId()`
+- Kept: `enabled()` — infrastructure-level kill switch
+
+### SlackChannelRouter — Credential Cache
+- New `SlackCredentials` record (agentId, botToken, signingSecret, groupId)
+- `resolveCredentials(channelId)` → returns full credentials for a channel
+- `getAllSigningSecrets()` → all unique signing secrets from all deployed agents
+- `SecretResolver` integration for `${eddivault:...}` references at cache refresh time (60s)
+- Removed dependency on `SlackIntegrationConfig` for credentials/defaults
+
+### SlackSignatureVerifier — Multi-Secret Verification
+- New signature: `verify(timestamp, body, signature, Collection<String> signingSecrets)`
+- Tries each signing secret until one matches (standard multi-workspace pattern)
+- Removed dependency on `SlackIntegrationConfig`
+
+### SlackEventHandler — Per-Agent Bot Tokens
+- `postMessage()` resolves bot token from `SlackChannelRouter.resolveCredentials(channelId)`
+- Group discussions get token from router instead of global config
+
+### RestSlackWebhook — Updated Flow
+- Gets all signing secrets from `SlackChannelRouter.getAllSigningSecrets()`
+- Passes collection to `SlackSignatureVerifier.verify()`
+
+### application.properties
+- Removed `eddi.slack.bot-token`, `eddi.slack.signing-secret`, `eddi.slack.default-agent-id`, `eddi.slack.default-group-id`
+- Updated inline documentation describing per-agent config model
+
+### Test Coverage: 30 Slack tests (router + verifier)
+- `SlackChannelRouterTest` — 17 tests: credentials resolution, vault references, signing secrets, edge cases
+- `SlackSignatureVerifierTest` — 13 tests: multi-secret verification, empty/null secrets, timing
+
+### Documentation
+- `docs/slack-integration.md` — completely rewritten for per-agent config model: new setup guide, credential flow diagram, updated config reference, updated troubleshooting
+
+**Design decisions:**
+- **Try-all-secrets for verification**: Instead of requiring `teamId` in config (extra operator friction), the webhook verifier tries all known signing secrets. Typical deployments have 1-3 workspaces — negligible overhead.
+- **Resolve vault refs at cache refresh**: Vault references are resolved every 60s during cache refresh (not per-request). Matches how LLM API keys are already resolved.
+- **No backward compat concern**: Slack integration is new in v6.0.0, not yet released.
+
+**Files:**
+- `SlackIntegrationConfig.java` — stripped to `enabled()` only
+- `SlackChannelRouter.java` — credential cache, SecretResolver integration
+- `SlackSignatureVerifier.java` — multi-secret verification
+- `RestSlackWebhook.java` — uses router for signing secrets
+- `SlackEventHandler.java` — per-agent bot token resolution
+- `application.properties` — removed old Slack properties
+- `SlackChannelRouterTest.java` — rewritten (17 tests)
+- `SlackSignatureVerifierTest.java` — rewritten (13 tests)
+- `docs/slack-integration.md` — rewritten for per-agent model
+
+---
+
+## Slack Integration — Retry Fix, Cache TTL, Jackson Migration, Docs (2026-04-15)
+
+**Repo:** EDDI (`feature/multi-agent-ux`)
+
+**What changed:**
+
+### Critical: Dead Retry Logic Fixed
+- `SlackWebApiClient.postMessage()` was catching all exceptions internally and returning `null`, so `SlackEventHandler`'s retry loop never triggered. Restructured: retryable failures (HTTP 429/500/502/503/504, network errors) now throw `SlackDeliveryException`; non-retryable API failures (ok:false) return null.
+- Created `SlackDeliveryException` — runtime exception for retryable Slack API failures.
+- `SlackGroupDiscussionListener` now uses `postSafe()` wrapper — catches `SlackDeliveryException` so individual post failures don't abort group discussions.
+
+### Cache TTL Infrastructure
+- Added `ICacheFactory.getCache(String name, Duration ttl)` overload with `expireAfterWrite` support.
+- Implemented in `CacheFactory` using Caffeine's TTL. Uses distinct cache key suffix to prevent collision with size-only caches.
+- `SlackEventHandler` now uses TTL caches: 10 min for event dedup, 2 hours for group listeners.
+
+### JSON & Parsing Robustness
+- `SlackWebApiClient` now uses Jackson `ObjectMapper` for JSON body construction (was manual string building). Fixes control character escaping gap (U+0000–U+001F).
+- Response `ts` field now parsed with Jackson `readTree()` (was fragile string indexOf).
+- Removed `escapeJson()` static method — no longer needed with Jackson.
+
+### Structured Exhaustion Logging
+- After 3 retry failures, logs `SLACK_DELIVERY_FAILED | channel=... | threadTs=... | textLength=... | attempts=... | error=...` — enough context for operator recovery via conversation API.
+
+### Documentation
+- Added **Retry & Error Handling** section: retry policy table, exhaustion behavior, operator recovery guide.
+- Added **Troubleshooting** section: 7 common failure scenarios with diagnostic tables.
+- Added **Building Custom Channel Integrations** guide: architecture pattern, 6-step implementation guide, 8 key lessons learned.
+- Fixed inaccurate "TTL-based" claim — now documents actual TTL values (10min/2hr).
+
+### Test Coverage: 70 Slack tests
+- `SlackWebApiClientTest` — rewritten for new constructor (ObjectMapper) and exception contract (7 tests)
+
+**Design decision:** Separated retryable vs non-retryable failures at the API client boundary (throw vs return null) rather than at the handler level. This lets every caller choose their own error strategy — retry wrappers see exceptions, fire-and-forget callers use postSafe().
+
+**Files:**
+- `SlackDeliveryException.java` — new
+- `SlackWebApiClient.java` — Jackson migration, retryable exception propagation
+- `SlackEventHandler.java` — catch `SlackDeliveryException`, structured exhaustion log, TTL caches
+- `SlackGroupDiscussionListener.java` — `postSafe()` wrapper on all Slack calls
+- `ICacheFactory.java` — `getCache(name, Duration)` overload
+- `CacheFactory.java` — TTL implementation
+- `SlackWebApiClientTest.java` — rewritten (7 tests)
+- `docs/slack-integration.md` — troubleshooting, retry docs, integration guide
+
+---
+
+## Slack Integration — Enterprise Hardening & Code Review Fixes (2026-04-15)
+
+**Repo:** EDDI (`feature/multi-agent-ux`)
+
+**What changed:**
+
+### Critical Bug Fixes (3)
+- **Memory leak** in `SlackEventHandler.activeGroupListeners` — replaced unbounded `ConcurrentHashMap` with `ICache` (TTL-based expiration). Previously, every expanded-mode discussion leaked `SlackGroupDiscussionListener` instances permanently.
+- **300s wasted thread** — `registerAgentThreadMappings` polling loop ran even in compact mode (where `agentMessageTsMap` is always empty). Now gated on `listener.isExpandedMode()` and uses `CountDownLatch.await()` instead of polling.
+- **Dead synthesis handler** — `onGroupComplete()` had an empty conditional body. Added `synthesisPosted` flag for fallback delivery and ensured `completionLatch.countDown()` in `finally` blocks for both `onGroupComplete` and `onGroupError`.
+
+### Medium Fixes (4)
+- Removed dead variable `resolvedAgentId` in `tryHandleAgentFollowUp`
+- Added `AtomicBoolean` refresh gate to `SlackChannelRouter.refreshIfNeeded()` to prevent thundering herd
+- Cleaned user-facing error message (removed internal `channelId` and config terminology)
+- Added reverse map `messageTsToAgentId` for O(1) lookups in `SlackGroupDiscussionListener`
+
+### Slack API Retry Logic
+- `postMessage()` now retries with exponential backoff (3 attempts, 500ms base)
+- Both `onGroupComplete` and `onGroupError` release `CountDownLatch` for clean thread completion
+
+### Test Coverage: 71 Slack tests
+- **`SlackGroupDiscussionListenerTest`** — 22 tests (added: completion latch, synthesis fallback, deduplication)
+- **`SlackEventHandlerTest`** — 21 tests (expanded: GROUP_PREFIX pattern, truncate, buildFollowUpInput context)
+- **`SlackChannelRouterTest`** — 11 tests (new: agent/group resolution, defaults, deleted agents, cache refresh, edge cases)
+- **`SlackSignatureVerifierTest`** — 9 tests
+- **`SlackWebApiClientTest`** — 8 tests
+
+### Documentation
+- Created `docs/slack-integration.md` — comprehensive setup guide, architecture diagram, UX modes, enterprise clustering, config reference
+- Full Javadoc on all public APIs
+
+**Files:**
+- `SlackEventHandler.java` — ICache, retry, compact-mode gate, dead variable removal
+- `SlackGroupDiscussionListener.java` — CountDownLatch, synthesisPosted flag, reverse map, awaitCompletion()
+- `SlackChannelRouter.java` — AtomicBoolean refresh gate
+- `SlackChannelRouterTest.java` — new (11 tests)
+- `SlackEventHandlerTest.java` — expanded (21 tests)
+- `SlackGroupDiscussionListenerTest.java` — expanded (22 tests)
+- `docs/slack-integration.md` — new
+
+---
+
+## Multi-Agent UX — maxTurns Safety Cap + Slack Integration (2026-04-15)
+
+**Repo:** EDDI (`feature/multi-agent-ux`)
+
+**What changed:**
+
+### maxTurns Safety Cap
+- Added `maxTurns` field to `ProtocolConfig` record in `AgentGroupConfiguration.java`
+- `AtomicInteger` turn counter in `GroupConversationService.executeDiscussion()` — shared across sequential, parallel, and peer-targeted phases
+- When `maxTurns` exceeded, remaining phases are skipped with a `SKIPPED` transcript entry and synthesis proceeds with existing transcript
+- Backward compatible: old MongoDB documents deserialize `maxTurns=0` (int default), treated as "use default 50"
+- Exposed via `McpGroupTools.create_group()` `maxTurns` parameter
+
+### Slack Integration (built into EDDI)
+- **Architecture decision:** Slack is an interface adapter (like REST, MCP, A2A) — lives inside the engine, NOT a separate service
+- Uses existing `ChannelConnector` placeholder in `AgentConfiguration` for per-agent channel→agent routing
+- Reuses `IUserConversationStore` for thread→conversation mapping (`intent="slack:{channelId}:{threadTs}"`)
+- No external SDK — pure HTTP via Java's `HttpClient`
+- Feature-flagged: `eddi.slack.enabled=false` by default
+
+**Files:**
+- `AgentGroupConfiguration.java` — `maxTurns` in `ProtocolConfig` record
+- `GroupConversationService.java` — turn counter in phase execution loop
+- `McpGroupTools.java` — `maxTurns` param in `create_group()`
+- `SlackIntegrationConfig.java` — `@ConfigMapping(prefix = "eddi.slack")`
+- `SlackSignatureVerifier.java` — HMAC-SHA256 verification + replay protection
+- `SlackChannelRouter.java` — scans `ChannelConnector` configs → agent ID resolution
+- `SlackEventHandler.java` — async event processing, dedup, bot-self-filter
+- `SlackWebApiClient.java` — lightweight `chat.postMessage` via HttpClient
+- `RestSlackWebhook.java` — `POST /integrations/slack/events` endpoint
+- `application.properties` — Slack config section + auth permit for webhook
+
+**Design decisions:**
+- HITL approval descoped: `ConversationState` touches 25+ files, needs its own branch
+- Channel adapters descoped: IChannelAdapter SPI was overengineered; Slack is just a thin webhook handler calling existing services
+- Record vs class for ProtocolConfig: kept record. Jackson deserializes missing int fields as 0; code treats `<=0` as "use default"
+
+---
+
 ## Documentation Cleanup — Stale Docs Purge (2026-04-14)
 
 **Repo:** EDDI (`feature/v6-hardening`)

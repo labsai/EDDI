@@ -191,6 +191,11 @@ public class GroupConversationService implements IGroupConversationService {
         counterGroupDiscussion.increment();
 
         ProtocolConfig protocol = resolveProtocol(config);
+        int maxTurns = protocol.maxTurns() > 0 ? protocol.maxTurns() : 50;
+
+        // AtomicInteger: shared across the phase loop; parallel phases increment
+        // from virtual threads. Mutable counter avoids passing & returning counts.
+        var turnCounter = new java.util.concurrent.atomic.AtomicInteger(0);
 
         if (listener != null) {
             listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(gc.getId(), gc.getGroupId(), question,
@@ -204,6 +209,19 @@ public class GroupConversationService implements IGroupConversationService {
                 DiscussionPhase phase = phases.get(phaseIdx);
 
                 for (int repeat = 0; repeat < Math.max(phase.repeats(), 1); repeat++) {
+
+                    // --- maxTurns safety cap ---
+                    if (turnCounter.get() >= maxTurns) {
+                        LOGGER.warnf("Max turns (%d) exceeded for group %s — skipping remaining phases",
+                                maxTurns, gc.getGroupId());
+                        gc.getTranscript().add(new TranscriptEntry(
+                                null, "System", null, phaseIdx, phase.name(),
+                                TranscriptEntryType.SKIPPED, Instant.now(),
+                                "Max turns (%d) exceeded — remaining phases skipped".formatted(maxTurns),
+                                null));
+                        break;
+                    }
+
                     gc.setCurrentPhaseIndex(phaseIdx);
                     gc.setCurrentPhaseName(phase.name());
 
@@ -224,11 +242,11 @@ public class GroupConversationService implements IGroupConversationService {
                     List<GroupMember> speakers = resolveParticipants(phase, config.getMembers(), config.getModeratorAgentId());
 
                     if (phase.targetEachPeer()) {
-                        executePeerTargetedPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener);
+                        executePeerTargetedPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
                     } else if (phase.turnOrder() == TurnOrder.PARALLEL) {
-                        executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener);
+                        executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
                     } else {
-                        executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener);
+                        executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
                     }
 
                     gc.setLastModified(Instant.now());
@@ -237,6 +255,11 @@ public class GroupConversationService implements IGroupConversationService {
                     if (listener != null) {
                         listener.onPhaseComplete(new GroupConversationEventSink.PhaseCompleteEvent(phaseIdx, phase.name()));
                     }
+                }
+
+                // Check again after inner repeat loop in case maxTurns was hit mid-repeat
+                if (turnCounter.get() >= maxTurns) {
+                    break;
                 }
             }
 
@@ -356,9 +379,14 @@ public class GroupConversationService implements IGroupConversationService {
     // =================================================================
 
     private void executeSequentialPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
-                                        ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener)
+                                        ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
+                                        java.util.concurrent.atomic.AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
         for (GroupMember speaker : speakers) {
+            if (turnCounter.get() >= maxTurns) {
+                break;
+            }
+            turnCounter.incrementAndGet();
             if (listener != null) {
                 listener.onSpeakerStart(
                         new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
@@ -374,21 +402,31 @@ public class GroupConversationService implements IGroupConversationService {
     }
 
     private void executeParallelPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
-                                      ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener)
+                                      ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
+                                      java.util.concurrent.atomic.AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
+
+        // Cap batch size to remaining turn budget
+        int remainingTurns = maxTurns > 0 ? Math.max(0, maxTurns - turnCounter.get()) : speakers.size();
+        if (remainingTurns == 0) {
+            return;
+        }
+        List<GroupMember> batchSpeakers = maxTurns > 0
+                ? speakers.subList(0, Math.min(speakers.size(), remainingTurns))
+                : speakers;
 
         // SAFETY: Snapshot the transcript so parallel tasks each see a consistent view.
         List<TranscriptEntry> snapshotTranscript = List.copyOf(gc.getTranscript());
 
         // Notify all speakers starting (parallel)
         if (listener != null) {
-            for (GroupMember speaker : speakers) {
+            for (GroupMember speaker : batchSpeakers) {
                 listener.onSpeakerStart(
                         new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
             }
         }
 
-        List<CompletableFuture<TranscriptEntry>> futures = speakers.stream().map(speaker -> CompletableFuture.supplyAsync(() -> {
+        List<CompletableFuture<TranscriptEntry>> futures = batchSpeakers.stream().map(speaker -> CompletableFuture.supplyAsync(() -> {
             try {
                 String input = buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null);
                 return executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null);
@@ -415,6 +453,8 @@ public class GroupConversationService implements IGroupConversationService {
                 gc.getTranscript().add(errorEntry(null, phaseIdx, phase, e.getMessage()));
             }
         }
+        // Count all completed turns for this batch (parallel turns are atomic batches)
+        turnCounter.addAndGet(batchSpeakers.size());
     }
 
     /**
@@ -422,18 +462,23 @@ public class GroupConversationService implements IGroupConversationService {
      * (N×(N-1) turns). Used for CRITIQUE style.
      */
     private void executePeerTargetedPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
-                                          ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener)
+                                          ProtocolConfig protocol, String question, int phaseIdx, GroupDiscussionEventListener listener,
+                                          java.util.concurrent.atomic.AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
 
         // Collect all non-moderator members as targets
         List<GroupMember> allMembers = config.getMembers().stream()
                 .sorted(Comparator.comparing(m -> m.speakingOrder() != null ? m.speakingOrder() : Integer.MAX_VALUE)).toList();
 
-        for (GroupMember speaker : speakers) {
+        outer : for (GroupMember speaker : speakers) {
             for (GroupMember target : allMembers) {
                 if (speaker.agentId().equals(target.agentId())) {
                     continue; // Don't critique yourself
                 }
+                if (turnCounter.get() >= maxTurns) {
+                    break outer;
+                }
+                turnCounter.incrementAndGet();
                 if (listener != null) {
                     listener.onSpeakerStart(
                             new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
@@ -443,7 +488,7 @@ public class GroupConversationService implements IGroupConversationService {
                 gc.getTranscript().add(entry);
                 if (listener != null) {
                     listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(speaker.agentId(), speaker.displayName(),
-                            entry.content(), phaseIdx, phase.name()));
+                            entry.content(), phaseIdx, phase.name(), target.agentId(), target.displayName()));
                 }
             }
         }

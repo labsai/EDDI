@@ -151,7 +151,9 @@ public class McpGroupTools {
                                @ToolArg(description = "Moderator agent ID (optional)") String moderatorAgentId,
                                @ToolArg(description = "Discussion style: ROUND_TABLE, PEER_REVIEW, "
                                        + "DEVIL_ADVOCATE, DELPHI, DEBATE (default ROUND_TABLE)") String style,
-                               @ToolArg(description = "Max rounds (default 2)") String maxRounds) {
+                               @ToolArg(description = "Max rounds (default 2)") String maxRounds,
+                               @ToolArg(description = "Maximum total agent turns across all phases (default 50). "
+                                       + "Safety cap to prevent runaway discussions.") String maxTurns) {
         requireRole(identity, authEnabled, "eddi-editor");
         try {
             AgentGroupConfiguration config = new AgentGroupConfiguration();
@@ -194,8 +196,10 @@ public class McpGroupTools {
             config.setStyle(discussionStyle);
             config.setMaxRounds(parseIntOrDefault(maxRounds, 2));
 
-            // Default protocol
-            config.setProtocol(new ProtocolConfig(60, ProtocolConfig.MemberFailurePolicy.SKIP, 2, ProtocolConfig.MemberUnavailablePolicy.SKIP));
+            // Protocol with maxTurns safety cap
+            int mt = parseIntOrDefault(maxTurns, 0);
+            config.setProtocol(new ProtocolConfig(60, ProtocolConfig.MemberFailurePolicy.SKIP, 2,
+                    ProtocolConfig.MemberUnavailablePolicy.SKIP, mt));
 
             Response response = groupStore.createGroup(config);
             String location = response.getLocation() != null ? response.getLocation().toString() : "";
