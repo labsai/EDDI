@@ -79,7 +79,7 @@ export function useLogStream(filters: LogFilters = {}) {
       const es = createLogEventSource(filters);
       eventSourceRef.current = es;
 
-      es.addEventListener("log", (event) => {
+      const handleEvent = (event: MessageEvent) => {
         if (pausedRef.current) return;
         try {
           const entry = JSON.parse(event.data) as LogEntry;
@@ -92,7 +92,11 @@ export function useLogStream(filters: LogFilters = {}) {
         } catch {
           // ignore parse errors
         }
-      });
+      };
+
+      es.addEventListener("log", handleEvent);
+      // Fallback for backends that send unnamed SSE events
+      es.onmessage = handleEvent;
 
       es.onerror = () => {
         setSseConnected(false);

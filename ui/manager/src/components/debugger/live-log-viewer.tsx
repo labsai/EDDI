@@ -63,7 +63,7 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
       conversationId: conversationId ?? undefined,
     });
 
-    es.addEventListener("log", (event: MessageEvent) => {
+    const handleEvent = (event: MessageEvent) => {
       if (pausedRef.current) return;
       try {
         const entry: LogEntry = JSON.parse(event.data);
@@ -74,7 +74,11 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
       } catch {
         // Ignore malformed log events
       }
-    });
+    };
+
+    es.addEventListener("log", handleEvent);
+    // Fallback for backends that send unnamed SSE events
+    es.onmessage = handleEvent;
 
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);

@@ -14,13 +14,17 @@ import {
   Search,
   Copy,
   Download,
+  MessageSquare,
+  Clock,
+  X,
+  Check,
 } from "lucide-react";
 import { StreamBadge } from "@/components/ui/stream-badge";
 import { useLogStream, useHistoryLogs, useInstanceId } from "@/hooks/use-logs";
 import type { LogEntry } from "@/lib/api/logs";
 import type { HistoryFilters } from "@/lib/api/logs";
 import { useDeployedAgents } from "@/hooks/use-chat";
-import { getConversationDescriptors, parseConversationUri, type ConversationDescriptor } from "@/lib/api/conversations";
+import { getConversationDescriptors, parseConversationUri } from "@/lib/api/conversations";
 import { useQuery } from "@tanstack/react-query";
 
 // ==================== Level badge config ====================
@@ -424,18 +428,32 @@ function HistoryTab() {
     []
   );
 
+  // Reset conversation when agent changes
+  const handleAgentChange = useCallback(
+    (v: string) => {
+      setFilters((prev) => ({
+        ...prev,
+        agentId: v || undefined,
+        conversationId: undefined,
+        skip: 0,
+      }));
+    },
+    []
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Filters */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <AgentFilterSelect
           value={filters.agentId ?? ""}
-          onChange={(v) => updateFilter("agentId", v)}
+          onChange={handleAgentChange}
           testId="history-filter-agent"
         />
-        <ConversationFilterSelect
+        <ConversationPicker
           value={filters.conversationId ?? ""}
           onChange={(v) => updateFilter("conversationId", v)}
+          agentId={filters.agentId}
           testId="history-filter-conversation"
         />
         <input
@@ -660,42 +678,302 @@ function AgentFilterSelect({
   );
 }
 
-/** Dropdown for selecting a conversation — populated from recent conversations. */
-function ConversationFilterSelect({
+// ==================== Conversation State Badge ====================
+
+const CONV_STATE_STYLE: Record<string, { i18nKey: string; fallback: string; className: string }> = {
+  READY: { i18nKey: "logs.stateReady", fallback: "Ready", className: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" },
+  IN_PROGRESS: { i18nKey: "logs.stateActive", fallback: "Active", className: "bg-blue-500/15 text-blue-400 border-blue-500/30" },
+  ERROR: { i18nKey: "logs.stateError", fallback: "Error", className: "bg-red-500/15 text-red-400 border-red-500/30" },
+  ENDED: { i18nKey: "logs.stateEnded", fallback: "Ended", className: "bg-gray-500/15 text-gray-400 border-gray-500/30" },
+};
+
+function ConvStateBadge({ state }: { state: string }) {
+  const { t } = useTranslation();
+  const config = CONV_STATE_STYLE[state] ?? {
+    i18nKey: "",
+    fallback: state,
+    className: "bg-gray-500/15 text-gray-400 border-gray-500/30",
+  };
+  return (
+    <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium leading-none ${config.className}`}>
+      {config.i18nKey ? t(config.i18nKey, config.fallback) : config.fallback}
+    </span>
+  );
+}
+
+// ==================== Relative Time ====================
+
+function formatRelativeTime(ts: number | string | undefined): string {
+  if (!ts) return "—";
+  const d = typeof ts === "string" ? new Date(ts) : new Date(ts);
+  const now = Date.now();
+  const diffMs = now - d.getTime();
+  const diffMin = Math.floor(diffMs / 60_000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30) return `${diffDay}d ago`;
+  return d.toLocaleDateString();
+}
+
+function formatAbsoluteTime(ts: number | string | undefined): string {
+  if (!ts) return "";
+  const d = typeof ts === "string" ? new Date(ts) : new Date(ts);
+  return d.toLocaleString();
+}
+
+// ==================== Rich Conversation Picker ====================
+
+/** Popover combobox for selecting a conversation with rich info display. */
+function ConversationPicker({
   value,
   onChange,
+  agentId,
   testId,
 }: {
   value: string;
   onChange: (v: string) => void;
+  agentId?: string;
   testId: string;
 }) {
   const { t } = useTranslation();
-  const { data: conversations } = useQuery({
-    queryKey: ["logs", "conversations-filter"],
-    queryFn: () => getConversationDescriptors(50),
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // Fetch conversations, filtered by agentId
+  const { data: conversations, isLoading: convLoading } = useQuery({
+    queryKey: ["logs", "conversations-filter", agentId ?? "all"],
+    queryFn: () => getConversationDescriptors(100, 0, "", agentId ?? ""),
     staleTime: 60_000,
   });
 
+  // Reset search when agentId changes
+  useEffect(() => {
+    setSearch("");
+  }, [agentId]);
+
+  // Filter conversations by search term (ID, agent name, userId)
+  const filtered = useMemo(() => {
+    if (!conversations) return [];
+    if (!search.trim()) return conversations;
+    const q = search.toLowerCase();
+    return conversations.filter((conv) => {
+      const convId = parseConversationUri(conv.resource);
+      return (
+        convId.toLowerCase().includes(q) ||
+        (conv.name || "").toLowerCase().includes(q) ||
+        (conv.agentId || "").toLowerCase().includes(q) ||
+        (conv.userId || "").toLowerCase().includes(q) ||
+        (conv.conversationState || "").toLowerCase().includes(q)
+      );
+    });
+  }, [conversations, search]);
+
+  // Detect if search looks like a direct conversation ID (24-char hex = MongoDB ObjectId)
+  const isDirectId = /^[a-f0-9]{24}$/i.test(search.trim());
+  const directIdNotInList =
+    isDirectId &&
+    !conversations?.some(
+      (c) => parseConversationUri(c.resource) === search.trim()
+    );
+
+  // Find selected conversation for trigger display
+  const selectedConv = conversations?.find(
+    (c) => parseConversationUri(c.resource) === value
+  );
+
+  // Click outside to close
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  // Focus search when opening
+  useEffect(() => {
+    if (open) {
+      // Small delay so the popover renders before focus
+      requestAnimationFrame(() => searchRef.current?.focus());
+    }
+  }, [open]);
+
+  // Keyboard: Escape to close
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+      }
+    },
+    []
+  );
+
+  const select = useCallback(
+    (id: string) => {
+      onChange(id);
+      setOpen(false);
+      setSearch("");
+    },
+    [onChange]
+  );
+
   return (
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="appearance-none rounded-lg border border-input bg-background pe-7 ps-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        data-testid={testId}
+    <div ref={containerRef} className="relative" onKeyDown={handleKeyDown} data-testid={testId}>
+      {/* Trigger button */}
+      <button
+        onClick={() => setOpen(!open)}
+        className="inline-flex items-center gap-2 rounded-lg border border-input bg-background pe-2 ps-3 py-1.5 text-xs text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-1 focus:ring-primary"
+        data-testid={`${testId}-trigger`}
       >
-        <option value="">{t("logs.allConversations", "All Conversations")}</option>
-        {conversations?.map((conv: ConversationDescriptor) => {
-          const convId = parseConversationUri(conv.resource);
-          return (
-            <option key={convId} value={convId}>
-              {convId.substring(0, 10)}… — {conv.agentId} ({conv.conversationState})
-            </option>
-          );
-        })}
-      </select>
-      <ChevronDown className="pointer-events-none absolute inset-e-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+        <MessageSquare className="h-3 w-3 shrink-0 text-muted-foreground" />
+        {selectedConv ? (
+          <span className="flex items-center gap-1.5 truncate max-w-[200px]">
+            <ConvStateBadge state={selectedConv.conversationState} />
+            <span className="truncate">
+              {selectedConv.name || selectedConv.agentId || parseConversationUri(selectedConv.resource).substring(0, 10)}
+            </span>
+            <span className="text-muted-foreground">
+              {formatRelativeTime(selectedConv.lastModifiedOn)}
+            </span>
+          </span>
+        ) : (
+          <span className="text-muted-foreground">
+            {t("logs.allConversations", "All Conversations")}
+          </span>
+        )}
+        {value ? (
+          <X
+            className="h-3 w-3 shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={(e) => {
+              e.stopPropagation();
+              select("");
+            }}
+          />
+        ) : (
+          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+        )}
+      </button>
+
+      {/* Popover dropdown */}
+      {open && (
+        <div className="absolute inset-s-0 top-full z-50 mt-1 w-96 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card shadow-xl shadow-black/20">
+          {/* Search */}
+          <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+            <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <input
+              ref={searchRef}
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t("logs.searchConversations", "Search by ID, agent, user…")}
+              className="w-full bg-transparent text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
+              data-testid={`${testId}-search`}
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+
+          {/* Options */}
+          <div className="max-h-72 overflow-y-auto overscroll-contain" data-testid={`${testId}-list`}>
+            {/* "All conversations" option */}
+            <button
+              onClick={() => select("")}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-start text-xs transition-colors hover:bg-muted/50 ${
+                !value ? "bg-primary/5 text-primary" : "text-foreground"
+              }`}
+            >
+              {!value && <Check className="h-3 w-3 shrink-0 text-primary" />}
+              <MessageSquare className={`h-3.5 w-3.5 shrink-0 ${!value ? "text-primary" : "text-muted-foreground"}`} />
+              {t("logs.allConversations", "All Conversations")}
+            </button>
+
+            {/* Loading */}
+            {convLoading && (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              </div>
+            )}
+
+            {/* Conversation items */}
+            {!convLoading &&
+              filtered.map((conv) => {
+                const convId = parseConversationUri(conv.resource);
+                const isSelected = convId === value;
+                return (
+                  <button
+                    key={convId}
+                    onClick={() => select(convId)}
+                    className={`flex w-full flex-col gap-1 px-3 py-2.5 text-start transition-colors hover:bg-muted/50 ${
+                      isSelected ? "bg-primary/5" : ""
+                    }`}
+                    title={formatAbsoluteTime(conv.createdOn)}
+                  >
+                    {/* Row 1: State + Agent + Time */}
+                    <div className="flex items-center gap-2">
+                      {isSelected && <Check className="h-3 w-3 shrink-0 text-primary" />}
+                      <ConvStateBadge state={conv.conversationState} />
+                      <span className="truncate text-xs font-medium text-foreground">
+                        {conv.name || conv.agentId || "Unnamed"}
+                      </span>
+                      <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">
+                        <Clock className="me-0.5 inline h-2.5 w-2.5" />
+                        {formatRelativeTime(conv.lastModifiedOn)}
+                      </span>
+                    </div>
+                    {/* Row 2: ID + Steps + User */}
+                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                      <span className="font-mono">{convId.substring(0, 12)}…</span>
+                      {conv.conversationStepSize != null && (
+                        <span>
+                          · {t("logs.stepsCount", { count: conv.conversationStepSize, defaultValue: `${conv.conversationStepSize} steps` })}
+                        </span>
+                      )}
+                      {conv.userId && (
+                        <span className="truncate">· {conv.userId}</span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+
+            {/* Direct ID paste option */}
+            {directIdNotInList && (
+              <button
+                onClick={() => select(search.trim())}
+                className="flex w-full items-center gap-2 border-t border-border px-3 py-2.5 text-start text-xs text-primary transition-colors hover:bg-primary/5"
+              >
+                <Search className="h-3.5 w-3.5 shrink-0" />
+                {t("logs.useConversationId", { id: search.trim(), defaultValue: `Use ID: ${search.trim()}` })}
+              </button>
+            )}
+
+            {/* No results */}
+            {!convLoading && filtered.length === 0 && !directIdNotInList && (
+              <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+                <MessageSquare className="mx-auto mb-2 h-6 w-6 text-muted-foreground/30" />
+                {t("logs.noConversationsFound", "No conversations found")}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

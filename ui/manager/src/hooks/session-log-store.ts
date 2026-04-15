@@ -31,7 +31,7 @@ function connect() {
   try {
     eventSource = createLogEventSource(); // no filters — capture everything
 
-    eventSource.addEventListener("log", (event) => {
+    const handleEvent = (event: MessageEvent) => {
       try {
         const entry = JSON.parse(event.data) as LogEntry;
         useSessionLogStore.setState((s) => {
@@ -46,7 +46,11 @@ function connect() {
       } catch {
         // ignore parse errors
       }
-    });
+    };
+
+    // Listen for both named "log" events and unnamed events (fallback)
+    eventSource.addEventListener("log", handleEvent);
+    eventSource.onmessage = handleEvent;
 
     eventSource.onerror = () => {
       useSessionLogStore.setState({ connected: false });

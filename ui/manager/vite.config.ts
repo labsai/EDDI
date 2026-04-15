@@ -43,7 +43,21 @@ export default defineConfig({
       "/schedulestore": "http://localhost:7070",
       "/deploymentstore": "http://localhost:7070",
       "/propertiesstore": "http://localhost:7070",
-      "/administration": "http://localhost:7070",
+      // SSE stream at /administration/logs/stream needs unbuffered proxy
+      "/administration": {
+        target: "http://localhost:7070",
+        configure: (proxy) => {
+          proxy.on("proxyReq", (_proxyReq, req) => {
+            if (req.socket) {
+              req.socket.on("close", () => {
+                if (_proxyReq.socket && !_proxyReq.socket.destroyed) {
+                  _proxyReq.socket.destroy();
+                }
+              });
+            }
+          });
+        },
+      },
       "/snippetstore": "http://localhost:7070",
       "/admin": "http://localhost:7070",
       "/capabilities": "http://localhost:7070",

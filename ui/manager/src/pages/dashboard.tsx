@@ -12,8 +12,9 @@ import {
   MessageCircle,
   ArrowRight,
   FileText,
-  Link2Off,
   ShieldCheck,
+  KeyRound,
+  Boxes,
   Activity,
   Server,
   Cloud,
@@ -134,7 +135,7 @@ export function DashboardPage() {
       </div>
 
       {/* ─── Platform Health Strip ─── */}
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card/50 px-4 py-2.5" role="status" aria-label={t("dashboard.platformHealth", "Platform health")} data-testid="platform-health-strip">
+      <div className="flex w-fit flex-wrap items-center gap-3 rounded-xl border border-border bg-card/50 px-4 py-2.5" role="status" aria-label={t("dashboard.platformHealth", "Platform health")} data-testid="platform-health-strip">
         {/* Platform connectivity */}
         <div className="flex items-center gap-2 text-xs">
           <span className={`inline-flex h-2 w-2 rounded-full ${
@@ -247,12 +248,6 @@ export function DashboardPage() {
             </Link>
           </Button>
           <Button variant="outline" asChild>
-            <Link to="/manage/agents">
-              <Plus className="h-4 w-4" />
-              {t("agents.createAgent")}
-            </Link>
-          </Button>
-          <Button variant="outline" asChild>
             <Link to="/manage/chat">
               <MessageCircle className="h-4 w-4" />
               {t("nav.chat")}
@@ -265,15 +260,21 @@ export function DashboardPage() {
             </Link>
           </Button>
           <Button variant="outline" asChild>
-            <Link to="/manage/orphans">
-              <Link2Off className="h-4 w-4" />
-              {t("dashboard.orphanScan", "Orphan Scan")}
-            </Link>
-          </Button>
-          <Button variant="outline" asChild>
             <Link to="/manage/audit">
               <ShieldCheck className="h-4 w-4" />
               {t("dashboard.auditTrail", "Audit Trail")}
+            </Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link to="/manage/secrets">
+              <KeyRound className="h-4 w-4" />
+              {t("dashboard.secretVault", "Secret Vault")}
+            </Link>
+          </Button>
+          <Button variant="outline" asChild>
+            <Link to="/manage/groups/wizard">
+              <Boxes className="h-4 w-4" />
+              {t("dashboard.createGroup", "Create Group")}
             </Link>
           </Button>
         </div>
@@ -316,7 +317,7 @@ export function DashboardPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-1.5" data-testid="recent-conversations">
+          <div className="flex flex-col gap-4" data-testid="recent-conversations">
             {recentConversations.map((conv) => {
               const convId = parseConversationUri(conv.resource);
               const agentName = agentNameMap.get(conv.agentId);

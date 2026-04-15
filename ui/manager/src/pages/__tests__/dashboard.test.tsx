@@ -73,7 +73,8 @@ describe("DashboardPage", () => {
   it("renders expanded quick actions", () => {
     renderWithProviders(<DashboardPage />);
     expect(screen.getByText("View Logs")).toBeInTheDocument();
-    expect(screen.getByText("Orphan Scan")).toBeInTheDocument();
     expect(screen.getByText("Audit Trail")).toBeInTheDocument();
+    expect(screen.getByText("Secret Vault")).toBeInTheDocument();
+    expect(screen.getByText("Create Group")).toBeInTheDocument();
   });
 });
