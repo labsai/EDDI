@@ -10,7 +10,7 @@
 
 **E.D.D.I** (Enhanced Dialog Driven Interface) is a production-grade, **config-driven multi-agent orchestration middleware** for conversational AI. It coordinates users, AI agents, and business systems through **intelligent routing, persistent memory, and API orchestration** — without writing code.
 
-Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker image**. Native support for **MCP** (Model Context Protocol), **A2A** (Agent-to-Agent), **OpenAPI**, and **OAuth 2.0**.
+Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker image**. Native support for **MCP** (Model Context Protocol), **A2A** (Agent-to-Agent), **Slack**, **OpenAPI**, and **OAuth 2.0**.
 
 **Latest version: 6.0.1** · [Website](https://eddi.labs.ai/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
 
@@ -256,6 +256,7 @@ Most multi-agent frameworks (LangGraph, CrewAI, AutoGen) are Python/Node librari
 
 - 🔀 **Intelligent Routing** — Direct conversations to different agents based on context, rules, and intent
 - 🗣️ **Group Conversations** — Multi-agent debates with 5 built-in discussion styles: Round Table, Peer Review, Devil's Advocate, Delphi, and Debate
+- 💬 **Slack Integration** — Deploy agents to Slack channels and run multi-agent debates directly in threads
 - 🪆 **Nested Groups** — Compose groups of groups for tournament brackets, red-team vs blue-team, and panel reviews
 - 👥 **Managed Conversations** — Intent-based auto-routing with one conversation per user per intent
 - 🎯 **Capability Matching** — Discover and route to agents by skill, confidence score, and custom attributes
@@ -430,6 +431,7 @@ Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming
 | **[RAG](docs/rag.md)**                                       | Knowledge base retrieval setup                     |
 | **[MCP Server](docs/mcp-server.md)**                         | 42 tools for AI-assisted agent management          |
 | **[A2A Protocol](docs/a2a-protocol.md)**                     | Agent-to-Agent peer communication                  |
+| **[Slack Integration](docs/slack-integration.md)**           | Deploy agents to Slack and run group discussions   |
 | **[Group Conversations](docs/group-conversations.md)**       | Multi-agent debate orchestration                   |
 | **[User Memory](docs/user-memory.md)**                       | Cross-conversation fact retention                  |
 | **[Memory Policy](docs/memory-policy.md)**                   | Commit flags and strict write discipline            |
