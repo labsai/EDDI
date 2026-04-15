@@ -28,6 +28,7 @@ import {
 import { AgentPicker } from "@/components/shared/agent-picker";
 import type { AgentTriggerConfiguration, AgentDeployment } from "@/lib/api/triggers";
 
+import { parseResourceUri } from "@/lib/api/agents";
 import { useAgentDescriptors } from "@/hooks/use-agents";
 
 export function TriggersPage() {
@@ -47,7 +48,7 @@ export function TriggersPage() {
     const map = new Map<string, string>();
     if (rawAgents) {
       rawAgents.forEach((a) => {
-        if (a.name) map.set(a.id, a.name.toLowerCase());
+        if (a.name) map.set(parseResourceUri(a.resource).id, a.name.toLowerCase());
       });
     }
     return map;
