@@ -885,7 +885,9 @@
     "integrityPartial": "Teilweise signiertes Prüfprotokoll",
     "integrityPartialDesc": "{{count}} von {{total}} Einträgen haben HMAC-Signaturen",
     "integrityNone": "Unsignierte Audit-Einträge",
-    "integrityNoneDesc": "Konfigurieren Sie einen Vault-Master-Key, um automatische HMAC-SHA256-Signierung fuer alle zukuenftigen Audit-Eintraege zu aktivieren."
+    "integrityNoneDesc": "Konfigurieren Sie einen Vault-Master-Key, um automatische HMAC-SHA256-Signierung fuer alle zukuenftigen Audit-Eintraege zu aktivieren.",
+    "signed": "Signiert",
+    "allSigned": "Alle signiert"
   },
   "schedules": {
     "title": "Zeitpläne",

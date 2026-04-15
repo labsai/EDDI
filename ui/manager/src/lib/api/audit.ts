@@ -22,6 +22,7 @@ export interface AuditEntry {
   cost: number;
   timestamp: string; // ISO instant
   hmac: string | null;
+  agentSignature: string | null;
 }
 
 /* ─── API Functions ─── */

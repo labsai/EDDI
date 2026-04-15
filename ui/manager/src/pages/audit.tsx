@@ -182,11 +182,20 @@ function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTra
           </span>
         )}
 
-        {/* HMAC indicator */}
-        {entry.hmac && (
+        {/* HMAC + Signature indicators */}
+        {entry.hmac ? (
           <span
-            className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-xs text-emerald-500"
-            title={t("audit.hmacIntegrity", "HMAC integrity verified")}
+            className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 cursor-help"
+            title={`HMAC: ${entry.hmac.slice(0, 16)}…${entry.hmac.slice(-8)}${entry.agentSignature ? `\nAgent Signature: ${entry.agentSignature.slice(0, 16)}…` : ""}`}
+            data-testid="hmac-badge"
+          >
+            <Fingerprint className="h-3 w-3" />
+            {t("audit.signed", "Signed")}
+          </span>
+        ) : (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-foreground/30"
+            data-testid="unsigned-badge"
           >
             <Shield className="h-3 w-3" />
           </span>
@@ -316,6 +325,7 @@ function ConversationGroup({
   const stepGroups = useMemo(() => groupByStep(entries), [entries]);
   const totalDuration = entries.reduce((sum, e) => sum + e.durationMs, 0);
   const totalCost = entries.reduce((sum, e) => sum + e.cost, 0);
+  const signedCount = entries.filter((e) => !!e.hmac).length;
   const timestamps = entries.map((e) => e.timestamp).sort();
   const firstTs = timestamps[0];
 
@@ -349,6 +359,21 @@ function ConversationGroup({
             <span className="text-xs text-amber-500 hidden sm:inline-flex items-center gap-1">
               <DollarSign className="h-3 w-3" />
               {formatCost(totalCost)}
+            </span>
+          )}
+          {/* Signing summary for this conversation */}
+          {signedCount > 0 && (
+            <span
+              className={`hidden sm:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                signedCount === entries.length
+                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                  : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+              }`}
+            >
+              <Fingerprint className="h-3 w-3" />
+              {signedCount === entries.length
+                ? t("audit.allSigned", "All signed")
+                : `${signedCount}/${entries.length}`}
             </span>
           )}
           <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${open ? "" : "-rotate-90"}`} />

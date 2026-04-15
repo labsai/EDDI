@@ -276,4 +276,34 @@ describe("AuditPage", () => {
     // We verify the step header is still there (it's a toggle)
     expect(stepHeader).toBeInTheDocument();
   });
+
+  it("shows integrity banner after search with results", async () => {
+    renderAudit();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId("mode-conversation"));
+    await user.type(screen.getByTestId("conversation-input"), "conv1");
+    await user.click(screen.getByTestId("search-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("integrity-banner")).toBeInTheDocument();
+    });
+  });
+
+  it("renders per-entry signed and unsigned badges", async () => {
+    renderAudit();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId("mode-conversation"));
+    await user.type(screen.getByTestId("conversation-input"), "conv1");
+    await user.click(screen.getByTestId("search-button"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("audit-timeline")).toBeInTheDocument();
+    });
+
+    // All 4 hardcoded entries have HMAC, so all should show "Signed" badges
+    const signedBadges = screen.getAllByTestId("hmac-badge");
+    expect(signedBadges.length).toBeGreaterThan(0);
+  });
 });

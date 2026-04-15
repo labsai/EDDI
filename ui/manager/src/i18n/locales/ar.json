@@ -885,7 +885,9 @@
     "integrityPartial": "Partially signed audit trail",
     "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
     "integrityNone": "Unsigned audit entries",
-    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries."
+    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries.",
+    "signed": "Signed",
+    "allSigned": "All signed"
   },
   "schedules": {
     "title": "الجداول",

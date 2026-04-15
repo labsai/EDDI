@@ -546,7 +546,8 @@ function generateMockAuditEntries(conversationId: string, count: number) {
     actions: ["greet", "respond"].slice(0, (i % 2) + 1),
     cost: TASK_TYPES[i % TASK_TYPES.length] === "langchain" ? 0.003 + Math.random() * 0.01 : 0,
     timestamp: new Date(now - (count - i) * 60000).toISOString(),
-    hmac: i % 4 === 0 ? "a1b2c3d4e5f6" : null,
+    hmac: i % 4 === 0 ? "a1b2c3d4e5f6a1b2c3d4e5f6789012345678901234567890abcdef" : null,
+    agentSignature: i % 4 === 0 ? "ed25519:sig_" + conversationId + "_" + i : null,
   }));
 }
 
@@ -2382,6 +2383,7 @@ const MOCK_AUDIT_ENTRIES = [
     cost: 0,
     timestamp: new Date(Date.now() - 60000).toISOString(),
     hmac: "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef12345678",
+    agentSignature: "ed25519:sig_test_audit1",
   },
   {
     id: "audit-2",
@@ -2403,6 +2405,7 @@ const MOCK_AUDIT_ENTRIES = [
     cost: 0,
     timestamp: new Date(Date.now() - 59000).toISOString(),
     hmac: "b2c3d4e5f6a1789012345678901234567890abcdef1234567890abcdef12345678",
+    agentSignature: "ed25519:sig_test_audit2",
   },
   {
     id: "audit-3",
@@ -2430,6 +2433,7 @@ const MOCK_AUDIT_ENTRIES = [
     cost: 0.003,
     timestamp: new Date(Date.now() - 57000).toISOString(),
     hmac: "c3d4e5f6a1b2789012345678901234567890abcdef1234567890abcdef12345678",
+    agentSignature: "ed25519:sig_test_audit3",
   },
   {
     id: "audit-4",
@@ -2451,6 +2455,7 @@ const MOCK_AUDIT_ENTRIES = [
     cost: 0,
     timestamp: new Date(Date.now() - 55000).toISOString(),
     hmac: "d4e5f6a1b2c3789012345678901234567890abcdef1234567890abcdef12345678",
+    agentSignature: "ed25519:sig_test_audit4",
   },
 ];
 
