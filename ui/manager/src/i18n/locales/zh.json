@@ -124,7 +124,9 @@
     "apply": "应用",
     "copied": "已复制",
     "copy": "复制",
-    "saving": "保存中…"
+    "saving": "保存中…",
+    "showMore": "Show More",
+    "showLess": "Show Less"
   },
   "agents": {
     "deploy": "部署",

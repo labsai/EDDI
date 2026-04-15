@@ -124,7 +124,9 @@
     "apply": "適用",
     "copied": "コピーしました",
     "copy": "コピー",
-    "saving": "保存中…"
+    "saving": "保存中…",
+    "showMore": "Show More",
+    "showLess": "Show Less"
   },
   "agents": {
     "deploy": "デプロイ",

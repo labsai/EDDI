@@ -672,7 +672,10 @@ export const handlers = [
       },
       agent3: {
         workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf3?version=1"],
-        channels: [{ type: "web", config: { allowedOrigins: ["https://clinic.example.com"] } }],
+        channels: [
+          { type: "web", config: { allowedOrigins: ["https://clinic.example.com"] } },
+          { type: "slack", config: { channelId: "C0123ABCDEF", botToken: "${eddivault:slack-bot-token}", signingSecret: "${eddivault:slack-signing-secret}", groupId: "group-123" } },
+        ],
         a2aEnabled: false,
         description: "Patient appointment scheduling with slot extraction and calendar integration",
         a2aSkills: [],
@@ -1140,6 +1143,16 @@ export const handlers = [
           ],
         },
       ],
+    });
+  }),
+
+  // EDDI Platform OpenAPI (used for version checking in standalone mode)
+  http.get("*/openapi", () => {
+    return HttpResponse.json({
+      info: {
+        version: "6.0.0-demo",
+        title: "EDDI API Mock",
+      },
     });
   }),
 

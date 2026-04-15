@@ -124,7 +124,9 @@
     "apply": "लागू करें",
     "copied": "कॉपी हो गया",
     "copy": "कॉपी",
-    "saving": "सहेज रहे हैं…"
+    "saving": "सहेज रहे हैं…",
+    "showMore": "Show More",
+    "showLess": "Show Less"
   },
   "agents": {
     "deploy": "तैनात करें",

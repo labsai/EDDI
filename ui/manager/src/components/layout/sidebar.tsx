@@ -37,6 +37,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useOnboarding, ALL_CHAPTERS, type TourChapterId } from "@/hooks/use-onboarding";
 import { TOUR_CHAPTERS } from "@/components/onboarding/tour-chapters";
+import { useQuery } from "@tanstack/react-query";
+import { getEddiVersion } from "@/lib/api/system";
 
 const navSections = [
   {
@@ -104,6 +106,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { t } = useTranslation();
   const { method, user, logout } = useAuth();
   const showUser = method === "keycloak" && user;
+
+  const { data: serverVersion, isLoading } = useQuery({
+    queryKey: ["eddi-version"],
+    queryFn: getEddiVersion,
+    staleTime: Infinity,
+    retry: 1, // Don't retry infinitely if offline
+  });
 
   /** User initials for avatar */
   const initials = showUser
@@ -316,8 +325,15 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       {/* Version + Collapse toggle */}
       <div className="border-t border-sidebar-border p-1.5">
         {!collapsed && (
-          <p className="mb-1 px-3 text-center text-[10px] text-sidebar-foreground/30">
-            EDDI Manager {__APP_VERSION__}
+          <p 
+            className="mb-1 px-3 text-center text-[10px] text-sidebar-foreground/30"
+            title={serverVersion === "Unknown" ? `Standalone Demo Mode fallback` : undefined}
+          >
+            {isLoading 
+              ? "Checking version..."
+              : serverVersion && serverVersion !== "Unknown" 
+                ? `EDDI ${serverVersion}`
+                : `EDDI Demo ${__APP_VERSION__}`}
           </p>
         )}
         <button

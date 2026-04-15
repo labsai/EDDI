@@ -70,6 +70,7 @@ export default defineConfig({
       "/managerresource": "http://localhost:7070",
       "/managedagents": "http://localhost:7070",
       "/mcp": "http://localhost:7070",
+      "/openapi": "http://localhost:7070",
     },
   },
 });

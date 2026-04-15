@@ -124,7 +124,9 @@
     "apply": "적용",
     "copied": "복사됨",
     "copy": "복사",
-    "saving": "저장 중…"
+    "saving": "저장 중…",
+    "showMore": "Show More",
+    "showLess": "Show Less"
   },
   "agents": {
     "deploy": "배포",

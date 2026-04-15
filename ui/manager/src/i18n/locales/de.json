@@ -124,7 +124,9 @@
     "apply": "Anwenden",
     "copied": "Kopiert",
     "copy": "Kopieren",
-    "saving": "Wird gespeichert…"
+    "saving": "Wird gespeichert…",
+    "showMore": "Show More",
+    "showLess": "Show Less"
   },
   "agents": {
     "deploy": "Bereitstellen",

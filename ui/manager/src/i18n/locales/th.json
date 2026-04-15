@@ -124,7 +124,9 @@
     "apply": "นำไปใช้",
     "copied": "คัดลอกแล้ว",
     "copy": "คัดลอก",
-    "saving": "กำลังบันทึก…"
+    "saving": "กำลังบันทึก…",
+    "showMore": "Show More",
+    "showLess": "Show Less"
   },
   "agents": {
     "deploy": "ติดตั้ง (Deploy)",
