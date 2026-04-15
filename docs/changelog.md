@@ -13,6 +13,26 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Version Bump to 6.0.1 (2026-04-15)
+
+**Repo:** EDDI (`feature/slack-integration`)
+
+**What changed:**
+Bumped EDDI platform version from `6.0.0` to `6.0.1` across all properties, descriptors, build workflows, documentation, and the Agent Father ZIP.
+
+**Files:**
+- `pom.xml` — maven version bumped
+- `application.properties` — projectVersion, info-version, and additional-tags
+- `README.md` — quick reference and examples bumped
+- `.github/workflows/redhat-certify.yml` — default input
+- `k8s/quickstart.yaml`, `k8s/base/eddi-deployment.yaml` — app.kubernetes.io/version labels
+- `helm/eddi/Chart.yaml` — appVersion
+- `Dockerfile.jvm` — EDDI_VERSION build ARG
+- `src/main/resources/initial-agents/available_agents.txt` — initial agent ref updated
+- `src/main/resources/initial-agents/Agent+Father-6.0.1.zip` — renamed
+
+---
+
 ## Slack Integration — Code Quality & Edge Case Hardening (2026-04-15)
 
 **Repo:** EDDI (`feature/slack-integration`)
