@@ -870,7 +870,22 @@
     "emptyHint": "위에서 대화 또는 에이전트 ID를 입력하여 Audit Trail을 탐색하세요.",
     "noResults": "감사 항목을 찾을 수 없습니다",
     "noResultsHint": "다른 ID를 시도하거나 대화가 처리되었는지 확인하세요.",
-    "loadMore": "더 보기"
+    "loadMore": "더 보기",
+    "selectAgent": "Select an agent…",
+    "conversations": "conversations",
+    "emptyAgent": "Select an agent to view its audit trail",
+    "emptyAgentHint": "Choose a deployed agent from the dropdown above to see all its audit records.",
+    "export": "Export",
+    "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
+    "autoRefreshOn": "Auto",
+    "autoRefreshOff": "Auto",
+    "integrityVerified": "All entries cryptographically signed",
+    "integrityVerifiedDesc": "{{count}} of {{total}} entries have valid HMAC signatures — tamper-proof audit trail",
+    "integrityPass": "VERIFIED",
+    "integrityPartial": "Partially signed audit trail",
+    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
+    "integrityNone": "Unsigned audit entries",
+    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries."
   },
   "schedules": {
     "title": "스케줄",

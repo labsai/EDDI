@@ -870,7 +870,22 @@
     "emptyHint": "在上方输入会话或 Agent ID 以浏览审计日志。",
     "noResults": "未找到审计记录",
     "noResultsHint": "尝试其他 ID 或检查会话是否已处理。",
-    "loadMore": "加载更多"
+    "loadMore": "加载更多",
+    "selectAgent": "Select an agent…",
+    "conversations": "conversations",
+    "emptyAgent": "Select an agent to view its audit trail",
+    "emptyAgentHint": "Choose a deployed agent from the dropdown above to see all its audit records.",
+    "export": "Export",
+    "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
+    "autoRefreshOn": "Auto",
+    "autoRefreshOff": "Auto",
+    "integrityVerified": "All entries cryptographically signed",
+    "integrityVerifiedDesc": "{{count}} of {{total}} entries have valid HMAC signatures — tamper-proof audit trail",
+    "integrityPass": "VERIFIED",
+    "integrityPartial": "Partially signed audit trail",
+    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
+    "integrityNone": "Unsigned audit entries",
+    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries."
   },
   "schedules": {
     "title": "定时任务",

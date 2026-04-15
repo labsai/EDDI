@@ -870,7 +870,22 @@
     "emptyHint": "Audit Trail ब्राउज़ करने के लिए ऊपर वार्तालाप या Agent ID दर्ज करें।",
     "noResults": "कोई ऑडिट प्रविष्टियां नहीं मिलीं",
     "noResultsHint": "भिन्न ID आज़माएं या जांचें कि वार्तालाप संसाधित हो चुका है।",
-    "loadMore": "और लोड करें"
+    "loadMore": "और लोड करें",
+    "selectAgent": "Select an agent…",
+    "conversations": "conversations",
+    "emptyAgent": "Select an agent to view its audit trail",
+    "emptyAgentHint": "Choose a deployed agent from the dropdown above to see all its audit records.",
+    "export": "Export",
+    "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
+    "autoRefreshOn": "Auto",
+    "autoRefreshOff": "Auto",
+    "integrityVerified": "All entries cryptographically signed",
+    "integrityVerifiedDesc": "{{count}} of {{total}} entries have valid HMAC signatures — tamper-proof audit trail",
+    "integrityPass": "VERIFIED",
+    "integrityPartial": "Partially signed audit trail",
+    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
+    "integrityNone": "Unsigned audit entries",
+    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries."
   },
   "schedules": {
     "title": "शेड्यूल",

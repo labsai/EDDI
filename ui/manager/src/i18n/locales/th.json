@@ -870,7 +870,22 @@
     "emptyHint": "ป้อน ID การสนทนาหรือ Agent ด้านบนเพื่อเรียกดู Audit Trail",
     "noResults": "ไม่พบรายการตรวจสอบ",
     "noResultsHint": "ลอง ID อื่นหรือตรวจสอบว่าการสนทนาถูกประมวลผลแล้ว",
-    "loadMore": "โหลดเพิ่ม"
+    "loadMore": "โหลดเพิ่ม",
+    "selectAgent": "Select an agent…",
+    "conversations": "conversations",
+    "emptyAgent": "Select an agent to view its audit trail",
+    "emptyAgentHint": "Choose a deployed agent from the dropdown above to see all its audit records.",
+    "export": "Export",
+    "autoRefreshToggle": "Toggle auto-refresh (every 10s)",
+    "autoRefreshOn": "Auto",
+    "autoRefreshOff": "Auto",
+    "integrityVerified": "All entries cryptographically signed",
+    "integrityVerifiedDesc": "{{count}} of {{total}} entries have valid HMAC signatures — tamper-proof audit trail",
+    "integrityPass": "VERIFIED",
+    "integrityPartial": "Partially signed audit trail",
+    "integrityPartialDesc": "{{count}} of {{total}} entries have HMAC signatures",
+    "integrityNone": "Unsigned audit entries",
+    "integrityNoneDesc": "Configure a vault master key to enable automatic HMAC-SHA256 signing on all future audit entries."
   },
   "schedules": {
     "title": "การกำหนดเวลา",
