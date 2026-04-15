@@ -13,6 +13,53 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Slack Integration — Retry Fix, Cache TTL, Jackson Migration, Docs (2026-04-15)
+
+**Repo:** EDDI (`feature/multi-agent-ux`)
+
+**What changed:**
+
+### Critical: Dead Retry Logic Fixed
+- `SlackWebApiClient.postMessage()` was catching all exceptions internally and returning `null`, so `SlackEventHandler`'s retry loop never triggered. Restructured: retryable failures (HTTP 429/500/502/503/504, network errors) now throw `SlackDeliveryException`; non-retryable API failures (ok:false) return null.
+- Created `SlackDeliveryException` — runtime exception for retryable Slack API failures.
+- `SlackGroupDiscussionListener` now uses `postSafe()` wrapper — catches `SlackDeliveryException` so individual post failures don't abort group discussions.
+
+### Cache TTL Infrastructure
+- Added `ICacheFactory.getCache(String name, Duration ttl)` overload with `expireAfterWrite` support.
+- Implemented in `CacheFactory` using Caffeine's TTL. Uses distinct cache key suffix to prevent collision with size-only caches.
+- `SlackEventHandler` now uses TTL caches: 10 min for event dedup, 2 hours for group listeners.
+
+### JSON & Parsing Robustness
+- `SlackWebApiClient` now uses Jackson `ObjectMapper` for JSON body construction (was manual string building). Fixes control character escaping gap (U+0000–U+001F).
+- Response `ts` field now parsed with Jackson `readTree()` (was fragile string indexOf).
+- Removed `escapeJson()` static method — no longer needed with Jackson.
+
+### Structured Exhaustion Logging
+- After 3 retry failures, logs `SLACK_DELIVERY_FAILED | channel=... | threadTs=... | textLength=... | attempts=... | error=...` — enough context for operator recovery via conversation API.
+
+### Documentation
+- Added **Retry & Error Handling** section: retry policy table, exhaustion behavior, operator recovery guide.
+- Added **Troubleshooting** section: 7 common failure scenarios with diagnostic tables.
+- Added **Building Custom Channel Integrations** guide: architecture pattern, 6-step implementation guide, 8 key lessons learned.
+- Fixed inaccurate "TTL-based" claim — now documents actual TTL values (10min/2hr).
+
+### Test Coverage: 70 Slack tests
+- `SlackWebApiClientTest` — rewritten for new constructor (ObjectMapper) and exception contract (7 tests)
+
+**Design decision:** Separated retryable vs non-retryable failures at the API client boundary (throw vs return null) rather than at the handler level. This lets every caller choose their own error strategy — retry wrappers see exceptions, fire-and-forget callers use postSafe().
+
+**Files:**
+- `SlackDeliveryException.java` — new
+- `SlackWebApiClient.java` — Jackson migration, retryable exception propagation
+- `SlackEventHandler.java` — catch `SlackDeliveryException`, structured exhaustion log, TTL caches
+- `SlackGroupDiscussionListener.java` — `postSafe()` wrapper on all Slack calls
+- `ICacheFactory.java` — `getCache(name, Duration)` overload
+- `CacheFactory.java` — TTL implementation
+- `SlackWebApiClientTest.java` — rewritten (7 tests)
+- `docs/slack-integration.md` — troubleshooting, retry docs, integration guide
+
+---
+
 ## Slack Integration — Enterprise Hardening & Code Review Fixes (2026-04-15)
 
 **Repo:** EDDI (`feature/multi-agent-ux`)

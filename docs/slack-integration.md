@@ -195,7 +195,7 @@ Slack retries webhook deliveries on timeout. EDDI uses an in-memory cache (`ICac
 
 ### Follow-up Memory Management
 
-Active group discussion contexts use EDDI's `ICache` infrastructure with automatic TTL expiration. This prevents unbounded memory growth from long-lived discussions.
+Active group discussion contexts use EDDI's `ICache` infrastructure with **TTL-based expiration** (2 hours for group listeners, 10 minutes for event dedup). This prevents unbounded memory growth from long-lived discussions.
 
 ### Thread Safety
 
@@ -233,3 +233,179 @@ When running EDDI as a multi-instance cluster behind a load balancer:
 |-----|----------|-------------|
 | `channelId` | ✅ | Slack channel ID (e.g., `C0123ABCDEF`) |
 | `groupId` | ❌ | Group config ID for multi-agent discussions |
+
+---
+
+## Retry & Error Handling
+
+### Retry Policy
+
+All outgoing Slack API calls (`chat.postMessage`) use exponential backoff:
+
+| Attempt | Backoff | Cumulative Wait |
+|---------|---------|----------------|
+| 1 | 0ms (immediate) | 0ms |
+| 2 | 500ms | 500ms |
+| 3 | 1000ms | 1500ms |
+
+Only **retryable failures** trigger retry:
+- HTTP 429 (Rate Limited)
+- HTTP 500, 502, 503, 504 (Server Error)
+- Network errors (connection refused, timeout, DNS failure)
+
+**Non-retryable failures** (HTTP 200 + `ok:false`) are logged and skipped:
+- `channel_not_found` — bot not in channel
+- `invalid_auth` — bad token
+- `not_in_channel` — bot not invited
+
+### What Happens After Retry Exhaustion
+
+After 3 failed attempts, the message is **permanently lost from the user's perspective**. The system:
+
+1. Logs a structured error for operator alerting:
+   ```
+   SLACK_DELIVERY_FAILED | channel=C0123 | threadTs=12345.000 | textLength=450 | attempts=3 | error=...
+   ```
+2. The agent's response **still exists in conversation memory** (MongoDB). Operators can manually retrieve it via the conversation API.
+3. The user sees no response in Slack — they can try sending the message again.
+
+**Recommended monitoring**: Set up a log alert for `SLACK_DELIVERY_FAILED` in your observability stack (Grafana, Datadog, etc.) to catch delivery failures.
+
+### Group Discussion Resilience
+
+During a multi-agent group discussion, individual Slack post failures do **not** abort the discussion. The `SlackGroupDiscussionListener` uses a fire-and-forget wrapper (`postSafe`) that catches delivery exceptions and continues. Users may see a missing agent contribution, but the discussion completes and synthesis is delivered.
+
+---
+
+## Troubleshooting
+
+### Bot doesn't respond to @mentions
+
+| Check | Fix |
+|-------|-----|
+| `eddi.slack.enabled=true` ? | Set in `application.properties` or env var |
+| Bot token set? | Check `eddi.slack.bot-token` — should start with `xoxb-` |
+| Bot in channel? | Invite the bot to the channel in Slack |
+| Event subscription active? | Check **Event Subscriptions** in Slack app settings |
+| Request URL verified? | Slack must have verified `https://<host>/integrations/slack/events` |
+| EDDI accessible? | The URL must be publicly reachable (or via tunnel for dev) |
+| Channel mapped? | Check `ChannelConnector` config or set `eddi.slack.default-agent-id` |
+
+### Signature verification fails (HTTP 403)
+
+| Check | Fix |
+|-------|-----|
+| Signing secret correct? | Copy from **Basic Information** in Slack app settings |
+| Clock drift? | Timestamp validation uses 5-minute window — sync clocks |
+| Reverse proxy stripping body? | The raw body must reach EDDI unchanged for HMAC verification |
+
+### `No agent configured for this channel`
+
+The bot responds but says no agent is mapped. Either:
+1. Add a `ChannelConnector` with the channel ID to your agent config
+2. Set `eddi.slack.default-agent-id` as a fallback
+
+### `No group configured for this channel`
+
+Triggered by `group:` prefix but no group mapped. Either:
+1. Add `groupId` to the channel's `ChannelConnector` config
+2. Set `eddi.slack.default-group-id` as a fallback
+
+### Messages appear duplicated
+
+Slack retries events up to 3 times if it doesn't receive HTTP 200 within 3 seconds. EDDI deduplicates by `event_id` using an in-memory cache (TTL: 10 minutes). If you see duplicates:
+- Check EDDI response time — if pipeline processing blocks the webhook endpoint, Slack will retry
+- The webhook endpoint responds immediately (async processing) — if you see slow responses, check network/proxy latency
+
+### Group discussion times out
+
+The `registerAgentThreadMappings` task waits up to 300 seconds. If the group discussion takes longer:
+- Check agent LLM response times
+- Consider using fewer agents or simpler discussion styles
+
+---
+
+## Building Custom Channel Integrations
+
+This section is a guide for developers building integrations for other platforms (Teams, Discord, Telegram, etc.) based on lessons learned from the Slack implementation.
+
+### Architecture Pattern
+
+Every channel integration follows the same layered pattern:
+
+```
+┌─────────────────────┐
+│  REST Webhook        │  ← Platform-specific webhook endpoint
+│  (RestSlackWebhook)  │     Verify signatures, respond fast, dispatch async
+└──────────┬──────────┘
+           │
+┌──────────▼──────────┐
+│  Event Handler       │  ← Core routing logic
+│  (SlackEventHandler) │     Dedup, route to agent/group, manage conversations
+└──────────┬──────────┘
+           │
+┌──────────▼──────────┐
+│  Channel Router      │  ← Map platform IDs → EDDI agents
+│  (SlackChannelRouter)│     Scan ChannelConnector configs
+└──────────┬──────────┘
+           │
+┌──────────▼──────────┐
+│  API Client          │  ← Platform's outgoing API (send messages)
+│  (SlackWebApiClient) │     Retryable exceptions, proper JSON handling
+└──────────────────────┘
+```
+
+### Step-by-Step Implementation Guide
+
+#### 1. Create a `ChannelType` entry
+
+Add your platform type (e.g., `teams`, `discord`) to the `ChannelConnector.type` field convention. This is a URI string, not an enum — just use the platform name.
+
+#### 2. Webhook Endpoint (`Rest*Webhook.java`)
+
+- **Must respond within the platform's timeout** (Slack: 3s, Discord: 3s, Teams: 15s)
+- **Verify request authenticity** (HMAC signature, token, etc.)
+- **Process async** — dispatch to a handler on a virtual thread
+- **Return immediately** with HTTP 200 or platform-specific acknowledgment
+- **Dedup events** — most platforms retry on timeout
+
+#### 3. Event Handler (`*EventHandler.java`)
+
+- Use `IConversationService` for 1:1 agent conversations
+- Use `IGroupConversationService` for multi-agent discussions
+- Use `IUserConversationStore` to map platform thread IDs → EDDI conversations
+- Use `ICacheFactory.getCache(name, Duration)` for dedup and session caches (always use TTL!)
+
+#### 4. Channel Router (`*ChannelRouter.java`)
+
+- Scan `AgentConfiguration.getChannels()` for your platform type
+- Cache the mapping with time-based refresh (60s is good)
+- Use `AtomicBoolean` for refresh gating (prevent thundering herd)
+- Support fallback to `default-agent-id` / `default-group-id`
+
+#### 5. API Client (`*ApiClient.java`)
+
+- **Throw exceptions for retryable failures** (network, rate limit, server errors)
+- **Return null for non-retryable API failures** (bad channel, bad token)
+- Use Jackson `ObjectMapper` for JSON serialization (not manual string building)
+- Use Jackson for response parsing (not string indexOf)
+
+#### 6. Group Discussion Listener (`*GroupDiscussionListener.java`)
+
+- Implement `GroupDiscussionEventListener`
+- Use a `postSafe()` wrapper — never let a single failed post abort the discussion
+- Track agent message IDs for follow-up routing (reverse map for O(1) lookups)
+- Signal completion via `CountDownLatch` (not polling)
+
+### Key Lessons from the Slack Implementation
+
+| Lesson | Why |
+|--------|-----|
+| **Never catch-and-swallow in the API client** | The retry wrapper in the handler needs to see failures. Throw for retryable, return null for non-retryable. |
+| **Always use TTL caches, not just size-based** | Size-based caches keep stale entries indefinitely in low-traffic systems. Use `ICacheFactory.getCache(name, Duration)`. |
+| **Use Jackson, not string manipulation** | Manual JSON escaping misses control characters. Manual JSON parsing is fragile. Jackson handles both correctly. |
+| **Gate cache refresh with AtomicBoolean** | Under load, many threads hit the refresh simultaneously. CAS-gate ensures only one thread refreshes. |
+| **Use CountDownLatch, not polling** | Polling wastes CPU and has latency. CountDownLatch signals instantly. |
+| **Fire-and-forget in listeners** | A failed Slack post should not crash the entire multi-agent discussion. Wrap in try/catch. |
+| **Structured exhaustion logs** | After retry exhaustion, log enough context (channel, thread, text length, error) for operator recovery. |
+| **Never leak internal IDs to users** | Error messages should be generic. Log the details server-side. |

@@ -15,6 +15,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.regex.Matcher;
@@ -91,8 +92,8 @@ public class SlackEventHandler {
         this.conversationService = conversationService;
         this.groupConversationService = groupConversationService;
         this.userConversationStore = userConversationStore;
-        this.eventDedup = cacheFactory.getCache("slack-event-dedup");
-        this.activeGroupListeners = cacheFactory.getCache("slack-group-listeners");
+        this.eventDedup = cacheFactory.getCache("slack-event-dedup", Duration.ofMinutes(10));
+        this.activeGroupListeners = cacheFactory.getCache("slack-group-listeners", Duration.ofHours(2));
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
 
         // Startup validation
@@ -457,7 +458,7 @@ public class SlackEventHandler {
             try {
                 slackApi.postMessage(auth, channelId, threadTs, text);
                 return;
-            } catch (Exception e) {
+            } catch (SlackDeliveryException e) {
                 if (attempt < SLACK_API_MAX_RETRIES) {
                     long backoff = SLACK_API_RETRY_BASE_MS * (1L << (attempt - 1));
                     LOGGER.warnf("Slack API call failed (attempt %d/%d), retrying in %dms: %s",
@@ -469,8 +470,12 @@ public class SlackEventHandler {
                         return;
                     }
                 } else {
-                    LOGGER.errorf("Slack API call failed after %d attempts for channel %s: %s",
-                            SLACK_API_MAX_RETRIES, channelId, e.getMessage());
+                    // All retries exhausted — structured log for operator recovery.
+                    // The agent response is still in conversation memory; this log
+                    // provides enough context to manually re-deliver if needed.
+                    LOGGER.errorf("SLACK_DELIVERY_FAILED | channel=%s | threadTs=%s | textLength=%d | attempts=%d | error=%s",
+                            channelId, threadTs, text != null ? text.length() : 0,
+                            SLACK_API_MAX_RETRIES, e.getMessage());
                 }
             }
         }

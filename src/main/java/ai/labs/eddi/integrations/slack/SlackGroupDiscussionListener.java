@@ -93,7 +93,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
                 event.memberAgentIds().size(), event.question());
 
         // Always post the start message in the user's thread
-        slackApi.postMessage(authToken, channelId, userThreadTs, msg);
+        postSafe(channelId, userThreadTs, msg);
     }
 
     @Override
@@ -104,7 +104,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         }
         // In compact mode, add a phase separator in the thread
         String separator = String.format("─── *%s* ───", event.phaseName());
-        slackApi.postMessage(authToken, channelId, userThreadTs, separator);
+        postSafe(channelId, userThreadTs, separator);
     }
 
     @Override
@@ -127,7 +127,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
             // COMPACT mode: everything in the user's thread
             String msg = formatContribution(displayName, response, event.targetAgentId(),
                     event.targetDisplayName());
-            slackApi.postMessage(authToken, channelId, userThreadTs, msg);
+            postSafe(channelId, userThreadTs, msg);
             trackAgentContext(event);
             return;
         }
@@ -152,7 +152,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         isSynthesisPhase = true;
         if (expandedMode) {
             // Visual separator before synthesis in the channel
-            slackApi.postMessage(authToken, channelId, null, "───────────────────────────");
+            postSafe(channelId, null, "───────────────────────────");
         }
     }
 
@@ -177,9 +177,9 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
             isSynthesisPhase = false;
             String msg = "⚠️ Group discussion encountered an error. Please try again.";
             if (expandedMode) {
-                slackApi.postMessage(authToken, channelId, null, msg);
+                postSafe(channelId, null, msg);
             } else {
-                slackApi.postMessage(authToken, channelId, userThreadTs, msg);
+                postSafe(channelId, userThreadTs, msg);
             }
         } finally {
             completionLatch.countDown();
@@ -196,7 +196,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         String displayName = event.displayName() != null ? event.displayName() : event.agentId();
         String msg = String.format("🟢 *%s*\n%s", displayName, event.response());
 
-        String ts = slackApi.postMessage(authToken, channelId, null, msg);
+        String ts = postSafe(channelId, null, msg);
         if (ts != null) {
             agentMessageTs.put(event.agentId(), ts);
             messageTsToAgentId.put(ts, event.agentId());
@@ -217,11 +217,11 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
 
         if (targetTs != null) {
             // Thread under the target agent's message
-            slackApi.postMessage(authToken, channelId, targetTs, msg);
+            postSafe(channelId, targetTs, msg);
         } else {
             // Fallback: post in user's thread with label
             LOGGER.debugf("No ts for target agent %s, falling back to user thread", event.targetAgentId());
-            slackApi.postMessage(authToken, channelId, userThreadTs, msg);
+            postSafe(channelId, userThreadTs, msg);
         }
 
         // Track feedback for follow-up context
@@ -237,9 +237,9 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         String msg = String.format("🔄 *%s (revised)*\n%s", displayName, event.response());
 
         if (ownTs != null) {
-            slackApi.postMessage(authToken, channelId, ownTs, msg);
+            postSafe(channelId, ownTs, msg);
         } else {
-            slackApi.postMessage(authToken, channelId, userThreadTs, msg);
+            postSafe(channelId, userThreadTs, msg);
         }
 
         // Update the agent's contribution in context
@@ -262,9 +262,9 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         String msg = String.format("📋 *Synthesis* (by %s)\n%s", displayName, response);
 
         if (expandedMode) {
-            slackApi.postMessage(authToken, channelId, null, msg);
+            postSafe(channelId, null, msg);
         } else {
-            slackApi.postMessage(authToken, channelId, userThreadTs, msg);
+            postSafe(channelId, userThreadTs, msg);
         }
     }
 
@@ -355,6 +355,22 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return false;
+        }
+    }
+
+    /**
+     * Fire-and-forget Slack post. Catches {@link SlackDeliveryException} so that a
+     * transient Slack API failure does not abort the entire group discussion.
+     *
+     * @return the message ts on success, or null on any failure
+     */
+    private String postSafe(String channel, String threadTs, String text) {
+        try {
+            return slackApi.postMessage(authToken, channel, threadTs, text);
+        } catch (SlackDeliveryException e) {
+            LOGGER.warnf("Slack post failed (channel=%s, thread=%s): %s",
+                    channel, threadTs, e.getMessage());
+            return null;
         }
     }
 }

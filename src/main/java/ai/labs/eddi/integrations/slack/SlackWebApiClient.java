@@ -1,5 +1,7 @@
 package ai.labs.eddi.integrations.slack;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -9,6 +11,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Lightweight Slack Web API client using {@link HttpClient}. No external SDK
@@ -19,7 +24,13 @@ import java.nio.charset.StandardCharsets;
  * <li>{@code chat.postMessage} — post a message to a channel/thread</li>
  * </ul>
  * <p>
- * Additional methods (reactions, files, etc.) can be added as needed.
+ * Error handling policy:
+ * <ul>
+ * <li><b>Retryable failures</b> (network, HTTP 429/500/503) throw
+ * {@link SlackDeliveryException} so callers can implement retry logic.</li>
+ * <li><b>Non-retryable API failures</b> (e.g., {@code ok:false} with
+ * {@code channel_not_found}) return {@code null} and log a warning.</li>
+ * </ul>
  *
  * @since 6.0.0
  */
@@ -29,10 +40,15 @@ public class SlackWebApiClient {
     private static final Logger LOGGER = Logger.getLogger(SlackWebApiClient.class);
     private static final String SLACK_API_BASE = "https://slack.com/api/";
 
+    /** HTTP status codes that are worth retrying. */
+    private static final Set<Integer> RETRYABLE_STATUS_CODES = Set.of(429, 500, 502, 503, 504);
+
     private final HttpClient httpClient;
+    private final ObjectMapper objectMapper;
 
     @Inject
-    public SlackWebApiClient() {
+    public SlackWebApiClient(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(java.time.Duration.ofSeconds(10))
                 .build();
@@ -49,79 +65,76 @@ public class SlackWebApiClient {
      *            thread timestamp for threaded replies (null for top-level)
      * @param text
      *            the message text (Slack mrkdwn format)
+     * @return the message timestamp (ts) on success, or null for non-retryable API
+     *         errors
+     * @throws SlackDeliveryException
+     *             on retryable failures (network, HTTP 429/500/503)
      */
     public String postMessage(String authToken, String channelId, String threadTs, String text) {
         try {
-            // Build JSON body manually to avoid Jackson dependency for this simple case
-            var json = new StringBuilder("{");
-            json.append("\"channel\":\"").append(escapeJson(channelId)).append("\"");
-            json.append(",\"text\":\"").append(escapeJson(text)).append("\"");
+            // Build JSON body using Jackson for proper escaping (handles all
+            // Unicode control characters, surrogate pairs, etc.)
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("channel", channelId);
+            body.put("text", text);
             if (threadTs != null) {
-                json.append(",\"thread_ts\":\"").append(escapeJson(threadTs)).append("\"");
+                body.put("thread_ts", threadTs);
             }
-            // Use mrkdwn formatting
-            json.append(",\"mrkdwn\":true");
-            json.append("}");
+            body.put("mrkdwn", true);
+
+            String jsonBody = objectMapper.writeValueAsString(body);
 
             var request = HttpRequest.newBuilder()
                     .uri(URI.create(SLACK_API_BASE + "chat.postMessage"))
                     .header("Content-Type", "application/json; charset=utf-8")
                     .header("Authorization", authToken)
-                    .POST(HttpRequest.BodyPublishers.ofString(json.toString(), StandardCharsets.UTF_8))
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8))
                     .build();
 
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
+            // Retryable HTTP errors — throw so caller can retry
+            if (RETRYABLE_STATUS_CODES.contains(response.statusCode())) {
+                throw new SlackDeliveryException(
+                        "Slack API returned retryable HTTP " + response.statusCode());
+            }
+
+            // Non-retryable HTTP errors — log and return null
             if (response.statusCode() != 200) {
                 LOGGER.warnf("Slack chat.postMessage returned HTTP %d: %s", response.statusCode(),
-                        response.body().substring(0, Math.min(200, response.body().length())));
+                        truncateForLog(response.body()));
                 return null;
             }
 
-            String body = response.body();
-            if (!body.contains("\"ok\":true")) {
-                LOGGER.warnf("Slack chat.postMessage returned ok=false: %s",
-                        body.substring(0, Math.min(200, body.length())));
+            // Parse response with Jackson for robust field extraction
+            JsonNode responseJson = objectMapper.readTree(response.body());
+
+            if (!responseJson.path("ok").asBoolean(false)) {
+                String error = responseJson.path("error").asText("unknown");
+                LOGGER.warnf("Slack chat.postMessage returned ok=false: error=%s", error);
                 return null;
             }
 
-            // Extract "ts" from response for threading
-            return extractTs(body);
+            // Extract "ts" — the posted message's timestamp (used for threading)
+            return responseJson.has("ts") ? responseJson.get("ts").asText() : null;
+
+        } catch (SlackDeliveryException e) {
+            throw e; // re-throw — don't wrap in another exception
+        } catch (java.io.IOException e) {
+            throw new SlackDeliveryException("Network error calling Slack API: " + e.getMessage(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new SlackDeliveryException("Slack API call interrupted", e);
         } catch (Exception e) {
-            LOGGER.errorf("Failed to call Slack chat.postMessage: %s", e.getMessage());
-            return null;
+            // Unexpected errors (JSON serialization failures, etc.) — treat as retryable
+            // to be safe
+            throw new SlackDeliveryException("Unexpected error calling Slack API: " + e.getMessage(), e);
         }
     }
 
-    /**
-     * Extract the "ts" field from a Slack API JSON response. Simple string parsing
-     * to avoid pulling in a JSON library for one field.
-     */
-    private static String extractTs(String jsonBody) {
-        // Look for "ts":"1234567890.123456"
-        int tsIdx = jsonBody.indexOf("\"ts\":\"");
-        if (tsIdx < 0) {
-            return null;
-        }
-        int start = tsIdx + 5; // skip "ts":"
-        int end = jsonBody.indexOf("\"", start + 1);
-        if (end < 0) {
-            return null;
-        }
-        return jsonBody.substring(start + 1, end);
-    }
-
-    /**
-     * Minimal JSON string escaping for safe embedding in JSON values.
-     */
-    static String escapeJson(String value) {
-        if (value == null)
+    private static String truncateForLog(String text) {
+        if (text == null)
             return "";
-        return value
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
+        return text.length() > 200 ? text.substring(0, 200) + "..." : text;
     }
 }

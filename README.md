@@ -20,6 +20,7 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 
 - [🏁 Quick Start](#-quick-start)
 - [💡 Why EDDI?](#-why-eddi)
+- [📸 See It In Action](#-see-it-in-action)
 - [✨ Features](#-features)
 - [🧩 Quarkus SDK](#-quarkus-sdk)
 - [📖 Documentation](#-documentation)
@@ -162,6 +163,90 @@ Most multi-agent frameworks (LangGraph, CrewAI, AutoGen) are Python/Node librari
 | **Deployment**     | pip/npm + manual infrastructure          | One-command Docker install, Kubernetes/OpenShift-ready                      |
 
 > _"The engine is strict so the AI can be creative."_ — [Project Philosophy](docs/project-philosophy.md)
+
+---
+
+## 📸 See It In Action
+
+<table>
+<tr>
+<td width="50%">
+<p align="center"><strong>📊 Dashboard</strong></p>
+<img src="screenshots/eddi-v6-screenshot-dashboard-1.png" alt="EDDI Dashboard" />
+<p><em>Platform overview with active agents, workflows, quick actions, and recent conversations</em></p>
+</td>
+<td width="50%">
+<p align="center"><strong>🤖 Agent Fleet</strong></p>
+<img src="screenshots/eddi-v6-screenshot-agents-1.png" alt="Agents List" />
+<p><em>All deployed agents at a glance with status, descriptions, and one-click chat</em></p>
+</td>
+</tr>
+<tr>
+<td width="50%">
+<p align="center"><strong>💬 Live Conversation</strong></p>
+<img src="screenshots/eddi-v6-screenshot-conversation-1.png" alt="Conversation View" />
+<p><em>Real-time conversation with visible actions, step timing, and tool calls</em></p>
+</td>
+<td width="50%">
+<p align="center"><strong>🗣️ Multi-Agent Debate</strong></p>
+<img src="screenshots/eddi-v6-screenshot-group-conversations-1.png" alt="Group Conversations" />
+<p><em>Peer Review with phased discussion: Opinion → Critique → Revision → Synthesis</em></p>
+</td>
+</tr>
+<tr>
+<td width="50%">
+<p align="center"><strong>🛡️ Secrets Vault</strong></p>
+<img src="screenshots/eddi-v6-screenshot-secret-vault-1.png" alt="Secrets Vault" />
+<p><em>Envelope-encrypted secrets with rotation tracking, checksums, and per-agent access control</em></p>
+</td>
+<td width="50%">
+<p align="center"><strong>💰 Tenant Quotas</strong></p>
+<img src="screenshots/eddi-v6-screenshot-quotas-1.png" alt="Tenant Quotas" />
+<p><em>Rate limits, cost budgets, and live usage monitoring per tenant</em></p>
+</td>
+</tr>
+</table>
+
+<details>
+<summary><strong>More screenshots: LLM Config, Logs, User Memory, Schedules, Agent Detail</strong></summary>
+
+<table>
+<tr>
+<td width="50%">
+<p align="center"><strong>⚡ LLM Task Configuration</strong></p>
+<img src="screenshots/eddi-v6-screenshot-agents-llm-config-1.png" alt="LLM Configuration" />
+<p><em>System prompt, model parameters, cascading, RAG, context window, and budget settings</em></p>
+</td>
+<td width="50%">
+<p align="center"><strong>📋 Real-Time Logs</strong></p>
+<img src="screenshots/eddi-v6-screenshot-logs-1.png" alt="Logs" />
+<p><em>Live log stream with per-call cost tracking, token counts, warnings, and errors</em></p>
+</td>
+</tr>
+<tr>
+<td width="50%">
+<p align="center"><strong>🧠 Persistent User Memory</strong></p>
+<img src="screenshots/eddi-v6-screenshot-user-data-1.png" alt="User Data" />
+<p><em>Cross-session memory with categorized entries, visibility scoping, and conflict detection</em></p>
+</td>
+<td width="50%">
+<p align="center"><strong>⏰ Scheduled Execution</strong></p>
+<img src="screenshots/eddi-v6-screenshot-schedules-1.png" alt="Schedules" />
+<p><em>Cron jobs and heartbeats with fire history, retry logic, and dead-letter tracking</em></p>
+</td>
+</tr>
+<tr>
+<td width="50%">
+<p align="center"><strong>🔧 Agent Detail</strong></p>
+<img src="screenshots/eddi-v6-screenshot-agents-detail-1.png" alt="Agent Detail" />
+<p><em>Full agent config: environments, workflows, A2A, security, capabilities, and memory policy</em></p>
+</td>
+<td width="50%">
+</td>
+</tr>
+</table>
+
+</details>
 
 ---
 
@@ -318,7 +403,7 @@ Building a Quarkus app that talks to EDDI? Use the **[quarkus-eddi](https://gith
 <dependency>
     <groupId>io.quarkiverse.eddi</groupId>
     <artifactId>quarkus-eddi</artifactId>
-    <version>6.0.0-SNAPSHOT</version>
+    <version>6.0.0</version>
 </dependency>
 ```
 
