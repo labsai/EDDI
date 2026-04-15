@@ -1,4 +1,4 @@
-import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { updateDescriptor } from "@/lib/api/descriptors";
 import {
   getAgentDescriptors,
@@ -60,6 +60,7 @@ export function useDeploymentStatus(agentId: string, version: number, environmen
     queryKey: [...AGENTS_KEY, "deployment", environment, agentId, version],
     queryFn: () => getDeploymentStatus(environment, agentId, version),
     enabled: !!agentId && version > 0,
+    placeholderData: keepPreviousData,
     refetchInterval: (query) => {
       // Poll every 3s while deploying
       return query.state.data?.status === "IN_PROGRESS" ? 3000 : false;

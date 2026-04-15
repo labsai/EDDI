@@ -25,11 +25,15 @@ import {
   useUpdateTrigger,
   useDeleteTrigger,
 } from "@/hooks/use-triggers";
+import { AgentPicker } from "@/components/shared/agent-picker";
 import type { AgentTriggerConfiguration, AgentDeployment } from "@/lib/api/triggers";
+
+import { useAgentDescriptors } from "@/hooks/use-agents";
 
 export function TriggersPage() {
   const { t } = useTranslation();
   const { data: triggers, isLoading, isError, refetch } = useTriggers();
+  const { data: rawAgents } = useAgentDescriptors(1000);
   const createTrigger = useCreateTrigger();
   const updateTrigger = useUpdateTrigger();
   const deleteTrigger = useDeleteTrigger();
@@ -39,16 +43,30 @@ export function TriggersPage() {
   const [deleteIntent, setDeleteIntent] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
+  const agentNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (rawAgents) {
+      rawAgents.forEach((a) => {
+        if (a.name) map.set(a.id, a.name.toLowerCase());
+      });
+    }
+    return map;
+  }, [rawAgents]);
+
   const filteredTriggers = useMemo(() => {
     if (!triggers) return [];
     if (!search.trim()) return triggers;
     const q = search.trim().toLowerCase();
-    return triggers.filter(
-      (tr) =>
-        tr.intent.toLowerCase().includes(q) ||
-        tr.agentDeployments.some((d) => d.agentId.toLowerCase().includes(q)),
-    );
-  }, [triggers, search]);
+    return triggers.filter((tr) => {
+      if (tr.intent.toLowerCase().includes(q)) return true;
+      return tr.agentDeployments.some((d) => {
+        if (d.agentId.toLowerCase().includes(q)) return true;
+        const name = agentNameMap.get(d.agentId);
+        if (name && name.includes(q)) return true;
+        return false;
+      });
+    });
+  }, [triggers, search, agentNameMap]);
 
   return (
     <div className="space-y-6" data-testid="triggers-page">
@@ -296,17 +314,14 @@ function TriggerDialog({
           <label className="text-xs font-medium text-muted-foreground">{t("triggers.deployments", "Agent Deployments")}</label>
           {deployments.map((dep, i) => (
             <div key={i} className="flex gap-2 items-center">
-              <input
-                type="text"
+              <AgentPicker
                 value={dep.agentId}
-                onChange={(e) => {
+                onChange={(val) => {
                   const next = [...deployments];
-                  next[i] = { ...dep, agentId: e.target.value };
+                  next[i] = { ...dep, agentId: val };
                   setDeployments(next);
                 }}
-                placeholder="Agent ID"
-                aria-label={`${t("triggers.agentId", "Agent ID")} ${i + 1}`}
-                className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-xs text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                placeholder={t("triggers.agentId", "Agent ID")}
               />
               <select
                 value={dep.environment}

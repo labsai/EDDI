@@ -43,6 +43,7 @@ export default defineConfig({
       "/schedulestore": "http://localhost:7070",
       "/deploymentstore": "http://localhost:7070",
       "/propertiesstore": "http://localhost:7070",
+      "/AgentTriggerStore": "http://localhost:7070",
       // SSE stream at /administration/logs/stream needs unbuffered proxy
       "/administration": {
         target: "http://localhost:7070",

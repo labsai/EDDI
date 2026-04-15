@@ -1,0 +1,912 @@
+{
+    "openapi":  "3.1.0",
+    "tags":  [
+                 {
+                     "name":  "Backup"
+                 },
+                 {
+                     "name":  "Orphan Admin"
+                 },
+                 {
+                     "name":  "Agents"
+                 },
+                 {
+                     "name":  "06. Capability Registry",
+                     "description":  "A2A agent capability discovery"
+                 },
+                 {
+                     "name":  "API Calls"
+                 },
+                 {
+                     "name":  "Agent Administration"
+                 },
+                 {
+                     "name":  "Descriptors"
+                 },
+                 {
+                     "name":  "Dictionary"
+                 },
+                 {
+                     "name":  "Agent Groups"
+                 },
+                 {
+                     "name":  "LLM Configuration"
+                 },
+                 {
+                     "name":  "MCP Calls"
+                 },
+                 {
+                     "name":  "Output"
+                 },
+                 {
+                     "name":  "Standalone NLP"
+                 },
+                 {
+                     "name":  "Properties"
+                 },
+                 {
+                     "name":  "User Memory",
+                     "description":  "Persistent user memory management"
+                 },
+                 {
+                     "name":  "RAG Ingestion"
+                 },
+                 {
+                     "name":  "RAG Knowledge Bases"
+                 },
+                 {
+                     "name":  "Behavior Rules"
+                 },
+                 {
+                     "name":  "Prompt Snippets"
+                 },
+                 {
+                     "name":  "Workflows"
+                 },
+                 {
+                     "name":  "Conversations"
+                 },
+                 {
+                     "name":  "Agent Setup"
+                 },
+                 {
+                     "name":  "Coordinator Admin"
+                 },
+                 {
+                     "name":  "Group Conversations"
+                 },
+                 {
+                     "name":  "Log Admin"
+                 },
+                 {
+                     "name":  "Audit Trail"
+                 },
+                 {
+                     "name":  "GDPR / Privacy"
+                 },
+                 {
+                     "name":  "Conversation Store"
+                 },
+                 {
+                     "name":  "Attachments"
+                 },
+                 {
+                     "name":  "Schedules"
+                 },
+                 {
+                     "name":  "Tenant Quotas"
+                 },
+                 {
+                     "name":  "Template Preview"
+                 },
+                 {
+                     "name":  "Secrets Vault"
+                 },
+                 {
+                     "name":  "Chat UI"
+                 }
+             ],
+    "components":  {
+                       "schemas":  {
+                                       "A2AAgentConfig":  "@{type=object; properties=}",
+                                       "AgentConfiguration":  "@{type=object; properties=}",
+                                       "AgentDeployment":  "@{type=object; properties=}",
+                                       "AgentDeploymentStatus":  "@{type=object; properties=}",
+                                       "AgentGroupConfiguration":  "@{type=object; properties=}",
+                                       "AgentIdentity":  "@{type=object; properties=}",
+                                       "AgentTriggerConfiguration":  "@{type=object; properties=}",
+                                       "ApiCall":  "@{type=object; properties=}",
+                                       "ApiCallsConfiguration":  "@{type=object; properties=}",
+                                       "AuditEntry":  "@{type=object; properties=}",
+                                       "AuditExportEntry":  "@{type=object; properties=}",
+                                       "BatchRequestBuildingInstruction":  "@{type=object; properties=}",
+                                       "Capability":  "@{type=object; properties=}",
+                                       "CapabilityMatch":  "@{type=object; properties=}",
+                                       "CascadeStep":  "@{type=object; properties=}",
+                                       "ChannelConnector":  "@{type=object; properties=}",
+                                       "ConfigValue":  "@{type=object; properties=}",
+                                       "Context":  "@{type=object; properties=}",
+                                       "ContextScope":  "@{type=string; enum=System.Object[]}",
+                                       "ContextType":  "@{type=string; enum=System.Object[]}",
+                                       "ConversationDescriptor":  "@{type=object; properties=}",
+                                       "ConversationExportEntry":  "@{type=object; properties=}",
+                                       "ConversationMemorySnapshot":  "@{type=object; properties=}",
+                                       "ConversationOutput":  "@{type=object}",
+                                       "ConversationState":  "@{type=string; enum=System.Object[]}",
+                                       "ConversationStatus":  "@{type=object; properties=}",
+                                       "ConversationStepData":  "@{type=object; properties=}",
+                                       "ConversationStepSnapshot":  "@{type=object; properties=}",
+                                       "ConversationSummaryConfig":  "@{type=object; properties=}",
+                                       "CoordinatorStatus":  "@{type=object; properties=}",
+                                       "CreateApiAgentRequest":  "@{type=object; required=System.Object[]; properties=}",
+                                       "Date":  "@{type=string; format=date; examples=System.Object[]}",
+                                       "DeadLetterEntry":  "@{type=object; properties=}",
+                                       "DeploymentInfo":  "@{type=object; properties=}",
+                                       "DeploymentStatus":  "@{type=string; enum=System.Object[]}",
+                                       "DictionaryConfiguration":  "@{type=object; properties=}",
+                                       "DiffAction":  "@{type=string; enum=System.Object[]}",
+                                       "DiscussRequest":  "@{type=object; properties=}",
+                                       "DiscussionPhase":  "@{type=object; properties=}",
+                                       "DiscussionStyle":  "@{type=string; enum=System.Object[]}",
+                                       "DocumentDescriptor":  "@{type=object; properties=}",
+                                       "DreamConfig":  "@{type=object; properties=}",
+                                       "Environment":  "@{type=string; enum=System.Object[]}",
+                                       "ExportPreview":  "@{type=object; properties=}",
+                                       "ExportableResource":  "@{type=object; properties=}",
+                                       "ExtensionDescriptor":  "@{type=object; properties=}",
+                                       "FieldType":  "@{type=string; enum=System.Object[]}",
+                                       "FireStatus":  "@{type=string; enum=System.Object[]}",
+                                       "GdprDeletionResult":  "@{type=object; properties=}",
+                                       "GroupConversation":  "@{type=object; properties=}",
+                                       "GroupConversationState":  "@{type=string; enum=System.Object[]}",
+                                       "GroupMember":  "@{type=object; properties=}",
+                                       "Guardrails":  "@{type=object; properties=}",
+                                       "HttpCodeValidator":  "@{type=object; properties=}",
+                                       "HttpPostResponse":  "@{type=object; properties=}",
+                                       "HttpPreRequest":  "@{type=object; properties=}",
+                                       "ImportPreview":  "@{type=object; properties=}",
+                                       "InputData":  "@{type=object; properties=}",
+                                       "InstanceInfo":  "@{type=object; properties=}",
+                                       "Instant":  "@{type=string; format=date-time; examples=System.Object[]}",
+                                       "JsonRpcRequest":  "@{type=object; properties=}",
+                                       "KekRotationRequest":  "@{type=object; properties=}",
+                                       "KnowledgeBaseReference":  "@{type=object; properties=}",
+                                       "LlmConfiguration":  "@{type=object; properties=}",
+                                       "LogEntry":  "@{type=object; properties=}",
+                                       "MatchingInfo":  "@{type=object; properties=}",
+                                       "McpCall":  "@{type=object; properties=}",
+                                       "McpCallsConfiguration":  "@{type=object; properties=}",
+                                       "MemberFailurePolicy":  "@{type=string; enum=System.Object[]}",
+                                       "MemberType":  "@{type=string; enum=System.Object[]}",
+                                       "MemberUnavailablePolicy":  "@{type=string; enum=System.Object[]}",
+                                       "MemoryPolicy":  "@{type=object; properties=}",
+                                       "ModelCascadeConfig":  "@{type=object; properties=}",
+                                       "OrphanInfo":  "@{type=object; properties=}",
+                                       "OrphanReport":  "@{type=object; properties=}",
+                                       "Output":  "@{type=object; properties=}",
+                                       "OutputBuildingInstruction":  "@{type=object; properties=}",
+                                       "OutputConfiguration":  "@{type=object; properties=}",
+                                       "OutputConfigurationSet":  "@{type=object; properties=}",
+                                       "OutputItem":  "@{type=object; properties=}",
+                                       "ParserConfiguration":  "@{type=object; properties=}",
+                                       "PatchInstructionDocumentDescriptor":  "@{type=object; properties=}",
+                                       "PatchOperation":  "@{type=string; enum=System.Object[]}",
+                                       "PhaseType":  "@{type=string; enum=System.Object[]}",
+                                       "PhraseConfiguration":  "@{type=object; properties=}",
+                                       "PostResponse":  "@{type=object; properties=}",
+                                       "PreRequest":  "@{type=object; properties=}",
+                                       "PromptSnippet":  "@{type=object; properties=}",
+                                       "Properties":  "@{type=object; additionalProperties=}",
+                                       "Property":  "@{type=object; properties=}",
+                                       "PropertyInstruction":  "@{type=object; properties=}",
+                                       "PropertySetterConfiguration":  "@{type=object; properties=}",
+                                       "ProtocolConfig":  "@{type=object; properties=}",
+                                       "QuickRepliesBuildingInstruction":  "@{type=object; properties=}",
+                                       "QuickReply":  "@{type=object; properties=}",
+                                       "RagConfiguration":  "@{type=object; properties=}",
+                                       "RagDefaults":  "@{type=object; properties=}",
+                                       "RegExConfiguration":  "@{type=object; properties=}",
+                                       "Request":  "@{type=object; properties=}",
+                                       "ResourceDiff":  "@{type=object; properties=}",
+                                       "ResultSnapshot":  "@{type=object; properties=}",
+                                       "RetryApiCallInstruction":  "@{type=object; properties=}",
+                                       "RetryConfiguration":  "@{type=object; properties=}",
+                                       "RuleConditionConfiguration":  "@{type=object; properties=}",
+                                       "RuleConfiguration":  "@{type=object; properties=}",
+                                       "RuleGroupConfiguration":  "@{type=object; properties=}",
+                                       "RuleSetConfiguration":  "@{type=object; properties=}",
+                                       "ScheduleConfiguration":  "@{type=object; properties=}",
+                                       "ScheduleFireLog":  "@{type=object; properties=}",
+                                       "Scope":  "@{type=string; enum=System.Object[]}",
+                                       "SecretRequest":  "@{type=object; properties=}",
+                                       "SecurityConfig":  "@{type=object; properties=}",
+                                       "SetOnActions":  "@{type=object; properties=}",
+                                       "SetupAgentRequest":  "@{type=object; required=System.Object[]; properties=}",
+                                       "SimpleConversationMemorySnapshot":  "@{type=object; properties=}",
+                                       "SimpleConversationStep":  "@{type=object; properties=}",
+                                       "SimpleDocumentDescriptor":  "@{type=object; properties=}",
+                                       "Status":  "@{type=string; enum=System.Object[]}",
+                                       "StrictWriteDiscipline":  "@{type=object; properties=}",
+                                       "SyncMapping":  "@{type=object; properties=}",
+                                       "SyncRequest":  "@{type=object; properties=}",
+                                       "Task":  "@{type=object; properties=}",
+                                       "TemplatePreviewRequest":  "@{type=object; properties=}",
+                                       "TemplatePreviewResponse":  "@{type=object; properties=}",
+                                       "TenantQuota":  "@{type=object; properties=}",
+                                       "ToolResponseLimits":  "@{type=object; properties=}",
+                                       "TranscriptEntry":  "@{type=object; properties=}",
+                                       "TranscriptEntryType":  "@{type=string; enum=System.Object[]}",
+                                       "TriggerType":  "@{type=string; enum=System.Object[]}",
+                                       "TurnOrder":  "@{type=string; enum=System.Object[]}",
+                                       "UsageSnapshot":  "@{type=object; properties=}",
+                                       "UserConversation":  "@{type=object; properties=}",
+                                       "UserDataExport":  "@{type=object; properties=}",
+                                       "UserMemoryConfig":  "@{type=object; properties=}",
+                                       "UserMemoryEntry":  "@{type=object; properties=}",
+                                       "ViewState":  "@{type=string; enum=System.Object[]}",
+                                       "Visibility":  "@{type=string; enum=System.Object[]}",
+                                       "WordConfiguration":  "@{type=object; properties=}",
+                                       "WorkflowConfiguration":  "@{type=object; properties=}",
+                                       "WorkflowRunSnapshot":  "@{type=object; properties=}",
+                                       "WorkflowStep":  "@{type=object; properties=}"
+                                   },
+                       "securitySchemes":  {
+                                               "Keycloak OIDC":  "@{description=OAuth2 / OpenID Connect via Keycloak. Only enforced when QUARKUS_OIDC_TENANT_ENABLED=true.; type=openIdConnect; openIdConnectUrl=http://localhost:8180/realms/eddi/.well-known/openid-configuration}"
+                                           }
+                   },
+    "paths":  {
+                  "/.well-known/agent.json":  {
+                                                  "get":  "@{operationId=getDefaultAgentCard; responses=; summary=Get Default Agent Card; tags=System.Object[]}"
+                                              },
+                  "/AgentTriggerStore/agenttriggers":  {
+                                                           "get":  "@{operationId=readAllAgentTriggers; tags=System.Object[]; responses=; security=System.Object[]}",
+                                                           "post":  "@{operationId=createAgentTrigger; tags=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                                       },
+                  "/AgentTriggerStore/agenttriggers/{intent}":  {
+                                                                    "put":  "@{operationId=updateAgentTrigger; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                                                    "get":  "@{operationId=readAgentTrigger; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                                    "delete":  "@{operationId=deleteAgentTrigger; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                },
+                  "/a2a/agents":  {
+                                      "get":  "@{operationId=listA2AAgents; responses=; summary=List A 2 A Agents; tags=System.Object[]}"
+                                  },
+                  "/a2a/agents/{agentId}":  {
+                                                "post":  "@{operationId=handleJsonRpc; parameters=System.Object[]; requestBody=; responses=; summary=Handle Json Rpc; tags=System.Object[]; security=System.Object[]}"
+                                            },
+                  "/a2a/agents/{agentId}/agent.json":  {
+                                                           "get":  "@{operationId=getAgentCard; parameters=System.Object[]; responses=; summary=Get Agent Card; tags=System.Object[]}"
+                                                       },
+                  "/actions":  {
+                                   "get":  "@{description=Read expressions.; operationId=readActions; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                               },
+                  "/admin/gdpr/{userId}":  {
+                                               "delete":  "@{summary=Cascade-delete all user data (GDPR Art. 17); description=Deletes user memories and conversations. Pseudonymizes audit ledger and database log entries. Returns a summary of affected records.; operationId=deleteUserDataGdpr; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                           },
+                  "/admin/gdpr/{userId}/export":  {
+                                                      "get":  "@{summary=Export all user data (GDPR Art. 15/20); description=Returns all data associated with a user, including memories, conversations, managed conversation mappings, and audit processing records.; operationId=exportUserDataGdpr; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                  },
+                  "/admin/gdpr/{userId}/restrict":  {
+                                                        "delete":  "@{summary=Remove processing restriction (GDPR Art. 18); description=Restores normal conversation processing for a user.; operationId=unrestrictProcessingGdpr; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                        "post":  "@{summary=Restrict processing for a user (GDPR Art. 18); description=Stops new conversation processing while preserving all user data. Use when a user disputes data accuracy or objects to processing.; operationId=restrictProcessingGdpr; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                        "get":  "@{summary=Check processing restriction status; description=Returns true if processing is currently restricted for this user.; operationId=checkProcessingRestrictionGdpr; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                    },
+                  "/administration/agents/setup":  {
+                                                       "post":  "@{summary=Setup a standard agent; description=Creates a fully configured agent with parser, behavior rules, LLM configuration, optional output set, workflow, and agent — then optionally deploys it.; operationId=setupAgent; tags=System.Object[]; requestBody=; responses=}"
+                                                   },
+                  "/administration/agents/setup-api":  {
+                                                           "post":  "@{summary=Create an API agent from an OpenAPI spec; description=Parses an OpenAPI specification, generates HttpCalls configurations grouped by tag, creates all necessary resources (parser, behavior, LLM, workflow), and optionally deploys the agent.; operationId=createApiAgent; tags=System.Object[]; requestBody=; responses=}"
+                                                       },
+                  "/administration/coordinator/dead-letters":  {
+                                                                   "delete":  "@{summary=Purge all dead-letter entries; description=Permanently removes all dead-letter entries. Returns count of purged entries.; operationId=purgeDeadLetters; tags=System.Object[]; responses=}",
+                                                                   "get":  "@{summary=List dead-letter entries; description=Returns all dead-letter entries from the coordinator.; operationId=getDeadLetters; tags=System.Object[]; responses=}"
+                                                               },
+                  "/administration/coordinator/dead-letters/{entryId}":  {
+                                                                             "delete":  "@{summary=Discard a dead-letter entry; description=Permanently removes a single dead-letter entry.; operationId=discardDeadLetter; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                         },
+                  "/administration/coordinator/dead-letters/{entryId}/replay":  {
+                                                                                    "post":  "@{summary=Replay a dead-letter entry; description=Re-injects a dead-letter entry into the processing pipeline.; operationId=replayDeadLetter; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                                },
+                  "/administration/coordinator/status":  {
+                                                             "get":  "@{summary=Get coordinator status; description=Returns coordinator type, connection state, queue depths, and processing stats.; operationId=getStatus; tags=System.Object[]; responses=}"
+                                                         },
+                  "/administration/coordinator/stream":  {
+                                                             "get":  "@{summary=Stream coordinator events via SSE; description=Live-tail of coordinator events: task_submitted, task_completed, task_failed, task_dead_lettered.; operationId=streamEvents; tags=System.Object[]; responses=}"
+                                                         },
+                  "/administration/logs":  {
+                                               "get":  "@{summary=Get recent in-memory logs; description=Returns recent logs from the in-memory ring buffer.; operationId=getRecentLogs; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                           },
+                  "/administration/logs/history":  {
+                                                       "get":  "@{summary=Get historical logs from database; description=Returns historical logs from the database. Survives restarts and works cross-instance.; operationId=getHistoryLogs; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                   },
+                  "/administration/logs/instance-id":  {
+                                                           "get":  "@{summary=Get instance identifier; description=Returns the current EDDI instance identifier for cluster tracking.; operationId=getInstanceId; tags=System.Object[]; responses=; security=System.Object[]}"
+                                                       },
+                  "/administration/logs/stream":  {
+                                                      "get":  "@{summary=Live-tail log stream via SSE; description=Streams log entries as they occur in real-time.; operationId=streamLogs; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                  },
+                  "/administration/orphans":  {
+                                                  "get":  "@{summary=Scan for orphaned resources; description=Scans all stores (packages, behavior sets, HTTP calls, output sets, langchains, property setters, dictionaries) and returns resources not referenced by any Agent or package. Use includeDeleted=true to also include soft-deleted resources in the report.; operationId=scanOrphans; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                  "delete":  "@{summary=Purge orphaned resources; description=Scans all stores for orphans and permanently deletes them. Returns a report of what was deleted. This operation is irreversible.; operationId=purgeOrphans; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                              },
+                  "/administration/preview/template":  {
+                                                           "post":  "@{summary=Preview a Qute template with conversation data; description=Resolves a Qute template string against real conversation memory (if conversationId is provided) or built-in sample data. Returns the resolved text and the list of available template variables.; operationId=previewTemplate; tags=System.Object[]; requestBody=; responses=}"
+                                                       },
+                  "/administration/quotas":  {
+                                                 "get":  "@{operationId=listQuotas; tags=System.Object[]; responses=; security=System.Object[]}"
+                                             },
+                  "/administration/quotas/{tenantId}":  {
+                                                            "put":  "@{operationId=updateQuota; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                                            "get":  "@{operationId=getQuota; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                        },
+                  "/administration/quotas/{tenantId}/usage":  {
+                                                                  "get":  "@{operationId=getUsage; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                              },
+                  "/administration/quotas/{tenantId}/usage/reset":  {
+                                                                        "post":  "@{operationId=resetUsage; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                    },
+                  "/administration/{environment}/deploy/{agentId}":  {
+                                                                         "post":  "@{summary=Deploy an agent; description=Deploys the specified agent version to the given environment.; operationId=deployAgent; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                     },
+                  "/administration/{environment}/deploymentstatus":  {
+                                                                         "get":  "@{summary=List all deployment statuses; description=Returns deployment status for all agents in the given environment.; operationId=getDeploymentStatuses; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                     },
+                  "/administration/{environment}/deploymentstatus/{agentId}":  {
+                                                                                   "get":  "@{summary=Get deployment status; description=Returns JSON by default. Use ?format=text for plain text (deprecated).; operationId=getDeploymentStatus; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                               },
+                  "/administration/{environment}/undeploy/{agentId}":  {
+                                                                           "post":  "@{summary=Undeploy an agent; description=Undeploys an agent from the given environment.; operationId=undeployAgent; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                       },
+                  "/agents/managed/{intent}/{userId}":  {
+                                                            "post":  "@{summary=Talk to managed agent with context; description=Send a structured message with context to the managed conversation.; operationId=sayWithinManagedContext; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=}",
+                                                            "get":  "@{summary=Load managed conversation; description=Loads the active conversation for the given intent and user.; operationId=loadConversationMemory; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                        },
+                  "/agents/managed/{intent}/{userId}/endConversation":  {
+                                                                            "post":  "@{summary=End managed conversation; description=Ends the active conversation for the given intent and user.; operationId=endCurrentConversation; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                        },
+                  "/agents/managed/{intent}/{userId}/redo":  {
+                                                                 "post":  "@{summary=Redo last undone step (managed); description=Redoes the last undone step for the managed conversation.; operationId=managedRedo; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                 "get":  "@{summary=Check redo availability (managed); description=Returns true if redo is available for the managed conversation.; operationId=isManagedRedoAvailable; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                             },
+                  "/agents/managed/{intent}/{userId}/undo":  {
+                                                                 "post":  "@{summary=Undo last step (managed); description=Undoes the last conversation step for the managed conversation.; operationId=managedUndo; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                 "get":  "@{summary=Check undo availability (managed); description=Returns true if undo is available for the managed conversation.; operationId=isManagedUndoAvailable; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                             },
+                  "/agents/{agentId}/start":  {
+                                                  "post":  "@{summary=Start a conversation; description=Creates a new conversation for the specified agent in the given environment. Returns 201 with Location header pointing to the new conversation.; operationId=startConversation; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=}"
+                                              },
+                  "/agents/{conversationId}":  {
+                                                   "post":  "@{summary=Send a message to the agent; description=Send a plain text message and receive the agent\u0027s response.; operationId=say; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=}",
+                                                   "get":  "@{summary=Read a conversation; description=Returns conversation memory snapshot with configurable detail level.; operationId=readConversation; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                               },
+                  "/agents/{conversationId}/endConversation":  {
+                                                                   "post":  "@{summary=End a conversation; description=Marks the conversation as ended. No further messages can be sent.; operationId=endConversation; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                               },
+                  "/agents/{conversationId}/log":  {
+                                                       "get":  "@{summary=Read conversation log; description=Returns conversation log in text or JSON format.; operationId=readConversationLog; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                   },
+                  "/agents/{conversationId}/redo":  {
+                                                        "post":  "@{summary=Redo last undone step; description=Re-applies a previously undone conversation step.; operationId=redo; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                        "get":  "@{summary=Check if redo is available; description=Returns true if a previously undone step can be redone.; operationId=isRedoAvailable; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                    },
+                  "/agents/{conversationId}/rerun":  {
+                                                         "post":  "@{summary=Rerun last conversation step; description=Re-executes the last conversation step, useful for retrying after errors.; operationId=rerunLastConversationStep; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                     },
+                  "/agents/{conversationId}/status":  {
+                                                          "get":  "@{summary=Get conversation state; description=Returns the current lifecycle state of the conversation.; operationId=getConversationState; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                      },
+                  "/agents/{conversationId}/stream":  {
+                                                          "post":  "@{summary=Send message with SSE streaming; description=Send user input and receive streaming SSE response with workflow events and LLM tokens.; operationId=sayStreaming; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=}"
+                                                      },
+                  "/agents/{conversationId}/undo":  {
+                                                        "post":  "@{summary=Undo last conversation step; description=Reverts the last conversation step.; operationId=undo; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                        "get":  "@{summary=Check if undo is available; description=Returns true if the last conversation step can be undone.; operationId=isUndoAvailable; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                    },
+                  "/agentstore/agents":  {
+                                             "post":  "@{description=Create agent.; operationId=createAgent; tags=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                         },
+                  "/agentstore/agents/descriptors":  {
+                                                         "post":  "@{description=Read list of Agent descriptors including a given workflowUri.; operationId=readAgentDescriptorsWithWorkflow; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                         "get":  "@{description=Read list of Agent descriptors.; operationId=readAgentDescriptors; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                     },
+                  "/agentstore/agents/jsonSchema":  {
+                                                        "get":  "@{description=Read JSON Schema for Agent definition.; operationId=readAgentJsonSchema; tags=System.Object[]; responses=; security=System.Object[]}"
+                                                    },
+                  "/agentstore/agents/{id}":  {
+                                                  "put":  "@{description=Update agent.; operationId=updateAgent; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                                  "get":  "@{description=Read agent.; operationId=readAgent; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                  "post":  "@{description=Duplicate this agent.; operationId=duplicateAgent; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                  "delete":  "@{summary=Delete agent; description=Delete a Agent configuration. When cascade=true, also deletes referenced packages and their extension resources (behavior sets, HTTP calls, output sets, langchains, property setters, dictionaries). Shared resources (packages used by other agents, extensions used by other packages) are skipped. Partial failures are logged but do not prevent the Agent from being deleted.; operationId=deleteAgent; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                              },
+                  "/agentstore/agents/{id}/currentversion":  {
+                                                                 "post":  "@{description=Redirect to latest version.; operationId=redirectToLatestVersion; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                 "get":  "@{description=Get current version of this resource.; operationId=getCurrentVersion; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                             },
+                  "/agentstore/agents/{id}/updateResourceUri":  {
+                                                                    "put":  "@{description=Update references to other resources within this Agent resource.; operationId=updateResourceInAgent; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                                                },
+                  "/apicallstore/apicalls":  {
+                                                 "post":  "@{description=Create httpCalls.; operationId=createApiCalls; tags=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                             },
+                  "/apicallstore/apicalls/descriptors":  {
+                                                             "get":  "@{description=Read list of httpCalls descriptors.; operationId=readApiCallsDescriptors; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                         },
+                  "/apicallstore/apicalls/discover-endpoints":  {
+                                                                    "get":  "@{summary=Discover API endpoints; description=Parse an OpenAPI 3.x spec (URL or inline JSON/YAML) and return available endpoints grouped by tag. Returns fully generated ApiCall objects ready for import. Used by the Manager UI for selective API call import.; operationId=discoverEndpoints; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                },
+                  "/apicallstore/apicalls/jsonSchema":  {
+                                                            "get":  "@{description=Read JSON Schema for regular httpCalls definition.; operationId=readApiCallsJsonSchema; tags=System.Object[]; responses=; security=System.Object[]}"
+                                                        },
+                  "/apicallstore/apicalls/{id}":  {
+                                                      "put":  "@{description=Update httpCalls.; operationId=updateApiCalls; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                                      "get":  "@{description=Read httpCalls.; operationId=readApiCalls; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                      "post":  "@{description=Duplicate this httpCalls.; operationId=duplicateApiCalls; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                      "delete":  "@{description=Delete httpCalls.; operationId=deleteApiCalls; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                  },
+                  "/apicallstore/apicalls/{id}/currentversion":  {
+                                                                     "post":  "@{description=Redirect to latest version.; operationId=redirectToLatestVersion; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                     "get":  "@{description=Get current version of this resource.; operationId=getCurrentVersion; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                 },
+                  "/auditstore/agent/{agentId}":  {
+                                                      "get":  "@{operationId=getAuditTrailByAgent; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                  },
+                  "/auditstore/{conversationId}":  {
+                                                       "get":  "@{operationId=getAuditTrail; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                   },
+                  "/auditstore/{conversationId}/count":  {
+                                                             "get":  "@{operationId=getEntryCount; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                         },
+                  "/backup/export/{agentFilename}":  {
+                                                         "get":  "@{operationId=getAgentZipArchive; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                     },
+                  "/backup/export/{agentId}":  {
+                                                   "post":  "@{description=Export a Agent as a ZIP file. When selectedResources is provided, only those resource IDs are included in the ZIP (agent + workflow skeletons are always included).; operationId=exportAgent; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                               },
+                  "/backup/export/{agentId}/preview":  {
+                                                           "post":  "@{description=Preview the resource tree of an agent for selective export. Returns all resources contained in the agent, organized by workflow, with selectability flags (agent + workflow skeletons are always required).; operationId=previewExport; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                       },
+                  "/backup/import":  {
+                                         "post":  "@{description=Import a Agent from a zip file. strategy=create (default) always creates new resources. strategy=merge looks up existing resources by origin ID and updates them. strategy=upgrade syncs content into the targetAgentId by structural matching.; operationId=importAgent; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                     },
+                  "/backup/import/initialAgents":  {
+                                                       "post":  "@{operationId=importInitialAgents; tags=System.Object[]; responses=; security=System.Object[]}"
+                                                   },
+                  "/backup/import/preview":  {
+                                                 "post":  "@{description=Preview what an import would do. When targetAgentId is provided, uses structural matching with content diffs (upgrade preview). Otherwise uses originId matching (merge preview).; operationId=previewImport; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                             },
+                  "/backup/import/sync":  {
+                                              "post":  "@{description=Execute a single-agent sync from a remote EDDI instance to a local target agent.; operationId=executeSync; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                          },
+                  "/backup/import/sync/agents":  {
+                                                     "get":  "@{description=List agents on a remote EDDI instance. Used by the UI to populate the source agent picker.; operationId=listRemoteAgents; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                 },
+                  "/backup/import/sync/batch":  {
+                                                    "post":  "@{description=Execute a multi-agent sync from a remote EDDI instance. Each request specifies a source?target agent pair with selected resources and workflow order.; operationId=executeSyncBatch; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                                },
+                  "/backup/import/sync/preview":  {
+                                                      "post":  "@{description=Preview a single-agent sync from a remote EDDI instance to a local target agent.; operationId=previewSync; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                  },
+                  "/backup/import/sync/preview/batch":  {
+                                                            "post":  "@{description=Preview a multi-agent sync from a remote EDDI instance. Each mapping specifies a source?target agent pair.; operationId=previewSyncBatch; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                                        },
+                  "/capabilities":  {
+                                        "get":  "@{description=Find agents matching a skill; operationId=searchCapabilities; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                    },
+                  "/capabilities/skills":  {
+                                               "get":  "@{description=List all registered skills; operationId=listAllSkills; tags=System.Object[]; responses=}"
+                                           },
+                  "/chat":  {
+                                "get":  "@{operationId=viewDefault; tags=System.Object[]; responses=}"
+                            },
+                  "/chat/{path}":  {
+                                       "get":  "@{operationId=viewHtml; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                   },
+                  "/conversations/{conversationId}/attachments":  {
+                                                                      "post":  "@{summary=Upload a file attachment; description=Upload a binary file to attach to a conversation. Returns a storage reference that can be used in the \u0027attachment_url\u0027 context field.; operationId=uploadAttachment; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=}"
+                                                                  },
+                  "/conversationstore/conversations":  {
+                                                           "get":  "@{operationId=readConversationDescriptors; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                           "delete":  "@{operationId=permanentlyDeleteEndedConversationLogs; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                       },
+                  "/conversationstore/conversations/active/{agentId}":  {
+                                                                            "get":  "@{operationId=getActiveConversations; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                        },
+                  "/conversationstore/conversations/end":  {
+                                                               "post":  "@{operationId=endActiveConversations; tags=System.Object[]; requestBody=; responses=}"
+                                                           },
+                  "/conversationstore/conversations/simple/{conversationId}":  {
+                                                                                   "get":  "@{operationId=readSimpleConversationLog; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                               },
+                  "/conversationstore/conversations/{conversationId}":  {
+                                                                            "get":  "@{operationId=readRawConversationLog; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                            "delete":  "@{operationId=deleteConversationLog; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                        },
+                  "/deploymentstore/deployments":  {
+                                                       "get":  "@{description=Read deployment infos.; operationId=readDeploymentInfos; tags=System.Object[]; responses=; security=System.Object[]}"
+                                                   },
+                  "/descriptorstore/descriptors":  {
+                                                       "get":  "@{description=Read list of descriptors.; operationId=readDescriptors; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                   },
+                  "/descriptorstore/descriptors/{id}":  {
+                                                            "get":  "@{description=Read descriptor.; operationId=readDescriptor; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                            "patch":  "@{description=Partial update descriptor.; operationId=patchDescriptor; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                                        },
+                  "/descriptorstore/descriptors/{id}/simple":  {
+                                                                   "get":  "@{description=Read simple descriptor.; operationId=readSimpleDescriptor; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                               },
+                  "/dictionarystore/dictionaries":  {
+                                                        "post":  "@{description=Create regular dictionary.; operationId=createRegularDictionary; tags=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                                    },
+                  "/dictionarystore/dictionaries/descriptors":  {
+                                                                    "get":  "@{description=Read list of regular dictionary descriptors.; operationId=readRegularDictionaryDescriptors; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                },
+                  "/dictionarystore/dictionaries/jsonSchema":  {
+                                                                   "get":  "@{description=Read JSON Schema for regular dictionary definition.; operationId=readDictionaryJsonSchema; tags=System.Object[]; responses=; security=System.Object[]}"
+                                                               },
+                  "/dictionarystore/dictionaries/{id}":  {
+                                                             "put":  "@{description=Update regular dictionary.; operationId=updateRegularDictionary; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                                             "get":  "@{description=Read regular dictionary.; operationId=readRegularDictionary; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                             "patch":  "@{description=Partial update regular dictionary.; operationId=patchRegularDictionary; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                                             "post":  "@{description=Duplicate regular dictionary.; operationId=duplicateRegularDictionary; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                             "delete":  "@{description=Delete regular dictionary.; operationId=deleteRegularDictionary; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                         },
+                  "/dictionarystore/dictionaries/{id}/currentversion":  {
+                                                                            "post":  "@{description=Redirect to latest version.; operationId=redirectToLatestVersion; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                            "get":  "@{description=Get current version of this resource.; operationId=getCurrentVersion; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                        },
+                  "/dictionarystore/dictionaries/{id}/expressions":  {
+                                                                         "get":  "@{description=Read expressions of regular dictionary.; operationId=readDictionaryExpressions; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                     },
+                  "/expressions":  {
+                                       "get":  "@{description=Read expressions.; operationId=readExpressions; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                   },
+                  "/extensionstore/extensions":  {
+                                                     "get":  "@{operationId=getWorkflowSteps; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                 },
+                  "/groups/{groupId}/conversations":  {
+                                                          "get":  "@{summary=List group conversations; description=Lists group conversation transcripts for a group with pagination.; operationId=listGroupConversations; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                          "post":  "@{summary=Start a group discussion; description=Starts a new multi-agent group discussion with the given question.; operationId=discuss; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=}"
+                                                      },
+                  "/groups/{groupId}/conversations/stream":  {
+                                                                 "post":  "@{summary=Start a group discussion with SSE streaming; description=Starts a group discussion asynchronously and streams progress events (group_start, phase_start, speaker_start, speaker_complete, phase_complete, synthesis_start, group_complete, group_error) via Server-Sent Events.; operationId=discussStreaming; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=}"
+                                                             },
+                  "/groups/{groupId}/conversations/{groupConversationId}":  {
+                                                                                "get":  "@{summary=Read a group conversation; description=Returns the full transcript of a group conversation.; operationId=readGroupConversation; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                                "delete":  "@{summary=Delete a group conversation; description=Deletes a group conversation and its member conversations.; operationId=deleteGroupConversation; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                            },
+                  "/groupstore/groups":  {
+                                             "post":  "@{description=Create group configuration.; operationId=createGroup; tags=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                         },
+                  "/groupstore/groups/descriptors":  {
+                                                         "get":  "@{description=Read list of group descriptors.; operationId=readGroupDescriptors; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                     },
+                  "/groupstore/groups/jsonSchema":  {
+                                                        "get":  "@{description=Read JSON Schema for group definition.; operationId=readAgentGroupJsonSchema; tags=System.Object[]; responses=; security=System.Object[]}"
+                                                    },
+                  "/groupstore/groups/styles":  {
+                                                    "get":  "@{description=List available discussion styles and their phase flows.; operationId=readDiscussionStyles; tags=System.Object[]; responses=; security=System.Object[]}"
+                                                },
+                  "/groupstore/groups/{id}":  {
+                                                  "put":  "@{description=Update group configuration.; operationId=updateGroup; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                                  "get":  "@{description=Read group configuration.; operationId=readGroup; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                  "post":  "@{description=Duplicate this group configuration.; operationId=duplicateGroup; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                  "delete":  "@{description=Delete group configuration.; operationId=deleteGroup; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                              },
+                  "/groupstore/groups/{id}/currentversion":  {
+                                                                 "post":  "@{description=Redirect to latest version.; operationId=redirectToLatestVersion; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                 "get":  "@{description=Get current version of this resource.; operationId=getCurrentVersion; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                             },
+                  "/llm/tools/cache":  {
+                                           "delete":  "@{operationId=clearCache; responses=; summary=Clear Cache; tags=System.Object[]}"
+                                       },
+                  "/llm/tools/cache/stats":  {
+                                                 "get":  "@{operationId=getCacheStats; responses=; summary=Get Cache Stats; tags=System.Object[]}"
+                                             },
+                  "/llm/tools/cache/ttl/{toolName}":  {
+                                                          "get":  "@{operationId=getToolTTL; parameters=System.Object[]; responses=; summary=Get Tool TTL; tags=System.Object[]}"
+                                                      },
+                  "/llm/tools/costs":  {
+                                           "get":  "@{operationId=getCosts; responses=; summary=Get Costs; tags=System.Object[]}"
+                                       },
+                  "/llm/tools/costs/conversation/{conversationId}":  {
+                                                                         "get":  "@{operationId=getConversationCosts; parameters=System.Object[]; responses=; summary=Get Conversation Costs; tags=System.Object[]}"
+                                                                     },
+                  "/llm/tools/costs/reset":  {
+                                                 "post":  "@{operationId=resetCosts; responses=; summary=Reset Costs; tags=System.Object[]}"
+                                             },
+                  "/llm/tools/costs/tool/{toolName}":  {
+                                                           "get":  "@{operationId=getToolCosts; parameters=System.Object[]; responses=; summary=Get Tool Costs; tags=System.Object[]}"
+                                                       },
+                  "/llm/tools/history/{conversationId}":  {
+                                                              "get":  "@{operationId=getToolHistory; parameters=System.Object[]; responses=; summary=Get Tool History; tags=System.Object[]}"
+                                                          },
+                  "/llm/tools/ratelimit/{toolName}":  {
+                                                          "get":  "@{operationId=getRateLimit; parameters=System.Object[]; responses=; summary=Get Rate Limit; tags=System.Object[]}"
+                                                      },
+                  "/llm/tools/ratelimit/{toolName}/reset":  {
+                                                                "post":  "@{operationId=resetRateLimit; parameters=System.Object[]; responses=; summary=Reset Rate Limit; tags=System.Object[]}"
+                                                            },
+                  "/llmstore/llms":  {
+                                         "post":  "@{description=Create LLM config.; operationId=createLlm; tags=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                     },
+                  "/llmstore/llms/descriptors":  {
+                                                     "get":  "@{description=Read list of LLM config descriptors.; operationId=readLlmDescriptors; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                 },
+                  "/llmstore/llms/jsonSchema":  {
+                                                    "get":  "@{description=Read JSON Schema for regular LLM config definition.; operationId=readLlmJsonSchema; tags=System.Object[]; responses=; security=System.Object[]}"
+                                                },
+                  "/llmstore/llms/{id}":  {
+                                              "put":  "@{description=Update LLM config.; operationId=updateLlm; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                              "get":  "@{description=Read LLM config.; operationId=readLlm; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                              "post":  "@{description=Duplicate this LLM config.; operationId=duplicateLlm; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                              "delete":  "@{description=Delete LLM config.; operationId=deleteLlm; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                          },
+                  "/llmstore/llms/{id}/currentversion":  {
+                                                             "post":  "@{description=Redirect to latest version.; operationId=redirectToLatestVersion; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                             "get":  "@{description=Get current version of this resource.; operationId=getCurrentVersion; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                         },
+                  "/mcpcallsstore/mcpcalls":  {
+                                                  "post":  "@{summary=Create MCP Calls config; description=Create a new MCP Calls configuration.; operationId=createMcpCalls; tags=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                              },
+                  "/mcpcallsstore/mcpcalls/descriptors":  {
+                                                              "get":  "@{summary=List MCP Calls descriptors; description=Read list of MCP Calls configuration descriptors.; operationId=readMcpCallsDescriptors; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                          },
+                  "/mcpcallsstore/mcpcalls/discover-tools":  {
+                                                                 "get":  "@{summary=Discover MCP tools; description=Probe a live MCP server to discover available tools. Used by the Manager UI for whitelist/blacklist selection.; operationId=discoverTools; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                             },
+                  "/mcpcallsstore/mcpcalls/jsonSchema":  {
+                                                             "get":  "@{summary=Get JSON Schema; description=Read JSON Schema for MCP Calls configuration.; operationId=readMcpCallsJsonSchema; tags=System.Object[]; responses=; security=System.Object[]}"
+                                                         },
+                  "/mcpcallsstore/mcpcalls/{id}":  {
+                                                       "put":  "@{summary=Update MCP Calls config; description=Update an existing MCP Calls configuration.; operationId=updateMcpCalls; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                                       "get":  "@{summary=Read MCP Calls config; description=Read a specific MCP Calls configuration.; operationId=readMcpCalls; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                       "post":  "@{summary=Duplicate MCP Calls config; description=Duplicate an existing MCP Calls configuration.; operationId=duplicateMcpCalls; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                       "delete":  "@{summary=Delete MCP Calls config; description=Delete an MCP Calls configuration.; operationId=deleteMcpCalls; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                   },
+                  "/mcpcallsstore/mcpcalls/{id}/currentversion":  {
+                                                                      "post":  "@{description=Redirect to latest version.; operationId=redirectToLatestVersion; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                      "get":  "@{description=Get current version of this resource.; operationId=getCurrentVersion; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                  },
+                  "/outputstore/actions":  {
+                                               "get":  "@{operationId=readOutputActions; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                           },
+                  "/outputstore/outputsets":  {
+                                                  "post":  "@{description=Create output.; operationId=createOutputSet; tags=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                              },
+                  "/outputstore/outputsets/descriptors":  {
+                                                              "get":  "@{description=Read list of output descriptors.; operationId=readOutputDescriptors; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                          },
+                  "/outputstore/outputsets/jsonSchema":  {
+                                                             "get":  "@{description=Read JSON Schema for output definition.; operationId=readOutputJsonSchema; tags=System.Object[]; responses=; security=System.Object[]}"
+                                                         },
+                  "/outputstore/outputsets/{id}":  {
+                                                       "put":  "@{description=Update output.; operationId=updateOutputSet; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                                       "get":  "@{description=Read output.; operationId=readOutputSet; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                       "patch":  "@{operationId=patchOutputSet; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                                       "post":  "@{description=Duplicate this output.; operationId=duplicateOutputSet; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                       "delete":  "@{description=Delete output.; operationId=deleteOutputSet; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                   },
+                  "/outputstore/outputsets/{id}/currentversion":  {
+                                                                      "post":  "@{description=Redirect to latest version.; operationId=redirectToLatestVersion; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                      "get":  "@{description=Get current version of this resource.; operationId=getCurrentVersion; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                  },
+                  "/outputstore/outputsets/{id}/outputKeys":  {
+                                                                  "get":  "@{description=Read output keys.; operationId=readOutputKeys; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                              },
+                  "/parser/{parserId}":  {
+                                             "post":  "@{summary=Parse a sentence; description=Parses the given sentence using the specified parser configuration.; operationId=parse; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=}"
+                                         },
+                  "/parserstore/parsers":  {
+                                               "post":  "@{description=Create parser.; operationId=createParser; tags=System.Object[]; requestBody=; responses=}"
+                                           },
+                  "/parserstore/parsers/descriptors":  {
+                                                           "get":  "@{description=Read list of parser descriptors.; operationId=readParserDescriptors; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                       },
+                  "/parserstore/parsers/{id}":  {
+                                                    "put":  "@{description=Update parser.; operationId=updateParser; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=}",
+                                                    "get":  "@{description=Read parser.; operationId=readParser; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                    "post":  "@{description=Duplicate this parser.; operationId=duplicateParser; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                    "delete":  "@{description=Delete parser.; operationId=deleteParser; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                },
+                  "/parserstore/parsers/{id}/currentversion":  {
+                                                                   "post":  "@{description=Redirect to latest version.; operationId=redirectToLatestVersion; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                   "get":  "@{description=Get current version of this resource.; operationId=getCurrentVersion; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                               },
+                  "/propertiesstore/properties/{userId}":  {
+                                                               "get":  "@{description=Read properties.; operationId=readProperties; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                               "post":  "@{description=Merge properties.; operationId=mergeProperties; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=}",
+                                                               "delete":  "@{description=Delete properties.; operationId=deleteProperties; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                           },
+                  "/propertysetterstore/propertysetters":  {
+                                                               "post":  "@{description=Create propertySetter.; operationId=createPropertySetter; tags=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                                           },
+                  "/propertysetterstore/propertysetters/descriptors":  {
+                                                                           "get":  "@{description=Read list of propertySetter descriptors.; operationId=readPropertySetterDescriptors; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                       },
+                  "/propertysetterstore/propertysetters/jsonSchema":  {
+                                                                          "get":  "@{description=Read JSON Schema for regular propertySetter definition.; operationId=readPropertySetterJsonSchema; tags=System.Object[]; responses=; security=System.Object[]}"
+                                                                      },
+                  "/propertysetterstore/propertysetters/{id}":  {
+                                                                    "put":  "@{description=Update propertySetter.; operationId=updatePropertySetter; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                                                    "get":  "@{description=Read propertySetter.; operationId=readPropertySetter; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                                    "post":  "@{description=Duplicate this propertySetter.; operationId=duplicatePropertySetter; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                                    "delete":  "@{description=Delete propertySetter.; operationId=deletePropertySetter; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                },
+                  "/propertysetterstore/propertysetters/{id}/currentversion":  {
+                                                                                   "post":  "@{description=Redirect to latest version.; operationId=redirectToLatestVersion; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                                   "get":  "@{description=Get current version of this resource.; operationId=getCurrentVersion; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                               },
+                  "/ragstore/rags":  {
+                                         "post":  "@{summary=Create RAG config; description=Create a new RAG configuration.; operationId=createRag; tags=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                     },
+                  "/ragstore/rags/descriptors":  {
+                                                     "get":  "@{summary=List RAG descriptors; description=Read list of RAG configuration descriptors.; operationId=readRagDescriptors; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                 },
+                  "/ragstore/rags/jsonSchema":  {
+                                                    "get":  "@{summary=Get JSON Schema; description=Read JSON Schema for RAG configuration.; operationId=readRagJsonSchema; tags=System.Object[]; responses=; security=System.Object[]}"
+                                                },
+                  "/ragstore/rags/{id}":  {
+                                              "put":  "@{summary=Update RAG config; description=Update an existing RAG configuration.; operationId=updateRag; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                              "get":  "@{summary=Read RAG config; description=Read a specific RAG configuration.; operationId=readRag; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                              "post":  "@{summary=Duplicate RAG config; description=Duplicate an existing RAG configuration.; operationId=duplicateRag; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                              "delete":  "@{summary=Delete RAG config; description=Delete a RAG configuration.; operationId=deleteRag; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                          },
+                  "/ragstore/rags/{id}/currentversion":  {
+                                                             "post":  "@{description=Redirect to latest version.; operationId=redirectToLatestVersion; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                             "get":  "@{description=Get current version of this resource.; operationId=getCurrentVersion; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                         },
+                  "/ragstore/rags/{id}/ingest":  {
+                                                     "post":  "@{summary=Ingest document; description=Ingest a text document into a knowledge base. Runs async on a virtual thread.; operationId=ingestDocument; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                                 },
+                  "/ragstore/rags/{id}/ingestion/{ingestionId}/status":  {
+                                                                             "get":  "@{summary=Get ingestion status; description=Poll the status of an async ingestion operation.; operationId=getIngestionStatus; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                         },
+                  "/rulestore/rulesets":  {
+                                              "post":  "@{description=Create behavior rule set.; operationId=createRuleSet; tags=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                          },
+                  "/rulestore/rulesets/descriptors":  {
+                                                          "get":  "@{description=Read list of behavior descriptors.; operationId=readBehaviorDescriptors; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                      },
+                  "/rulestore/rulesets/jsonSchema":  {
+                                                         "get":  "@{description=Read JSON Schema for behavior definition.; operationId=readRuleSetJsonSchema; tags=System.Object[]; responses=; security=System.Object[]}"
+                                                     },
+                  "/rulestore/rulesets/{id}":  {
+                                                   "put":  "@{description=Update behavior rule set.; operationId=updateRuleSet; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                                   "get":  "@{description=Read behavior rule set.; operationId=readRuleSet; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                   "post":  "@{description=Duplicate this behavior rule set.; operationId=duplicateRuleSet; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                   "delete":  "@{description=Delete behavior rule set.; operationId=deleteRuleSet; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                               },
+                  "/rulestore/rulesets/{id}/currentversion":  {
+                                                                  "post":  "@{description=Redirect to latest version.; operationId=redirectToLatestVersion; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                  "get":  "@{description=Get current version of this resource.; operationId=getCurrentVersion; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                              },
+                  "/schedulestore/schedules":  {
+                                                   "get":  "@{description=List all schedules. Optional filter by agentId.; operationId=readAllSchedules; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                   "post":  "@{description=Create a new schedule. Returns the created schedule with generated ID.; operationId=createSchedule; tags=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                               },
+                  "/schedulestore/schedules/admin/failed":  {
+                                                                "get":  "@{description=List all failed and dead-lettered fire logs across all schedules.; operationId=readFailedFires; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                            },
+                  "/schedulestore/schedules/{scheduleId}":  {
+                                                                "put":  "@{description=Update an existing schedule.; operationId=updateSchedule; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                                                "get":  "@{description=Read a specific schedule by ID.; operationId=readSchedule; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                                "delete":  "@{description=Delete a schedule.; operationId=deleteSchedule; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                            },
+                  "/schedulestore/schedules/{scheduleId}/disable":  {
+                                                                        "post":  "@{description=Disable a schedule.; operationId=disableSchedule; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                    },
+                  "/schedulestore/schedules/{scheduleId}/dismiss":  {
+                                                                        "post":  "@{description=Reset a dead-lettered schedule to PENDING without immediate retry.; operationId=dismissDeadLetter; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                    },
+                  "/schedulestore/schedules/{scheduleId}/enable":  {
+                                                                       "post":  "@{description=Enable a schedule.; operationId=enableSchedule; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                   },
+                  "/schedulestore/schedules/{scheduleId}/fire":  {
+                                                                     "post":  "@{description=Manually trigger a schedule fire immediately.; operationId=fireNow; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                 },
+                  "/schedulestore/schedules/{scheduleId}/fires":  {
+                                                                      "get":  "@{description=Read fire history for a schedule.; operationId=readFireLogs; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                  },
+                  "/schedulestore/schedules/{scheduleId}/retry":  {
+                                                                      "post":  "@{description=Re-queue a dead-lettered schedule for another fire attempt.; operationId=retryDeadLetter; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                  },
+                  "/secretstore/secrets/admin/rotate-kek":  {
+                                                                "post":  "@{summary=Rotate Master Key (KEK); description=Re-encrypts all tenant DEKs with a new master key. WARNING: This endpoint transmits master keys in the request body. Ensure TLS is enabled. After a successful rotation, update the EDDI_VAULT_MASTER_KEY environment variable and restart the application.; operationId=rotateKek; tags=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                                            },
+                  "/secretstore/secrets/health":  {
+                                                      "get":  "@{summary=Vault health check; operationId=healthCheck; tags=System.Object[]; responses=; security=System.Object[]}"
+                                                  },
+                  "/secretstore/secrets/{tenantId}":  {
+                                                          "get":  "@{summary=List all secrets for a tenant; operationId=listSecrets; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                      },
+                  "/secretstore/secrets/{tenantId}/rotate-dek":  {
+                                                                     "post":  "@{summary=Rotate DEK for a tenant; description=Generates a new Data Encryption Key and re-encrypts all secrets for the tenant. This does NOT require a restart — the new DEK is used immediately.; operationId=rotateDek; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                 },
+                  "/secretstore/secrets/{tenantId}/{keyName}":  {
+                                                                    "put":  "@{summary=Store or update a secret; operationId=storeSecret; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                                                    "get":  "@{summary=Get secret metadata; operationId=getSecretMetadata; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                                    "delete":  "@{summary=Delete a secret; operationId=deleteSecret; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                                },
+                  "/snippetstore/snippets":  {
+                                                 "post":  "@{description=Create a prompt snippet.; operationId=createSnippet; tags=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                             },
+                  "/snippetstore/snippets/descriptors":  {
+                                                             "get":  "@{description=Read list of prompt snippet descriptors.; operationId=readSnippetDescriptors; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                         },
+                  "/snippetstore/snippets/{id}":  {
+                                                      "put":  "@{description=Update a prompt snippet.; operationId=updateSnippet; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                                      "get":  "@{description=Read a prompt snippet.; operationId=readSnippet; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                      "delete":  "@{description=Delete a prompt snippet.; operationId=deleteSnippet; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                  },
+                  "/snippetstore/snippets/{id}/currentversion":  {
+                                                                     "post":  "@{description=Redirect to latest version.; operationId=redirectToLatestVersion; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                     "get":  "@{description=Get current version of this resource.; operationId=getCurrentVersion; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                 },
+                  "/userconversationstore/userconversations/{intent}/{userId}":  {
+                                                                                     "get":  "@{operationId=readUserConversation; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                                     "delete":  "@{operationId=deleteUserConversation; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                                     "post":  "@{operationId=createUserConversation; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=}"
+                                                                                 },
+                  "/usermemorystore/memories":  {
+                                                    "put":  "@{summary=Upsert a memory entry; description=Insert or update a memory entry. Upsert key depends on visibility.; operationId=upsertMemory; tags=System.Object[]; requestBody=; responses=}"
+                                                },
+                  "/usermemorystore/memories/entry/{entryId}":  {
+                                                                    "delete":  "@{summary=Delete a specific memory entry; operationId=deleteMemory; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                },
+                  "/usermemorystore/memories/{userId}":  {
+                                                             "get":  "@{summary=Get all memories for a user; description=Returns all structured memory entries for the given user.; operationId=getAllMemories; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                             "delete":  "@{summary=Delete all memories for a user (GDPR); description=Permanently removes all memory entries for a user. Intended for GDPR right-to-erasure requests.; operationId=deleteAllForUser; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                         },
+                  "/usermemorystore/memories/{userId}/category/{category}":  {
+                                                                                 "get":  "@{summary=Get memories by category; description=Returns memories filtered by category (preference, fact, context).; operationId=getMemoriesByCategory; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                             },
+                  "/usermemorystore/memories/{userId}/count":  {
+                                                                   "get":  "@{summary=Count memory entries for a user; operationId=countMemories; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                               },
+                  "/usermemorystore/memories/{userId}/key/{key}":  {
+                                                                       "get":  "@{summary=Get a specific memory by key; description=Returns a single memory entry by its key name.; operationId=getMemoryByKey; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                   },
+                  "/usermemorystore/memories/{userId}/search":  {
+                                                                    "get":  "@{summary=Search user memories; description=Filter memories by key or value content.; operationId=searchMemories; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                },
+                  "/usermemorystore/memories/{userId}/visible":  {
+                                                                     "get":  "@{summary=Get visible memories for an agent; description=Returns memories visible to a specific agent, considering self/group/global visibility.; operationId=getVisibleMemories; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                 },
+                  "/workflowstore/workflows":  {
+                                                   "post":  "@{description=Create workflow.; operationId=createWorkflow; tags=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                               },
+                  "/workflowstore/workflows/descriptors":  {
+                                                               "post":  "@{description=Read list of workflow descriptors including a given resourceUri.; operationId=readWorkflowDescriptorsWithResource; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                               "get":  "@{description=Read list of workflow descriptors.; operationId=readWorkflowDescriptors; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                           },
+                  "/workflowstore/workflows/jsonSchema":  {
+                                                              "get":  "@{description=Read JSON Schema for workflow definition.; operationId=readWorkflowJsonSchema; tags=System.Object[]; responses=; security=System.Object[]}"
+                                                          },
+                  "/workflowstore/workflows/{id}":  {
+                                                        "put":  "@{description=Update workflow.; operationId=updateWorkflow; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}",
+                                                        "get":  "@{description=Read workflow.; operationId=readWorkflow; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                        "post":  "@{description=Duplicate this workflow.; operationId=duplicateWorkflow; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}",
+                                                        "delete":  "@{summary=Delete package; description=Delete a workflow configuration. When cascade=true, also deletes extension resources referenced by this package: behavior sets, HTTP calls, output sets, LLM configs, property setters, and parser dictionaries. Shared resources (used by other packages) are skipped. Partial failures are logged but do not prevent the workflow from being deleted.; operationId=deleteWorkflow; tags=System.Object[]; parameters=System.Object[]; responses=; security=System.Object[]}"
+                                                    },
+                  "/workflowstore/workflows/{id}/currentversion":  {
+                                                                       "post":  "@{description=Redirect to latest version.; operationId=redirectToLatestVersion; tags=System.Object[]; parameters=System.Object[]; responses=}",
+                                                                       "get":  "@{description=Get current version of this resource.; operationId=getCurrentVersion; tags=System.Object[]; parameters=System.Object[]; responses=}"
+                                                                   },
+                  "/workflowstore/workflows/{id}/updateResourceUri":  {
+                                                                          "put":  "@{description=Update references to other resources within this workflow resource.; operationId=updateResourceInWorkflow; tags=System.Object[]; parameters=System.Object[]; requestBody=; responses=; security=System.Object[]}"
+                                                                      }
+              },
+    "info":  {
+                 "title":  "EDDI API",
+                 "version":  "6.0.0",
+                 "description":  "Enterprise-grade conversational AI platform. Configure agents, orchestrate multi-agent group discussions, and integrate with LLM providers via a unified REST API.",
+                 "contact":  {
+                                 "name":  "LABS.AI",
+                                 "email":  "contact@labs.ai",
+                                 "url":  "https://eddi.labs.ai"
+                             },
+                 "license":  {
+                                 "name":  "Apache 2.0",
+                                 "url":  "https://www.apache.org/licenses/LICENSE-2.0.html"
+                             }
+             }
+}

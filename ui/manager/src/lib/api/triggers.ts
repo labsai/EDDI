@@ -18,7 +18,8 @@ export interface AgentTriggerConfiguration {
 const BASE = "/AgentTriggerStore/agenttriggers";
 
 export async function getAllTriggers(): Promise<AgentTriggerConfiguration[]> {
-  return api.get<AgentTriggerConfiguration[]>(BASE);
+  const result = await api.get<AgentTriggerConfiguration[]>(BASE);
+  return result || [];
 }
 
 export async function getTrigger(
