@@ -41,14 +41,14 @@ All repos live under `c:\dev\git\`:
 ### Before Starting Any Work
 
 1. **Read [`HANDOFF.md`](HANDOFF.md)** — current status, completed phases, test counts
-2. **Check git**: `git log -5 --oneline` on `feature/version-6.0.0`
+2. **Check git logs**: `git log -5 --oneline`
 3. **Check for uncommitted work**: `git status`
 4. **Cross-repo context**: [`../EDDI/AGENTS.md`](../EDDI/AGENTS.md) when touching API contracts
 
 ### During Work
 
-- **Branch**: `feature/version-6.0.0` — do NOT commit to `main`
-- **Commit often** with conventional commits: `feat(v6): description`
+- **Branch**: Ensure you are on the correct user-specified feature branch.
+- **Commit often** with conventional commits: `feat: description`
 
 ### Quality Gates
 
@@ -186,7 +186,7 @@ All 9 resource types are defined in `src/lib/api/resources.ts` as `RESOURCE_TYPE
 **Picking up from a previous session:**
 
 1. Read `HANDOFF.md`
-2. `git log -5 --oneline` on `feature/version-6.0.0`
+2. `git log -5 --oneline`
 3. `git status` for uncommitted changes
 
 **Ending a session:**
