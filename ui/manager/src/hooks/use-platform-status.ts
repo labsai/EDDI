@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useMemo } from "react";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -14,16 +14,14 @@ export interface PlatformStatus {
   lastCheckedAt: Date | null;
 }
 
-interface InstanceResponse {
+interface HealthResult {
   instanceId: string;
+  latencyMs: number;
 }
 
 // ─── Fetch with latency measurement ──────────────────────────────
 
-async function checkPlatformHealth(): Promise<{
-  instanceId: string;
-  latencyMs: number;
-}> {
+async function checkPlatformHealth(): Promise<HealthResult> {
   const start = performance.now();
   const res = await fetch(
     `${window.location.origin}/administration/logs/instance-id`,
@@ -35,7 +33,7 @@ async function checkPlatformHealth(): Promise<{
     throw new Error(`HTTP ${res.status}`);
   }
 
-  const data = (await res.json()) as InstanceResponse;
+  const data = (await res.json()) as { instanceId: string };
   return { instanceId: data.instanceId, latencyMs };
 }
 
@@ -47,42 +45,21 @@ const QUERY_KEY = ["platform", "health"] as const;
  * Global platform health hook.
  * Polls /administration/logs/instance-id every 15s.
  * Returns connection status, instance ID, and latency.
+ *
+ * All derived state is computed from the TanStack Query result
+ * — no extra useState — so each poll causes exactly one render.
  */
 export function usePlatformStatus(): PlatformStatus {
-  const [latencyMs, setLatencyMs] = useState<number | null>(null);
-  const lastCheckedRef = useRef<Date | null>(null);
-  const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
-
-  const onSuccess = useCallback((data: { instanceId: string; latencyMs: number }) => {
-    setLatencyMs(data.latencyMs);
-    lastCheckedRef.current = new Date();
-    setLastCheckedAt(lastCheckedRef.current);
-  }, []);
-
-  const onError = useCallback(() => {
-    setLatencyMs(null);
-    lastCheckedRef.current = new Date();
-    setLastCheckedAt(lastCheckedRef.current);
-  }, []);
-
   const query = useQuery({
     queryKey: QUERY_KEY,
-    queryFn: async () => {
-      const result = await checkPlatformHealth();
-      onSuccess(result);
-      return result;
-    },
+    queryFn: checkPlatformHealth,
     refetchInterval: 15_000,
     staleTime: 10_000,
     retry: 1,
   });
 
-  // Track errors via effect since TanStack Query v5 removed onError callback
-  useEffect(() => {
-    if (query.isError) {
-      onError();
-    }
-  }, [query.isError, query.errorUpdatedAt, onError]);
+  // Use dataUpdatedAt / errorUpdatedAt as a stable epoch for "last checked"
+  const lastTimestamp = query.dataUpdatedAt || query.errorUpdatedAt;
 
   const status: PlatformStatus["status"] = query.isLoading
     ? "checking"
@@ -90,10 +67,10 @@ export function usePlatformStatus(): PlatformStatus {
       ? "offline"
       : "online";
 
-  return {
+  return useMemo<PlatformStatus>(() => ({
     status,
     instanceId: query.data?.instanceId ?? null,
-    latencyMs: status === "online" ? latencyMs : null,
-    lastCheckedAt,
-  };
+    latencyMs: status === "online" ? (query.data?.latencyMs ?? null) : null,
+    lastCheckedAt: lastTimestamp ? new Date(lastTimestamp) : null,
+  }), [status, query.data, lastTimestamp]);
 }

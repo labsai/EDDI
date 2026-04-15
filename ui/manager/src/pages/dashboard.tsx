@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import {
@@ -58,15 +58,21 @@ export function DashboardPage() {
   const { data: vaultHealth } = useVaultHealth();
   const { data: agentDescriptors = [] } = useAgentDescriptors(50);
 
-  const recentAgents = recentAgentsRaw ? groupAgentsByName(recentAgentsRaw).slice(0, 4) : [];
+  const recentAgents = useMemo(
+    () => recentAgentsRaw ? groupAgentsByName(recentAgentsRaw).slice(0, 4) : [],
+    [recentAgentsRaw],
+  );
 
   // Build a lookup map: agentId → agent name (latest version)
-  const agentNameMap = new Map<string, string>();
-  if (agentDescriptors.length > 0) {
-    for (const a of groupAgentsByName(agentDescriptors)) {
-      if (a.name) agentNameMap.set(a.id, a.name);
+  const agentNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (agentDescriptors.length > 0) {
+      for (const a of groupAgentsByName(agentDescriptors)) {
+        if (a.name) map.set(a.id, a.name);
+      }
     }
-  }
+    return map;
+  }, [agentDescriptors]);
 
   // Auto-trigger dashboard onboarding chapter on first visit
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
