@@ -1,7 +1,7 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { X, ChevronRight, ChevronLeft, Users, Plus, Trash2 } from "lucide-react";
+import { X, ChevronRight, ChevronLeft, Users, Plus, Trash2, AlertTriangle, Check, Clock, Shield, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -28,7 +28,10 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
   const { t } = useTranslation();
   const createMutation = useCreateGroup();
   const { data: agentDescriptors } = useAgentDescriptors(100);
-  const agents = agentDescriptors ? groupAgentsByName(agentDescriptors) : [];
+  const agents = useMemo(
+    () => (agentDescriptors ? groupAgentsByName(agentDescriptors) : []),
+    [agentDescriptors],
+  );
 
   const [step, setStep] = useState<Step>(initialTemplate ? "basics" : "template");
   const [, setSelectedTemplate] = useState<GroupTemplate | null>(initialTemplate ?? null);
@@ -48,6 +51,13 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
       : []
   );
   const [moderatorAgentId, setModeratorAgentId] = useState("");
+
+  // Resolve agent IDs → display names for review step
+  const agentNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const a of agents) map.set(a.id, a.name || a.id.slice(0, 12));
+    return map;
+  }, [agents]);
 
   const resetAndClose = useCallback(() => {
     setStep("template");
@@ -404,33 +414,17 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
             </div>
           )}
 
-          {/* Review step */}
+          {/* Review / Confirmation step */}
           {step === "review" && (
-            <div className="space-y-3">
-              <h3 className="text-sm font-bold">{name}</h3>
-              {description && <p className="text-xs text-muted-foreground">{description}</p>}
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="outline">{STYLE_INFO[style]?.icon} {STYLE_INFO[style]?.label}</Badge>
-                <Badge variant="secondary">{members.length} members</Badge>
-                <Badge variant="secondary">{maxRounds} rounds</Badge>
-              </div>
-              <div className="rounded-lg border border-border bg-secondary/20 p-3 space-y-1">
-                {members.map((m, i) => (
-                  <div key={i} className="flex items-center gap-2 text-xs">
-                    <span className="font-medium">{m.displayName}</span>
-                    {m.role && <Badge variant="outline" className="text-[9px] px-1 py-0">{m.role}</Badge>}
-                    {m.memberType === "GROUP" && (
-                      <Badge variant="secondary" className="text-[9px] px-1 py-0">
-                        <Users className="h-2 w-2 me-0.5" /> Group
-                      </Badge>
-                    )}
-                    <span className="text-muted-foreground ms-auto font-mono">
-                      {m.agentId ? m.agentId.slice(0, 12) + "…" : "unassigned"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <ReviewStep
+              name={name}
+              description={description}
+              style={style}
+              maxRounds={maxRounds}
+              members={members}
+              moderatorAgentId={moderatorAgentId}
+              agentNameMap={agentNameMap}
+            />
           )}
         </div>
 
@@ -462,6 +456,179 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
             </Button>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Review sub-component (extracted to avoid IIFE and aid React DevTools / fast-refresh) ───
+
+interface ReviewStepProps {
+  name: string;
+  description: string;
+  style: DiscussionStyle;
+  maxRounds: number;
+  members: GroupMember[];
+  moderatorAgentId: string;
+  agentNameMap: Map<string, string>;
+}
+
+function ReviewStep({
+  name,
+  description,
+  style,
+  maxRounds,
+  members,
+  moderatorAgentId,
+  agentNameMap,
+}: ReviewStepProps) {
+  const { t } = useTranslation();
+  const unassignedCount = members.filter((m) => !m.agentId).length;
+
+  return (
+    <div className="space-y-4" data-testid="review-summary">
+      {/* Warning banner for unassigned members */}
+      {unassignedCount > 0 && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2.5">
+          <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+          <p className="text-xs">
+            <span className="font-semibold text-amber-500">
+              {t("groups.reviewUnassignedWarning", "{{count}} member(s) unassigned", { count: unassignedCount })}
+            </span>
+            <span className="text-muted-foreground ms-1">
+              — {t("groups.reviewUnassignedHint", "Go back to assign agents before creating.")}
+            </span>
+          </p>
+        </div>
+      )}
+
+      {/* Section 1: Group Identity */}
+      <div className="rounded-lg border border-border bg-secondary/10 p-3 space-y-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-bold truncate">{name}</h3>
+            {description && (
+              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{description}</p>
+            )}
+          </div>
+          <Badge variant="outline" className="shrink-0">
+            {STYLE_INFO[style]?.icon} {STYLE_INFO[style]?.label}
+          </Badge>
+        </div>
+        <p className="text-[10px] text-muted-foreground font-mono">
+          {STYLE_INFO[style]?.flow}
+        </p>
+      </div>
+
+      {/* Section 2: Key settings */}
+      <div className="grid grid-cols-3 gap-2">
+        <div className="rounded-lg border border-border bg-secondary/10 p-2.5 text-center">
+          <Users className="h-3.5 w-3.5 text-muted-foreground inline-block mb-1" />
+          <div className="text-sm font-bold">{members.length}</div>
+          <div className="text-[10px] text-muted-foreground">
+            {t("groups.reviewMembers", "Members")}
+          </div>
+        </div>
+        <div className="rounded-lg border border-border bg-secondary/10 p-2.5 text-center">
+          <RotateCcw className="h-3.5 w-3.5 text-muted-foreground inline-block mb-1" />
+          <div className="text-sm font-bold">{maxRounds}</div>
+          <div className="text-[10px] text-muted-foreground">
+            {t("groups.reviewRounds", "Max Rounds")}
+          </div>
+        </div>
+        <div className="rounded-lg border border-border bg-secondary/10 p-2.5 text-center">
+          <Clock className="h-3.5 w-3.5 text-muted-foreground inline-block mb-1" />
+          <div className="text-sm font-bold">60s</div>
+          <div className="text-[10px] text-muted-foreground">
+            {t("groups.reviewTimeout", "Agent Timeout")}
+          </div>
+        </div>
+      </div>
+
+      {/* Section 3: Member roster */}
+      <div>
+        <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+          {t("groups.reviewMemberRoster", "Member Roster")}
+        </h4>
+        <div className="rounded-lg border border-border overflow-hidden">
+          {members.map((m, i) => {
+            const agentName = m.agentId ? agentNameMap.get(m.agentId) : null;
+            const isUnassigned = !m.agentId;
+
+            return (
+              <div
+                key={`${m.displayName}-${i}`}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-2 text-xs",
+                  i > 0 && "border-t border-border",
+                  isUnassigned && "bg-amber-400/5"
+                )}
+              >
+                {/* Speaking order */}
+                <span className="text-[10px] font-mono text-muted-foreground w-4 shrink-0 text-center">
+                  {i + 1}
+                </span>
+
+                {/* Display name + role */}
+                <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                  <span className="font-medium truncate">{m.displayName}</span>
+                  {m.role && (
+                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 shrink-0">
+                      {m.role}
+                    </Badge>
+                  )}
+                  {m.memberType === "GROUP" && (
+                    <Badge variant="secondary" className="text-[9px] px-1.5 py-0 shrink-0">
+                      <Users className="h-2 w-2 me-0.5" />
+                      {t("groups.memberTypeGroup", "Group")}
+                    </Badge>
+                  )}
+                </div>
+
+                {/* Agent assignment status */}
+                <div className="shrink-0 flex items-center gap-1">
+                  {isUnassigned ? (
+                    <span className="flex items-center gap-1 text-amber-500 font-medium">
+                      <AlertTriangle className="h-3 w-3" />
+                      {t("groups.reviewUnassigned", "Unassigned")}
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-emerald-500">
+                      <Check className="h-3 w-3" />
+                      <span className="text-foreground/70 truncate max-w-[140px]">{agentName}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Section 4: Moderator */}
+      <div className="rounded-lg border-2 border-primary/15 bg-primary/5 p-3">
+        <div className="flex items-center gap-2 text-xs">
+          <span>⭐</span>
+          <span className="font-semibold">{t("groups.reviewModerator", "Moderator")}</span>
+          <span className="text-muted-foreground">—</span>
+          {moderatorAgentId ? (
+            <span className="text-foreground font-medium">
+              {agentNameMap.get(moderatorAgentId) || moderatorAgentId.slice(0, 12)}
+            </span>
+          ) : (
+            <span className="text-muted-foreground italic">
+              {t("groups.reviewNoModerator", "None (auto-synthesis disabled)")}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Section 5: Protocol defaults */}
+      <div className="flex items-center gap-3 text-[10px] text-muted-foreground px-1">
+        <Shield className="h-3 w-3 shrink-0" />
+        <span>
+          {t("groups.reviewProtocol", "On failure: skip agent • 2 retries • Unavailable members: skip")}
+        </span>
       </div>
     </div>
   );
