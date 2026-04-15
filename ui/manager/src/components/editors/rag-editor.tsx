@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
+import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -176,18 +177,28 @@ function Section({
 
 // ─── Key-Value Editor ───────────────────────────────────────────────────────
 
+/** Keys whose values should use SecretKeyPicker instead of a plain text input */
+const SENSITIVE_KEYS = new Set(["apikey", "password", "secret", "token"]);
+
+function isSensitiveKey(key: string): boolean {
+  return SENSITIVE_KEYS.has(key.toLowerCase());
+}
+
 function KeyValueEditor({
   entries,
   onChange,
   readOnly,
   hints,
   label,
+  testIdPrefix = "kv",
 }: {
   entries: Record<string, string>;
   onChange: (v: Record<string, string>) => void;
   readOnly?: boolean;
   hints?: { key: string; placeholder: string }[];
   label?: string;
+  /** Prefix for data-testid attributes, avoids collisions when multiple editors share key names */
+  testIdPrefix?: string;
 }) {
   const { t } = useTranslation();
   const pairs = Object.entries(entries);
@@ -240,22 +251,34 @@ function KeyValueEditor({
               className="h-7 w-32 rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             />
             <span className="text-muted-foreground/40">=</span>
-            <div className="relative flex-1">
-              <input
-                type="text"
-                value={value}
-                onChange={(e) => updateValue(key, e.target.value)}
-                readOnly={readOnly}
-                placeholder={hint?.placeholder || "value"}
-                className={cn(
-                  "h-7 w-full rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring",
-                  isVaultRef(value) && "pe-7",
+            {isSensitiveKey(key) ? (
+              <div className="flex-1">
+                <SecretKeyPicker
+                  value={value}
+                  onChange={(v) => updateValue(key, v)}
+                  readOnly={readOnly}
+                  placeholder={hint?.placeholder || "${eddivault:...}"}
+                  testId={`${testIdPrefix}-${key}`}
+                />
+              </div>
+            ) : (
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={value}
+                  onChange={(e) => updateValue(key, e.target.value)}
+                  readOnly={readOnly}
+                  placeholder={hint?.placeholder || "value"}
+                  className={cn(
+                    "h-7 w-full rounded border border-input bg-background px-2 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring",
+                    isVaultRef(value) && "pe-7",
+                  )}
+                />
+                {isVaultRef(value) && (
+                  <Lock className="absolute inset-e-2 top-1.5 h-3.5 w-3.5 text-amber-500" />
                 )}
-              />
-              {isVaultRef(value) && (
-                <Lock className="absolute inset-e-2 top-1.5 h-3.5 w-3.5 text-amber-500" />
-              )}
-            </div>
+              </div>
+            )}
             {!readOnly && (
               <button
                 type="button"
@@ -673,6 +696,7 @@ export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }:
               onChange={(v) => onChange({ ...data, embeddingParameters: Object.keys(v).length > 0 ? v : undefined })}
               readOnly={readOnly}
               hints={embeddingHints}
+              testIdPrefix="embed"
             />
           </div>
         </div>
@@ -745,6 +769,7 @@ export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }:
                 }
                 readOnly={readOnly}
                 hints={storeHints}
+                testIdPrefix="store"
               />
             </div>
           )}

@@ -63,6 +63,9 @@ import {
   BUILT_IN_TOOLS,
 } from "./llm/types";
 
+/** Parameter keys whose values should use SecretKeyPicker (case-insensitive match) */
+const SENSITIVE_LLM_PARAM_KEYS = new Set(["apikey", "password", "secret", "token"]);
+
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 function ActionTags({
@@ -402,36 +405,51 @@ function TaskEditor({
             <div className="grid grid-cols-2 gap-2">
               {Object.entries(task.parameters ?? {})
                 .filter(([k]) => !HIDDEN_PARAM_KEYS.has(k))
-                .map(([k, v]) => (
-                  <div key={k} className="flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      value={k}
-                      readOnly
-                      className="h-7 w-28 rounded border border-input bg-muted px-2 text-xs text-foreground"
-                    />
-                    <input
-                      type="text"
-                      value={v}
-                      onChange={(e) => updateParam(k, e.target.value)}
-                      readOnly={readOnly}
-                      className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                    />
-                    {!readOnly && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = { ...task.parameters };
-                          delete next[k];
-                          onChange({ ...task, parameters: next });
-                        }}
-                        className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                ))}
+                .map(([k, v]) => {
+                  const isSensitive = SENSITIVE_LLM_PARAM_KEYS.has(k.toLowerCase());
+                  return (
+                    <div key={k} className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={k}
+                        readOnly
+                        className="h-7 w-28 rounded border border-input bg-muted px-2 text-xs text-foreground"
+                      />
+                      {isSensitive ? (
+                        <div className="flex-1">
+                          <SecretKeyPicker
+                            value={v}
+                            onChange={(val) => updateParam(k, val)}
+                            readOnly={readOnly}
+                            placeholder={"${eddivault:...}"}
+                            testId={`llm-param-${k}`}
+                          />
+                        </div>
+                      ) : (
+                        <input
+                          type="text"
+                          value={v}
+                          onChange={(e) => updateParam(k, e.target.value)}
+                          readOnly={readOnly}
+                          className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        />
+                      )}
+                      {!readOnly && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = { ...task.parameters };
+                            delete next[k];
+                            onChange({ ...task, parameters: next });
+                          }}
+                          className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
             </div>
             {!readOnly && (
               <button
