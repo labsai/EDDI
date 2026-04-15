@@ -22,21 +22,13 @@ Add these **Bot Token Scopes**:
 | `channels:read` | Read channel metadata |
 | `im:read` | Read direct messages |
 
-### 3. Enable Event Subscriptions
-
-1. Go to **Event Subscriptions** → Enable
-2. Set the **Request URL** to: `https://<your-eddi-host>/integrations/slack/events`
-3. Subscribe to **Bot Events**:
-   - `app_mention` — triggers when the bot is @mentioned
-   - `message.im` — triggers on direct messages
-
-### 4. Install to Workspace
+### 3. Install to Workspace
 
 1. Go to **Install App** → **Install to Workspace**
 2. Copy the **Bot User OAuth Token** (starts with `xoxb-`)
 3. Copy the **Signing Secret** from **Basic Information**
 
-### 5. Enable Slack in EDDI
+### 4. Enable Slack in EDDI
 
 Set the master toggle (environment variable or `application.properties`):
 
@@ -46,7 +38,7 @@ eddi.slack.enabled=true
 
 This is the only server-level setting. All credentials are configured per-agent.
 
-### 6. Store Credentials in Vault
+### 5. Store Credentials in Vault
 
 Store your Slack credentials in EDDI's Secrets Vault:
 
@@ -61,7 +53,7 @@ curl -X POST http://localhost:7070/secretstore/keys \
   -d '{"keyName":"slack-signing-secret","secretValue":"your-signing-secret"}'
 ```
 
-### 7. Configure Channel Mapping on Your Agent
+### 6. Configure Channel Mapping on Your Agent
 
 Add a `ChannelConnector` to your agent configuration:
 
@@ -84,6 +76,18 @@ Add a `ChannelConnector` to your agent configuration:
 The `channelId` is the Slack channel ID (find it in Slack by right-clicking a channel → **View channel details** → copy the ID at the bottom).
 
 > **Multi-workspace**: Each agent can use different bot tokens and signing secrets, allowing a single EDDI instance to serve multiple Slack workspaces.
+
+### 7. Enable Event Subscriptions in Slack
+
+> ⚠️ **This step must come last.** When you set the Request URL, Slack immediately sends a signed `url_verification` challenge. EDDI verifies this using the signing secrets from step 6. If no agent is configured yet, verification fails and Slack rejects the URL.
+
+1. Go to **Event Subscriptions** → Enable
+2. Set the **Request URL** to: `https://<your-eddi-host>/integrations/slack/events`
+3. Slack will verify the URL (you should see a green checkmark)
+4. Subscribe to **Bot Events**:
+   - `app_mention` — triggers when the bot is @mentioned
+   - `message.im` — triggers on direct messages
+5. Click **Save Changes**
 
 ---
 

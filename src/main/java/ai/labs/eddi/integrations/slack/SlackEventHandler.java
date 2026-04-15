@@ -232,6 +232,13 @@ public class SlackEventHandler {
         // Resolve bot token for this channel
         Optional<SlackChannelRouter.SlackCredentials> credsOpt = channelRouter.resolveCredentials(channelId);
         String botToken = credsOpt.map(SlackChannelRouter.SlackCredentials::botToken).orElse("");
+
+        if (botToken.isEmpty()) {
+            LOGGER.errorf("No bot token configured for Slack channel %s — cannot run group discussion. " +
+                    "Check the agent's ChannelConnector config and vault key resolution.", channelId);
+            return;
+        }
+
         String token = "Bearer " + botToken;
 
         // Create the listener that streams discussion into Slack

@@ -230,6 +230,45 @@ class SlackChannelRouterTest {
         assertFalse(router.hasAnySlackChannels());
     }
 
+    @Test
+    void resolveCredentials_vaultFailure_botTokenNull_channelStillMapped() throws Exception {
+        // Vault throws for the botToken reference but signingSecret resolves fine
+        when(secretResolver.resolveValue("${eddivault:bad-token-ref}"))
+                .thenThrow(new RuntimeException("Vault key not found: bad-token-ref"));
+        when(secretResolver.resolveValue("plain-secret"))
+                .thenReturn("plain-secret");
+
+        setupDeployedAgent("agent-1", 1, "C0123",
+                "${eddivault:bad-token-ref}", "plain-secret", null);
+
+        // Channel should still be mapped (routing works)
+        assertEquals(Optional.of("agent-1"), router.resolveAgentId("C0123"));
+
+        // Credentials should exist but botToken should be null (graceful degradation)
+        var creds = router.resolveCredentials("C0123");
+        assertTrue(creds.isPresent());
+        assertNull(creds.get().botToken());
+        assertEquals("plain-secret", creds.get().signingSecret());
+    }
+
+    @Test
+    void resolveCredentials_vaultFailure_signingSecretNull_notInSigningSecretsSet() throws Exception {
+        // Signing secret vault ref fails — should not appear in getAllSigningSecrets()
+        when(secretResolver.resolveValue("xoxb-good-token"))
+                .thenReturn("xoxb-good-token");
+        when(secretResolver.resolveValue("${eddivault:bad-secret-ref}"))
+                .thenThrow(new RuntimeException("Vault key not found"));
+
+        setupDeployedAgent("agent-1", 1, "C0123",
+                "xoxb-good-token", "${eddivault:bad-secret-ref}", null);
+
+        // Signing secrets set should be empty (failed resolution excluded)
+        assertTrue(router.getAllSigningSecrets().isEmpty());
+
+        // But the channel is still mapped
+        assertEquals(Optional.of("agent-1"), router.resolveAgentId("C0123"));
+    }
+
     // ─── Helpers ───
 
     private void setupDeployedAgent(String agentId, int version, String channelId,
