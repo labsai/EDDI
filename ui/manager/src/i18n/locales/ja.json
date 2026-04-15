@@ -126,7 +126,8 @@
     "copy": "コピー",
     "saving": "保存中…",
     "showMore": "Show More",
-    "showLess": "Show Less"
+    "showLess": "Show Less",
+    "copyFailed": "クリップボードへのコピーに失敗しました"
   },
   "agents": {
     "deploy": "デプロイ",
@@ -196,7 +197,34 @@
     "onCapEvict": "最古を削除",
     "onCapReject": "拒否",
     "recallMostRecent": "最新順",
-    "recallMostRelevant": "関連度順"
+    "recallMostRelevant": "関連度順",
+    "channels": "チャネルコネクタ",
+    "channelsDesc": "このエージェントをSlackチャネルに接続します。各チャネルコネクタは独自の認証情報で個別に設定され、マルチワークスペース設定をサポートします。",
+    "noChannels": "チャネルが設定されていません",
+    "noChannelsDesc": "Slackチャネルを追加して、ユーザーがSlackからこのエージェントとやり取りできるようにします。",
+    "addSlackChannel": "Slackチャネルを追加",
+    "slackChannel": "Slackチャネル",
+    "removeChannel": "チャネルを削除",
+    "removeChannelConfirm": "このSlackチャネルコネクタを削除しますか？",
+    "channelId": "チャネルID",
+    "channelIdHint": "チャネルIDはCで始まり、大文字の英数字が続きます",
+    "botToken": "ボットトークン",
+    "botTokenPlaceholder": "xoxb-… または ${eddivault:slack-bot-token}",
+    "botTokenHint": "Slack Bot User OAuthトークン。セキュリティのためにVault参照を使用してください。",
+    "signingSecret": "署名シークレット",
+    "signingSecretPlaceholder": "16進文字列または ${eddivault:slack-signing-secret}",
+    "signingSecretHint": "Slackアプリの基本情報ページから。セキュリティのためにVault参照を使用してください。",
+    "groupIdOptional": "グループID（オプション）",
+    "groupIdPlaceholder": "マルチエージェントグループ設定ID",
+    "groupIdHint": "このSlackチャネルから「group: 質問」マルチエージェント討論を有効にします。",
+    "slackSetupGuide": "Slackセットアップガイド",
+    "slackWebhookUrl": "Webhook URL",
+    "slackWebhookCopied": "Webhook URLをコピーしました",
+    "slackStep1": "api.slack.com/appsでSlackアプリを作成し、ワークスペースにインストールします。",
+    "slackStep2": "ボットトークン（xoxb-…）と署名シークレットをEDDI Vaultにコピーし、以下でチャネルを設定します。",
+    "slackStep3": "次にSlackアプリでEvent Subscriptionsを有効にし、上記のWebhook URLを貼り付けて、以下を購読します：",
+    "slackSetupNote": "重要：Event Subscriptionsを有効にする前に、下のチャネルを設定してください — SlackはURL検証チャレンジを送信し、EDDIで署名シークレットが設定されている必要があります。",
+    "slackRequiredScopes": "必要なボットトークンスコープ"
   },
   "wizard": {
     "title": "Agent ウィザード"

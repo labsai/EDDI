@@ -126,7 +126,8 @@
     "copy": "复制",
     "saving": "保存中…",
     "showMore": "Show More",
-    "showLess": "Show Less"
+    "showLess": "Show Less",
+    "copyFailed": "复制到剪贴板失败"
   },
   "agents": {
     "deploy": "部署",
@@ -196,7 +197,34 @@
     "onCapEvict": "淘汰最旧",
     "onCapReject": "拒绝",
     "recallMostRecent": "最新优先",
-    "recallMostRelevant": "最相关优先"
+    "recallMostRelevant": "最相关优先",
+    "channels": "频道连接器",
+    "channelsDesc": "将此代理连接到 Slack 频道。每个频道连接器都可以独立配置自己的凭据，支持多工作区设置。",
+    "noChannels": "未配置频道",
+    "noChannelsDesc": "添加 Slack 频道，让用户可以通过 Slack 与此代理交互。",
+    "addSlackChannel": "添加 Slack 频道",
+    "slackChannel": "Slack 频道",
+    "removeChannel": "移除频道",
+    "removeChannelConfirm": "移除此 Slack 频道连接器？",
+    "channelId": "频道 ID",
+    "channelIdHint": "频道 ID 以 C 开头，后跟大写字母数字字符",
+    "botToken": "Bot 令牌",
+    "botTokenPlaceholder": "xoxb-… 或 ${eddivault:slack-bot-token}",
+    "botTokenHint": "Slack Bot 用户 OAuth 令牌。请使用保管库引用以确保安全。",
+    "signingSecret": "签名密钥",
+    "signingSecretPlaceholder": "十六进制字符串或 ${eddivault:slack-signing-secret}",
+    "signingSecretHint": "来自 Slack 应用的基本信息页面。请使用保管库引用以确保安全。",
+    "groupIdOptional": "群组 ID（可选）",
+    "groupIdPlaceholder": "多代理群组配置 ID",
+    "groupIdHint": "启用此 Slack 频道的 \"group: 问题\" 多代理讨论。",
+    "slackSetupGuide": "Slack 设置指南",
+    "slackWebhookUrl": "Webhook URL",
+    "slackWebhookCopied": "Webhook URL 已复制",
+    "slackStep1": "在 api.slack.com/apps 上创建一个 Slack 应用并将其安装到您的工作区。",
+    "slackStep2": "将 Bot 令牌 (xoxb-…) 和签名密钥复制到 EDDI 保管库中，并在下方配置频道。",
+    "slackStep3": "然后在 Slack 应用中启用 Event Subscriptions，粘贴上面的 Webhook URL，并订阅：",
+    "slackSetupNote": "重要提示：在启用 Event Subscriptions 之前，请先在下方配置频道 — Slack 会发送 URL 验证请求，需要在 EDDI 中配置签名密钥。",
+    "slackRequiredScopes": "所需的 Bot 令牌权限"
   },
   "wizard": {
     "title": "Agent 向导"

@@ -126,7 +126,8 @@
     "copy": "คัดลอก",
     "saving": "กำลังบันทึก…",
     "showMore": "Show More",
-    "showLess": "Show Less"
+    "showLess": "Show Less",
+    "copyFailed": "คัดลอกไปยังคลิปบอร์ดล้มเหลว"
   },
   "agents": {
     "deploy": "ติดตั้ง (Deploy)",
@@ -196,7 +197,34 @@
     "onCapEvict": "ลบรายการเก่าสุด",
     "onCapReject": "ปฏิเสธ",
     "recallMostRecent": "ล่าสุด",
-    "recallMostRelevant": "เกี่ยวข้องที่สุด"
+    "recallMostRelevant": "เกี่ยวข้องที่สุด",
+    "channels": "ตัวเชื่อมต่อช่อง",
+    "channelsDesc": "เชื่อมต่อเอเจนต์นี้กับช่อง Slack แต่ละตัวเชื่อมต่อจะกำหนดค่าแยกกันด้วยข้อมูลประจำตัวของตัวเอง รองรับการตั้งค่าหลายเวิร์กสเปซ",
+    "noChannels": "ยังไม่ได้กำหนดค่าช่อง",
+    "noChannelsDesc": "เพิ่มช่อง Slack เพื่อให้ผู้ใช้สามารถโต้ตอบกับเอเจนต์นี้จาก Slack",
+    "addSlackChannel": "เพิ่มช่อง Slack",
+    "slackChannel": "ช่อง Slack",
+    "removeChannel": "ลบช่อง",
+    "removeChannelConfirm": "ลบตัวเชื่อมต่อช่อง Slack นี้?",
+    "channelId": "ID ช่อง",
+    "channelIdHint": "ID ช่องเริ่มต้นด้วย C ตามด้วยตัวอักษรและตัวเลขตัวพิมพ์ใหญ่",
+    "botToken": "โทเค็นบอท",
+    "botTokenPlaceholder": "xoxb-… หรือ ${eddivault:slack-bot-token}",
+    "botTokenHint": "โทเค็น OAuth ผู้ใช้บอท Slack ใช้การอ้างอิง vault เพื่อความปลอดภัย",
+    "signingSecret": "ซีเคร็ตลายเซ็น",
+    "signingSecretPlaceholder": "สตริงฐานสิบหกหรือ ${eddivault:slack-signing-secret}",
+    "signingSecretHint": "จากหน้า Basic Information ของแอป Slack ใช้การอ้างอิง vault เพื่อความปลอดภัย",
+    "groupIdOptional": "ID กลุ่ม (ไม่บังคับ)",
+    "groupIdPlaceholder": "ID การกำหนดค่ากลุ่มหลายเอเจนต์",
+    "groupIdHint": "เปิดใช้งานการสนทนาหลายเอเจนต์ \"group: คำถาม\" จากช่อง Slack นี้",
+    "slackSetupGuide": "คู่มือการตั้งค่า Slack",
+    "slackWebhookUrl": "URL Webhook",
+    "slackWebhookCopied": "คัดลอก URL Webhook แล้ว",
+    "slackStep1": "สร้างแอป Slack ที่ api.slack.com/apps แล้วติดตั้งในเวิร์กสเปซของคุณ",
+    "slackStep2": "คัดลอกโทเค็นบอท (xoxb-…) และซีเคร็ตลายเซ็นไปยัง vault ของ EDDI แล้วกำหนดค่าช่องด้านล่าง",
+    "slackStep3": "จากนั้นเปิดใช้งาน Event Subscriptions ในแอป Slack วาง URL Webhook ด้านบนแล้วสมัครรับ:",
+    "slackSetupNote": "สำคัญ: กำหนดค่าช่องด้านล่างก่อนเปิดใช้งาน Event Subscriptions — Slack จะส่งคำท้าทายการตรวจสอบ URL ที่ต้องกำหนดค่าซีเคร็ตลายเซ็นใน EDDI",
+    "slackRequiredScopes": "สิทธิ์โทเค็นบอทที่จำเป็น"
   },
   "wizard": {
     "title": "ตัวช่วยสร้าง Agent"

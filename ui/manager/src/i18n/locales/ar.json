@@ -126,7 +126,8 @@
     "copy": "نسخ",
     "saving": "جارٍ الحفظ…",
     "showMore": "Show More",
-    "showLess": "Show Less"
+    "showLess": "Show Less",
+    "copyFailed": "فشل النسخ إلى الحافظة"
   },
   "agents": {
     "deploy": "نشر",
@@ -196,7 +197,34 @@
     "onCapEvict": "إزالة الأقدم",
     "onCapReject": "رفض",
     "recallMostRecent": "الأحدث",
-    "recallMostRelevant": "الأكثر صلة"
+    "recallMostRelevant": "الأكثر صلة",
+    "channels": "موصلات القنوات",
+    "channelsDesc": "اربط هذا الوكيل بقنوات Slack. كل موصل قناة يُعد بشكل مستقل ببيانات اعتماد خاصة، مما يدعم إعدادات مساحات العمل المتعددة.",
+    "noChannels": "لا توجد قنوات مُعدة",
+    "noChannelsDesc": "أضف قناة Slack للسماح للمستخدمين بالتفاعل مع هذا الوكيل من Slack.",
+    "addSlackChannel": "إضافة قناة Slack",
+    "slackChannel": "قناة Slack",
+    "removeChannel": "إزالة القناة",
+    "removeChannelConfirm": "إزالة موصل قناة Slack هذا؟",
+    "channelId": "معرف القناة",
+    "channelIdHint": "تبدأ معرفات القنوات بحرف C متبوعاً بأحرف أبجدية رقمية كبيرة",
+    "botToken": "رمز البوت",
+    "botTokenPlaceholder": "xoxb-… أو ${eddivault:slack-bot-token}",
+    "botTokenHint": "رمز OAuth لمستخدم بوت Slack. استخدم مرجع الخزنة للأمان.",
+    "signingSecret": "سر التوقيع",
+    "signingSecretPlaceholder": "سلسلة سداسية عشرية أو ${eddivault:slack-signing-secret}",
+    "signingSecretHint": "من صفحة المعلومات الأساسية لتطبيق Slack الخاص بك. استخدم مرجع الخزنة للأمان.",
+    "groupIdOptional": "معرف المجموعة (اختياري)",
+    "groupIdPlaceholder": "معرف تكوين المجموعة متعددة الوكلاء",
+    "groupIdHint": "فعّل مناقشات \"group: سؤال\" متعددة الوكلاء من قناة Slack هذه.",
+    "slackSetupGuide": "دليل إعداد Slack",
+    "slackWebhookUrl": "عنوان Webhook",
+    "slackWebhookCopied": "تم نسخ عنوان Webhook",
+    "slackStep1": "أنشئ تطبيق Slack على api.slack.com/apps وثبّته في مساحة عملك.",
+    "slackStep2": "انسخ رمز البوت (xoxb-…) وسر التوقيع إلى خزنة EDDI وأعد تكوين القنوات أدناه.",
+    "slackStep3": "ثم فعّل Event Subscriptions في تطبيق Slack الخاص بك، والصق عنوان Webhook أعلاه واشترك في:",
+    "slackSetupNote": "مهم: أعد تكوين القناة أدناه قبل تفعيل Event Subscriptions — يرسل Slack تحدي تحقق URL يتطلب تكوين سر التوقيع في EDDI.",
+    "slackRequiredScopes": "أذونات رمز البوت المطلوبة"
   },
   "wizard": {
     "title": "معالج Agent"

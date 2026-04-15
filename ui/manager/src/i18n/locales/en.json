@@ -126,7 +126,8 @@
     "copy": "Copy",
     "saving": "Saving...",
     "showMore": "Show more",
-    "showLess": "Show less"
+    "showLess": "Show less",
+    "copyFailed": "Failed to copy to clipboard"
   },
   "createOrWizard": {
     "title": "New {{type}}",
@@ -223,7 +224,34 @@
     "onCapEvict": "Evict Oldest",
     "onCapReject": "Reject",
     "recallMostRecent": "Most Recent",
-    "recallMostRelevant": "Most Relevant"
+    "recallMostRelevant": "Most Relevant",
+    "channels": "Channel Connectors",
+    "channelsDesc": "Connect this agent to Slack channels. Each channel connector is independently configured with its own credentials, supporting multi-workspace setups.",
+    "noChannels": "No channels configured",
+    "noChannelsDesc": "Add a Slack channel to let users interact with this agent from Slack.",
+    "addSlackChannel": "Add Slack Channel",
+    "slackChannel": "Slack Channel",
+    "removeChannel": "Remove channel",
+    "removeChannelConfirm": "Remove this Slack channel connector?",
+    "channelId": "Channel ID",
+    "channelIdHint": "Channel IDs start with C followed by uppercase alphanumeric characters",
+    "botToken": "Bot Token",
+    "botTokenPlaceholder": "xoxb-… or ${eddivault:slack-bot-token}",
+    "botTokenHint": "Slack Bot User OAuth Token. Use a vault reference for security.",
+    "signingSecret": "Signing Secret",
+    "signingSecretPlaceholder": "Hex string or ${eddivault:slack-signing-secret}",
+    "signingSecretHint": "From your Slack App's Basic Information page. Use a vault reference for security.",
+    "groupIdOptional": "Group ID (optional)",
+    "groupIdPlaceholder": "Multi-agent group config ID",
+    "groupIdHint": "Set this to enable \"group: question\" multi-agent discussions from this Slack channel.",
+    "slackSetupGuide": "Slack Setup Guide",
+    "slackWebhookUrl": "Webhook URL",
+    "slackWebhookCopied": "Webhook URL copied",
+    "slackStep1": "Create a Slack App at api.slack.com/apps and install it to your workspace.",
+    "slackStep2": "Copy the Bot Token (xoxb-…) and Signing Secret into the EDDI vault and configure channels below.",
+    "slackStep3": "Then enable Event Subscriptions in your Slack App, paste the Webhook URL above, and subscribe to:",
+    "slackSetupNote": "Important: Configure the channel below before enabling Event Subscriptions — Slack sends a URL verification challenge that requires the signing secret to be configured in EDDI.",
+    "slackRequiredScopes": "Required Bot Token Scopes"
   },
   "wizard": {
     "title": "Agent Wizard"

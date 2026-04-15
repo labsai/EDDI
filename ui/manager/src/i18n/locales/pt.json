@@ -126,7 +126,8 @@
     "copy": "Copiar",
     "saving": "A guardar…",
     "showMore": "Show More",
-    "showLess": "Show Less"
+    "showLess": "Show Less",
+    "copyFailed": "Falha ao copiar para a área de transferência"
   },
   "agents": {
     "deploy": "Implementar",
@@ -196,7 +197,34 @@
     "onCapEvict": "Remover o mais antigo",
     "onCapReject": "Rejeitar",
     "recallMostRecent": "Mais recente",
-    "recallMostRelevant": "Mais relevante"
+    "recallMostRelevant": "Mais relevante",
+    "channels": "Conectores de canal",
+    "channelsDesc": "Conecte este agente a canais do Slack. Cada conector é configurado independentemente com suas próprias credenciais, suportando configurações multi-workspace.",
+    "noChannels": "Nenhum canal configurado",
+    "noChannelsDesc": "Adicione um canal do Slack para permitir que os usuários interajam com este agente pelo Slack.",
+    "addSlackChannel": "Adicionar canal Slack",
+    "slackChannel": "Canal Slack",
+    "removeChannel": "Remover canal",
+    "removeChannelConfirm": "Remover este conector de canal Slack?",
+    "channelId": "ID do canal",
+    "channelIdHint": "IDs de canal começam com C seguido de caracteres alfanuméricos maiúsculos",
+    "botToken": "Token do bot",
+    "botTokenPlaceholder": "xoxb-… ou ${eddivault:slack-bot-token}",
+    "botTokenHint": "Token OAuth de usuário bot do Slack. Use uma referência de vault para segurança.",
+    "signingSecret": "Segredo de assinatura",
+    "signingSecretPlaceholder": "String hexadecimal ou ${eddivault:slack-signing-secret}",
+    "signingSecretHint": "Da página de informações básicas do seu app Slack. Use uma referência de vault para segurança.",
+    "groupIdOptional": "ID do grupo (opcional)",
+    "groupIdPlaceholder": "ID de configuração de grupo multi-agente",
+    "groupIdHint": "Ative discussões multi-agente \"group: pergunta\" a partir deste canal Slack.",
+    "slackSetupGuide": "Guia de configuração do Slack",
+    "slackWebhookUrl": "URL do webhook",
+    "slackWebhookCopied": "URL do webhook copiada",
+    "slackStep1": "Crie um app Slack em api.slack.com/apps e instale-o no seu workspace.",
+    "slackStep2": "Copie o token do bot (xoxb-…) e o segredo de assinatura para o vault do EDDI e configure os canais abaixo.",
+    "slackStep3": "Em seguida, ative Event Subscriptions no seu app Slack, cole a URL do webhook acima e inscreva-se em:",
+    "slackSetupNote": "Importante: Configure o canal abaixo antes de ativar Event Subscriptions — o Slack envia um desafio de verificação de URL que requer que o segredo de assinatura esteja configurado no EDDI.",
+    "slackRequiredScopes": "Permissões de token do bot necessárias"
   },
   "wizard": {
     "title": "Assistente de Agent"

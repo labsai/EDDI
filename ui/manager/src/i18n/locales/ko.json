@@ -126,7 +126,8 @@
     "copy": "복사",
     "saving": "저장 중…",
     "showMore": "Show More",
-    "showLess": "Show Less"
+    "showLess": "Show Less",
+    "copyFailed": "클립보드 복사 실패"
   },
   "agents": {
     "deploy": "배포",
@@ -196,7 +197,34 @@
     "onCapEvict": "가장 오래된 항목 제거",
     "onCapReject": "거부",
     "recallMostRecent": "최근순",
-    "recallMostRelevant": "관련도순"
+    "recallMostRelevant": "관련도순",
+    "channels": "채널 커넥터",
+    "channelsDesc": "이 에이전트를 Slack 채널에 연결합니다. 각 채널 커넥터는 자체 자격 증명으로 독립적으로 구성되며 다중 워크스페이스 설정을 지원합니다.",
+    "noChannels": "구성된 채널 없음",
+    "noChannelsDesc": "Slack 채널을 추가하여 사용자가 Slack에서 이 에이전트와 상호작용할 수 있게 합니다.",
+    "addSlackChannel": "Slack 채널 추가",
+    "slackChannel": "Slack 채널",
+    "removeChannel": "채널 제거",
+    "removeChannelConfirm": "이 Slack 채널 커넥터를 제거하시겠습니까?",
+    "channelId": "채널 ID",
+    "channelIdHint": "채널 ID는 C로 시작하고 대문자 영숫자 문자가 뒤따릅니다",
+    "botToken": "봇 토큰",
+    "botTokenPlaceholder": "xoxb-… 또는 ${eddivault:slack-bot-token}",
+    "botTokenHint": "Slack Bot User OAuth 토큰. 보안을 위해 볼트 참조를 사용하세요.",
+    "signingSecret": "서명 시크릿",
+    "signingSecretPlaceholder": "16진수 문자열 또는 ${eddivault:slack-signing-secret}",
+    "signingSecretHint": "Slack 앱의 기본 정보 페이지에서. 보안을 위해 볼트 참조를 사용하세요.",
+    "groupIdOptional": "그룹 ID (선택사항)",
+    "groupIdPlaceholder": "멀티 에이전트 그룹 구성 ID",
+    "groupIdHint": "이 Slack 채널에서 \"group: 질문\" 멀티 에이전트 토론을 활성화합니다.",
+    "slackSetupGuide": "Slack 설정 가이드",
+    "slackWebhookUrl": "Webhook URL",
+    "slackWebhookCopied": "Webhook URL 복사됨",
+    "slackStep1": "api.slack.com/apps에서 Slack 앱을 만들고 워크스페이스에 설치합니다.",
+    "slackStep2": "봇 토큰(xoxb-…)과 서명 시크릿을 EDDI 볼트에 복사하고 아래에서 채널을 구성합니다.",
+    "slackStep3": "그런 다음 Slack 앱에서 Event Subscriptions을 활성화하고 위의 Webhook URL을 붙여넣고 구독합니다:",
+    "slackSetupNote": "중요: Event Subscriptions을 활성화하기 전에 아래 채널을 구성하세요 — Slack은 EDDI에서 서명 시크릿이 구성되어 있어야 하는 URL 확인 챌린지를 보냅니다.",
+    "slackRequiredScopes": "필요한 봇 토큰 범위"
   },
   "wizard": {
     "title": "Agent 마법사"

@@ -126,7 +126,8 @@
     "copy": "कॉपी",
     "saving": "सहेज रहे हैं…",
     "showMore": "Show More",
-    "showLess": "Show Less"
+    "showLess": "Show Less",
+    "copyFailed": "क्लिपबोर्ड पर कॉपी करने में विफल"
   },
   "agents": {
     "deploy": "तैनात करें",
@@ -196,7 +197,34 @@
     "onCapEvict": "सबसे पुराना हटाएं",
     "onCapReject": "अस्वीकार करें",
     "recallMostRecent": "सबसे हालिया",
-    "recallMostRelevant": "सबसे प्रासंगिक"
+    "recallMostRelevant": "सबसे प्रासंगिक",
+    "channels": "चैनल कनेक्टर",
+    "channelsDesc": "इस एजेंट को Slack चैनलों से कनेक्ट करें। प्रत्येक चैनल कनेक्टर स्वतंत्र रूप से अपने क्रेडेंशियल्स के साथ कॉन्फ़िगर किया जाता है, मल्टी-वर्कस्पेस सेटअप का समर्थन करता है।",
+    "noChannels": "कोई चैनल कॉन्फ़िगर नहीं",
+    "noChannelsDesc": "उपयोगकर्ताओं को Slack से इस एजेंट के साथ इंटरैक्ट करने के लिए एक Slack चैनल जोड़ें।",
+    "addSlackChannel": "Slack चैनल जोड़ें",
+    "slackChannel": "Slack चैनल",
+    "removeChannel": "चैनल हटाएं",
+    "removeChannelConfirm": "इस Slack चैनल कनेक्टर को हटाएं?",
+    "channelId": "चैनल आईडी",
+    "channelIdHint": "चैनल आईडी C से शुरू होती है जिसके बाद अपरकेस अल्फ़ान्यूमेरिक वर्ण आते हैं",
+    "botToken": "बॉट टोकन",
+    "botTokenPlaceholder": "xoxb-… या ${eddivault:slack-bot-token}",
+    "botTokenHint": "Slack बॉट यूज़र OAuth टोकन। सुरक्षा के लिए वॉल्ट संदर्भ का उपयोग करें।",
+    "signingSecret": "साइनिंग सीक्रेट",
+    "signingSecretPlaceholder": "हेक्स स्ट्रिंग या ${eddivault:slack-signing-secret}",
+    "signingSecretHint": "आपके Slack ऐप के बेसिक इन्फ़ॉर्मेशन पेज से। सुरक्षा के लिए वॉल्ट संदर्भ का उपयोग करें।",
+    "groupIdOptional": "ग्रुप आईडी (वैकल्पिक)",
+    "groupIdPlaceholder": "मल्टी-एजेंट ग्रुप कॉन्फ़िग आईडी",
+    "groupIdHint": "इस Slack चैनल से \"group: प्रश्न\" मल्टी-एजेंट चर्चा सक्षम करें।",
+    "slackSetupGuide": "Slack सेटअप गाइड",
+    "slackWebhookUrl": "Webhook URL",
+    "slackWebhookCopied": "Webhook URL कॉपी किया गया",
+    "slackStep1": "api.slack.com/apps पर एक Slack ऐप बनाएं और इसे अपने वर्कस्पेस में इंस्टॉल करें।",
+    "slackStep2": "बॉट टोकन (xoxb-…) और साइनिंग सीक्रेट को EDDI वॉल्ट में कॉपी करें और नीचे चैनल कॉन्फ़िगर करें।",
+    "slackStep3": "फिर अपने Slack ऐप में Event Subscriptions सक्षम करें, ऊपर Webhook URL पेस्ट करें और सब्सक्राइब करें:",
+    "slackSetupNote": "महत्वपूर्ण: Event Subscriptions सक्षम करने से पहले नीचे चैनल कॉन्फ़िगर करें — Slack एक URL सत्यापन चुनौती भेजता है जिसके लिए EDDI में साइनिंग सीक्रेट कॉन्फ़िगर होना आवश्यक है।",
+    "slackRequiredScopes": "आवश्यक बॉट टोकन स्कोप"
   },
   "wizard": {
     "title": "Agent विज़ार्ड"
