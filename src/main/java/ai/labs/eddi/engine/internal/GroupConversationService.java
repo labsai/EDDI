@@ -479,7 +479,7 @@ public class GroupConversationService implements IGroupConversationService {
                 gc.getTranscript().add(entry);
                 if (listener != null) {
                     listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(speaker.agentId(), speaker.displayName(),
-                            entry.content(), phaseIdx, phase.name()));
+                            entry.content(), phaseIdx, phase.name(), target.agentId(), target.displayName()));
                 }
             }
         }

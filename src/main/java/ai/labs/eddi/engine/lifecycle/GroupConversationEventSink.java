@@ -44,7 +44,13 @@ public final class GroupConversationEventSink {
     public record TokenEvent(String agentId, String token) {
     }
 
-    public record SpeakerCompleteEvent(String agentId, String displayName, String response, int phaseIndex, String phaseName) {
+    public record SpeakerCompleteEvent(String agentId, String displayName, String response, int phaseIndex, String phaseName,
+            String targetAgentId, String targetDisplayName) {
+
+        /** Backward-compatible constructor (no target). */
+        public SpeakerCompleteEvent(String agentId, String displayName, String response, int phaseIndex, String phaseName) {
+            this(agentId, displayName, response, phaseIndex, phaseName, null, null);
+        }
     }
 
     public record PhaseCompleteEvent(int phaseIndex, String phaseName) {

@@ -50,7 +50,7 @@ public class SlackWebApiClient {
      * @param text
      *            the message text (Slack mrkdwn format)
      */
-    public void postMessage(String authToken, String channelId, String threadTs, String text) {
+    public String postMessage(String authToken, String channelId, String threadTs, String text) {
         try {
             // Build JSON body manually to avoid Jackson dependency for this simple case
             var json = new StringBuilder("{");
@@ -75,13 +75,40 @@ public class SlackWebApiClient {
             if (response.statusCode() != 200) {
                 LOGGER.warnf("Slack chat.postMessage returned HTTP %d: %s", response.statusCode(),
                         response.body().substring(0, Math.min(200, response.body().length())));
-            } else if (!response.body().contains("\"ok\":true")) {
-                LOGGER.warnf("Slack chat.postMessage returned ok=false: %s",
-                        response.body().substring(0, Math.min(200, response.body().length())));
+                return null;
             }
+
+            String body = response.body();
+            if (!body.contains("\"ok\":true")) {
+                LOGGER.warnf("Slack chat.postMessage returned ok=false: %s",
+                        body.substring(0, Math.min(200, body.length())));
+                return null;
+            }
+
+            // Extract "ts" from response for threading
+            return extractTs(body);
         } catch (Exception e) {
             LOGGER.errorf("Failed to call Slack chat.postMessage: %s", e.getMessage());
+            return null;
         }
+    }
+
+    /**
+     * Extract the "ts" field from a Slack API JSON response. Simple string parsing
+     * to avoid pulling in a JSON library for one field.
+     */
+    private static String extractTs(String jsonBody) {
+        // Look for "ts":"1234567890.123456"
+        int tsIdx = jsonBody.indexOf("\"ts\":\"");
+        if (tsIdx < 0) {
+            return null;
+        }
+        int start = tsIdx + 5; // skip "ts":"
+        int end = jsonBody.indexOf("\"", start + 1);
+        if (end < 0) {
+            return null;
+        }
+        return jsonBody.substring(start + 1, end);
     }
 
     /**

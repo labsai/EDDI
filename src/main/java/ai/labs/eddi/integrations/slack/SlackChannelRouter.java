@@ -42,6 +42,10 @@ public class SlackChannelRouter {
      * ensures concurrent readers never see a partially-updated map.
      */
     private volatile Map<String, String> channelAgentMap = Map.of();
+
+    /** channelId → groupId mapping (optional, for group discussions). */
+    private volatile Map<String, String> channelGroupMap = Map.of();
+
     private volatile long lastRefreshTime = 0;
     private static final long REFRESH_INTERVAL_MS = 60_000; // 1 minute
 
@@ -74,6 +78,25 @@ public class SlackChannelRouter {
     }
 
     /**
+     * Resolve which group configuration to use for group discussions from a given
+     * Slack channel.
+     *
+     * @param slackChannelId
+     *            the Slack channel ID
+     * @return the EDDI group config ID, or empty if no mapping exists
+     */
+    public Optional<String> resolveGroupId(String slackChannelId) {
+        refreshIfNeeded();
+
+        String groupId = channelGroupMap.get(slackChannelId);
+        if (groupId != null) {
+            return Optional.of(groupId);
+        }
+
+        return config.defaultGroupId();
+    }
+
+    /**
      * Refresh the channel→agent mapping by scanning deployed agents. Uses a simple
      * time-based cache invalidation (1 minute).
      */
@@ -84,7 +107,8 @@ public class SlackChannelRouter {
         }
 
         try {
-            Map<String, String> newMap = new ConcurrentHashMap<>();
+            var newAgentMap = new java.util.HashMap<String, String>();
+            var newGroupMap = new java.util.HashMap<String, String>();
 
             // Scan all deployed agents in production
             List<AgentDeploymentStatus> statuses = agentAdmin.getDeploymentStatuses(Deployment.Environment.production);
@@ -106,8 +130,15 @@ public class SlackChannelRouter {
 
                                 String channelId = channel.getConfig().get("channelId");
                                 if (channelId != null && !channelId.isBlank()) {
-                                    newMap.put(channelId, agentId);
+                                    newAgentMap.put(channelId, agentId);
                                     LOGGER.debugf("Mapped Slack channel %s → agent %s", channelId, agentId);
+
+                                    // Optional group mapping
+                                    String groupId = channel.getConfig().get("groupId");
+                                    if (groupId != null && !groupId.isBlank()) {
+                                        newGroupMap.put(channelId, groupId);
+                                        LOGGER.debugf("Mapped Slack channel %s → group %s", channelId, groupId);
+                                    }
                                 }
                             }
                         }
@@ -118,10 +149,12 @@ public class SlackChannelRouter {
             }
 
             // Atomic reference swap — readers never see a partially-updated map
-            channelAgentMap = Map.copyOf(newMap);
+            channelAgentMap = Map.copyOf(newAgentMap);
+            channelGroupMap = Map.copyOf(newGroupMap);
             lastRefreshTime = now;
 
-            LOGGER.infof("Slack channel router refreshed: %d channel→agent mappings", newMap.size());
+            LOGGER.infof("Slack channel router refreshed: %d channel→agent, %d channel→group mappings",
+                    newAgentMap.size(), newGroupMap.size());
         } catch (Exception e) {
             LOGGER.warnf("Failed to refresh Slack channel router: %s", e.getMessage());
             lastRefreshTime = now; // Avoid hammering on repeated failures
