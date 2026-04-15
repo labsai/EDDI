@@ -345,8 +345,8 @@ export function GroupWizardPage() {
           {t("groupWizard.backToGroups", "Back to Groups")}
         </Link>
         <h1 className="flex items-center gap-3 text-3xl font-bold text-foreground">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-linear-to-br from-amber-500 to-orange-600 text-white shadow-lg">
-            <Wand2 className="h-5 w-5" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+            <Wand2 className="h-5 w-5 text-primary" />
           </div>
           {t("groupWizard.title", "Group Setup Wizard")}
         </h1>
@@ -489,7 +489,7 @@ function TemplateStep({
               data-testid={`template-${tmpl.key}`}
             >
               <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-linear-to-br from-amber-500/20 to-orange-500/20 text-2xl shadow-sm">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-2xl">
                   {tmpl.icon}
                 </div>
                 <div>
