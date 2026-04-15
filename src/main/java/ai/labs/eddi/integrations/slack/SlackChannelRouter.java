@@ -13,6 +13,7 @@ import org.jboss.logging.Logger;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Routes incoming Slack channel messages to the correct EDDI agent by scanning
@@ -48,6 +49,7 @@ public class SlackChannelRouter {
 
     private volatile long lastRefreshTime = 0;
     private static final long REFRESH_INTERVAL_MS = 60_000; // 1 minute
+    private final AtomicBoolean refreshInProgress = new AtomicBoolean(false);
 
     @Inject
     public SlackChannelRouter(IRestAgentAdministration agentAdmin, IRestAgentStore agentStore,
@@ -106,6 +108,11 @@ public class SlackChannelRouter {
             return;
         }
 
+        // Gate: only one thread refreshes at a time
+        if (!refreshInProgress.compareAndSet(false, true)) {
+            return;
+        }
+
         try {
             var newAgentMap = new java.util.HashMap<String, String>();
             var newGroupMap = new java.util.HashMap<String, String>();
@@ -158,6 +165,8 @@ public class SlackChannelRouter {
         } catch (Exception e) {
             LOGGER.warnf("Failed to refresh Slack channel router: %s", e.getMessage());
             lastRefreshTime = now; // Avoid hammering on repeated failures
+        } finally {
+            refreshInProgress.set(false);
         }
     }
 }

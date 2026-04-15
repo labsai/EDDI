@@ -13,6 +13,49 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Slack Integration — Enterprise Hardening & Code Review Fixes (2026-04-15)
+
+**Repo:** EDDI (`feature/multi-agent-ux`)
+
+**What changed:**
+
+### Critical Bug Fixes (3)
+- **Memory leak** in `SlackEventHandler.activeGroupListeners` — replaced unbounded `ConcurrentHashMap` with `ICache` (TTL-based expiration). Previously, every expanded-mode discussion leaked `SlackGroupDiscussionListener` instances permanently.
+- **300s wasted thread** — `registerAgentThreadMappings` polling loop ran even in compact mode (where `agentMessageTsMap` is always empty). Now gated on `listener.isExpandedMode()` and uses `CountDownLatch.await()` instead of polling.
+- **Dead synthesis handler** — `onGroupComplete()` had an empty conditional body. Added `synthesisPosted` flag for fallback delivery and ensured `completionLatch.countDown()` in `finally` blocks for both `onGroupComplete` and `onGroupError`.
+
+### Medium Fixes (4)
+- Removed dead variable `resolvedAgentId` in `tryHandleAgentFollowUp`
+- Added `AtomicBoolean` refresh gate to `SlackChannelRouter.refreshIfNeeded()` to prevent thundering herd
+- Cleaned user-facing error message (removed internal `channelId` and config terminology)
+- Added reverse map `messageTsToAgentId` for O(1) lookups in `SlackGroupDiscussionListener`
+
+### Slack API Retry Logic
+- `postMessage()` now retries with exponential backoff (3 attempts, 500ms base)
+- Both `onGroupComplete` and `onGroupError` release `CountDownLatch` for clean thread completion
+
+### Test Coverage: 71 Slack tests
+- **`SlackGroupDiscussionListenerTest`** — 22 tests (added: completion latch, synthesis fallback, deduplication)
+- **`SlackEventHandlerTest`** — 21 tests (expanded: GROUP_PREFIX pattern, truncate, buildFollowUpInput context)
+- **`SlackChannelRouterTest`** — 11 tests (new: agent/group resolution, defaults, deleted agents, cache refresh, edge cases)
+- **`SlackSignatureVerifierTest`** — 9 tests
+- **`SlackWebApiClientTest`** — 8 tests
+
+### Documentation
+- Created `docs/slack-integration.md` — comprehensive setup guide, architecture diagram, UX modes, enterprise clustering, config reference
+- Full Javadoc on all public APIs
+
+**Files:**
+- `SlackEventHandler.java` — ICache, retry, compact-mode gate, dead variable removal
+- `SlackGroupDiscussionListener.java` — CountDownLatch, synthesisPosted flag, reverse map, awaitCompletion()
+- `SlackChannelRouter.java` — AtomicBoolean refresh gate
+- `SlackChannelRouterTest.java` — new (11 tests)
+- `SlackEventHandlerTest.java` — expanded (21 tests)
+- `SlackGroupDiscussionListenerTest.java` — expanded (22 tests)
+- `docs/slack-integration.md` — new
+
+---
+
 ## Multi-Agent UX — maxTurns Safety Cap + Slack Integration (2026-04-15)
 
 **Repo:** EDDI (`feature/multi-agent-ux`)

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -240,6 +241,62 @@ class SlackGroupDiscussionListenerTest {
         listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent("timeout"));
 
         verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("error"));
+    }
+
+    // ─── Completion Latch ───
+
+    @Test
+    void awaitCompletion_returnsTrueAfterGroupComplete() {
+        initCompactMode();
+        listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(
+                ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState.COMPLETED, null));
+
+        assertTrue(listener.awaitCompletion(1, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void awaitCompletion_returnsTrueAfterGroupError() {
+        initCompactMode();
+        listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent("fail"));
+
+        assertTrue(listener.awaitCompletion(1, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void awaitCompletion_returnsFalseOnTimeout() {
+        initCompactMode();
+        // Never call onGroupComplete/onGroupError
+
+        assertFalse(listener.awaitCompletion(50, TimeUnit.MILLISECONDS));
+    }
+
+    // ─── Synthesis Fallback ───
+
+    @Test
+    void onGroupComplete_postsSynthesisFallback_whenNotPostedDuringSpeakerComplete() {
+        initCompactMode();
+        // No onSynthesisStart/onSpeakerComplete, synthesis comes only in
+        // onGroupComplete
+        listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(
+                ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState.COMPLETED,
+                "Final synthesis answer"));
+
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("Synthesis"));
+    }
+
+    @Test
+    void onGroupComplete_doesNotDuplicateSynthesis_whenAlreadyPosted() {
+        initCompactMode();
+        listener.onSynthesisStart(new GroupConversationEventSink.SynthesisStartEvent("mod1"));
+        listener.onSpeakerComplete(speakerEvent("mod1", "Moderator", "Synthesis via speaker", null, null));
+
+        // Now onGroupComplete also has a synthesis — should NOT post again
+        listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(
+                ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState.COMPLETED,
+                "Duplicate synthesis"));
+
+        // Only one synthesis message posted (the one from onSpeakerComplete)
+        verify(slackApi, times(1)).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("Synthesis"));
     }
 
     // ─── Helpers ───

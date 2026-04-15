@@ -65,12 +65,17 @@ public class SlackEventHandler {
     private final ICache<String, Boolean> eventDedup;
     private final ExecutorService executorService;
 
+    /** Max retries for Slack API calls with exponential backoff. */
+    private static final int SLACK_API_MAX_RETRIES = 3;
+    private static final long SLACK_API_RETRY_BASE_MS = 500;
+
     /**
-     * Tracks active group discussion listeners by channelId. Used to detect user
-     * replies in agent threads for follow-up conversations. key = Slack message ts
-     * of an agent's contribution → value = listener that has the context.
+     * Tracks active group discussion listeners keyed by Slack message ts. Used to
+     * detect user thread-replies for follow-up conversations. Uses ICache with TTL
+     * to prevent unbounded growth — follow-ups are only useful shortly after a
+     * discussion finishes.
      */
-    private final Map<String, SlackGroupDiscussionListener> activeGroupListeners = new ConcurrentHashMap<>();
+    private final ICache<String, SlackGroupDiscussionListener> activeGroupListeners;
 
     @Inject
     public SlackEventHandler(SlackIntegrationConfig config,
@@ -87,6 +92,7 @@ public class SlackEventHandler {
         this.groupConversationService = groupConversationService;
         this.userConversationStore = userConversationStore;
         this.eventDedup = cacheFactory.getCache("slack-event-dedup");
+        this.activeGroupListeners = cacheFactory.getCache("slack-group-listeners");
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
 
         // Startup validation
@@ -196,8 +202,7 @@ public class SlackEventHandler {
         if (agentIdOpt.isEmpty()) {
             LOGGER.warnf("No agent mapped for Slack channel %s", channelId);
             postMessage(channelId, threadTs,
-                    "⚠️ No agent is configured for this channel. Ask an admin to set up a `ChannelConnector` with type `slack` and `channelId: "
-                            + channelId + "`.");
+                    "⚠️ No agent is configured for this channel. Please contact an administrator.");
             return;
         }
 
@@ -236,10 +241,11 @@ public class SlackEventHandler {
 
             groupConversationService.startAndDiscussAsync(groupId, question, userId, listener);
 
-            // Track the listener for follow-up routing.
-            // After async completes, the listener has agentId→ts mappings.
-            // We use a snapshot approach: poll after a short delay to register mappings.
-            executorService.submit(() -> registerAgentThreadMappings(listener, channelId));
+            // Only register for follow-up routing in expanded mode (compact has no
+            // channel-level messages)
+            if (listener.isExpandedMode()) {
+                executorService.submit(() -> registerAgentThreadMappings(listener));
+            }
 
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to start group discussion: %s", e.getMessage());
@@ -252,30 +258,17 @@ public class SlackEventHandler {
      * Wait for the group discussion to complete, then register all agent message ts
      * mappings for follow-up routing.
      */
-    private void registerAgentThreadMappings(SlackGroupDiscussionListener listener, String channelId) {
-        // Poll until the listener has agent mappings (discussion is async)
-        // The discussion typically takes 10-60 seconds
-        int maxWaitSeconds = 300;
-        int waited = 0;
-        while (waited < maxWaitSeconds) {
-            try {
-                Thread.sleep(2000);
-                waited += 2;
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return;
-            }
-            if (!listener.getAgentMessageTsMap().isEmpty()) {
-                break;
-            }
+    private void registerAgentThreadMappings(SlackGroupDiscussionListener listener) {
+        // Wait for the group discussion to complete via the listener's latch
+        boolean completed = listener.awaitCompletion(300, java.util.concurrent.TimeUnit.SECONDS);
+        if (!completed) {
+            LOGGER.warnf("Group discussion did not complete within timeout — follow-up routing may be incomplete");
         }
 
         // Register all agent message ts → listener for follow-up detection
-        if (listener.isExpandedMode()) {
-            for (String ts : listener.getAgentMessageTsMap().values()) {
-                activeGroupListeners.put(ts, listener);
-                LOGGER.debugf("Registered agent thread ts=%s for follow-up routing", ts);
-            }
+        for (String ts : listener.getAgentMessageTsMap().values()) {
+            activeGroupListeners.put(ts, listener);
+            LOGGER.debugf("Registered agent thread ts=%s for follow-up routing", ts);
         }
     }
 
@@ -311,11 +304,7 @@ public class SlackEventHandler {
         // Build context-enriched input
         String enrichedInput = buildFollowUpInput(ctx, text);
 
-        // Get or create a follow-up conversation for this agent thread
-        Optional<String> agentIdOpt = channelRouter.resolveAgentId(channelId);
-        String resolvedAgentId = agentIdOpt.orElse(agentId);
-
-        // Use the agent from the group discussion, not the channel default
+        // Route to the specific agent from the group discussion
         String conversationId = getOrCreateConversation(agentId, userId, channelId, parentTs);
         String response = sendAndWait(conversationId, enrichedInput);
         postMessageChunked(channelId, threadTs, response);
@@ -461,11 +450,29 @@ public class SlackEventHandler {
      * Post a single message to Slack via the Web API.
      */
     private void postMessage(String channelId, String threadTs, String text) {
-        try {
-            String token = config.botToken().orElse("");
-            slackApi.postMessage("Bearer " + token, channelId, threadTs, text);
-        } catch (Exception e) {
-            LOGGER.errorf("Failed to post Slack message to channel %s: %s", channelId, e.getMessage());
+        String token = config.botToken().orElse("");
+        String auth = "Bearer " + token;
+
+        for (int attempt = 1; attempt <= SLACK_API_MAX_RETRIES; attempt++) {
+            try {
+                slackApi.postMessage(auth, channelId, threadTs, text);
+                return;
+            } catch (Exception e) {
+                if (attempt < SLACK_API_MAX_RETRIES) {
+                    long backoff = SLACK_API_RETRY_BASE_MS * (1L << (attempt - 1));
+                    LOGGER.warnf("Slack API call failed (attempt %d/%d), retrying in %dms: %s",
+                            attempt, SLACK_API_MAX_RETRIES, backoff, e.getMessage());
+                    try {
+                        Thread.sleep(backoff);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                } else {
+                    LOGGER.errorf("Slack API call failed after %d attempts for channel %s: %s",
+                            SLACK_API_MAX_RETRIES, channelId, e.getMessage());
+                }
+            }
         }
     }
 

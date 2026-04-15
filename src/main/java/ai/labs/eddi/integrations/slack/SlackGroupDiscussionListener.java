@@ -7,6 +7,8 @@ import org.jboss.logging.Logger;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Streams a multi-agent group discussion into a Slack channel in real-time.
@@ -43,11 +45,18 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
     /** agentId → Slack message ts of their first contribution (for threading). */
     private final Map<String, String> agentMessageTs = new ConcurrentHashMap<>();
 
+    /** Reverse map: Slack message ts → agentId (O(1) lookup for follow-ups). */
+    private final Map<String, String> messageTsToAgentId = new ConcurrentHashMap<>();
+
     /** agentId → group discussion context (for follow-up conversations). */
     private final Map<String, AgentContext> agentContexts = new ConcurrentHashMap<>();
 
+    /** Signals when the group discussion is fully complete. */
+    private final CountDownLatch completionLatch = new CountDownLatch(1);
+
     private volatile boolean expandedMode = false;
     private volatile boolean isSynthesisPhase = false;
+    private volatile boolean synthesisPosted = false;
     private volatile String groupQuestion;
     private volatile String groupConversationId;
 
@@ -149,24 +158,31 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
 
     @Override
     public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
-        isSynthesisPhase = false;
-        // If synthesis wasn't delivered via onSpeakerComplete, post it here
-        if (event.synthesizedAnswer() != null && !event.synthesizedAnswer().isBlank()) {
-            // Check if we already posted it (avoid duplication)
-            // The synthesis is typically delivered via onSpeakerComplete in the SYNTHESIS
-            // phase
+        try {
+            isSynthesisPhase = false;
+            // Fallback: if synthesis was delivered in onGroupComplete but not via
+            // onSpeakerComplete
+            if (!synthesisPosted && event.synthesizedAnswer() != null && !event.synthesizedAnswer().isBlank()) {
+                postSynthesis("Moderator", event.synthesizedAnswer());
+            }
+            LOGGER.debugf("Group discussion complete: %s", event.state());
+        } finally {
+            completionLatch.countDown();
         }
-        LOGGER.debugf("Group discussion complete: %s", event.state());
     }
 
     @Override
     public void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
-        isSynthesisPhase = false;
-        String msg = "⚠️ Group discussion encountered an error. Please try again.";
-        if (expandedMode) {
-            slackApi.postMessage(authToken, channelId, null, msg);
-        } else {
-            slackApi.postMessage(authToken, channelId, userThreadTs, msg);
+        try {
+            isSynthesisPhase = false;
+            String msg = "⚠️ Group discussion encountered an error. Please try again.";
+            if (expandedMode) {
+                slackApi.postMessage(authToken, channelId, null, msg);
+            } else {
+                slackApi.postMessage(authToken, channelId, userThreadTs, msg);
+            }
+        } finally {
+            completionLatch.countDown();
         }
     }
 
@@ -183,6 +199,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         String ts = slackApi.postMessage(authToken, channelId, null, msg);
         if (ts != null) {
             agentMessageTs.put(event.agentId(), ts);
+            messageTsToAgentId.put(ts, event.agentId());
             LOGGER.debugf("Tracked agent %s message ts=%s", event.agentId(), ts);
         }
     }
@@ -240,6 +257,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
      * Post the synthesis — always prominent and visible.
      */
     private void postSynthesis(String displayName, String response) {
+        synthesisPosted = true;
         isSynthesisPhase = false;
         String msg = String.format("📋 *Synthesis* (by %s)\n%s", displayName, response);
 
@@ -315,18 +333,28 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         return agentContexts.get(agentId);
     }
 
-    /** Get the agentId for a given Slack message ts. */
+    /** Get the agentId for a given Slack message ts. O(1) via reverse map. */
     public String getAgentIdForMessageTs(String messageTs) {
-        for (var entry : agentMessageTs.entrySet()) {
-            if (entry.getValue().equals(messageTs)) {
-                return entry.getKey();
-            }
-        }
-        return null;
+        return messageTsToAgentId.get(messageTs);
     }
 
     /** Whether this discussion used expanded (channel-level) mode. */
     public boolean isExpandedMode() {
         return expandedMode;
+    }
+
+    /**
+     * Block until the discussion completes (onGroupComplete or onGroupError). Used
+     * by SlackEventHandler to wait before registering follow-up mappings.
+     *
+     * @return true if completed within timeout, false if timed out
+     */
+    public boolean awaitCompletion(long timeout, TimeUnit unit) {
+        try {
+            return completionLatch.await(timeout, unit);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 }
