@@ -1,6 +1,7 @@
 package ai.labs.eddi.integrations.slack;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import javax.crypto.Mac;
@@ -35,8 +36,17 @@ public class SlackSignatureVerifier {
 
     private final SlackIntegrationConfig config;
 
+    @Inject
     public SlackSignatureVerifier(SlackIntegrationConfig config) {
         this.config = config;
+
+        // Startup validation: warn loudly if enabled but secrets are missing
+        if (config.enabled()) {
+            if (config.signingSecret().isEmpty() || config.signingSecret().get().isBlank()) {
+                LOGGER.error("Slack integration is ENABLED but eddi.slack.signing-secret is NOT SET. "
+                        + "All incoming events will be rejected!");
+            }
+        }
     }
 
     /**

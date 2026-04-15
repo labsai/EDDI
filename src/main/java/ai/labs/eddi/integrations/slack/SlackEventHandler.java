@@ -3,7 +3,6 @@ package ai.labs.eddi.integrations.slack;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.api.IConversationService;
-import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.InputData;
@@ -72,6 +71,12 @@ public class SlackEventHandler {
         this.userConversationStore = userConversationStore;
         this.eventDedup = cacheFactory.getCache("slack-event-dedup");
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
+
+        // Startup validation
+        if (config.enabled() && (config.botToken().isEmpty() || config.botToken().get().isBlank())) {
+            LOGGER.error("Slack integration is ENABLED but eddi.slack.bot-token is NOT SET. "
+                    + "Responses will fail to post to Slack!");
+        }
     }
 
     /**
@@ -102,15 +107,15 @@ public class SlackEventHandler {
             try {
                 handleEvent(eventType, event);
             } catch (Exception e) {
-                LOGGER.errorf("Error handling Slack event %s: %s", eventId, e.getMessage());
+                LOGGER.errorf(e, "Error handling Slack event %s", eventId);
 
-                // Best-effort error response to user
+                // Best-effort error response to user (never leak internal details)
                 String channelId = (String) event.get("channel");
                 String threadTs = getThreadTs(event);
                 if (channelId != null) {
                     try {
                         postMessage(channelId, threadTs,
-                                "⚠️ Sorry, I encountered an error processing your message: " + e.getMessage());
+                                "⚠️ Sorry, I encountered an error processing your message. Please try again.");
                     } catch (Exception ignored) {
                         // Can't post error — nothing more we can do
                     }
@@ -179,18 +184,15 @@ public class SlackEventHandler {
         String threadKey = threadTs != null ? threadTs : "main";
         String intent = "slack:" + channelId + ":" + threadKey;
 
-        // Try existing
-        try {
-            UserConversation existing = userConversationStore.readUserConversation(intent, slackUserId);
-            if (existing != null) {
-                return existing.getConversationId();
-            }
-        } catch (IResourceStore.ResourceStoreException ignored) {
-            // Not found — create new
+        // Try existing — readUserConversation returns null when not found,
+        // throws ResourceStoreException only on real DB errors (which should propagate)
+        UserConversation existing = userConversationStore.readUserConversation(intent, slackUserId);
+        if (existing != null) {
+            return existing.getConversationId();
         }
 
         // Create new conversation
-        ConversationResult result = conversationService.startConversation(
+        var result = conversationService.startConversation(
                 Deployment.Environment.production, agentId, slackUserId,
                 Map.of("slackChannel", new Context(Context.ContextType.string, channelId),
                         "slackThread", new Context(Context.ContextType.string, threadKey)));

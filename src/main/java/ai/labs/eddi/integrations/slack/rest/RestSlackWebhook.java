@@ -97,7 +97,7 @@ public class RestSlackWebhook {
                 LOGGER.infof("Slack URL verification challenge received");
                 return Response.ok()
                         .type(MediaType.APPLICATION_JSON)
-                        .entity("{\"challenge\":\"" + challenge + "\"}")
+                        .entity(objectMapper.writeValueAsString(Map.of("challenge", challenge != null ? challenge : "")))
                         .build();
             }
 

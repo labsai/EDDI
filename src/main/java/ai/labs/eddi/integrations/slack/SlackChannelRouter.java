@@ -13,7 +13,6 @@ import org.jboss.logging.Logger;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Routes incoming Slack channel messages to the correct EDDI agent by scanning
@@ -39,9 +38,10 @@ public class SlackChannelRouter {
     private final SlackIntegrationConfig config;
 
     /**
-     * channelId → agentId mapping, rebuilt on demand.
+     * channelId → agentId mapping, rebuilt on demand. Volatile reference swap
+     * ensures concurrent readers never see a partially-updated map.
      */
-    private final Map<String, String> channelAgentMap = new ConcurrentHashMap<>();
+    private volatile Map<String, String> channelAgentMap = Map.of();
     private volatile long lastRefreshTime = 0;
     private static final long REFRESH_INTERVAL_MS = 60_000; // 1 minute
 
@@ -117,8 +117,8 @@ public class SlackChannelRouter {
                 }
             }
 
-            channelAgentMap.clear();
-            channelAgentMap.putAll(newMap);
+            // Atomic reference swap — readers never see a partially-updated map
+            channelAgentMap = Map.copyOf(newMap);
             lastRefreshTime = now;
 
             LOGGER.infof("Slack channel router refreshed: %d channel→agent mappings", newMap.size());
