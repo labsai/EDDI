@@ -126,9 +126,10 @@ public class SlackWebApiClient {
             Thread.currentThread().interrupt();
             throw new SlackDeliveryException("Slack API call interrupted", e);
         } catch (Exception e) {
-            // Unexpected errors (JSON serialization failures, etc.) — treat as retryable
-            // to be safe
-            throw new SlackDeliveryException("Unexpected error calling Slack API: " + e.getMessage(), e);
+            // Unexpected errors (e.g., JSON serialization) are deterministic — retrying
+            // won't help. Log and return null (non-retryable), consistent with API errors.
+            LOGGER.errorf(e, "Unexpected non-retryable error calling Slack API: %s", e.getMessage());
+            return null;
         }
     }
 

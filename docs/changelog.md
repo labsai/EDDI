@@ -13,6 +13,43 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Slack Integration — Code Quality & Edge Case Hardening (2026-04-15)
+
+**Repo:** EDDI (`feature/slack-integration`)
+
+**What changed:**
+
+### Code Quality & Cleanup
+- Removed unused `beforeCount` variable in `SlackGroupDiscussionListenerTest.java` (CodeQL warning).
+- Removed unused `eventType` parameter from `SlackEventHandler.handleEvent()`.
+- Replaced hardcoded test secrets in `SlackSignatureVerifierTest.java` with test-prefixed values to avoid CI secret scanner noise.
+
+### Reliability & Edge Cases
+- **Infinite Loop Fix**: Added a safety guard to the message chunking loop in `SlackEventHandler.java`. If a single word exceeds the 3000 character limit without newlines, it now breaks the loop instead of spinning forever.
+- **Cache NPE Fix**: Added a `null` check for the `Duration ttl` parameter in `CacheFactory.getCache()` to prevent `NullPointerException`s when standard size-only caches are requested.
+
+### Slack Delivery Error Handling
+- Updated the catch-all exception block in `SlackWebApiClient.postMessage()`. `JsonProcessingException` and other unexpected exceptions are now logged as warnings and return `null` instead of erroneously triggering a retry loop via `SlackDeliveryException`.
+
+### Group Conversation Turn Limits
+- Refactored `executeParallelPhase()` in `GroupConversationService.java` to properly respect `maxTurns`. The method now calculates remaining turns and caps the parallel speaker batch size to the remaining budget, ensuring strict turn limit enforcement.
+
+### Resource Management
+- **Graceful Shutdown**: Added a `@PreDestroy` method `shutdown()` to `SlackEventHandler.java` to properly terminate the virtual thread `ExecutorService` when the application is shutting down.
+
+**Design decisions:**
+- **JAX-RS AsyncResponse**: A code review suggested using `@Suspended AsyncResponse` for `RestSlackWebhook`. Decided against this because Slack webhooks require a synchronous 200 OK response within 3 seconds. Using `AsyncResponse` would delay the 200 OK until the async work completed, violating the webhook contract. The endpoint correctly delegates to the async handler and returns immediately.
+
+**Files:**
+- `SlackEventHandler.java` — Removed unused params, added infinite loop guard, added `@PreDestroy` shutdown.
+- `SlackWebApiClient.java` — Adjusted retry vs fatal error handling.
+- `CacheFactory.java` — Added null check for TTL.
+- `GroupConversationService.java` — Enforced `maxTurns` cap in parallel phases.
+- `SlackGroupDiscussionListenerTest.java` — CodeQL cleanup.
+- `SlackSignatureVerifierTest.java` — CI security noise cleanup.
+
+---
+
 ## Slack Integration — Per-Agent Credentials (2026-04-15)
 
 **Repo:** EDDI (`feature/multi-agent-ux`)

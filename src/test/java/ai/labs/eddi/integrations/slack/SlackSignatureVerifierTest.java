@@ -15,9 +15,9 @@ class SlackSignatureVerifierTest {
 
     private SlackSignatureVerifier verifier;
 
-    private static final String SIGNING_SECRET = "8f742231b10e8888abcd99yez56789d0";
-    private static final String SIGNING_SECRET_2 = "aaaa1111bbbb2222cccc3333dddd4444";
-    private static final String TEST_BODY = "token=xyzz0WbapA4vBCDEFasx0q6G&team_id=T1DC2JH3J&team_domain=testteamnow";
+    private static final String SIGNING_SECRET = "test_fake_secret_00000000000000a1";
+    private static final String SIGNING_SECRET_2 = "test_fake_secret_00000000000000b2";
+    private static final String TEST_BODY = "token=test_fake_token_000&team_id=T0000TEST&team_domain=testteamnow";
 
     @BeforeEach
     void setUp() {

@@ -30,6 +30,9 @@ public class CacheFactory implements ICacheFactory {
     @Override
     @SuppressWarnings("unchecked")
     public <K, V> ICache<K, V> getCache(String cacheName, Duration ttl) {
+        if (ttl == null) {
+            throw new IllegalArgumentException("TTL must not be null; use getCache(cacheName) for caches without expiry");
+        }
         String name = cacheName != null ? cacheName : "local";
         // Use a distinct key to prevent collision with size-only caches
         String cacheKey = name + ":ttl=" + ttl.toSeconds();

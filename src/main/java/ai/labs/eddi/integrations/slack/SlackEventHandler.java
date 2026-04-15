@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.datastore.IResourceStore;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -100,6 +101,19 @@ public class SlackEventHandler {
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
     }
 
+    @PreDestroy
+    void shutdown() {
+        executorService.shutdown();
+        try {
+            if (!executorService.awaitTermination(10, TimeUnit.SECONDS)) {
+                executorService.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executorService.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+
     /**
      * Handle an incoming Slack event asynchronously. Called from the webhook
      * endpoint after signature verification. Returns immediately — processing
@@ -126,7 +140,7 @@ public class SlackEventHandler {
 
         executorService.submit(() -> {
             try {
-                handleEvent(eventType, event);
+                handleEvent(event);
             } catch (Exception e) {
                 LOGGER.errorf(e, "Error handling Slack event %s", eventId);
 
@@ -145,7 +159,7 @@ public class SlackEventHandler {
         });
     }
 
-    private void handleEvent(String eventType, Map<String, Object> event) throws Exception {
+    private void handleEvent(Map<String, Object> event) throws Exception {
         // Filter bot's own messages (prevent infinite loop)
         if (event.containsKey("bot_id") || "bot_message".equals(event.get("subtype"))) {
             LOGGER.debugf("Ignoring bot message in channel %s", event.get("channel"));
@@ -449,6 +463,10 @@ public class SlackEventHandler {
                 if (lastNewline > offset) {
                     end = lastNewline;
                 }
+            }
+            // Safety: ensure forward progress even if end == offset
+            if (end <= offset) {
+                end = Math.min(offset + MAX_SLACK_MESSAGE_LENGTH, text.length());
             }
             postMessage(channelId, threadTs, text.substring(offset, end));
             offset = end;

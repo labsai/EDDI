@@ -406,18 +406,27 @@ public class GroupConversationService implements IGroupConversationService {
                                       java.util.concurrent.atomic.AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
 
+        // Cap batch size to remaining turn budget
+        int remainingTurns = maxTurns > 0 ? Math.max(0, maxTurns - turnCounter.get()) : speakers.size();
+        if (remainingTurns == 0) {
+            return;
+        }
+        List<GroupMember> batchSpeakers = maxTurns > 0
+                ? speakers.subList(0, Math.min(speakers.size(), remainingTurns))
+                : speakers;
+
         // SAFETY: Snapshot the transcript so parallel tasks each see a consistent view.
         List<TranscriptEntry> snapshotTranscript = List.copyOf(gc.getTranscript());
 
         // Notify all speakers starting (parallel)
         if (listener != null) {
-            for (GroupMember speaker : speakers) {
+            for (GroupMember speaker : batchSpeakers) {
                 listener.onSpeakerStart(
                         new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
             }
         }
 
-        List<CompletableFuture<TranscriptEntry>> futures = speakers.stream().map(speaker -> CompletableFuture.supplyAsync(() -> {
+        List<CompletableFuture<TranscriptEntry>> futures = batchSpeakers.stream().map(speaker -> CompletableFuture.supplyAsync(() -> {
             try {
                 String input = buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null);
                 return executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null);
@@ -445,7 +454,7 @@ public class GroupConversationService implements IGroupConversationService {
             }
         }
         // Count all completed turns for this batch (parallel turns are atomic batches)
-        turnCounter.addAndGet(futures.size());
+        turnCounter.addAndGet(batchSpeakers.size());
     }
 
     /**

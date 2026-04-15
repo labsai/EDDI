@@ -225,7 +225,6 @@ class SlackGroupDiscussionListenerTest {
     @Test
     void blankResponse_notPosted() {
         initCompactMode();
-        int beforeCount = mockingDetails(slackApi).getInvocations().size();
 
         listener.onSpeakerComplete(speakerEvent("agent1", "Alice", "  ", null, null));
         listener.onSpeakerComplete(speakerEvent("agent1", "Alice", null, null, null));
