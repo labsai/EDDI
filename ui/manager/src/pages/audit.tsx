@@ -112,13 +112,14 @@ function formatFullTimestamp(ts: string): string {
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
-function JsonBlock({ data, label }: { data: Record<string, unknown> | null; label: string }) {
+function JsonBlock({ data, label }: { data: Record<string, unknown> | unknown[] | null; label: string }) {
   const [open, setOpen] = useState(false);
-  if (!data || Object.keys(data).length === 0) return null;
+  if (!data || (Array.isArray(data) ? data.length === 0 : Object.keys(data).length === 0)) return null;
 
   return (
     <div className="mt-2">
       <button
+        type="button"
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1.5 text-xs font-medium text-foreground/60 hover:text-foreground/80 transition-colors"
         data-testid={`expand-${label}`}
@@ -182,8 +183,8 @@ function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTra
           </span>
         )}
 
-        {/* HMAC + Signature indicators */}
-        {entry.hmac ? (
+        {/* HMAC signing indicator — only shown when signed (absence = unsigned) */}
+        {entry.hmac && (
           <span
             className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 cursor-help"
             title={`HMAC: ${entry.hmac.slice(0, 16)}…${entry.hmac.slice(-8)}${entry.agentSignature ? `\nAgent Signature: ${entry.agentSignature.slice(0, 16)}…` : ""}`}
@@ -191,13 +192,6 @@ function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTra
           >
             <Fingerprint className="h-3 w-3" />
             {t("audit.signed", "Signed")}
-          </span>
-        ) : (
-          <span
-            className="inline-flex items-center gap-1 rounded-full bg-foreground/5 px-2 py-0.5 text-[11px] text-foreground/30"
-            data-testid="unsigned-badge"
-          >
-            <Shield className="h-3 w-3" />
           </span>
         )}
       </div>
@@ -231,7 +225,7 @@ function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTra
       <JsonBlock data={entry.input} label={t("audit.input", "Input")} />
       <JsonBlock data={entry.output} label={t("audit.output", "Output")} />
       <JsonBlock data={entry.llmDetail} label={t("audit.llmDetail", "LLM Detail")} />
-      <JsonBlock data={entry.toolCalls} label={t("audit.toolCalls", "Tool Calls")} />
+      <JsonBlock data={entry.toolCalls as Record<string, unknown> | unknown[] | null} label={t("audit.toolCalls", "Tool Calls")} />
     </div>
   );
 }
@@ -256,6 +250,7 @@ function StepGroup({
     <div className="relative">
       {/* Step header — clickable to collapse */}
       <button
+        type="button"
         onClick={() => setOpen(!open)}
         className="mb-3 flex w-full items-center gap-3 text-start group"
         data-testid={`step-header-${stepIdx}`}
@@ -323,16 +318,23 @@ function ConversationGroup({
 }) {
   const [open, setOpen] = useState(true);
   const stepGroups = useMemo(() => groupByStep(entries), [entries]);
-  const totalDuration = entries.reduce((sum, e) => sum + e.durationMs, 0);
-  const totalCost = entries.reduce((sum, e) => sum + e.cost, 0);
-  const signedCount = entries.filter((e) => !!e.hmac).length;
-  const timestamps = entries.map((e) => e.timestamp).sort();
-  const firstTs = timestamps[0];
+  const { totalDuration, totalCost, signedCount, firstTs } = useMemo(() => {
+    let dur = 0, cost = 0, signed = 0;
+    let earliest = "";
+    for (const e of entries) {
+      dur += e.durationMs;
+      cost += e.cost;
+      if (e.hmac) signed++;
+      if (!earliest || e.timestamp < earliest) earliest = e.timestamp;
+    }
+    return { totalDuration: dur, totalCost: cost, signedCount: signed, firstTs: earliest || undefined };
+  }, [entries]);
 
   return (
     <div className="rounded-xl border border-border bg-card/50 overflow-hidden" data-testid={`conversation-group-${conversationId}`}>
       {/* Conversation header */}
       <button
+        type="button"
         onClick={() => setOpen(!open)}
         className="flex w-full items-center gap-3 p-4 text-start hover:bg-muted/30 transition-colors group"
       >
@@ -571,6 +573,7 @@ export function AuditPage() {
           <div className="flex items-center gap-2">
             {/* Export */}
             <button
+              type="button"
               onClick={handleExport}
               disabled={!entries || entries.length === 0}
               className="inline-flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
@@ -588,6 +591,7 @@ export function AuditPage() {
         {/* Mode toggle */}
         <div className="mb-3 flex items-center gap-2" data-tour="audit-mode-toggle">
           <button
+            type="button"
             onClick={() => setMode("agent")}
             className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
               mode === "agent"
@@ -600,6 +604,7 @@ export function AuditPage() {
             {t("audit.byAgent", "By Agent")}
           </button>
           <button
+            type="button"
             onClick={() => setMode("conversation")}
             className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
               mode === "conversation"
@@ -654,6 +659,7 @@ export function AuditPage() {
                 data-testid="conversation-input"
               />
               <button
+                type="button"
                 onClick={handleConversationSearch}
                 disabled={!conversationId.trim()}
                 className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
@@ -667,6 +673,7 @@ export function AuditPage() {
           {/* Auto-refresh toggle */}
           {hasSearched && (
             <button
+              type="button"
               onClick={() => setAutoRefresh((p) => !p)}
               className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
                 autoRefresh
@@ -753,13 +760,13 @@ export function AuditPage() {
                   {t("audit.integrityVerified", "All entries cryptographically signed")}
                 </p>
                 <p className="text-xs text-emerald-600/70 dark:text-emerald-400/60">
-                  {t("audit.integrityVerifiedDesc", "{{count}} of {{total}} entries have valid HMAC signatures — tamper-proof audit trail", { count: stats.signed, total: stats.count })}
+                  {t("audit.integrityVerifiedDesc", "{{count}} of {{total}} entries have HMAC-SHA256 signatures", { count: stats.signed, total: stats.count })}
                 </p>
               </div>
               <div className="shrink-0 flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1">
                 <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
                 <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                  {t("audit.integrityPass", "VERIFIED")}
+                  {t("audit.integrityPass", "SIGNED")}
                 </span>
               </div>
             </>
@@ -837,7 +844,7 @@ export function AuditPage() {
       {/* Timeline view */}
       {hasSearched && !isLoading && entries && entries.length > 0 && (
         <div className="space-y-4" data-testid="audit-timeline">
-          {mode === "agent" && conversationGroups.size > 1 ? (
+          {mode === "agent" && conversationGroups.size > 0 ? (
             /* Agent mode with multiple conversations — group by conversation */
             [...conversationGroups.entries()].map(([convId, convEntries]) => (
               <ConversationGroup
@@ -865,6 +872,7 @@ export function AuditPage() {
           {entries.length >= PAGE_SIZE && (
             <div className="flex justify-center">
               <button
+                type="button"
                 onClick={() => setSkip((s) => s + PAGE_SIZE)}
                 className="rounded-lg bg-foreground/5 px-6 py-2 text-sm font-medium text-foreground/60 transition-all hover:bg-foreground/10 hover:text-foreground/80"
                 data-testid="load-more"
