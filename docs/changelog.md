@@ -13,6 +13,55 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Security Hardening Sprint 2 — v6.0.2 (2026-04-16)
+
+**Repo:** EDDI (`fix/security-hardening-6.0.2`)
+
+**What changed:** Code review remediation + P2/P3 security items across 17 files.
+
+### Code Review Fixes (from Sprint 1 review)
+
+- **`application.properties`**: Fixed `OPTION` → `OPTIONS` typo in authenticated policy — CORS preflight requests would have received 401
+- **All tool HttpClients**: Added explicit `followRedirects(HttpClient.Redirect.NEVER)` to PdfReaderTool, WebSearchTool, WeatherTool — defense-in-depth (JDK default is NEVER but this documents security intent)
+
+### P0-2: SafeHttpClient — Centralized SSRF-Safe HTTP
+
+Created `SafeHttpClient` (`@ApplicationScoped`) wrapping `java.net.http.HttpClient` with:
+- `Redirect.NEVER` enforced at client level
+- `send()` with recursive per-hop redirect validation (max 5)
+- `sendValidated()` for user-controlled URLs (validates initial URL too)
+- Connect timeout from `httpClient.connectTimeoutInMillis` config
+
+Migrated 4 LLM tools (WebScraperTool, PdfReaderTool, WebSearchTool, WeatherTool) from inline `HttpClient.newBuilder()` to `@Inject SafeHttpClient`. WebScraperTool's 40-line manual redirect loop was replaced by `httpClient.send()`.
+
+### P3-1: SecurityUtilities — 3 Bug Fixes
+
+- `new Random()` per loop iteration → shared `SecureRandom` instance (CSPRNG)
+- Off-by-one: `nextInt(length - 1)` never generated the last character in the alphabet → `nextInt(length)`
+- `DigestUtils.md5Hex()` → `DigestUtils.sha256Hex()` (MD5 has known collision attacks)
+
+### P1-6: Qute Strict Rendering
+
+Added `%prod.quarkus.qute.strict-rendering=true` — Qute templates fail loudly on missing variables in production instead of silently rendering blanks.
+
+### P3-2: Security Response Headers
+
+Added via `quarkus.http.header.*`:
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `X-XSS-Protection: 0` (modern CSP replaces this)
+- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+- `Content-Security-Policy`: `default-src 'self'`, inline styles allowed for Manager SPA
+
+### P1-7: CI Security Scanning
+
+Added two new parallel jobs to `.github/workflows/ci.yml`:
+- **CodeQL SAST** — `security-extended` query set, uploads SARIF results to GitHub Security tab
+- **Trivy FS scan** — CRITICAL/HIGH severity, exit-code 1 (fails pipeline on findings)
+
+---
+
 ## Security Hardening Sprint 1 — v6.0.2 (2026-04-16)
 
 **Repo:** EDDI (`fix/security-hardening-6.0.2`)
