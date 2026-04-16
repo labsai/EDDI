@@ -112,7 +112,18 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
     public Response duplicateGroup(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
         AgentGroupConfiguration config = restVersionInfo.read(id, version);
-        return restVersionInfo.create(config);
+        Response response = restVersionInfo.create(config);
+        // Sync descriptor for the duplicate too
+        URI location = response.getLocation();
+        if (location != null) {
+            try {
+                var resourceId = RestUtilities.extractResourceId(location);
+                syncDescriptor(resourceId.getId(), config);
+            } catch (Exception e) {
+                LOG.warn("Failed to sync group descriptor name/description on duplicate", e);
+            }
+        }
+        return response;
     }
 
     @Override
