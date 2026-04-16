@@ -418,7 +418,6 @@ public class SlackEventHandler {
     /**
      * Extract the text response from a conversation snapshot.
      */
-    @SuppressWarnings("unchecked")
     private String extractResponseText(SimpleConversationMemorySnapshot snapshot) {
         var outputs = snapshot.getConversationOutputs();
         if (outputs == null || outputs.isEmpty()) {
