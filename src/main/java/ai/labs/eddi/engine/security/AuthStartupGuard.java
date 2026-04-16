@@ -38,8 +38,8 @@ public class AuthStartupGuard {
 
     private volatile boolean warnMode = false;
 
-    @SuppressWarnings("unused") // CDI requires the @Observes parameter for event discovery
-    void onStart(@Observes StartupEvent event) {
+    // CDI requires the @Observes parameter for event discovery; not read directly
+    void onStart(@Observes StartupEvent _event) {
         LaunchMode mode = getLaunchMode();
 
         if (mode == LaunchMode.DEVELOPMENT || mode == LaunchMode.TEST) {
