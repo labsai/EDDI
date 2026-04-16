@@ -1,0 +1,39 @@
+GNU Lesser General Public License
+Version 2.1, February 1999
+
+Copyright (C) 1991, 1999 Free Software Foundation, Inc.
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+
+Everyone is permitted to copy and distribute verbatim copies of this license
+document, but changing it is not allowed.
+
+[This is the first released version of the Lesser GPL. It also counts as the
+successor of the GNU Library Public License, version 2, hence the version
+number 2.1.]
+
+TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
+
+0. This License Agreement applies to any software library or other program
+which contains a notice placed by the copyright holder or other authorized
+party saying it may be distributed under the terms of this Lesser General
+Public License (also called "this License"). Each licensee is addressed as
+"you".
+
+A "library" means a collection of software functions and/or data prepared so
+as to be conveniently linked with application programs (which use some of
+those functions and data) to form executables.
+
+1. You may copy and distribute verbatim copies of the Library's complete
+source code as you receive it, in any medium, provided that you conspicuously
+and appropriately publish on each copy an appropriate copyright notice and
+disclaimer of warranty.
+
+2. You may modify your copy or copies of the Library or any portion of it,
+thus forming a work based on the Library, and copy and distribute such
+modifications or work under the terms of Section 1 above.
+
+THE FULL TEXT OF THIS LICENSE IS AVAILABLE AT:
+https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+
+This license is included here in summary form. The complete legal text
+can be found at the URL above.

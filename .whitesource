@@ -1,7 +1,7 @@
 {
   "scanSettings": {
     "baseBranches": [],
-    "skipFolders": ["licenses"]
+    "skipFolders": ["licenses", "branding", "screenshots", "grafana-data", "keycloak", "docs"]
   },
   "checkRunSettings": {
     "vulnerableCheckRunConclusionLevel": "failure",

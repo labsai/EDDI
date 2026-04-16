@@ -13,6 +13,30 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Fix WhiteSource/Mend Bolt False Positive — Bootstrap CVEs (2026-04-16)
+
+**Repo:** EDDI (`fix/whitesource-bootstrap-false-positive`)
+
+**Problem:** Mend Bolt (WhiteSource) security check was failing on every GitHub build, flagging CVE-2024-6485 (CVSS 6.4) and CVE-2025-1647 (CVSS 5.6) — both XSS vulnerabilities in Bootstrap 3.4.1. **Bootstrap was never an actual dependency of EDDI.**
+
+**Root cause:** The `licenses/` folder contained 25 saved HTML web pages from opensource.org (~34,000 lines / ~2.5MB). These pages embedded CDN references to `bootstrap-3.4.1.min.js` in their website chrome. Despite `.whitesource` having `"skipFolders": ["licenses"]`, Mend Bolt still scanned these files and flagged the CDN references as direct dependencies.
+
+**Fix:**
+- Deleted all 25 bloated HTML files (33,978 lines removed)
+- Replaced with 13 clean plain-text license files using SPDX naming conventions
+- Added `licenses/README.md` explaining folder structure and how to regenerate dependency reports via `mvn package -Plicense-gen`
+- Expanded `.whitesource` `skipFolders` to also exclude other non-code directories (branding, screenshots, docs, etc.)
+
+**License types covered:** MIT, BSD-2-Clause, BSD-3-Clause, EPL-1.0, EPL-2.0, LGPL-2.1, LGPL-3.0, GPL-2.0-with-classpath-exception, CDDL-1.0, CC0-1.0, UPL-1.0, EDL-1.0, ISC
+
+**Files:**
+- `licenses/*.html` — 25 files deleted
+- `licenses/*.txt` — 13 plain-text license files created
+- `licenses/README.md` — new
+- `.whitesource` — expanded `skipFolders`
+
+---
+
 ## Version Bump to 6.0.1 (2026-04-15)
 
 **Repo:** EDDI (`feature/slack-integration`)
