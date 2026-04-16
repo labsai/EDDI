@@ -36,7 +36,8 @@ public class WeatherTool {
     Optional<String> openWeatherMapApiKey;
 
     public WeatherTool() {
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+        // SECURITY: Redirect.NEVER — defense-in-depth (see WebScraperTool P0-1)
+        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NEVER).build();
     }
 
     @Tool("Gets current weather information for a city. Returns temperature, conditions, humidity, and wind speed.")

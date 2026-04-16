@@ -35,7 +35,9 @@ public class WebSearchTool {
     String searchProvider;
 
     public WebSearchTool() {
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+        // SECURITY: Redirect.NEVER — these call fixed API endpoints, but explicit for
+        // defense-in-depth
+        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NEVER).build();
     }
 
     @Tool("Searches the web for current information on any topic. Returns relevant search results with titles and snippets.")

@@ -30,7 +30,9 @@ public class PdfReaderTool {
     private final HttpClient httpClient;
 
     public PdfReaderTool() {
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build();
+        // SECURITY: Redirect.NEVER prevents SSRF via redirect chains (see
+        // WebScraperTool P0-1)
+        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).followRedirects(HttpClient.Redirect.NEVER).build();
     }
 
     @Tool("Extracts all text content from a PDF file. Provide the URL to the PDF document.")
