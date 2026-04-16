@@ -13,6 +13,56 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Security Hardening — Code Review Remediation (2026-04-17)
+
+**Repo:** EDDI (`fix/security-hardening-6.0.2`)
+**Commit:** `549e79fc`
+
+**What changed:** Addressed 10 findings from external code review of the security hardening branch. 3 blockers, 5 medium, 2 low.
+
+### Blocker Fixes
+
+- **#1 — DNS rebinding javadoc:** Removed misleading claim that `UrlValidationUtils.validateUrl()` "defeats DNS rebinding (TOCTOU) attacks." The default `SafeHttpClient` path does NOT pin resolved IPs — the JDK HttpClient re-resolves DNS independently. Updated javadoc to honestly document the risk acceptance. The `InetAddress[]` return value remains available for callers who choose to implement socket-level pinning.
+- **#2 — Salt migration path:** `rotateKek()` was using `saltManager.getSalt()` for both old and new KEK derivation. If the deployment was on legacy salt, both derived with the same legacy salt — salt was never migrated. Fix: `rotateKek()` now detects legacy salt, generates a new 16-byte random salt, derives newKek with it, re-encrypts DEKs, then persists the new salt via `VaultSaltManager.migrateSalt()`. Added `migrateSalt(byte[])` and `getLegacySaltBytes()` to `VaultSaltManager`.
+- **#3 — @DefaultBean on both persistence impls:** **Not a bug.** `DataStoreProducers.secretPersistence()` produces a non-default `@Produces @ApplicationScoped ISecretPersistence` bean that takes priority over both `@DefaultBean` implementations. This is the same pattern used for all 11 dual-persistence stores. Fixed the misleading javadoc on `PostgresSecretPersistence` ("Activated only when postgres build profile is active" → documents the actual `DataStoreProducers` runtime selection).
+
+### Medium Fixes
+
+- **#5 — Redirect header preservation:** `SafeHttpClient.sendWithRedirects()` was only copying `User-Agent` on redirects, silently dropping `Authorization`, `Accept`, `X-API-Key`, etc. Fix: same-origin redirects copy all headers (except HttpClient-managed ones like `Host`/`Content-Length`). Cross-origin redirects strip `Authorization`, `Cookie`, `Proxy-Authorization` but keep everything else. Method-downgrade redirects (301/302/303 → GET) also strip `Content-Type`.
+- **#6 — Teredo/6to4 javadoc:** `isPrivateIPv6` javadoc claimed "covering ULA, IPv4-mapped, and Teredo" but had no Teredo (2001::/32) or 6to4 (2002::/16) check. Fixed comment to say "covering ULA and IPv4-mapped" with a note that Teredo/6to4 are not blocked (deprecated tunneling protocols, embedded IPv4 would be caught by `isPrivateIPv4`).
+- **#7 — AuthStartupGuard blocks TEST mode:** `onStart()` only exempted `LaunchMode.DEVELOPMENT`. `LaunchMode.TEST` fell into the prod branch, which would throw `IllegalStateException` at startup for any `@QuarkusTest` that doesn't set `allow-unauthenticated=true`. Fix: exempt both `DEVELOPMENT` and `TEST`. Also added `eddi.security.allow-unauthenticated=true` to both `IntegrationTestProfile` and `PostgresIntegrationTestProfile` as defense-in-depth.
+- **#8 — Log spam:** Periodic auth warning fired at ERROR level every 60 seconds (525k lines/year). Changed to WARN level every 3600 seconds (1/hour). Initial startup message remains ERROR.
+- **#9 — No total timeout across redirect hops:** An attacker could chain slow-resolving redirects to hold connections open. Added overall wall-clock timeout (`connectTimeoutMs × 3`, default 30s) checked before each hop in `sendWithRedirects()`.
+
+### Low / Cleanup
+
+- **#13 — WebScraperToolSsrfTest deleted:** Every test used `http://127.0.0.1` as the initial URL, which was blocked by `validateUrl` before any redirect logic ran. All tests passed for the wrong reason. The real redirect-hop validation is already covered by `SafeHttpClientTest`. File deleted.
+
+### Design Decisions
+
+- **Salt migration order:** New salt is persisted AFTER DEKs are re-encrypted. If salt persistence fails, DEKs are on the new KEK but the legacy salt is still in the DB. Recovery: the legacy salt is a known constant (`"eddi-vault-kek-v1"`), so the operator can decrypt manually. Persisting salt first was considered but would leave the system in a worse state on partial failure (old DEKs encrypted with old-salt-derived KEK, but DB has new salt).
+- **Header preservation on redirects:** Follows browser behavior: same-origin preserves all, cross-origin strips auth. More permissive than the previous "only User-Agent" approach but matches real-world expectations for authenticated API integrations.
+- **AuthStartupGuard TEST exemption:** TEST mode is developer-controlled and not a production risk. The escape hatch (`allow-unauthenticated`) is the operator-facing control.
+
+### Test Coverage
+
+- `AuthStartupGuardTest`: 5 tests (added TEST mode exemption)
+- All 2236 unit tests pass, 0 failures, 0 errors
+
+**Files:**
+- `SafeHttpClient.java` — header preservation, wall-clock timeout, origin comparison
+- `UrlValidationUtils.java` — TOCTOU javadoc fix, Teredo comment fix
+- `VaultSaltManager.java` — `migrateSalt()`, `getLegacySaltBytes()`
+- `VaultSecretProvider.java` — `rotateKek()` salt migration logic
+- `AuthStartupGuard.java` — TEST mode exemption, hourly WARN instead of per-minute ERROR
+- `PostgresSecretPersistence.java` — javadoc correction
+- `AuthStartupGuardTest.java` — TEST mode test
+- `IntegrationTestProfile.java` — `allow-unauthenticated=true`
+- `PostgresIntegrationTestProfile.java` — `allow-unauthenticated=true`
+- `WebScraperToolSsrfTest.java` — deleted (redundant)
+
+---
+
 ## Security Hardening Finalization + Documentation (2026-04-16)
 
 **Repo:** EDDI (`fix/security-hardening-6.0.2`)
