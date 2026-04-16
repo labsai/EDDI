@@ -111,7 +111,7 @@ public class VaultSaltManager {
         if (activeSalt == null) {
             throw new IllegalStateException("VaultSaltManager has not been initialized. Call initialize() first.");
         }
-        return activeSalt;
+        return activeSalt.clone();
     }
 
     /**
