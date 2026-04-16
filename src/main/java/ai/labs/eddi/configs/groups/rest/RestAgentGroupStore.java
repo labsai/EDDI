@@ -164,7 +164,14 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
                 documentDescriptorStore.setDescriptor(resourceId, currentResourceId.getVersion(), descriptor);
             }
         } catch (Exception e) {
-            LOG.warnf(e, "Failed to sync group descriptor name/description for id=%s", resourceId);
+            LOG.warnf(e, "Failed to sync group descriptor name/description for id=%s", sanitizeForLog(resourceId));
         }
+    }
+
+    private String sanitizeForLog(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.replaceAll("[\\r\\n\\t\\x00-\\x1F\\x7F]", "_");
     }
 }
