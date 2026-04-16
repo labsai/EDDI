@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write  # Required by CodeQL to upload SARIF results
 
 env:
   DOCKER_IMAGE: labsai/eddi
@@ -99,6 +98,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       security-events: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -111,7 +111,7 @@ jobs:
           cache: maven
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@ce64ddcb0d8d890d2df4a9d1c04ff297367dea2a # v3
         with:
           languages: java
           queries: security-extended
@@ -123,7 +123,7 @@ jobs:
         run: ./mvnw compile -DskipTests -B --no-transfer-progress
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@ce64ddcb0d8d890d2df4a9d1c04ff297367dea2a # v3
         with:
           category: "/language:java"
 
@@ -136,7 +136,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
         with:
           scan-type: fs
           scan-ref: .

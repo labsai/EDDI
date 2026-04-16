@@ -12,17 +12,19 @@ on:
         default: false
 
 permissions:
-  actions: write   # cache delete
   contents: read   # repo metadata + traffic API
 
 jobs:
   track:
     runs-on: ubuntu-latest
+    permissions:
+      actions: write   # cache delete (job-level for least privilege)
+      contents: read
     steps:
       # ── Restore cached metrics ──────────────────────────────
       - name: Restore metrics cache
         id: cache-restore
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:
           path: metrics.json
           key: project-metrics-data
@@ -302,7 +304,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
       - name: Save metrics cache
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:
           path: metrics.json
           key: project-metrics-data
