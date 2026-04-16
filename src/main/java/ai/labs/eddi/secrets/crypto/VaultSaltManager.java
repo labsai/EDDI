@@ -140,7 +140,6 @@ public class VaultSaltManager {
         LOGGER.info("[VAULT] Salt migration complete — per-deployment random salt activated (" + newSalt.length + " bytes).");
     }
 
-
     /**
      * Returns true if this deployment is using the legacy fixed salt (pre-6.0.2
      * backward compatibility mode).
