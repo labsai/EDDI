@@ -19,6 +19,7 @@ import {
   Link2,
   Star,
   AlertTriangle,
+  Pencil,
 } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -34,7 +35,7 @@ import {
   type GroupMember,
   type AgentGroupConfiguration,
 } from "@/lib/api/groups";
-import { GROUP_TEMPLATES, type GroupTemplate } from "@/lib/group-templates";
+import { getGroupTemplates, type GroupTemplate } from "@/lib/group-templates";
 import {
   setupAgent,
   LLM_PROVIDERS,
@@ -71,7 +72,7 @@ interface WizardState {
 function createEmptySlot(index: number, displayName?: string, role?: string | null): MemberSlot {
   return {
     agentId: "",
-    displayName: displayName || `Agent ${index + 1}`,
+    displayName: displayName || "",
     speakingOrder: index + 1,
     role: role || null,
     memberType: "AGENT",
@@ -202,7 +203,7 @@ export function GroupWizardPage() {
       .filter(({ slot }) => slot.mode === "new" && !slot.created && !slot.agentId);
 
     for (const { slot, index } of uncreatedMembers) {
-      setCreationProgress(t("groupWizard.creatingSlot", "Creating {{name}}…", { name: slot.displayName }));
+      setCreationProgress(t("groupWizard.creatingSlot", { name: slot.displayName }));
       try {
         const result = await setupAgent({
           name: `${state.name} — ${slot.displayName}`.trim(),
@@ -214,7 +215,7 @@ export function GroupWizardPage() {
         });
         updatedMembers[index] = { ...updatedMembers[index]!, agentId: result.agentId, created: true };
       } catch (err) {
-        toast.error(t("groupWizard.agentCreateFailed", "Failed to create agent: {{error}}", {
+        toast.error(t("groupWizard.agentCreateFailed", {
           error: err instanceof Error ? err.message : String(err),
         }));
         setIsBatchCreating(false);
@@ -226,7 +227,7 @@ export function GroupWizardPage() {
 
     // Auto-create moderator if needed
     if (updatedModerator && updatedModerator.mode === "new" && !updatedModerator.created && !updatedModerator.agentId) {
-      setCreationProgress(t("groupWizard.creatingModerator", "Creating moderator…"));
+      setCreationProgress(t("groupWizard.creatingModerator"));
       try {
         const result = await setupAgent({
           name: `${state.name} — Moderator`.trim(),
@@ -238,7 +239,7 @@ export function GroupWizardPage() {
         });
         updatedModerator = { ...updatedModerator, agentId: result.agentId, created: true };
       } catch (err) {
-        toast.error(t("groupWizard.agentCreateFailed", "Failed to create agent: {{error}}", {
+        toast.error(t("groupWizard.agentCreateFailed", {
           error: err instanceof Error ? err.message : String(err),
         }));
         setIsBatchCreating(false);
@@ -251,7 +252,7 @@ export function GroupWizardPage() {
     setState((s) => ({ ...s, members: updatedMembers, moderator: updatedModerator }));
 
     // --- Phase 2: Create the group ---
-    setCreationProgress(t("groupWizard.creatingGroup", "Creating group…"));
+    setCreationProgress(t("groupWizard.creatingGroup"));
     const config: AgentGroupConfiguration = {
       name: state.name,
       description: state.description,
@@ -278,7 +279,7 @@ export function GroupWizardPage() {
 
     createMutation.mutate(config, {
       onSuccess: (data) => {
-        toast.success(t("groupWizard.success", "Group created successfully!"));
+        toast.success(t("groupWizard.success"));
         const id = typeof data === "string" ? data : (data as { id?: string })?.id ?? "new";
         setResultId(id);
         setIsBatchCreating(false);
@@ -301,10 +302,10 @@ export function GroupWizardPage() {
             <CheckCircle2 className="h-8 w-8 text-emerald-500" />
           </div>
           <h2 className="text-2xl font-bold text-foreground">
-            {t("groupWizard.created", "Group Created!")}
+            {t("groupWizard.created")}
           </h2>
           <p className="mt-2 text-muted-foreground">
-            {state.name} — {state.members.length} {t("groups.members", "members")} · {STYLE_INFO[state.style]?.label}
+            {state.name} — {state.members.length} {t("groups.members")} · {STYLE_INFO[state.style]?.label}
           </p>
 
           <div className="mt-6 flex items-center justify-center gap-3">
@@ -312,7 +313,7 @@ export function GroupWizardPage() {
               to={`/manage/groups/${resultId}`}
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow-md active:scale-[0.98]"
             >
-              {t("groupWizard.viewGroup", "Open Group")}
+              {t("groupWizard.viewGroup")}
               <ExternalLink className="h-4 w-4" />
             </Link>
             <button
@@ -323,7 +324,7 @@ export function GroupWizardPage() {
               }}
               className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             >
-              {t("groupWizard.createAnother", "Create Another")}
+              {t("groupWizard.createAnother")}
             </button>
           </div>
         </div>
@@ -342,16 +343,16 @@ export function GroupWizardPage() {
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
-          {t("groupWizard.backToGroups", "Back to Groups")}
+          {t("groupWizard.backToGroups")}
         </Link>
         <h1 className="flex items-center gap-3 text-3xl font-bold text-foreground">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
             <Wand2 className="h-5 w-5 text-primary" />
           </div>
-          {t("groupWizard.title", "Group Setup Wizard")}
+          {t("groupWizard.title")}
         </h1>
         <p className="text-muted-foreground">
-          {t("groupWizard.subtitle", "Assemble a team of AI advisors to discuss your questions")}
+          {t("groupWizard.subtitle")}
         </p>
       </div>
 
@@ -441,12 +442,12 @@ export function GroupWizardPage() {
             {isCreating ? (
               <>
                 <RefreshCw className="h-4 w-4 animate-spin" />
-                {creationProgress || t("groupWizard.createGroup", "Create Group")}
+                {creationProgress || t("groupWizard.createGroup")}
               </>
             ) : (
               <>
                 <Rocket className="h-4 w-4" />
-                {t("groupWizard.createGroup", "Create Group")}
+                {t("groupWizard.createGroup")}
               </>
             )}
           </button>
@@ -472,14 +473,14 @@ function TemplateStep({
   return (
     <div>
       <h2 className="text-xl font-semibold text-foreground">
-        {t("groupWizard.templateTitle", "Start from a template")}
+        {t("groupWizard.templateTitle")}
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        {t("groupWizard.templateDesc", "Choose a preset group configuration or start from scratch.")}
+        {t("groupWizard.templateDesc")}
       </p>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2" data-testid="template-grid">
-        {GROUP_TEMPLATES.map((tmpl) => {
+        {getGroupTemplates(t).map((tmpl) => {
           const styleInfo = STYLE_INFO[tmpl.style];
           return (
             <button
@@ -529,10 +530,10 @@ function TemplateStep({
           </div>
           <div>
             <p className="text-sm font-semibold text-foreground">
-              {t("groupWizard.startBlank", "Start from Scratch")}
+              {t("groupWizard.startBlank")}
             </p>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {t("groupWizard.blankDesc", "Configure everything manually")}
+              {t("groupWizard.blankDesc")}
             </p>
           </div>
         </button>
@@ -557,10 +558,10 @@ function ConfigStep({
   return (
     <div>
       <h2 className="text-xl font-semibold text-foreground">
-        {t("groupWizard.configTitle", "Group Configuration")}
+        {t("groupWizard.configTitle")}
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        {t("groupWizard.configDesc", "Name your group and choose how the agents will discuss")}
+        {t("groupWizard.configDesc")}
       </p>
 
       <div className="mt-6 space-y-5">
@@ -574,7 +575,7 @@ function ConfigStep({
             type="text"
             value={state.name}
             onChange={(e) => onChange({ name: e.target.value })}
-            placeholder={t("groupWizard.namePlaceholder", "e.g. Advisory Board")}
+            placeholder={t("groupWizard.namePlaceholder")}
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
             data-testid="gw-name"
             autoFocus
@@ -590,7 +591,7 @@ function ConfigStep({
             id="gw-desc"
             value={state.description}
             onChange={(e) => onChange({ description: e.target.value })}
-            placeholder={t("groupWizard.descPlaceholder", "What is this group for?")}
+            placeholder={t("groupWizard.descPlaceholder")}
             rows={2}
             className="w-full rounded-lg border border-input bg-background px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-y transition-shadow"
             data-testid="gw-description"
@@ -718,10 +719,10 @@ function MembersStep({
         created: true,
         creating: false,
       });
-      toast.success(t("groupWizard.agentCreated", "Agent \"{{name}}\" created", { name: slot.displayName }));
+      toast.success(t("groupWizard.agentCreated", { name: slot.displayName }));
     } catch (err) {
       updateMember(idx, { creating: false });
-      toast.error(t("groupWizard.agentCreateFailed", "Failed to create agent: {{error}}", {
+      toast.error(t("groupWizard.agentCreateFailed", {
         error: err instanceof Error ? err.message : String(err),
       }));
     }
@@ -747,10 +748,10 @@ function MembersStep({
       onChange({
         moderator: { ...mod, agentId: result.agentId, created: true, creating: false },
       });
-      toast.success(t("groupWizard.moderatorCreated", "Moderator agent created"));
+      toast.success(t("groupWizard.moderatorCreated"));
     } catch (err) {
       onChange({ moderator: { ...mod, creating: false } });
-      toast.error(t("groupWizard.agentCreateFailed", "Failed to create agent: {{error}}", {
+      toast.error(t("groupWizard.agentCreateFailed", {
         error: err instanceof Error ? err.message : String(err),
       }));
     }
@@ -760,23 +761,23 @@ function MembersStep({
     <div>
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-xl font-semibold text-foreground">
-          {t("groupWizard.membersTitle", "Assemble Your Team")}
+          {t("groupWizard.membersTitle")}
         </h2>
         <div className="flex items-center gap-2">
           <button
             onClick={() => refetchAgents()}
             className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-            title={t("groupWizard.refreshAgents", "Refresh agent list")}
+            title={t("groupWizard.refreshAgents")}
           >
             <RefreshCw className="h-3 w-3" />
           </button>
           <Badge variant="secondary" className="text-xs">
-            {agents.length} {t("groupWizard.existingAgents", "existing agents")}
+            {agents.length} {t("groupWizard.existingAgents")}
           </Badge>
         </div>
       </div>
       <p className="text-sm text-muted-foreground mb-4">
-        {t("groupWizard.membersDesc", "For each seat, choose an existing agent or create a new one on the fly.")}
+        {t("groupWizard.membersDesc")}
       </p>
 
       {/* Member Cards */}
@@ -803,7 +804,7 @@ function MembersStep({
         data-testid="gw-add-member"
       >
         <Plus className="h-4 w-4" />
-        {t("groupWizard.addMember", "Add Member")}
+        {t("groupWizard.addMember")}
       </button>
 
       {/* Moderator Section */}
@@ -812,10 +813,10 @@ function MembersStep({
           <div className="flex items-center gap-2">
             <Star className="h-4 w-4 text-primary" />
             <span className="text-sm font-semibold text-foreground">
-              {t("groupWizard.moderator", "Moderator")}
+              {t("groupWizard.moderator")}
             </span>
             <span className="text-xs text-muted-foreground">
-              {t("groupWizard.moderatorHint", "Synthesizes the discussion")}
+              {t("groupWizard.moderatorHint")}
             </span>
           </div>
           {!state.moderator ? (
@@ -824,13 +825,13 @@ function MembersStep({
               className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
             >
               <UserPlus className="h-3 w-3" />
-              {t("groupWizard.addModerator", "Add Moderator")}
+              {t("groupWizard.addModerator")}
             </button>
           ) : (
             <button
               onClick={() => onChange({ moderator: null })}
               className="rounded-md p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-              title={t("groupWizard.removeModerator", "Remove moderator")}
+              title={t("groupWizard.removeModerator")}
             >
               <Trash2 className="h-3.5 w-3.5" />
             </button>
@@ -852,7 +853,7 @@ function MembersStep({
       {state.members.length < 2 && (
         <p className="mt-3 text-xs text-amber-500 font-medium flex items-center gap-1.5">
           <AlertTriangle className="h-3.5 w-3.5" />
-          {t("groupWizard.needMembers", "Add at least 2 members to proceed")}
+          {t("groupWizard.needMembers")}
         </p>
       )}
     </div>
@@ -907,18 +908,27 @@ function MemberCard({
           {member.created ? <Check className="h-4 w-4" /> : getInitials(member.displayName || "?")}
         </div>
 
-        <div className="flex-1 min-w-0">
-          <input
-            value={member.displayName}
-            onChange={(e) => onUpdate({ displayName: e.target.value })}
-            className="w-full bg-transparent text-sm font-semibold text-foreground focus:outline-none placeholder:text-muted-foreground"
-            placeholder={t("groupWizard.displayName", "Display Name")}
-          />
+        <div className="flex-1 min-w-0 space-y-1">
+          <div className={cn(
+            "flex items-center gap-1.5 rounded-md border px-2 py-0.5 transition-colors",
+            member.displayName.trim()
+              ? "border-border/60 focus-within:border-primary/50"
+              : "border-amber-500/50 bg-amber-500/5"
+          )}>
+            <Pencil className="h-3 w-3 shrink-0 text-muted-foreground/50" />
+            <input
+              value={member.displayName}
+              onChange={(e) => onUpdate({ displayName: e.target.value })}
+              className="w-full bg-transparent text-sm font-semibold text-foreground focus:outline-none placeholder:text-muted-foreground/60"
+              placeholder={t("groupWizard.displayNamePlaceholder")}
+              autoFocus={!member.displayName && !member.created}
+            />
+          </div>
           <input
             value={member.role ?? ""}
             onChange={(e) => onUpdate({ role: e.target.value || null })}
-            className="w-full bg-transparent text-xs text-muted-foreground focus:outline-none placeholder:text-muted-foreground/50"
-            placeholder={t("groupWizard.rolePlaceholder", "Role (e.g. Marketing, Engineering)")}
+            className="w-full bg-transparent text-xs text-muted-foreground ps-2.5 focus:outline-none placeholder:text-muted-foreground/50"
+            placeholder={t("groupWizard.rolePlaceholder")}
           />
         </div>
 
@@ -973,7 +983,7 @@ function MemberCard({
               )}
             >
               <Link2 className="h-3.5 w-3.5" />
-              {t("groupWizard.useExisting", "Use Existing")}
+              {t("groupWizard.useExisting")}
             </button>
             <button
               onClick={() => onUpdate({ mode: "new", agentId: "" })}
@@ -985,7 +995,7 @@ function MemberCard({
               )}
             >
               <Sparkles className="h-3.5 w-3.5" />
-              {t("groupWizard.createNew", "Create New")}
+              {t("groupWizard.createNew")}
             </button>
           </div>
 
@@ -1000,7 +1010,7 @@ function MemberCard({
                   !member.agentId ? "border-amber-400/50" : "border-input"
                 )}
               >
-                <option value="">{t("groupWizard.selectAgent", "Select agent…")}</option>
+                <option value="">{t("groupWizard.selectAgent")}</option>
                 {agents.map((agent) => (
                   <option key={agent.id} value={agent.id}>
                     {agent.name || agent.id.slice(0, 12)}
@@ -1017,7 +1027,7 @@ function MemberCard({
               {/* System prompt */}
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                  {t("groupWizard.systemPrompt", "System Prompt")}
+                  {t("groupWizard.systemPrompt")}
                 </label>
                 <textarea
                   value={member.systemPrompt}
@@ -1032,7 +1042,7 @@ function MemberCard({
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    {t("groupWizard.provider", "LLM Provider")}
+                    {t("groupWizard.provider")}
                   </label>
                   <div className="relative">
                     <select
@@ -1054,7 +1064,7 @@ function MemberCard({
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    {t("groupWizard.model", "Model")}
+                    {t("groupWizard.model")}
                   </label>
                   <input
                     value={member.model}
@@ -1069,12 +1079,12 @@ function MemberCard({
               {providerConfig?.needsKey && (
                 <div>
                   <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    {t("groupWizard.apiKey", "API Key")}
+                    {t("groupWizard.apiKey")}
                   </label>
                   <SecretKeyPicker
                     value={member.apiKey}
                     onChange={(v) => onUpdate({ apiKey: v })}
-                    placeholder={t("groupWizard.apiKeyPlaceholder", "sk-…")}
+                    placeholder={t("groupWizard.apiKeyPlaceholder")}
                     testId={`gw-apikey-${index}`}
                   />
                 </div>
@@ -1092,8 +1102,8 @@ function MemberCard({
                   <Wand2 className="h-3 w-3" />
                 )}
                 {member.creating
-                  ? t("groupWizard.creatingAgent", "Creating agent…")
-                  : t("groupWizard.createThisAgent", "Create Agent")}
+                  ? t("groupWizard.creatingAgent")
+                  : t("groupWizard.createThisAgent")}
               </button>
             </div>
           )}
@@ -1105,7 +1115,7 @@ function MemberCard({
         <div className="px-4 py-2 bg-emerald-500/5 border-t border-emerald-500/20 flex items-center gap-2">
           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
           <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-            {t("groupWizard.agentReady", "Agent created & deployed")}
+            {t("groupWizard.agentReady")}
           </span>
           <span className="text-[10px] text-muted-foreground font-mono ms-auto">
             {member.agentId.slice(0, 12)}…
@@ -1140,7 +1150,7 @@ function ModeratorCard({
       <div className="flex items-center gap-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-2.5">
         <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
         <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium flex-1">
-          {t("groupWizard.moderatorReady", "Moderator agent ready")}
+          {t("groupWizard.moderatorReady")}
         </span>
         <span className="text-[10px] text-muted-foreground font-mono">
           {moderator.agentId.slice(0, 12)}…
@@ -1163,7 +1173,7 @@ function ModeratorCard({
           )}
         >
           <Link2 className="h-3.5 w-3.5" />
-          {t("groupWizard.useExisting", "Use Existing")}
+          {t("groupWizard.useExisting")}
         </button>
         <button
           onClick={() => onChange({ mode: "new", agentId: "" })}
@@ -1175,7 +1185,7 @@ function ModeratorCard({
           )}
         >
           <Sparkles className="h-3.5 w-3.5" />
-          {t("groupWizard.createNew", "Create New")}
+          {t("groupWizard.createNew")}
         </button>
       </div>
 
@@ -1186,7 +1196,7 @@ function ModeratorCard({
             onChange={(e) => onChange({ agentId: e.target.value })}
             className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-2 pe-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
           >
-            <option value="">{t("groupWizard.selectAgent", "Select agent…")}</option>
+            <option value="">{t("groupWizard.selectAgent")}</option>
             {agents.map((agent) => (
               <option key={agent.id} value={agent.id}>
                 {agent.name || agent.id.slice(0, 12)}
@@ -1229,12 +1239,12 @@ function ModeratorCard({
           {providerConfig?.needsKey && (
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                {t("groupWizard.apiKey", "API Key")}
+                {t("groupWizard.apiKey")}
               </label>
               <SecretKeyPicker
                 value={moderator.apiKey}
                 onChange={(v) => onChange({ apiKey: v })}
-                placeholder={t("groupWizard.apiKeyPlaceholder", "sk-…")}
+                placeholder={t("groupWizard.apiKeyPlaceholder")}
                 testId="gw-moderator-apikey"
               />
             </div>
@@ -1250,8 +1260,8 @@ function ModeratorCard({
               <Wand2 className="h-3 w-3" />
             )}
             {moderator.creating
-              ? t("groupWizard.creatingAgent", "Creating agent…")
-              : t("groupWizard.createModerator", "Create Moderator Agent")}
+              ? t("groupWizard.creatingAgent")
+              : t("groupWizard.createModerator")}
           </button>
         </div>
       )}
@@ -1280,10 +1290,10 @@ function ReviewStep({
   return (
     <div>
       <h2 className="text-xl font-semibold text-foreground">
-        {t("groupWizard.reviewTitle", "Review & Create")}
+        {t("groupWizard.reviewTitle")}
       </h2>
       <p className="mt-1 text-sm text-muted-foreground">
-        {t("groupWizard.reviewDesc", "Review your group configuration before creating.")}
+        {t("groupWizard.reviewDesc")}
       </p>
 
       <div className="mt-6 space-y-5">
@@ -1318,10 +1328,10 @@ function ReviewStep({
             <Sparkles className="h-4 w-4 text-primary shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-medium text-primary">
-                {t("groupWizard.autoCreateNotice", "{{count}} agents will be auto-created when you click Create Group", { count: willCreateCount })}
+                {t("groupWizard.autoCreateNotice", { count: willCreateCount })}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {t("groupWizard.autoCreateHint", "Each agent will be created and deployed automatically before the group is assembled.")}
+                {t("groupWizard.autoCreateHint")}
               </p>
             </div>
           </div>
@@ -1333,10 +1343,10 @@ function ReviewStep({
             <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
             <div>
               <p className="text-sm font-medium text-amber-600 dark:text-amber-400">
-                {t("groupWizard.unassignedWarning", "{{count}} members set to 'Use Existing' but no agent selected", { count: unassignedExistingCount })}
+                {t("groupWizard.unassignedWarning", { count: unassignedExistingCount })}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {t("groupWizard.unassignedHint", "These members will be skipped during discussions. Go back to assign agents.")}
+                {t("groupWizard.unassignedHint")}
               </p>
             </div>
           </div>
@@ -1345,7 +1355,7 @@ function ReviewStep({
         {/* Members */}
         <div>
           <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-            {t("groupWizard.reviewMembers", "Members")}
+            {t("groupWizard.reviewMembers")}
             {newCount > 0 && (
               <span className="ms-2 font-normal normal-case text-emerald-500">
                 ({newCount} newly created)
@@ -1401,7 +1411,7 @@ function ReviewStep({
         {styleInfo && (
           <div className={cn("rounded-lg border p-3", colors.border, colors.bg)}>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-              {t("groupWizard.flowPreview", "Discussion Flow")}
+              {t("groupWizard.flowPreview")}
             </p>
             <p className={cn("text-xs font-medium", colors.text)}>
               {styleInfo.flow}

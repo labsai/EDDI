@@ -3,6 +3,7 @@ import type {
   GroupMember,
   DiscussionStyle,
 } from "./api/groups";
+import type { TFunction } from "i18next";
 
 /**
  * Preset templates for common group configurations.
@@ -20,87 +21,89 @@ export interface GroupTemplate {
   moderatorSuggested: boolean;
 }
 
-export const GROUP_TEMPLATES: GroupTemplate[] = [
-  {
-    key: "advisory-board",
-    name: "Advisory Board",
-    description:
-      "A panel of expert advisors consulting on strategic decisions. Each agent represents a different business function and provides domain-specific insights.",
-    icon: "👔",
-    style: "ROUND_TABLE",
-    maxRounds: 2,
-    roles: [
-      { displayName: "Marketing Expert", role: "Marketing" },
-      { displayName: "Tech Lead", role: "Engineering" },
-      { displayName: "Finance Director", role: "Finance" },
-      { displayName: "Legal Counsel", role: "Legal" },
-      { displayName: "Strategy Consultant", role: "Strategy" },
-    ],
-    moderatorSuggested: true,
-  },
-  {
-    key: "code-review",
-    name: "Code Review Panel",
-    description:
-      "Structured code review with independent opinions, peer critique, revision based on feedback, and a synthesized assessment.",
-    icon: "🔍",
-    style: "PEER_REVIEW",
-    maxRounds: 1,
-    roles: [
-      { displayName: "Senior Engineer", role: "Code Quality" },
-      { displayName: "Architect", role: "Architecture" },
-      { displayName: "Security Reviewer", role: "Security" },
-    ],
-    moderatorSuggested: true,
-  },
-  {
-    key: "risk-assessment",
-    name: "Risk Assessment",
-    description:
-      "Panel with a devil's advocate who challenges assumptions and identifies blind spots. Great for stress-testing proposals and strategies.",
-    icon: "⚠️",
-    style: "DEVIL_ADVOCATE",
-    maxRounds: 1,
-    roles: [
-      { displayName: "Risk Analyst", role: "Risk" },
-      { displayName: "Domain Expert", role: "Domain" },
-      { displayName: "Devil's Advocate", role: "DEVIL_ADVOCATE" },
-    ],
-    moderatorSuggested: true,
-  },
-  {
-    key: "forecasting",
-    name: "Forecasting Panel",
-    description:
-      "Delphi-style anonymous deliberation for reducing groupthink and getting unbiased independent estimates and forecasts.",
-    icon: "🔮",
-    style: "DELPHI",
-    maxRounds: 3,
-    roles: [
-      { displayName: "Analyst A", role: "Forecasting" },
-      { displayName: "Analyst B", role: "Forecasting" },
-      { displayName: "Analyst C", role: "Forecasting" },
-      { displayName: "Analyst D", role: "Forecasting" },
-    ],
-    moderatorSuggested: true,
-  },
-  {
-    key: "pro-con",
-    name: "Pro/Con Debate",
-    description:
-      "Formal debate with pro and con teams arguing their positions, followed by rebuttals and a judge's verdict.",
-    icon: "⚖️",
-    style: "DEBATE",
-    maxRounds: 1,
-    roles: [
-      { displayName: "Pro Advocate 1", role: "PRO" },
-      { displayName: "Pro Advocate 2", role: "PRO" },
-      { displayName: "Con Advocate 1", role: "CON" },
-      { displayName: "Con Advocate 2", role: "CON" },
-    ],
-    moderatorSuggested: true,
-  },
-];
+/**
+ * Returns translated group templates.
+ * Accepts a `t` function from `useTranslation()` so all display
+ * strings are locale-aware and update when the language changes.
+ */
+export function getGroupTemplates(t: TFunction): GroupTemplate[] {
+  return [
+    {
+      key: "advisory-board",
+      name: t("groupTemplates.advisoryBoard"),
+      description: t("groupTemplates.advisoryBoardDesc"),
+      icon: "👔",
+      style: "ROUND_TABLE",
+      maxRounds: 2,
+      roles: [
+        { displayName: t("groupTemplates.roles.marketingExpert"), role: "Marketing" },
+        { displayName: t("groupTemplates.roles.techLead"), role: "Engineering" },
+        { displayName: t("groupTemplates.roles.financeDirector"), role: "Finance" },
+        { displayName: t("groupTemplates.roles.legalCounsel"), role: "Legal" },
+        { displayName: t("groupTemplates.roles.strategyConsultant"), role: "Strategy" },
+      ],
+      moderatorSuggested: true,
+    },
+    {
+      key: "code-review",
+      name: t("groupTemplates.codeReview"),
+      description: t("groupTemplates.codeReviewDesc"),
+      icon: "🔍",
+      style: "PEER_REVIEW",
+      maxRounds: 1,
+      roles: [
+        { displayName: t("groupTemplates.roles.seniorEngineer"), role: "Code Quality" },
+        { displayName: t("groupTemplates.roles.architect"), role: "Architecture" },
+        { displayName: t("groupTemplates.roles.securityReviewer"), role: "Security" },
+      ],
+      moderatorSuggested: true,
+    },
+    {
+      key: "risk-assessment",
+      name: t("groupTemplates.riskAssessment"),
+      description: t("groupTemplates.riskAssessmentDesc"),
+      icon: "⚠️",
+      style: "DEVIL_ADVOCATE",
+      maxRounds: 1,
+      roles: [
+        { displayName: t("groupTemplates.roles.riskAnalyst"), role: "Risk" },
+        { displayName: t("groupTemplates.roles.domainExpert"), role: "Domain" },
+        { displayName: t("groupTemplates.roles.devilsAdvocate"), role: "DEVIL_ADVOCATE" },
+      ],
+      moderatorSuggested: true,
+    },
+    {
+      key: "forecasting",
+      name: t("groupTemplates.forecasting"),
+      description: t("groupTemplates.forecastingDesc"),
+      icon: "🔮",
+      style: "DELPHI",
+      maxRounds: 3,
+      roles: [
+        { displayName: t("groupTemplates.roles.analystA"), role: "Forecasting" },
+        { displayName: t("groupTemplates.roles.analystB"), role: "Forecasting" },
+        { displayName: t("groupTemplates.roles.analystC"), role: "Forecasting" },
+        { displayName: t("groupTemplates.roles.analystD"), role: "Forecasting" },
+      ],
+      moderatorSuggested: true,
+    },
+    {
+      key: "pro-con",
+      name: t("groupTemplates.proCon"),
+      description: t("groupTemplates.proConDesc"),
+      icon: "⚖️",
+      style: "DEBATE",
+      maxRounds: 1,
+      roles: [
+        { displayName: t("groupTemplates.roles.proAdvocate1"), role: "PRO" },
+        { displayName: t("groupTemplates.roles.proAdvocate2"), role: "PRO" },
+        { displayName: t("groupTemplates.roles.conAdvocate1"), role: "CON" },
+        { displayName: t("groupTemplates.roles.conAdvocate2"), role: "CON" },
+      ],
+      moderatorSuggested: true,
+    },
+  ];
+}
 
 /**
  * Build an AgentGroupConfiguration from a template.

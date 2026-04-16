@@ -424,6 +424,52 @@ export function groupGroupsByName(
   );
 }
 
+/** Enriched group descriptor with config-level data (name, description, style, memberCount) */
+export type EnrichedGroupDescriptor = GroupDescriptor & {
+  id: string;
+  version: number;
+  memberCount: number;
+  style?: DiscussionStyle;
+};
+
+/**
+ * Fetch group descriptors and enrich them with data from full configs.
+ * The backend's descriptor endpoint may return empty name/description because
+ * those fields live inside AgentGroupConfiguration, not on the descriptor itself.
+ * This function batch-fetches each group's config to fill the gaps.
+ */
+export async function getEnrichedGroupDescriptors(
+  limit = 20,
+  index = 0,
+  filter = ""
+): Promise<EnrichedGroupDescriptor[]> {
+  const descriptors = await getGroupDescriptors(limit, index, filter);
+  const grouped = groupGroupsByName(descriptors);
+
+  // Batch-fetch full configs for groups with empty names
+  const enriched = await Promise.all(
+    grouped.map(async (g) => {
+      try {
+        const config = await getGroup(g.id, g.version);
+        return {
+          ...g,
+          name: config.name || g.name,
+          description: config.description || g.description,
+          memberCount: config.members?.length ?? 0,
+          style: config.style,
+        } satisfies EnrichedGroupDescriptor;
+      } catch {
+        return {
+          ...g,
+          memberCount: 0,
+        } satisfies EnrichedGroupDescriptor;
+      }
+    })
+  );
+
+  return enriched;
+}
+
 /** Style display info */
 export const STYLE_INFO: Record<
   DiscussionStyle,

@@ -14,7 +14,7 @@ import {
   type GroupMember,
   type AgentGroupConfiguration,
 } from "@/lib/api/groups";
-import { GROUP_TEMPLATES, type GroupTemplate } from "@/lib/group-templates";
+import { getGroupTemplates, type GroupTemplate } from "@/lib/group-templates";
 
 interface CreateGroupDialogProps {
   open: boolean;
@@ -99,7 +99,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
       ...members,
       {
         agentId: "",
-        displayName: `Agent ${members.length + 1}`,
+        displayName: "",
         speakingOrder: members.length + 1,
         role: null,
         memberType: "AGENT",
@@ -198,7 +198,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                 {t("groups.chooseTemplate", "Choose a template or start from scratch.")}
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {GROUP_TEMPLATES.map((tmpl) => (
+                {getGroupTemplates(t).map((tmpl) => (
                   <button
                     key={tmpl.key}
                     onClick={() => selectTemplate(tmpl)}

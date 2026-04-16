@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getGroupDescriptors,
+  getEnrichedGroupDescriptors,
   getGroup,
   createGroup,
   updateGroup,
@@ -24,6 +25,13 @@ export function useGroupDescriptors(limit = 20, index = 0, filter = "") {
   return useQuery({
     queryKey: [...GROUPS_KEY, "descriptors", { limit, index, filter }],
     queryFn: () => getGroupDescriptors(limit, index, filter),
+  });
+}
+
+export function useEnrichedGroupDescriptors(limit = 20, index = 0, filter = "") {
+  return useQuery({
+    queryKey: [...GROUPS_KEY, "enriched", { limit, index, filter }],
+    queryFn: () => getEnrichedGroupDescriptors(limit, index, filter),
   });
 }
 

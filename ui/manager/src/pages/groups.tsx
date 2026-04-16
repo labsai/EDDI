@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Boxes, Search, Plus, ExternalLink, Copy, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { useGroupDescriptors, useDeleteGroup, useDuplicateGroup } from "@/hooks/use-groups";
+import { useEnrichedGroupDescriptors, useDeleteGroup, useDuplicateGroup } from "@/hooks/use-groups";
 import { GroupCard } from "@/components/groups/group-card";
 import { CreateGroupDialog } from "@/components/groups/create-group-dialog";
 import { CreateOrWizardDialog } from "@/components/shared/create-or-wizard-dialog";
@@ -18,7 +18,6 @@ import {
   type ViewMode,
 } from "@/components/shared/view-toggle";
 import { getStoredViewMode, setStoredViewMode } from "@/components/shared/view-mode";
-import { groupGroupsByName } from "@/lib/api/groups";
 import { formatRelativeTime } from "@/lib/utils";
 
 export function GroupsPage() {
@@ -32,11 +31,11 @@ export function GroupsPage() {
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("groups"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
 
-  const { data: groups, isLoading, isError, refetch } = useGroupDescriptors(100, 0, search);
+  const { data: enrichedGroups, isLoading, isError, refetch } = useEnrichedGroupDescriptors(100, 0, search);
   const deleteMutation = useDeleteGroup();
   const duplicateMutation = useDuplicateGroup();
 
-  const groupedGroups = groups ? groupGroupsByName(groups) : [];
+  const groupedGroups = enrichedGroups ?? [];
 
   function handleDelete(id: string, version: number) {
     setDeleteTarget({ id, version });
@@ -155,6 +154,8 @@ export function GroupsPage() {
                 <GroupCard
                   key={group.id}
                   group={group}
+                  memberCount={group.memberCount}
+                  style={group.style}
                   onDuplicate={handleDuplicate}
                   onDelete={handleDelete}
                 />
