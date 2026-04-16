@@ -13,6 +13,110 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Security Hardening Sprint 1 — v6.0.2 (2026-04-16)
+
+**Repo:** EDDI (`fix/security-hardening-6.0.2`)
+
+**What changed:** Comprehensive security hardening across 26 files (1040 insertions). All items from the P0/P1 security ticket board.
+
+### P0-1: SSRF via Redirect in WebScraperTool
+
+`WebScraperTool.fetchUrl()` used `HttpClient.Redirect.NORMAL` — the JDK followed 3xx redirects with no per-hop validation. Attacker-controlled URL → 302 → `http://169.254.169.254/` was exploitable.
+
+**Fix:** Set `Redirect.NEVER`, implemented manual redirect loop (`followRedirectsSafely()`) that calls `UrlValidationUtils.validateUrl()` on every `Location` header. Capped at 5 hops total.
+
+### P0-3: UrlValidationUtils Hardened
+
+`isPrivateAddress()` only covered RFC 1918 and link-local. Missing: IPv6 ULA (fc00::/7), CGNAT (100.64.0.0/10), IPv4-mapped IPv6 (::ffff:x.x.x.x wrapping private ranges), multicast (224.0.0.0/4), unspecified (0.0.0.0/8).
+
+**Fix:** Extended to block all above ranges. Added injectable `HostResolver` interface for DNS rebinding defense and testability. `validateUrl()` now returns `InetAddress[]` so callers can pin the resolved IP for the actual HTTP request (TOCTOU defense).
+
+### P0-4: Authorization Gap on REST Resources
+
+7 REST interfaces had no authorization annotations — any authenticated user could perform admin operations.
+
+**Fix:** Added `@RolesAllowed`:
+- `eddi-admin`: `IRestAgentSetup`, `IRestCoordinatorAdmin`
+- `eddi-admin`, `eddi-user`: `IRestAgentEngine`, `IRestAgentEngineStreaming`, `IRestAgentManagement`, `IRestGroupConversation`, `IRestUserMemoryStore`
+
+Added `eddi-user` role + sample `user` account to `eddi-realm.json`.
+
+### P0-5: Fail-Loud Production Auth
+
+No warning when OIDC is disabled in production — operators could unknowingly expose the full API without authentication.
+
+**Fix:** Created `AuthStartupGuard.java` — observes `StartupEvent`, checks if OIDC tenant is disabled outside dev mode. Logs `FATAL` and calls `Quarkus.asyncExit(78)`. Escape hatch: `eddi.security.allow-unauthenticated=true`.
+
+### P0-6: Overly Permissive Permit Rule
+
+Single `permit1` path pattern allowed all HTTP methods on static asset paths — including POST/PUT/DELETE.
+
+**Fix:** Split into method-specific policies: static assets GET/HEAD only, health endpoint GET only, Slack webhook POST only.
+
+### P0-7: Jackson 3.x Ban
+
+No build-time guard against accidental Jackson 3.x introduction via transitive dependencies.
+
+**Fix:** Added `maven-enforcer-plugin` rule banning `tools.jackson.*` group ID (Jackson 3.x namespace).
+
+### P1-1: Per-Deployment Random KEK Salt
+
+KEK derivation used a fixed, hardcoded salt (`"eddi-vault-kek-v1"`). If two deployments used the same passphrase, they'd derive the same KEK.
+
+**Fix:**
+- Added `deriveKeyFromString(String, byte[])` overload to `EnvelopeCrypto`
+- Created `VaultSaltManager` — generates a random 16-byte salt on first boot, persists to `secretvault_meta` collection, loads on subsequent boots
+- Added `getMetaValue()`/`setMetaValue()` to `ISecretPersistence` (default methods) with implementations in both `MongoSecretPersistence` and `PostgresSecretPersistence`
+- **Backward compatible:** Upgrades from pre-6.0.2 auto-detect existing DEKs and use the legacy salt (no data loss)
+
+### P1-4: Redirect Cap
+
+`httpClient.maxRedirects` defaulted to 32 — excessive for any legitimate use case.
+
+**Fix:** Clamped to 5 in `application.properties`.
+
+### P1-5: Docker / Compose Hardening
+
+| Change | Before | After |
+|--------|--------|-------|
+| MongoDB version | `mongo:6.0` | `mongo:7.0.14` (pinned) |
+| MongoDB auth | None | `MONGO_INITDB_ROOT_USERNAME/PASSWORD` |
+| MongoDB port | `27017:27017` (all interfaces) | `127.0.0.1:27017:27017` |
+| Healthchecks | None | Both EDDI + MongoDB |
+| depends_on | Simple | `condition: service_healthy` |
+| Dockerfile | No HEALTHCHECK | `HEALTHCHECK` + non-root user documentation |
+| Environment | Inline defaults | `.env.example` template |
+
+### Test Coverage
+
+- `UrlValidationUtilsExtendedTest` — 16 parameterized tests (IPv6 ULA, CGNAT, IPv4-mapped, multicast, unspecified, DNS rebinding, regression)
+- `WebScraperToolSsrfTest` — 4 tests (redirect-to-loopback, redirect-to-metadata, too-many-redirects, Redirect.NEVER enforcement)
+- `VaultSecretProviderTest` — 12 tests (updated for VaultSaltManager constructor)
+- `SecretVaultIntegrationTest` — 35 tests (updated for VaultSaltManager constructor)
+
+**All 67 tests pass, 0 failures.**
+
+**Design decisions:**
+- **Fail-loud over fail-open:** User accepted breaking changes for production auth misconfiguration
+- **Legacy salt backward compat:** VaultSaltManager detects existing DEKs and auto-selects the legacy salt — no migration action needed from operators
+- **Default methods on interface:** `getMetaValue`/`setMetaValue` use `default` implementations (return null / no-op) so existing custom persistence implementations don't break
+
+**Files:**
+- `UrlValidationUtils.java`, `WebScraperTool.java` — SSRF hardening
+- `IRestAgentEngine.java`, `IRestAgentEngineStreaming.java`, `IRestAgentManagement.java`, `IRestAgentSetup.java`, `IRestGroupConversation.java`, `IRestCoordinatorAdmin.java`, `IRestUserMemoryStore.java` — `@RolesAllowed`
+- `AuthStartupGuard.java` — production auth guard (NEW)
+- `VaultSaltManager.java` — per-deployment salt manager (NEW)
+- `EnvelopeCrypto.java` — salt-parameterized key derivation
+- `VaultSecretProvider.java` — wired VaultSaltManager
+- `ISecretPersistence.java`, `MongoSecretPersistence.java`, `PostgresSecretPersistence.java` — metadata store
+- `application.properties` — fine-grained permit rules, redirect cap
+- `pom.xml` — maven-enforcer-plugin
+- `docker-compose.yml`, `Dockerfile.jvm`, `.env.example` — Docker hardening
+- `eddi-realm.json` — eddi-user role
+- Test files: `UrlValidationUtilsExtendedTest.java`, `WebScraperToolSsrfTest.java`, `VaultSecretProviderTest.java`, `SecretVaultIntegrationTest.java`
+
+---
+
 ## Version Bump to 6.0.1 (2026-04-15)
 
 **Repo:** EDDI (`feature/slack-integration`)
