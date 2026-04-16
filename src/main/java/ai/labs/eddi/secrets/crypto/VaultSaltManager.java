@@ -140,13 +140,6 @@ public class VaultSaltManager {
         LOGGER.info("[VAULT] Salt migration complete — per-deployment random salt activated (" + newSalt.length + " bytes).");
     }
 
-    /**
-     * Returns the well-known legacy fixed salt used by pre-6.0.2 deployments. Used
-     * by {@code rotateKek()} to derive the old KEK when migrating from legacy salt.
-     */
-    public static byte[] getLegacySaltBytes() {
-        return "eddi-vault-kek-v1".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-    }
 
     /**
      * Returns true if this deployment is using the legacy fixed salt (pre-6.0.2
