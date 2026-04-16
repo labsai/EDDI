@@ -6,6 +6,7 @@ import ai.labs.eddi.secrets.model.EncryptedSecret;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
+import ai.labs.eddi.secrets.crypto.VaultSaltManager;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,16 +29,28 @@ class VaultSecretProviderTest {
 
     private ISecretPersistence persistence;
     private SimpleMeterRegistry meterRegistry;
+    private VaultSaltManager saltManager;
     private VaultSecretProvider provider;
 
     @BeforeEach
     void setUp() {
         persistence = mock(ISecretPersistence.class);
         meterRegistry = new SimpleMeterRegistry();
-        provider = new VaultSecretProvider(Optional.of("test-master-key-32chars!!"), persistence, meterRegistry);
+        saltManager = createLegacySaltManager();
+        provider = new VaultSecretProvider(Optional.of("test-master-key-32chars!!"), persistence, saltManager, meterRegistry);
         provider.initMetrics();
         // Simulate startup
         provider.onStartup(new io.quarkus.runtime.StartupEvent());
+    }
+
+    /**
+     * Creates a VaultSaltManager that uses the legacy fixed salt (backward compat).
+     */
+    private VaultSaltManager createLegacySaltManager() {
+        var sm = new VaultSaltManager(persistence);
+        // Initialize will use legacy salt since persistence mock returns null for meta
+        sm.initialize();
+        return sm;
     }
 
     @Test
@@ -47,7 +60,7 @@ class VaultSecretProviderTest {
 
     @Test
     void isAvailable_whenMasterKeyNotSet() {
-        var disabledProvider = new VaultSecretProvider(Optional.empty(), persistence, meterRegistry);
+        var disabledProvider = new VaultSecretProvider(Optional.empty(), persistence, saltManager, meterRegistry);
         disabledProvider.initMetrics();
         disabledProvider.onStartup(new io.quarkus.runtime.StartupEvent());
         assertFalse(disabledProvider.isAvailable());
@@ -179,7 +192,7 @@ class VaultSecretProviderTest {
 
     @Test
     void unavailable_throwsOnResolve() {
-        var disabledProvider = new VaultSecretProvider(Optional.empty(), persistence, meterRegistry);
+        var disabledProvider = new VaultSecretProvider(Optional.empty(), persistence, saltManager, meterRegistry);
         disabledProvider.initMetrics();
         disabledProvider.onStartup(new io.quarkus.runtime.StartupEvent());
         assertThrows(ISecretProvider.SecretProviderException.class, () -> disabledProvider.resolve(new SecretReference("default", "key")));
@@ -187,7 +200,7 @@ class VaultSecretProviderTest {
 
     @Test
     void unavailable_throwsOnStore() {
-        var disabledProvider = new VaultSecretProvider(Optional.empty(), persistence, meterRegistry);
+        var disabledProvider = new VaultSecretProvider(Optional.empty(), persistence, saltManager, meterRegistry);
         disabledProvider.initMetrics();
         disabledProvider.onStartup(new io.quarkus.runtime.StartupEvent());
         assertThrows(ISecretProvider.SecretProviderException.class,

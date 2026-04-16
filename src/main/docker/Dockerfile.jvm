@@ -115,11 +115,17 @@ COPY --chown=185 target/quarkus-app/quarkus/ /deployments/quarkus/
 COPY --chown=185 licenses/ /licenses/
 COPY --chown=185 docs/ /deployments/docs/
 
+# Run as non-root user (UID 185 = jboss user from UBI base image)
+# This is a security requirement — containers MUST NOT run as root
 USER 185
 EXPOSE 7070
 ENV JAVA_OPTS_APPEND="-Dquarkus.http.host=0.0.0.0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager -Dfile.encoding=UTF8 -Deddi.docs.path=/deployments/docs"
 # for debugging:
 # ENV JAVA_OPTS_APPEND="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
 ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
+
+# Docker-native healthcheck (supplements k8s liveness/readiness probes)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:7070/q/health/ready || exit 1
 
 ENTRYPOINT [ "/opt/jboss/container/java/run/run-java.sh" ]

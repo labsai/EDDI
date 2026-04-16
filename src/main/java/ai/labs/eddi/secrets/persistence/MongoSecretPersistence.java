@@ -58,12 +58,14 @@ public class MongoSecretPersistence implements ISecretPersistence {
 
     private final MongoCollection<Document> secretsCollection;
     private final MongoCollection<Document> deksCollection;
+    private final MongoCollection<Document> metaCollection;
 
     @Inject
     public MongoSecretPersistence(MongoDatabase database) {
         RuntimeUtilities.checkNotNull(database, "database");
         this.secretsCollection = database.getCollection(COLLECTION_SECRETS);
         this.deksCollection = database.getCollection(COLLECTION_DEKS);
+        this.metaCollection = database.getCollection("secretvault_meta");
         ensureIndexes();
     }
 
@@ -74,6 +76,9 @@ public class MongoSecretPersistence implements ISecretPersistence {
 
         // Unique index on tenantId for DEKs (one DEK per tenant)
         deksCollection.createIndex(Indexes.ascending(FIELD_TENANT_ID), new IndexOptions().name("idx_dek_tenant").unique(true).background(true));
+
+        // Unique index on key for metadata
+        metaCollection.createIndex(Indexes.ascending("key"), new IndexOptions().name("idx_meta_key").unique(true).background(true));
 
         LOGGER.info("Secrets vault MongoDB indexes ensured");
     }
@@ -180,6 +185,31 @@ public class MongoSecretPersistence implements ISecretPersistence {
             return deks;
         } catch (com.mongodb.MongoException e) {
             throw new PersistenceException("Failed to list all DEKs", e);
+        }
+    }
+
+    // ─── Metadata ───
+
+    @Override
+    public String getMetaValue(String key) {
+        try {
+            var doc = metaCollection.find(eq("key", key)).first();
+            return doc != null ? doc.getString("value") : null;
+        } catch (com.mongodb.MongoException e) {
+            throw new PersistenceException("Failed to read meta value: " + key, e);
+        }
+    }
+
+    @Override
+    public void setMetaValue(String key, String value) {
+        try {
+            var filter = eq("key", key);
+            var update = Updates.combine(
+                    Updates.set("value", value),
+                    Updates.setOnInsert("key", key));
+            metaCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
+        } catch (com.mongodb.MongoException e) {
+            throw new PersistenceException("Failed to write meta value: " + key, e);
         }
     }
 

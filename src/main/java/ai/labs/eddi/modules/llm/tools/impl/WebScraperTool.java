@@ -15,6 +15,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.Set;
 
 import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 
@@ -24,10 +25,17 @@ import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 @ApplicationScoped
 public class WebScraperTool {
     private static final Logger LOGGER = Logger.getLogger(WebScraperTool.class);
+
+    /** Maximum number of HTTP redirects to follow per request. */
+    private static final int MAX_REDIRECTS = 5;
+
+    /** HTTP status codes that indicate a redirect. */
+    private static final Set<Integer> REDIRECT_CODES = Set.of(301, 302, 303, 307, 308);
+
     private final HttpClient httpClient;
 
     public WebScraperTool() {
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).followRedirects(HttpClient.Redirect.NORMAL).build();
+        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).followRedirects(HttpClient.Redirect.NEVER).build();
     }
 
     @Tool("Extracts text content from a web page URL. Returns the main text content without HTML tags.")
@@ -218,19 +226,62 @@ public class WebScraperTool {
         }
     }
 
+    /**
+     * Fetches the content of a URL with SSRF-safe redirect handling. Validates the
+     * initial URL and every redirect hop. Caps total redirects at
+     * {@link #MAX_REDIRECTS}.
+     *
+     * @param url
+     *            the URL to fetch
+     * @return the response body as a string
+     * @throws IOException
+     *             if the request fails
+     * @throws InterruptedException
+     *             if the thread is interrupted
+     * @throws IllegalArgumentException
+     *             if any URL (initial or redirect) is unsafe
+     */
     private String fetchUrl(String url) throws IOException, InterruptedException {
         validateUrl(url);
 
-        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15))
-                .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)").GET().build();
+        URI currentUri = URI.create(url);
+        int redirectCount = 0;
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        while (true) {
+            HttpRequest request = HttpRequest.newBuilder().uri(currentUri).timeout(Duration.ofSeconds(15))
+                    .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)").GET().build();
 
-        if (response.statusCode() != 200) {
-            throw new IOException("HTTP " + response.statusCode() + " for URL: " + url);
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            int statusCode = response.statusCode();
+
+            if (!REDIRECT_CODES.contains(statusCode)) {
+                // Not a redirect — return the response
+                if (statusCode != 200) {
+                    throw new IOException("HTTP " + statusCode + " for URL: " + currentUri);
+                }
+                return response.body();
+            }
+
+            // Handle redirect
+            redirectCount++;
+            if (redirectCount > MAX_REDIRECTS) {
+                throw new IOException("Too many redirects (" + redirectCount + ") for URL: " + url);
+            }
+
+            String location = response.headers().firstValue("Location").orElse(null);
+            if (location == null || location.isBlank()) {
+                throw new IOException("Redirect " + statusCode + " without Location header from: " + currentUri);
+            }
+
+            // Resolve relative Location against the current URI
+            URI resolvedUri = currentUri.resolve(location);
+
+            // Validate the redirect target — prevents SSRF via 302 → internal
+            validateUrl(resolvedUri.toString());
+
+            LOGGER.debugf("Following redirect %d/%d: %s → %s", redirectCount, MAX_REDIRECTS, currentUri, resolvedUri);
+            currentUri = resolvedUri;
         }
-
-        return response.body();
     }
 
     private String extractMainContent(Document doc) {

@@ -5,6 +5,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.container.Suspended;
@@ -25,6 +26,7 @@ import java.util.Map;
  */
 @Path("/agents")
 @Tag(name = "Conversations")
+@RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
 public interface IRestAgentEngine {
 
     // --- Start conversation (still needs agentId) ---

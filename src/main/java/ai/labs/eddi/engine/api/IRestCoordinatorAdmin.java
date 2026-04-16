@@ -2,6 +2,7 @@ package ai.labs.eddi.engine.api;
 
 import ai.labs.eddi.engine.model.CoordinatorStatus;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
@@ -21,6 +22,7 @@ import java.util.List;
  */
 @Path("/administration/coordinator")
 @Tag(name = "Coordinator Admin")
+@RolesAllowed("eddi-admin")
 public interface IRestCoordinatorAdmin {
 
     @GET

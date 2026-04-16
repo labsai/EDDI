@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.api;
 
 import ai.labs.eddi.engine.model.InputData;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
@@ -19,6 +20,7 @@ import java.util.List;
  */
 @Path("/agents/managed")
 @Tag(name = "Conversations")
+@RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
 public interface IRestAgentManagement {
 
     @GET

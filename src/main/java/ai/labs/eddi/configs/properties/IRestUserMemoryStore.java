@@ -1,6 +1,7 @@
 package ai.labs.eddi.configs.properties;
 
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
@@ -18,6 +19,7 @@ import java.util.List;
  */
 @Path("/usermemorystore/memories")
 @Tag(name = "User Memory", description = "Persistent user memory management")
+@RolesAllowed({"eddi-admin", "eddi-user"})
 public interface IRestUserMemoryStore {
 
     @GET
