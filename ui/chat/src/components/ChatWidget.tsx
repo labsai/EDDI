@@ -131,17 +131,19 @@ export function ChatWidget() {
     setBaseUrl(apiServer ?? state.config.apiBaseUrl ?? "");
   }, [apiServer, state.config.apiBaseUrl]);
 
-  /* ─── SSE event handler (declared early to avoid reference issues) ── */
+  /* ─── SSE event handler (declared early to avoid reference issues) ──
+     Returns `true` when the stream is logically complete (done / error),
+     so the caller can break out of the for-await loop.                  */
   const handleSSEEvent = useCallback(
-    (event: SSEEvent) => {
+    (event: SSEEvent): boolean => {
       switch (event.type) {
         case "token":
           dispatch({ type: "SET_THINKING", value: false });
           dispatch({ type: "APPEND_TO_LAST_AGENT", token: event.data });
-          break;
+          return false;
         case "thinking":
           dispatch({ type: "SET_THINKING", value: true });
-          break;
+          return false;
         case "done":
           dispatch({ type: "FINISH_STREAMING" });
           // Parse the snapshot from the done event to extract quickReplies,
@@ -169,15 +171,17 @@ export function ChatWidget() {
             }
           }
           dispatch({ type: "SET_PROCESSING", value: false });
-          break;
+          return true;
         case "error":
           dispatch({
             type: "APPEND_TO_LAST_AGENT",
             token: `\n\n⚠️ Error: ${event.data}`,
           });
           dispatch({ type: "FINISH_STREAMING" });
-          break;
+          return true;
         // task_start / task_complete — pipeline progress, ignore for now
+        default:
+          return false;
       }
     },
     [dispatch],
@@ -392,16 +396,34 @@ export function ChatWidget() {
             },
           });
 
+          // AbortController: break out of the for-await when "done" fires.
+          // Proxies (Vite dev, nginx) may not forward the SSE close signal,
+          // so reader.read() would hang forever without this.
+          const abort = new AbortController();
+
           const events = sendMessageStreaming(
             environment,
             agentId,
             state.conversationId,
             text,
             secretContext,
+            abort.signal,
           );
 
-          for await (const event of events) {
-            handleSSEEvent(event);
+          try {
+            for await (const event of events) {
+              const isDone = handleSSEEvent(event);
+              if (isDone) {
+                abort.abort();
+                break;
+              }
+            }
+          } catch (e) {
+            if (e instanceof DOMException && e.name === "AbortError") {
+              // expected after abort — swallow
+            } else {
+              throw e;
+            }
           }
           dispatch({ type: "FINISH_STREAMING" });
         } else if (environment && agentId && state.conversationId) {
@@ -691,6 +713,7 @@ export function ChatWidget() {
               <ChatInput
                 onSend={handleSend}
                 disabled={!state.conversationId && !isManagedAgent}
+                conversationId={state.conversationId}
               />
             )}
           </div>

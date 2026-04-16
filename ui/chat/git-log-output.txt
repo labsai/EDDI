@@ -1,0 +1,30 @@
+311a46a fix(chat-ui): parse SSE done event for quickReplies
+ac4e08d chore: untrack .env, add to .gitignore
+41ab931 feat(v6): API endpoint simplification ÔÇö /agents/{agentId}/start, /agents/managed, conv-only paths
+82190be fix(chat-ui): correct bot to agent rename casing in ScrollToBottom components
+677db80 refactor(v6): replace unrestrictedÔåÆproduction environment in Chat-UI
+86f5c51 test(chat-ui): add 5 secret input reducer tests (SET_INPUT_FIELD, CLEAR_INPUT_FIELD, TOGGLE_SECRET_MODE)
+4c641e8 feat(secrets): secret input handling ÔÇö password fields, eye toggle, secret mode toggle, context API
+27d7f53 chore(chat-ui): add dist/ to .gitignore
+5e17047 feat(chat-ui): CRA to Vite rewrite ÔÇö React 19, SSE streaming, context state, demo mode, BEM CSS
+85ac895 added missing dependency; fixed css for QR buttons; code cleanup; disable creation of source map
+720011b fixed basedUrl; none set by default and possible to override via url param "apiServer=//localhost:7070"
+77ff394 Improved colors for links and its states for better readability
+2e0d0f7 Fixed rendering of html based messages, improved code highlighting
+1673c55 force showing of input field via query param; make sure input field has focus if shown
+f69db96 added isLoading to prevent flickering preview of input field; don't show input field while loading nor if there are QRs (except if actions contain 'show_input'); changed font to Noto Sans
+f49aed9 fixed quick reply buttons not being visible; Added "Conversion End" State with Restart button
+d501524 Added focus to inputField on page load
+176baf9 Added Markdown support, updated dependencies, updated css
+c7b6693 replace try-catch with fetch-then-catch; smaller refactorings
+8ea1fc2 Merge remote-tracking branch 'origin/master'
+ade4fc3 fixed useEffect issues
+6515509 replace new lines properly; moved favicon to img folder
+26679c9 allow adding non-encoded html code in the bot message but making sure it is safe
+2466cb2 Merge pull request #2 from labsai/renovate/configure
+221e02a Merge pull request #1 from labsai/whitesource/configure
+5780ede fixed favicon
+9967347 improved baseUrl
+4234757 Merge remote-tracking branch 'origin/master'
+f92ade5 fixed paths in env variables
+8de6ed9 Update README.md

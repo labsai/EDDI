@@ -494,6 +494,34 @@ a:hover { opacity: 0.85; }
   to { transform: rotate(360deg); }
 }
 
+/* ─── Attach button in ChatInput ─────────────── */
+
+.chat-input__attach {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--chat-radius-sm);
+  background: transparent;
+  color: var(--chat-text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  font-size: 1.1rem;
+}
+
+.chat-input__attach:hover:not(:disabled) {
+  background: var(--chat-accent-soft);
+  color: var(--chat-text);
+}
+
+.chat-input__attach:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 /* ─── Secret toggle in ChatInput ──────────────── */
 
 .chat-input__secret-toggle {

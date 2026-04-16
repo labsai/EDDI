@@ -119,6 +119,7 @@ export async function* sendMessageStreaming(
   conversationId: string,
   message: string,
   context?: Record<string, { type: string; value: string }>,
+  signal?: AbortSignal,
 ): AsyncGenerator<SSEEvent> {
   const body: Record<string, unknown> = { input: message };
   if (context && Object.keys(context).length > 0) {
@@ -131,6 +132,7 @@ export async function* sendMessageStreaming(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal,
     },
   );
 
@@ -276,4 +278,33 @@ export async function fetchAgentDescriptor(
   } catch {
     return {};
   }
+}
+
+/* ─── Attachments ────────────────────────────── */
+
+export interface AttachmentResult {
+  storageRef: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
+/**
+ * Upload a file attachment to a conversation.
+ * POST /conversations/{conversationId}/attachments (multipart/form-data)
+ */
+export async function uploadAttachment(
+  conversationId: string,
+  file: File,
+): Promise<AttachmentResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch(
+    buildUrl(`/conversations/${conversationId}/attachments`),
+    { method: "POST", body: formData },
+  );
+
+  if (!res.ok) throw new Error(`Attachment upload failed: ${res.statusText}`);
+  return res.json();
 }

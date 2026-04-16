@@ -5,13 +5,15 @@
 
 import { useState, useRef, useCallback, type KeyboardEvent } from "react";
 import { useChatState, useChatDispatch } from "@/store/chat-store";
+import { uploadAttachment } from "@/api/chat-api";
 
 interface ChatInputProps {
   onSend: (message: string, isSecret?: boolean) => void;
   disabled?: boolean;
+  conversationId?: string | null;
 }
 
-export function ChatInput({ onSend, disabled }: ChatInputProps) {
+export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) {
   const { isProcessing, config, isSecretMode } = useChatState();
   const dispatch = useChatDispatch();
   const [value, setValue] = useState("");
@@ -56,8 +58,47 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
 
   const canSend = value.trim().length > 0 && !disabled && !isProcessing;
 
+  // ── Attachment upload ──
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleAttach = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !conversationId) return;
+    setIsUploading(true);
+    try {
+      const result = await uploadAttachment(conversationId, file);
+      onSend(`📎 ${file.name} [ref:${result.storageRef}]`);
+    } catch {
+      // silently fail — user sees no message sent
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }, [conversationId, onSend]);
+
   return (
     <div className="chat-input">
+      {/* Hidden file input for attachments */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        style={{ display: "none" }}
+        onChange={handleAttach}
+        data-testid="chat-file-input"
+      />
+      {/* 📎 Attach button */}
+      <button
+        type="button"
+        className="chat-input__attach"
+        onClick={() => fileInputRef.current?.click()}
+        disabled={!conversationId || isUploading}
+        title="Attach file"
+        data-testid="chat-attach-btn"
+        aria-label="Attach file"
+      >
+        {isUploading ? "⏳" : "📎"}
+      </button>
       {/* 🔒 Secret mode toggle */}
       <button
         type="button"
