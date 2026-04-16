@@ -35,7 +35,7 @@ public class AuthStartupGuard {
     private volatile boolean warnMode = false;
 
     void onStart(@Observes StartupEvent event) {
-        if (LaunchMode.current() == LaunchMode.DEVELOPMENT) {
+        if (getLaunchMode() == LaunchMode.DEVELOPMENT) {
             if (!oidcEnabled) {
                 LOGGER.info("[SECURITY] Dev mode — OIDC disabled. " + "Set QUARKUS_OIDC_TENANT_ENABLED=true to test with authentication.");
             }
@@ -69,5 +69,13 @@ public class AuthStartupGuard {
             LOGGER.error("[SECURITY] ⚠️  REMINDER: OIDC is DISABLED in production. "
                     + "All API endpoints are unauthenticated. Set QUARKUS_OIDC_TENANT_ENABLED=true.");
         }
+    }
+
+    /**
+     * Returns the current launch mode. Package-private to allow test overrides
+     * (LaunchMode.current() is static and not mockable without a wrapper).
+     */
+    LaunchMode getLaunchMode() {
+        return LaunchMode.current();
     }
 }

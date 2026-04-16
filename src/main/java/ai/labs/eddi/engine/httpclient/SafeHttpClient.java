@@ -120,19 +120,37 @@ public class SafeHttpClient {
         URI resolvedUri = request.uri().resolve(location);
 
         // Validate the redirect target — prevents SSRF via 302 → internal
-        UrlValidationUtils.validateUrl(resolvedUri.toString());
+        validateRedirectTarget(resolvedUri.toString());
 
         LOGGER.debugf("Following redirect %d/%d: %s → %s", redirectCount, MAX_REDIRECTS, request.uri(), resolvedUri);
 
-        // Build a new GET request for the redirect target (POST→GET for 301/302/303)
-        HttpRequest redirectRequest = HttpRequest.newBuilder()
+        // Build redirect request — preserve method for 307/308 per RFC 7538
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(resolvedUri)
                 .timeout(request.timeout().orElse(Duration.ofSeconds(15)))
-                .header("User-Agent", request.headers().firstValue("User-Agent").orElse("EDDI-Agent/1.0"))
-                .GET()
-                .build();
+                .header("User-Agent", request.headers().firstValue("User-Agent").orElse("EDDI-Agent/1.0"));
+
+        if ((statusCode == 307 || statusCode == 308) && !"GET".equals(request.method())) {
+            // 307/308: preserve original HTTP method and body
+            builder.method(request.method(),
+                    request.bodyPublisher().orElse(HttpRequest.BodyPublishers.noBody()));
+        } else {
+            // 301/302/303: always downgrade to GET per RFC 7231
+            builder.GET();
+        }
+
+        HttpRequest redirectRequest = builder.build();
 
         return sendWithRedirects(redirectRequest, bodyHandler, redirectCount);
+    }
+
+    /**
+     * Validates a redirect target URL against SSRF rules. Package-private to allow
+     * test overrides for embedded server tests where the redirect target is on
+     * loopback.
+     */
+    void validateRedirectTarget(String url) {
+        UrlValidationUtils.validateUrl(url);
     }
 
     /**

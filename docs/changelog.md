@@ -13,6 +13,38 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Security Hardening Finalization + Documentation (2026-04-16)
+
+**Repo:** EDDI (`fix/security-hardening-6.0.2`)
+**Commit:** `711642a5`
+
+**What changed:** Completed remaining security hardening items + comprehensive documentation updates.
+
+### Code Changes
+
+- **SafeHttpClient (307/308 fix):** Redirect handling now preserves HTTP method and body for 307/308 per RFC 7538. Previously all redirects were downgraded to GET.
+- **SafeHttpClient (testability):** Extracted `validateRedirectTarget()` as package-private method for spy-based testing.
+- **SafeHttpClientTest:** 9 unit tests covering SSRF blocking (loopback, cloud metadata), redirect mechanics (too-many-hops, missing Location header), non-redirect responses (200, 404), `sendValidated()` validation, and 307 method preservation.
+- **AuthStartupGuard (testability):** Extracted `getLaunchMode()` wrapper over static `LaunchMode.current()`.
+- **AuthStartupGuardTest:** 4 unit tests covering dev mode, prod+no-auth (throws), prod+escape-hatch (warns), prod+OIDC-enabled (passes).
+- **SecurityUtilities:** Deleted. Zero callers confirmed (grep across entire src/). Dead code since EDDI 5.x.
+- **WeatherTool:** Fixed missing `java.time.Duration` import (pre-existing compilation error from SafeHttpClient migration).
+- **RestAgentGroupStore:** Removed UTF-8 BOM character causing checkstyle/compiler failures.
+
+### Documentation Changes
+
+- **AGENTS.md:** Added `SafeHttpClient`, `UrlValidationUtils`, `AuthStartupGuard`, `VaultSaltManager` to Reusable Infrastructure table. Added `Security Hardening v6.0.2` to Completed roadmap. Updated Tool Security section with `SafeHttpClient` pattern. Updated Key Files table.
+- **architecture.md:** New "Security Architecture" section covering SSRF 3-layer model, vault encryption model (PBKDF2 → KEK → DEK), authentication model (AuthStartupGuard decision matrix), CI security scanning, security headers, and DNS rebinding risk acceptance.
+- **README.md:** Expanded Security section from a single link to 5 bullet points covering production security defaults.
+
+### Design Decisions
+
+- **SecurityUtilities deletion > deprecation:** Zero callers and EDDI is self-contained — no external consumers to warn. Dead code should be removed.
+- **DNS rebinding (Option C):** Accepted risk. Exploitation requires cooperating DNS + race condition + bypassing redirect validation. Documented in architecture.md.
+- **Test approach:** Used Mockito spy (not MockedStatic) for `SafeHttpClient.validateRedirectTarget()` and `AuthStartupGuard.getLaunchMode()` — minimal production code changes, maximum test coverage.
+
+---
+
 ## Security Hardening Sprint 2 — v6.0.2 (2026-04-16)
 
 **Repo:** EDDI (`fix/security-hardening-6.0.2`)
