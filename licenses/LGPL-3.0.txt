@@ -1,0 +1,44 @@
+GNU Lesser General Public License
+Version 3, 29 June 2007
+
+Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
+
+Everyone is permitted to copy and distribute verbatim copies of this license
+document, but changing it is not allowed.
+
+This version of the GNU Lesser General Public License incorporates the terms
+and conditions of version 3 of the GNU General Public License, supplemented
+by the additional permissions listed below.
+
+0. Additional Definitions.
+
+As used herein, "this License" refers to version 3 of the GNU Lesser General
+Public License, and the "GNU GPL" refers to version 3 of the GNU General
+Public License.
+
+1. Exception to Section 3 of the GNU GPL.
+
+You may convey a covered work under sections 3 and 4 of this License without
+being bound by section 3 of the GNU GPL.
+
+2. Conveying Modified Versions.
+
+If you modify a copy of the Library, and, in your modifications, a facility
+refers to a function or data to be supplied by an Application that uses the
+facility (other than as an argument passed when the facility is invoked), then
+you may convey a copy of the modified version.
+
+3. Object Code Incorporating Material from Library Header Files.
+
+The object code form of an Application may incorporate material from a header
+file that is part of the Library.
+
+4. Combined Works.
+
+You may convey a Combined Work under terms of your choice that, taken together,
+effectively do not restrict modification of the portions of the Library
+contained in the Combined Work and reverse engineering for debugging such
+modifications.
+
+THE FULL TEXT OF THIS LICENSE IS AVAILABLE AT:
+https://www.gnu.org/licenses/lgpl-3.0.html
