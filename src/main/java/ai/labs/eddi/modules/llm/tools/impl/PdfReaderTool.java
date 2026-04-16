@@ -1,8 +1,10 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -11,7 +13,6 @@ import org.jboss.logging.Logger;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
@@ -27,12 +28,11 @@ import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 @ApplicationScoped
 public class PdfReaderTool {
     private static final Logger LOGGER = Logger.getLogger(PdfReaderTool.class);
-    private final HttpClient httpClient;
+    private final SafeHttpClient httpClient;
 
-    public PdfReaderTool() {
-        // SECURITY: Redirect.NEVER prevents SSRF via redirect chains (see
-        // WebScraperTool P0-1)
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).followRedirects(HttpClient.Redirect.NEVER).build();
+    @Inject
+    public PdfReaderTool(SafeHttpClient httpClient) {
+        this.httpClient = httpClient;
     }
 
     @Tool("Extracts all text content from a PDF file. Provide the URL to the PDF document.")

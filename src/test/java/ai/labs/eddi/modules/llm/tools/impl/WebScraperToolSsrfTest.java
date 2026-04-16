@@ -1,5 +1,6 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.*;
 
@@ -24,7 +25,7 @@ class WebScraperToolSsrfTest {
     void setUp() throws IOException {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         port = server.getAddress().getPort();
-        tool = new WebScraperTool();
+        tool = new WebScraperTool(new SafeHttpClient(10000));
     }
 
     @AfterEach

@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  security-events: write  # Required by CodeQL to upload SARIF results
 
 env:
   DOCKER_IMAGE: labsai/eddi
@@ -91,6 +92,58 @@ jobs:
           name: jacoco-it-report
           path: target/site/jacoco-it/
           retention-days: 14
+
+  # ─── Job 2b: CodeQL SAST ───────────────────────────────────────
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: java
+          queries: security-extended
+
+      - name: Set execute permission for mvnw
+        run: chmod +x mvnw
+
+      - name: Build for CodeQL
+        run: ./mvnw compile -DskipTests -B --no-transfer-progress
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:java"
+
+  # ─── Job 2c: Trivy Security Scan ───────────────────────────────
+  trivy-scan:
+    name: Trivy Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: 1
+          ignore-unfixed: true
+          format: table
 
   # ─── Job 3: Docker Build & Push ─────────────────────────────────
   docker:

@@ -1,15 +1,16 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -23,7 +24,7 @@ import java.util.Optional;
 @ApplicationScoped
 public class WebSearchTool {
     private static final Logger LOGGER = Logger.getLogger(WebSearchTool.class);
-    private final HttpClient httpClient;
+    private final SafeHttpClient httpClient;
 
     @ConfigProperty(name = "eddi.tools.websearch.google.api-key")
     Optional<String> googleApiKey;
@@ -34,10 +35,9 @@ public class WebSearchTool {
     @ConfigProperty(name = "eddi.tools.websearch.provider", defaultValue = "duckduckgo")
     String searchProvider;
 
-    public WebSearchTool() {
-        // SECURITY: Redirect.NEVER — these call fixed API endpoints, but explicit for
-        // defense-in-depth
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NEVER).build();
+    @Inject
+    public WebSearchTool(SafeHttpClient httpClient) {
+        this.httpClient = httpClient;
     }
 
     @Tool("Searches the web for current information on any topic. Returns relevant search results with titles and snippets.")
