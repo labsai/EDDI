@@ -4,8 +4,8 @@
 
 .DESCRIPTION
     1. Runs `npm run build` to produce the production bundle
-    2. Removes old Manager JS/CSS from EDDI (index-*.js, index-*.css only — preserves chat-ui-*)
-    3. Copies the new hashed JS/CSS into EDDI's scripts/ directory
+    2. Cleans up old hashed assets from previous builds.
+    3. Copies the entire new assets folder into EDDI's assets/ directory.
     4. Updates manage.html with the new hashed filenames
 
 .PARAMETER EddiPath
@@ -24,6 +24,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $ResourceDir = Join-Path $EddiPath "src\main\resources\META-INF\resources"
+$AssetsDir   = Join-Path $ResourceDir "assets"
 $ScriptsJs   = Join-Path $ResourceDir "scripts\js"
 $ScriptsCss  = Join-Path $ResourceDir "scripts\css"
 $ManageHtml  = Join-Path $ResourceDir "manage.html"
@@ -45,60 +46,84 @@ Write-Host "  Build succeeded." -ForegroundColor Green
 
 # ─── Step 2: Find new assets ────────────────────────────────────────────────
 $distAssets = Join-Path $PSScriptRoot "dist\assets"
-$newJs  = Get-ChildItem $distAssets -Filter "index-*.js" | Select-Object -First 1
-$newCss = Get-ChildItem $distAssets -Filter "index-*.css" | Select-Object -First 1
+$distFiles = Get-ChildItem $distAssets
+$newJs  = $distFiles | Where-Object { $_.Name -like "index-*.js" } | Select-Object -First 1
+$newCss = $distFiles | Where-Object { $_.Name -like "index-*.css" } | Select-Object -First 1
 
 if (-not $newJs -or -not $newCss) {
     Write-Error "Could not find index-*.js or index-*.css in dist/assets/"
     exit 1
 }
 
-Write-Host "`n[2/4] New assets:" -ForegroundColor Cyan
+Write-Host "`n[2/4] New main assets:" -ForegroundColor Cyan
 Write-Host "  JS:  $($newJs.Name)"
 Write-Host "  CSS: $($newCss.Name)"
+Write-Host "  Total assets: $($distFiles.Count)" -ForegroundColor DarkGray
 
-# ─── Step 3: Remove old Manager files (preserve chat-ui-*) ─────────────────
-Write-Host "`n[3/4] Cleaning old Manager assets..." -ForegroundColor Cyan
+# ─── Step 3: Remove old files selectively ────────────────────────────────────
+Write-Host "`n[3/4] Cleaning old Manager assets (selectively)..." -ForegroundColor Cyan
 
 $removedFiles = @()
 
+# Cleanup legacy locations if any exist (from previous deployment structure)
 $oldJs = Get-ChildItem $ScriptsJs -Filter "index-*.js" -ErrorAction SilentlyContinue
 foreach ($f in $oldJs) {
-    Write-Host "  Removing $($f.Name)" -ForegroundColor Yellow
+    Write-Host "  Removing legacy script $($f.Name)" -ForegroundColor Yellow
     $removedFiles += "src/main/resources/META-INF/resources/scripts/js/$($f.Name)"
     Remove-Item $f.FullName -Force
 }
 
 $oldCss = Get-ChildItem $ScriptsCss -Filter "index-*.css" -ErrorAction SilentlyContinue
 foreach ($f in $oldCss) {
-    Write-Host "  Removing $($f.Name)" -ForegroundColor Yellow
+    Write-Host "  Removing legacy style $($f.Name)" -ForegroundColor Yellow
     $removedFiles += "src/main/resources/META-INF/resources/scripts/css/$($f.Name)"
     Remove-Item $f.FullName -Force
+}
+
+# Ensure destination assets dir exists
+if (-not (Test-Path $AssetsDir)) {
+    New-Item -ItemType Directory -Force -Path $AssetsDir | Out-Null
+}
+
+# Clean old versions of the currently generated files in assets/
+# Match files with 8-character hashes: [prefix]-[hash].[ext]
+foreach ($f in $distFiles) {
+    if ($f.Name -match "^(.+)-([A-Za-z0-9_-]{8})\.([A-Za-z0-9]+)$") {
+        $prefix = $matches[1]
+        $ext = $matches[3]
+        $oldMatches = Get-ChildItem -Path $AssetsDir -Filter "$prefix-*.$ext" -ErrorAction SilentlyContinue
+        foreach ($old in $oldMatches) {
+            # ensure it has an 8-character hash to avoid accidentally removing e.g. index-xyz-abc.js
+            if ($old.Name -match "^(.+)-([A-Za-z0-9_-]{8})\.([A-Za-z0-9]+)$") {
+                if ($old.Name -ne $f.Name) {
+                    Write-Host "  Removing old asset $($old.Name)" -ForegroundColor Yellow
+                    $removedFiles += "src/main/resources/META-INF/resources/assets/$($old.Name)"
+                    Remove-Item $old.FullName -Force
+                }
+            }
+        }
+    }
 }
 
 # ─── Step 4: Copy new assets + update manage.html ──────────────────────────
 Write-Host "`n[4/4] Deploying new assets..." -ForegroundColor Cyan
 
-Copy-Item $newJs.FullName  -Destination $ScriptsJs
-Copy-Item $newCss.FullName -Destination $ScriptsCss
-Write-Host "  Copied $($newJs.Name) -> scripts/js/"
-Write-Host "  Copied $($newCss.Name) -> scripts/css/"
+Copy-Item "$distAssets\*" -Destination $AssetsDir -Force -Recurse
+Write-Host "  Copied all $($distFiles.Count) files into assets/"
 
 # Update manage.html references
 $html = Get-Content $ManageHtml -Raw
 
-# Replace the JS reference: src="/scripts/js/index-XXXX.js"
-$html = $html -replace 'src="/scripts/js/index-[^"]+\.js"', "src=`"/scripts/js/$($newJs.Name)`""
-
-# Replace the CSS reference: href="/scripts/css/index-XXXX.css"
-$html = $html -replace 'href="/scripts/css/index-[^"]+\.css"', "href=`"/scripts/css/$($newCss.Name)`""
+# Replace the HTML references to either /scripts/js or /assets/ logic
+$html = $html -replace 'src="/(scripts/js|assets)/index-[^"]+\.js"', "src=`"/assets/$($newJs.Name)`""
+$html = $html -replace 'href="/(scripts/css|assets)/index-[^"]+\.css"', "href=`"/assets/$($newCss.Name)`""
 
 Set-Content $ManageHtml -Value $html -NoNewline
 
 Write-Host "`n  Updated manage.html" -ForegroundColor Green
 Write-Host "`n[DONE] EDDI Manager deployed successfully!" -ForegroundColor Green
-Write-Host "  JS:  /scripts/js/$($newJs.Name)"
-Write-Host "  CSS: /scripts/css/$($newCss.Name)`n"
+Write-Host "  JS:  /assets/$($newJs.Name)"
+Write-Host "  CSS: /assets/$($newCss.Name)`n"
 
 # ─── Step 5 (optional): Commit in EDDI repo ────────────────────────────────
 $answer = Read-Host "Commit these assets in the EDDI repo? [y/N]"
@@ -116,11 +141,13 @@ if ($answer -match '^[Yy]') {
 
     Push-Location $EddiPath
     try {
-        # Stage the specific new files
-        git add "src/main/resources/META-INF/resources/scripts/js/$($newJs.Name)"
-        git add "src/main/resources/META-INF/resources/scripts/css/$($newCss.Name)"
+        # Stage all newly added files from dist/assets into assets/
+        foreach ($f in $distFiles) {
+             git add "src/main/resources/META-INF/resources/assets/$($f.Name)"
+        }
+        
         git add "src/main/resources/META-INF/resources/manage.html"
-
+        
         # Stage the specific old files that were deleted
         foreach ($removed in $removedFiles) {
             git add $removed
