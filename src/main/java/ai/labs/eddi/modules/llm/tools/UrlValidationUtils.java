@@ -48,15 +48,21 @@ public final class UrlValidationUtils {
 
     /**
      * Validates URL safety using a custom host resolver. Returns the resolved
-     * addresses so callers can use the same addresses for the actual HTTP request,
-     * defeating DNS rebinding (TOCTOU) attacks.
+     * addresses for callers that wish to implement socket-level IP pinning.
+     * <p>
+     * <b>Note:</b> The default {@link SafeHttpClient} code path does NOT pin the
+     * resolved addresses — the JDK {@code HttpClient} re-resolves DNS
+     * independently. This means a short-TTL DNS rebinding attack is theoretically
+     * possible between validation and connect. The risk is accepted because
+     * exploitation requires a cooperating DNS server, a sub-second race window, AND
+     * bypassing per-hop redirect validation. See {@code docs/architecture.md} "DNS
+     * Rebinding" for details.
      *
      * @param url
      *            the URL to validate
      * @param resolver
      *            the host resolver to use (injectable for testing)
-     * @return the resolved InetAddresses (callers should connect to these, not
-     *         re-resolve)
+     * @return the resolved InetAddresses (for optional pinning by callers)
      * @throws IllegalArgumentException
      *             if the URL is invalid or targets a private address
      */
@@ -183,7 +189,11 @@ public final class UrlValidationUtils {
     }
 
     /**
-     * IPv6 private address checks covering ULA, IPv4-mapped, and Teredo.
+     * IPv6 private address checks covering ULA and IPv4-mapped addresses.
+     * <p>
+     * Teredo (2001::/32) and 6to4 (2002::/16) tunneling prefixes are NOT blocked —
+     * these are largely deprecated and the embedded IPv4 addresses would be caught
+     * by {@link #isPrivateIPv4(byte[])} if they were private.
      */
     private static boolean isPrivateIPv6(byte[] bytes) {
         // IPv6 ULA (fc00::/7) — RFC 4193

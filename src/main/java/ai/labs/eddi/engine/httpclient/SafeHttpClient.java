@@ -11,6 +11,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -24,7 +26,9 @@ import java.util.Set;
  * <li>Each redirect hop is validated against SSRF rules (private IPs, cloud
  * metadata, etc.)</li>
  * <li>Maximum redirect count is capped</li>
- * <li>Connect timeout is enforced</li>
+ * <li>Connect timeout is enforced per-hop</li>
+ * <li>Overall wall-clock timeout is enforced across all hops</li>
+ * <li>On cross-origin redirects, Authorization/Cookie headers are stripped</li>
  * </ul>
  *
  * @since 6.0.2
@@ -40,10 +44,18 @@ public class SafeHttpClient {
     /** HTTP status codes considered redirects. */
     private static final Set<Integer> REDIRECT_CODES = Set.of(301, 302, 303, 307, 308);
 
+    /** Headers managed by HttpClient — must not be copied to redirect requests. */
+    private static final Set<String> MANAGED_HEADERS = Set.of("host", "content-length", "connection");
+
+    /** Security-sensitive headers stripped on cross-origin redirects. */
+    private static final Set<String> SENSITIVE_HEADERS = Set.of("authorization", "cookie", "proxy-authorization");
+
     private final HttpClient httpClient;
+    private final long connectTimeoutMs;
 
     public SafeHttpClient(
             @ConfigProperty(name = "httpClient.connectTimeoutInMillis", defaultValue = "10000") int connectTimeoutMs) {
+        this.connectTimeoutMs = connectTimeoutMs;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(connectTimeoutMs))
                 .followRedirects(HttpClient.Redirect.NEVER)
@@ -71,7 +83,7 @@ public class SafeHttpClient {
      */
     public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
             throws IOException, InterruptedException {
-        return sendWithRedirects(request, bodyHandler, 0);
+        return sendWithRedirects(request, bodyHandler, 0, Instant.now());
     }
 
     /**
@@ -91,12 +103,21 @@ public class SafeHttpClient {
     public <T> HttpResponse<T> sendValidated(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
             throws IOException, InterruptedException {
         UrlValidationUtils.validateUrl(request.uri().toString());
-        return sendWithRedirects(request, bodyHandler, 0);
+        return sendWithRedirects(request, bodyHandler, 0, Instant.now());
     }
 
     private <T> HttpResponse<T> sendWithRedirects(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler,
-                                                  int redirectCount)
+                                                  int redirectCount, Instant startTime)
             throws IOException, InterruptedException {
+
+        // Check overall wall-clock timeout (3x connect timeout, e.g. 30s default).
+        // This prevents an attacker from chaining slow-resolving redirects to hold
+        // connections open indefinitely.
+        long elapsedMs = Duration.between(startTime, Instant.now()).toMillis();
+        long totalTimeoutMs = connectTimeoutMs * 3;
+        if (elapsedMs > totalTimeoutMs) {
+            throw new IOException("Total request timeout exceeded (" + elapsedMs + "ms > " + totalTimeoutMs + "ms)");
+        }
 
         HttpResponse<T> response = httpClient.send(request, bodyHandler);
         int statusCode = response.statusCode();
@@ -125,12 +146,16 @@ public class SafeHttpClient {
         LOGGER.debugf("Following redirect %d/%d: %s → %s", redirectCount, MAX_REDIRECTS, request.uri(), resolvedUri);
 
         // Build redirect request — preserve method for 307/308 per RFC 7538
+        boolean methodPreserved = (statusCode == 307 || statusCode == 308) && !"GET".equals(request.method());
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(resolvedUri)
-                .timeout(request.timeout().orElse(Duration.ofSeconds(15)))
-                .header("User-Agent", request.headers().firstValue("User-Agent").orElse("EDDI-Agent/1.0"));
+                .timeout(request.timeout().orElse(Duration.ofSeconds(15)));
 
-        if ((statusCode == 307 || statusCode == 308) && !"GET".equals(request.method())) {
+        // Copy headers from original request, with security-aware filtering
+        boolean sameOrigin = isSameOrigin(request.uri(), resolvedUri);
+        copyHeaders(request, builder, sameOrigin, methodPreserved);
+
+        if (methodPreserved) {
             // 307/308: preserve original HTTP method and body
             builder.method(request.method(),
                     request.bodyPublisher().orElse(HttpRequest.BodyPublishers.noBody()));
@@ -141,7 +166,63 @@ public class SafeHttpClient {
 
         HttpRequest redirectRequest = builder.build();
 
-        return sendWithRedirects(redirectRequest, bodyHandler, redirectCount);
+        return sendWithRedirects(redirectRequest, bodyHandler, redirectCount, startTime);
+    }
+
+    /**
+     * Copies headers from the original request to the redirect request.
+     * <p>
+     * Same-origin: all headers are copied (except HttpClient-managed ones).
+     * Cross-origin: Authorization, Cookie, Proxy-Authorization are stripped. Method
+     * downgrade (301/302/303): Content-Type is not copied (no body on GET).
+     */
+    private void copyHeaders(HttpRequest original, HttpRequest.Builder builder,
+                             boolean sameOrigin, boolean methodPreserved) {
+        original.headers().map().forEach((name, values) -> {
+            String lower = name.toLowerCase();
+
+            // Skip headers managed by HttpClient
+            if (MANAGED_HEADERS.contains(lower))
+                return;
+
+            // Skip body-related headers when method downgrades to GET
+            if (!methodPreserved && "content-type".equals(lower))
+                return;
+
+            // Strip sensitive headers on cross-origin redirects
+            if (!sameOrigin && SENSITIVE_HEADERS.contains(lower))
+                return;
+
+            for (String value : values) {
+                builder.header(name, value);
+            }
+        });
+
+        // Ensure User-Agent is always present
+        if (original.headers().firstValue("User-Agent").isEmpty()) {
+            builder.header("User-Agent", "EDDI-Agent/1.0");
+        }
+    }
+
+    /**
+     * Checks if two URIs share the same origin (scheme + host + port).
+     */
+    private static boolean isSameOrigin(URI a, URI b) {
+        if (!Objects.equals(a.getScheme(), b.getScheme()))
+            return false;
+        if (!a.getHost().equalsIgnoreCase(b.getHost()))
+            return false;
+        return effectivePort(a) == effectivePort(b);
+    }
+
+    /**
+     * Returns the effective port for a URI, using default ports for http/https.
+     */
+    private static int effectivePort(URI uri) {
+        int port = uri.getPort();
+        if (port != -1)
+            return port;
+        return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
     }
 
     /**

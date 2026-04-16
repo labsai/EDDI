@@ -11,13 +11,17 @@ import org.jboss.logging.Logger;
  * Startup guard that prevents accidental unauthenticated production
  * deployments.
  * <p>
- * In non-development launch modes, if OIDC is disabled and the operator has not
- * explicitly opted out via {@code eddi.security.allow-unauthenticated=true},
- * startup fails with a clear error message. This ensures operators consciously
- * choose to run without authentication.
+ * In production launch mode ({@link LaunchMode#NORMAL}), if OIDC is disabled
+ * and the operator has not explicitly opted out via
+ * {@code eddi.security.allow-unauthenticated=true}, startup fails with a clear
+ * error message. This ensures operators consciously choose to run without
+ * authentication.
  * <p>
- * When the escape hatch IS used, an ERROR is logged once per minute for the
- * lifetime of the process so it remains visible in monitoring.
+ * {@link LaunchMode#DEVELOPMENT} and {@link LaunchMode#TEST} are exempt — OIDC
+ * is typically disabled during development and in integration tests.
+ * <p>
+ * When the escape hatch IS used, an ERROR is logged at startup and a WARN
+ * reminder is emitted hourly for monitoring visibility.
  *
  * @since 6.0.2
  */
@@ -35,14 +39,17 @@ public class AuthStartupGuard {
     private volatile boolean warnMode = false;
 
     void onStart(@Observes StartupEvent event) {
-        if (getLaunchMode() == LaunchMode.DEVELOPMENT) {
+        LaunchMode mode = getLaunchMode();
+
+        if (mode == LaunchMode.DEVELOPMENT || mode == LaunchMode.TEST) {
             if (!oidcEnabled) {
-                LOGGER.info("[SECURITY] Dev mode — OIDC disabled. " + "Set QUARKUS_OIDC_TENANT_ENABLED=true to test with authentication.");
+                LOGGER.info("[SECURITY] " + mode.name().toLowerCase() + " mode — OIDC disabled. "
+                        + "Set QUARKUS_OIDC_TENANT_ENABLED=true to test with authentication.");
             }
             return;
         }
 
-        // Non-development mode (prod, test profile with prod mode)
+        // Production mode (LaunchMode.NORMAL)
         if (!oidcEnabled) {
             if (!allowUnauthenticated) {
                 throw new IllegalStateException(
@@ -51,7 +58,7 @@ public class AuthStartupGuard {
                                 + "Running without authentication in production is a security risk.");
             }
 
-            // Escape hatch used — log loudly
+            // Escape hatch used — log loudly at startup
             warnMode = true;
             LOGGER.error("[SECURITY] ⚠️  OIDC is DISABLED in production mode! "
                     + "All API endpoints are accessible without authentication. "
@@ -60,13 +67,14 @@ public class AuthStartupGuard {
     }
 
     /**
-     * Periodic warning when running unauthenticated in production. Scheduled via
-     * Quarkus @Scheduled to emit an ERROR every 60 seconds.
+     * Periodic warning when running unauthenticated in production. Logs at WARN
+     * level every hour (not every 60 seconds) to avoid polluting alerting/SIEM with
+     * 525k identical ERROR lines per year.
      */
-    @io.quarkus.scheduler.Scheduled(every = "60s")
+    @io.quarkus.scheduler.Scheduled(every = "3600s")
     void periodicAuthWarning() {
         if (warnMode) {
-            LOGGER.error("[SECURITY] ⚠️  REMINDER: OIDC is DISABLED in production. "
+            LOGGER.warn("[SECURITY] ⚠️  REMINDER: OIDC is DISABLED in production. "
                     + "All API endpoints are unauthenticated. Set QUARKUS_OIDC_TENANT_ENABLED=true.");
         }
     }

@@ -60,6 +60,14 @@ class AuthStartupGuardTest {
     }
 
     @Test
+    @DisplayName("Test mode + OIDC disabled → no exception (tests must not be blocked)")
+    void testModeOidcDisabled_shouldNotThrow() throws Exception {
+        AuthStartupGuard guard = createGuard(false, false, LaunchMode.TEST);
+
+        assertDoesNotThrow(() -> guard.onStart(new StartupEvent()));
+    }
+
+    @Test
     @DisplayName("Prod mode + OIDC disabled + no escape hatch → throws IllegalStateException")
     void prodModeOidcDisabled_shouldThrow() throws Exception {
         AuthStartupGuard guard = createGuard(false, false, LaunchMode.NORMAL);

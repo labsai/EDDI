@@ -21,8 +21,9 @@ import java.util.Optional;
  * secrets and DEKs in two tables: {@code secret_vault_secrets} and
  * {@code secret_vault_deks}.
  * <p>
- * Activated only when the {@code postgres} build profile is active
- * ({@code @DefaultBean}).
+ * Annotated {@code @DefaultBean} so that the non-default {@code @Produces}
+ * method in {@code DataStoreProducers} takes priority. Selected at runtime when
+ * {@code eddi.datastore.type=postgres}.
  *
  * @author ginccc
  * @since 6.0.0

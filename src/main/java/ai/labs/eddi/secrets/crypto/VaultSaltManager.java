@@ -115,6 +115,40 @@ public class VaultSaltManager {
     }
 
     /**
+     * Migrates from the current salt to a new random salt. Persists the new salt to
+     * the database and updates the in-memory state.
+     * <p>
+     * Called by {@code VaultSecretProvider.rotateKek()} after all DEKs have been
+     * successfully re-encrypted with the new-salt-derived KEK. Persisting the salt
+     * AFTER DEK writes means that a partial failure leaves the old salt in the DB
+     * (DEKs may be mixed — some old KEK, some new KEK). The operator can recover by
+     * retrying the KEK rotation with the same keys.
+     *
+     * @param newSalt
+     *            the new salt to activate (must be at least 8 bytes)
+     * @throws PersistenceException
+     *             if the salt cannot be persisted
+     */
+    public void migrateSalt(byte[] newSalt) {
+        if (newSalt == null || newSalt.length < 8) {
+            throw new IllegalArgumentException("Salt must be at least 8 bytes");
+        }
+        String encoded = Base64.getEncoder().encodeToString(newSalt);
+        persistence.setMetaValue(SALT_META_KEY, encoded);
+        this.activeSalt = newSalt.clone();
+        this.usingLegacySalt = false;
+        LOGGER.info("[VAULT] Salt migration complete — per-deployment random salt activated (" + newSalt.length + " bytes).");
+    }
+
+    /**
+     * Returns the well-known legacy fixed salt used by pre-6.0.2 deployments. Used
+     * by {@code rotateKek()} to derive the old KEK when migrating from legacy salt.
+     */
+    public static byte[] getLegacySaltBytes() {
+        return "eddi-vault-kek-v1".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /**
      * Returns true if this deployment is using the legacy fixed salt (pre-6.0.2
      * backward compatibility mode).
      */

@@ -19,6 +19,7 @@ public class IntegrationTestProfile implements QuarkusTestProfile {
         return Map.ofEntries(
                 Map.entry("quarkus.oidc.tenant-enabled", "false"),
                 Map.entry("authorization.enabled", "false"),
+                Map.entry("eddi.security.allow-unauthenticated", "true"),
                 Map.entry("quarkus.http.test-port", "8081"),
                 Map.entry("quarkus.http.port", "8081"),
                 Map.entry("quarkus.log.category.\"ai.labs.eddi\".level", "INFO"),

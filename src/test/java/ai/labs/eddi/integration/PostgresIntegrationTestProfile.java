@@ -31,6 +31,7 @@ public class PostgresIntegrationTestProfile implements QuarkusTestProfile {
                 // Auth disabled
                 Map.entry("quarkus.oidc.tenant-enabled", "false"),
                 Map.entry("authorization.enabled", "false"),
+                Map.entry("eddi.security.allow-unauthenticated", "true"),
                 // Enable vault for vault CRUD tests
                 Map.entry("eddi.vault.master-key", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
                 // Test HTTP port — different from MongoDB ITs (8081)

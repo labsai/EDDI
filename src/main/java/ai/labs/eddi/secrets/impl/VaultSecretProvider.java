@@ -335,8 +335,20 @@ public class VaultSecretProvider implements ISecretProvider {
         rotateCounter.increment();
 
         try {
+            // 1. Derive old KEK with current salt (legacy or random)
             byte[] oldKek = EnvelopeCrypto.deriveKeyFromString(oldMasterKey, saltManager.getSalt());
-            byte[] newKek = EnvelopeCrypto.deriveKeyFromString(newMasterKey, saltManager.getSalt());
+
+            // 2. Determine new salt — migrate from legacy if needed
+            byte[] newSalt;
+            boolean migratingFromLegacy = saltManager.isUsingLegacySalt();
+            if (migratingFromLegacy) {
+                newSalt = new byte[16];
+                new java.security.SecureRandom().nextBytes(newSalt);
+                LOGGER.info("[VAULT] KEK rotation will also migrate from legacy salt to per-deployment random salt.");
+            } else {
+                newSalt = saltManager.getSalt();
+            }
+            byte[] newKek = EnvelopeCrypto.deriveKeyFromString(newMasterKey, newSalt);
 
             // Phase 1: Verify — decrypt ALL DEKs with old KEK to validate before mutating
             List<EncryptedDek> allDeks = persistence.listAllDeks();
@@ -356,10 +368,18 @@ public class VaultSecretProvider implements ISecretProvider {
                 persistence.upsertDek(encDek);
             }
 
+            // Phase 3: Persist new salt AFTER DEKs are re-encrypted.
+            // If this fails, DEKs are on newKek but salt in DB is still legacy.
+            // The operator can retry — the legacy salt is a known constant.
+            if (migratingFromLegacy) {
+                saltManager.migrateSalt(newSalt);
+            }
+
             // Update our in-memory KEK to the new one
             this.kek = newKek;
 
-            LOGGER.infof("KEK rotated: %d DEKs re-encrypted", allDeks.size());
+            LOGGER.infof("KEK rotated: %d DEKs re-encrypted%s", allDeks.size(),
+                    migratingFromLegacy ? " + salt migrated to per-deployment random" : "");
             return allDeks.size();
         } catch (PersistenceException | EnvelopeCrypto.CryptoException e) {
             errorCounter.increment();
