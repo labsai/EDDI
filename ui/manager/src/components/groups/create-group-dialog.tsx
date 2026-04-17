@@ -651,6 +651,28 @@ function GroupPickerSelect({
 }) {
   const { t } = useTranslation();
   const { data: groups, isLoading } = useEnrichedGroupDescriptors(100);
+  const hasGroups = groups && groups.length > 0;
+
+  if (isLoading) {
+    return (
+      <div className="rounded-md border border-input bg-background px-2 py-1.5 text-xs text-muted-foreground animate-pulse">
+        {t("common.loading", "Loading…")}
+      </div>
+    );
+  }
+
+  if (!hasGroups) {
+    return (
+      <div className="rounded-md border border-dashed border-amber-400/50 bg-amber-400/5 px-2 py-2 text-center">
+        <p className="text-[10px] font-medium text-amber-600 dark:text-amber-400">
+          {t("groupWizard.noGroupsYet", "No groups available")}
+        </p>
+        <p className="text-[9px] text-muted-foreground mt-0.5">
+          {t("groupWizard.noGroupsHint", "Create a group first, then add it as a nested sub-group member.")}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <select
@@ -660,14 +682,9 @@ function GroupPickerSelect({
         "w-full rounded-md border bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring",
         !value ? "border-amber-400/50" : "border-input"
       )}
-      disabled={isLoading}
     >
-      <option value="">
-        {isLoading
-          ? t("common.loading", "Loading…")
-          : t("groupWizard.selectGroup", "Select existing group…")}
-      </option>
-      {groups?.map((group) => (
+      <option value="">{t("groupWizard.selectGroup", "Select existing group…")}</option>
+      {groups.map((group) => (
         <option key={group.id} value={group.id}>
           {group.name || group.id.slice(0, 12)} ({group.memberCount} members)
         </option>

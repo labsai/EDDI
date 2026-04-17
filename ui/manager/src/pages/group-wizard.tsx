@@ -1460,38 +1460,54 @@ function GroupMemberPicker({
   t: ReturnType<typeof useTranslation>["t"];
 }) {
   const { data: groups, isLoading } = useEnrichedGroupDescriptors(100);
+  const hasGroups = groups && groups.length > 0;
 
   return (
     <div>
       <label className="mb-1 block text-xs font-medium text-muted-foreground">
         {t("groupWizard.selectGroup", "Select existing group")}
       </label>
-      <div className="relative">
-        <select
-          value={agentId}
-          onChange={(e) => onUpdate({ agentId: e.target.value, mode: "existing" })}
-          className={cn(
-            "w-full appearance-none rounded-lg border bg-background px-3 py-2 pe-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring",
-            !agentId ? "border-amber-400/50" : "border-input"
-          )}
-          disabled={isLoading}
-        >
-          <option value="">
-            {isLoading
-              ? t("common.loading", "Loading…")
-              : t("groupWizard.selectGroup", "Select existing group…")}
-          </option>
-          {groups?.map((group) => (
-            <option key={group.id} value={group.id}>
-              {group.name || group.id.slice(0, 12)} ({group.memberCount} members)
-            </option>
-          ))}
-        </select>
-        <ChevronDown className="pointer-events-none absolute inset-e-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-      </div>
-      <p className="mt-1 text-[10px] text-muted-foreground">
-        {t("groupWizard.groupMemberHint", "This group will participate as a nested sub-group in the discussion.")}
-      </p>
+
+      {isLoading ? (
+        <div className="rounded-lg border border-input bg-background px-3 py-2 text-xs text-muted-foreground animate-pulse">
+          {t("common.loading", "Loading…")}
+        </div>
+      ) : !hasGroups ? (
+        <div className="rounded-lg border border-dashed border-amber-400/50 bg-amber-400/5 px-3 py-3 text-center">
+          <Users className="h-4 w-4 text-amber-500 mx-auto mb-1" />
+          <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
+            {t("groupWizard.noGroupsYet", "No groups available")}
+          </p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            {t("groupWizard.noGroupsHint", "Create a group first, then add it as a nested sub-group member.")}
+          </p>
+        </div>
+      ) : (
+        <div className="relative">
+          <select
+            value={agentId}
+            onChange={(e) => onUpdate({ agentId: e.target.value, mode: "existing" })}
+            className={cn(
+              "w-full appearance-none rounded-lg border bg-background px-3 py-2 pe-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring",
+              !agentId ? "border-amber-400/50" : "border-input"
+            )}
+          >
+            <option value="">{t("groupWizard.selectGroup", "Select existing group…")}</option>
+            {groups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.name || group.id.slice(0, 12)} ({group.memberCount} members)
+              </option>
+            ))}
+          </select>
+          <ChevronDown className="pointer-events-none absolute inset-e-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        </div>
+      )}
+
+      {hasGroups && (
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          {t("groupWizard.groupMemberHint", "This group will participate as a nested sub-group in the discussion.")}
+        </p>
+      )}
     </div>
   );
 }
