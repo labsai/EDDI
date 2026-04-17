@@ -10,6 +10,9 @@ import org.mockito.ArgumentCaptor;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -225,6 +228,51 @@ class InMemoryConversationCoordinatorTest {
         // After completion, queue should be removed (eager cleanup)
         assertFalse(coordinator.getQueueDepths().containsKey("conv-cleanup"),
                 "Queue should be removed after draining via eager cleanup");
+    }
+
+    /**
+     * Regression test for the eager-cleanup race condition.
+     *
+     * Scenario: Thread A completes a task and submitNext() removes the queue (eager
+     * cleanup). Thread B calls submitInOrder() for the same conversation right in
+     * the cleanup window. Without the CAS loop fix, Thread B would operate on an
+     * orphaned queue, creating two queues for the same conversation.
+     *
+     * This test verifies that after cleanup + re-submit, exactly one task runs and
+     * the new task is properly queued against a fresh queue.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldHandleConcurrentSubmitDuringCleanup() throws Exception {
+        Callable<Void> task1 = mock(Callable.class);
+        Callable<Void> task2 = mock(Callable.class);
+
+        // Submit first task
+        coordinator.submitInOrder("conv-race", task1);
+
+        // Capture the callback so we can simulate completion
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> captor1 = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        verify(runtime).submitCallable(eq(task1), captor1.capture(), isNull());
+
+        // Complete task1 — this triggers submitNext → eager cleanup
+        captor1.getValue().onComplete(null);
+
+        // Queue should now be cleaned up
+        assertFalse(coordinator.getQueueDepths().containsKey("conv-race"),
+                "Queue should be removed after task1 completes");
+
+        // Submit task2 to the same conversation — should create a fresh queue
+        coordinator.submitInOrder("conv-race", task2);
+
+        // task2 should have been submitted to the runtime
+        verify(runtime).submitCallable(eq(task2), any(), isNull());
+
+        // Verify exactly one queue exists for this conversation
+        assertEquals(1, coordinator.getQueueDepths().getOrDefault("conv-race", 0),
+                "Should have exactly one task in the new queue");
+
+        // Total processed should reflect task1 completion
+        assertEquals(1, coordinator.getTotalProcessed());
     }
 
     // ==================== Helpers ====================
