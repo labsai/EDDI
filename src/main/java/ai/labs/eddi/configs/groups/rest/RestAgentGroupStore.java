@@ -172,6 +172,16 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
         if (value == null) {
             return null;
         }
-        return value.replaceAll("[\\r\\n\\t\\x00-\\x1F\\x7F]", "_");
+
+        StringBuilder sanitized = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '\r' || c == '\n' || c == '\t' || c < 0x20 || c == 0x7F) {
+                sanitized.append('_');
+            } else {
+                sanitized.append(c);
+            }
+        }
+        return sanitized.toString();
     }
 }
