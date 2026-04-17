@@ -58,6 +58,20 @@ Each entry follows this format:
 - `docs/monitoring/*` — Full monitoring documentation and dashboard
 - `docker-compose.monitoring.yml` — Monitoring stack overlay
 
+### 4. Code Review Fixes (2026-04-17)
+- **CRITICAL: Eager-cleanup race condition** — `submitInOrder` could see an orphaned queue after `submitNext` removed it, creating two queues for the same conversation (broken ordering guarantee). Fixed with CAS loop: verify queue identity after lock acquisition before proceeding.
+- **OTel SDK default** — Changed from enabled-in-prod/disabled-in-dev to globally disabled by default. `docker-compose.monitoring.yml` enables it via env var. Prevents OTLP connection-error spam on prod deployments without a collector.
+- **totalProcessed metric** — Changed from gauge to `FunctionCounter` (Prometheus-idiomatic for monotonic values; enables proper `rate()` queries and restart detection).
+- **Capacity rejection log level** — `ERROR` → `WARN` (expected backpressure, not a system error; reduces alert fatigue).
+- **NATS gauge registration** — Moved after `start()` to avoid registering metrics for a coordinator that failed to connect.
+- **Pipeline duration metrics** — Added `eddi.pipeline.task.duration` Timer and `eddi.pipeline.task.errors` Counter (tagged by `task.id`, `task.type`) using `Metrics.globalRegistry`.
+- **Install script paths** — Fixed `install.sh`/`install.ps1` monitoring file paths from old `grafana-data/` to `docs/monitoring/`. Added Grafana/Prometheus/Jaeger URLs to success banners.
+- **Docker Compose overlay** — Added `eddi` service OTel env overrides so tracing works automatically.
+- **PII-in-traces warning** — Added GDPR/HIPAA privacy note to `monitoring-guide.md` regarding `conversation.id` and `agent.id` in trace spans.
+- **Production checklist** — Added Grafana password rotation, Jaeger auth proxy warning, privacy review item.
+- **README** — Added OpenTelemetry tracing bullet, monitoring guide link, documentation table entry.
+- **Tests** — Added 3 coordinator tests: max-size rejection, follow-up at capacity, eager cleanup verification.
+
 ---
 
 ## Fix WhiteSource/Mend Bolt False Positive — Bootstrap CVEs (2026-04-16)
