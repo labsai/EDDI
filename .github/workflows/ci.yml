@@ -13,6 +13,9 @@ permissions:
 env:
   DOCKER_IMAGE: labsai/eddi
   JAVA_VERSION: "25"
+  # Pin preflight version + hash — update both when upgrading
+  PREFLIGHT_VERSION: "1.17.1"
+  PREFLIGHT_SHA256: "15f58d0de7212ac948706515f824d0d2f42b94c11fa85cdb1bc08ad8993226ca"
 
 jobs:
   # ─── Job 0: Detect Changes ──────────────────────────────────────
@@ -430,10 +433,10 @@ jobs:
 
       - name: Install preflight
         run: |
-          PREFLIGHT_VERSION=$(curl -s https://api.github.com/repos/redhat-openshift-ecosystem/openshift-preflight/releases/latest | jq -r .tag_name)
           echo "Installing preflight ${PREFLIGHT_VERSION}..."
           curl -sL "https://github.com/redhat-openshift-ecosystem/openshift-preflight/releases/download/${PREFLIGHT_VERSION}/preflight-linux-amd64" \
             -o /usr/local/bin/preflight
+          echo "${PREFLIGHT_SHA256}  /usr/local/bin/preflight" | sha256sum -c -
           chmod +x /usr/local/bin/preflight
           preflight --version
 
@@ -513,10 +516,10 @@ jobs:
 
       - name: Install preflight
         run: |
-          PREFLIGHT_VERSION=$(curl -s https://api.github.com/repos/redhat-openshift-ecosystem/openshift-preflight/releases/latest | jq -r .tag_name)
           echo "Installing preflight ${PREFLIGHT_VERSION}..."
           curl -sL "https://github.com/redhat-openshift-ecosystem/openshift-preflight/releases/download/${PREFLIGHT_VERSION}/preflight-linux-amd64" \
             -o /usr/local/bin/preflight
+          echo "${PREFLIGHT_SHA256}  /usr/local/bin/preflight" | sha256sum -c -
           chmod +x /usr/local/bin/preflight
           preflight --version
 
