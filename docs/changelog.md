@@ -13,6 +13,52 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## PR Review Fixes — Quota Ordering, Log Injection, Doc Hygiene (2026-04-17)
+
+**Repo:** EDDI (`feature/observability`)
+
+**What changed:** Addressed 8 findings from CodeRabbit review of PR #424.
+
+### 1. Quota Consumed on Validation Failure (Bug)
+
+`ConversationService.startConversation()`, `.say()`, and `.sayStreaming()` all called `acquireConversationSlot()` / `acquireApiCallSlot()` **before** cheap in-process validations (GDPR restriction check, agent-not-ready, agent-mismatch, conversation-not-found). A misconfigured client or GDPR-restricted user could exhaust tenant quota without ever running a pipeline.
+
+**Fix:** Moved quota acquisition AFTER all validation checks. Quota is only burned for requests that will actually be processed. Also removed the now-unnecessary `processingConversationReferences.remove()` from the GDPR catch path (the add hasn't happened yet when GDPR check runs).
+
+### 2. `tryAddCost` Budget Boundary Inconsistency (Bug)
+
+`checkCostBudget()` (pre-call gate) used `>=` but `tryAddCost()` (post-call accounting) used `>`. At exactly the limit, these disagreed. Changed `tryAddCost` to use `>=` to match.
+
+### 3. Log Injection Prevention (Security)
+
+Added `sanitizeForLog()` helper (replaces `\n`/`\r` with `_`) to 4 files:
+- `InMemoryConversationCoordinator.java` — `conversationId` in all log statements
+- `NatsConversationCoordinator.java` — `conversationId` in all log statements
+- `RestAgentEngineStreaming.java` — `conversationId` in error logs
+- `InMemoryTenantQuotaStore.java` — `tenantId` in `resetUsage` log
+
+### 4. Documentation Fixes
+
+- `monitoring-guide.md` — Added `text` language to ASCII diagram code blocks (MD040 lint)
+- `monitoring-guide.md` — Fixed dead-letter alert: `eddi_nats_dead_letter_count > 0` → `increase(eddi_nats_dead_letter_count_total[10m]) > 0`
+- `multi-tenancy-plan.md` — Replaced 11 absolute `file:///c:/dev/git/EDDI/...` links with relative `../src/...` paths (portability)
+- `multi-tenancy-plan.md` — Added fail-closed behavior: `TenantResolverFilter` MUST reject with HTTP 403 when OIDC is enabled but `tenant_id` claim is missing/blank
+- `AGENTS.md` — Fixed broken reference to `agentic-improvements-plan.md` (moved from `docs/planning/` to `planning/`)
+
+**Files:**
+- `ConversationService.java` — Quota ordering fix in 3 methods
+- `InMemoryTenantQuotaStore.java` — `>=` operator + `sanitizeForLog`
+- `InMemoryConversationCoordinator.java` — `sanitizeForLog`
+- `NatsConversationCoordinator.java` — `sanitizeForLog`
+- `RestAgentEngineStreaming.java` — `sanitizeForLog`
+- `docs/monitoring/monitoring-guide.md` — Code block lang + alert fix
+- `planning/multi-tenancy-plan.md` — Relative links + fail-closed
+- `AGENTS.md` — Reference fix
+
+**Verification:** `mvn compile` — BUILD SUCCESS.
+
+---
+
 ## Atomic Quota Enforcement — TOCTOU Fix & Code Quality (2026-04-17)
 
 **Repo:** EDDI (current branch)

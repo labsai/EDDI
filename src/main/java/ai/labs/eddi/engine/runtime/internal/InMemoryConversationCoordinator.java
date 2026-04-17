@@ -162,10 +162,12 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
             public void onFailure(Throwable t) {
                 int nextAttempt = attempt + 1;
                 if (nextAttempt < MAX_RETRIES) {
-                    log.warnf(t, "In-memory task failed (conversationId=%s, attempt=%d/%d), retrying...", conversationId, nextAttempt, MAX_RETRIES);
+                    log.warnf(t, "In-memory task failed (conversationId=%s, attempt=%d/%d), retrying...", sanitizeForLog(conversationId), nextAttempt,
+                            MAX_RETRIES);
                     executeWithRetry(conversationId, queue, callable, nextAttempt);
                 } else {
-                    log.errorf(t, "In-memory task exhausted retries (conversationId=%s, attempts=%d), dead-lettering", conversationId, nextAttempt);
+                    log.errorf(t, "In-memory task exhausted retries (conversationId=%s, attempts=%d), dead-lettering", sanitizeForLog(conversationId),
+                            nextAttempt);
                     routeToDeadLetter(conversationId, t);
                     totalProcessed.incrementAndGet();
                     submitNext(conversationId, queue);
@@ -260,7 +262,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
             DeadLetterEntry entry = it.next();
             if (entry.id().equals(entryId)) {
                 it.remove();
-                log.infof("Discarded dead-letter %s for conversation %s", entryId, entry.conversationId());
+                log.infof("Discarded dead-letter %s for conversation %s", entryId, sanitizeForLog(entry.conversationId()));
                 return true;
             }
         }

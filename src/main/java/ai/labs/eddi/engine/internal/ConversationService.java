@@ -356,6 +356,8 @@ public class ConversationService implements IConversationService {
                     executeConversation);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
+        } catch (ProcessingRestrictedException | QuotaExceededException e) {
+            throw e; // thrown before processingConversationReferences.add()
         } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
             processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
             throw e;
@@ -479,6 +481,8 @@ public class ConversationService implements IConversationService {
                     executeConversation);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
+        } catch (ProcessingRestrictedException | QuotaExceededException e) {
+            throw e; // thrown before processingConversationReferences.add()
         } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
             processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
             throw e;

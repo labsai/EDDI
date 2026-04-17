@@ -22,10 +22,10 @@ This document evaluates exactly what exists, what's missing, and proposes two de
 
 **Files:**
 
-- [TenantQuotaService.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/engine/tenancy/TenantQuotaService.java) — Quota enforcement engine
-- [ITenantQuotaStore.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/engine/tenancy/ITenantQuotaStore.java) — Store interface with documented atomicity contract
-- [InMemoryTenantQuotaStore.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/engine/tenancy/InMemoryTenantQuotaStore.java) — In-memory implementation (single-instance only)
-- [TenantQuota.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/engine/tenancy/model/TenantQuota.java) — Record with `tenantId`, `maxConversationsPerDay`, `maxAgentsPerTenant`, `maxApiCallsPerMinute`, `maxMonthlyCostUsd`, `enabled`
+- [TenantQuotaService.java](../src/main/java/ai/labs/eddi/engine/tenancy/TenantQuotaService.java) — Quota enforcement engine
+- [ITenantQuotaStore.java](../src/main/java/ai/labs/eddi/engine/tenancy/ITenantQuotaStore.java) — Store interface with documented atomicity contract
+- [InMemoryTenantQuotaStore.java](../src/main/java/ai/labs/eddi/engine/tenancy/InMemoryTenantQuotaStore.java) — In-memory implementation (single-instance only)
+- [TenantQuota.java](../src/main/java/ai/labs/eddi/engine/tenancy/model/TenantQuota.java) — Record with `tenantId`, `maxConversationsPerDay`, `maxAgentsPerTenant`, `maxApiCallsPerMinute`, `maxMonthlyCostUsd`, `enabled`
 - REST API: `GET/PUT/DELETE /admin/tenants/{tenantId}`, usage + reset endpoints
 
 **Assessment:** Well-built. Atomic check-and-increment. Per-tenant metrics (`eddi.tenant.quota.allowed/denied`). BUT: the only _caller_ is `AgentOrchestrator.java:283` which hardcodes `tenantQuotaService.getDefaultTenantId()`. No request ever passes a real tenant ID derived from authentication context. The multi-tenant API surface exists but is inert.
@@ -34,8 +34,8 @@ This document evaluates exactly what exists, what's missing, and proposes two de
 
 **Files:**
 
-- [SecretReference.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/secrets/model/SecretReference.java) — `record(tenantId, keyName)`
-- [VaultSecretProvider.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/secrets/impl/VaultSecretProvider.java) — Per-tenant DEK management
+- [SecretReference.java](../src/main/java/ai/labs/eddi/secrets/model/SecretReference.java) — `record(tenantId, keyName)`
+- [VaultSecretProvider.java](../src/main/java/ai/labs/eddi/secrets/impl/VaultSecretProvider.java) — Per-tenant DEK management
 - REST API: `/{tenantId}/{keyName}` for all CRUD + DEK rotation
 
 **Assessment:** **Genuinely multi-tenant.** Secrets are partitioned by `(tenantId, keyName)`. Each tenant gets its own Data Encryption Key. DEK rotation is per-tenant. This is the one subsystem that truly works for multi-tenancy as-is.
@@ -44,9 +44,9 @@ This document evaluates exactly what exists, what's missing, and proposes two de
 
 **Files:**
 
-- [IUserMemoryStore.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/configs/properties/IUserMemoryStore.java) — Queries scoped by `(userId, agentId)`
-- [ConversationMemorySnapshot.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/engine/memory/model/ConversationMemorySnapshot.java) — Has `userId`, `agentId`, but **no `tenantId`**
-- [RestGdprAdmin.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/engine/gdpr/RestGdprAdmin.java) — Cascade delete by `userId`
+- [IUserMemoryStore.java](../src/main/java/ai/labs/eddi/configs/properties/IUserMemoryStore.java) — Queries scoped by `(userId, agentId)`
+- [ConversationMemorySnapshot.java](../src/main/java/ai/labs/eddi/engine/memory/model/ConversationMemorySnapshot.java) — Has `userId`, `agentId`, but **no `tenantId`**
+- [RestGdprAdmin.java](../src/main/java/ai/labs/eddi/engine/gdpr/RestGdprAdmin.java) — Cascade delete by `userId`
 
 **Assessment:** Good user-level isolation. Conversations are scoped to `userId + agentId`. GDPR erasure works per-user. But user isolation ≠ tenant isolation — a user in org A can query data belonging to org B's agents because agents themselves have no tenant ownership.
 
@@ -54,9 +54,9 @@ This document evaluates exactly what exists, what's missing, and proposes two de
 
 **Files:**
 
-- [application.properties](file:///c:/dev/git/EDDI/src/main/resources/application.properties) lines 130–158 — OIDC config
-- [RestAgentManagement.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/engine/internal/RestAgentManagement.java) lines 286–289 — `checkUserAuthIfApplicable()`
-- [McpToolUtils.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/engine/mcp/McpToolUtils.java) lines 33–39 — `requireRole()`
+- [application.properties](../src/main/resources/application.properties) lines 130–158 — OIDC config
+- [RestAgentManagement.java](../src/main/java/ai/labs/eddi/engine/internal/RestAgentManagement.java) lines 286–289 — `checkUserAuthIfApplicable()`
+- [McpToolUtils.java](../src/main/java/ai/labs/eddi/engine/mcp/McpToolUtils.java) lines 33–39 — `requireRole()`
 
 **Assessment:** Keycloak OIDC with bearer tokens, roles `admin`/`editor`/`viewer`. `@RolesAllowed("eddi-admin")` on sensitive endpoints. But roles are **global** — an admin is admin of _everything_. `SecurityIdentity` is injected in MCP tools and `RestAgentManagement`, but **no code ever extracts a tenant/org claim** from the JWT.
 
@@ -210,7 +210,7 @@ public class TenantContext {
 
 A JAX-RS `@PreMatching` `ContainerRequestFilter` that:
 
-1. If OIDC enabled: extracts `tenant_id` claim from JWT (configurable claim name via `eddi.tenant.jwt-claim`)
+1. If OIDC enabled: extracts `tenant_id` claim from JWT (configurable claim name via `eddi.tenant.jwt-claim`). **If the claim is missing or blank, the filter MUST reject the request with HTTP 403** (fail-closed) to prevent accidental cross-tenant access via fallback.
 2. If OIDC disabled: uses `eddi.tenant.default-id` from config (existing property)
 3. Sets the resolved tenant ID into the `TenantContext` bean
 4. Adds `tenantId` to MDC for structured logging
@@ -375,8 +375,8 @@ static void requireTenantAccess(SecurityIdentity identity, boolean authEnabled,
 
 **Files to modify:**
 
-- [AgentOrchestrator.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/modules/llm/impl/AgentOrchestrator.java) line 283 — change `tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId())` to use tenant from conversation memory or context
-- [LlmTask.java](file:///c:/dev/git/EDDI/src/main/java/ai/labs/eddi/modules/llm/impl/LlmTask.java) — propagate tenant ID to orchestrator
+- [AgentOrchestrator.java](../src/main/java/ai/labs/eddi/modules/llm/impl/AgentOrchestrator.java) line 283 — change `tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId())` to use tenant from conversation memory or context
+- [LlmTask.java](../src/main/java/ai/labs/eddi/modules/llm/impl/LlmTask.java) — propagate tenant ID to orchestrator
 
 **Note:** Inside the pipeline, `TenantContext` (request-scoped) may not be available. The tenant ID should be stored as a `ConversationProperty` at conversation init and read from memory in pipeline tasks. This follows the existing pattern (userId is stored in memory, not extracted from request context in tasks).
 

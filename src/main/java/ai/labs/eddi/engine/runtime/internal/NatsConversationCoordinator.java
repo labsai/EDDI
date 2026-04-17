@@ -190,6 +190,13 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
         }
     }
 
+    private static String sanitizeForLog(String value) {
+        if (value == null) {
+            return "null";
+        }
+        return value.replace('\n', '_').replace('\r', '_');
+    }
+
     /**
      * Submit a conversation task for ordered processing.
      *
@@ -204,13 +211,6 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
      * @param callable
      *            the task to execute
      */
-    private static String sanitizeForLog(String value) {
-        if (value == null) {
-            return "null";
-        }
-        return value.replace('\n', '_').replace('\r', '_');
-    }
-
     @Override
     public void submitInOrder(String conversationId, Callable<Void> callable) {
         final String safeConversationId = sanitizeForLog(conversationId);
@@ -274,7 +274,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 m.getPublishDuration().record(Duration.ofNanos(durationNanos));
             });
         } catch (IOException | JetStreamApiException e) {
-            log.warnf(e, "Failed to publish to NATS for conversation %s, executing locally", conversationId);
+            log.warnf(e, "Failed to publish to NATS for conversation %s, executing locally", sanitizeForLog(conversationId));
         }
 
         // Execute the callable via the runtime thread pool
@@ -293,11 +293,13 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 int attempt = retryable.incrementAndGetAttempt();
 
                 if (attempt < maxRetries) {
-                    log.warnf(t, "Conversation task failed (conversationId=%s, attempt=%d/%d), retrying...", conversationId, attempt, maxRetries);
+                    log.warnf(t, "Conversation task failed (conversationId=%s, attempt=%d/%d), retrying...", sanitizeForLog(conversationId), attempt,
+                            maxRetries);
                     // Re-execute the same callable (retry)
                     publishAndExecute(conversationId, queue, retryable);
                 } else {
-                    log.errorf(t, "Conversation task exhausted retries (conversationId=%s, attempts=%d), " + "routing to dead-letter", conversationId,
+                    log.errorf(t, "Conversation task exhausted retries (conversationId=%s, attempts=%d), " + "routing to dead-letter",
+                            sanitizeForLog(conversationId),
                             attempt);
                     routeToDeadLetter(conversationId, t);
                     submitNext(conversationId, queue);
@@ -326,12 +328,12 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                     failure.getMessage() != null ? failure.getMessage().replace("\"", "\\\"") : "unknown", System.currentTimeMillis());
 
             jetStream.publish(deadLetterSubject, payload.getBytes());
-            log.infof("Published dead-letter for conversation %s to %s", conversationId, deadLetterSubject);
+            log.infof("Published dead-letter for conversation %s to %s", sanitizeForLog(conversationId), deadLetterSubject);
 
             totalDeadLettered.incrementAndGet();
             getMetrics().ifPresent(m -> m.getDeadLetterCount().increment());
         } catch (IOException | JetStreamApiException e) {
-            log.errorf(e, "Failed to publish dead-letter for conversation %s", conversationId);
+            log.errorf(e, "Failed to publish dead-letter for conversation %s", sanitizeForLog(conversationId));
         }
     }
 
