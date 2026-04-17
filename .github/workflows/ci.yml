@@ -329,6 +329,7 @@ jobs:
           docker run -d --name eddi \
             --network host \
             -e "MONGODB_CONNECTIONSTRING=mongodb://localhost:27017/eddi?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000" \
+            -e "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true" \
             ${DOCKER_IMAGE}:${PRIMARY_TAG}
 
       - name: Wait for healthy
