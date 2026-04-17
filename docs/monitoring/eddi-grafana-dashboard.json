@@ -1,0 +1,267 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Coordinator Health",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5000 },
+              { "color": "red", "value": 9000 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 1 },
+      "id": 1,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Active Conversations",
+      "type": "stat",
+      "targets": [
+        { "expr": "eddi_coordinator_active_conversations", "legendFormat": "active" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 1 },
+      "id": 2,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Queue Depth",
+      "type": "stat",
+      "targets": [
+        { "expr": "eddi_coordinator_queue_depth", "legendFormat": "queued" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" } } },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 1 },
+      "id": 3,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "title": "Total Processed",
+      "type": "stat",
+      "targets": [
+        { "expr": "eddi_coordinator_total_processed", "legendFormat": "processed" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": {} },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 7 },
+      "id": 4,
+      "title": "Coordinator Over Time",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "eddi_coordinator_active_conversations", "legendFormat": "Active Conversations" },
+        { "expr": "eddi_coordinator_queue_depth", "legendFormat": "Queue Depth" },
+        { "expr": "rate(eddi_coordinator_total_processed[5m])", "legendFormat": "Throughput (/s)" }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+      "id": 200,
+      "title": "Tool Execution",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": {} },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 5,
+      "title": "Rate Limit Allow / Deny",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "rate(eddi_tool_ratelimit_allowed_total[5m])", "legendFormat": "Allowed {{ tool }}" },
+        { "expr": "rate(eddi_tool_ratelimit_denied_total[5m])", "legendFormat": "Denied {{ tool }}" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": {} },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 6,
+      "title": "Tool Cache Hit / Miss",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "rate(eddi_tool_cache_hits_total[5m])", "legendFormat": "Hits {{ tool }}" },
+        { "expr": "rate(eddi_tool_cache_misses_total[5m])", "legendFormat": "Misses {{ tool }}" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "id": 7,
+      "title": "Tool Execution Failures",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "rate(eddi_tool_execution_failure_total[5m])", "legendFormat": "{{ tool }}" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": {} },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "id": 8,
+      "title": "Cache Size",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "eddi_tool_cache_size", "legendFormat": "Cache Entries" }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 },
+      "id": 300,
+      "title": "Vault & Security",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
+      "id": 9,
+      "title": "Vault Resolve Latency",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "rate(eddi_vault_resolve_duration_seconds_sum[5m]) / rate(eddi_vault_resolve_duration_seconds_count[5m])", "legendFormat": "Avg Resolve" },
+        { "expr": "histogram_quantile(0.99, rate(eddi_vault_resolve_duration_seconds_bucket[5m]))", "legendFormat": "P99 Resolve" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": {} },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
+      "id": 10,
+      "title": "Vault Operations",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "rate(eddi_vault_resolve_count_total[5m])", "legendFormat": "Resolves" },
+        { "expr": "rate(eddi_vault_store_count_total[5m])", "legendFormat": "Stores" },
+        { "expr": "rate(eddi_vault_resolve_errors_total[5m])", "legendFormat": "Errors" },
+        { "expr": "rate(eddi_vault_cache_hits_total[5m])", "legendFormat": "Cache Hits" },
+        { "expr": "rate(eddi_vault_cache_misses_total[5m])", "legendFormat": "Cache Misses" }
+      ]
+    },
+    {
+      "collapsed": true,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 },
+      "id": 400,
+      "title": "NATS Messaging (when enabled)",
+      "type": "row",
+      "panels": [
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
+          "id": 11,
+          "title": "NATS Publish / Consume Latency",
+          "type": "timeseries",
+          "targets": [
+            { "expr": "rate(eddi_nats_publish_duration_seconds_sum[5m]) / rate(eddi_nats_publish_duration_seconds_count[5m])", "legendFormat": "Publish Avg" },
+            { "expr": "rate(eddi_nats_consume_duration_seconds_sum[5m]) / rate(eddi_nats_consume_duration_seconds_count[5m])", "legendFormat": "Consume Avg" }
+          ]
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": { "defaults": {} },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
+          "id": 12,
+          "title": "NATS Throughput & Dead Letters",
+          "type": "timeseries",
+          "targets": [
+            { "expr": "rate(eddi_nats_publish_count_total[5m])", "legendFormat": "Published/s" },
+            { "expr": "rate(eddi_nats_consume_count_total[5m])", "legendFormat": "Consumed/s" },
+            { "expr": "eddi_nats_dead_letter_count", "legendFormat": "Dead Letters" }
+          ]
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 50 },
+      "id": 500,
+      "title": "HTTP & JVM (Quarkus Built-in)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 51 },
+      "id": 13,
+      "title": "HTTP Request Rate",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "rate(http_server_requests_seconds_count[5m])", "legendFormat": "{{ method }} {{ uri }} {{ status }}" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 51 },
+      "id": 14,
+      "title": "JVM Heap Usage",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "jvm_memory_used_bytes{area=\"heap\"}", "legendFormat": "Used {{ id }}" },
+        { "expr": "jvm_memory_max_bytes{area=\"heap\"}", "legendFormat": "Max {{ id }}" }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["eddi", "observability"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" },
+        "hide": 0,
+        "includeAll": false,
+        "name": "datasource",
+        "query": "prometheus",
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "EDDI Observability",
+  "uid": "eddi-observability",
+  "version": 1
+}

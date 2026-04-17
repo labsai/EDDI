@@ -3,6 +3,7 @@ package ai.labs.eddi.engine.runtime.internal;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.nats.client.*;
 import io.nats.client.api.*;
 import io.quarkus.arc.profile.IfBuildProfile;
@@ -64,10 +65,12 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
 
     private final IRuntime runtime;
     private final Instance<NatsMetrics> metricsInstance;
+    private final MeterRegistry meterRegistry;
     private final String natsUrl;
     private final String streamName;
     private final String deadLetterStreamName;
     private final int maxRetries;
+    private final int maxActiveConversations;
 
     private Connection natsConnection;
     private JetStream jetStream;
@@ -82,22 +85,35 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
 
     @Inject
     public NatsConversationCoordinator(IRuntime runtime, Instance<NatsMetrics> metricsInstance,
+            MeterRegistry meterRegistry,
             @ConfigProperty(name = "eddi.nats.url", defaultValue = "nats://localhost:4222") String natsUrl,
             @ConfigProperty(name = "eddi.nats.stream-name", defaultValue = "EDDI_CONVERSATIONS") String streamName,
             @ConfigProperty(name = "eddi.nats.dead-letter-stream-name", defaultValue = "EDDI_DEAD_LETTERS") String deadLetterStreamName,
             @ConfigProperty(name = "eddi.nats.max-retries", defaultValue = "3") int maxRetries,
-            @ConfigProperty(name = "eddi.nats.ack-wait-seconds", defaultValue = "60") long ackWaitSeconds) {
+            @ConfigProperty(name = "eddi.nats.ack-wait-seconds", defaultValue = "60") long ackWaitSeconds,
+            @ConfigProperty(name = "eddi.coordinator.max-active-conversations", defaultValue = "10000") int maxActiveConversations) {
         this.runtime = runtime;
         this.metricsInstance = metricsInstance;
+        this.meterRegistry = meterRegistry;
         this.natsUrl = natsUrl;
         this.streamName = streamName;
         this.deadLetterStreamName = deadLetterStreamName;
         this.maxRetries = maxRetries;
+        this.maxActiveConversations = maxActiveConversations;
     }
 
     @PostConstruct
     void init() {
+        // Register coordinator-level Micrometer metrics
+        meterRegistry.gauge("eddi.coordinator.active_conversations", conversationQueues, Map::size);
+        meterRegistry.gauge("eddi.coordinator.queue_depth", conversationQueues, this::computeTotalQueueDepth);
+        meterRegistry.gauge("eddi.coordinator.total_processed", totalProcessed, AtomicLong::doubleValue);
+
         start();
+    }
+
+    private double computeTotalQueueDepth(Map<String, BlockingQueue<RetryableCallable>> queues) {
+        return queues.values().stream().mapToInt(BlockingQueue::size).sum();
     }
 
     @Override
@@ -175,6 +191,14 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
      */
     @Override
     public void submitInOrder(String conversationId, Callable<Void> callable) {
+        // Max-size check: only reject truly new conversations, not follow-up messages
+        if (!conversationQueues.containsKey(conversationId) && conversationQueues.size() >= maxActiveConversations) {
+            log.errorf("Coordinator capacity exceeded (%d active conversations). Rejecting new conversationId=%s", maxActiveConversations,
+                    conversationId);
+            throw new java.util.concurrent.RejectedExecutionException(
+                    "Coordinator capacity exceeded: " + maxActiveConversations + " active conversations. Try again later.");
+        }
+
         final BlockingQueue<RetryableCallable> queue = conversationQueues.computeIfAbsent(conversationId, k -> new LinkedTransferQueue<>());
 
         synchronized (queue) {
@@ -271,6 +295,9 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
 
                 if (!queue.isEmpty()) {
                     publishAndExecute(conversationId, queue, queue.element());
+                } else {
+                    // Eager cleanup: remove empty queue to prevent memory leaks.
+                    conversationQueues.remove(conversationId, queue);
                 }
             }
         }

@@ -13,6 +13,53 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Observability & Pipeline Architecture — OTel, Coordinator Hardening, Monitoring (2026-04-17)
+
+**Repo:** EDDI (`feature/observability`)
+
+**What changed:**
+
+### 1. OpenTelemetry Distributed Tracing
+- Added `quarkus-opentelemetry` dependency (pom.xml)
+- Instrumented `LifecycleManager.executeLifecycle()` with per-task spans
+- Each task execution creates an `eddi.pipeline.task` span with attributes: `task.id`, `task.type`, `task.index`, `conversation.id`, `agent.id`
+- Uses `GlobalOpenTelemetry.getTracer()` since LifecycleManager is not CDI-managed (created via `new` in `WorkflowStoreClientLibrary`)
+- No-op tracer when OTel disabled — zero overhead in dev/test
+- OTLP protocol: backend-agnostic (Jaeger, Tempo, Datadog, Honeycomb)
+- Auto-instrumented: REST endpoints, Vert.x HTTP client, MongoDB
+
+### 2. ConversationCoordinator Hardening
+- **Eager cleanup**: Empty queues removed from `conversationQueues` map in `submitNext()` using `ConcurrentHashMap.remove(key, value)` for safe concurrent removal. Prevents memory leaks from abandoned conversations.
+- **Max-size limit**: Configurable `eddi.coordinator.max-active-conversations` (default 10,000). Only rejects new conversations — follow-up messages always accepted. Throws `RejectedExecutionException` at capacity.
+- **Micrometer gauges**: 3 metrics registered via `@PostConstruct`: `eddi.coordinator.active_conversations`, `eddi.coordinator.queue_depth`, `eddi.coordinator.total_processed`
+- Applied to both `InMemoryConversationCoordinator` and `NatsConversationCoordinator`
+
+### 3. Enterprise Monitoring Stack
+- `docs/monitoring/monitoring-guide.md` — Full guide: architecture, metrics reference (20+ metrics), tracing setup, 6 alerting rules, production checklist
+- `docs/monitoring/eddi-grafana-dashboard.json` — 14-panel dashboard across 5 rows (Coordinator, Tools, Vault, NATS, HTTP/JVM)
+- `docker-compose.monitoring.yml` — One-command overlay: Prometheus v3.4.0 + Grafana 11.6.0 + Jaeger 2.7.0 (OTLP-native)
+- `docs/monitoring/prometheus.yml` — Scrape config targeting EDDI `/q/metrics`
+- `docs/monitoring/grafana-provisioning/` — Auto-provisioned datasources (Prometheus + Jaeger) and dashboard directory
+
+**Decision:** Used Jaeger (not Zipkin) for traces — CNCF graduated, native OTLP support, better scalability. EDDI uses standard OTLP protocol so backends are swappable by changing one URL.
+
+**Decision:** Chose eager cleanup + max-size over Caffeine TTL for coordinator hardening. Caffeine could evict queues mid-processing (race condition). Eager cleanup is simpler and eliminates the issue.
+
+**Files:**
+- `pom.xml` — `quarkus-opentelemetry` dependency
+- `LifecycleManager.java` — OTel span instrumentation, `getTracer()` helper
+- `application.properties` — OTel config, coordinator max-size config
+- `InMemoryConversationCoordinator.java` — Eager cleanup, max-size, Micrometer gauges
+- `NatsConversationCoordinator.java` — Same hardening
+- `InMemoryConversationCoordinatorTest.java` — Updated constructor
+- `ConversationCoordinatorTest.java` — Updated constructor
+- `NatsConversationCoordinatorTest.java` — Updated constructor
+- `NatsConversationCoordinatorIT.java` — Updated constructor
+- `docs/monitoring/*` — Full monitoring documentation and dashboard
+- `docker-compose.monitoring.yml` — Monitoring stack overlay
+
+---
+
 ## Fix WhiteSource/Mend Bolt False Positive — Bootstrap CVEs (2026-04-16)
 
 **Repo:** EDDI (`fix/whitesource-bootstrap-false-positive`)

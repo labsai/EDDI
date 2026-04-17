@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.runtime.IRuntime;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.nats.client.*;
 import io.nats.client.api.*;
 import org.junit.jupiter.api.*;
@@ -60,8 +61,8 @@ class NatsConversationCoordinatorIT {
 
         // Create coordinator with real NATS connection (no mocks)
         coordinator = new NatsConversationCoordinator(runtime, null, // no metrics instance for IT
-                natsUrl, "EDDI_IT_CONVERSATIONS", "EDDI_IT_DEAD_LETTERS", 3, // maxRetries
-                60);
+                new SimpleMeterRegistry(), natsUrl, "EDDI_IT_CONVERSATIONS", "EDDI_IT_DEAD_LETTERS", 3, // maxRetries
+                60, 10000);
 
         // Start coordinator (connects to NATS, creates streams)
         coordinator.start();

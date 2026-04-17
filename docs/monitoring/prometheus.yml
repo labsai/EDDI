@@ -1,0 +1,17 @@
+# Prometheus scrape configuration for EDDI
+# See docs/monitoring/monitoring-guide.md for full setup instructions.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "eddi"
+    metrics_path: "/q/metrics"
+    static_configs:
+      - targets: ["eddi:7070"]
+        labels:
+          instance: "eddi-primary"
+          environment: "production"
+    # Increase scrape timeout for large metric sets
+    scrape_timeout: 10s

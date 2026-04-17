@@ -2,6 +2,7 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -30,7 +31,7 @@ class InMemoryConversationCoordinatorTest {
     @BeforeEach
     void setUp() {
         runtime = mock(IRuntime.class);
-        coordinator = new InMemoryConversationCoordinator(runtime);
+        coordinator = new InMemoryConversationCoordinator(runtime, new SimpleMeterRegistry(), 10000);
     }
 
     // ==================== Status ====================

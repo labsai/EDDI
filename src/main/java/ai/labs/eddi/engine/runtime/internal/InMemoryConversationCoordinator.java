@@ -3,9 +3,12 @@ package ai.labs.eddi.engine.runtime.internal;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.arc.DefaultBean;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.*;
@@ -33,6 +36,18 @@ import java.util.concurrent.atomic.AtomicLong;
  * Dashboard.
  * </p>
  *
+ * <h3>Hardening (v6.0.2)</h3>
+ * <ul>
+ * <li><b>Eager cleanup</b>: Queues are removed from the map as soon as they
+ * become empty, preventing memory leaks from abandoned conversations.</li>
+ * <li><b>Max-size limit</b>: Configurable cap on active conversations
+ * ({@code eddi.coordinator.max-active-conversations}). Follow-up messages to
+ * existing conversations are always accepted.</li>
+ * <li><b>Micrometer metrics</b>: {@code eddi.coordinator.active_conversations},
+ * {@code eddi.coordinator.queue_depth},
+ * {@code eddi.coordinator.total_processed}.</li>
+ * </ul>
+ *
  * @author ginccc
  * @see ai.labs.eddi.engine.runtime.IEventBus
  */
@@ -49,16 +64,40 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
     private final AtomicLong deadLetterIdCounter = new AtomicLong(0);
 
     private final IRuntime runtime;
+    private final MeterRegistry meterRegistry;
+    private final int maxActiveConversations;
 
     private static final Logger log = Logger.getLogger(InMemoryConversationCoordinator.class);
 
     @Inject
-    public InMemoryConversationCoordinator(IRuntime runtime) {
+    public InMemoryConversationCoordinator(IRuntime runtime, MeterRegistry meterRegistry,
+            @ConfigProperty(name = "eddi.coordinator.max-active-conversations", defaultValue = "10000") int maxActiveConversations) {
         this.runtime = runtime;
+        this.meterRegistry = meterRegistry;
+        this.maxActiveConversations = maxActiveConversations;
+    }
+
+    @PostConstruct
+    void initMetrics() {
+        meterRegistry.gauge("eddi.coordinator.active_conversations", conversationQueues, Map::size);
+        meterRegistry.gauge("eddi.coordinator.queue_depth", conversationQueues, this::computeTotalQueueDepth);
+        meterRegistry.gauge("eddi.coordinator.total_processed", totalProcessed, AtomicLong::doubleValue);
+    }
+
+    private double computeTotalQueueDepth(Map<String, BlockingQueue<Callable<Void>>> queues) {
+        return queues.values().stream().mapToInt(BlockingQueue::size).sum();
     }
 
     @Override
     public void submitInOrder(String conversationId, Callable<Void> callable) {
+        // Max-size check: only reject truly new conversations, not follow-up messages
+        if (!conversationQueues.containsKey(conversationId) && conversationQueues.size() >= maxActiveConversations) {
+            log.errorf("Coordinator capacity exceeded (%d active conversations). Rejecting new conversationId=%s", maxActiveConversations,
+                    conversationId);
+            throw new RejectedExecutionException(
+                    "Coordinator capacity exceeded: " + maxActiveConversations + " active conversations. Try again later.");
+        }
+
         final BlockingQueue<Callable<Void>> queue = conversationQueues.computeIfAbsent(conversationId, (key) -> new LinkedTransferQueue<>());
 
         synchronized (queue) {
@@ -113,6 +152,11 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
 
                 if (!queue.isEmpty()) {
                     executeWithRetry(conversationId, queue, queue.element(), 0);
+                } else {
+                    // Eager cleanup: remove empty queue to prevent memory leaks.
+                    // Uses remove(key, value) to avoid removing a new queue that was
+                    // just created by a concurrent submitInOrder call.
+                    conversationQueues.remove(conversationId, queue);
                 }
             }
         }
