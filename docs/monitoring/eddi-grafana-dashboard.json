@@ -14,7 +14,7 @@
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -37,7 +37,7 @@
       ]
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -60,7 +60,7 @@
       ]
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" } } },
       "gridPos": { "h": 6, "w": 8, "x": 16, "y": 1 },
       "id": 3,
@@ -68,11 +68,11 @@
       "title": "Total Processed",
       "type": "stat",
       "targets": [
-        { "expr": "eddi_coordinator_total_processed", "legendFormat": "processed" }
+        { "expr": "eddi_coordinator_total_processed_total", "legendFormat": "processed" }
       ]
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": {} },
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 7 },
       "id": 4,
@@ -81,20 +81,60 @@
       "targets": [
         { "expr": "eddi_coordinator_active_conversations", "legendFormat": "Active Conversations" },
         { "expr": "eddi_coordinator_queue_depth", "legendFormat": "Queue Depth" },
-        { "expr": "rate(eddi_coordinator_total_processed[5m])", "legendFormat": "Throughput (/s)" }
+        { "expr": "rate(eddi_coordinator_total_processed_total[5m])", "legendFormat": "Throughput (/s)" }
       ]
     },
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+      "id": 150,
+      "title": "Pipeline Tasks",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "id": 15,
+      "title": "Task Duration (Avg / P99)",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "rate(eddi_pipeline_task_duration_seconds_sum[5m]) / rate(eddi_pipeline_task_duration_seconds_count[5m])", "legendFormat": "Avg {{ task_type }}" },
+        { "expr": "histogram_quantile(0.99, rate(eddi_pipeline_task_duration_seconds_bucket[5m]))", "legendFormat": "P99 {{ task_type }}" }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.1 }
+            ]
+          }
+        }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "id": 16,
+      "title": "Task Error Rate",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "rate(eddi_pipeline_task_errors_total[5m])", "legendFormat": "{{ task_type }}" }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
       "id": 200,
       "title": "Tool Execution",
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": {} },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 25 },
       "id": 5,
       "title": "Rate Limit Allow / Deny",
       "type": "timeseries",
@@ -104,9 +144,9 @@
       ]
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": {} },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 25 },
       "id": 6,
       "title": "Tool Cache Hit / Miss",
       "type": "timeseries",
@@ -116,7 +156,7 @@
       ]
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -128,7 +168,7 @@
           }
         }
       },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
       "id": 7,
       "title": "Tool Execution Failures",
       "type": "timeseries",
@@ -137,9 +177,9 @@
       ]
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": {} },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
       "id": 8,
       "title": "Cache Size",
       "type": "timeseries",
@@ -149,15 +189,15 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 32 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 },
       "id": 300,
       "title": "Vault & Security",
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "s" } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 33 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
       "id": 9,
       "title": "Vault Resolve Latency",
       "type": "timeseries",
@@ -167,9 +207,9 @@
       ]
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": {} },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 33 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
       "id": 10,
       "title": "Vault Operations",
       "type": "timeseries",
@@ -183,15 +223,15 @@
     },
     {
       "collapsed": true,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 41 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 50 },
       "id": 400,
       "title": "NATS Messaging (when enabled)",
       "type": "row",
       "panels": [
         {
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": { "defaults": { "unit": "s" } },
-          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 51 },
           "id": 11,
           "title": "NATS Publish / Consume Latency",
           "type": "timeseries",
@@ -201,9 +241,9 @@
           ]
         },
         {
-          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": { "defaults": {} },
-          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 51 },
           "id": 12,
           "title": "NATS Throughput & Dead Letters",
           "type": "timeseries",
@@ -217,15 +257,15 @@
     },
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 50 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 59 },
       "id": 500,
       "title": "HTTP & JVM (Quarkus Built-in)",
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "reqps" } },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 51 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 60 },
       "id": 13,
       "title": "HTTP Request Rate",
       "type": "timeseries",
@@ -234,9 +274,9 @@
       ]
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "bytes" } },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 51 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 60 },
       "id": 14,
       "title": "JVM Heap Usage",
       "type": "timeseries",
@@ -248,20 +288,9 @@
   ],
   "schemaVersion": 39,
   "tags": ["eddi", "observability"],
-  "templating": {
-    "list": [
-      {
-        "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" },
-        "hide": 0,
-        "includeAll": false,
-        "name": "datasource",
-        "query": "prometheus",
-        "type": "datasource"
-      }
-    ]
-  },
+  "templating": { "list": [] },
   "time": { "from": "now-1h", "to": "now" },
   "title": "EDDI Observability",
   "uid": "eddi-observability",
-  "version": 1
+  "version": 2
 }

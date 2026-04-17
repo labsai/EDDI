@@ -26,6 +26,7 @@ import io.micrometer.core.instrument.Counter;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.utils.LifecycleUtilities.createComponentKey;
@@ -102,6 +103,11 @@ public class LifecycleManager implements ILifecycleManager {
 
     /** Maximum length for error digest message shown to the LLM. */
     private static final int MAX_ERROR_DIGEST_LENGTH = 200;
+
+    // Cached Micrometer meters keyed by "taskId|taskType" to avoid per-invocation
+    // builder allocation on the hot path.
+    private static final ConcurrentHashMap<String, Timer> TASK_TIMERS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Counter> TASK_ERROR_COUNTERS = new ConcurrentHashMap<>();
 
     /**
      * The ordered list of lifecycle tasks to execute. Tasks are added during Agent
@@ -255,12 +261,14 @@ public class LifecycleManager implements ILifecycleManager {
                 Map<String, Object> summary = buildTaskSummary(conversationMemory, task);
 
                 // Record Micrometer timer for dashboards & alerting
-                Timer.builder("eddi.pipeline.task.duration")
-                        .tag("task.id", task.getId() != null ? task.getId() : "unknown")
-                        .tag("task.type", task.getType() != null ? task.getType() : "unknown")
+                String taskId = task.getId() != null ? task.getId() : "unknown";
+                String taskType = task.getType() != null ? task.getType() : "unknown";
+                String meterKey = taskId + "|" + taskType;
+                TASK_TIMERS.computeIfAbsent(meterKey, k -> Timer.builder("eddi.pipeline.task.duration")
+                        .tag("task.id", taskId)
+                        .tag("task.type", taskType)
                         .description("Pipeline task execution duration")
-                        .register(Metrics.globalRegistry)
-                        .record(java.time.Duration.ofMillis(durationMs));
+                        .register(Metrics.globalRegistry)).record(java.time.Duration.ofMillis(durationMs));
 
                 if (eventSink != null) {
                     eventSink.onTaskComplete(task.getId(), task.getType(), durationMs, summary);
@@ -281,12 +289,14 @@ public class LifecycleManager implements ILifecycleManager {
                 taskSpan.recordException(e);
 
                 // Record error counter for dashboards & alerting
-                Counter.builder("eddi.pipeline.task.errors")
-                        .tag("task.id", task.getId() != null ? task.getId() : "unknown")
-                        .tag("task.type", task.getType() != null ? task.getType() : "unknown")
+                String errTaskId = task.getId() != null ? task.getId() : "unknown";
+                String errTaskType = task.getType() != null ? task.getType() : "unknown";
+                String errMeterKey = errTaskId + "|" + errTaskType;
+                TASK_ERROR_COUNTERS.computeIfAbsent(errMeterKey, k -> Counter.builder("eddi.pipeline.task.errors")
+                        .tag("task.id", errTaskId)
+                        .tag("task.type", errTaskType)
                         .description("Pipeline task execution errors")
-                        .register(Metrics.globalRegistry)
-                        .increment();
+                        .register(Metrics.globalRegistry)).increment();
 
                 if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
                     // === Strict Write Discipline: handle task failure ===

@@ -43,7 +43,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * become empty, preventing memory leaks from abandoned conversations.</li>
  * <li><b>Max-size limit</b>: Configurable cap on active conversations
  * ({@code eddi.coordinator.max-active-conversations}). Follow-up messages to
- * existing conversations are always accepted.</li>
+ * currently-queued conversations are always accepted; conversations that have
+ * fully drained are treated as new.</li>
  * <li><b>Micrometer metrics</b>: {@code eddi.coordinator.active_conversations},
  * {@code eddi.coordinator.queue_depth},
  * {@code eddi.coordinator.total_processed}.</li>
