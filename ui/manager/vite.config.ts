@@ -30,7 +30,22 @@ export default defineConfig({
       "/mcpcallsstore": "http://localhost:7070",
       "/ragstore": "http://localhost:7070",
       "/groupstore": "http://localhost:7070",
-      "/groups": "http://localhost:7070",
+      // The /groups path includes /groups/{id}/conversations/stream SSE endpoint.
+      // Disable http-proxy buffering so the stream closes cleanly on abort.
+      "/groups": {
+        target: "http://localhost:7070",
+        configure: (proxy) => {
+          proxy.on("proxyReq", (_proxyReq, req) => {
+            if (req.socket) {
+              req.socket.on("close", () => {
+                if (_proxyReq.socket && !_proxyReq.socket.destroyed) {
+                  _proxyReq.socket.destroy();
+                }
+              });
+            }
+          });
+        },
+      },
       "/logs": "http://localhost:7070",
       "/parserstore": "http://localhost:7070",
       "/extensionstore": "http://localhost:7070",

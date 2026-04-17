@@ -5,7 +5,7 @@ import { X, ChevronRight, ChevronLeft, Users, Plus, Trash2, AlertTriangle, Check
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { useCreateGroup } from "@/hooks/use-groups";
+import { useCreateGroup, useEnrichedGroupDescriptors } from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import {
   DISCUSSION_STYLES,
@@ -371,23 +371,30 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                       </button>
                     </div>
 
-                    {/* Card body — agent selector */}
+                    {/* Card body — conditional on member type */}
                     <div className="px-3 py-2">
-                      <select
-                        value={member.agentId}
-                        onChange={(e) => updateMember(idx, { agentId: e.target.value })}
-                        className={cn(
-                          "w-full rounded-md border bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring",
-                          !member.agentId ? "border-amber-400/50" : "border-input"
-                        )}
-                      >
-                        <option value="">{t("groups.selectAgent", "Select agent…")}</option>
-                        {agents.map((agent) => (
-                          <option key={agent.id} value={agent.id}>
-                            {agent.name || agent.id.slice(0, 12)}
-                          </option>
-                        ))}
-                      </select>
+                      {member.memberType === "GROUP" ? (
+                        <GroupPickerSelect
+                          value={member.agentId}
+                          onChange={(v) => updateMember(idx, { agentId: v })}
+                        />
+                      ) : (
+                        <select
+                          value={member.agentId}
+                          onChange={(e) => updateMember(idx, { agentId: e.target.value })}
+                          className={cn(
+                            "w-full rounded-md border bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring",
+                            !member.agentId ? "border-amber-400/50" : "border-input"
+                          )}
+                        >
+                          <option value="">{t("groups.selectAgent", "Select agent…")}</option>
+                          {agents.map((agent) => (
+                            <option key={agent.id} value={agent.id}>
+                              {agent.name || agent.id.slice(0, 12)}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -631,5 +638,40 @@ function ReviewStep({
         </span>
       </div>
     </div>
+  );
+}
+
+/** Reusable group picker for GROUP-type members */
+function GroupPickerSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const { t } = useTranslation();
+  const { data: groups, isLoading } = useEnrichedGroupDescriptors(100);
+
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={cn(
+        "w-full rounded-md border bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring",
+        !value ? "border-amber-400/50" : "border-input"
+      )}
+      disabled={isLoading}
+    >
+      <option value="">
+        {isLoading
+          ? t("common.loading", "Loading…")
+          : t("groupWizard.selectGroup", "Select existing group…")}
+      </option>
+      {groups?.map((group) => (
+        <option key={group.id} value={group.id}>
+          {group.name || group.id.slice(0, 12)} ({group.memberCount} members)
+        </option>
+      ))}
+    </select>
   );
 }

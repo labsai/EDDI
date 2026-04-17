@@ -35,6 +35,8 @@ import {
   type GroupMember,
   type AgentGroupConfiguration,
 } from "@/lib/api/groups";
+import { parseResourceUri } from "@/lib/api/agents";
+import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
 import { getGroupTemplates, type GroupTemplate } from "@/lib/group-templates";
 import {
   setupAgent,
@@ -280,7 +282,17 @@ export function GroupWizardPage() {
     createMutation.mutate(config, {
       onSuccess: (data) => {
         toast.success(t("groupWizard.success"));
-        const id = typeof data === "string" ? data : (data as { id?: string })?.id ?? "new";
+        // Parse the location URI to extract the actual group ID
+        let id = "new";
+        try {
+          const location = (data as { location?: string })?.location;
+          if (location) {
+            id = parseResourceUri(location).id;
+          }
+        } catch {
+          // fallback — use raw data if parse fails
+          id = typeof data === "string" ? data : (data as { id?: string })?.id ?? "new";
+        }
         setResultId(id);
         setIsBatchCreating(false);
         setCreationProgress(null);
@@ -971,141 +983,152 @@ function MemberCard({
       {/* Card body — mode toggle + form */}
       {!member.created && (
         <div className="px-4 py-3 space-y-3">
-          {/* Mode toggle */}
-          <div className="flex gap-2">
-            <button
-              onClick={() => onUpdate({ mode: "existing", agentId: "" })}
-              className={cn(
-                "flex-1 flex items-center justify-center gap-2 rounded-lg border-2 py-2 text-xs font-medium transition-all",
-                member.mode === "existing"
-                  ? "border-primary bg-primary/5 text-primary"
-                  : "border-border text-muted-foreground hover:border-primary/30"
-              )}
-            >
-              <Link2 className="h-3.5 w-3.5" />
-              {t("groupWizard.useExisting")}
-            </button>
-            <button
-              onClick={() => onUpdate({ mode: "new", agentId: "" })}
-              className={cn(
-                "flex-1 flex items-center justify-center gap-2 rounded-lg border-2 py-2 text-xs font-medium transition-all",
-                member.mode === "new"
-                  ? `${styleColors.border} ${styleColors.bg} ${styleColors.text}`
-                  : "border-border text-muted-foreground hover:border-primary/30"
-              )}
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              {t("groupWizard.createNew")}
-            </button>
-          </div>
-
-          {/* Existing agent mode */}
-          {member.mode === "existing" && (
-            <div className="relative">
-              <select
-                value={member.agentId}
-                onChange={(e) => onUpdate({ agentId: e.target.value })}
-                className={cn(
-                  "w-full appearance-none rounded-lg border bg-background px-3 py-2 pe-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring",
-                  !member.agentId ? "border-amber-400/50" : "border-input"
-                )}
-              >
-                <option value="">{t("groupWizard.selectAgent")}</option>
-                {agents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name || agent.id.slice(0, 12)}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute inset-e-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            </div>
-          )}
-
-          {/* Create new agent mode */}
-          {member.mode === "new" && (
-            <div className="space-y-2.5">
-              {/* System prompt */}
-              <div>
-                <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                  {t("groupWizard.systemPrompt")}
-                </label>
-                <textarea
-                  value={member.systemPrompt}
-                  onChange={(e) => onUpdate({ systemPrompt: e.target.value })}
-                  placeholder={`You are ${member.displayName}${member.role ? `, a ${member.role} expert` : ""}. Provide insightful analysis from your domain perspective.`}
-                  rows={2}
-                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
-                />
+          {/* GROUP type: just show a group selector */}
+          {member.memberType === "GROUP" ? (
+            <GroupMemberPicker
+              agentId={member.agentId}
+              onUpdate={onUpdate}
+              t={t}
+            />
+          ) : (
+            <>
+              {/* Mode toggle */}
+              <div className="flex gap-2">
+                <button
+                  onClick={() => onUpdate({ mode: "existing", agentId: "" })}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-2 rounded-lg border-2 py-2 text-xs font-medium transition-all",
+                    member.mode === "existing"
+                      ? "border-primary bg-primary/5 text-primary"
+                      : "border-border text-muted-foreground hover:border-primary/30"
+                  )}
+                >
+                  <Link2 className="h-3.5 w-3.5" />
+                  {t("groupWizard.useExisting")}
+                </button>
+                <button
+                  onClick={() => onUpdate({ mode: "new", agentId: "" })}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-2 rounded-lg border-2 py-2 text-xs font-medium transition-all",
+                    member.mode === "new"
+                      ? `${styleColors.border} ${styleColors.bg} ${styleColors.text}`
+                      : "border-border text-muted-foreground hover:border-primary/30"
+                  )}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {t("groupWizard.createNew")}
+                </button>
               </div>
 
-              {/* Provider + Model row */}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    {t("groupWizard.provider")}
-                  </label>
-                  <div className="relative">
-                    <select
-                      value={member.provider}
-                      onChange={(e) => {
-                        onUpdate({
-                          provider: e.target.value,
-                          model: "",
-                        });
-                      }}
-                      className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-1.5 pe-7 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                    >
-                      {LLM_PROVIDERS.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute inset-e-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+              {/* Existing agent mode */}
+              {member.mode === "existing" && (
+                <div className="relative">
+                  <select
+                    value={member.agentId}
+                    onChange={(e) => onUpdate({ agentId: e.target.value })}
+                    className={cn(
+                      "w-full appearance-none rounded-lg border bg-background px-3 py-2 pe-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring",
+                      !member.agentId ? "border-amber-400/50" : "border-input"
+                    )}
+                  >
+                    <option value="">{t("groupWizard.selectAgent")}</option>
+                    {agents.map((agent) => (
+                      <option key={agent.id} value={agent.id}>
+                        {agent.name || agent.id.slice(0, 12)}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute inset-e-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                </div>
+              )}
+
+              {/* Create new agent mode */}
+              {member.mode === "new" && (
+                <div className="space-y-2.5">
+                  {/* System prompt */}
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                      {t("groupWizard.systemPrompt")}
+                    </label>
+                    <textarea
+                      value={member.systemPrompt}
+                      onChange={(e) => onUpdate({ systemPrompt: e.target.value })}
+                      placeholder={`You are ${member.displayName}${member.role ? `, a ${member.role} expert` : ""}. Provide insightful analysis from your domain perspective.`}
+                      rows={2}
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
+                    />
                   </div>
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    {t("groupWizard.model")}
-                  </label>
-                  <input
-                    value={member.model}
-                    onChange={(e) => onUpdate({ model: e.target.value })}
-                    className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                    placeholder={`e.g. ${providerConfig?.defaultModel ?? ""}`}
-                  />
-                </div>
-              </div>
 
-              {/* API Key (only if provider needs it) */}
-              {providerConfig?.needsKey && (
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    {t("groupWizard.apiKey")}
-                  </label>
-                  <SecretKeyPicker
-                    value={member.apiKey}
-                    onChange={(v) => onUpdate({ apiKey: v })}
-                    placeholder={t("groupWizard.apiKeyPlaceholder")}
-                    testId={`gw-apikey-${index}`}
-                  />
+                  {/* Provider + Model row */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                        {t("groupWizard.provider")}
+                      </label>
+                      <div className="relative">
+                        <select
+                          value={member.provider}
+                          onChange={(e) => {
+                            onUpdate({
+                              provider: e.target.value,
+                              model: "",
+                            });
+                          }}
+                          className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-1.5 pe-7 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        >
+                          {LLM_PROVIDERS.map((p) => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                        </select>
+                        <ChevronDown className="pointer-events-none absolute inset-e-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                        {t("groupWizard.model")}
+                      </label>
+                      <input
+                        value={member.model}
+                        onChange={(e) => onUpdate({ model: e.target.value })}
+                        className="w-full rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        placeholder={`e.g. ${providerConfig?.defaultModel ?? ""}`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* API Key (only if provider needs it) */}
+                  {providerConfig?.needsKey && (
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                        {t("groupWizard.apiKey")}
+                      </label>
+                      <SecretKeyPicker
+                        value={member.apiKey}
+                        onChange={(v) => onUpdate({ apiKey: v })}
+                        placeholder={t("groupWizard.apiKeyPlaceholder")}
+                        testId={`gw-apikey-${index}`}
+                      />
+                    </div>
+                  )}
+
+                  {/* Create button */}
+                  <button
+                    onClick={onCreateAgent}
+                    disabled={member.creating || !member.displayName.trim()}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary/10 px-4 py-2 text-xs font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {member.creating ? (
+                      <RefreshCw className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Wand2 className="h-3 w-3" />
+                    )}
+                    {member.creating
+                      ? t("groupWizard.creatingAgent")
+                      : t("groupWizard.createThisAgent")}
+                  </button>
                 </div>
               )}
-
-              {/* Create button */}
-              <button
-                onClick={onCreateAgent}
-                disabled={member.creating || !member.displayName.trim()}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-primary/10 px-4 py-2 text-xs font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {member.creating ? (
-                  <RefreshCw className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Wand2 className="h-3 w-3" />
-                )}
-                {member.creating
-                  ? t("groupWizard.creatingAgent")
-                  : t("groupWizard.createThisAgent")}
-              </button>
-            </div>
+            </>
           )}
         </div>
       )}
@@ -1419,6 +1442,56 @@ function ReviewStep({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ================================================================
+   Group Member Picker — shown when memberType is GROUP
+   ================================================================ */
+
+function GroupMemberPicker({
+  agentId,
+  onUpdate,
+  t,
+}: {
+  agentId: string;
+  onUpdate: (updates: Partial<MemberSlot>) => void;
+  t: ReturnType<typeof useTranslation>["t"];
+}) {
+  const { data: groups, isLoading } = useEnrichedGroupDescriptors(100);
+
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-medium text-muted-foreground">
+        {t("groupWizard.selectGroup", "Select existing group")}
+      </label>
+      <div className="relative">
+        <select
+          value={agentId}
+          onChange={(e) => onUpdate({ agentId: e.target.value, mode: "existing" })}
+          className={cn(
+            "w-full appearance-none rounded-lg border bg-background px-3 py-2 pe-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring",
+            !agentId ? "border-amber-400/50" : "border-input"
+          )}
+          disabled={isLoading}
+        >
+          <option value="">
+            {isLoading
+              ? t("common.loading", "Loading…")
+              : t("groupWizard.selectGroup", "Select existing group…")}
+          </option>
+          {groups?.map((group) => (
+            <option key={group.id} value={group.id}>
+              {group.name || group.id.slice(0, 12)} ({group.memberCount} members)
+            </option>
+          ))}
+        </select>
+        <ChevronDown className="pointer-events-none absolute inset-e-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+      </div>
+      <p className="mt-1 text-[10px] text-muted-foreground">
+        {t("groupWizard.groupMemberHint", "This group will participate as a nested sub-group in the discussion.")}
+      </p>
     </div>
   );
 }

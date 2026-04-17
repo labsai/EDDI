@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   Users, Trash2, MessageSquareQuote, Clock,
   PanelRightOpen, PanelRightClose,
-  Maximize2, Minimize2, History,
+  Maximize2, Minimize2, History, StopCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -90,7 +90,7 @@ export function GroupDetailPage() {
       setSelectedConvId(streamState.conversationId);
       // M2 fix: refresh conversation list so sidebar shows the new discussion
       if (groupId) {
-        queryClient.invalidateQueries({ queryKey: ["group-conversations", groupId] });
+        queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
       }
     }
   }, [streamState.state, streamState.conversationId, streamState.isStreaming, groupId, queryClient]);
@@ -301,10 +301,26 @@ export function GroupDetailPage() {
             />
           </div>
           {/* Input always at the bottom of the transcript panel */}
-          <DiscussionInput
-            onSubmit={handleStartDiscussion}
-            isLoading={streamState.isStreaming}
-          />
+          <div className="flex items-center gap-2 shrink-0">
+            {streamState.isStreaming && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={abortStream}
+                className="shrink-0 ms-3 text-destructive border-destructive/30 hover:bg-destructive/10"
+                data-testid="abort-discussion-btn"
+              >
+                <StopCircle className="h-4 w-4 me-1" />
+                {t("groups.stopDiscussion", "Stop")}
+              </Button>
+            )}
+            <div className="flex-1 min-w-0">
+              <DiscussionInput
+                onSubmit={handleStartDiscussion}
+                isLoading={streamState.isStreaming}
+              />
+            </div>
+          </div>
         </div>
 
         {/* RIGHT: Config panel — hidden on small screens and in fullscreen */}

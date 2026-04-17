@@ -135,11 +135,11 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
             {t("groups.protocolSettings", "Protocol")}
           </h4>
           <div className="rounded-lg border border-border bg-secondary/30 p-2.5 space-y-1">
-            <InfoRow label="Timeout" value={`${config.protocol.agentTimeoutSeconds}s`} />
-            <InfoRow label="On Failure" value={config.protocol.onAgentFailure} />
-            <InfoRow label="Max Retries" value={String(config.protocol.maxRetries)} />
-            <InfoRow label="Unavailable" value={config.protocol.onMemberUnavailable} />
-            <InfoRow label="Max Rounds" value={String(config.maxRounds)} />
+            <InfoRow label={t("groups.protocolTimeout", "Timeout")} value={`${config.protocol.agentTimeoutSeconds}s`} />
+            <InfoRow label={t("groups.protocolOnFailure", "On Failure")} value={config.protocol.onAgentFailure} />
+            <InfoRow label={t("groups.protocolMaxRetries", "Max Retries")} value={String(config.protocol.maxRetries)} />
+            <InfoRow label={t("groups.protocolUnavailable", "Unavailable")} value={config.protocol.onMemberUnavailable} />
+            <InfoRow label={t("groups.protocolMaxRounds", "Max Rounds")} value={String(config.maxRounds)} />
           </div>
         </div>
       )}

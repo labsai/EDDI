@@ -55,7 +55,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled }: DiscussionInp
 
   return (
     <>
-      <form onSubmit={handleSubmit} className="flex items-end gap-2 p-3 border-t border-border bg-card/80 backdrop-blur-sm shrink-0">
+      <form onSubmit={handleSubmit} className="relative flex items-end gap-2 p-3 pb-5 border-t border-border bg-card/80 backdrop-blur-sm shrink-0">
         <div className="relative flex-1 min-w-0">
           <textarea
             ref={textareaRef}
@@ -99,6 +99,11 @@ export function DiscussionInput({ onSubmit, isLoading, disabled }: DiscussionInp
             {t("groups.startDiscussion", "Discuss")}
           </span>
         </Button>
+        {question.length > 0 && (
+          <p className="absolute -bottom-4 start-0 text-[10px] text-muted-foreground/60">
+            ↵ {t("groups.enterToSend", "Enter to send")} · ⇧↵ {t("groups.shiftEnter", "new line")}
+          </p>
+        )}
       </form>
 
       {/* Expanded input dialog */}
