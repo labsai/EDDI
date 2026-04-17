@@ -247,8 +247,8 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
             DeadLetterEntry entry = it.next();
             if (entry.id().equals(entryId)) {
                 it.remove();
-                log.infof("Replayed dead-letter %s for conversation %s (in-memory — task reference lost, removed from DL queue)", entryId,
-                        entry.conversationId());
+                log.infof("Replayed dead-letter %s for conversation %s (in-memory — task reference lost, removed from DL queue)",
+                        sanitizeForLog(entryId), sanitizeForLog(entry.conversationId()));
                 return true;
             }
         }
@@ -262,7 +262,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
             DeadLetterEntry entry = it.next();
             if (entry.id().equals(entryId)) {
                 it.remove();
-                log.infof("Discarded dead-letter %s for conversation %s", entryId, sanitizeForLog(entry.conversationId()));
+                log.infof("Discarded dead-letter %s for conversation %s", sanitizeForLog(entryId), sanitizeForLog(entry.conversationId()));
                 return true;
             }
         }

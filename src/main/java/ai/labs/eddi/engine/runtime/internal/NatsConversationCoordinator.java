@@ -328,7 +328,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                     failure.getMessage() != null ? failure.getMessage().replace("\"", "\\\"") : "unknown", System.currentTimeMillis());
 
             jetStream.publish(deadLetterSubject, payload.getBytes());
-            log.infof("Published dead-letter for conversation %s to %s", sanitizeForLog(conversationId), deadLetterSubject);
+            log.infof("Published dead-letter for conversation %s to %s", sanitizeForLog(conversationId), sanitizeForLog(deadLetterSubject));
 
             totalDeadLettered.incrementAndGet();
             getMetrics().ifPresent(m -> m.getDeadLetterCount().increment());
@@ -448,7 +448,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     public boolean discardDeadLetter(String entryId) {
         // For NATS, we can't selectively delete individual messages from a stream.
         // Instead, we log it and let the operator know.
-        log.infof("Dead-letter %s acknowledged (NATS stream messages expire via retention policy)", entryId);
+        log.infof("Dead-letter %s acknowledged (NATS stream messages expire via retention policy)", sanitizeForLog(entryId));
         return true;
     }
 

@@ -68,18 +68,25 @@ public class RestCoordinatorAdmin implements IRestCoordinatorAdmin {
     public void replayDeadLetter(String entryId) {
         boolean replayed = coordinator.replayDeadLetter(entryId);
         if (!replayed) {
-            throw new NotFoundException("Dead-letter entry not found: " + entryId);
+            throw new NotFoundException("Dead-letter entry not found: " + sanitizeForLog(entryId));
         }
-        log.infof("Dead-letter %s replayed via REST", entryId);
+        log.infof("Dead-letter %s replayed via REST", sanitizeForLog(entryId));
     }
 
     @Override
     public void discardDeadLetter(String entryId) {
         boolean discarded = coordinator.discardDeadLetter(entryId);
         if (!discarded) {
-            throw new NotFoundException("Dead-letter entry not found: " + entryId);
+            throw new NotFoundException("Dead-letter entry not found: " + sanitizeForLog(entryId));
         }
-        log.infof("Dead-letter %s discarded via REST", entryId);
+        log.infof("Dead-letter %s discarded via REST", sanitizeForLog(entryId));
+    }
+
+    private static String sanitizeForLog(String value) {
+        if (value == null) {
+            return "null";
+        }
+        return value.replace('\n', '_').replace('\r', '_');
     }
 
     @Override
