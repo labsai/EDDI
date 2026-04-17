@@ -72,6 +72,17 @@ Each entry follows this format:
 - **README** — Added OpenTelemetry tracing bullet, monitoring guide link, documentation table entry.
 - **Tests** — Added 3 coordinator tests: max-size rejection, follow-up at capacity, eager cleanup verification.
 
+### 5. Code Review Round 2 Fixes (2026-04-17)
+- **Hot-path metric cache** — Timer/Counter instances now cached in `ConcurrentHashMap` keyed by `(taskId|taskType)`. Avoids per-invocation builder/tag allocation on the pipeline hot path.
+- **Pipeline Tasks dashboard row** — Added Grafana panels: task duration avg/P99 and error rate per `task.type`. The headline feature was advertised in monitoring-guide.md but had no visualization.
+- **Grafana datasource UID** — Fixed `${datasource}` template variable to use fixed `"prometheus"` uid matching `datasources.yml`. Prevents "datasource not found" on fresh Grafana installs.
+- **NATS row layout** — Collapsed-row panels moved from overlapping y:42 to proper y:51 inside the row's panels array.
+- **Duplicate `prometheus.yml`** — Deleted root-level copy (diverged from `docs/monitoring/prometheus.yml`).
+- **Docstring accuracy** — Follow-ups accepted for "currently-queued" conversations only; drained conversations treated as new per eager-cleanup semantics.
+- **Typo** — `QUARKUS_OTel_SDK_DISABLED` → `QUARKUS_OTEL_SDK_DISABLED` in properties comment.
+- **Cleanup-race regression test** — `shouldHandleConcurrentSubmitDuringCleanup`: exercises drain→cleanup→resubmit sequence to guard the CAS loop fix against regressions.
+- **`totalProcessed_total` metric name** — Dashboard updated to use `_total` suffix matching FunctionCounter naming convention.
+
 ---
 
 ## Fix WhiteSource/Mend Bolt False Positive — Bootstrap CVEs (2026-04-16)
