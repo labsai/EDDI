@@ -168,6 +168,65 @@ class InMemoryConversationCoordinatorTest {
         assertTrue(depths.containsKey("conv-q"));
     }
 
+    // ==================== Capacity Limit ====================
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldRejectNewConversationAtCapacity() {
+        // Create coordinator with maxActiveConversations=2
+        var smallCoordinator = new InMemoryConversationCoordinator(runtime, new SimpleMeterRegistry(), 2);
+
+        Callable<Void> task1 = mock(Callable.class);
+        Callable<Void> task2 = mock(Callable.class);
+        Callable<Void> task3 = mock(Callable.class);
+
+        smallCoordinator.submitInOrder("conv-1", task1);
+        smallCoordinator.submitInOrder("conv-2", task2);
+
+        // Third NEW conversation should be rejected
+        assertThrows(java.util.concurrent.RejectedExecutionException.class,
+                () -> smallCoordinator.submitInOrder("conv-3", task3));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldAllowFollowUpToExistingConversationAtCapacity() {
+        // Create coordinator with maxActiveConversations=2
+        var smallCoordinator = new InMemoryConversationCoordinator(runtime, new SimpleMeterRegistry(), 2);
+
+        Callable<Void> task1 = mock(Callable.class);
+        Callable<Void> task2 = mock(Callable.class);
+        Callable<Void> followUp = mock(Callable.class);
+
+        smallCoordinator.submitInOrder("conv-1", task1);
+        smallCoordinator.submitInOrder("conv-2", task2);
+
+        // Follow-up to existing conversation should NOT be rejected
+        assertDoesNotThrow(() -> smallCoordinator.submitInOrder("conv-1", followUp));
+    }
+
+    // ==================== Eager Cleanup ====================
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldRemoveQueueAfterDrain() {
+        Callable<Void> task = mock(Callable.class);
+        coordinator.submitInOrder("conv-cleanup", task);
+
+        // Queue should exist after submission
+        assertTrue(coordinator.getQueueDepths().containsKey("conv-cleanup"),
+                "Queue should exist after submission");
+
+        // Simulate completion
+        ArgumentCaptor<IRuntime.IFinishedExecution<Void>> captor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
+        verify(runtime).submitCallable(eq(task), captor.capture(), isNull());
+        captor.getValue().onComplete(null);
+
+        // After completion, queue should be removed (eager cleanup)
+        assertFalse(coordinator.getQueueDepths().containsKey("conv-cleanup"),
+                "Queue should be removed after draining via eager cleanup");
+    }
+
     // ==================== Helpers ====================
 
     @SuppressWarnings("unchecked")

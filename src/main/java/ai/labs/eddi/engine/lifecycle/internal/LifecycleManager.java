@@ -20,6 +20,10 @@ import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Scope;
 
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.Counter;
+
 import java.time.Instant;
 import java.util.*;
 
@@ -250,6 +254,14 @@ public class LifecycleManager implements ILifecycleManager {
                 long durationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
                 Map<String, Object> summary = buildTaskSummary(conversationMemory, task);
 
+                // Record Micrometer timer for dashboards & alerting
+                Timer.builder("eddi.pipeline.task.duration")
+                        .tag("task.id", task.getId() != null ? task.getId() : "unknown")
+                        .tag("task.type", task.getType() != null ? task.getType() : "unknown")
+                        .description("Pipeline task execution duration")
+                        .register(Metrics.globalRegistry)
+                        .record(java.time.Duration.ofMillis(durationMs));
+
                 if (eventSink != null) {
                     eventSink.onTaskComplete(task.getId(), task.getType(), durationMs, summary);
                 }
@@ -267,6 +279,14 @@ public class LifecycleManager implements ILifecycleManager {
             } catch (LifecycleException | RuntimeException e) {
                 taskSpan.setStatus(StatusCode.ERROR, e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
                 taskSpan.recordException(e);
+
+                // Record error counter for dashboards & alerting
+                Counter.builder("eddi.pipeline.task.errors")
+                        .tag("task.id", task.getId() != null ? task.getId() : "unknown")
+                        .tag("task.type", task.getType() != null ? task.getType() : "unknown")
+                        .description("Pipeline task execution errors")
+                        .register(Metrics.globalRegistry)
+                        .increment();
 
                 if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
                     // === Strict Write Discipline: handle task failure ===

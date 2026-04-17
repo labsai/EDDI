@@ -13,6 +13,12 @@
 #   QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
 
 services:
+  # Override EDDI service to enable OTel tracing and point to Jaeger
+  eddi:
+    environment:
+      QUARKUS_OTEL_SDK_DISABLED: "false"
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+
   prometheus:
     image: prom/prometheus:v3.4.0
     container_name: eddi-prometheus
