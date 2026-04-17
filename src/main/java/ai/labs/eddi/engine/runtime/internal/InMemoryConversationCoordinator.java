@@ -110,13 +110,20 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
         // our computeIfAbsent and our synchronized(queue), the queue is orphaned
         // and we must retry with a fresh computeIfAbsent to avoid two queues for
         // the same conversation running in parallel.
-        while (true) {
+        //
+        // Happens-before correctness: ConcurrentHashMap.get() is ordered after
+        // the monitor release in submitNext's synchronized(queue) block, so our
+        // identity check sees the removal. In practice, retries are 0–1.
+        for (int attempt = 0;; attempt++) {
             final BlockingQueue<Callable<Void>> queue = conversationQueues.computeIfAbsent(conversationId, (key) -> new LinkedTransferQueue<>());
 
             synchronized (queue) {
                 // Verify this queue is still the current value in the map.
                 // If not, another thread cleaned it up — retry.
                 if (conversationQueues.get(conversationId) != queue) {
+                    if (attempt >= 3) {
+                        log.debugf("CAS loop retried %d times for conversationId=%s (expected 0-1)", attempt, conversationId);
+                    }
                     continue; // retry with fresh computeIfAbsent
                 }
 

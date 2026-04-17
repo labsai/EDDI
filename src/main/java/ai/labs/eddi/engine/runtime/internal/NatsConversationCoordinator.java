@@ -52,6 +52,19 @@ import java.util.concurrent.atomic.AtomicLong;
  * of Callable, allowing cross-instance message consumption.
  * </p>
  *
+ * <h3>Hardening (v6.0.2)</h3>
+ * <ul>
+ * <li><b>Eager cleanup</b>: Queues are removed from the map as soon as they
+ * become empty, preventing memory leaks from abandoned conversations.</li>
+ * <li><b>Max-size limit</b>: Configurable cap on active conversations
+ * ({@code eddi.coordinator.max-active-conversations}). Follow-up messages to
+ * currently-queued conversations are always accepted; conversations that have
+ * fully drained are treated as new.</li>
+ * <li><b>Micrometer metrics</b>: {@code eddi.coordinator.active_conversations},
+ * {@code eddi.coordinator.queue_depth},
+ * {@code eddi.coordinator.total_processed}.</li>
+ * </ul>
+ *
  * @author ginccc
  * @since 6.0.0
  * @see ai.labs.eddi.engine.runtime.IEventBus
@@ -207,11 +220,18 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
         // map's current value. If submitNext() removed it (eager cleanup) between
         // our computeIfAbsent and our synchronized(queue), the queue is orphaned
         // and we must retry with a fresh computeIfAbsent.
-        while (true) {
+        //
+        // Happens-before correctness: ConcurrentHashMap.get() is ordered after
+        // the monitor release in submitNext's synchronized(queue) block, so our
+        // identity check sees the removal. In practice, retries are 0–1.
+        for (int attempt = 0;; attempt++) {
             final BlockingQueue<RetryableCallable> queue = conversationQueues.computeIfAbsent(conversationId, k -> new LinkedTransferQueue<>());
 
             synchronized (queue) {
                 if (conversationQueues.get(conversationId) != queue) {
+                    if (attempt >= 3) {
+                        log.debugf("CAS loop retried %d times for conversationId=%s (expected 0-1)", attempt, conversationId);
+                    }
                     continue; // retry with fresh computeIfAbsent
                 }
 

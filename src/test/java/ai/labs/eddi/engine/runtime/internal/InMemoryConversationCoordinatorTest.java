@@ -231,19 +231,21 @@ class InMemoryConversationCoordinatorTest {
     }
 
     /**
-     * Regression test for the eager-cleanup race condition.
+     * Verifies that resubmitting to a conversation after its queue has been drained
+     * (and eagerly removed) works correctly: a fresh queue is created and the new
+     * task is dispatched.
      *
-     * Scenario: Thread A completes a task and submitNext() removes the queue (eager
-     * cleanup). Thread B calls submitInOrder() for the same conversation right in
-     * the cleanup window. Without the CAS loop fix, Thread B would operate on an
-     * orphaned queue, creating two queues for the same conversation.
-     *
-     * This test verifies that after cleanup + re-submit, exactly one task runs and
-     * the new task is properly queued against a fresh queue.
+     * <p>
+     * Note: this is a sequential test (drain completes before resubmit). It does
+     * NOT exercise the true concurrent race window where submitNext() holds the
+     * lock while submitInOrder() races in. That race is guarded by the CAS identity
+     * check in submitInOrder's while(true) loop, which is not practically testable
+     * without internal hooks.
+     * </p>
      */
     @Test
     @SuppressWarnings("unchecked")
-    void shouldHandleConcurrentSubmitDuringCleanup() throws Exception {
+    void shouldHandleResubmitAfterDrain() throws Exception {
         Callable<Void> task1 = mock(Callable.class);
         Callable<Void> task2 = mock(Callable.class);
 

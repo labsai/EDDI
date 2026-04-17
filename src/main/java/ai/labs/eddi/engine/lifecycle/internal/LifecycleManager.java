@@ -268,6 +268,7 @@ public class LifecycleManager implements ILifecycleManager {
                         .tag("task.id", taskId)
                         .tag("task.type", taskType)
                         .description("Pipeline task execution duration")
+                        .publishPercentileHistogram()
                         .register(Metrics.globalRegistry)).record(java.time.Duration.ofMillis(durationMs));
 
                 if (eventSink != null) {
