@@ -51,7 +51,7 @@ describe("HTTP Calls Editor", () => {
     renderPage("apicalls");
 
     await waitFor(() => {
-      expect(screen.getByTestId("httpcall-editor")).toBeInTheDocument();
+      expect(screen.getAllByTestId("httpcall-editor").length).toBeGreaterThan(0);
     });
   });
 
@@ -59,7 +59,7 @@ describe("HTTP Calls Editor", () => {
     renderPage("apicalls");
 
     await waitFor(() => {
-      expect(screen.getByTestId("method-select")).toBeInTheDocument();
+      expect(screen.getAllByTestId("method-select").length).toBeGreaterThan(0);
     });
   });
 
@@ -75,7 +75,7 @@ describe("HTTP Calls Editor", () => {
     renderPage("apicalls");
 
     await waitFor(() => {
-      expect(screen.getByTestId("call-name-input")).toBeInTheDocument();
+      expect(screen.getAllByTestId("call-name-input").length).toBeGreaterThan(0);
     });
   });
 

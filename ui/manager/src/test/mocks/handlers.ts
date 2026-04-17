@@ -691,7 +691,57 @@ export const handlers = [
         memory: { memoryType: "longTerm", maxConversationSteps: 50 },
       },
     };
-    const config = agentConfigs[agentId] ?? {
+    const agentFallbacks: Record<string, object> = {
+      agent2: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/pkg2?version=1"],
+        channels: [{ type: "web", config: { allowedOrigins: ["https://support.example.com"], maxIdleMinutes: 15 } }],
+        a2aEnabled: true,
+        description: "Self-service knowledge base answering product, billing, and account questions",
+        a2aSkills: ["faq", "knowledge-search"],
+        memory: { memoryType: "shortTerm", maxConversationSteps: 30 },
+      },
+      agent5: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf5?version=1"],
+        channels: [
+          { type: "web", config: { allowedOrigins: ["https://shop.example.com"], maxIdleMinutes: 20 } },
+        ],
+        a2aEnabled: true,
+        description: "Suggests products based on browsing history, preferences, and real-time inventory",
+        a2aSkills: ["product-recommendation"],
+        memory: { memoryType: "longTerm", maxConversationSteps: 40 },
+      },
+      agent6: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=2"],
+        channels: [
+          { type: "web", config: { allowedOrigins: ["https://hr.example.com"] } },
+          { type: "slack", config: { channelId: "C0HR_ONBOARD", botToken: "${eddivault:slack-bot-token}", signingSecret: "${eddivault:slack-signing-secret}" } },
+        ],
+        a2aEnabled: false,
+        description: "Walks new hires through IT setup, policy acknowledgement, and benefits enrollment",
+        a2aSkills: ["onboarding"],
+        memory: { memoryType: "longTerm", maxConversationSteps: 60 },
+      },
+      agent7: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf6?version=1"],
+        channels: [],
+        a2aEnabled: true,
+        description: "Analyzes legal contracts using RAG, highlights key clauses, and flags risk areas",
+        a2aSkills: ["contract-analysis", "risk-assessment"],
+        memory: { memoryType: "longTerm", maxConversationSteps: 80 },
+      },
+      agent8: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=2"],
+        channels: [
+          { type: "web", config: { allowedOrigins: ["https://internal.example.com"] } },
+          { type: "slack", config: { channelId: "C0IT_HELP", botToken: "${eddivault:slack-bot-token}", signingSecret: "${eddivault:slack-signing-secret}", groupId: "group-it" } },
+        ],
+        a2aEnabled: true,
+        description: "Troubleshoots common IT issues, resets passwords, and creates Jira tickets for escalation",
+        a2aSkills: ["it-troubleshooting", "password-reset"],
+        memory: { memoryType: "shortTerm", maxConversationSteps: 25 },
+      },
+    };
+    const config = agentConfigs[agentId] ?? agentFallbacks[agentId] ?? {
       workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=2"],
       channels: [],
       a2aEnabled: false,
@@ -1238,21 +1288,114 @@ export const handlers = [
       httpCalls: [
         {
           name: "get_weather",
-          description: "Fetch current weather data for a city",
-          parameters: { city: "City name to look up" },
+          description: "Fetch current weather data for a city including temperature, humidity, and forecast",
+          parameters: { city: "City name to look up", units: "Temperature units (metric or imperial)" },
           actions: ["get_weather"],
           saveResponse: true,
           responseObjectName: "weatherData",
           fireAndForget: false,
           request: {
-            path: "/weather?city=[[${city}]]",
+            path: "/v2/weather/current",
             method: "GET",
             headers: {
               Authorization: "Bearer [[${apiKey}]]",
+              "X-Request-ID": "[[${conversationId}]]",
+            },
+            queryParams: { city: "[[${city}]]", units: "[[${units}]]" },
+            contentType: "application/json",
+            body: "",
+          },
+          preRequest: {
+            propertyInstructions: [
+              { name: "units", valueString: "metric", scope: "step", override: false },
+            ],
+          },
+          postResponse: {
+            propertyInstructions: [
+              { name: "current_temp", valueString: "[[${weatherData.temperature}]]", scope: "conversation", override: true },
+            ],
+            outputBuildInstructions: [],
+            qrBuildInstructions: [],
+          },
+        },
+        {
+          name: "lookup_order",
+          description: "Retrieve order details from the e-commerce backend by order ID",
+          parameters: { orderId: "The order ID (e.g. ORD-2024-78542)" },
+          actions: ["lookup_order"],
+          saveResponse: true,
+          responseObjectName: "orderDetails",
+          fireAndForget: false,
+          request: {
+            path: "/v1/orders/[[${orderId}]]",
+            method: "GET",
+            headers: {
+              Authorization: "Bearer ${eddivault:ecommerce-api-key}",
+              Accept: "application/json",
             },
             queryParams: {},
             contentType: "application/json",
             body: "",
+          },
+          preRequest: { propertyInstructions: [] },
+          postResponse: {
+            propertyInstructions: [
+              { name: "order_status", valueString: "[[${orderDetails.status}]]", scope: "conversation", override: true },
+              { name: "order_total", valueString: "[[${orderDetails.total}]]", scope: "conversation", override: true },
+            ],
+            outputBuildInstructions: [],
+            qrBuildInstructions: [],
+          },
+        },
+        {
+          name: "create_support_ticket",
+          description: "Create a Jira support ticket for issues that require human follow-up",
+          parameters: { summary: "Ticket summary", priority: "Priority level (low, medium, high, critical)" },
+          actions: ["escalate", "create_ticket"],
+          saveResponse: true,
+          responseObjectName: "ticketResult",
+          fireAndForget: false,
+          request: {
+            path: "/v2/issues",
+            method: "POST",
+            headers: {
+              Authorization: "Basic ${eddivault:jira-api-token}",
+              Accept: "application/json",
+            },
+            queryParams: {},
+            contentType: "application/json",
+            body: '{\n  "fields": {\n    "project": { "key": "SUP" },\n    "summary": "[[${summary}]]",\n    "description": "Auto-created by EDDI agent from conversation [[${conversationId}]]",\n    "issuetype": { "name": "Support Request" },\n    "priority": { "name": "[[${priority}]]" }\n  }\n}',
+          },
+          preRequest: {
+            propertyInstructions: [
+              { name: "priority", valueString: "medium", scope: "step", override: false },
+            ],
+          },
+          postResponse: {
+            propertyInstructions: [
+              { name: "ticket_key", valueString: "[[${ticketResult.key}]]", scope: "conversation", override: true },
+            ],
+            outputBuildInstructions: [],
+            qrBuildInstructions: [],
+          },
+        },
+        {
+          name: "send_notification_email",
+          description: "Send a transactional notification email to the customer via SendGrid",
+          parameters: {},
+          actions: ["notify_customer"],
+          saveResponse: false,
+          responseObjectName: "",
+          fireAndForget: true,
+          request: {
+            path: "/v3/mail/send",
+            method: "POST",
+            headers: {
+              Authorization: "Bearer ${eddivault:sendgrid-api-key}",
+            },
+            queryParams: {},
+            contentType: "application/json",
+            body: '{\n  "personalizations": [{ "to": [{ "email": "[[${properties.email}]]" }] }],\n  "from": { "email": "noreply@example.com", "name": "Support Team" },\n  "subject": "Update on your request",\n  "content": [{ "type": "text/plain", "value": "[[${notification_body}]]" }]\n}',
           },
           preRequest: { propertyInstructions: [] },
           postResponse: {
@@ -1363,14 +1506,90 @@ export const handlers = [
           outputs: [
             {
               valueAlternatives: [
-                { type: "text", text: "Hello! How can I help you?", delay: 0 },
-                { type: "text", text: "Hi there! What can I do for you?", delay: 0 },
+                { type: "text", text: "Hello! 👋 Welcome to our support. How can I help you today?", delay: 0 },
+                { type: "text", text: "Hi there! I'm your virtual assistant. What can I do for you?", delay: 0 },
+                { type: "text", text: "Good day! I'm here to help with orders, returns, or general questions. What do you need?", delay: 0 },
               ],
             },
           ],
           quickReplies: [
-            { value: "Tell me more", expressions: "more_info", isDefault: false },
-            { value: "Goodbye", expressions: "bye", isDefault: false },
+            { value: "Track my order", expressions: "order_tracking", isDefault: false },
+            { value: "Start a return", expressions: "return_request", isDefault: false },
+            { value: "Billing question", expressions: "billing_inquiry", isDefault: false },
+            { value: "Something else", expressions: "other", isDefault: false },
+          ],
+        },
+        {
+          action: "farewell",
+          timesOccurred: 0,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "Thank you for reaching out! Have a great day. 😊", delay: 0 },
+                { type: "text", text: "Glad I could help! Don't hesitate to come back if you need anything.", delay: 0 },
+              ],
+            },
+          ],
+          quickReplies: [],
+        },
+        {
+          action: "fallback",
+          timesOccurred: 0,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "I'm not sure I understood that. Could you rephrase your question?", delay: 0 },
+                { type: "text", text: "Hmm, I didn't quite catch that. Can you try asking in a different way?", delay: 0 },
+                { type: "text", text: "I want to make sure I help you correctly — could you provide more details?", delay: 0 },
+              ],
+            },
+          ],
+          quickReplies: [
+            { value: "Talk to a human", expressions: "escalate", isDefault: false },
+            { value: "Main menu", expressions: "restart", isDefault: true },
+          ],
+        },
+        {
+          action: "order_status",
+          timesOccurred: 0,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "Here's the status of your order [[${properties.order_id}]]: It is currently **[[${properties.order_status}]]** and expected to arrive by [[${properties.delivery_date}]].", delay: 0 },
+              ],
+            },
+          ],
+          quickReplies: [
+            { value: "Track another order", expressions: "order_tracking", isDefault: false },
+            { value: "Return this order", expressions: "return_request", isDefault: false },
+            { value: "That's all, thanks", expressions: "bye", isDefault: false },
+          ],
+        },
+        {
+          action: "escalate",
+          timesOccurred: 0,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "I understand this needs personal attention. I'm connecting you with a support specialist now. Your reference number is [[${properties.ticket_key}]].", delay: 500 },
+              ],
+            },
+          ],
+          quickReplies: [],
+        },
+        {
+          action: "greet",
+          timesOccurred: 1,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "Welcome back! Is there something else I can help you with?", delay: 0 },
+              ],
+            },
+          ],
+          quickReplies: [
+            { value: "Continue previous topic", expressions: "continue", isDefault: false },
+            { value: "New question", expressions: "restart", isDefault: false },
           ],
         },
       ],
@@ -1389,6 +1608,31 @@ export const handlers = [
           setProperties: [
             { name: "user_greeted", valueString: "true", scope: "conversation", override: true },
             { name: "greeting_count", valueString: "[[${greeting_count}]] + 1", scope: "longTerm", fromObjectPath: "", override: true },
+            { name: "session_start", valueString: "[[${new java.util.Date().toISOString()}]]", scope: "conversation", override: true },
+          ],
+        },
+        {
+          actions: ["lookup_order"],
+          setProperties: [
+            { name: "last_order_id", valueString: "[[${orderDetails.orderId}]]", scope: "longTerm", fromObjectPath: "", override: true },
+            { name: "order_status", valueString: "[[${orderDetails.status}]]", scope: "conversation", fromObjectPath: "", override: true },
+            { name: "delivery_date", valueString: "[[${orderDetails.estimatedDelivery}]]", scope: "conversation", fromObjectPath: "", override: true },
+            { name: "order_total", valueString: "[[${orderDetails.total}]]", scope: "conversation", fromObjectPath: "", override: true },
+          ],
+        },
+        {
+          actions: ["escalate"],
+          setProperties: [
+            { name: "escalation_reason", valueString: "[[${memory.current.input}]]", scope: "conversation", override: true },
+            { name: "escalated_at", valueString: "[[${new java.util.Date().toISOString()}]]", scope: "conversation", override: true },
+            { name: "escalation_count", valueString: "[[${escalation_count}]] + 1", scope: "longTerm", fromObjectPath: "", override: true },
+          ],
+        },
+        {
+          actions: ["farewell"],
+          setProperties: [
+            { name: "last_interaction", valueString: "[[${new java.util.Date().toISOString()}]]", scope: "longTerm", override: true },
+            { name: "satisfaction_prompted", valueString: "false", scope: "conversation", override: true },
           ],
         },
       ],
@@ -1403,14 +1647,34 @@ export const handlers = [
     return HttpResponse.json({
       lang: "en",
       words: [
-        { word: "hello", expressions: "greeting(hello)", frequency: 0 },
-        { word: "hi", expressions: "greeting(hi)", frequency: 0 },
+        { word: "hello", expressions: "greeting(hello)", frequency: 10 },
+        { word: "hi", expressions: "greeting(hi)", frequency: 10 },
+        { word: "hey", expressions: "greeting(hey)", frequency: 8 },
+        { word: "goodbye", expressions: "farewell(goodbye)", frequency: 5 },
+        { word: "bye", expressions: "farewell(bye)", frequency: 5 },
+        { word: "thanks", expressions: "gratitude(thanks)", frequency: 7 },
+        { word: "order", expressions: "topic(order)", frequency: 9 },
+        { word: "return", expressions: "intent(return_request)", frequency: 6 },
+        { word: "refund", expressions: "intent(refund_request)", frequency: 6 },
+        { word: "help", expressions: "intent(help)", frequency: 8 },
+        { word: "cancel", expressions: "intent(cancel)", frequency: 4 },
+        { word: "status", expressions: "intent(check_status)", frequency: 7 },
       ],
       phrases: [
         { phrase: "good morning", expressions: "greeting(good_morning)" },
+        { phrase: "good evening", expressions: "greeting(good_evening)" },
+        { phrase: "see you later", expressions: "farewell(see_you)" },
+        { phrase: "track my order", expressions: "intent(order_tracking)" },
+        { phrase: "I want to return", expressions: "intent(return_request)" },
+        { phrase: "talk to a human", expressions: "intent(escalate)" },
+        { phrase: "billing question", expressions: "intent(billing_inquiry)" },
+        { phrase: "change my address", expressions: "intent(address_change)" },
       ],
       regExs: [
-        { regEx: "\\d{5}", expressions: "zipcode(zipcode)" },
+        { regEx: "ORD-\\d{4}-\\d{5}", expressions: "entity(order_id)" },
+        { regEx: "\\d{5}(-\\d{4})?", expressions: "entity(zipcode)" },
+        { regEx: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z]{2,}", expressions: "entity(email)" },
+        { regEx: "\\+?\\d{1,3}[-.\\s]?\\(?\\d{1,4}\\)?[-.\\s]?\\d{1,4}[-.\\s]?\\d{1,9}", expressions: "entity(phone_number)" },
       ],
     });
   }),
@@ -1438,21 +1702,40 @@ export const handlers = [
     const includePrevious = url.searchParams.get("includePreviousVersions");
     if (url.pathname.endsWith("/descriptors") || includePrevious) return;
     return HttpResponse.json({
-      name: "Document Tools Server",
-      mcpServerUrl: "http://localhost:7070/mcp",
+      name: "Enterprise Document Tools Server",
+      mcpServerUrl: "https://mcp.internal.example.com/v1",
       transport: "http",
       apiKey: "${eddivault:mcp-doc-key}",
       timeoutMs: 30000,
-      toolsWhitelist: ["search_documents", "index_document"],
-      toolsBlacklist: [],
+      toolsWhitelist: ["search_documents", "index_document", "get_document_metadata"],
+      toolsBlacklist: ["delete_document"],
       mcpCalls: [
         {
           name: "searchDocs",
-          actions: ["search"],
+          description: "Search internal knowledge base using semantic similarity matching",
+          actions: ["search", "find_info"],
           toolName: "search_documents",
-          toolArguments: { query: "[[${memory.input}]]" },
+          toolArguments: { query: "[[${memory.current.input}]]", maxResults: "5", minScore: "0.7" },
           saveResponse: true,
           responseObjectName: "searchResults",
+        },
+        {
+          name: "indexNewDoc",
+          description: "Index a new document from a conversation attachment into the knowledge base",
+          actions: ["index_attachment"],
+          toolName: "index_document",
+          toolArguments: { content: "[[${attachment.text}]]", title: "[[${attachment.fileName}]]", metadata: '{"source": "conversation", "conversationId": "[[${conversationId}]]"}' },
+          saveResponse: true,
+          responseObjectName: "indexResult",
+        },
+        {
+          name: "getDocMeta",
+          description: "Retrieve metadata for a specific document by its ID",
+          actions: ["get_doc_details"],
+          toolName: "get_document_metadata",
+          toolArguments: { documentId: "[[${searchResults[0].id}]]" },
+          saveResponse: true,
+          responseObjectName: "docMetadata",
         },
       ],
     });
@@ -1798,9 +2081,9 @@ export const handlers = [
     return HttpResponse.json({
       name: "cautious_mode",
       category: "governance",
-      description: "Makes the agent more careful and hedging in responses",
-      content: "You should be cautious and careful in your responses. When uncertain about facts, explicitly state your uncertainty. Avoid making definitive claims without supporting evidence. Use hedging language when appropriate.",
-      tags: ["safety", "production", "enterprise"],
+      description: "Makes the agent more careful and hedging in responses — recommended for production agents handling regulated domains",
+      content: "## Response Guidelines\n\nYou must follow these rules at all times:\n\n1. **Accuracy First**: When uncertain about facts, explicitly state your uncertainty. Say \"I believe\" or \"Based on available information\" rather than making definitive claims.\n2. **No Financial/Legal Advice**: Never provide specific financial, legal, or medical recommendations. Instead, direct users to qualified professionals.\n3. **Source Attribution**: When citing data, reference the source document or knowledge base entry.\n4. **Hedging Language**: Use phrases like \"typically\", \"in most cases\", \"generally speaking\" for statements that may not apply universally.\n5. **Escalation Trigger**: If confidence drops below 70% on a user question, offer to connect with a human specialist.\n\n{#if properties.regulated_domain}\n⚠️ This conversation involves a regulated domain ({properties.regulated_domain}). Apply maximum caution.\n{/if}",
+      tags: ["safety", "production", "enterprise", "compliance", "regulated"],
       templateEnabled: true,
     });
   }),
@@ -2883,86 +3166,10 @@ export const scheduleHandlers = [
   }),
 
   // ==========================================
-  // === Group Config & Conversation Mocks ===
+  // === Group Conversation Mocks ===
   // ==========================================
-
-  // Group descriptors
-  http.get("*/groupstore/groups/descriptors", () => {
-    return HttpResponse.json([
-      {
-        resource: "eddi://ai.labs.group/groupstore/groups/group1?version=1",
-        name: "Advisory Board (Beraterstab)",
-        description: "15-member panel for strategic advisory discussions",
-        createdOn: Date.now() - 86400000,
-        lastModifiedOn: Date.now(),
-      },
-      {
-        resource: "eddi://ai.labs.group/groupstore/groups/group2?version=1",
-        name: "Code Review Panel",
-        description: "Peer review for architecture decisions",
-        createdOn: Date.now() - 172800000,
-        lastModifiedOn: Date.now() - 3600000,
-      },
-    ]);
-  }),
-
-  // Group config
-  http.get("*/groupstore/groups/:id", ({ request }) => {
-    const url = new URL(request.url);
-    if (url.pathname.endsWith("/descriptors") || url.pathname.endsWith("/styles") || url.pathname.endsWith("/jsonSchema")) return;
-    return HttpResponse.json({
-      name: "Advisory Board (Beraterstab)",
-      description: "A panel of expert advisors consulting on strategic decisions.",
-      members: [
-        { agentId: "agent1", displayName: "Marketing Expert", speakingOrder: 1, role: null, memberType: "AGENT" },
-        { agentId: "agent2", displayName: "Sales Strategist", speakingOrder: 2, role: null, memberType: "AGENT" },
-        { agentId: "agent3", displayName: "Product Manager", speakingOrder: 3, role: null, memberType: "AGENT" },
-        { agentId: "agent4", displayName: "Tech Lead", speakingOrder: 4, role: null, memberType: "AGENT" },
-        { agentId: "agent5", displayName: "Legal Counsel", speakingOrder: 5, role: null, memberType: "AGENT" },
-      ],
-      moderatorAgentId: "agent-mod",
-      style: "ROUND_TABLE",
-      maxRounds: 2,
-      phases: null,
-      protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
-    });
-  }),
-
-  // Discussion styles
-  http.get("*/groupstore/groups/styles", () => {
-    return HttpResponse.json({
-      ROUND_TABLE: { description: "All members share opinions, then discuss, then synthesize", phases: ["OPINION", "ARGUE", "SYNTHESIS"] },
-      PEER_REVIEW: { description: "Independent opinions, peer critique, revision, synthesis", phases: ["OPINION", "CRITIQUE", "REVISION", "SYNTHESIS"] },
-      DEVIL_ADVOCATE: { description: "Opinions challenged by designated devil's advocate", phases: ["OPINION", "CHALLENGE", "DEFENSE", "SYNTHESIS"] },
-      DELPHI: { description: "Anonymous rounds to reduce groupthink", phases: ["OPINION", "REVISION", "SYNTHESIS"] },
-      DEBATE: { description: "Formal pro/con debate with rebuttals", phases: ["ARGUE", "REBUTTAL", "SYNTHESIS"] },
-    });
-  }),
-
-  // Group JSON schema
-  http.get("*/groupstore/groups/jsonSchema", () => {
-    return HttpResponse.json({ type: "object", properties: { name: { type: "string" }, members: { type: "array" } } });
-  }),
-
-  // Create group
-  http.post("*/groupstore/groups", () => {
-    return new HttpResponse(null, { status: 201, headers: { Location: `/groupstore/groups/new-group-${Date.now()}?version=1` } });
-  }),
-
-  // Update group
-  http.put("*/groupstore/groups/:id", ({ params }) => {
-    return new HttpResponse(null, { status: 200, headers: { Location: `/groupstore/groups/${params.id}?version=2` } });
-  }),
-
-  // Duplicate group
-  http.post("*/groupstore/groups/:id", () => {
-    return new HttpResponse(null, { status: 201, headers: { Location: `/groupstore/groups/dup-${Date.now()}?version=1` } });
-  }),
-
-  // Delete group
-  http.delete("*/groupstore/groups/:id", () => {
-    return new HttpResponse(null, { status: 204 });
-  }),
+  // NOTE: Group config handlers (descriptors, detail, styles, schema, CRUD) are
+  // in the main `handlers` export. Only group *conversation* handlers are here.
 
   // List group conversations
   http.get("*/groups/:groupId/conversations", ({ request }) => {

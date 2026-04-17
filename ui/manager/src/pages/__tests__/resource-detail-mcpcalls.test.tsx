@@ -99,7 +99,7 @@ describe("MCP Calls Editor", () => {
     renderPage("mcpcalls");
 
     await waitFor(() => {
-      expect(screen.getByTestId("mcp-call-editor")).toBeInTheDocument();
+      expect(screen.getAllByTestId("mcp-call-editor").length).toBeGreaterThan(0);
     });
   });
 
@@ -107,7 +107,7 @@ describe("MCP Calls Editor", () => {
     renderPage("mcpcalls");
 
     await waitFor(() => {
-      expect(screen.getByTestId("tool-name-input")).toBeInTheDocument();
+      expect(screen.getAllByTestId("tool-name-input").length).toBeGreaterThan(0);
     });
   });
 
@@ -115,7 +115,7 @@ describe("MCP Calls Editor", () => {
     renderPage("mcpcalls");
 
     await waitFor(() => {
-      expect(screen.getByTestId("call-actions")).toBeInTheDocument();
+      expect(screen.getAllByTestId("call-actions").length).toBeGreaterThan(0);
     });
   });
 
@@ -132,7 +132,7 @@ describe("MCP Calls Editor", () => {
 
     await waitFor(() => {
       const input = screen.getByTestId("mcp-url-input") as HTMLInputElement;
-      expect(input.value).toBe("http://localhost:7070/mcp");
+      expect(input.value).toBe("https://mcp.internal.example.com/v1");
     });
   });
 
@@ -141,7 +141,7 @@ describe("MCP Calls Editor", () => {
 
     await waitFor(() => {
       const input = screen.getByTestId("mcp-name-input") as HTMLInputElement;
-      expect(input.value).toBe("Document Tools Server");
+      expect(input.value).toBe("Enterprise Document Tools Server");
     });
   });
 
@@ -172,8 +172,8 @@ describe("MCP Calls Editor", () => {
     renderPage("mcpcalls");
 
     await waitFor(() => {
-      const input = screen.getByTestId("tool-name-input") as HTMLInputElement;
-      expect(input.value).toBe("search_documents");
+      const inputs = screen.getAllByTestId("tool-name-input") as HTMLInputElement[];
+      expect(inputs[0]!.value).toBe("search_documents");
     });
   });
 
