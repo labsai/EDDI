@@ -897,6 +897,80 @@ See [Agent Sync Architecture](agent-sync-architecture.md) for the matching algor
 
 ---
 
+## Security Architecture
+
+EDDI enforces security at multiple layers so individual failures don't result in full compromise.
+
+### SSRF Prevention (3-Layer Model)
+
+Outbound HTTP from LLM tools is the primary attack surface. Three layers prevent Server-Side Request Forgery:
+
+| Layer | Component | What It Blocks |
+|-------|-----------|----------------|
+| **Layer 1: URL Validation** | `UrlValidationUtils.validateUrl()` | Private IPs (`10.x`, `172.16-31.x`, `192.168.x`), loopback (`127.x`, `::1`), link-local (`169.254.x`, `fe80::`), cloud metadata (`169.254.169.254`), non-HTTP schemes (`file://`, `ftp://`), hostnames resolving to private IPs |
+| **Layer 2: Redirect Validation** | `SafeHttpClient.sendWithRedirects()` | Each redirect hop is validated against Layer 1 rules. `HttpClient.Redirect.NEVER` prevents the JDK from following redirects silently. Maximum 5 hops |
+| **Layer 3: Network Policy** | Kubernetes `NetworkPolicy` | Restricts egress at the cluster level (optional, operator-configured) |
+
+**Usage pattern:**
+```java
+@Inject SafeHttpClient httpClient;
+
+// For user-controlled URLs (LLM tools, web scraping):
+httpClient.sendValidated(request, bodyHandler);  // validates initial + redirect targets
+
+// For config-controlled URLs (known APIs):
+httpClient.send(request, bodyHandler);            // validates redirect targets only
+```
+
+**DNS Rebinding:** EDDI validates hostnames at request time. A TOCTOU (time-of-check-time-of-use) gap exists between DNS validation and TCP connect. This is an accepted risk — exploitation requires a cooperating DNS server AND a successful race condition AND bypassing Layer 2 redirect validation. Defense-in-depth makes this impractical in practice.
+
+### Vault Encryption Model
+
+Secrets (API keys, credentials) never appear as plaintext in the database:
+
+```
+Master Key (env var EDDI_VAULT_MASTER_KEY)
+  └→ PBKDF2-HMAC-SHA256 (600k iterations, per-deployment salt via VaultSaltManager)
+       └→ Key Encryption Key (KEK)
+            └→ AES-256-GCM encrypt/decrypt
+                 └→ Data Encryption Key (DEK, per-secret)
+                      └→ AES-256-GCM encrypt/decrypt
+                           └→ Secret plaintext
+```
+
+- **Per-deployment salt**: `VaultSaltManager` generates and stores a unique 32-byte salt per EDDI instance
+- **Envelope encryption**: Rotating the master key re-wraps KEK→DEK without touching individual secrets
+- **Export scrubbing**: Agent export/sync automatically strips secrets from ZIP files
+
+### Authentication Model
+
+| Environment | OIDC Enabled | Behavior |
+|-------------|-------------|----------|
+| **Dev mode** | No | Allowed — info log on startup |
+| **Dev mode** | Yes | Full auth with configured Keycloak |
+| **Production** | No + no opt-out | `AuthStartupGuard` **fails startup** with clear error |
+| **Production** | No + explicit opt-out | Starts, but logs ERROR every 60s as a constant reminder |
+| **Production** | Yes | Full OIDC with Keycloak multi-tenant support |
+
+The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gapped deployments and quick demos. The periodic ERROR log ensures operators remain aware.
+
+### CI Security Scanning
+
+| Tool | Trigger | What It Checks |
+|------|---------|----------------|
+| **CodeQL** | Every PR + weekly schedule | Java semantic analysis (injection, SSRF, crypto misuse) |
+| **Trivy** | Docker image build | CVEs in OS packages and Java dependencies |
+| **Dependency Review** | Every PR | License compliance and known vulnerabilities in new dependencies |
+| **Jackson 3 Ban** | Every build (Maven Enforcer) | Prevents accidental Jackson 3.x introduction (incompatible with Quarkus) |
+
+### Security Headers
+
+Production response headers (configured via `application.properties`):
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Content-Security-Policy: default-src 'self'; ...`
+- `Strict-Transport-Security: max-age=31536000` (when TLS is configured)
+
 ## Related Documentation
 
 - [Getting Started](getting-started.md) - Setup and installation

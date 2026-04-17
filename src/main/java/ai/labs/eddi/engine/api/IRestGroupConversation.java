@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.api;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
@@ -20,6 +21,7 @@ import java.util.List;
  */
 @Path("/groups/{groupId}/conversations")
 @Tag(name = "Group Conversations")
+@RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
 public interface IRestGroupConversation {
 
     @POST

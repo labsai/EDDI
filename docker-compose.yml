@@ -1,9 +1,10 @@
 services:
   eddi:
-    image: labsai/eddi:latest
+    image: labsai/eddi:${EDDI_VERSION:-latest}
     environment:
       - "EDDI_VAULT_MASTER_KEY=${EDDI_VAULT_MASTER_KEY:-}"
       - "EDDI_DATASTORE_TYPE=${EDDI_DATASTORE_TYPE:-mongodb}"
+      - "QUARKUS_MONGODB_CONNECTION_STRING=mongodb://${MONGO_INITDB_ROOT_USERNAME:-eddi}:${MONGO_INITDB_ROOT_PASSWORD:-changeme}@mongodb:27017/eddi?authSource=admin"
 #      - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -12,12 +13,31 @@ services:
       - "${EDDI_HTTPS_PORT:-7443}:7443"
 #      - "5005:5005"
     depends_on:
-      - mongodb
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7070/q/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
   mongodb:
-    image: mongo:6.0
+    image: mongo:7.0.14
     restart: always
+    environment:
+      - "MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME:-eddi}"
+      - "MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD:-changeme}"
+    ports:
+      - "127.0.0.1:${MONGO_PORT:-27017}:27017"
     volumes:
       - mongodb-db:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   mongodb-db:

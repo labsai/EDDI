@@ -597,7 +597,15 @@ Every PR is automatically checked by CI (build + tests), CodeQL (security), depe
 
 ## 🔒 Security
 
-Please report security vulnerabilities privately — see our [Security Policy](SECURITY.md).
+EDDI ships with security-by-default for production deployments:
+
+- **Authentication enforced** — `AuthStartupGuard` fails startup if OIDC is disabled in production without explicit opt-out
+- **Secrets encrypted at rest** — Envelope encryption (PBKDF2 → AES-256-GCM) with per-deployment salt. Never plaintext in DB
+- **SSRF protection** — All LLM tool HTTP calls go through `SafeHttpClient` with private IP blocking, redirect validation, and scheme enforcement
+- **Security headers** — `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy` configured out of the box
+- **CI scanning** — CodeQL (semantic analysis) + Trivy (CVE scanning) + dependency review on every PR
+
+For vulnerability reports, see our [Security Policy](SECURITY.md). For architecture details, see [Security Architecture](docs/architecture.md#security-architecture).
 
 ## 📜 Code of Conduct
 

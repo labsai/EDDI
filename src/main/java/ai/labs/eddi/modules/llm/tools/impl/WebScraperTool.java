@@ -1,8 +1,10 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -11,7 +13,6 @@ import org.jsoup.select.Elements;
 
 import java.io.IOException;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
@@ -24,10 +25,12 @@ import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
 @ApplicationScoped
 public class WebScraperTool {
     private static final Logger LOGGER = Logger.getLogger(WebScraperTool.class);
-    private final HttpClient httpClient;
 
-    public WebScraperTool() {
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).followRedirects(HttpClient.Redirect.NORMAL).build();
+    private final SafeHttpClient httpClient;
+
+    @Inject
+    public WebScraperTool(SafeHttpClient httpClient) {
+        this.httpClient = httpClient;
     }
 
     @Tool("Extracts text content from a web page URL. Returns the main text content without HTML tags.")
@@ -218,11 +221,18 @@ public class WebScraperTool {
         }
     }
 
+    /**
+     * Fetches the content of a URL using the SSRF-safe SafeHttpClient. The URL is
+     * validated (SSRF check) and redirects are handled safely.
+     */
     private String fetchUrl(String url) throws IOException, InterruptedException {
         validateUrl(url);
 
-        HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).timeout(Duration.ofSeconds(15))
-                .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)").GET().build();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(15))
+                .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)")
+                .GET().build();
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 

@@ -452,7 +452,29 @@
                     </compilerArgs>
                 </configuration>
             </plugin>
-
+            <!-- Enforcer: ban Jackson 3.x (tools.jackson.*) from the dependency tree.
+                 Prevents silent re-introduction via transitive dependencies (e.g. Elasticsearch). -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>ban-jackson3</id>
+                        <goals><goal>enforce</goal></goals>
+                        <configuration>
+                            <rules>
+                                <bannedDependencies>
+                                    <excludes>
+                                        <exclude>tools.jackson.core:*</exclude>
+                                    </excludes>
+                                    <message>Jackson 3.x (tools.jackson.*) is banned — use com.fasterxml.jackson (2.x) managed by Quarkus BOM.</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
 
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

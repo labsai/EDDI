@@ -1,5 +1,6 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -15,7 +16,7 @@ class WebSearchToolTest {
 
     @BeforeEach
     void setUp() {
-        webSearchTool = new WebSearchTool();
+        webSearchTool = new WebSearchTool(new SafeHttpClient(10000));
     }
 
     @Test

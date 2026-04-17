@@ -1,6 +1,7 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import com.fasterxml.jackson.databind.JsonNode;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
@@ -12,7 +13,6 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URLEncoder;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -27,7 +27,7 @@ import java.util.Optional;
 @ApplicationScoped
 public class WeatherTool {
     private static final Logger LOGGER = Logger.getLogger(WeatherTool.class);
-    private final HttpClient httpClient;
+    private final SafeHttpClient httpClient;
 
     @Inject
     IJsonSerialization jsonSerialization;
@@ -35,8 +35,9 @@ public class WeatherTool {
     @ConfigProperty(name = "eddi.tools.weather.openweathermap.api-key")
     Optional<String> openWeatherMapApiKey;
 
-    public WeatherTool() {
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    @Inject
+    public WeatherTool(SafeHttpClient httpClient) {
+        this.httpClient = httpClient;
     }
 
     @Tool("Gets current weather information for a city. Returns temperature, conditions, humidity, and wind speed.")

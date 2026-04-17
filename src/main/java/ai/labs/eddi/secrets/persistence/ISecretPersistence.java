@@ -96,4 +96,35 @@ public interface ISecretPersistence {
      *             if the read fails
      */
     List<EncryptedDek> listAllDeks();
+
+    // ─── Metadata ───
+
+    /**
+     * Read a vault infrastructure metadata value by key. Used for per-deployment
+     * configuration like the KEK salt.
+     *
+     * @param key
+     *            the metadata key
+     * @return the value, or null if not found
+     * @throws PersistenceException
+     *             if the read fails
+     */
+    default String getMetaValue(String key) {
+        return null; // Default = no metadata store available
+    }
+
+    /**
+     * Write a vault infrastructure metadata value by key. Creates or updates the
+     * entry.
+     *
+     * @param key
+     *            the metadata key
+     * @param value
+     *            the value to store
+     * @throws PersistenceException
+     *             if the write fails
+     */
+    default void setMetaValue(String key, String value) {
+        // Default = no-op
+    }
 }

@@ -14,7 +14,7 @@
 # docker run -i --rm -p 8080:8080 quarkus/code-with-quarkus
 #
 ###
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7@sha256:fe688da81a696387ca53a4c19231e99289591f990c904ef913c51b6e87d4e4df
 WORKDIR /work/
 RUN chown 1001 /work \
     && chmod "g+rwX" /work \

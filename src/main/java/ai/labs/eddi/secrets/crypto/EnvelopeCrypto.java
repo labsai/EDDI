@@ -160,21 +160,49 @@ public final class EnvelopeCrypto {
     }
 
     /**
-     * Derive a 32-byte key from an arbitrary-length string (for convenience when
-     * the EDDI_VAULT_MASTER_KEY env var is a passphrase rather than raw bytes).
-     * Uses PBKDF2WithHmacSHA256 with 600,000 iterations for brute-force resistance.
+     * Derive a 32-byte key from an arbitrary-length string using a
+     * <b>per-deployment random salt</b>. Uses PBKDF2WithHmacSHA256 with 600,000
+     * iterations for brute-force resistance.
+     *
+     * @param keyString
+     *            the passphrase / master key string
+     * @param salt
+     *            per-deployment random salt (should be at least 16 bytes)
+     * @return derived 32-byte AES-256 key
      */
-    public static byte[] deriveKeyFromString(String keyString) {
+    public static byte[] deriveKeyFromString(String keyString, byte[] salt) {
+        if (salt == null || salt.length < 8) {
+            throw new CryptoException("PBKDF2 salt must be at least 8 bytes, got " + (salt == null ? "null" : salt.length));
+        }
         try {
             javax.crypto.SecretKeyFactory factory = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
-            // Fixed, application-specific salt — acceptable since the KEK is unique per
-            // deployment
-            byte[] salt = "eddi-vault-kek-v1".getBytes(java.nio.charset.StandardCharsets.UTF_8);
             javax.crypto.spec.PBEKeySpec spec = new javax.crypto.spec.PBEKeySpec(keyString.toCharArray(), salt, 600_000, 256);
             return factory.generateSecret(spec).getEncoded();
         } catch (java.security.NoSuchAlgorithmException | java.security.spec.InvalidKeySpecException e) {
             throw new CryptoException("PBKDF2 key derivation failed", e);
         }
+    }
+
+    /**
+     * Fixed, legacy salt — used for backward compatibility with pre-6.0.2
+     * deployments.
+     */
+    private static final byte[] LEGACY_SALT = "eddi-vault-kek-v1".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+    /**
+     * Derive a 32-byte key using the <b>legacy fixed salt</b>. New deployments
+     * should use {@link #deriveKeyFromString(String, byte[])} with a random
+     * per-deployment salt for stronger security.
+     *
+     * @param keyString
+     *            the passphrase / master key string
+     * @return derived 32-byte AES-256 key
+     * @deprecated Use {@link #deriveKeyFromString(String, byte[])} with a random
+     *             salt
+     */
+    @Deprecated(since = "6.0.2")
+    public static byte[] deriveKeyFromString(String keyString) {
+        return deriveKeyFromString(keyString, LEGACY_SALT);
     }
 
     private static byte[] generateIv() {

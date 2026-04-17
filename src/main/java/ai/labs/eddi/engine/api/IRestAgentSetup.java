@@ -2,6 +2,7 @@ package ai.labs.eddi.engine.api;
 
 import ai.labs.eddi.engine.setup.CreateApiAgentRequest;
 import ai.labs.eddi.engine.setup.SetupAgentRequest;
+import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import jakarta.ws.rs.*;
@@ -17,6 +18,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 @Tag(name = "Agent Setup")
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
+@RolesAllowed("eddi-admin")
 public interface IRestAgentSetup {
 
     @POST
