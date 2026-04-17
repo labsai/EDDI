@@ -3,7 +3,7 @@ package ai.labs.eddi.engine.tenancy.rest;
 import ai.labs.eddi.engine.tenancy.ITenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
-import ai.labs.eddi.engine.tenancy.model.TenantUsage;
+import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.NotFoundException;
@@ -50,7 +50,7 @@ public class RestTenantQuota implements IRestTenantQuota {
     }
 
     @Override
-    public TenantUsage.UsageSnapshot getUsage(String tenantId) {
+    public UsageSnapshot getUsage(String tenantId) {
         return quotaService.getUsage(tenantId);
     }
 

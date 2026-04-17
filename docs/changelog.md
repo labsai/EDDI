@@ -13,6 +13,82 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Atomic Quota Enforcement — TOCTOU Fix & Code Quality (2026-04-17)
+
+**Repo:** EDDI (current branch)
+
+**What changed:**
+
+### 1. TOCTOU Race Condition Fix (Critical)
+
+`TenantQuotaService` had a Time-Of-Check-Time-Of-Use (TOCTOU) race condition. The quota enforcement used a two-step pattern (`checkConversationQuota()` → `recordConversationStart()`) where multiple concurrent requests could pass the check before any recorded usage, allowing limits to be exceeded.
+
+**Fix:** Merged check+record into **atomic slot acquisition** methods:
+- `acquireConversationSlot()` — atomically checks daily conversation limit and increments counter
+- `acquireApiCallSlot()` — atomically checks per-minute API rate limit and increments counter
+- `tryAddCost()` — atomically adds cost and checks monthly budget (post-call accounting)
+
+The store-level `tryIncrement*` methods guarantee that reset → check → increment all happen inside the same `synchronized` block (per-tenant lock). This is single-instance atomicity; the `ITenantQuotaStore` interface documents that DB-backed implementations MUST use storage-level atomicity (`UPDATE ... WHERE count < limit RETURNING`) for cluster safety.
+
+### 2. Architecture Cleanup
+
+- **`UsageSnapshot`** extracted from inner class to top-level record in `model/` (REST API concern, not internal counter state)
+- **`TenantUsageCounters`** replaced `TenantUsage` — package-private POJO with plain `int` fields (no `AtomicInteger` — under external lock, atomic types add no value and obscure intent)
+- **`TenantUsage.java`** deleted — split into `TenantUsageCounters` (internal) + `UsageSnapshot` (API)
+- **Cost budget** kept as two separate operations: `checkCostBudget()` (pre-call read-only gate) and `recordCost()` (post-call atomic accounting). Reserve+commit pattern rejected as overkill — worst-case TOCTOU overrun is one LLM call ≈ cents.
+- **Metrics hygiene** — `quotaAllowedCounter` / `quotaDeniedCounter` no longer increment when quota is disabled (`null` or `enabled=false`), fixing inflated metrics.
+
+### 3. Code Quality Fixes
+
+- `application.properties` — Resolved Checkstyle `LineLength` violation (line 152)
+- `LifecycleManager.java` — Resolved 5 "Null type safety" warnings with `Objects.requireNonNullElse()`
+- `UpgradeExecutorTest.java` — Added `@SuppressWarnings("unchecked")` for raw CDI `Instance<T>` mocks
+- `SlackEventHandler.java` — Removed unnecessary `@SuppressWarnings("unchecked")`
+- `InMemoryConversationCoordinatorTest.java`, `SlackChannelRouterTest.java` — Removed unused imports
+
+**Call sites updated (3 TOCTOU patterns fixed):**
+- `ConversationService.startConversation()` — `checkConversationQuota()` + `recordConversationStart()` → `acquireConversationSlot()`
+- `ConversationService.say()` — `checkApiCallQuota()` + `recordApiCall()` → `acquireApiCallSlot()`
+- `ConversationService.sayStreaming()` — same pattern → `acquireApiCallSlot()`
+
+**Design decisions:**
+- **Per-tenant `synchronized`, not global** — Tenant A's quota enforcement never blocks Tenant B.
+- **Plain `int` over `AtomicInteger`** — Under the synchronized lock, atomic types add no value. Plain fields make the "all three ops under one lock" contract clearer.
+- **Unlimited fast path (`limit < 0`) skips tracking** — No counter increment when unlimited; prevents unsynchronized writes to plain int fields and avoids inflating usage numbers for no enforcement value.
+- **Cluster-ready interface shape** — `ITenantQuotaStore` Javadoc documents atomicity contract for DB-backed implementations. Java synchronization is explicitly NOT sufficient for multi-instance.
+
+**Files:**
+- `ITenantQuotaStore.java` — Added `tryIncrementConversations`, `tryIncrementApiCalls`, `tryAddCost`, `getUsage`, `resetUsage`
+- `InMemoryTenantQuotaStore.java` — Atomic ops with per-tenant `synchronized`
+- `TenantQuotaService.java` — `acquireConversationSlot()`, `acquireApiCallSlot()`, `checkCostBudget()`, `recordCost()`
+- `TenantUsageCounters.java` — [NEW] Package-private POJO, plain int fields
+- `model/UsageSnapshot.java` — [NEW] Top-level record for API responses
+- `model/TenantUsage.java` — [DELETED] Replaced by the above two
+- `ConversationService.java` — 3 TOCTOU patterns fixed
+- `IRestTenantQuota.java`, `RestTenantQuota.java` — Updated `UsageSnapshot` import
+- `TenantQuotaServiceTest.java` — Full rewrite: 22 tests including 100-thread TOCTOU regression tests
+- `RestTenantQuotaTest.java` — Updated to new method names
+- `ConversationServiceTest.java` — Updated mock stubs
+- `application.properties` — Checkstyle fix
+- `LifecycleManager.java` — Null safety fixes
+
+**Verification:** 47 tests pass (22 quota + 7 REST + 18 ConversationService), BUILD SUCCESS. Concurrency regression tests verify exactly 50 of 100 racing threads acquire a slot with limit=50.
+
+### 4. Code Review Fixes (2026-04-17)
+
+- **CRITICAL: `LOGGER.warnf()` format-string injection** — `result.reason()` contains pre-formatted strings; passing to `warnf()` treats `%` in tenant IDs as format specifiers → `MissingFormatArgumentException` crash. Changed all 4 call sites from `warnf(reason)` to `warn(reason)`.
+- **Monthly cost never resets** — Pre-existing bug carried forward: `monthlyCostUsd` accumulated indefinitely. Added `YearMonth costMonth` field to `TenantUsageCounters`; `resetExpiredWindows()` now resets cost on UTC calendar month boundary.
+- **Unlimited quotas: internal counter inconsistency** — When `enabled=true` but `limit=-1`, the unlimited fast path skipped internal counter increment but Micrometer still counted traffic. Removed fast path entirely; `tryIncrement*` now always enters `synchronized`, always increments, but skips the `>= limit` check when `limit < 0`. Internal counters and Micrometer stay consistent; gives admins a useful "what would you be hitting" view.
+- **Hot-path allocation in `checkCostBudget()`** — Was allocating a `UsageSnapshot` record per LLM call just to read one `double`. Added `getMonthlyCost(String tenantId)` to `ITenantQuotaStore` and `InMemoryTenantQuotaStore`; `checkCostBudget()` now uses it directly.
+- **`tryAddCost` semantics** — Clarified Javadoc: cost is **always added** (even over budget) because the LLM call already happened. This differs from `tryIncrement*` which never increments past the limit.
+- **`getUsage()` side effect** — Documented in Javadoc that `getUsage()` resets expired windows before reading (not a pure read).
+- **`TenantUsageCounters.tenantId` field** — Removed. Callers already know the tenant ID from the map lookup; `toSnapshot()` now takes `String tenantId` as param.
+- **`computeIfAbsent` atomicity** — Added inline comment clarifying that `ConcurrentHashMap.computeIfAbsent` is itself atomic, which is why the `synchronized(counters)` block works correctly.
+- **Test `shouldTrackUsageMetrics`** — Was using two `enableQuotaWith*` helpers that clobbered each other. Fixed to use `enableQuotaWithBothLimits(100, 100)`.
+- **Redundant import** — Removed `import java.util.Objects` from `LifecycleManager.java` (already covered by `java.util.*` wildcard).
+
+---
+
 ## Observability & Pipeline Architecture — OTel, Coordinator Hardening, Monitoring (2026-04-17)
 
 **Repo:** EDDI (`feature/observability`)

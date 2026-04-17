@@ -230,12 +230,13 @@ public class LifecycleManager implements ILifecycleManager {
 
             // === OpenTelemetry: create span per task ===
             Span taskSpan = getTracer().spanBuilder("eddi.pipeline.task")
-                    .setAttribute("eddi.task.id", task.getId())
-                    .setAttribute("eddi.task.type", task.getType() != null ? task.getType() : "unknown")
+                    .setAttribute("eddi.task.id", Objects.requireNonNullElse(task.getId(), "unknown"))
+                    .setAttribute("eddi.task.type", Objects.requireNonNullElse(task.getType(), "unknown"))
                     .setAttribute("eddi.task.index", (long) index)
                     .setAttribute("eddi.conversation.id",
-                            conversationMemory.getConversationId() != null ? conversationMemory.getConversationId() : "unknown")
-                    .setAttribute("eddi.agent.id", conversationMemory.getAgentId() != null ? conversationMemory.getAgentId() : "unknown")
+                            Objects.requireNonNullElse(conversationMemory.getConversationId(), "unknown"))
+                    .setAttribute("eddi.agent.id",
+                            Objects.requireNonNullElse(conversationMemory.getAgentId(), "unknown"))
                     .startSpan();
 
             try (Scope ignored = taskSpan.makeCurrent()) {
@@ -286,7 +287,7 @@ public class LifecycleManager implements ILifecycleManager {
                 checkIfStopConversationAction(conversationMemory);
 
             } catch (LifecycleException | RuntimeException e) {
-                taskSpan.setStatus(StatusCode.ERROR, e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
+                taskSpan.setStatus(StatusCode.ERROR, Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
                 taskSpan.recordException(e);
 
                 // Record error counter for dashboards & alerting

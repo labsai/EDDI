@@ -149,8 +149,8 @@ public class ConversationService implements IConversationService {
         }
 
         try {
-            // Tenant quota check — conversation start
-            QuotaCheckResult quotaCheck = tenantQuotaService.checkConversationQuota();
+            // Tenant quota — atomic slot acquisition (eliminates TOCTOU race)
+            QuotaCheckResult quotaCheck = tenantQuotaService.acquireConversationSlot();
             if (!quotaCheck.allowed()) {
                 throw new QuotaExceededException(quotaCheck.reason());
             }
@@ -175,7 +175,6 @@ public class ConversationService implements IConversationService {
             var conversationMemory = conversation.getConversationMemory();
             var conversationId = storeConversationMemory(conversationMemory, environment);
             cacheConversationState(conversationId, conversationMemory.getConversationState());
-            tenantQuotaService.recordConversationStart();
             var conversationUri = createURI(RESOURCE_URI, conversationId);
 
             conversationSetup.createConversationDescriptor(agentId, latestAgent, userId, conversationId, conversationUri);
@@ -269,12 +268,11 @@ public class ConversationService implements IConversationService {
 
         long startTime = System.nanoTime();
         try {
-            // Tenant quota check — API call
-            QuotaCheckResult quotaCheck = tenantQuotaService.checkApiCallQuota();
+            // Tenant quota — atomic slot acquisition (eliminates TOCTOU race)
+            QuotaCheckResult quotaCheck = tenantQuotaService.acquireApiCallSlot();
             if (!quotaCheck.allowed()) {
                 throw new QuotaExceededException(quotaCheck.reason());
             }
-            tenantQuotaService.recordApiCall();
 
             processingConversationReferences.add(createReferenceForMetrics(agentId, conversationId));
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
@@ -372,12 +370,11 @@ public class ConversationService implements IConversationService {
 
         long startTime = System.nanoTime();
         try {
-            // Tenant quota check — API call (streaming)
-            QuotaCheckResult quotaCheck = tenantQuotaService.checkApiCallQuota();
+            // Tenant quota — atomic slot acquisition (eliminates TOCTOU race)
+            QuotaCheckResult quotaCheck = tenantQuotaService.acquireApiCallSlot();
             if (!quotaCheck.allowed()) {
                 throw new QuotaExceededException(quotaCheck.reason());
             }
-            tenantQuotaService.recordApiCall();
 
             processingConversationReferences.add(createReferenceForMetrics(agentId, conversationId));
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
