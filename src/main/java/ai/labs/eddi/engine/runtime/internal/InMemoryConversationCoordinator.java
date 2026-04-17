@@ -92,15 +92,23 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
         return queues.values().stream().mapToInt(BlockingQueue::size).sum();
     }
 
+    private static String sanitizeForLog(String value) {
+        if (value == null) {
+            return "null";
+        }
+        return value.replace('\n', '_').replace('\r', '_');
+    }
+
     @Override
     public void submitInOrder(String conversationId, Callable<Void> callable) {
+        final String safeConversationId = sanitizeForLog(conversationId);
         // Max-size check: only reject truly new conversations, not follow-up messages.
         // Note: this check is intentionally non-atomic (soft limit). Two threads
         // could both pass the check and briefly exceed maxActiveConversations.
         // This is acceptable for a soft backpressure limit.
         if (!conversationQueues.containsKey(conversationId) && conversationQueues.size() >= maxActiveConversations) {
             log.warnf("Coordinator capacity exceeded (%d active conversations). Rejecting new conversationId=%s", maxActiveConversations,
-                    conversationId);
+                    safeConversationId);
             throw new RejectedExecutionException(
                     "Coordinator capacity exceeded: " + maxActiveConversations + " active conversations. Try again later.");
         }
@@ -122,7 +130,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
                 // If not, another thread cleaned it up — retry.
                 if (conversationQueues.get(conversationId) != queue) {
                     if (attempt >= 3) {
-                        log.debugf("CAS loop retried %d times for conversationId=%s (expected 0-1)", attempt, conversationId);
+                        log.debugf("CAS loop retried %d times for conversationId=%s (expected 0-1)", attempt, safeConversationId);
                     }
                     continue; // retry with fresh computeIfAbsent
                 }
@@ -130,8 +138,8 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
                 boolean wasEmpty = queue.isEmpty();
                 boolean enqueued = queue.offer(callable);
                 if (!enqueued) {
-                    log.warnf("Failed to enqueue task for conversationId=%s", conversationId);
-                    throw new RejectedExecutionException("Failed to enqueue task for conversationId=" + conversationId);
+                    log.warnf("Failed to enqueue task for conversationId=%s", safeConversationId);
+                    throw new RejectedExecutionException("Failed to enqueue task for conversationId=" + safeConversationId);
                 }
 
                 if (wasEmpty) {

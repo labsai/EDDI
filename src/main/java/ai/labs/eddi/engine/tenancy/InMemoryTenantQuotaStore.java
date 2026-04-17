@@ -126,7 +126,7 @@ public class InMemoryTenantQuotaStore implements ITenantQuotaStore {
         synchronized (counters) {
             counters.resetExpiredWindows();
             counters.addCost(cost);
-            if (limit >= 0 && counters.getMonthlyCostUsd() > limit) {
+            if (limit >= 0 && counters.getMonthlyCostUsd() >= limit) {
                 return QuotaCheckResult.denied(
                         String.format("Monthly cost budget ($%.2f) exceeded for tenant '%s'", limit, tenantId));
             }
@@ -167,8 +167,15 @@ public class InMemoryTenantQuotaStore implements ITenantQuotaStore {
             synchronized (counters) {
                 counters.resetAll();
             }
-            LOGGER.infof("Usage counters reset for tenant '%s'", tenantId);
+            LOGGER.infof("Usage counters reset for tenant '%s'", sanitizeForLog(tenantId));
         }
+    }
+
+    private static String sanitizeForLog(String value) {
+        if (value == null) {
+            return "null";
+        }
+        return value.replace('\n', '_').replace('\r', '_');
     }
 
     private TenantUsageCounters getOrCreateCounters(String tenantId) {

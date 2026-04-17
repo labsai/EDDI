@@ -19,7 +19,7 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 
 ## Architecture
 
-```
+```text
 ┌─────────────┐     OTLP (gRPC :4317)     ┌──────────┐
 │    EDDI      │ ──────────────────────── → │  Jaeger  │ ← Trace visualization
 │  (Quarkus)   │                           └──────────┘
@@ -107,7 +107,7 @@ Quarkus OpenTelemetry auto-instruments:
 
 EDDI adds manual spans in `LifecycleManager` for each pipeline task:
 
-```
+```text
 Trace: POST /agentstore/agents/{agentId}/conversations/{convId}
   └── eddi.pipeline.task [task.id=ai.labs.behavior, task.type=behaviorRules]
   └── eddi.pipeline.task [task.id=ai.labs.property, task.type=propertySetter]
@@ -197,7 +197,7 @@ groups:
           description: "Secret resolution errors at {{ $value }}/s — LLM calls may fail"
 
       - alert: EddiDeadLetterAccumulation
-        expr: eddi_nats_dead_letter_count > 0
+        expr: increase(eddi_nats_dead_letter_count_total[10m]) > 0
         for: 10m
         labels:
           severity: warning
