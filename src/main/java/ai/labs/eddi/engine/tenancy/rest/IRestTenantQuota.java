@@ -1,7 +1,7 @@
 package ai.labs.eddi.engine.tenancy.rest;
 
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
-import ai.labs.eddi.engine.tenancy.model.TenantUsage;
+import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -45,7 +45,7 @@ public interface IRestTenantQuota {
      */
     @GET
     @Path("/{tenantId}/usage")
-    TenantUsage.UsageSnapshot getUsage(@PathParam("tenantId") String tenantId);
+    UsageSnapshot getUsage(@PathParam("tenantId") String tenantId);
 
     /**
      * Reset usage counters for a tenant.

@@ -2,7 +2,7 @@ package ai.labs.eddi.engine.tenancy;
 
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
-import ai.labs.eddi.engine.tenancy.model.TenantUsage;
+import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
@@ -11,16 +11,16 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import java.time.Duration;
-import java.time.Instant;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
 /**
  * Tenant quota enforcement engine.
  * <p>
- * Checks quotas before conversation start and API calls, tracks usage counters,
- * and exposes Micrometer metrics.
+ * Provides <strong>atomic</strong> quota acquisition methods that merge the
+ * check ("am I within budget?") and record ("increment the counter") into a
+ * single indivisible operation, eliminating TOCTOU races.
+ * <p>
+ * Single-instance atomicity is guaranteed by the in-memory store's per-tenant
+ * locks. Cluster-safe atomicity requires a DB-backed {@link ITenantQuotaStore}
+ * that uses storage-level atomic operations.
  * <p>
  * In single-tenant mode, all operations use the default tenant ID.
  */
@@ -28,8 +28,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public class TenantQuotaService {
 
     private static final Logger LOGGER = Logger.getLogger(TenantQuotaService.class);
-    private static final Duration MINUTE_WINDOW = Duration.ofMinutes(1);
-    private static final Duration DAY_WINDOW = Duration.ofDays(1);
 
     @Inject
     ITenantQuotaStore quotaStore;
@@ -39,8 +37,6 @@ public class TenantQuotaService {
 
     @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default")
     String defaultTenantId;
-
-    private final Map<String, TenantUsage> usageMap = new ConcurrentHashMap<>();
 
     // Metrics
     private Counter quotaAllowedCounter;
@@ -77,79 +73,89 @@ public class TenantQuotaService {
         return defaultTenantId;
     }
 
+    // ─── Atomic Slot Acquisition ───
+
     /**
-     * Check whether a new conversation is allowed for the default tenant.
+     * Atomically acquire a conversation slot for the default tenant. If the daily
+     * limit has been reached, returns a denied result. Otherwise, increments the
+     * counter and returns OK.
      */
-    public QuotaCheckResult checkConversationQuota() {
-        return checkConversationQuota(defaultTenantId);
+    public QuotaCheckResult acquireConversationSlot() {
+        return acquireConversationSlot(defaultTenantId);
     }
 
     /**
-     * Check whether a new conversation is allowed for a specific tenant.
+     * Atomically acquire a conversation slot for a specific tenant. If the daily
+     * limit has been reached, returns a denied result. Otherwise, increments the
+     * counter and returns OK.
      */
-    // TODO: Phase 7.1 — make check+record atomic for multi-tenant SaaS (TOCTOU race
-    // under concurrency)
-    public QuotaCheckResult checkConversationQuota(String tenantId) {
+    public QuotaCheckResult acquireConversationSlot(String tenantId) {
         TenantQuota quota = quotaStore.getQuota(tenantId);
         if (quota == null || !quota.enabled()) {
-            quotaAllowedCounter.increment();
             return QuotaCheckResult.OK;
         }
-
-        TenantUsage usage = getOrCreateUsage(tenantId);
-        resetWindowsIfExpired(usage);
 
         int limit = quota.maxConversationsPerDay();
-        if (limit >= 0 && usage.getConversationsToday() >= limit) {
+        QuotaCheckResult result = quotaStore.tryIncrementConversations(tenantId, limit);
+
+        if (result.allowed()) {
+            quotaAllowedCounter.increment();
+            meterRegistry.counter("eddi.tenant.usage.conversations", "tenant", tenantId).increment();
+        } else {
             quotaDeniedCounter.increment();
             meterRegistry.counter("eddi.tenant.quota.denied", "tenant", tenantId, "type", "conversation").increment();
-            String reason = String.format("Daily conversation limit (%d) exceeded for tenant '%s'", limit, tenantId);
-            LOGGER.warnf(reason);
-            return QuotaCheckResult.denied(reason);
+            LOGGER.warn(result.reason());
         }
 
-        quotaAllowedCounter.increment();
-        return QuotaCheckResult.OK;
+        return result;
     }
 
     /**
-     * Check whether an API call (say/sayStreaming) is allowed for the default
-     * tenant.
+     * Atomically acquire an API call slot for the default tenant. If the per-minute
+     * rate limit has been reached, returns a denied result. Otherwise, increments
+     * the counter and returns OK.
      */
-    public QuotaCheckResult checkApiCallQuota() {
-        return checkApiCallQuota(defaultTenantId);
+    public QuotaCheckResult acquireApiCallSlot() {
+        return acquireApiCallSlot(defaultTenantId);
     }
 
     /**
-     * Check whether an API call is allowed for a specific tenant.
+     * Atomically acquire an API call slot for a specific tenant. If the per-minute
+     * rate limit has been reached, returns a denied result. Otherwise, increments
+     * the counter and returns OK.
      */
-    // TODO: Phase 7.1 — make check+record atomic for multi-tenant SaaS (TOCTOU race
-    // under concurrency)
-    public QuotaCheckResult checkApiCallQuota(String tenantId) {
+    public QuotaCheckResult acquireApiCallSlot(String tenantId) {
         TenantQuota quota = quotaStore.getQuota(tenantId);
         if (quota == null || !quota.enabled()) {
-            quotaAllowedCounter.increment();
             return QuotaCheckResult.OK;
         }
 
-        TenantUsage usage = getOrCreateUsage(tenantId);
-        resetWindowsIfExpired(usage);
-
         int limit = quota.maxApiCallsPerMinute();
-        if (limit >= 0 && usage.getApiCallsThisMinute() >= limit) {
+        QuotaCheckResult result = quotaStore.tryIncrementApiCalls(tenantId, limit);
+
+        if (result.allowed()) {
+            quotaAllowedCounter.increment();
+            meterRegistry.counter("eddi.tenant.usage.api_calls", "tenant", tenantId).increment();
+        } else {
             quotaDeniedCounter.increment();
             meterRegistry.counter("eddi.tenant.quota.denied", "tenant", tenantId, "type", "api_call").increment();
-            String reason = String.format("API rate limit (%d/min) exceeded for tenant '%s'", limit, tenantId);
-            LOGGER.warnf(reason);
-            return QuotaCheckResult.denied(reason);
+            LOGGER.warn(result.reason());
         }
 
-        quotaAllowedCounter.increment();
-        return QuotaCheckResult.OK;
+        return result;
     }
 
+    // ─── Cost Budget ───
+
     /**
-     * Check whether the monthly cost budget is within limits.
+     * Read-only pre-call gate: checks whether the monthly cost budget has been
+     * exceeded. Does NOT add any cost — this is a "can I proceed?" check used
+     * before an LLM call whose cost is not yet known.
+     * <p>
+     * Note: unlike {@code acquire*Slot()}, this method does NOT increment
+     * {@code quotaAllowedCounter} on the happy path — it is a read-only gate, not
+     * an acquisition. The {@code quota.allowed} metric only counts slot
+     * acquisitions.
      */
     public QuotaCheckResult checkCostBudget(String tenantId) {
         TenantQuota quota = quotaStore.getQuota(tenantId);
@@ -157,13 +163,13 @@ public class TenantQuotaService {
             return QuotaCheckResult.OK;
         }
 
-        TenantUsage usage = getOrCreateUsage(tenantId);
+        double currentCost = quotaStore.getMonthlyCost(tenantId);
         double limit = quota.maxMonthlyCostUsd();
-        if (limit >= 0 && usage.getMonthlyCostUsd() >= limit) {
+        if (limit >= 0 && currentCost >= limit) {
             quotaDeniedCounter.increment();
             meterRegistry.counter("eddi.tenant.quota.denied", "tenant", tenantId, "type", "cost").increment();
             String reason = String.format("Monthly cost budget ($%.2f) exceeded for tenant '%s'", limit, tenantId);
-            LOGGER.warnf(reason);
+            LOGGER.warn(reason);
             return QuotaCheckResult.denied(reason);
         }
 
@@ -171,80 +177,47 @@ public class TenantQuotaService {
     }
 
     /**
-     * Record that a new conversation was started.
+     * Post-call accounting: atomically adds the actual cost incurred and checks
+     * whether the budget has been exceeded. Use the returned result to decide
+     * whether to block subsequent calls or emit metrics.
+     * <p>
+     * Note: internally calls {@link ITenantQuotaStore#tryAddCost} which resets all
+     * expired time windows (minute, day, month) under the per-tenant lock. This is
+     * harmless (lazy reset is idempotent), but means this method has broader side
+     * effects than its name suggests.
      */
-    public void recordConversationStart() {
-        recordConversationStart(defaultTenantId);
-    }
+    public QuotaCheckResult recordCost(String tenantId, double cost) {
+        TenantQuota quota = quotaStore.getQuota(tenantId);
+        if (quota == null || !quota.enabled()) {
+            return QuotaCheckResult.OK;
+        }
 
-    public void recordConversationStart(String tenantId) {
-        TenantUsage usage = getOrCreateUsage(tenantId);
-        usage.incrementConversations();
-        meterRegistry.counter("eddi.tenant.usage.conversations", "tenant", tenantId).increment();
-    }
-
-    /**
-     * Record that an API call was made.
-     */
-    public void recordApiCall() {
-        recordApiCall(defaultTenantId);
-    }
-
-    public void recordApiCall(String tenantId) {
-        TenantUsage usage = getOrCreateUsage(tenantId);
-        usage.incrementApiCalls();
-        meterRegistry.counter("eddi.tenant.usage.api_calls", "tenant", tenantId).increment();
-    }
-
-    /**
-     * Record tool cost for a tenant.
-     */
-    public void recordCost(String tenantId, double cost) {
-        TenantUsage usage = getOrCreateUsage(tenantId);
-        usage.addCost(cost);
+        double limit = quota.maxMonthlyCostUsd();
+        QuotaCheckResult result = quotaStore.tryAddCost(tenantId, cost, limit);
         meterRegistry.counter("eddi.tenant.usage.cost", "tenant", tenantId).increment(cost);
+
+        if (!result.allowed()) {
+            quotaDeniedCounter.increment();
+            meterRegistry.counter("eddi.tenant.quota.denied", "tenant", tenantId, "type", "cost").increment();
+            LOGGER.warn(result.reason());
+        }
+
+        return result;
     }
+
+    // ─── Usage Reporting ───
 
     /**
      * Get usage snapshot for a tenant.
      */
-    public TenantUsage.UsageSnapshot getUsage(String tenantId) {
-        TenantUsage usage = usageMap.get(tenantId);
-        if (usage == null) {
-            return new TenantUsage.UsageSnapshot(tenantId, 0, 0, 0.0, Instant.now(), Instant.now());
-        }
-        resetWindowsIfExpired(usage);
-        return usage.toSnapshot();
+    public UsageSnapshot getUsage(String tenantId) {
+        return quotaStore.getUsage(tenantId);
     }
 
     /**
      * Reset all usage counters for a tenant.
      */
     public void resetUsage(String tenantId) {
-        TenantUsage usage = usageMap.get(tenantId);
-        if (usage != null) {
-            usage.resetAll();
-            LOGGER.infof("Usage counters reset for tenant '%s'", tenantId);
-        }
-    }
-
-    // --- Internal helpers ---
-
-    private TenantUsage getOrCreateUsage(String tenantId) {
-        return usageMap.computeIfAbsent(tenantId, TenantUsage::new);
-    }
-
-    private void resetWindowsIfExpired(TenantUsage usage) {
-        Instant now = Instant.now();
-
-        // Reset minute window if expired
-        if (Duration.between(usage.getMinuteWindowStart(), now).compareTo(MINUTE_WINDOW) > 0) {
-            usage.resetMinuteWindow();
-        }
-
-        // Reset daily counters if expired
-        if (Duration.between(usage.getDayStart(), now).compareTo(DAY_WINDOW) > 0) {
-            usage.resetDailyCounters();
-        }
+        quotaStore.resetUsage(tenantId);
     }
 }

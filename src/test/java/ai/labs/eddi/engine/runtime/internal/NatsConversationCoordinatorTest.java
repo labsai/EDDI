@@ -3,6 +3,7 @@ package ai.labs.eddi.engine.runtime.internal;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.nats.client.Connection;
 import io.nats.client.JetStream;
 import io.nats.client.api.PublishAck;
@@ -67,8 +68,8 @@ class NatsConversationCoordinatorTest {
 
         // Create coordinator with mocked dependencies (skip start() since that needs
         // real NATS)
-        coordinator = new NatsConversationCoordinator(runtime, metricsInstance, "nats://localhost:4222", "EDDI_CONVERSATIONS", "EDDI_DEAD_LETTERS", 3,
-                60);
+        coordinator = new NatsConversationCoordinator(runtime, metricsInstance, new SimpleMeterRegistry(), "nats://localhost:4222",
+                "EDDI_CONVERSATIONS", "EDDI_DEAD_LETTERS", 3, 10000);
 
         // Inject the mocked JetStream via reflection
         var jetStreamField = NatsConversationCoordinator.class.getDeclaredField("jetStream");

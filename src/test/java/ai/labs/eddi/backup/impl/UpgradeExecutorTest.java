@@ -242,6 +242,7 @@ class UpgradeExecutorTest {
 
         @Test
         @DisplayName("should update matched extension and rewrite workflow URI")
+        @SuppressWarnings("unchecked")
         void updatesExtensionAndRewritesWorkflowUri() throws Exception {
             String wfId = "aaaaaaaaaaaaaaaaaaaaaaaa";
             String extId = "bbbbbbbbbbbbbbbbbbbbbbbb";
@@ -310,6 +311,7 @@ class UpgradeExecutorTest {
 
         @Test
         @DisplayName("should create new extension when action is CREATE")
+        @SuppressWarnings("unchecked")
         void createsNewExtension() throws Exception {
             String wfId = "aaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -393,6 +395,7 @@ class UpgradeExecutorTest {
 
         @Test
         @DisplayName("should create new workflow and append to agent config")
+        @SuppressWarnings("unchecked")
         void createsNewWorkflowAndAppendsToAgent() throws Exception {
             var newWf = new WorkflowSourceData("src-wf-1", "New Workflow", 0,
                     new WorkflowConfiguration(), Map.of());

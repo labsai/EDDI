@@ -40,10 +40,18 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         this.conversationService = conversationService;
     }
 
+    private static String sanitizeForLog(String value) {
+        if (value == null) {
+            return "null";
+        }
+        return value.replace('\n', '_').replace('\r', '_');
+    }
+
     @Override
     public void sayStreaming(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields,
                              InputData inputData, SseEventSink eventSink, Sse sse) {
 
+        final String safeConversationId = sanitizeForLog(conversationId);
         try {
             conversationService.sayStreaming(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
                     new IConversationService.StreamingResponseHandler() {
@@ -93,7 +101,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                         @Override
                         public void onError(Throwable error) {
                             try {
-                                LOGGER.errorf("Streaming error for conversation %s: %s", conversationId, error.getMessage());
+                                LOGGER.errorf("Streaming error for conversation %s: %s", safeConversationId, error.getMessage());
                                 sendEvent(eventSink, sse, "error", String.format("{\"message\":\"%s\"}", escapeJson(error.getMessage())));
                             } finally {
                                 closeQuietly(eventSink);
@@ -101,7 +109,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                         }
                     });
         } catch (Exception e) {
-            LOGGER.errorf("Failed to start streaming for conversation %s: %s", conversationId, e.getMessage());
+            LOGGER.errorf("Failed to start streaming for conversation %s: %s", safeConversationId, e.getMessage());
             sendEvent(eventSink, sse, "error", String.format("{\"message\":\"%s\"}", escapeJson(e.getMessage())));
             closeQuietly(eventSink);
         }

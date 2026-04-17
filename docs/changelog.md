@@ -13,6 +13,200 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## PR Review Fixes — Quota Ordering, Log Injection, Doc Hygiene (2026-04-17)
+
+**Repo:** EDDI (`feature/observability`)
+
+**What changed:** Addressed 8 findings from CodeRabbit review of PR #424.
+
+### 1. Quota Consumed on Validation Failure (Bug)
+
+`ConversationService.startConversation()`, `.say()`, and `.sayStreaming()` all called `acquireConversationSlot()` / `acquireApiCallSlot()` **before** cheap in-process validations (GDPR restriction check, agent-not-ready, agent-mismatch, conversation-not-found). A misconfigured client or GDPR-restricted user could exhaust tenant quota without ever running a pipeline.
+
+**Fix:** Moved quota acquisition AFTER all validation checks. Quota is only burned for requests that will actually be processed. Also removed the now-unnecessary `processingConversationReferences.remove()` from the GDPR catch path (the add hasn't happened yet when GDPR check runs).
+
+### 2. `tryAddCost` Budget Boundary Inconsistency (Bug)
+
+`checkCostBudget()` (pre-call gate) used `>=` but `tryAddCost()` (post-call accounting) used `>`. At exactly the limit, these disagreed. Changed `tryAddCost` to use `>=` to match.
+
+### 3. Log Injection Prevention (Security)
+
+Added `sanitizeForLog()` helper (replaces `\n`/`\r` with `_`) to 4 files:
+- `InMemoryConversationCoordinator.java` — `conversationId` in all log statements
+- `NatsConversationCoordinator.java` — `conversationId` in all log statements
+- `RestAgentEngineStreaming.java` — `conversationId` in error logs
+- `InMemoryTenantQuotaStore.java` — `tenantId` in `resetUsage` log
+
+### 4. Documentation Fixes
+
+- `monitoring-guide.md` — Added `text` language to ASCII diagram code blocks (MD040 lint)
+- `monitoring-guide.md` — Fixed dead-letter alert: `eddi_nats_dead_letter_count > 0` → `increase(eddi_nats_dead_letter_count_total[10m]) > 0`
+- `multi-tenancy-plan.md` — Replaced 11 absolute `file:///c:/dev/git/EDDI/...` links with relative `../src/...` paths (portability)
+- `multi-tenancy-plan.md` — Added fail-closed behavior: `TenantResolverFilter` MUST reject with HTTP 403 when OIDC is enabled but `tenant_id` claim is missing/blank
+- `AGENTS.md` — Fixed broken reference to `agentic-improvements-plan.md` (moved from `docs/planning/` to `planning/`)
+
+**Files:**
+- `ConversationService.java` — Quota ordering fix in 3 methods
+- `InMemoryTenantQuotaStore.java` — `>=` operator + `sanitizeForLog`
+- `InMemoryConversationCoordinator.java` — `sanitizeForLog`
+- `NatsConversationCoordinator.java` — `sanitizeForLog`
+- `RestAgentEngineStreaming.java` — `sanitizeForLog`
+- `docs/monitoring/monitoring-guide.md` — Code block lang + alert fix
+- `planning/multi-tenancy-plan.md` — Relative links + fail-closed
+- `AGENTS.md` — Reference fix
+
+**Verification:** `mvn compile` — BUILD SUCCESS.
+
+---
+
+## Atomic Quota Enforcement — TOCTOU Fix & Code Quality (2026-04-17)
+
+**Repo:** EDDI (current branch)
+
+**What changed:**
+
+### 1. TOCTOU Race Condition Fix (Critical)
+
+`TenantQuotaService` had a Time-Of-Check-Time-Of-Use (TOCTOU) race condition. The quota enforcement used a two-step pattern (`checkConversationQuota()` → `recordConversationStart()`) where multiple concurrent requests could pass the check before any recorded usage, allowing limits to be exceeded.
+
+**Fix:** Merged check+record into **atomic slot acquisition** methods:
+- `acquireConversationSlot()` — atomically checks daily conversation limit and increments counter
+- `acquireApiCallSlot()` — atomically checks per-minute API rate limit and increments counter
+- `tryAddCost()` — atomically adds cost and checks monthly budget (post-call accounting)
+
+The store-level `tryIncrement*` methods guarantee that reset → check → increment all happen inside the same `synchronized` block (per-tenant lock). This is single-instance atomicity; the `ITenantQuotaStore` interface documents that DB-backed implementations MUST use storage-level atomicity (`UPDATE ... WHERE count < limit RETURNING`) for cluster safety.
+
+### 2. Architecture Cleanup
+
+- **`UsageSnapshot`** extracted from inner class to top-level record in `model/` (REST API concern, not internal counter state)
+- **`TenantUsageCounters`** replaced `TenantUsage` — package-private POJO with plain `int` fields (no `AtomicInteger` — under external lock, atomic types add no value and obscure intent)
+- **`TenantUsage.java`** deleted — split into `TenantUsageCounters` (internal) + `UsageSnapshot` (API)
+- **Cost budget** kept as two separate operations: `checkCostBudget()` (pre-call read-only gate) and `recordCost()` (post-call atomic accounting). Reserve+commit pattern rejected as overkill — worst-case TOCTOU overrun is one LLM call ≈ cents.
+- **Metrics hygiene** — `quotaAllowedCounter` / `quotaDeniedCounter` no longer increment when quota is disabled (`null` or `enabled=false`), fixing inflated metrics.
+
+### 3. Code Quality Fixes
+
+- `application.properties` — Resolved Checkstyle `LineLength` violation (line 152)
+- `LifecycleManager.java` — Resolved 5 "Null type safety" warnings with `Objects.requireNonNullElse()`
+- `UpgradeExecutorTest.java` — Added `@SuppressWarnings("unchecked")` for raw CDI `Instance<T>` mocks
+- `SlackEventHandler.java` — Removed unnecessary `@SuppressWarnings("unchecked")`
+- `InMemoryConversationCoordinatorTest.java`, `SlackChannelRouterTest.java` — Removed unused imports
+
+**Call sites updated (3 TOCTOU patterns fixed):**
+- `ConversationService.startConversation()` — `checkConversationQuota()` + `recordConversationStart()` → `acquireConversationSlot()`
+- `ConversationService.say()` — `checkApiCallQuota()` + `recordApiCall()` → `acquireApiCallSlot()`
+- `ConversationService.sayStreaming()` — same pattern → `acquireApiCallSlot()`
+
+**Design decisions:**
+- **Per-tenant `synchronized`, not global** — Tenant A's quota enforcement never blocks Tenant B.
+- **Plain `int` over `AtomicInteger`** — Under the synchronized lock, atomic types add no value. Plain fields make the "all three ops under one lock" contract clearer.
+- **Unlimited fast path (`limit < 0`) skips tracking** — No counter increment when unlimited; prevents unsynchronized writes to plain int fields and avoids inflating usage numbers for no enforcement value.
+- **Cluster-ready interface shape** — `ITenantQuotaStore` Javadoc documents atomicity contract for DB-backed implementations. Java synchronization is explicitly NOT sufficient for multi-instance.
+
+**Files:**
+- `ITenantQuotaStore.java` — Added `tryIncrementConversations`, `tryIncrementApiCalls`, `tryAddCost`, `getUsage`, `resetUsage`
+- `InMemoryTenantQuotaStore.java` — Atomic ops with per-tenant `synchronized`
+- `TenantQuotaService.java` — `acquireConversationSlot()`, `acquireApiCallSlot()`, `checkCostBudget()`, `recordCost()`
+- `TenantUsageCounters.java` — [NEW] Package-private POJO, plain int fields
+- `model/UsageSnapshot.java` — [NEW] Top-level record for API responses
+- `model/TenantUsage.java` — [DELETED] Replaced by the above two
+- `ConversationService.java` — 3 TOCTOU patterns fixed
+- `IRestTenantQuota.java`, `RestTenantQuota.java` — Updated `UsageSnapshot` import
+- `TenantQuotaServiceTest.java` — Full rewrite: 22 tests including 100-thread TOCTOU regression tests
+- `RestTenantQuotaTest.java` — Updated to new method names
+- `ConversationServiceTest.java` — Updated mock stubs
+- `application.properties` — Checkstyle fix
+- `LifecycleManager.java` — Null safety fixes
+
+**Verification:** 47 tests pass (22 quota + 7 REST + 18 ConversationService), BUILD SUCCESS. Concurrency regression tests verify exactly 50 of 100 racing threads acquire a slot with limit=50.
+
+### 4. Code Review Fixes (2026-04-17)
+
+- **CRITICAL: `LOGGER.warnf()` format-string injection** — `result.reason()` contains pre-formatted strings; passing to `warnf()` treats `%` in tenant IDs as format specifiers → `MissingFormatArgumentException` crash. Changed all 4 call sites from `warnf(reason)` to `warn(reason)`.
+- **Monthly cost never resets** — Pre-existing bug carried forward: `monthlyCostUsd` accumulated indefinitely. Added `YearMonth costMonth` field to `TenantUsageCounters`; `resetExpiredWindows()` now resets cost on UTC calendar month boundary.
+- **Unlimited quotas: internal counter inconsistency** — When `enabled=true` but `limit=-1`, the unlimited fast path skipped internal counter increment but Micrometer still counted traffic. Removed fast path entirely; `tryIncrement*` now always enters `synchronized`, always increments, but skips the `>= limit` check when `limit < 0`. Internal counters and Micrometer stay consistent; gives admins a useful "what would you be hitting" view.
+- **Hot-path allocation in `checkCostBudget()`** — Was allocating a `UsageSnapshot` record per LLM call just to read one `double`. Added `getMonthlyCost(String tenantId)` to `ITenantQuotaStore` and `InMemoryTenantQuotaStore`; `checkCostBudget()` now uses it directly.
+- **`tryAddCost` semantics** — Clarified Javadoc: cost is **always added** (even over budget) because the LLM call already happened. This differs from `tryIncrement*` which never increments past the limit.
+- **`getUsage()` side effect** — Documented in Javadoc that `getUsage()` resets expired windows before reading (not a pure read).
+- **`TenantUsageCounters.tenantId` field** — Removed. Callers already know the tenant ID from the map lookup; `toSnapshot()` now takes `String tenantId` as param.
+- **`computeIfAbsent` atomicity** — Added inline comment clarifying that `ConcurrentHashMap.computeIfAbsent` is itself atomic, which is why the `synchronized(counters)` block works correctly.
+- **Test `shouldTrackUsageMetrics`** — Was using two `enableQuotaWith*` helpers that clobbered each other. Fixed to use `enableQuotaWithBothLimits(100, 100)`.
+- **Redundant import** — Removed `import java.util.Objects` from `LifecycleManager.java` (already covered by `java.util.*` wildcard).
+
+---
+
+## Observability & Pipeline Architecture — OTel, Coordinator Hardening, Monitoring (2026-04-17)
+
+**Repo:** EDDI (`feature/observability`)
+
+**What changed:**
+
+### 1. OpenTelemetry Distributed Tracing
+- Added `quarkus-opentelemetry` dependency (pom.xml)
+- Instrumented `LifecycleManager.executeLifecycle()` with per-task spans
+- Each task execution creates an `eddi.pipeline.task` span with attributes: `task.id`, `task.type`, `task.index`, `conversation.id`, `agent.id`
+- Uses `GlobalOpenTelemetry.getTracer()` since LifecycleManager is not CDI-managed (created via `new` in `WorkflowStoreClientLibrary`)
+- No-op tracer when OTel disabled — zero overhead in dev/test
+- OTLP protocol: backend-agnostic (Jaeger, Tempo, Datadog, Honeycomb)
+- Auto-instrumented: REST endpoints, Vert.x HTTP client, MongoDB
+
+### 2. ConversationCoordinator Hardening
+- **Eager cleanup**: Empty queues removed from `conversationQueues` map in `submitNext()` using `ConcurrentHashMap.remove(key, value)` for safe concurrent removal. Prevents memory leaks from abandoned conversations.
+- **Max-size limit**: Configurable `eddi.coordinator.max-active-conversations` (default 10,000). Only rejects new conversations — follow-up messages always accepted. Throws `RejectedExecutionException` at capacity.
+- **Micrometer gauges**: 3 metrics registered via `@PostConstruct`: `eddi.coordinator.active_conversations`, `eddi.coordinator.queue_depth`, `eddi.coordinator.total_processed`
+- Applied to both `InMemoryConversationCoordinator` and `NatsConversationCoordinator`
+
+### 3. Enterprise Monitoring Stack
+- `docs/monitoring/monitoring-guide.md` — Full guide: architecture, metrics reference (20+ metrics), tracing setup, 6 alerting rules, production checklist
+- `docs/monitoring/eddi-grafana-dashboard.json` — 14-panel dashboard across 5 rows (Coordinator, Tools, Vault, NATS, HTTP/JVM)
+- `docker-compose.monitoring.yml` — One-command overlay: Prometheus v3.4.0 + Grafana 11.6.0 + Jaeger 2.7.0 (OTLP-native)
+- `docs/monitoring/prometheus.yml` — Scrape config targeting EDDI `/q/metrics`
+- `docs/monitoring/grafana-provisioning/` — Auto-provisioned datasources (Prometheus + Jaeger) and dashboard directory
+
+**Decision:** Used Jaeger (not Zipkin) for traces — CNCF graduated, native OTLP support, better scalability. EDDI uses standard OTLP protocol so backends are swappable by changing one URL.
+
+**Decision:** Chose eager cleanup + max-size over Caffeine TTL for coordinator hardening. Caffeine could evict queues mid-processing (race condition). Eager cleanup is simpler and eliminates the issue.
+
+**Files:**
+- `pom.xml` — `quarkus-opentelemetry` dependency
+- `LifecycleManager.java` — OTel span instrumentation, `getTracer()` helper
+- `application.properties` — OTel config, coordinator max-size config
+- `InMemoryConversationCoordinator.java` — Eager cleanup, max-size, Micrometer gauges
+- `NatsConversationCoordinator.java` — Same hardening
+- `InMemoryConversationCoordinatorTest.java` — Updated constructor
+- `ConversationCoordinatorTest.java` — Updated constructor
+- `NatsConversationCoordinatorTest.java` — Updated constructor
+- `NatsConversationCoordinatorIT.java` — Updated constructor
+- `docs/monitoring/*` — Full monitoring documentation and dashboard
+- `docker-compose.monitoring.yml` — Monitoring stack overlay
+
+### 4. Code Review Fixes (2026-04-17)
+- **CRITICAL: Eager-cleanup race condition** — `submitInOrder` could see an orphaned queue after `submitNext` removed it, creating two queues for the same conversation (broken ordering guarantee). Fixed with CAS loop: verify queue identity after lock acquisition before proceeding.
+- **OTel SDK default** — Changed from enabled-in-prod/disabled-in-dev to globally disabled by default. `docker-compose.monitoring.yml` enables it via env var. Prevents OTLP connection-error spam on prod deployments without a collector.
+- **totalProcessed metric** — Changed from gauge to `FunctionCounter` (Prometheus-idiomatic for monotonic values; enables proper `rate()` queries and restart detection).
+- **Capacity rejection log level** — `ERROR` → `WARN` (expected backpressure, not a system error; reduces alert fatigue).
+- **NATS gauge registration** — Moved after `start()` to avoid registering metrics for a coordinator that failed to connect.
+- **Pipeline duration metrics** — Added `eddi.pipeline.task.duration` Timer and `eddi.pipeline.task.errors` Counter (tagged by `task.id`, `task.type`) using `Metrics.globalRegistry`.
+- **Install script paths** — Fixed `install.sh`/`install.ps1` monitoring file paths from old `grafana-data/` to `docs/monitoring/`. Added Grafana/Prometheus/Jaeger URLs to success banners.
+- **Docker Compose overlay** — Added `eddi` service OTel env overrides so tracing works automatically.
+- **PII-in-traces warning** — Added GDPR/HIPAA privacy note to `monitoring-guide.md` regarding `conversation.id` and `agent.id` in trace spans.
+- **Production checklist** — Added Grafana password rotation, Jaeger auth proxy warning, privacy review item.
+- **README** — Added OpenTelemetry tracing bullet, monitoring guide link, documentation table entry.
+- **Tests** — Added 3 coordinator tests: max-size rejection, follow-up at capacity, eager cleanup verification.
+
+### 5. Code Review Round 2 Fixes (2026-04-17)
+- **Hot-path metric cache** — Timer/Counter instances now cached in `ConcurrentHashMap` keyed by `(taskId|taskType)`. Avoids per-invocation builder/tag allocation on the pipeline hot path.
+- **Pipeline Tasks dashboard row** — Added Grafana panels: task duration avg/P99 and error rate per `task.type`. The headline feature was advertised in monitoring-guide.md but had no visualization.
+- **Grafana datasource UID** — Fixed `${datasource}` template variable to use fixed `"prometheus"` uid matching `datasources.yml`. Prevents "datasource not found" on fresh Grafana installs.
+- **NATS row layout** — Collapsed-row panels moved from overlapping y:42 to proper y:51 inside the row's panels array.
+- **Duplicate `prometheus.yml`** — Deleted root-level copy (diverged from `docs/monitoring/prometheus.yml`).
+- **Docstring accuracy** — Follow-ups accepted for "currently-queued" conversations only; drained conversations treated as new per eager-cleanup semantics.
+- **Typo** — `QUARKUS_OTel_SDK_DISABLED` → `QUARKUS_OTEL_SDK_DISABLED` in properties comment.
+- **Cleanup-race regression test** — `shouldHandleConcurrentSubmitDuringCleanup`: exercises drain→cleanup→resubmit sequence to guard the CAS loop fix against regressions.
+- **`totalProcessed_total` metric name** — Dashboard updated to use `_total` suffix matching FunctionCounter naming convention.
+
+---
+
 ## Fix WhiteSource/Mend Bolt False Positive — Bootstrap CVEs (2026-04-16)
 
 **Repo:** EDDI (`fix/whitesource-bootstrap-false-positive`)

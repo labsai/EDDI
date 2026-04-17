@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     E.D.D.I — One-Command Install & Onboarding Wizard
 
@@ -523,10 +523,10 @@ function Get-ComposeFiles {
         Write-Information -MessageData ""
         Write-Information -MessageData "  Downloading monitoring configuration..."
         $monitoringFiles = @(
-            "prometheus.yml",
-            "grafana-data/provisioning/dashboards/dashboard.yml",
-            "grafana-data/provisioning/datasources/prometheus.yml",
-            "grafana-data/dashboards/eddi-operations.json"
+            "docs/monitoring/prometheus.yml",
+            "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml",
+            "docs/monitoring/grafana-provisioning/datasources/datasources.yml",
+            "docs/monitoring/eddi-grafana-dashboard.json"
         )
         foreach ($mf in $monitoringFiles) {
             $mfTarget = Join-Path -Path $EddiDir -ChildPath $mf
@@ -747,6 +747,13 @@ function Write-Success {
     Write-Information -MessageData "  HTTPS      →  https://localhost:${EddiHttpsPort}"
     Write-Information -MessageData "  MCP        →  http://localhost:${EddiPort}/mcp"
     Write-Information -MessageData "  API docs   →  http://localhost:${EddiPort}/q/swagger-ui"
+
+    if ($WithMonitoring) {
+        Write-Information -MessageData ""
+        Write-Information -MessageData "  Grafana    →  http://localhost:3000  (admin/admin)"
+        Write-Information -MessageData "  Prometheus →  http://localhost:9090"
+        Write-Information -MessageData "  Jaeger     →  http://localhost:16686  (trace visualization)"
+    }
 
     if ($WithAuth) {
         Write-Information -MessageData ""

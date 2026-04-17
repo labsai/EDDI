@@ -1,6 +1,8 @@
 package ai.labs.eddi.engine.tenancy;
 
+import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
+import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -12,10 +14,23 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * In-memory implementation of {@link ITenantQuotaStore}. Loads the default
- * tenant quota from application.properties on startup.
+ * In-memory implementation of {@link ITenantQuotaStore} with atomic
+ * check-and-increment operations.
  * <p>
- * This is a stub implementation; a DB-backed store can override this via
+ * Atomicity is achieved via {@code synchronized} on per-tenant counter objects.
+ * This is correct for single-instance deployments. For cluster (multi-instance)
+ * deployments, replace with a DB-backed store that uses storage-level atomicity
+ * (e.g., PostgreSQL {@code UPDATE ... WHERE count < limit RETURNING}).
+ * <p>
+ * <strong>Lock granularity:</strong> all five mutating operations
+ * ({@code tryIncrementConversations}, {@code tryIncrementApiCalls},
+ * {@code tryAddCost}, {@code getUsage}, {@code getMonthlyCost}) share the same
+ * per-tenant lock. In a default single-tenant deployment, "per-tenant" is
+ * effectively a global lock. This is acceptable because the critical section is
+ * microseconds (a few field reads, one integer increment, one timestamp
+ * comparison). No I/O or allocation occurs under the lock.
+ * <p>
+ * This is the default bean; a DB-backed store can override it via
  * {@code @LookupIfProperty} in future phases.
  */
 @ApplicationScoped
@@ -25,6 +40,7 @@ public class InMemoryTenantQuotaStore implements ITenantQuotaStore {
     private static final Logger LOGGER = Logger.getLogger(InMemoryTenantQuotaStore.class);
 
     private final Map<String, TenantQuota> quotas = new ConcurrentHashMap<>();
+    private final Map<String, TenantUsageCounters> usageMap = new ConcurrentHashMap<>();
 
     @Inject
     public InMemoryTenantQuotaStore(@ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
@@ -48,6 +64,8 @@ public class InMemoryTenantQuotaStore implements ITenantQuotaStore {
         quotas.put(defaultQuota.tenantId(), defaultQuota);
     }
 
+    // ─── Quota Configuration ───
+
     @Override
     public TenantQuota getQuota(String tenantId) {
         return quotas.get(tenantId);
@@ -66,5 +84,101 @@ public class InMemoryTenantQuotaStore implements ITenantQuotaStore {
     @Override
     public void deleteQuota(String tenantId) {
         quotas.remove(tenantId);
+    }
+
+    // ─── Atomic Usage Operations ───
+
+    @Override
+    public QuotaCheckResult tryIncrementConversations(String tenantId, int limit) {
+        // CHM.computeIfAbsent is itself atomic — guarantees a single counter object
+        // per tenant, which the subsequent synchronized block uses as the lock.
+        TenantUsageCounters counters = getOrCreateCounters(tenantId);
+        synchronized (counters) {
+            counters.resetExpiredWindows();
+            if (limit >= 0 && counters.getConversationsToday() >= limit) {
+                return QuotaCheckResult.denied(
+                        String.format("Daily conversation limit (%d) exceeded for tenant '%s'", limit, tenantId));
+            }
+            counters.incrementConversations();
+            return QuotaCheckResult.OK;
+        }
+    }
+
+    @Override
+    public QuotaCheckResult tryIncrementApiCalls(String tenantId, int limit) {
+        // CHM.computeIfAbsent is itself atomic — guarantees a single counter object
+        // per tenant, which the subsequent synchronized block uses as the lock.
+        TenantUsageCounters counters = getOrCreateCounters(tenantId);
+        synchronized (counters) {
+            counters.resetExpiredWindows();
+            if (limit >= 0 && counters.getApiCallsThisMinute() >= limit) {
+                return QuotaCheckResult.denied(
+                        String.format("API rate limit (%d/min) exceeded for tenant '%s'", limit, tenantId));
+            }
+            counters.incrementApiCalls();
+            return QuotaCheckResult.OK;
+        }
+    }
+
+    @Override
+    public QuotaCheckResult tryAddCost(String tenantId, double cost, double limit) {
+        TenantUsageCounters counters = getOrCreateCounters(tenantId);
+        synchronized (counters) {
+            counters.resetExpiredWindows();
+            counters.addCost(cost);
+            if (limit >= 0 && counters.getMonthlyCostUsd() >= limit) {
+                return QuotaCheckResult.denied(
+                        String.format("Monthly cost budget ($%.2f) exceeded for tenant '%s'", limit, tenantId));
+            }
+            return QuotaCheckResult.OK;
+        }
+    }
+
+    // ─── Usage Reporting ───
+
+    @Override
+    public UsageSnapshot getUsage(String tenantId) {
+        TenantUsageCounters counters = usageMap.get(tenantId);
+        if (counters == null) {
+            return UsageSnapshot.empty(tenantId);
+        }
+        synchronized (counters) {
+            counters.resetExpiredWindows();
+            return counters.toSnapshot(tenantId);
+        }
+    }
+
+    @Override
+    public double getMonthlyCost(String tenantId) {
+        TenantUsageCounters counters = usageMap.get(tenantId);
+        if (counters == null) {
+            return 0.0;
+        }
+        synchronized (counters) {
+            counters.resetExpiredWindows();
+            return counters.getMonthlyCostUsd();
+        }
+    }
+
+    @Override
+    public void resetUsage(String tenantId) {
+        TenantUsageCounters counters = usageMap.get(tenantId);
+        if (counters != null) {
+            synchronized (counters) {
+                counters.resetAll();
+            }
+            LOGGER.infof("Usage counters reset for tenant '%s'", sanitizeForLog(tenantId));
+        }
+    }
+
+    private static String sanitizeForLog(String value) {
+        if (value == null) {
+            return "null";
+        }
+        return value.replace('\n', '_').replace('\r', '_');
+    }
+
+    private TenantUsageCounters getOrCreateCounters(String tenantId) {
+        return usageMap.computeIfAbsent(tenantId, k -> new TenantUsageCounters());
     }
 }

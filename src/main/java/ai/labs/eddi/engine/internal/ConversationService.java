@@ -149,12 +149,6 @@ public class ConversationService implements IConversationService {
         }
 
         try {
-            // Tenant quota check — conversation start
-            QuotaCheckResult quotaCheck = tenantQuotaService.checkConversationQuota();
-            if (!quotaCheck.allowed()) {
-                throw new QuotaExceededException(quotaCheck.reason());
-            }
-
             // GDPR Art. 18 — processing restriction check
             userId = conversationSetup.computeAnonymousUserIdIfEmpty(userId, context.get(USER_ID));
             if (userId != null && gdprComplianceService.isProcessingRestricted(userId)) {
@@ -169,13 +163,19 @@ public class ConversationService implements IConversationService {
                 throw new AgentNotReadyException(message);
             }
 
+            // Tenant quota — atomic slot acquisition AFTER cheap validations
+            // (avoids burning quota on GDPR-restricted or agent-not-ready failures)
+            QuotaCheckResult quotaCheck = tenantQuotaService.acquireConversationSlot();
+            if (!quotaCheck.allowed()) {
+                throw new QuotaExceededException(quotaCheck.reason());
+            }
+
             IConversation conversation = latestAgent.startConversation(userId, context,
                     createPropertiesHandler(userId, latestAgent.getUserMemoryConfig()), null);
 
             var conversationMemory = conversation.getConversationMemory();
             var conversationId = storeConversationMemory(conversationMemory, environment);
             cacheConversationState(conversationId, conversationMemory.getConversationState());
-            tenantQuotaService.recordConversationStart();
             var conversationUri = createURI(RESOURCE_URI, conversationId);
 
             conversationSetup.createConversationDescriptor(agentId, latestAgent, userId, conversationId, conversationUri);
@@ -269,21 +269,12 @@ public class ConversationService implements IConversationService {
 
         long startTime = System.nanoTime();
         try {
-            // Tenant quota check — API call
-            QuotaCheckResult quotaCheck = tenantQuotaService.checkApiCallQuota();
-            if (!quotaCheck.allowed()) {
-                throw new QuotaExceededException(quotaCheck.reason());
-            }
-            tenantQuotaService.recordApiCall();
-
-            processingConversationReferences.add(createReferenceForMetrics(agentId, conversationId));
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
 
             // GDPR Art. 18 — processing restriction check
             if (conversationMemory.getUserId() != null
                     && gdprComplianceService.isProcessingRestricted(conversationMemory.getUserId())) {
-                processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
                 throw new ProcessingRestrictedException(
                         "Processing is restricted for this user (GDPR Art. 18)");
             }
@@ -305,6 +296,16 @@ public class ConversationService implements IConversationService {
                 msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
                 throw new AgentNotReadyException(msg);
             }
+
+            // Tenant quota — atomic slot acquisition AFTER cheap validations
+            // (avoids burning quota on not-found, GDPR-restricted, agent-mismatch, or
+            // agent-not-ready failures)
+            QuotaCheckResult quotaCheck = tenantQuotaService.acquireApiCallSlot();
+            if (!quotaCheck.allowed()) {
+                throw new QuotaExceededException(quotaCheck.reason());
+            }
+
+            processingConversationReferences.add(createReferenceForMetrics(agentId, conversationId));
 
             // Set the audit collector on memory (if auditing is enabled)
             if (auditLedgerService.isEnabled()) {
@@ -355,6 +356,8 @@ public class ConversationService implements IConversationService {
                     executeConversation);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
+        } catch (ProcessingRestrictedException | QuotaExceededException e) {
+            throw e; // thrown before processingConversationReferences.add()
         } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
             processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
             throw e;
@@ -372,21 +375,12 @@ public class ConversationService implements IConversationService {
 
         long startTime = System.nanoTime();
         try {
-            // Tenant quota check — API call (streaming)
-            QuotaCheckResult quotaCheck = tenantQuotaService.checkApiCallQuota();
-            if (!quotaCheck.allowed()) {
-                throw new QuotaExceededException(quotaCheck.reason());
-            }
-            tenantQuotaService.recordApiCall();
-
-            processingConversationReferences.add(createReferenceForMetrics(agentId, conversationId));
             final IConversationMemory conversationMemory = loadConversationMemory(conversationId);
             checkConversationMemoryNotNull(conversationMemory, conversationId);
 
             // GDPR Art. 18 — processing restriction check
             if (conversationMemory.getUserId() != null
                     && gdprComplianceService.isProcessingRestricted(conversationMemory.getUserId())) {
-                processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
                 throw new ProcessingRestrictedException(
                         "Processing is restricted for this user (GDPR Art. 18)");
             }
@@ -408,6 +402,16 @@ public class ConversationService implements IConversationService {
                 msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
                 throw new AgentNotReadyException(msg);
             }
+
+            // Tenant quota — atomic slot acquisition AFTER cheap validations
+            // (avoids burning quota on not-found, GDPR-restricted, agent-mismatch, or
+            // agent-not-ready failures)
+            QuotaCheckResult quotaCheck = tenantQuotaService.acquireApiCallSlot();
+            if (!quotaCheck.allowed()) {
+                throw new QuotaExceededException(quotaCheck.reason());
+            }
+
+            processingConversationReferences.add(createReferenceForMetrics(agentId, conversationId));
 
             // Create event sink that delegates to the streaming handler
             var eventSink = new ConversationEventSink() {
@@ -477,6 +481,8 @@ public class ConversationService implements IConversationService {
                     executeConversation);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
+        } catch (ProcessingRestrictedException | QuotaExceededException e) {
+            throw e; // thrown before processingConversationReferences.add()
         } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
             processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
             throw e;

@@ -63,8 +63,10 @@ class RestTenantQuotaTest {
 
     @Test
     void shouldReturnUsage() {
-        quotaService.recordConversationStart();
-        quotaService.recordApiCall();
+        // Enable quota so counters are tracked
+        quotaStore.setQuota(new TenantQuota(TENANT_ID, 100, -1, 100, -1, true));
+        quotaService.acquireConversationSlot();
+        quotaService.acquireApiCallSlot();
 
         var usage = restTenantQuota.getUsage(TENANT_ID);
 
@@ -75,8 +77,10 @@ class RestTenantQuotaTest {
 
     @Test
     void shouldResetUsage() {
-        quotaService.recordConversationStart();
-        quotaService.recordApiCall();
+        // Enable quota so counters are tracked
+        quotaStore.setQuota(new TenantQuota(TENANT_ID, 100, -1, 100, -1, true));
+        quotaService.acquireConversationSlot();
+        quotaService.acquireApiCallSlot();
 
         try (Response response = restTenantQuota.resetUsage(TENANT_ID)) {
             assertEquals(200, response.getStatus());

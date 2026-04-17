@@ -14,8 +14,19 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Data;
 
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.api.trace.Tracer;
+import io.opentelemetry.context.Scope;
+
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.Timer;
+import io.micrometer.core.instrument.Counter;
+
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.utils.LifecycleUtilities.createComponentKey;
@@ -92,6 +103,11 @@ public class LifecycleManager implements ILifecycleManager {
 
     /** Maximum length for error digest message shown to the LLM. */
     private static final int MAX_ERROR_DIGEST_LENGTH = 200;
+
+    // Cached Micrometer meters keyed by "taskId|taskType" to avoid per-invocation
+    // builder allocation on the hot path.
+    private static final ConcurrentHashMap<String, Timer> TASK_TIMERS = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Counter> TASK_ERROR_COUNTERS = new ConcurrentHashMap<>();
 
     /**
      * The ordered list of lifecycle tasks to execute. Tasks are added during Agent
@@ -212,7 +228,20 @@ public class LifecycleManager implements ILifecycleManager {
                 }
             }
 
-            try {
+            // === OpenTelemetry: create span per task ===
+            Span taskSpan = getTracer().spanBuilder("eddi.pipeline.task")
+                    .setAttribute("eddi.task.id", Objects.requireNonNullElse(task.getId(), "unknown"))
+                    .setAttribute("eddi.task.type", Objects.requireNonNullElse(task.getType(), "unknown"))
+                    .setAttribute("eddi.task.index", (long) index)
+                    .setAttribute("eddi.conversation.id",
+                            Objects.requireNonNullElse(conversationMemory.getConversationId(), "unknown"))
+                    .setAttribute("eddi.agent.id",
+                            Objects.requireNonNullElse(conversationMemory.getAgentId(), "unknown"))
+                    .startSpan();
+
+            long taskStartTime = System.nanoTime();
+
+            try (Scope ignored = taskSpan.makeCurrent()) {
                 // Retrieve task's component from cache
                 // Component contains task-specific configuration loaded during agent
                 // initialization
@@ -224,8 +253,6 @@ public class LifecycleManager implements ILifecycleManager {
                 if (eventSink != null) {
                     eventSink.onTaskStart(task.getId(), task.getType(), index);
                 }
-
-                long taskStartTime = System.nanoTime();
 
                 // Execute the task, transforming the conversation memory
                 task.execute(conversationMemory, component);
@@ -249,6 +276,19 @@ public class LifecycleManager implements ILifecycleManager {
                 checkIfStopConversationAction(conversationMemory);
 
             } catch (LifecycleException | RuntimeException e) {
+                taskSpan.setStatus(StatusCode.ERROR, Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
+                taskSpan.recordException(e);
+
+                // Record error counter for dashboards & alerting
+                String errTaskId = task.getId() != null ? task.getId() : "unknown";
+                String errTaskType = task.getType() != null ? task.getType() : "unknown";
+                String errMeterKey = errTaskId + "|" + errTaskType;
+                TASK_ERROR_COUNTERS.computeIfAbsent(errMeterKey, k -> Counter.builder("eddi.pipeline.task.errors")
+                        .tag("task.id", errTaskId)
+                        .tag("task.type", errTaskType)
+                        .description("Pipeline task execution errors")
+                        .register(Metrics.globalRegistry)).increment();
+
                 if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
                     // === Strict Write Discipline: handle task failure ===
                     String onFailureMode = resolveOnFailureMode(memoryPolicy);
@@ -263,6 +303,23 @@ public class LifecycleManager implements ILifecycleManager {
                     throw new LifecycleException("Error while executing lifecycle!", le);
                 }
                 throw new LifecycleException("Error while executing lifecycle!", e);
+            } finally {
+                // Record Micrometer timer for dashboards & alerting — in finally so
+                // both successful and failed task executions contribute to the
+                // duration histogram (failing tasks with long timeouts are especially
+                // important for latency monitoring during incidents).
+                long durationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
+                String taskId = task.getId() != null ? task.getId() : "unknown";
+                String taskType = task.getType() != null ? task.getType() : "unknown";
+                String meterKey = taskId + "|" + taskType;
+                TASK_TIMERS.computeIfAbsent(meterKey, k -> Timer.builder("eddi.pipeline.task.duration")
+                        .tag("task.id", taskId)
+                        .tag("task.type", taskType)
+                        .description("Pipeline task execution duration")
+                        .publishPercentileHistogram()
+                        .register(Metrics.globalRegistry)).record(java.time.Duration.ofMillis(durationMs));
+
+                taskSpan.end();
             }
         }
     }
@@ -572,5 +629,27 @@ public class LifecycleManager implements ILifecycleManager {
             msg = msg.substring(0, MAX_ERROR_DIGEST_LENGTH) + "...";
         }
         return msg.trim();
+    }
+
+    // ==================== OpenTelemetry ====================
+
+    /**
+     * Lazy-initialized OTel tracer. Returns a no-op tracer when OTel SDK is
+     * disabled ({@code quarkus.otel.sdk.disabled=true}), ensuring zero overhead in
+     * dev/test.
+     *
+     * <p>
+     * Uses {@link GlobalOpenTelemetry} because {@code LifecycleManager} is not
+     * CDI-managed — it is instantiated via {@code new} in
+     * {@link ai.labs.eddi.engine.runtime.client.workflows.WorkflowStoreClientLibrary}.
+     * </p>
+     */
+    private static volatile Tracer tracer;
+
+    private static Tracer getTracer() {
+        if (tracer == null) {
+            tracer = GlobalOpenTelemetry.getTracer("eddi.pipeline");
+        }
+        return tracer;
     }
 }

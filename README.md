@@ -378,12 +378,15 @@ EDDI implements open standards — not proprietary APIs:
 
 - 🐳 **One-Command Install** — Interactive wizard sets up EDDI + database + starter agent via Docker
 - ☸️ **Kubernetes / OpenShift** — Kustomize overlays, Helm charts, HPA, PDB, NetworkPolicy
-- 📊 **Prometheus & Grafana** — 50+ Micrometer metrics at `/q/metrics` (tools, vault, memory, scheduling, conversations)
+- 📊 **Prometheus & Grafana** — 50+ Micrometer metrics at `/q/metrics` (tools, vault, memory, scheduling, conversations). Pre-built [Grafana dashboard](docs/monitoring/eddi-grafana-dashboard.json) included
+- 🔭 **OpenTelemetry Tracing** — Per-task distributed traces via OTLP (Jaeger, Tempo, Datadog). Every pipeline task emits spans with `task.id`, `task.type`, `conversation.id`, and `agent.id`
 - 🩺 **Health Checks** — Liveness & readiness probes at `/q/health/live` and `/q/health/ready`
 - 🔄 **NATS JetStream** — Async event bus for distributed processing
 - ⚡ **Virtual Threads** — Java 25 virtual threads for true OS-level concurrency (no Python GIL or Node.js event loop bottleneck)
 - 🗃️ **DB-Agnostic** — Choose MongoDB or PostgreSQL; switch with one env var. Single Docker image for both
 - 🏗️ **Red Hat Certified** — Container certification with automated preflight checks in CI/CD
+
+> **📖 Monitoring Guide:** See [docs/monitoring/monitoring-guide.md](docs/monitoring/monitoring-guide.md) for architecture overview, metrics reference, alerting rules, and a production checklist.
 
 ### 🖥️ Manager Dashboard & Chat UI
 
@@ -446,6 +449,7 @@ Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming
 | **[Secrets Vault](docs/secrets-vault.md)**                   | Envelope encryption and auto-vaulting              |
 | **[Audit Ledger](docs/audit-ledger.md)**                     | EU AI Act-compliant audit trail                    |
 | **[Kubernetes](docs/kubernetes.md)**                         | Deploy with Kustomize or Helm                      |
+| **[Monitoring & Tracing](docs/monitoring/monitoring-guide.md)** | Prometheus, Grafana, OpenTelemetry, alerting     |
 | **[Red Hat OpenShift](docs/redhat-openshift.md)**            | Certified container, automated release             |
 | **[Agent Father Deep Dive](docs/agent-father-deep-dive.md)** | How the meta-agent works                           |
 | **[Full Documentation](https://docs.labs.ai/)**              | Complete documentation site                        |

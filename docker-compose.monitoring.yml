@@ -1,41 +1,63 @@
-# Monitoring overlay for EDDI (Grafana + Prometheus)
-# Used by: install.sh --with-monitoring
+# Docker Compose overlay for EDDI monitoring stack.
 #
-# Usage: docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 #
-# Grafana:    http://localhost:3000 (admin/admin)
-# Prometheus: http://localhost:9090
+# Access:
+#   Prometheus:  http://localhost:9090
+#   Grafana:     http://localhost:3000  (admin/admin)
+#   Jaeger UI:   http://localhost:16686
+#
+# EDDI must set these in its environment:
+#   QUARKUS_OTEL_SDK_DISABLED=false
+#   QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
 
 services:
+  # Override EDDI service to enable OTel tracing and point to Jaeger
+  eddi:
+    environment:
+      QUARKUS_OTEL_SDK_DISABLED: "false"
+      QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.4.0
+    container_name: eddi-prometheus
     ports:
       - "9090:9090"
     volumes:
+      - ./docs/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.retention.time=30d"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.6.0
+    container_name: eddi-grafana
     ports:
       - "3000:3000"
+    volumes:
+      - ./docs/monitoring/eddi-grafana-dashboard.json:/var/lib/grafana/dashboards/eddi.json:ro
+      - ./docs/monitoring/grafana-provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./docs/monitoring/grafana-provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana-data:/var/lib/grafana
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_USERS_DEFAULT_THEME: dark
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/eddi-operations.json
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./grafana-data/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana-data/dashboards:/var/lib/grafana/dashboards:ro
-    depends_on:
-      - prometheus
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/jaeger:2.7.0
+    container_name: eddi-jaeger
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
     restart: unless-stopped
 
 volumes:

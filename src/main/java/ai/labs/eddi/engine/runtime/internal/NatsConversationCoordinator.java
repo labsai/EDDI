@@ -3,6 +3,8 @@ package ai.labs.eddi.engine.runtime.internal;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import io.micrometer.core.instrument.FunctionCounter;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.nats.client.*;
 import io.nats.client.api.*;
 import io.quarkus.arc.profile.IfBuildProfile;
@@ -50,6 +52,19 @@ import java.util.concurrent.atomic.AtomicLong;
  * of Callable, allowing cross-instance message consumption.
  * </p>
  *
+ * <h3>Hardening (v6.0.2)</h3>
+ * <ul>
+ * <li><b>Eager cleanup</b>: Queues are removed from the map as soon as they
+ * become empty, preventing memory leaks from abandoned conversations.</li>
+ * <li><b>Max-size limit</b>: Configurable cap on active conversations
+ * ({@code eddi.coordinator.max-active-conversations}). Follow-up messages to
+ * currently-queued conversations are always accepted; conversations that have
+ * fully drained are treated as new.</li>
+ * <li><b>Micrometer metrics</b>: {@code eddi.coordinator.active_conversations},
+ * {@code eddi.coordinator.queue_depth},
+ * {@code eddi.coordinator.total_processed}.</li>
+ * </ul>
+ *
  * @author ginccc
  * @since 6.0.0
  * @see ai.labs.eddi.engine.runtime.IEventBus
@@ -64,10 +79,12 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
 
     private final IRuntime runtime;
     private final Instance<NatsMetrics> metricsInstance;
+    private final MeterRegistry meterRegistry;
     private final String natsUrl;
     private final String streamName;
     private final String deadLetterStreamName;
     private final int maxRetries;
+    private final int maxActiveConversations;
 
     private Connection natsConnection;
     private JetStream jetStream;
@@ -82,22 +99,36 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
 
     @Inject
     public NatsConversationCoordinator(IRuntime runtime, Instance<NatsMetrics> metricsInstance,
+            MeterRegistry meterRegistry,
             @ConfigProperty(name = "eddi.nats.url", defaultValue = "nats://localhost:4222") String natsUrl,
             @ConfigProperty(name = "eddi.nats.stream-name", defaultValue = "EDDI_CONVERSATIONS") String streamName,
             @ConfigProperty(name = "eddi.nats.dead-letter-stream-name", defaultValue = "EDDI_DEAD_LETTERS") String deadLetterStreamName,
             @ConfigProperty(name = "eddi.nats.max-retries", defaultValue = "3") int maxRetries,
-            @ConfigProperty(name = "eddi.nats.ack-wait-seconds", defaultValue = "60") long ackWaitSeconds) {
+            @ConfigProperty(name = "eddi.coordinator.max-active-conversations", defaultValue = "10000") int maxActiveConversations) {
         this.runtime = runtime;
         this.metricsInstance = metricsInstance;
+        this.meterRegistry = meterRegistry;
         this.natsUrl = natsUrl;
         this.streamName = streamName;
         this.deadLetterStreamName = deadLetterStreamName;
         this.maxRetries = maxRetries;
+        this.maxActiveConversations = maxActiveConversations;
     }
 
     @PostConstruct
     void init() {
         start();
+
+        // Register coordinator-level Micrometer metrics after successful start
+        meterRegistry.gauge("eddi.coordinator.active_conversations", conversationQueues, Map::size);
+        meterRegistry.gauge("eddi.coordinator.queue_depth", conversationQueues, this::computeTotalQueueDepth);
+        FunctionCounter.builder("eddi.coordinator.total_processed", totalProcessed, AtomicLong::doubleValue)
+                .description("Total conversation tasks processed")
+                .register(meterRegistry);
+    }
+
+    private double computeTotalQueueDepth(Map<String, BlockingQueue<RetryableCallable>> queues) {
+        return queues.values().stream().mapToInt(BlockingQueue::size).sum();
     }
 
     @Override
@@ -159,6 +190,13 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
         }
     }
 
+    private static String sanitizeForLog(String value) {
+        if (value == null) {
+            return "null";
+        }
+        return value.replace('\n', '_').replace('\r', '_');
+    }
+
     /**
      * Submit a conversation task for ordered processing.
      *
@@ -175,14 +213,47 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
      */
     @Override
     public void submitInOrder(String conversationId, Callable<Void> callable) {
-        final BlockingQueue<RetryableCallable> queue = conversationQueues.computeIfAbsent(conversationId, k -> new LinkedTransferQueue<>());
+        final String safeConversationId = sanitizeForLog(conversationId);
+        // Max-size check: only reject truly new conversations, not follow-up messages.
+        // Note: this check is intentionally non-atomic (soft limit).
+        if (!conversationQueues.containsKey(conversationId) && conversationQueues.size() >= maxActiveConversations) {
+            log.warnf("Coordinator capacity exceeded (%d active conversations). Rejecting new conversationId=%s", maxActiveConversations,
+                    safeConversationId);
+            throw new java.util.concurrent.RejectedExecutionException(
+                    "Coordinator capacity exceeded: " + maxActiveConversations + " active conversations. Try again later.");
+        }
 
-        synchronized (queue) {
-            boolean wasEmpty = queue.isEmpty();
-            queue.offer(new RetryableCallable(callable));
+        // CAS loop: after acquiring the lock on the queue, verify it's still the
+        // map's current value. If submitNext() removed it (eager cleanup) between
+        // our computeIfAbsent and our synchronized(queue), the queue is orphaned
+        // and we must retry with a fresh computeIfAbsent.
+        //
+        // Happens-before correctness: ConcurrentHashMap.get() is ordered after
+        // the monitor release in submitNext's synchronized(queue) block, so our
+        // identity check sees the removal. In practice, retries are 0–1.
+        for (int attempt = 0;; attempt++) {
+            final BlockingQueue<RetryableCallable> queue = conversationQueues.computeIfAbsent(conversationId, k -> new LinkedTransferQueue<>());
 
-            if (wasEmpty) {
-                publishAndExecute(conversationId, queue, queue.element());
+            synchronized (queue) {
+                if (conversationQueues.get(conversationId) != queue) {
+                    if (attempt >= 3) {
+                        log.debugf("CAS loop retried %d times for conversationId=%s (expected 0-1)", attempt, safeConversationId);
+                    }
+                    continue; // retry with fresh computeIfAbsent
+                }
+
+                boolean wasEmpty = queue.isEmpty();
+                boolean enqueued = queue.offer(new RetryableCallable(callable));
+                if (!enqueued) {
+                    log.warnf("Failed to enqueue task for conversationId=%s", safeConversationId);
+                    throw new java.util.concurrent.RejectedExecutionException(
+                            "Failed to enqueue task for conversationId=" + safeConversationId);
+                }
+
+                if (wasEmpty) {
+                    publishAndExecute(conversationId, queue, queue.element());
+                }
+                return; // success
             }
         }
     }
@@ -203,7 +274,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 m.getPublishDuration().record(Duration.ofNanos(durationNanos));
             });
         } catch (IOException | JetStreamApiException e) {
-            log.warnf(e, "Failed to publish to NATS for conversation %s, executing locally", conversationId);
+            log.warnf(e, "Failed to publish to NATS for conversation %s, executing locally", sanitizeForLog(conversationId));
         }
 
         // Execute the callable via the runtime thread pool
@@ -222,11 +293,13 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 int attempt = retryable.incrementAndGetAttempt();
 
                 if (attempt < maxRetries) {
-                    log.warnf(t, "Conversation task failed (conversationId=%s, attempt=%d/%d), retrying...", conversationId, attempt, maxRetries);
+                    log.warnf(t, "Conversation task failed (conversationId=%s, attempt=%d/%d), retrying...", sanitizeForLog(conversationId), attempt,
+                            maxRetries);
                     // Re-execute the same callable (retry)
                     publishAndExecute(conversationId, queue, retryable);
                 } else {
-                    log.errorf(t, "Conversation task exhausted retries (conversationId=%s, attempts=%d), " + "routing to dead-letter", conversationId,
+                    log.errorf(t, "Conversation task exhausted retries (conversationId=%s, attempts=%d), " + "routing to dead-letter",
+                            sanitizeForLog(conversationId),
                             attempt);
                     routeToDeadLetter(conversationId, t);
                     submitNext(conversationId, queue);
@@ -255,12 +328,12 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                     failure.getMessage() != null ? failure.getMessage().replace("\"", "\\\"") : "unknown", System.currentTimeMillis());
 
             jetStream.publish(deadLetterSubject, payload.getBytes());
-            log.infof("Published dead-letter for conversation %s to %s", conversationId, deadLetterSubject);
+            log.infof("Published dead-letter for conversation %s to %s", sanitizeForLog(conversationId), sanitizeForLog(deadLetterSubject));
 
             totalDeadLettered.incrementAndGet();
             getMetrics().ifPresent(m -> m.getDeadLetterCount().increment());
         } catch (IOException | JetStreamApiException e) {
-            log.errorf(e, "Failed to publish dead-letter for conversation %s", conversationId);
+            log.errorf(e, "Failed to publish dead-letter for conversation %s", sanitizeForLog(conversationId));
         }
     }
 
@@ -271,6 +344,9 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
 
                 if (!queue.isEmpty()) {
                     publishAndExecute(conversationId, queue, queue.element());
+                } else {
+                    // Eager cleanup: remove empty queue to prevent memory leaks.
+                    conversationQueues.remove(conversationId, queue);
                 }
             }
         }
@@ -372,7 +448,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     public boolean discardDeadLetter(String entryId) {
         // For NATS, we can't selectively delete individual messages from a stream.
         // Instead, we log it and let the operator know.
-        log.infof("Dead-letter %s acknowledged (NATS stream messages expire via retention policy)", entryId);
+        log.infof("Dead-letter %s acknowledged (NATS stream messages expire via retention policy)", sanitizeForLog(entryId));
         return true;
     }
 

@@ -78,8 +78,8 @@ class ConversationServiceTest {
         gdprComplianceService = mock(GdprComplianceService.class);
         tenantQuotaService = mock(TenantQuotaService.class);
         userMemoryStore = mock(IUserMemoryStore.class);
-        when(tenantQuotaService.checkConversationQuota()).thenReturn(QuotaCheckResult.OK);
-        when(tenantQuotaService.checkApiCallQuota()).thenReturn(QuotaCheckResult.OK);
+        when(tenantQuotaService.acquireConversationSlot()).thenReturn(QuotaCheckResult.OK);
+        when(tenantQuotaService.acquireApiCallSlot()).thenReturn(QuotaCheckResult.OK);
         when(auditLedgerService.isEnabled()).thenReturn(false);
         MeterRegistry meterRegistry = new SimpleMeterRegistry();
 

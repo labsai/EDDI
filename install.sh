@@ -589,10 +589,10 @@ resolve_compose_files() {
     echo ""
     echo -e "  ${DIM}Downloading monitoring configuration...${RESET}"
     local monitoring_files=(
-      "prometheus.yml"
-      "grafana-data/provisioning/dashboards/dashboard.yml"
-      "grafana-data/provisioning/datasources/prometheus.yml"
-      "grafana-data/dashboards/eddi-operations.json"
+      "docs/monitoring/prometheus.yml"
+      "docs/monitoring/grafana-provisioning/dashboards/dashboards.yml"
+      "docs/monitoring/grafana-provisioning/datasources/datasources.yml"
+      "docs/monitoring/eddi-grafana-dashboard.json"
     )
     for mf in "${monitoring_files[@]}"; do
       local mf_target="$EDDI_DIR/$mf"
@@ -783,6 +783,13 @@ print_success() {
   echo -e "  ${BOLD}HTTPS${RESET}      →  ${CYAN}https://localhost:${EDDI_HTTPS_PORT}${RESET}"
   echo -e "  ${BOLD}MCP${RESET}        →  ${CYAN}http://localhost:${EDDI_PORT}/mcp${RESET}"
   echo -e "  ${BOLD}API docs${RESET}   →  ${CYAN}http://localhost:${EDDI_PORT}/q/swagger-ui${RESET}"
+
+  if [[ "$WITH_MONITORING" == "true" ]]; then
+    echo ""
+    echo -e "  ${BOLD}Grafana${RESET}    →  ${CYAN}http://localhost:3000${RESET}  ${DIM}(admin/admin)${RESET}"
+    echo -e "  ${BOLD}Prometheus${RESET} →  ${CYAN}http://localhost:9090${RESET}"
+    echo -e "  ${BOLD}Jaeger${RESET}     →  ${CYAN}http://localhost:16686${RESET}  ${DIM}(trace visualization)${RESET}"
+  fi
 
   if [[ "$WITH_AUTH" == "true" ]]; then
     echo ""

@@ -105,7 +105,7 @@ Follow this order unless the user explicitly requests something different.
 | Phase | Area                      | Description                                                                                                                               |
 | ----- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | —     | Memory Architecture       | Commit flags, RAG threshold, context selection, auto-compaction, property consolidation (see `docs/planning/memory-architecture-plan.md`) |
-| —     | Session Forking           | State snapshotting, conversation forking (see `docs/planning/agentic-improvements-plan.md` §7)                                            |
+| —     | Session Forking           | State snapshotting, conversation forking (see `planning/agentic-improvements-plan.md` §7)                                                 |
 | —     | Conversation Chaining     | Cross-session context carry-over (see `docs/planning/conversation-window-management.md` Strategy 3)                                       |
 | 9     | DAG Pipeline              | Parallel tasks, circuit breakers, OpenTelemetry tracing                                                                                   |
 | 9b    | HITL Framework            | Human-in-the-loop pause/resume/approve                                                                                                    |
