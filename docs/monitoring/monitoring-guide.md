@@ -45,6 +45,8 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d
 
 | Metric | Type | Description |
 |--------|------|-------------|
+| `eddi_pipeline_task_duration` | Timer | Per-task execution time (tagged by `task.id`, `task.type`) |
+| `eddi_pipeline_task_errors` | Counter | Task failures (tagged by `task.id`, `task.type`) |
 | `eddi_coordinator_active_conversations` | Gauge | Number of active conversation queues |
 | `eddi_coordinator_queue_depth` | Gauge | Total queued callables across all conversations |
 | `eddi_coordinator_total_processed` | Counter | Monotonic count of completed conversation tasks |
@@ -128,16 +130,27 @@ Trace: POST /agentstore/agents/{agentId}/conversations/{convId}
 ### Configuration
 
 ```properties
-# application.properties
+# application.properties — OTel is disabled by default
 quarkus.otel.service.name=eddi
-quarkus.otel.exporter.otlp.endpoint=http://jaeger:4317
+quarkus.otel.exporter.otlp.endpoint=http://localhost:4317
+quarkus.otel.sdk.disabled=true
 
-# Disable in dev/test
-%dev.quarkus.otel.sdk.disabled=true
-%test.quarkus.otel.sdk.disabled=true
+# Enable via env var when a collector is available:
+#   QUARKUS_OTEL_SDK_DISABLED=false
+#   QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+# docker-compose.monitoring.yml sets these automatically.
 ```
 
 **Switching backends:** EDDI uses standard OTLP protocol. To switch from Jaeger to Grafana Tempo, Datadog, or Honeycomb, just change the endpoint URL — no code changes needed.
+
+### Privacy Note (GDPR / HIPAA)
+
+> ⚠️ **Trace spans include `eddi.conversation.id` and `eddi.agent.id`.** If traces are exported to a third-party backend (Datadog, Honeycomb, Grafana Cloud), these identifiers leave your security boundary. While they are opaque IDs (not PII themselves), they can be correlated to user sessions.
+>
+> For regulated environments:
+> - Ensure your trace backend is covered by appropriate DPAs (Data Processing Agreements)
+> - Consider restricting trace export to self-hosted backends (Jaeger, Tempo) only
+> - Review Quarkus [OTel resource attributes](https://quarkus.io/guides/opentelemetry) for additional data that may be auto-attached
 
 ## Alerting Rules
 
@@ -218,10 +231,12 @@ Import `eddi-grafana-dashboard.json` from this directory:
 
 ## Production Checklist
 
-- [ ] Set `quarkus.otel.exporter.otlp.endpoint` to your trace collector
-- [ ] Remove `quarkus.otel.sdk.disabled` override (defaults to enabled)
+- [ ] Set `QUARKUS_OTEL_SDK_DISABLED=false` and `QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT` to your trace collector
 - [ ] Configure Prometheus to scrape `/q/metrics` (see `prometheus.yml`)
 - [ ] Import Grafana dashboard and configure alert notification channels
+- [ ] **Change `GF_SECURITY_ADMIN_PASSWORD`** before exposing Grafana publicly (default: `admin/admin`)
+- [ ] **Restrict Jaeger UI access** — Jaeger 2.x has no built-in auth; put it behind a reverse proxy or restrict to internal network
 - [ ] Set appropriate retention policies (Prometheus: 15d, Jaeger: 7d recommended)
 - [ ] Secure `/q/metrics` and `/q/health` endpoints if exposed externally
 - [ ] Review `eddi.coordinator.max-active-conversations` for your deployment scale
+- [ ] Review [Privacy Note](#privacy-note-gdpr--hipaa) if exporting traces to third-party backends

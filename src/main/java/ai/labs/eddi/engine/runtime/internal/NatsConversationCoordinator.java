@@ -3,6 +3,7 @@ package ai.labs.eddi.engine.runtime.internal;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.nats.client.*;
 import io.nats.client.api.*;
@@ -104,12 +105,14 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
 
     @PostConstruct
     void init() {
-        // Register coordinator-level Micrometer metrics
+        start();
+
+        // Register coordinator-level Micrometer metrics after successful start
         meterRegistry.gauge("eddi.coordinator.active_conversations", conversationQueues, Map::size);
         meterRegistry.gauge("eddi.coordinator.queue_depth", conversationQueues, this::computeTotalQueueDepth);
-        meterRegistry.gauge("eddi.coordinator.total_processed", totalProcessed, AtomicLong::doubleValue);
-
-        start();
+        FunctionCounter.builder("eddi.coordinator.total_processed", totalProcessed, AtomicLong::doubleValue)
+                .description("Total conversation tasks processed")
+                .register(meterRegistry);
     }
 
     private double computeTotalQueueDepth(Map<String, BlockingQueue<RetryableCallable>> queues) {
@@ -191,22 +194,34 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
      */
     @Override
     public void submitInOrder(String conversationId, Callable<Void> callable) {
-        // Max-size check: only reject truly new conversations, not follow-up messages
+        // Max-size check: only reject truly new conversations, not follow-up messages.
+        // Note: this check is intentionally non-atomic (soft limit).
         if (!conversationQueues.containsKey(conversationId) && conversationQueues.size() >= maxActiveConversations) {
-            log.errorf("Coordinator capacity exceeded (%d active conversations). Rejecting new conversationId=%s", maxActiveConversations,
+            log.warnf("Coordinator capacity exceeded (%d active conversations). Rejecting new conversationId=%s", maxActiveConversations,
                     conversationId);
             throw new java.util.concurrent.RejectedExecutionException(
                     "Coordinator capacity exceeded: " + maxActiveConversations + " active conversations. Try again later.");
         }
 
-        final BlockingQueue<RetryableCallable> queue = conversationQueues.computeIfAbsent(conversationId, k -> new LinkedTransferQueue<>());
+        // CAS loop: after acquiring the lock on the queue, verify it's still the
+        // map's current value. If submitNext() removed it (eager cleanup) between
+        // our computeIfAbsent and our synchronized(queue), the queue is orphaned
+        // and we must retry with a fresh computeIfAbsent.
+        while (true) {
+            final BlockingQueue<RetryableCallable> queue = conversationQueues.computeIfAbsent(conversationId, k -> new LinkedTransferQueue<>());
 
-        synchronized (queue) {
-            boolean wasEmpty = queue.isEmpty();
-            queue.offer(new RetryableCallable(callable));
+            synchronized (queue) {
+                if (conversationQueues.get(conversationId) != queue) {
+                    continue; // retry with fresh computeIfAbsent
+                }
 
-            if (wasEmpty) {
-                publishAndExecute(conversationId, queue, queue.element());
+                boolean wasEmpty = queue.isEmpty();
+                queue.offer(new RetryableCallable(callable));
+
+                if (wasEmpty) {
+                    publishAndExecute(conversationId, queue, queue.element());
+                }
+                return; // success
             }
         }
     }
