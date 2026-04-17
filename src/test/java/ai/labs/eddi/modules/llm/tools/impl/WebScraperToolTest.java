@@ -1,5 +1,6 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -16,7 +17,7 @@ class WebScraperToolTest {
 
     @BeforeEach
     void setUp() {
-        webScraperTool = new WebScraperTool();
+        webScraperTool = new WebScraperTool(new SafeHttpClient(10000));
     }
 
     // === SSRF Protection Tests ===

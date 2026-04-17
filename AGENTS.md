@@ -98,6 +98,7 @@ Follow this order unless the user explicitly requests something different.
 | —     | Commit Flags             | Strict write discipline for memory — uncommit failed task data, error digest injection              |
 | —     | Template Preview         | REST endpoint for previewing resolved system prompts with sample/live data                          |
 | —     | RC2 Hardening            | 2,000+ unit tests, 250+ integration tests, branding overhaul, rules deserialization fix             |
+| —     | Security Hardening v6.0.2 | SSRF prevention, SafeHttpClient, auth guard, vault salt, security headers, CodeQL + Trivy CI       |
 
 ### In Progress / Upcoming
 
@@ -249,6 +250,10 @@ Several infrastructure components are already built and should be reused, not du
 | **`CostTracker`** (via ToolExecutionService)             | Dollar-based LLM cost tracking per conversation                                                                                 | Cost ceilings for background LLM jobs (use `maxCostPerRun` instead of `maxLlmCallsPerRun` — dollar amounts are more meaningful than call counts because different operations cost vastly different amounts). |
 | **`SecretResolver`**                                     | Vault-based secret resolution for API keys and credentials                                                                      | Any feature that needs secrets (LLM providers, external APIs).                                                                                                                                               |
 | **Micrometer `MeterRegistry`**                           | Metrics collection (counters, timers, gauges) exposed at `/q/metrics`                                                           | Always add metrics to new features for observability.                                                                                                                                                        |
+| **`SafeHttpClient`**                                     | SSRF-safe HTTP wrapper — `Redirect.NEVER` + per-hop validated redirects, configurable timeout                                   | ALL outbound HTTP from LLM tools and integrations. Never create `HttpClient.newBuilder()` in tool code.                                                                                                      |
+| **`UrlValidationUtils`**                                 | Blocks private IPs, loopback, link-local, cloud metadata, non-HTTP schemes                                                     | Always call before fetching user-controlled URLs.                                                                                                                                                            |
+| **`AuthStartupGuard`**                                   | Fails startup if OIDC disabled in prod without explicit opt-out                                                                 | Automatic — operators only need `QUARKUS_OIDC_TENANT_ENABLED=true`.                                                                                                                                          |
+| **`VaultSaltManager`**                                   | Per-deployment PBKDF2 salt for KEK derivation                                                                                   | Managed by `VaultSecretProvider` — no direct usage needed.                                                                                                                                                   |
 
 #### Group Conversations — Context Flow
 
@@ -367,18 +372,24 @@ Pipeline: `Tool Call → Rate Limiter → Cache Check → Execute → Cost Track
 
 #### Tool Security
 
-- **Always validate URLs** with `UrlValidationUtils.validateUrl(url)` before fetching
+- **Use `SafeHttpClient`** (`@Inject SafeHttpClient`) for ALL outbound HTTP — never create `HttpClient.newBuilder()` directly
+- **Always validate URLs** with `UrlValidationUtils.validateUrl(url)` before fetching user-controlled input
 - **Only allow `http`/`https`** — never `file://`, `ftp://`, etc.
-- **Block private/internal addresses** (loopback, site-local, link-local, cloud metadata)
+- **Block private/internal addresses** — handled automatically by `SafeHttpClient.sendValidated()`
 - **Never use `ScriptEngine`** — use `SafeMathParser` (recursive-descent)
 
 ```java
-import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
+@Inject SafeHttpClient httpClient;
 
 @Tool("Fetches data from a URL")
 public String fetchData(@P("URL (http or https)") String url) {
-    validateUrl(url); // throws IllegalArgumentException if blocked
-    // ... proceed with fetch
+    try {
+        var request = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();
+        var response = httpClient.sendValidated(request, HttpResponse.BodyHandlers.ofString());
+        return response.body();
+    } catch (Exception e) {
+        return "Error fetching URL: " + e.getMessage();
+    }
 }
 ```
 
@@ -539,9 +550,11 @@ When designing any new feature, always consider these before finalizing the desi
 | `src/main/resources/initial-agents/`        | Agent Father and sample agent configs                       |
 | `.github/workflows/ci.yml`                  | CI/CD pipeline (build, test, Docker push, smoke test)       |
 | `docs/`                                     | 40 markdown files, published at docs.labs.ai                |
-| `docs/v6-planning/`                         | Architecture analysis, changelog, business logic analysis   |
 | `docker-compose.yml`                        | EDDI + MongoDB local setup                                  |
 | `docs/agent-configs/`                       | Agent config sources (e.g. Agent Father) — reference for AI |
+| `src/main/java/.../httpclient/SafeHttpClient.java` | Centralized SSRF-safe HTTP client wrapper              |
+| `src/main/java/.../security/AuthStartupGuard.java` | Production auth enforcement guard                      |
+| `.env.example`                              | Required environment variables                              |
 
 ---
 

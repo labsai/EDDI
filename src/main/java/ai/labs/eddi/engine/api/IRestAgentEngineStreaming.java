@@ -1,6 +1,7 @@
 package ai.labs.eddi.engine.api;
 
 import ai.labs.eddi.engine.model.InputData;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
@@ -25,6 +26,7 @@ import java.util.List;
  */
 @Path("/agents")
 @Tag(name = "Conversations")
+@RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
 public interface IRestAgentEngineStreaming {
 
     @POST

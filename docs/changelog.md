@@ -185,6 +185,241 @@ The store-level `tryIncrement*` methods guarantee that reset → check → incre
 
 ---
 
+## Security Hardening — Code Review Remediation (2026-04-17)
+
+**Repo:** EDDI (`fix/security-hardening-6.0.2`)
+**Commit:** `549e79fc`
+
+**What changed:** Addressed 10 findings from external code review of the security hardening branch. 3 blockers, 5 medium, 2 low.
+
+### Blocker Fixes
+
+- **#1 — DNS rebinding javadoc:** Removed misleading claim that `UrlValidationUtils.validateUrl()` "defeats DNS rebinding (TOCTOU) attacks." The default `SafeHttpClient` path does NOT pin resolved IPs — the JDK HttpClient re-resolves DNS independently. Updated javadoc to honestly document the risk acceptance. The `InetAddress[]` return value remains available for callers who choose to implement socket-level pinning.
+- **#2 — Salt migration path:** `rotateKek()` was using `saltManager.getSalt()` for both old and new KEK derivation. If the deployment was on legacy salt, both derived with the same legacy salt — salt was never migrated. Fix: `rotateKek()` now detects legacy salt, generates a new 16-byte random salt, derives newKek with it, re-encrypts DEKs, then persists the new salt via `VaultSaltManager.migrateSalt()`. Added `migrateSalt(byte[])` and `getLegacySaltBytes()` to `VaultSaltManager`.
+- **#3 — @DefaultBean on both persistence impls:** **Not a bug.** `DataStoreProducers.secretPersistence()` produces a non-default `@Produces @ApplicationScoped ISecretPersistence` bean that takes priority over both `@DefaultBean` implementations. This is the same pattern used for all 11 dual-persistence stores. Fixed the misleading javadoc on `PostgresSecretPersistence` ("Activated only when postgres build profile is active" → documents the actual `DataStoreProducers` runtime selection).
+
+### Medium Fixes
+
+- **#5 — Redirect header preservation:** `SafeHttpClient.sendWithRedirects()` was only copying `User-Agent` on redirects, silently dropping `Authorization`, `Accept`, `X-API-Key`, etc. Fix: same-origin redirects copy all headers (except HttpClient-managed ones like `Host`/`Content-Length`). Cross-origin redirects strip `Authorization`, `Cookie`, `Proxy-Authorization` but keep everything else. Method-downgrade redirects (301/302/303 → GET) also strip `Content-Type`.
+- **#6 — Teredo/6to4 javadoc:** `isPrivateIPv6` javadoc claimed "covering ULA, IPv4-mapped, and Teredo" but had no Teredo (2001::/32) or 6to4 (2002::/16) check. Fixed comment to say "covering ULA and IPv4-mapped" with a note that Teredo/6to4 are not blocked (deprecated tunneling protocols, embedded IPv4 would be caught by `isPrivateIPv4`).
+- **#7 — AuthStartupGuard blocks TEST mode:** `onStart()` only exempted `LaunchMode.DEVELOPMENT`. `LaunchMode.TEST` fell into the prod branch, which would throw `IllegalStateException` at startup for any `@QuarkusTest` that doesn't set `allow-unauthenticated=true`. Fix: exempt both `DEVELOPMENT` and `TEST`. Also added `eddi.security.allow-unauthenticated=true` to both `IntegrationTestProfile` and `PostgresIntegrationTestProfile` as defense-in-depth.
+- **#8 — Log spam:** Periodic auth warning fired at ERROR level every 60 seconds (525k lines/year). Changed to WARN level every 3600 seconds (1/hour). Initial startup message remains ERROR.
+- **#9 — No total timeout across redirect hops:** An attacker could chain slow-resolving redirects to hold connections open. Added overall wall-clock timeout (`connectTimeoutMs × 3`, default 30s) checked before each hop in `sendWithRedirects()`.
+
+### Low / Cleanup
+
+- **#13 — WebScraperToolSsrfTest deleted:** Every test used `http://127.0.0.1` as the initial URL, which was blocked by `validateUrl` before any redirect logic ran. All tests passed for the wrong reason. The real redirect-hop validation is already covered by `SafeHttpClientTest`. File deleted.
+
+### Design Decisions
+
+- **Salt migration order:** New salt is persisted AFTER DEKs are re-encrypted. If salt persistence fails, DEKs are on the new KEK but the legacy salt is still in the DB. Recovery: the legacy salt is a known constant (`"eddi-vault-kek-v1"`), so the operator can decrypt manually. Persisting salt first was considered but would leave the system in a worse state on partial failure (old DEKs encrypted with old-salt-derived KEK, but DB has new salt).
+- **Header preservation on redirects:** Follows browser behavior: same-origin preserves all, cross-origin strips auth. More permissive than the previous "only User-Agent" approach but matches real-world expectations for authenticated API integrations.
+- **AuthStartupGuard TEST exemption:** TEST mode is developer-controlled and not a production risk. The escape hatch (`allow-unauthenticated`) is the operator-facing control.
+
+### Test Coverage
+
+- `AuthStartupGuardTest`: 5 tests (added TEST mode exemption)
+- All 2236 unit tests pass, 0 failures, 0 errors
+
+**Files:**
+- `SafeHttpClient.java` — header preservation, wall-clock timeout, origin comparison
+- `UrlValidationUtils.java` — TOCTOU javadoc fix, Teredo comment fix
+- `VaultSaltManager.java` — `migrateSalt()`, `getLegacySaltBytes()`
+- `VaultSecretProvider.java` — `rotateKek()` salt migration logic
+- `AuthStartupGuard.java` — TEST mode exemption, hourly WARN instead of per-minute ERROR
+- `PostgresSecretPersistence.java` — javadoc correction
+- `AuthStartupGuardTest.java` — TEST mode test
+- `IntegrationTestProfile.java` — `allow-unauthenticated=true`
+- `PostgresIntegrationTestProfile.java` — `allow-unauthenticated=true`
+- `WebScraperToolSsrfTest.java` — deleted (redundant)
+
+---
+
+## Security Hardening Finalization + Documentation (2026-04-16)
+
+**Repo:** EDDI (`fix/security-hardening-6.0.2`)
+**Commit:** `711642a5`
+
+**What changed:** Completed remaining security hardening items + comprehensive documentation updates.
+
+### Code Changes
+
+- **SafeHttpClient (307/308 fix):** Redirect handling now preserves HTTP method and body for 307/308 per RFC 7538. Previously all redirects were downgraded to GET.
+- **SafeHttpClient (testability):** Extracted `validateRedirectTarget()` as package-private method for spy-based testing.
+- **SafeHttpClientTest:** 9 unit tests covering SSRF blocking (loopback, cloud metadata), redirect mechanics (too-many-hops, missing Location header), non-redirect responses (200, 404), `sendValidated()` validation, and 307 method preservation.
+- **AuthStartupGuard (testability):** Extracted `getLaunchMode()` wrapper over static `LaunchMode.current()`.
+- **AuthStartupGuardTest:** 4 unit tests covering dev mode, prod+no-auth (throws), prod+escape-hatch (warns), prod+OIDC-enabled (passes).
+- **SecurityUtilities:** Deleted. Zero callers confirmed (grep across entire src/). Dead code since EDDI 5.x.
+- **WeatherTool:** Fixed missing `java.time.Duration` import (pre-existing compilation error from SafeHttpClient migration).
+- **RestAgentGroupStore:** Removed UTF-8 BOM character causing checkstyle/compiler failures.
+
+### Documentation Changes
+
+- **AGENTS.md:** Added `SafeHttpClient`, `UrlValidationUtils`, `AuthStartupGuard`, `VaultSaltManager` to Reusable Infrastructure table. Added `Security Hardening v6.0.2` to Completed roadmap. Updated Tool Security section with `SafeHttpClient` pattern. Updated Key Files table.
+- **architecture.md:** New "Security Architecture" section covering SSRF 3-layer model, vault encryption model (PBKDF2 → KEK → DEK), authentication model (AuthStartupGuard decision matrix), CI security scanning, security headers, and DNS rebinding risk acceptance.
+- **README.md:** Expanded Security section from a single link to 5 bullet points covering production security defaults.
+
+### Design Decisions
+
+- **SecurityUtilities deletion > deprecation:** Zero callers and EDDI is self-contained — no external consumers to warn. Dead code should be removed.
+- **DNS rebinding (Option C):** Accepted risk. Exploitation requires cooperating DNS + race condition + bypassing redirect validation. Documented in architecture.md.
+- **Test approach:** Used Mockito spy (not MockedStatic) for `SafeHttpClient.validateRedirectTarget()` and `AuthStartupGuard.getLaunchMode()` — minimal production code changes, maximum test coverage.
+
+---
+
+## Security Hardening Sprint 2 — v6.0.2 (2026-04-16)
+
+**Repo:** EDDI (`fix/security-hardening-6.0.2`)
+
+**What changed:** Code review remediation + P2/P3 security items across 17 files.
+
+### Code Review Fixes (from Sprint 1 review)
+
+- **`application.properties`**: Fixed `OPTION` → `OPTIONS` typo in authenticated policy — CORS preflight requests would have received 401
+- **All tool HttpClients**: Added explicit `followRedirects(HttpClient.Redirect.NEVER)` to PdfReaderTool, WebSearchTool, WeatherTool — defense-in-depth (JDK default is NEVER but this documents security intent)
+
+### P0-2: SafeHttpClient — Centralized SSRF-Safe HTTP
+
+Created `SafeHttpClient` (`@ApplicationScoped`) wrapping `java.net.http.HttpClient` with:
+- `Redirect.NEVER` enforced at client level
+- `send()` with recursive per-hop redirect validation (max 5)
+- `sendValidated()` for user-controlled URLs (validates initial URL too)
+- Connect timeout from `httpClient.connectTimeoutInMillis` config
+
+Migrated 4 LLM tools (WebScraperTool, PdfReaderTool, WebSearchTool, WeatherTool) from inline `HttpClient.newBuilder()` to `@Inject SafeHttpClient`. WebScraperTool's 40-line manual redirect loop was replaced by `httpClient.send()`.
+
+### P3-1: SecurityUtilities — 3 Bug Fixes
+
+- `new Random()` per loop iteration → shared `SecureRandom` instance (CSPRNG)
+- Off-by-one: `nextInt(length - 1)` never generated the last character in the alphabet → `nextInt(length)`
+- `DigestUtils.md5Hex()` → `DigestUtils.sha256Hex()` (MD5 has known collision attacks)
+
+### P1-6: Qute Strict Rendering
+
+Added `%prod.quarkus.qute.strict-rendering=true` — Qute templates fail loudly on missing variables in production instead of silently rendering blanks.
+
+### P3-2: Security Response Headers
+
+Added via `quarkus.http.header.*`:
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: DENY`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `X-XSS-Protection: 0` (modern CSP replaces this)
+- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+- `Content-Security-Policy`: `default-src 'self'`, inline styles allowed for Manager SPA
+
+### P1-7: CI Security Scanning
+
+Added two new parallel jobs to `.github/workflows/ci.yml`:
+- **CodeQL SAST** — `security-extended` query set, uploads SARIF results to GitHub Security tab
+- **Trivy FS scan** — CRITICAL/HIGH severity, exit-code 1 (fails pipeline on findings)
+
+---
+
+## Security Hardening Sprint 1 — v6.0.2 (2026-04-16)
+
+**Repo:** EDDI (`fix/security-hardening-6.0.2`)
+
+**What changed:** Comprehensive security hardening across 26 files (1040 insertions). All items from the P0/P1 security ticket board.
+
+### P0-1: SSRF via Redirect in WebScraperTool
+
+`WebScraperTool.fetchUrl()` used `HttpClient.Redirect.NORMAL` — the JDK followed 3xx redirects with no per-hop validation. Attacker-controlled URL → 302 → `http://169.254.169.254/` was exploitable.
+
+**Fix:** Set `Redirect.NEVER`, implemented manual redirect loop (`followRedirectsSafely()`) that calls `UrlValidationUtils.validateUrl()` on every `Location` header. Capped at 5 hops total.
+
+### P0-3: UrlValidationUtils Hardened
+
+`isPrivateAddress()` only covered RFC 1918 and link-local. Missing: IPv6 ULA (fc00::/7), CGNAT (100.64.0.0/10), IPv4-mapped IPv6 (::ffff:x.x.x.x wrapping private ranges), multicast (224.0.0.0/4), unspecified (0.0.0.0/8).
+
+**Fix:** Extended to block all above ranges. Added injectable `HostResolver` interface for DNS rebinding defense and testability. `validateUrl()` now returns `InetAddress[]` so callers can pin the resolved IP for the actual HTTP request (TOCTOU defense).
+
+### P0-4: Authorization Gap on REST Resources
+
+7 REST interfaces had no authorization annotations — any authenticated user could perform admin operations.
+
+**Fix:** Added `@RolesAllowed`:
+- `eddi-admin`: `IRestAgentSetup`, `IRestCoordinatorAdmin`
+- `eddi-admin`, `eddi-user`: `IRestAgentEngine`, `IRestAgentEngineStreaming`, `IRestAgentManagement`, `IRestGroupConversation`, `IRestUserMemoryStore`
+
+Added `eddi-user` role + sample `user` account to `eddi-realm.json`.
+
+### P0-5: Fail-Loud Production Auth
+
+No warning when OIDC is disabled in production — operators could unknowingly expose the full API without authentication.
+
+**Fix:** Created `AuthStartupGuard.java` — observes `StartupEvent`, checks if OIDC tenant is disabled outside dev mode. Logs `FATAL` and calls `Quarkus.asyncExit(78)`. Escape hatch: `eddi.security.allow-unauthenticated=true`.
+
+### P0-6: Overly Permissive Permit Rule
+
+Single `permit1` path pattern allowed all HTTP methods on static asset paths — including POST/PUT/DELETE.
+
+**Fix:** Split into method-specific policies: static assets GET/HEAD only, health endpoint GET only, Slack webhook POST only.
+
+### P0-7: Jackson 3.x Ban
+
+No build-time guard against accidental Jackson 3.x introduction via transitive dependencies.
+
+**Fix:** Added `maven-enforcer-plugin` rule banning `tools.jackson.*` group ID (Jackson 3.x namespace).
+
+### P1-1: Per-Deployment Random KEK Salt
+
+KEK derivation used a fixed, hardcoded salt (`"eddi-vault-kek-v1"`). If two deployments used the same passphrase, they'd derive the same KEK.
+
+**Fix:**
+- Added `deriveKeyFromString(String, byte[])` overload to `EnvelopeCrypto`
+- Created `VaultSaltManager` — generates a random 16-byte salt on first boot, persists to `secretvault_meta` collection, loads on subsequent boots
+- Added `getMetaValue()`/`setMetaValue()` to `ISecretPersistence` (default methods) with implementations in both `MongoSecretPersistence` and `PostgresSecretPersistence`
+- **Backward compatible:** Upgrades from pre-6.0.2 auto-detect existing DEKs and use the legacy salt (no data loss)
+
+### P1-4: Redirect Cap
+
+`httpClient.maxRedirects` defaulted to 32 — excessive for any legitimate use case.
+
+**Fix:** Clamped to 5 in `application.properties`.
+
+### P1-5: Docker / Compose Hardening
+
+| Change | Before | After |
+|--------|--------|-------|
+| MongoDB version | `mongo:6.0` | `mongo:7.0.14` (pinned) |
+| MongoDB auth | None | `MONGO_INITDB_ROOT_USERNAME/PASSWORD` |
+| MongoDB port | `27017:27017` (all interfaces) | `127.0.0.1:27017:27017` |
+| Healthchecks | None | Both EDDI + MongoDB |
+| depends_on | Simple | `condition: service_healthy` |
+| Dockerfile | No HEALTHCHECK | `HEALTHCHECK` + non-root user documentation |
+| Environment | Inline defaults | `.env.example` template |
+
+### Test Coverage
+
+- `UrlValidationUtilsExtendedTest` — 16 parameterized tests (IPv6 ULA, CGNAT, IPv4-mapped, multicast, unspecified, DNS rebinding, regression)
+- `WebScraperToolSsrfTest` — 4 tests (redirect-to-loopback, redirect-to-metadata, too-many-redirects, Redirect.NEVER enforcement)
+- `VaultSecretProviderTest` — 12 tests (updated for VaultSaltManager constructor)
+- `SecretVaultIntegrationTest` — 35 tests (updated for VaultSaltManager constructor)
+
+**All 67 tests pass, 0 failures.**
+
+**Design decisions:**
+- **Fail-loud over fail-open:** User accepted breaking changes for production auth misconfiguration
+- **Legacy salt backward compat:** VaultSaltManager detects existing DEKs and auto-selects the legacy salt — no migration action needed from operators
+- **Default methods on interface:** `getMetaValue`/`setMetaValue` use `default` implementations (return null / no-op) so existing custom persistence implementations don't break
+
+**Files:**
+- `UrlValidationUtils.java`, `WebScraperTool.java` — SSRF hardening
+- `IRestAgentEngine.java`, `IRestAgentEngineStreaming.java`, `IRestAgentManagement.java`, `IRestAgentSetup.java`, `IRestGroupConversation.java`, `IRestCoordinatorAdmin.java`, `IRestUserMemoryStore.java` — `@RolesAllowed`
+- `AuthStartupGuard.java` — production auth guard (NEW)
+- `VaultSaltManager.java` — per-deployment salt manager (NEW)
+- `EnvelopeCrypto.java` — salt-parameterized key derivation
+- `VaultSecretProvider.java` — wired VaultSaltManager
+- `ISecretPersistence.java`, `MongoSecretPersistence.java`, `PostgresSecretPersistence.java` — metadata store
+- `application.properties` — fine-grained permit rules, redirect cap
+- `pom.xml` — maven-enforcer-plugin
+- `docker-compose.yml`, `Dockerfile.jvm`, `.env.example` — Docker hardening
+- `eddi-realm.json` — eddi-user role
+- Test files: `UrlValidationUtilsExtendedTest.java`, `WebScraperToolSsrfTest.java`, `VaultSecretProviderTest.java`, `SecretVaultIntegrationTest.java`
+
+---
+
 ## Version Bump to 6.0.1 (2026-04-15)
 
 **Repo:** EDDI (`feature/slack-integration`)

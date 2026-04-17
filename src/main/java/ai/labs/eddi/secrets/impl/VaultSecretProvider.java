@@ -3,6 +3,7 @@ package ai.labs.eddi.secrets.impl;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.VaultStartupBanner;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
+import ai.labs.eddi.secrets.crypto.VaultSaltManager;
 import ai.labs.eddi.secrets.model.*;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
 import ai.labs.eddi.secrets.persistence.PersistenceException;
@@ -57,6 +58,7 @@ public class VaultSecretProvider implements ISecretProvider {
 
     private final Optional<String> masterKeyConfig;
     private final ISecretPersistence persistence;
+    private final VaultSaltManager saltManager;
     private final MeterRegistry meterRegistry;
 
     private byte[] kek; // Key Encryption Key derived from master key
@@ -73,9 +75,10 @@ public class VaultSecretProvider implements ISecretProvider {
 
     @Inject
     public VaultSecretProvider(@ConfigProperty(name = "eddi.vault.master-key") Optional<String> masterKeyConfig, ISecretPersistence persistence,
-            MeterRegistry meterRegistry) {
+            VaultSaltManager saltManager, MeterRegistry meterRegistry) {
         this.masterKeyConfig = masterKeyConfig;
         this.persistence = persistence;
+        this.saltManager = saltManager;
         this.meterRegistry = meterRegistry;
     }
 
@@ -96,8 +99,17 @@ public class VaultSecretProvider implements ISecretProvider {
             return;
         }
 
-        this.kek = EnvelopeCrypto.deriveKeyFromString(masterKeyConfig.get());
+        // Initialize per-deployment salt (generates on first boot, loads on subsequent)
+        saltManager.initialize();
+
+        this.kek = EnvelopeCrypto.deriveKeyFromString(masterKeyConfig.get(), saltManager.getSalt());
         this.available = true;
+
+        if (saltManager.isUsingLegacySalt()) {
+            LOGGER.warn("[VAULT] Using legacy fixed salt for KEK derivation. "
+                    + "Run KEK rotation to migrate to a per-deployment random salt.");
+        }
+
         VaultStartupBanner.printEnabled();
     }
 
@@ -323,8 +335,20 @@ public class VaultSecretProvider implements ISecretProvider {
         rotateCounter.increment();
 
         try {
-            byte[] oldKek = EnvelopeCrypto.deriveKeyFromString(oldMasterKey);
-            byte[] newKek = EnvelopeCrypto.deriveKeyFromString(newMasterKey);
+            // 1. Derive old KEK with current salt (legacy or random)
+            byte[] oldKek = EnvelopeCrypto.deriveKeyFromString(oldMasterKey, saltManager.getSalt());
+
+            // 2. Determine new salt — migrate from legacy if needed
+            byte[] newSalt;
+            boolean migratingFromLegacy = saltManager.isUsingLegacySalt();
+            if (migratingFromLegacy) {
+                newSalt = new byte[16];
+                new java.security.SecureRandom().nextBytes(newSalt);
+                LOGGER.info("[VAULT] KEK rotation will also migrate from legacy salt to per-deployment random salt.");
+            } else {
+                newSalt = saltManager.getSalt();
+            }
+            byte[] newKek = EnvelopeCrypto.deriveKeyFromString(newMasterKey, newSalt);
 
             // Phase 1: Verify — decrypt ALL DEKs with old KEK to validate before mutating
             List<EncryptedDek> allDeks = persistence.listAllDeks();
@@ -344,10 +368,18 @@ public class VaultSecretProvider implements ISecretProvider {
                 persistence.upsertDek(encDek);
             }
 
+            // Phase 3: Persist new salt AFTER DEKs are re-encrypted.
+            // If this fails, DEKs are on newKek but salt in DB is still legacy.
+            // The operator can retry — the legacy salt is a known constant.
+            if (migratingFromLegacy) {
+                saltManager.migrateSalt(newSalt);
+            }
+
             // Update our in-memory KEK to the new one
             this.kek = newKek;
 
-            LOGGER.infof("KEK rotated: %d DEKs re-encrypted", allDeks.size());
+            LOGGER.infof("KEK rotated: %d DEKs re-encrypted%s", allDeks.size(),
+                    migratingFromLegacy ? " + salt migrated to per-deployment random" : "");
             return allDeks.size();
         } catch (PersistenceException | EnvelopeCrypto.CryptoException e) {
             errorCounter.increment();

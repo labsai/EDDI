@@ -1,5 +1,6 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -18,7 +19,7 @@ class WeatherToolTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        weatherTool = new WeatherTool();
+        weatherTool = new WeatherTool(new SafeHttpClient(10000));
 
         // Use reflection to set the Optional field (simulating no API key configured)
         Field apiKeyField = WeatherTool.class.getDeclaredField("openWeatherMapApiKey");

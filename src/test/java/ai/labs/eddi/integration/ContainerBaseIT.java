@@ -55,6 +55,7 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
             // Disable auth for tests
             .withEnv("QUARKUS_OIDC_TENANT_ENABLED", "false")
             .withEnv("AUTHORIZATION_ENABLED", "false")
+            .withEnv("EDDI_SECURITY_ALLOW_UNAUTHENTICATED", "true")
             .dependsOn(MONGO)
             .waitingFor(Wait.forHttp("/q/health/ready")
                     .forPort(7070)

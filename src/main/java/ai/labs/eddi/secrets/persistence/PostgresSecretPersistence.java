@@ -21,8 +21,9 @@ import java.util.Optional;
  * secrets and DEKs in two tables: {@code secret_vault_secrets} and
  * {@code secret_vault_deks}.
  * <p>
- * Activated only when the {@code postgres} build profile is active
- * ({@code @DefaultBean}).
+ * Annotated {@code @DefaultBean} so that the non-default {@code @Produces}
+ * method in {@code DataStoreProducers} takes priority. Selected at runtime when
+ * {@code eddi.datastore.type=postgres}.
  *
  * @author ginccc
  * @since 6.0.0
@@ -67,6 +68,13 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             CREATE INDEX IF NOT EXISTS idx_svd_tenant ON secret_vault_deks (tenant_id)
             """;
 
+    private static final String CREATE_META_TABLE = """
+            CREATE TABLE IF NOT EXISTS secret_vault_meta (
+                key VARCHAR(255) PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """;
+
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
 
@@ -81,6 +89,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_SECRETS_TABLE);
             stmt.execute(CREATE_DEKS_TABLE);
+            stmt.execute(CREATE_META_TABLE);
             for (String sql : CREATE_INDEXES.split(";")) {
                 sql = sql.trim();
                 if (!sql.isEmpty())
@@ -244,6 +253,42 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             throw new PersistenceException("Failed to list all DEKs", e);
         }
         return deks;
+    }
+
+    // ─── Metadata ───
+
+    @Override
+    public String getMetaValue(String key) {
+        ensureSchema();
+        String sql = "SELECT value FROM secret_vault_meta WHERE key = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, key);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next())
+                    return rs.getString("value");
+            }
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to read meta value: " + key, e);
+        }
+        return null;
+    }
+
+    @Override
+    public void setMetaValue(String key, String value) {
+        ensureSchema();
+        String sql = """
+                INSERT INTO secret_vault_meta (key, value) VALUES (?, ?)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, key);
+            ps.setString(2, value);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to write meta value: " + key, e);
+        }
     }
 
     // ─── Conversion helpers ───

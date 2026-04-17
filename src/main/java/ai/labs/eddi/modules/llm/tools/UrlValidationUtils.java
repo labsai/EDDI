@@ -9,12 +9,28 @@ import java.net.UnknownHostException;
  * URL validation utilities to prevent SSRF (Server-Side Request Forgery)
  * attacks. Validates that URLs use allowed schemes and do not target
  * private/internal networks.
+ * <p>
+ * Covers: RFC 1918 (IPv4 private), RFC 4193 (IPv6 ULA), RFC 6598 (CGNAT),
+ * IPv4-mapped IPv6, link-local, loopback, multicast, unspecified, and cloud
+ * metadata endpoints.
  */
 public final class UrlValidationUtils {
 
     private UrlValidationUtils() {
         // Utility class
     }
+
+    /**
+     * Functional interface for hostname resolution. Allows mocking in tests to
+     * simulate DNS rebinding scenarios.
+     */
+    @FunctionalInterface
+    public interface HostResolver {
+        InetAddress[] resolveAll(String host) throws UnknownHostException;
+    }
+
+    /** Default resolver delegating to the JDK. */
+    private static final HostResolver DEFAULT_RESOLVER = InetAddress::getAllByName;
 
     /**
      * Validates that the given URL is safe for server-side fetching. Checks: 1. URL
@@ -24,9 +40,33 @@ public final class UrlValidationUtils {
      * @param url
      *            the URL to validate
      * @throws IllegalArgumentException
-     *             if the URL is invalid or targets a production address
+     *             if the URL is invalid or targets a private address
      */
     public static void validateUrl(String url) {
+        validateUrl(url, DEFAULT_RESOLVER);
+    }
+
+    /**
+     * Validates URL safety using a custom host resolver. Returns the resolved
+     * addresses for callers that wish to implement socket-level IP pinning.
+     * <p>
+     * <b>Note:</b> The default {@link SafeHttpClient} code path does NOT pin the
+     * resolved addresses — the JDK {@code HttpClient} re-resolves DNS
+     * independently. This means a short-TTL DNS rebinding attack is theoretically
+     * possible between validation and connect. The risk is accepted because
+     * exploitation requires a cooperating DNS server, a sub-second race window, AND
+     * bypassing per-hop redirect validation. See {@code docs/architecture.md} "DNS
+     * Rebinding" for details.
+     *
+     * @param url
+     *            the URL to validate
+     * @param resolver
+     *            the host resolver to use (injectable for testing)
+     * @return the resolved InetAddresses (for optional pinning by callers)
+     * @throws IllegalArgumentException
+     *             if the URL is invalid or targets a private address
+     */
+    public static InetAddress[] validateUrl(String url, HostResolver resolver) {
         if (url == null || url.isBlank()) {
             throw new IllegalArgumentException("URL must not be null or empty");
         }
@@ -58,12 +98,13 @@ public final class UrlValidationUtils {
 
         // 4. Resolve hostname and check if it's a private IP
         try {
-            InetAddress[] addresses = InetAddress.getAllByName(host);
+            InetAddress[] addresses = resolver.resolveAll(host);
             for (InetAddress addr : addresses) {
                 if (isPrivateAddress(addr)) {
                     throw new IllegalArgumentException("URL resolves to a private/internal address which is not allowed: " + host);
                 }
             }
+            return addresses;
         } catch (UnknownHostException e) {
             throw new IllegalArgumentException("Cannot resolve hostname: " + host);
         }
@@ -79,20 +120,128 @@ public final class UrlValidationUtils {
     }
 
     /**
-     * Checks whether an InetAddress is a private, loopback, or link-local address.
+     * Checks whether an InetAddress is a private, loopback, link-local, multicast,
+     * unspecified, or otherwise unsafe address for outbound requests.
+     * <p>
+     * Covers:
+     * <ul>
+     * <li>Loopback (127.0.0.0/8, ::1)</li>
+     * <li>RFC 1918 private (10/8, 172.16/12, 192.168/16)</li>
+     * <li>RFC 4193 IPv6 ULA (fc00::/7)</li>
+     * <li>RFC 6598 CGNAT (100.64.0.0/10)</li>
+     * <li>Link-local (169.254/16, fe80::/10)</li>
+     * <li>IPv4-mapped IPv6 (::ffff:x.x.x.x) — extracts and re-checks IPv4</li>
+     * <li>IPv4 multicast (224.0.0.0/4)</li>
+     * <li>Unspecified (0.0.0.0/8)</li>
+     * <li>Cloud metadata (169.254.169.254)</li>
+     * </ul>
      */
     static boolean isPrivateAddress(InetAddress address) {
-        return address.isLoopbackAddress() || address.isSiteLocalAddress() || address.isLinkLocalAddress() || address.isAnyLocalAddress()
-                || isCloudMetadataAddress(address);
+        // JDK covers: loopback, site-local (RFC 1918 for IPv4, fec0::/10 for IPv6),
+        // link-local, any-local (0.0.0.0, ::)
+        if (address.isLoopbackAddress() || address.isSiteLocalAddress() || address.isLinkLocalAddress() || address.isAnyLocalAddress()
+                || address.isMulticastAddress()) {
+            return true;
+        }
+
+        byte[] bytes = address.getAddress();
+
+        if (bytes.length == 4) {
+            return isPrivateIPv4(bytes);
+        }
+
+        if (bytes.length == 16) {
+            return isPrivateIPv6(bytes);
+        }
+
+        // Unknown address length — block by default for safety
+        return true;
+    }
+
+    /**
+     * Additional IPv4 checks beyond what JDK covers.
+     */
+    private static boolean isPrivateIPv4(byte[] bytes) {
+        int b0 = bytes[0] & 0xFF;
+        int b1 = bytes[1] & 0xFF;
+
+        // CGNAT (100.64.0.0/10) — RFC 6598
+        if (b0 == 100 && (b1 & 0xC0) == 64) {
+            return true;
+        }
+
+        // Multicast (224.0.0.0/4)
+        if ((b0 & 0xF0) == 224) {
+            return true;
+        }
+
+        // Unspecified / "this network" (0.0.0.0/8)
+        if (b0 == 0) {
+            return true;
+        }
+
+        // Cloud metadata (169.254.169.254)
+        if (isCloudMetadataAddress(bytes)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * IPv6 private address checks covering ULA and IPv4-mapped addresses.
+     * <p>
+     * Teredo (2001::/32) and 6to4 (2002::/16) tunneling prefixes are NOT blocked —
+     * these are largely deprecated and the embedded IPv4 addresses would be caught
+     * by {@link #isPrivateIPv4(byte[])} if they were private.
+     */
+    private static boolean isPrivateIPv6(byte[] bytes) {
+        // IPv6 ULA (fc00::/7) — RFC 4193
+        if ((bytes[0] & 0xFE) == 0xFC) {
+            return true;
+        }
+
+        // IPv4-mapped IPv6 (::ffff:x.x.x.x)
+        // Bytes 0-9 are zero, bytes 10-11 are 0xFF
+        if (isIPv4Mapped(bytes)) {
+            byte[] ipv4 = new byte[4];
+            System.arraycopy(bytes, 12, ipv4, 0, 4);
+
+            // Re-check the embedded IPv4 address against all IPv4 rules
+            try {
+                InetAddress embedded = InetAddress.getByAddress(ipv4);
+                if (embedded.isLoopbackAddress() || embedded.isSiteLocalAddress() || embedded.isLinkLocalAddress() || embedded.isAnyLocalAddress()
+                        || embedded.isMulticastAddress() || isPrivateIPv4(ipv4)) {
+                    return true;
+                }
+            } catch (Exception e) {
+                // Should never happen with 4-byte array, but block if it does
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Detects IPv4-mapped IPv6 addresses (::ffff:x.x.x.x). Format: 80 bits of zero,
+     * 16 bits of 0xFFFF, 32 bits of IPv4.
+     */
+    private static boolean isIPv4Mapped(byte[] bytes) {
+        if (bytes.length != 16)
+            return false;
+        for (int i = 0; i < 10; i++) {
+            if (bytes[i] != 0)
+                return false;
+        }
+        return (bytes[10] & 0xFF) == 0xFF && (bytes[11] & 0xFF) == 0xFF;
     }
 
     /**
      * Checks for cloud metadata service addresses (169.254.169.254).
      */
-    private static boolean isCloudMetadataAddress(InetAddress address) {
-        byte[] bytes = address.getAddress();
+    private static boolean isCloudMetadataAddress(byte[] bytes) {
         if (bytes.length == 4) {
-            // 169.254.169.254 - AWS/GCP/Azure metadata endpoint
             return (bytes[0] & 0xFF) == 169 && (bytes[1] & 0xFF) == 254 && (bytes[2] & 0xFF) == 169 && (bytes[3] & 0xFF) == 254;
         }
         return false;

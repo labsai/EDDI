@@ -6,6 +6,7 @@ import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
+import ai.labs.eddi.secrets.crypto.VaultSaltManager;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.runtime.StartupEvent;
 import org.junit.jupiter.api.BeforeEach;
@@ -61,7 +62,9 @@ class SecretVaultIntegrationTest {
         secretStore.clear();
 
         // Create provider with real crypto, mocked persistence
-        provider = new VaultSecretProvider(Optional.of(MASTER_KEY), persistence, meterRegistry);
+        var saltManager = new VaultSaltManager(persistence);
+        saltManager.initialize(); // Uses legacy salt since mock returns null for meta
+        provider = new VaultSecretProvider(Optional.of(MASTER_KEY), persistence, saltManager, meterRegistry);
         provider.initMetrics();
         provider.onStartup(new StartupEvent());
 
@@ -422,7 +425,9 @@ class SecretVaultIntegrationTest {
         @Test
         @DisplayName("vault unavailable throws SecretProviderException")
         void vaultUnavailable() {
-            var unavailableProvider = new VaultSecretProvider(Optional.empty(), persistence, meterRegistry);
+            var sm = new VaultSaltManager(persistence);
+            sm.initialize();
+            var unavailableProvider = new VaultSecretProvider(Optional.empty(), persistence, sm, meterRegistry);
             unavailableProvider.initMetrics();
 
             assertThrows(ISecretProvider.SecretProviderException.class, () -> unavailableProvider.resolve(new SecretReference(TENANT, KEY_NAME)));
