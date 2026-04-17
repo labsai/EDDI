@@ -126,7 +126,7 @@ public class InMemoryTenantQuotaStore implements ITenantQuotaStore {
         synchronized (counters) {
             counters.resetExpiredWindows();
             counters.addCost(cost);
-            if (limit >= 0 && counters.getMonthlyCostUsd() >= limit) {
+            if (limit >= 0 && counters.getMonthlyCostUsd() > limit) {
                 return QuotaCheckResult.denied(
                         String.format("Monthly cost budget ($%.2f) exceeded for tenant '%s'", limit, tenantId));
             }

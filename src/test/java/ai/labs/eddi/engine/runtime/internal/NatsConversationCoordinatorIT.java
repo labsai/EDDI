@@ -62,7 +62,7 @@ class NatsConversationCoordinatorIT {
         // Create coordinator with real NATS connection (no mocks)
         coordinator = new NatsConversationCoordinator(runtime, null, // no metrics instance for IT
                 new SimpleMeterRegistry(), natsUrl, "EDDI_IT_CONVERSATIONS", "EDDI_IT_DEAD_LETTERS", 3, // maxRetries
-                60, 10000);
+                10000);
 
         // Start coordinator (connects to NATS, creates streams)
         coordinator.start();

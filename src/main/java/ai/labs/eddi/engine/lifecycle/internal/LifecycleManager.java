@@ -239,6 +239,8 @@ public class LifecycleManager implements ILifecycleManager {
                             Objects.requireNonNullElse(conversationMemory.getAgentId(), "unknown"))
                     .startSpan();
 
+            long taskStartTime = System.nanoTime();
+
             try (Scope ignored = taskSpan.makeCurrent()) {
                 // Retrieve task's component from cache
                 // Component contains task-specific configuration loaded during agent
@@ -252,25 +254,12 @@ public class LifecycleManager implements ILifecycleManager {
                     eventSink.onTaskStart(task.getId(), task.getType(), index);
                 }
 
-                long taskStartTime = System.nanoTime();
-
                 // Execute the task, transforming the conversation memory
                 task.execute(conversationMemory, component);
 
                 // Emit task_complete event if streaming
                 long durationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
                 Map<String, Object> summary = buildTaskSummary(conversationMemory, task);
-
-                // Record Micrometer timer for dashboards & alerting
-                String taskId = task.getId() != null ? task.getId() : "unknown";
-                String taskType = task.getType() != null ? task.getType() : "unknown";
-                String meterKey = taskId + "|" + taskType;
-                TASK_TIMERS.computeIfAbsent(meterKey, k -> Timer.builder("eddi.pipeline.task.duration")
-                        .tag("task.id", taskId)
-                        .tag("task.type", taskType)
-                        .description("Pipeline task execution duration")
-                        .publishPercentileHistogram()
-                        .register(Metrics.globalRegistry)).record(java.time.Duration.ofMillis(durationMs));
 
                 if (eventSink != null) {
                     eventSink.onTaskComplete(task.getId(), task.getType(), durationMs, summary);
@@ -315,6 +304,21 @@ public class LifecycleManager implements ILifecycleManager {
                 }
                 throw new LifecycleException("Error while executing lifecycle!", e);
             } finally {
+                // Record Micrometer timer for dashboards & alerting — in finally so
+                // both successful and failed task executions contribute to the
+                // duration histogram (failing tasks with long timeouts are especially
+                // important for latency monitoring during incidents).
+                long durationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
+                String taskId = task.getId() != null ? task.getId() : "unknown";
+                String taskType = task.getType() != null ? task.getType() : "unknown";
+                String meterKey = taskId + "|" + taskType;
+                TASK_TIMERS.computeIfAbsent(meterKey, k -> Timer.builder("eddi.pipeline.task.duration")
+                        .tag("task.id", taskId)
+                        .tag("task.type", taskType)
+                        .description("Pipeline task execution duration")
+                        .publishPercentileHistogram()
+                        .register(Metrics.globalRegistry)).record(java.time.Duration.ofMillis(durationMs));
+
                 taskSpan.end();
             }
         }

@@ -69,8 +69,7 @@ class NatsConversationCoordinatorTest {
         // Create coordinator with mocked dependencies (skip start() since that needs
         // real NATS)
         coordinator = new NatsConversationCoordinator(runtime, metricsInstance, new SimpleMeterRegistry(), "nats://localhost:4222",
-                "EDDI_CONVERSATIONS", "EDDI_DEAD_LETTERS", 3,
-                60, 10000);
+                "EDDI_CONVERSATIONS", "EDDI_DEAD_LETTERS", 3, 10000);
 
         // Inject the mocked JetStream via reflection
         var jetStreamField = NatsConversationCoordinator.class.getDeclaredField("jetStream");

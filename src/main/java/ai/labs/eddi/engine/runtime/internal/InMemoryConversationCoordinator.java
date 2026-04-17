@@ -128,7 +128,11 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
                 }
 
                 boolean wasEmpty = queue.isEmpty();
-                queue.offer(callable);
+                boolean enqueued = queue.offer(callable);
+                if (!enqueued) {
+                    log.warnf("Failed to enqueue task for conversationId=%s", conversationId);
+                    throw new RejectedExecutionException("Failed to enqueue task for conversationId=" + conversationId);
+                }
 
                 if (wasEmpty) {
                     executeWithRetry(conversationId, queue, callable, 0);

@@ -104,7 +104,6 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
             @ConfigProperty(name = "eddi.nats.stream-name", defaultValue = "EDDI_CONVERSATIONS") String streamName,
             @ConfigProperty(name = "eddi.nats.dead-letter-stream-name", defaultValue = "EDDI_DEAD_LETTERS") String deadLetterStreamName,
             @ConfigProperty(name = "eddi.nats.max-retries", defaultValue = "3") int maxRetries,
-            @ConfigProperty(name = "eddi.nats.ack-wait-seconds", defaultValue = "60") long ackWaitSeconds,
             @ConfigProperty(name = "eddi.coordinator.max-active-conversations", defaultValue = "10000") int maxActiveConversations) {
         this.runtime = runtime;
         this.metricsInstance = metricsInstance;
@@ -236,7 +235,12 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 }
 
                 boolean wasEmpty = queue.isEmpty();
-                queue.offer(new RetryableCallable(callable));
+                boolean enqueued = queue.offer(new RetryableCallable(callable));
+                if (!enqueued) {
+                    log.warnf("Failed to enqueue task for conversationId=%s", conversationId);
+                    throw new java.util.concurrent.RejectedExecutionException(
+                            "Failed to enqueue task for conversationId=" + conversationId);
+                }
 
                 if (wasEmpty) {
                     publishAndExecute(conversationId, queue, queue.element());
