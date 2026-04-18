@@ -47,6 +47,8 @@ import java.net.URI;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -1318,9 +1320,14 @@ public class McpAdminTools {
             var statuses = agentAdmin.getDeploymentStatuses(
                     ai.labs.eddi.engine.model.Deployment.Environment.production);
 
-            // Group connectors by platformChannelId to detect duplicates
-            // channelId → list of (connector, agentId, agentName)
-            var channelGroups = new LinkedHashMap<String, List<Map<String, Object>>>();
+            // N6: typed record instead of Map<String,Object>
+            record MigrationEntry(AgentConfiguration.ChannelConnector connector,
+                    String agentId, String agentName, String channelType) {
+            }
+
+            // N4: group key includes channelType to avoid cross-platform collisions
+            var channelGroups = new LinkedHashMap<String, List<MigrationEntry>>();
+            var skipped = new ArrayList<Map<String, Object>>();
 
             for (var status : statuses) {
                 if (status.getDescriptor() == null || status.getDescriptor().isDeleted())
@@ -1338,75 +1345,105 @@ public class McpAdminTools {
                         String platformChannelId = connector.getConfig().get("channelId");
                         if (platformChannelId == null || platformChannelId.isBlank())
                             continue;
+                        String channelType = connector.getType().toString().toLowerCase();
+                        String agentName = status.getDescriptor().getName() != null
+                                ? status.getDescriptor().getName()
+                                : agentId;
 
-                        channelGroups.computeIfAbsent(platformChannelId, k -> new ArrayList<>())
-                                .add(Map.of(
-                                        "connector", connector,
-                                        "agentId", agentId,
-                                        "agentName", status.getDescriptor().getName() != null
-                                                ? status.getDescriptor().getName()
-                                                : agentId,
-                                        "channelType", connector.getType().toString().toLowerCase()));
+                        // N4: channelType:channelId as group key
+                        String groupKey = channelType + ":" + platformChannelId;
+                        channelGroups.computeIfAbsent(groupKey, k -> new ArrayList<>())
+                                .add(new MigrationEntry(connector, agentId, agentName, channelType));
                     }
                 } catch (Exception e) {
-                    // skip
+                    // N1: restore per-agent error reporting
+                    skipped.add(Map.of("agentId", agentId,
+                            "error", String.valueOf(e.getMessage())));
                 }
             }
 
             var migrated = new ArrayList<Map<String, Object>>();
-            var skipped = new ArrayList<Map<String, Object>>();
 
-            for (var entry : channelGroups.entrySet()) {
-                String platformChannelId = entry.getKey();
-                List<Map<String, Object>> connectors = entry.getValue();
+            for (var groupEntry : channelGroups.entrySet()) {
+                List<MigrationEntry> entries = groupEntry.getValue();
 
-                // Build a single multi-target config for this channelId
-                var firstConnector = (AgentConfiguration.ChannelConnector) connectors.get(0).get("connector");
-                String channelType = (String) connectors.get(0).get("channelType");
+                // N5: sort by agentId for deterministic ordering
+                entries.sort(Comparator.comparing(MigrationEntry::agentId));
+
+                MigrationEntry first = entries.get(0);
+                String channelType = first.channelType();
+                String platformChannelId = first.connector().getConfig().get("channelId");
+
+                // N2: detect credential conflicts across merged connectors
+                var credentialConflicts = new ArrayList<String>();
+                for (String credKey : List.of("botToken", "signingSecret")) {
+                    long distinct = entries.stream()
+                            .map(e -> String.valueOf(e.connector().getConfig().get(credKey)))
+                            .distinct().count();
+                    if (distinct > 1) {
+                        credentialConflicts.add(credKey);
+                    }
+                }
+                if (!credentialConflicts.isEmpty()) {
+                    var conflict = new LinkedHashMap<String, Object>();
+                    conflict.put("platformChannelId", platformChannelId);
+                    conflict.put("channelType", channelType);
+                    conflict.put("action", "credential_conflict");
+                    conflict.put("conflictingKeys", credentialConflicts);
+                    conflict.put("agents", entries.stream().map(MigrationEntry::agentId).toList());
+                    conflict.put("hint", "These agents share a channelId but have different "
+                            + String.join("/", credentialConflicts)
+                            + ". Merge manually or ensure all agents use the same Slack app.");
+                    skipped.add(conflict);
+                    continue;
+                }
 
                 var newConfig = new ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration();
                 newConfig.setName(channelType + " — " + platformChannelId);
                 newConfig.setChannelType(channelType);
-                newConfig.setPlatformConfig(new java.util.HashMap<>(firstConnector.getConfig()));
+                newConfig.setPlatformConfig(new java.util.HashMap<>(first.connector().getConfig()));
 
                 var targets = new ArrayList<ai.labs.eddi.configs.channels.model.ChannelTarget>();
-                String firstTargetName = null;
+                var usedNames = new HashSet<String>();
 
-                for (var connectorEntry : connectors) {
-                    String agentId = (String) connectorEntry.get("agentId");
-                    String agentName = (String) connectorEntry.get("agentName");
-                    var connector = (AgentConfiguration.ChannelConnector) connectorEntry.get("connector");
-
+                for (var me : entries) {
                     var target = new ai.labs.eddi.configs.channels.model.ChannelTarget();
-                    // Use agent name as target name (sanitized)
-                    String targetName = agentName.toLowerCase().replaceAll("[^a-z0-9-]", "-");
+                    // N3: deduplicate target names by suffixing with short agentId
+                    String baseName = me.agentName().toLowerCase().replaceAll("[^a-z0-9-]", "-");
+                    String targetName = baseName;
+                    if (!usedNames.add(targetName)) {
+                        // Collision — suffix with short agent ID
+                        String shortId = me.agentId().length() > 6
+                                ? me.agentId().substring(0, 6)
+                                : me.agentId();
+                        targetName = baseName + "-" + shortId;
+                        usedNames.add(targetName);
+                    }
                     target.setName(targetName);
                     target.setType(ai.labs.eddi.configs.channels.model.ChannelTarget.TargetType.AGENT);
-                    target.setTargetId(agentId);
+                    target.setTargetId(me.agentId());
 
-                    String groupId = connector.getConfig().get("groupId");
+                    String groupId = me.connector().getConfig().get("groupId");
                     if (groupId != null && !groupId.isBlank()) {
                         target.setType(ai.labs.eddi.configs.channels.model.ChannelTarget.TargetType.GROUP);
                         target.setTargetId(groupId);
                     }
 
-                    // Add trigger from target name
                     target.setTriggers(List.of(targetName));
                     targets.add(target);
-                    if (firstTargetName == null)
-                        firstTargetName = targetName;
                 }
 
                 newConfig.setTargets(targets);
-                newConfig.setDefaultTargetName(firstTargetName);
+                // N5: first in sorted order = deterministic default
+                newConfig.setDefaultTargetName(targets.get(0).getName());
 
                 var resultEntry = new LinkedHashMap<String, Object>();
                 resultEntry.put("platformChannelId", platformChannelId);
                 resultEntry.put("channelType", channelType);
                 resultEntry.put("targetCount", targets.size());
-                if (connectors.size() > 1) {
-                    resultEntry.put("mergedAgents", connectors.stream()
-                            .map(c -> (String) c.get("agentId")).toList());
+                if (entries.size() > 1) {
+                    resultEntry.put("mergedAgents", entries.stream()
+                            .map(MigrationEntry::agentId).toList());
                 }
 
                 if (isDryRun) {
