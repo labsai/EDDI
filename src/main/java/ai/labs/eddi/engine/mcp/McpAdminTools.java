@@ -1168,4 +1168,237 @@ public class McpAdminTools {
             return errorJson("Failed to retry schedule: " + e.getMessage());
         }
     }
+
+    // ==================== Channel Integration Tools ====================
+
+    @Tool(name = "list_channel_integrations", description = "List all channel integration configurations. "
+            + "Returns descriptors with name, channelType, and target count.")
+    public String listChannelIntegrations(
+                                          @ToolArg(description = "Optional filter string") String filter,
+                                          @ToolArg(description = "Maximum number of results (default 20)") Integer limit) {
+        requireRole(identity, authEnabled, "eddi-admin");
+        try {
+            int limitInt = limit != null ? limit : 20;
+            String filterStr = filter != null ? filter : "";
+            var channelStore = getRestStore(
+                    ai.labs.eddi.configs.channels.IRestChannelIntegrationStore.class);
+            var descriptors = channelStore.readChannelDescriptors(filterStr, 0, limitInt);
+            return jsonSerialization.serialize(descriptors);
+        } catch (Exception e) {
+            LOGGER.error("MCP list_channel_integrations failed", e);
+            return errorJson("Failed to list channel integrations: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "read_channel_integration", description = "Read a channel integration configuration by ID. "
+            + "Returns the full config with targets, triggers, platformConfig, and observe mode settings.")
+    public String readChannelIntegration(
+                                         @ToolArg(description = "Channel integration ID (required)") String channelId,
+                                         @ToolArg(description = "Version number (default: latest)") Integer version) {
+        requireRole(identity, authEnabled, "eddi-admin");
+        if (channelId == null || channelId.isBlank())
+            return errorJson("channelId is required");
+        try {
+            var channelStore = getRestStore(
+                    ai.labs.eddi.configs.channels.IRestChannelIntegrationStore.class);
+            int ver = version != null ? version : channelStore.getCurrentVersion(channelId);
+            var config = channelStore.readChannel(channelId, ver);
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("channelId", channelId);
+            result.put("version", ver);
+            result.put("configuration", config);
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.error("MCP read_channel_integration failed for " + channelId, e);
+            return errorJson("Failed to read channel integration: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "create_channel_integration", description = "Create a new channel integration configuration. "
+            + "Requires JSON body with name, channelType, platformConfig, targets[], and defaultTargetName. "
+            + "Returns the new resource ID and URI.")
+    public String createChannelIntegration(
+                                           @ToolArg(description = "Full JSON configuration body (required)") String config) {
+        requireRole(identity, authEnabled, "eddi-admin");
+        if (config == null || config.isBlank())
+            return errorJson("config is required");
+        try {
+            var channelConfig = jsonSerialization.deserialize(config,
+                    ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration.class);
+            var channelStore = getRestStore(
+                    ai.labs.eddi.configs.channels.IRestChannelIntegrationStore.class);
+            Response response = channelStore.createChannel(channelConfig);
+            String location = response.getHeaderString("Location");
+            String newId = extractIdFromLocation(location);
+
+            return resultJson("created", Map.of(
+                    "channelId", newId != null ? newId : "unknown",
+                    "name", channelConfig.getName() != null ? channelConfig.getName() : "",
+                    "channelType", channelConfig.getChannelType() != null ? channelConfig.getChannelType() : "",
+                    "targetCount", channelConfig.getTargets() != null ? channelConfig.getTargets().size() : 0,
+                    "location", location != null ? location : "unknown",
+                    "status", response.getStatus()));
+        } catch (Exception e) {
+            LOGGER.error("MCP create_channel_integration failed", e);
+            return errorJson("Failed to create channel integration: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "update_channel_integration", description = "Update an existing channel integration configuration.")
+    public String updateChannelIntegration(
+                                           @ToolArg(description = "Channel integration ID (required)") String channelId,
+                                           @ToolArg(description = "Current version number (required)") Integer version,
+                                           @ToolArg(description = "Full JSON configuration body (required)") String config) {
+        requireRole(identity, authEnabled, "eddi-admin");
+        if (channelId == null || channelId.isBlank())
+            return errorJson("channelId is required");
+        if (config == null || config.isBlank())
+            return errorJson("config is required");
+        try {
+            int ver = version != null ? version : 1;
+            var channelConfig = jsonSerialization.deserialize(config,
+                    ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration.class);
+            var channelStore = getRestStore(
+                    ai.labs.eddi.configs.channels.IRestChannelIntegrationStore.class);
+            Response response = channelStore.updateChannel(channelId, ver, channelConfig);
+            String location = response.getHeaderString("Location");
+            int newVersion = extractVersionFromLocation(location);
+
+            return resultJson("updated", Map.of(
+                    "channelId", channelId,
+                    "previousVersion", ver,
+                    "newVersion", newVersion,
+                    "status", response.getStatus()));
+        } catch (Exception e) {
+            LOGGER.error("MCP update_channel_integration failed for " + channelId, e);
+            return errorJson("Failed to update channel integration: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "delete_channel_integration", description = "Delete a channel integration configuration.")
+    public String deleteChannelIntegration(
+                                           @ToolArg(description = "Channel integration ID (required)") String channelId,
+                                           @ToolArg(description = "Current version number (required)") Integer version,
+                                           @ToolArg(description = "Permanently delete? (default: false)") Boolean permanent) {
+        requireRole(identity, authEnabled, "eddi-admin");
+        if (channelId == null || channelId.isBlank())
+            return errorJson("channelId is required");
+        try {
+            int ver = version != null ? version : 1;
+            boolean isPermanent = permanent != null ? permanent : false;
+            var channelStore = getRestStore(
+                    ai.labs.eddi.configs.channels.IRestChannelIntegrationStore.class);
+            Response response = channelStore.deleteChannel(channelId, ver, isPermanent);
+
+            return resultJson("deleted", Map.of(
+                    "channelId", channelId,
+                    "version", ver,
+                    "permanent", isPermanent,
+                    "status", response.getStatus()));
+        } catch (Exception e) {
+            LOGGER.error("MCP delete_channel_integration failed for " + channelId, e);
+            return errorJson("Failed to delete channel integration: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "migrate_channel_connectors", description = "Migrate legacy ChannelConnector entries from agent configs "
+            + "to standalone ChannelIntegrationConfigurations. Scans all deployed agents and creates one "
+            + "ChannelIntegrationConfiguration per unique channelId. Non-destructive (does not modify agent configs). "
+            + "Run this once to upgrade from the old channel model.")
+    public String migrateChannelConnectors(
+                                           @ToolArg(description = "Dry run mode — show what would be created without creating (default: true)") Boolean dryRun) {
+        requireRole(identity, authEnabled, "eddi-admin");
+        try {
+            boolean isDryRun = dryRun == null || dryRun;
+            var localAgentStore = getRestStore(IRestAgentStore.class);
+            var channelStore = getRestStore(
+                    ai.labs.eddi.configs.channels.IRestChannelIntegrationStore.class);
+
+            var statuses = agentAdmin.getDeploymentStatuses(
+                    ai.labs.eddi.engine.model.Deployment.Environment.production);
+            var migrated = new ArrayList<Map<String, Object>>();
+            var skipped = new ArrayList<Map<String, Object>>();
+
+            for (var status : statuses) {
+                if (status.getDescriptor() == null || status.getDescriptor().isDeleted())
+                    continue;
+                String agentId = status.getAgentId();
+                try {
+                    AgentConfiguration agentConfig = localAgentStore.readAgent(
+                            agentId, status.getAgentVersion());
+                    if (agentConfig == null || agentConfig.getChannels() == null)
+                        continue;
+
+                    for (var connector : agentConfig.getChannels()) {
+                        if (connector.getType() == null || connector.getConfig() == null)
+                            continue;
+                        String channelType = connector.getType().toString().toLowerCase();
+                        String platformChannelId = connector.getConfig().get("channelId");
+                        if (platformChannelId == null || platformChannelId.isBlank())
+                            continue;
+
+                        // Build a ChannelIntegrationConfiguration
+                        var newConfig = new ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration();
+                        String agentName = status.getDescriptor().getName();
+                        newConfig.setName(channelType + " — "
+                                + (agentName != null ? agentName : agentId));
+                        newConfig.setChannelType(channelType);
+                        newConfig.setPlatformConfig(new java.util.HashMap<>(connector.getConfig()));
+
+                        // Create a default target pointing to the agent
+                        var target = new ai.labs.eddi.configs.channels.model.ChannelTarget();
+                        target.setName("default");
+                        target.setType(ai.labs.eddi.configs.channels.model.ChannelTarget.TargetType.AGENT);
+                        target.setTargetId(agentId);
+                        // If groupId present, make it a group target
+                        String groupId = connector.getConfig().get("groupId");
+                        if (groupId != null && !groupId.isBlank()) {
+                            target.setType(ai.labs.eddi.configs.channels.model.ChannelTarget.TargetType.GROUP);
+                            target.setTargetId(groupId);
+                        }
+                        newConfig.setTargets(List.of(target));
+                        newConfig.setDefaultTargetName("default");
+
+                        var entry = new LinkedHashMap<String, Object>();
+                        entry.put("agentId", agentId);
+                        entry.put("channelType", channelType);
+                        entry.put("platformChannelId", platformChannelId);
+
+                        if (isDryRun) {
+                            entry.put("action", "would_create");
+                            entry.put("config", newConfig);
+                            migrated.add(entry);
+                        } else {
+                            try {
+                                Response response = channelStore.createChannel(newConfig);
+                                String location = response.getHeaderString("Location");
+                                entry.put("action", "created");
+                                entry.put("location", location);
+                                migrated.add(entry);
+                            } catch (Exception createErr) {
+                                entry.put("action", "failed");
+                                entry.put("error", createErr.getMessage());
+                                skipped.add(entry);
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    skipped.add(Map.of("agentId", agentId, "error", e.getMessage()));
+                }
+            }
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("dryRun", isDryRun);
+            result.put("migratedCount", migrated.size());
+            result.put("skippedCount", skipped.size());
+            result.put("migrated", migrated);
+            if (!skipped.isEmpty())
+                result.put("skipped", skipped);
+            return resultJson("migration_complete", result);
+        } catch (Exception e) {
+            LOGGER.error("MCP migrate_channel_connectors failed", e);
+            return errorJson("Failed to migrate channel connectors: " + e.getMessage());
+        }
+    }
 }
