@@ -13,6 +13,30 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Channel Integration — Code Review Hardening (2026-04-18)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+**What changed:** Addressed 12 findings from a thorough code review before merge.
+
+### Critical fixes
+- **Deleted dead `SlackChannelRouter`** (#1) — was `@ApplicationScoped` but never injected, causing double agent scanning at startup. Removed 615 LOC (class + test).
+- **Migration now merges duplicate channelIds** (#2) — old tool created one config per (agent, channel) pair; new version groups by platformChannelId and creates a single multi-target config with derived triggers.
+- **Deep-copy before secret resolution** (#3) — `resolvePlatformSecrets` was mutating the store's instance in-place; added `deepCopyConfig()` so the REST layer always returns vault references.
+- **Null/blank trigger guard** (#5) — null triggers from loose JSON now return 400 instead of NPE.
+- **Removed dead fields** (#6) — `newStyleChannelIds` (assigned, never read), `cacheFactory` (constructor-only), unused `ConcurrentHashMap` import.
+- **Reject `observeMode=true`** (#12) — validation now blocks until the feature is implemented.
+- **Stack traces preserved** (#8) — all `LOGGER.warnf(msg, e.getMessage())` changed to `LOGGER.warn(msg, e)`.
+- **Renamed `channelId` → `resourceId`** (#10) in MCP tool responses to avoid confusion with Slack channelId.
+- **Fixed `deployAgent` typo** (#11) — 'production' listed twice in 4 environment descriptions.
+- **Tempered Javadoc** (#17) — now says "currently Slack-only with platform-agnostic model".
+
+### Deferred (architectural follow-ups)
+- **#7** Extensible channel type registry (CDI-based) — for Teams/Discord fork support
+- **#9** Prompt injection hardening in `buildFollowUpInput` — truncation + delimiters
+- **#13** Replace `ThreadLocal<ResolvedTarget>` with explicit parameter passing
+- **#15** Lock thread target only after successful conversation start
+
 ## Channel Integration Refactor — Decoupled Multi-Target Architecture (2026-04-18)
 
 **Repo:** EDDI (`feature/channel-integrations`)
