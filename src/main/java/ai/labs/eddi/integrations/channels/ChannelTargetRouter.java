@@ -9,6 +9,8 @@ import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.engine.caching.ICache;
+import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -19,6 +21,7 @@ import org.jboss.logging.Logger;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.time.Duration;
 
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 
@@ -50,6 +53,8 @@ public class ChannelTargetRouter {
     private final IRestAgentStore agentStore;
     private final SecretResolver secretResolver;
 
+    private final ICacheFactory cacheFactory;
+
     // ─── Cached state (atomic reference swap) ──────────────────────────────────
 
     /**
@@ -69,20 +74,25 @@ public class ChannelTargetRouter {
     private volatile long lastRefreshTime = 0;
     private final AtomicBoolean refreshInProgress = new AtomicBoolean(false);
 
-    /** Thread → locked target (prevents mid-thread target switching). */
-    private final Map<String, ChannelTarget> threadTargetLock = new ConcurrentHashMap<>();
+    /**
+     * Thread → locked target (prevents mid-thread target switching). TTL-evicted.
+     */
+    private final ICache<String, ChannelTarget> threadTargetLock;
 
     @Inject
     public ChannelTargetRouter(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore descriptorStore,
             IRestAgentAdministration agentAdmin,
             IRestAgentStore agentStore,
-            SecretResolver secretResolver) {
+            SecretResolver secretResolver,
+            ICacheFactory cacheFactory) {
         this.channelStore = channelStore;
         this.descriptorStore = descriptorStore;
         this.agentAdmin = agentAdmin;
         this.agentStore = agentStore;
         this.secretResolver = secretResolver;
+        this.cacheFactory = cacheFactory;
+        this.threadTargetLock = cacheFactory.getCache("channel-thread-locks", Duration.ofHours(24));
     }
 
     // ─── Public API ────────────────────────────────────────────────────────────
@@ -370,7 +380,7 @@ public class ChannelTargetRouter {
         slackSigningSecrets = Set.copyOf(newSigningSecrets);
         newStyleChannelIds = Set.copyOf(coveredChannelIds);
 
-        LOGGER.infof("Channel target router refreshed: %d integrations, %d legacy, %d signing secrets",
+        LOGGER.debugf("Channel target router refreshed: %d integrations, %d legacy, %d signing secrets",
                 newIntegrationMap.size(), newLegacyMap.size(), newSigningSecrets.size());
     }
 
@@ -429,8 +439,13 @@ public class ChannelTargetRouter {
         ChannelTarget toChannelTarget() {
             var target = new ChannelTarget();
             target.setName("default");
-            target.setType(ChannelTarget.TargetType.AGENT);
-            target.setTargetId(agentId);
+            if (groupId != null) {
+                target.setType(ChannelTarget.TargetType.GROUP);
+                target.setTargetId(groupId);
+            } else {
+                target.setType(ChannelTarget.TargetType.AGENT);
+                target.setTargetId(agentId);
+            }
             return target;
         }
     }

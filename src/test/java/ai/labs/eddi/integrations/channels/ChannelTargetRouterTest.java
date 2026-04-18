@@ -2,15 +2,23 @@ package ai.labs.eddi.integrations.channels;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
+import ai.labs.eddi.engine.caching.ICache;
+import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for trigger matching, default fallback, help detection, colon
@@ -26,9 +34,10 @@ class ChannelTargetRouterTest {
 
     @BeforeEach
     void setUp() {
-        // Router is instantiated with null dependencies — we only test the
-        // matching logic (resolveFromIntegration) which doesn't hit any stores.
-        router = new ChannelTargetRouter(null, null, null, null, null);
+        ICacheFactory cacheFactory = mock(ICacheFactory.class);
+        when(cacheFactory.<String, ChannelTarget>getCache(eq("channel-thread-locks"), any(Duration.class)))
+                .thenReturn(new MapCache<>());
+        router = new ChannelTargetRouter(null, null, null, null, null, cacheFactory);
 
         integration = new ChannelIntegrationConfiguration();
         integration.setName("Test Hub");
@@ -343,6 +352,51 @@ class ChannelTargetRouterTest {
             assertNotNull(result);
             assertEquals("support", result.target().getName());
             assertEquals("I need help with my order", result.strippedMessage());
+        }
+    }
+
+    // ─── Test helper: simple ConcurrentHashMap-based ICache ─────
+
+    private static class MapCache<K, V> extends ConcurrentHashMap<K, V> implements ICache<K, V> {
+
+        @Override
+        public String getCacheName() {
+            return "test-cache";
+        }
+
+        @Override
+        public V put(K key, V value, long lifespan, TimeUnit unit) {
+            return put(key, value);
+        }
+
+        @Override
+        public V putIfAbsent(K key, V value, long lifespan, TimeUnit unit) {
+            return putIfAbsent(key, value);
+        }
+
+        @Override
+        public void putAll(Map<? extends K, ? extends V> map, long lifespan, TimeUnit unit) {
+            putAll(map);
+        }
+
+        @Override
+        public V replace(K key, V value, long lifespan, TimeUnit unit) {
+            return replace(key, value);
+        }
+
+        @Override
+        public boolean replace(K key, V oldValue, V value, long lifespan, TimeUnit unit) {
+            return replace(key, oldValue, value);
+        }
+
+        @Override
+        public V put(K key, V value, long lifespan, TimeUnit lifespanUnit, long maxIdleTime, TimeUnit maxIdleTimeUnit) {
+            return put(key, value);
+        }
+
+        @Override
+        public V putIfAbsent(K key, V value, long lifespan, TimeUnit lifespanUnit, long maxIdleTime, TimeUnit maxIdleTimeUnit) {
+            return putIfAbsent(key, value);
         }
     }
 }

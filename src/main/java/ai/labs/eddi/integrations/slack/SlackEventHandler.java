@@ -219,8 +219,8 @@ public class SlackEventHandler {
         currentResolvedTarget.set(resolved);
         try {
             switch (resolved.target().getType()) {
-                case AGENT -> handleAgentConversation(resolved, channelId, userId, threadTs);
-                case GROUP -> handleGroupDiscussion(resolved, channelId, userId, threadTs);
+                case AGENT -> handleAgentConversation(resolved, channelId, userId, threadTs, text);
+                case GROUP -> handleGroupDiscussion(resolved, channelId, userId, threadTs, text);
             }
         } finally {
             currentResolvedTarget.remove();
@@ -231,7 +231,7 @@ public class SlackEventHandler {
      * Handle a standard 1:1 agent conversation routed via ChannelTargetRouter.
      */
     private void handleAgentConversation(ResolvedTarget resolved, String channelId,
-                                         String userId, String threadTs)
+                                         String userId, String threadTs, String originalText)
             throws Exception {
         String agentId = resolved.target().getTargetId();
         String targetName = resolved.target().getName();
@@ -243,8 +243,12 @@ public class SlackEventHandler {
                 : "legacy";
         String intent = "channel:" + integrationId + ":" + targetName + ":" + threadKey;
 
+        // Use strippedMessage (trigger keyword removed) or fall back to original text
+        // (thread replies from resolveThreadTarget have strippedMessage=null)
+        String message = resolved.strippedMessage() != null ? resolved.strippedMessage() : originalText;
+
         String conversationId = getOrCreateConversation(agentId, userId, intent);
-        String response = sendAndWait(conversationId, resolved.strippedMessage());
+        String response = sendAndWait(conversationId, message);
         postMessageChunked(channelId, threadTs, response);
     }
 
@@ -254,7 +258,7 @@ public class SlackEventHandler {
      * Handle a group discussion trigger routed via ChannelTargetRouter.
      */
     private void handleGroupDiscussion(ResolvedTarget resolved, String channelId,
-                                       String userId, String threadTs) {
+                                       String userId, String threadTs, String originalText) {
         String groupId = resolved.target().getTargetId();
         String botToken = resolved.botToken();
 
@@ -268,7 +272,7 @@ public class SlackEventHandler {
         // Create the listener that streams discussion into Slack
         var listener = new SlackGroupDiscussionListener(slackApi, token, channelId, threadTs);
 
-        String question = resolved.strippedMessage();
+        String question = resolved.strippedMessage() != null ? resolved.strippedMessage() : originalText;
         try {
             LOGGER.infof("Starting group discussion in channel %s, group %s, question: %s",
                     channelId, groupId, question.substring(0, Math.min(80, question.length())));
@@ -339,7 +343,8 @@ public class SlackEventHandler {
         String enrichedInput = buildFollowUpInput(ctx, text);
 
         // Route to the specific agent from the group discussion
-        String conversationId = getOrCreateConversation(agentId, userId, channelId, parentTs);
+        String intent = "channel:followup:" + channelId + ":" + parentTs;
+        String conversationId = getOrCreateConversation(agentId, userId, intent);
         String response = sendAndWait(conversationId, enrichedInput);
         postMessageChunked(channelId, threadTs, response);
 
@@ -549,11 +554,12 @@ public class SlackEventHandler {
         sb.append("👋 *Available targets in this channel:*\n\n");
 
         for (ChannelTarget target : config.getTargets()) {
+            String name = target.getName() != null ? target.getName() : "(unnamed)";
             String type = target.getType() == ChannelTarget.TargetType.GROUP ? "group" : "agent";
-            String isDefault = target.getName().equalsIgnoreCase(config.getDefaultTargetName())
+            String isDefault = name.equalsIgnoreCase(config.getDefaultTargetName())
                     ? " _(default)_"
                     : "";
-            sb.append("• *").append(target.getName()).append("*").append(isDefault);
+            sb.append("• *").append(name).append("*").append(isDefault);
             sb.append(" [").append(type).append("]\n");
             if (target.getTriggers() != null && !target.getTriggers().isEmpty()) {
                 sb.append("  Triggers: ");
