@@ -1374,7 +1374,9 @@ public class McpAdminTools {
                 String channelType = first.channelType();
                 String platformChannelId = first.connector().getConfig().get("channelId");
 
-                // N2: detect credential conflicts across merged connectors
+                // N2: detect credential conflicts across merged connectors.
+                // Currently checks Slack keys only; extend this list when
+                // Teams/Discord adapters arrive (e.g. appPassword, serviceUrl).
                 var credentialConflicts = new ArrayList<String>();
                 for (String credKey : List.of("botToken", "signingSecret")) {
                     long distinct = entries.stream()
@@ -1408,7 +1410,7 @@ public class McpAdminTools {
 
                 for (var me : entries) {
                     var target = new ai.labs.eddi.configs.channels.model.ChannelTarget();
-                    // N3: deduplicate target names by suffixing with short agentId
+                    // N3: deduplicate target names with counter fallback
                     String baseName = me.agentName().toLowerCase().replaceAll("[^a-z0-9-]", "-");
                     String targetName = baseName;
                     if (!usedNames.add(targetName)) {
@@ -1417,7 +1419,12 @@ public class McpAdminTools {
                                 ? me.agentId().substring(0, 6)
                                 : me.agentId();
                         targetName = baseName + "-" + shortId;
-                        usedNames.add(targetName);
+                        // Counter fallback for the (extremely unlikely) case where
+                        // two agent IDs share the same 6-char prefix
+                        int counter = 2;
+                        while (!usedNames.add(targetName)) {
+                            targetName = baseName + "-" + shortId + "-" + counter++;
+                        }
                     }
                     target.setName(targetName);
                     target.setType(ai.labs.eddi.configs.channels.model.ChannelTarget.TargetType.AGENT);

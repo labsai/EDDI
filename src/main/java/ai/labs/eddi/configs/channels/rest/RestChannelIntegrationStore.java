@@ -118,7 +118,8 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
 
     // ─── Validation ────────────────────────────────────────────────────────────
 
-    private void validateConfiguration(ChannelIntegrationConfiguration config) {
+    // Visible for testing
+    void validateConfiguration(ChannelIntegrationConfiguration config) {
         if (config.getName() == null || config.getName().isBlank()) {
             throw new BadRequestException("Channel integration name is required.");
         }

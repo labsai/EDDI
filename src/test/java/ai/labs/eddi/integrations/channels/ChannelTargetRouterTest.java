@@ -240,6 +240,29 @@ class ChannelTargetRouterTest {
         void blankMessageReturnsNull() {
             assertNull(router.resolveFromIntegration(integration, "   "));
         }
+
+        @Test
+        @DisplayName("help: (with colon) → NOT help signal, falls to default with full message")
+        void helpWithColonIsNotHelpSignal() {
+            // "help:" has a colon — "help" is the candidate trigger. Since "help" is not
+            // a configured trigger, it falls through to the default target with the full
+            // message preserved (including the colon).
+            ResolvedTarget result = router.resolveFromIntegration(integration, "help:");
+
+            assertNotNull(result);
+            assertEquals("architect", result.target().getName());
+            assertEquals("help:", result.strippedMessage());
+        }
+
+        @Test
+        @DisplayName("architect: (empty after colon) → matches trigger, empty stripped message")
+        void triggerWithEmptyRemainder() {
+            ResolvedTarget result = router.resolveFromIntegration(integration, "architect:");
+
+            assertNotNull(result);
+            assertEquals("architect", result.target().getName());
+            assertEquals("", result.strippedMessage());
+        }
     }
 
     // ─── Thread target locking ─────────────────────────────────────────────────
