@@ -88,7 +88,7 @@ public class ChannelConnectorMigration {
                 }
                 String agentId = status.getAgentId();
                 try {
-                    var agentConfig = agentStore.readAgent(agentId, status.getAgentVersion());
+                    var agentConfig = agentStore.read(agentId, status.getAgentVersion());
                     if (agentConfig == null || agentConfig.getChannels() == null) {
                         continue;
                     }

@@ -310,7 +310,7 @@ public class ChannelTargetRouter {
                             // Collect signing secrets for Slack
                             if (CHANNEL_TYPE_SLACK.equals(
                                     config.getChannelType().toLowerCase())) {
-                                String ss = config.getPlatformConfig().get("signingSecret");
+                                String ss = copy.getPlatformConfig().get("signingSecret");
                                 if (ss != null && !ss.isBlank()) {
                                     newSigningSecrets.add(ss);
                                 }
