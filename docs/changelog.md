@@ -13,6 +13,31 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Channel Integration — Startup Migration & Legacy Deprecation (2026-04-18)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+**What changed:** Replaced the MCP-based migration tool with a deterministic startup migration and deprecated legacy channel connectors.
+
+**Key changes:**
+- **Removed** `migrate_channel_connectors` MCP tool from `McpAdminTools` — migration is now infrastructure, not an admin tool
+- **Added** `ChannelConnectorMigration` — startup one-shot migration following the established `V6RenameMigration` pattern (flag-based via `migrationlog` collection, idempotent, retry-safe on failure)
+- **Wired** into `AgentDeploymentManagement.autoDeployAgents()` after V6 migrations, before agent deployment
+- **Deprecated** `ChannelConnector` class and `channels` field in `AgentConfiguration` with `@Deprecated(since="6.1.0", forRemoval=true)`
+
+**Design decisions:**
+- Startup migration is cleaner than on-demand MCP tool: runs exactly once, no admin intervention needed, follows existing patterns
+- Deprecation rather than removal: old JSON configs in MongoDB can still deserialize; the legacy fallback in `ChannelTargetRouter` remains as a safety net
+- Migration is deliberately simple (preview feature with very few users)
+
+**Files:**
+- `ChannelConnectorMigration.java` [NEW] — startup migration
+- `McpAdminTools.java` — removed migration tool (-184 lines)
+- `AgentDeploymentManagement.java` — wired migration into startup
+- `AgentConfiguration.java` — deprecated channels field + ChannelConnector class
+
+---
+
 ## Channel Integration — Migration Tool Hardening (2026-04-18)
 
 **Repo:** EDDI (`feature/channel-integrations`)
