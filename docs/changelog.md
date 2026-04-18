@@ -13,6 +13,34 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Channel Integration — Review Hardening & Test Coverage (2026-04-19)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+### Critical Bugs Fixed
+- **R1 — Compilation failure:** `ChannelConnectorMigration` called `readAgent()` on `IAgentStore`, which
+  only has `read()` (inherited from `IResourceStore`). `readAgent()` is on `IRestAgentStore`. Was masked by
+  incremental compilation; `mvnw clean compile` failed immediately. Fixed to `agentStore.read()`.
+- **R2 — Signing secret resolution:** `ChannelTargetRouter.refreshInternal()` collected signing secrets from
+  the store's cached config (containing vault references like `${eddivault:...}`) instead of the deep-copied
+  config with resolved secrets. Slack webhook HMAC verification would always fail for vaulted secrets.
+
+### Test Coverage Expansion (42 → 73 tests)
+- New `ChannelTargetRouterRefreshTest` (31 tests) covering:
+  - Public API `resolveTarget()` with mocked stores (new-style + legacy)
+  - Secret resolution (vault refs, resolver failures, absent keys)
+  - Legacy fallback (agent routing, group routing, new-style suppression)
+  - Channel detection (`hasAnyChannels`, `getIntegration`)
+  - Deep copy safety (store original unchanged after resolution)
+  - Refresh mechanism (first-call load, interval gate, error resilience)
+  - `ResolvedTarget` accessor logic (integration vs legacy preference)
+  - `LegacyTarget.toChannelTarget()` conversion
+
+**Files:**
+- `src/main/java/ai/labs/eddi/configs/migration/ChannelConnectorMigration.java` — `readAgent` → `read`
+- `src/main/java/ai/labs/eddi/integrations/channels/ChannelTargetRouter.java` — signing secret from `copy`
+- `src/test/java/ai/labs/eddi/integrations/channels/ChannelTargetRouterRefreshTest.java` — [NEW]
+
 ## Channel Integration — Startup Migration & Legacy Deprecation (2026-04-18)
 
 **Repo:** EDDI (`feature/channel-integrations`)
