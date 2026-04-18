@@ -13,6 +13,20 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Channel Integration — Migration Tool Hardening (2026-04-18)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+**What changed:** Re-review of the migration rewrite (fix #2) found 7 new issues (N1-N7). All fixed.
+
+- **N1: Restored per-agent error reporting** — regression from rewrite silently swallowed agent read failures.
+- **N2: Credential conflict detection** — when multiple agents share a channelId with different botToken/signingSecret, migration now skips with `action: "credential_conflict"` and an actionable hint.
+- **N3: Target name deduplication** — agents with identical names in the same channel get suffixed with short agentId to avoid `BadRequestException` on duplicate triggers.
+- **N4: Group key includes channelType** — prevents cross-platform collisions (`channelType:channelId`).
+- **N5: Deterministic ordering** — entries sorted by agentId before constructing targets; `defaultTargetName` is now reproducible across JVM runs.
+- **N6: Typed `MigrationEntry` record** — replaces `Map<String,Object>` with unsafe casts.
+- **N7: `deepCopyConfig` invariant comment** — documents that target instances are shared by reference and must not be mutated.
+
 ## Channel Integration — Code Review Hardening (2026-04-18)
 
 **Repo:** EDDI (`feature/channel-integrations`)
