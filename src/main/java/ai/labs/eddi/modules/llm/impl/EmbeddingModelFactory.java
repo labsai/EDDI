@@ -11,6 +11,8 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.langchain4j.model.bedrock.BedrockTitanEmbeddingModel;
 import dev.langchain4j.model.cohere.CohereEmbeddingModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.googleai.GoogleAiEmbeddingModel;
+import dev.langchain4j.model.googleai.GoogleAiEmbeddingModel.TaskType;
 import dev.langchain4j.model.mistralai.MistralAiEmbeddingModel;
 import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
@@ -71,6 +73,7 @@ public class EmbeddingModelFactory {
             case "mistral" -> buildMistral(params);
             case "bedrock" -> buildBedrock(params);
             case "cohere" -> buildCohere(params);
+            case "gemini" -> buildGemini(params);
             case "vertex" -> buildVertex(params);
             default -> throw new IllegalArgumentException(
                     "Unsupported embedding provider: " + provider + ". Supported: openai, azure-openai, ollama, mistral, bedrock, cohere, vertex");
@@ -94,6 +97,15 @@ public class EmbeddingModelFactory {
     private EmbeddingModel buildOllama(Map<String, String> params) {
         return OllamaEmbeddingModel.builder().modelName(params.getOrDefault("model", "nomic-embed-text"))
                 .baseUrl(params.getOrDefault("baseUrl", "http://localhost:11434")).build();
+    }
+
+    private EmbeddingModel buildGemini(Map<String, String> params) {
+        TaskType taskType = GoogleAiEmbeddingModel.TaskType.valueOf(params.getOrDefault("tasktype", "RETRIEVAL_DOCUMENT"));
+
+        return GoogleAiEmbeddingModel.builder()
+                .modelName(params.getOrDefault("model", "text-embedding-001"))
+                .taskType(taskType)
+                .build();
     }
 
     private EmbeddingModel buildMistral(Map<String, String> params) {
