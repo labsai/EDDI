@@ -19,19 +19,19 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.time.Duration;
 
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 
 /**
- * Platform-agnostic target router for channel integrations. Resolves incoming
- * channel messages to the correct {@link ChannelTarget} based on configured
- * trigger keywords (colon-required syntax: {@code keyword: message}).
+ * Target router for channel integrations. Resolves incoming channel messages to
+ * the correct {@link ChannelTarget} based on configured trigger keywords
+ * (colon-required syntax: {@code keyword: message}).
  * <p>
- * Replaces {@code SlackChannelRouter} and is shared across all platform
- * adapters (Slack, Teams, Discord).
+ * Currently Slack-only with a platform-agnostic internal model; Teams/Discord
+ * adapters will extend the platform-specific paths (signing secret aggregation,
+ * legacy fallback) when added.
  * <p>
  * <b>Fallback rule:</b> If any {@code ChannelIntegrationConfiguration} matches
  * a channelId, ALL legacy {@code ChannelConnector} entries for that channel are
@@ -53,12 +53,13 @@ public class ChannelTargetRouter {
     private final IRestAgentStore agentStore;
     private final SecretResolver secretResolver;
 
-    private final ICacheFactory cacheFactory;
-
     // ─── Cached state (atomic reference swap) ──────────────────────────────────
 
     /**
-     * channelType:channelId → ChannelIntegrationConfiguration (resolved secrets).
+     * channelType:channelId → deep-copied ChannelIntegrationConfiguration with
+     * resolved secrets. These instances are never returned to callers outside the
+     * router — the REST layer reads from the store directly and returns vault
+     * references.
      */
     private volatile Map<String, ChannelIntegrationConfiguration> integrationMap = Map.of();
 
@@ -67,9 +68,6 @@ public class ChannelTargetRouter {
 
     /** Legacy channelId → LegacyTarget for backward compat. */
     private volatile Map<String, LegacyTarget> legacyMap = Map.of();
-
-    /** Channel IDs covered by new-style ChannelIntegrationConfiguration. */
-    private volatile Set<String> newStyleChannelIds = Set.of();
 
     private volatile long lastRefreshTime = 0;
     private final AtomicBoolean refreshInProgress = new AtomicBoolean(false);
@@ -91,7 +89,6 @@ public class ChannelTargetRouter {
         this.agentAdmin = agentAdmin;
         this.agentStore = agentStore;
         this.secretResolver = secretResolver;
-        this.cacheFactory = cacheFactory;
         this.threadTargetLock = cacheFactory.getCache("channel-thread-locks", Duration.ofHours(24));
     }
 
@@ -276,7 +273,7 @@ public class ChannelTargetRouter {
             refreshInternal();
             lastRefreshTime = now;
         } catch (Exception e) {
-            LOGGER.warnf("Failed to refresh channel target router: %s", e.getMessage());
+            LOGGER.warn("Failed to refresh channel target router", e);
             lastRefreshTime = now; // Avoid hammering on repeated failures
         } finally {
             refreshInProgress.set(false);
@@ -300,12 +297,14 @@ public class ChannelTargetRouter {
                     if (config != null && config.getChannelType() != null
                             && config.getPlatformConfig() != null) {
 
-                        // Resolve secrets in platformConfig
+                        // Deep-copy before resolving secrets so the store's
+                        // cached instance keeps vault references intact
                         String channelId = config.getPlatformConfig().get("channelId");
                         if (channelId != null && !channelId.isBlank()) {
-                            resolvePlatformSecrets(config);
-                            String key = config.getChannelType().toLowerCase() + ":" + channelId;
-                            newIntegrationMap.put(key, config);
+                            var copy = deepCopyConfig(config);
+                            resolvePlatformSecrets(copy);
+                            String key = copy.getChannelType().toLowerCase() + ":" + channelId;
+                            newIntegrationMap.put(key, copy);
                             coveredChannelIds.add(channelId);
 
                             // Collect signing secrets for Slack
@@ -319,11 +318,11 @@ public class ChannelTargetRouter {
                         }
                     }
                 } catch (Exception e) {
-                    LOGGER.debugf("Skipping channel config: %s", e.getMessage());
+                    LOGGER.debug("Skipping channel config", e);
                 }
             }
         } catch (Exception e) {
-            LOGGER.warnf("Failed to load channel integration configs: %s", e.getMessage());
+            LOGGER.warn("Failed to load channel integration configs", e);
         }
 
         // 2. Load legacy ChannelConnector entries (backward compat)
@@ -366,22 +365,40 @@ public class ChannelTargetRouter {
                         }
                     }
                 } catch (Exception e) {
-                    LOGGER.debugf("Skipping agent %s for legacy channel scan: %s",
-                            agentId, e.getMessage());
+                    LOGGER.debugf(e, "Skipping agent %s for legacy channel scan",
+                            agentId);
                 }
             }
         } catch (Exception e) {
-            LOGGER.warnf("Failed to scan legacy ChannelConnectors: %s", e.getMessage());
+            LOGGER.warn("Failed to scan legacy ChannelConnectors", e);
         }
 
         // Atomic swap
         integrationMap = Map.copyOf(newIntegrationMap);
         legacyMap = Map.copyOf(newLegacyMap);
         slackSigningSecrets = Set.copyOf(newSigningSecrets);
-        newStyleChannelIds = Set.copyOf(coveredChannelIds);
 
         LOGGER.debugf("Channel target router refreshed: %d integrations, %d legacy, %d signing secrets",
                 newIntegrationMap.size(), newLegacyMap.size(), newSigningSecrets.size());
+    }
+
+    /**
+     * Deep-copy a config so that secret resolution does not mutate the store's
+     * cached instance (which must retain {@code ${eddivault:...}} references for
+     * the REST API).
+     */
+    private ChannelIntegrationConfiguration deepCopyConfig(ChannelIntegrationConfiguration src) {
+        var copy = new ChannelIntegrationConfiguration();
+        copy.setName(src.getName());
+        copy.setChannelType(src.getChannelType());
+        copy.setDefaultTargetName(src.getDefaultTargetName());
+        if (src.getPlatformConfig() != null) {
+            copy.setPlatformConfig(new HashMap<>(src.getPlatformConfig()));
+        }
+        if (src.getTargets() != null) {
+            copy.setTargets(new ArrayList<>(src.getTargets()));
+        }
+        return copy;
     }
 
     private void resolvePlatformSecrets(ChannelIntegrationConfiguration config) {
@@ -398,7 +415,7 @@ public class ChannelTargetRouter {
         try {
             return secretResolver.resolveValue(value);
         } catch (Exception e) {
-            LOGGER.warnf("Failed to resolve secret: %s", e.getMessage());
+            LOGGER.warn("Failed to resolve secret", e);
             return null;
         }
     }

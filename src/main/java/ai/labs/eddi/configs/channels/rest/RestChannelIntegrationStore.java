@@ -164,8 +164,20 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 throw new BadRequestException(
                         "Target '" + target.getName() + "' must have a targetId.");
             }
+            // Observe mode is schema-ready but not yet implemented
+            if (target.isObserveMode()) {
+                throw new BadRequestException(
+                        "Target '" + target.getName()
+                                + "': observeMode is not yet implemented. "
+                                + "Set observeMode to false or omit it.");
+            }
             if (target.getTriggers() != null) {
                 for (String trigger : target.getTriggers()) {
+                    if (trigger == null || trigger.isBlank()) {
+                        throw new BadRequestException(
+                                "Target '" + target.getName()
+                                        + "' contains a null or blank trigger keyword.");
+                    }
                     String normalized = trigger.toLowerCase().trim();
                     if (!allTriggers.add(normalized)) {
                         throw new BadRequestException(
