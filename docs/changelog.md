@@ -13,6 +13,67 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Channel Integration Refactor — Decoupled Multi-Target Architecture (2026-04-18)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+**What changed:** Refactored the Slack integration from a tightly-coupled, agent-embedded model (`ChannelConnector` inside `AgentConfiguration`) to a standalone, multi-target, multi-platform architecture.
+
+### 1. Standalone Config Resource
+
+Created `ChannelIntegrationConfiguration` — a first-class versioned MongoDB document (`eddi://ai.labs.channel/channelstore/channels/{id}`) decoupled from agents. Each config holds:
+- `channelType` (slack, teams, discord)
+- `platformConfig` (credentials via vault references)
+- `targets[]` — each with name, type (AGENT/GROUP), targetId, and trigger keywords
+- `defaultTargetName` — fallback when no trigger matches
+- `observeMode` / `ObserveConfig` — schema reserved for future passive observation
+
+### 2. ChannelTargetRouter
+
+Platform-agnostic router replacing `SlackChannelRouter`:
+- **Colon-required triggers**: `architect: question` routes to the "architect" target
+- **Thread target locking**: First message locks the target for the thread (prevents mid-thread switching)
+- **New-style wins**: If a `ChannelIntegrationConfiguration` covers a channelId, all legacy `ChannelConnector` entries for that channel are ignored
+- **Signing secret aggregation**: Collects from both new and legacy configs for webhook verification
+
+### 3. Slack Adapter Refactor
+
+- `SlackEventHandler` → uses `ChannelTargetRouter` for all routing decisions
+- Removed `group:` magic prefix — groups now reached via configured triggers
+- Added `postHelp()` — lists available targets with trigger keywords when message is blank or "help"
+- `postMessage()` resolves bot token from `ResolvedTarget` or router fallback
+- `RestSlackWebhook` → uses `ChannelTargetRouter.getSigningSecrets("slack")`
+
+### 4. MCP Admin Tools + Migration
+
+Added 6 new MCP tools (admin-only):
+- `list_channel_integrations`, `read_channel_integration`, `create_channel_integration`
+- `update_channel_integration`, `delete_channel_integration`
+- `migrate_channel_connectors` — scans legacy `ChannelConnector` entries on deployed agents and converts to standalone `ChannelIntegrationConfiguration` (dry-run by default, non-destructive)
+
+### Design Decisions
+
+- **Colon-required syntax over fuzzy matching**: Deterministic, no ambiguity. `architect: hello` matches; `architect hello` does not.
+- **Thread locking over repeated resolution**: Prevents jarring mid-thread target switches in multi-target channels.
+- **Schema-now for observe mode**: `observeMode` and `ObserveConfig` are in the model but not wired. Avoids future MongoDB migration when observation is implemented.
+- **Migration as MCP tool (not REST endpoint)**: Fits admin tooling pattern, supports dry-run, accessible from Claude/MCP clients.
+
+**Files:**
+- `ChannelIntegrationConfiguration.java`, `ChannelTarget.java`, `ObserveConfig.java` — [NEW] models
+- `IChannelIntegrationStore.java` — [NEW] store interface
+- `IRestChannelIntegrationStore.java` — [NEW] REST interface
+- `ChannelIntegrationStore.java` — [NEW] DB-agnostic store
+- `RestChannelIntegrationStore.java` — [NEW] REST implementation with validation
+- `ChannelTargetRouter.java` — [NEW] platform-agnostic router
+- `ChannelTargetRouterTest.java` — [NEW] 23 unit tests
+- `SlackEventHandler.java` — refactored to use ChannelTargetRouter
+- `RestSlackWebhook.java` — updated credential resolution
+- `McpAdminTools.java` — 6 new channel integration tools
+
+**In Progress:** Manager UI, file attachment forwarding, observe mode (future PRs).
+
+---
+
 ## PR Review Fixes — Quota Ordering, Log Injection, Doc Hygiene (2026-04-17)
 
 **Repo:** EDDI (`feature/observability`)
