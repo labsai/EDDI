@@ -37,22 +37,41 @@ Each entry follows this format:
 - `RuleTest` — execute() with no/pass/fail/error conditions, short-circuit on first failure, infinite loop detection, equals/hashCode, clone, toString
 - `RulesEvaluatorTest` — empty sets, success/fail/error routing, execution strategies (executeUntilFirstSuccess vs executeAll), null rule set guard
 
+### Batch 11 — Output, Engine, Config Models + PrePostUtils
+- `OutputModelsTest` — TextOutputItem, ButtonOutputItem, QuickReply, OutputValue, OutputEntry (Comparable), Jackson polymorphic deserialization
+- `OutputTypesTest` — All 8 OutputItem subtypes (Image, AgentFace, ApplicationLink, InputField, QuickReply, Other/Map delegation)
+- `EngineModelsTest` — Deployment.Environment (backward compat + Jackson), Deployment.Status, Context, InputData, DeadLetterEntry, AgentDeploymentStatus, CoordinatorStatus, AgentDeployment, LogEntry
+- `PrePostUtilsTest` — verifyHttpCode with DEFAULT validator, custom codes, skip logic
+- `RagConfigurationTest` — defaults, setters, Jackson round-trip
+- `ConversationOutputTest` — typed get(), LinkedHashMap ordering
+- `ConversationPropertiesTest`, `BackupModelsTest`, `McpToolFilterTest`, `ConversationOutputUtilsTest` — fixes to align with actual APIs
+
+### Batch 12 — McpCalls, Serialization, ToolExecution
+- `McpCallsModelsTest` — McpCallsConfiguration (defaults, setters, Jackson), McpCall (defaults, setters, Jackson round-trip)
+- `IdSerializerTest` — isValid() hex validation, length, null, non-BSON serialize
+- `IdDeserializerTest` — non-BSON deserialization path
+- `ToolExecutionServiceTest` — executeToolWrapped (all feature permutations: success, cached, rate-limited, features individually disabled, null conversationId, tool exception), parallel array validation
+
 ### Coverage Progress
 
 | Checkpoint | Line % | Branch % |
 |------------|--------|----------|
 | Batch 6    | 48.1%  | 42.7%    |
 | Batch 10   | 49.1%  | 43.2%    |
+| Batch 12   | 50.8%  | 44.3%    |
 
-**Files:**
-- `src/test/java/ai/labs/eddi/engine/a2a/AgentCardServiceTest.java` — new
-- `src/test/java/ai/labs/eddi/engine/internal/ContextLoggerTest.java` — new
-- `src/test/java/ai/labs/eddi/configs/descriptors/model/SimpleDocumentDescriptorTest.java` — new
-- `src/test/java/ai/labs/eddi/modules/llm/model/LlmConfigurationModelsTest.java` — new
-- `src/test/java/ai/labs/eddi/configs/model/SmallModelsBatchTest.java` — new
-- `src/test/java/ai/labs/eddi/modules/rules/impl/RuleDeserializationTest.java` — new
-- `src/test/java/ai/labs/eddi/modules/rules/impl/RuleTest.java` — new
-- `src/test/java/ai/labs/eddi/modules/rules/impl/RulesEvaluatorTest.java` — new
+**Files (Batch 11-12):**
+- `src/test/java/ai/labs/eddi/modules/output/model/OutputModelsTest.java` — new
+- `src/test/java/ai/labs/eddi/modules/output/model/types/OutputTypesTest.java` — new
+- `src/test/java/ai/labs/eddi/engine/model/EngineModelsTest.java` — new
+- `src/test/java/ai/labs/eddi/modules/apicalls/impl/PrePostUtilsTest.java` — new
+- `src/test/java/ai/labs/eddi/configs/rag/model/RagConfigurationTest.java` — new
+- `src/test/java/ai/labs/eddi/engine/memory/model/ConversationOutputTest.java` — new
+- `src/test/java/ai/labs/eddi/modules/llm/impl/ConversationOutputUtilsTest.java` — new
+- `src/test/java/ai/labs/eddi/configs/mcpcalls/model/McpCallsModelsTest.java` — new
+- `src/test/java/ai/labs/eddi/datastore/serialization/IdSerializerTest.java` — new
+- `src/test/java/ai/labs/eddi/datastore/serialization/IdDeserializerTest.java` — new
+- `src/test/java/ai/labs/eddi/modules/llm/tools/ToolExecutionServiceTest.java` — new
 
 ---
 
