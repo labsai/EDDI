@@ -13,6 +13,37 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Channel Integration — External Review Round 4 (2026-04-19)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+### Bugs Fixed (6 findings from external review)
+- **#1 — Legacy follow-up posting:** `postMessage` fell back to `getIntegration()` which only
+  checked `integrationMap`, not `legacyMap`. Legacy-only channels silently failed to post responses.
+  Fixed by adding `getBotToken()` method that checks both maps.
+- **#3 — Duplicate channelId:** REST validation now rejects create/update if another non-deleted
+  config already claims the same `channelType:channelId`. Prevents silent overwrites in the router.
+- **#4 — Reserved triggers:** `"help"` is now rejected as a trigger keyword — it would never fire
+  because the router short-circuits on `help` before trigger matching.
+- **#5 — NPE guard:** Added null check on `trigger.toLowerCase()` in `resolveFromIntegration` for
+  data that bypasses REST validation (e.g., raw MongoDB writes, imported ZIPs).
+- **#2 — Migration credential divergence:** Migration now logs WARN when agents sharing the same
+  channelId have different botToken/signingSecret values, with affected agentIds listed.
+- **#10 — Migration target names:** Target names now use the agent's descriptor name (slugified)
+  instead of raw ObjectId strings, making trigger keywords human-typeable.
+
+### Test Coverage (73 → 80 tests)
+- 3 new reserved trigger validation tests
+- 4 new `getBotToken()` tests (new-style, legacy fallback, precedence, unknown)
+
+**Files:**
+- `ChannelTargetRouter.java` — `getBotToken()`, null guard, import order
+- `SlackEventHandler.java` — use `getBotToken()` instead of `getIntegration()` in `postMessage`
+- `RestChannelIntegrationStore.java` — reserved triggers, `validateUniqueChannelId()`, `Locale.ROOT`
+- `ChannelConnectorMigration.java` — descriptor name lookup, slugify, divergence warning
+- `RestChannelIntegrationStoreValidationTest.java` — 3 reserved trigger tests
+- `ChannelTargetRouterRefreshTest.java` — 4 getBotToken tests
+
 ## Channel Integration — Review Hardening & Test Coverage (2026-04-19)
 
 **Repo:** EDDI (`feature/channel-integrations`)
