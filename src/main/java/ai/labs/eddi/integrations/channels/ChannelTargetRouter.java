@@ -17,9 +17,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.time.Duration;
 
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 
@@ -180,6 +180,30 @@ public class ChannelTargetRouter {
     }
 
     /**
+     * Get the bot token for a channel, checking new-style integrations first, then
+     * legacy. Returns {@code null} if no token is configured for this channel.
+     */
+    public String getBotToken(String channelType, String platformChannelId) {
+        refreshIfNeeded();
+        String key = channelType + ":" + platformChannelId;
+        ChannelIntegrationConfiguration integration = integrationMap.get(key);
+        if (integration != null && integration.getPlatformConfig() != null) {
+            String token = integration.getPlatformConfig().get("botToken");
+            if (token != null && !token.isBlank()) {
+                return token;
+            }
+        }
+        // Fallback: legacy map (Slack only)
+        if (CHANNEL_TYPE_SLACK.equals(channelType)) {
+            LegacyTarget legacy = legacyMap.get(platformChannelId);
+            if (legacy != null && legacy.botToken() != null) {
+                return legacy.botToken();
+            }
+        }
+        return null;
+    }
+
+    /**
      * Check if any channel integrations are configured (new or legacy).
      */
     public boolean hasAnyChannels(String channelType) {
@@ -228,7 +252,7 @@ public class ChannelTargetRouter {
             for (ChannelTarget target : integration.getTargets()) {
                 if (target.getTriggers() != null) {
                     for (String trigger : target.getTriggers()) {
-                        if (trigger.toLowerCase().trim().equals(candidateTrigger)) {
+                        if (trigger != null && trigger.toLowerCase().trim().equals(candidateTrigger)) {
                             return new ResolvedTarget(target, remainder, integration,
                                     null, null);
                         }

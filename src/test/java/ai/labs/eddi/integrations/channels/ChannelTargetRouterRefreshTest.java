@@ -608,6 +608,57 @@ class ChannelTargetRouterRefreshTest {
         }
     }
 
+    // ─── getBotToken ───────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("getBotToken — unified token lookup")
+    class GetBotTokenTests {
+
+        @Test
+        @DisplayName("returns bot token from new-style integration")
+        void newStyleToken() throws Exception {
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-integration", "signing123");
+
+            String token = router.getBotToken("slack", CHANNEL_ID);
+
+            assertEquals("xoxb-integration", token);
+        }
+
+        @Test
+        @DisplayName("returns bot token from legacy when no new-style config exists")
+        void legacyFallbackToken() throws Exception {
+            when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+            setupLegacyAgent(AGENT_ID, CHANNEL_ID, "xoxb-legacy", "sign", null);
+            when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+
+            String token = router.getBotToken("slack", CHANNEL_ID);
+
+            assertEquals("xoxb-legacy", token);
+        }
+
+        @Test
+        @DisplayName("new-style token takes precedence over legacy")
+        void newStylePrecedence() throws Exception {
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-new", "sign-new");
+            setupLegacyAgent(AGENT_ID, CHANNEL_ID, "xoxb-legacy", "sign-legacy", null);
+
+            String token = router.getBotToken("slack", CHANNEL_ID);
+
+            assertEquals("xoxb-new", token);
+        }
+
+        @Test
+        @DisplayName("returns null for unknown channel")
+        void unknownChannelReturnsNull() throws Exception {
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "signing");
+
+            String token = router.getBotToken("slack", "UNKNOWN_CHANNEL");
+
+            assertNull(token);
+        }
+    }
+
     // ─── Test helper: simple ConcurrentHashMap-based ICache ─────────────────
 
     private static class MapCache<K, V> extends ConcurrentHashMap<K, V> implements ICache<K, V> {

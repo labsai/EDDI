@@ -18,6 +18,7 @@ import org.jboss.logging.Logger;
 import java.net.URI;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -35,6 +36,11 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
      * via CDI so forks can register custom adapters.
      */
     private static final Set<String> REGISTERED_CHANNEL_TYPES = Set.of("slack");
+
+    /**
+     * Trigger keywords that are reserved by the router and must not be configured.
+     */
+    private static final Set<String> RESERVED_TRIGGERS = Set.of("help");
 
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore documentDescriptorStore;
@@ -62,6 +68,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     public Response updateChannel(String id, Integer version,
                                   ChannelIntegrationConfiguration channelConfiguration) {
         validateConfiguration(channelConfiguration);
+        validateUniqueChannelId(channelConfiguration, id);
         Response response = restVersionInfo.update(id, version, channelConfiguration);
         syncDescriptor(id, channelConfiguration);
         return response;
@@ -70,6 +77,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     @Override
     public Response createChannel(ChannelIntegrationConfiguration channelConfiguration) {
         validateConfiguration(channelConfiguration);
+        validateUniqueChannelId(channelConfiguration, null);
         Response response = restVersionInfo.create(channelConfiguration);
         URI location = response.getLocation();
         if (location != null) {
@@ -179,7 +187,12 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                                 "Target '" + target.getName()
                                         + "' contains a null or blank trigger keyword.");
                     }
-                    String normalized = trigger.toLowerCase().trim();
+                    String normalized = trigger.toLowerCase(Locale.ROOT).trim();
+                    if (RESERVED_TRIGGERS.contains(normalized)) {
+                        throw new BadRequestException(
+                                "Trigger '" + trigger
+                                        + "' is a reserved keyword and cannot be used.");
+                    }
                     if (!allTriggers.add(normalized)) {
                         throw new BadRequestException(
                                 "Duplicate trigger keyword: '" + trigger
@@ -187,6 +200,62 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                     }
                 }
             }
+        }
+    }
+
+    // ─── Channel ID uniqueness ─────────────────────────────────────────────────
+
+    /**
+     * Reject create/update if another non-deleted config already claims the same
+     * {@code channelType:channelId}. Prevents silent overwrites in the router's
+     * integrationMap.
+     *
+     * @param excludeId
+     *            the resource ID of the config being updated (null on create)
+     */
+    private void validateUniqueChannelId(ChannelIntegrationConfiguration config, String excludeId) {
+        if (config.getPlatformConfig() == null)
+            return;
+        String channelId = config.getPlatformConfig().get("channelId");
+        if (channelId == null || channelId.isBlank())
+            return;
+        String channelType = config.getChannelType();
+        if (channelType == null)
+            return;
+
+        try {
+            var descriptors = documentDescriptorStore.readDescriptors(
+                    "ai.labs.channel", "", 0, 1000, false);
+            for (var descriptor : descriptors) {
+                try {
+                    var resId = RestUtilities.extractResourceId(descriptor.getResource());
+                    if (resId == null || resId.getId() == null)
+                        continue;
+                    // Skip the config being updated
+                    if (resId.getId().equals(excludeId))
+                        continue;
+
+                    var existing = channelStore.read(resId.getId(), resId.getVersion());
+                    if (existing != null
+                            && existing.getPlatformConfig() != null
+                            && channelType.equalsIgnoreCase(existing.getChannelType())
+                            && channelId.equals(existing.getPlatformConfig().get("channelId"))) {
+                        throw new BadRequestException(
+                                "Another channel integration ('"
+                                        + (existing.getName() != null ? existing.getName() : resId.getId())
+                                        + "') already uses channelId '" + channelId
+                                        + "' for type '" + channelType + "'.");
+                    }
+                } catch (BadRequestException e) {
+                    throw e; // re-throw validation errors
+                } catch (Exception e) {
+                    LOG.debugf("Skipping descriptor during uniqueness check: %s", e.getMessage());
+                }
+            }
+        } catch (BadRequestException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.warn("Failed to check channel ID uniqueness — allowing save", e);
         }
     }
 

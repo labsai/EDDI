@@ -7,12 +7,14 @@ import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.migration.model.MigrationLog;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.*;
+import java.util.Locale;
 
 import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.deployed;
 
@@ -40,16 +42,19 @@ public class ChannelConnectorMigration {
     private final IDeploymentStore deploymentStore;
     private final IAgentStore agentStore;
     private final IChannelIntegrationStore channelStore;
+    private final IDocumentDescriptorStore descriptorStore;
     private final MigrationLogStore migrationLogStore;
 
     @Inject
     public ChannelConnectorMigration(IDeploymentStore deploymentStore,
             IAgentStore agentStore,
             IChannelIntegrationStore channelStore,
+            IDocumentDescriptorStore descriptorStore,
             MigrationLogStore migrationLogStore) {
         this.deploymentStore = deploymentStore;
         this.agentStore = agentStore;
         this.channelStore = channelStore;
+        this.descriptorStore = descriptorStore;
         this.migrationLogStore = migrationLogStore;
     }
 
@@ -100,10 +105,11 @@ public class ChannelConnectorMigration {
                         if (channelId == null || channelId.isBlank()) {
                             continue;
                         }
-                        String channelType = connector.getType().toString().toLowerCase();
+                        String channelType = connector.getType().toString().toLowerCase(Locale.ROOT);
                         String groupKey = channelType + ":" + channelId;
                         channelGroups.computeIfAbsent(groupKey, k -> new ArrayList<>())
-                                .add(new ConnectorEntry(connector, agentId, channelType));
+                                .add(new ConnectorEntry(connector, agentId, channelType,
+                                        lookupAgentName(agentId, status.getAgentVersion())));
                     }
                 } catch (Exception e) {
                     LOGGER.warnf("Skipping agent %s during channel migration: %s", agentId, e.getMessage());
@@ -120,6 +126,9 @@ public class ChannelConnectorMigration {
             // Sort for deterministic default target
             entries.sort(Comparator.comparing(ConnectorEntry::agentId));
 
+            // Warn on credential divergence across agents sharing the same channel
+            warnOnCredentialDivergence(entry.getKey(), entries);
+
             var first = entries.get(0);
             String channelId = first.connector().getConfig().get("channelId");
             String channelType = first.channelType();
@@ -134,13 +143,11 @@ public class ChannelConnectorMigration {
 
             for (var ce : entries) {
                 var target = new ChannelTarget();
-                String baseName = ce.agentId().toLowerCase().replaceAll("[^a-z0-9-]", "-");
+                String baseName = slugify(ce.agentName() != null ? ce.agentName() : ce.agentId());
                 String targetName = baseName;
-                if (!usedNames.add(targetName)) {
-                    int counter = 2;
-                    while (!usedNames.add(targetName)) {
-                        targetName = baseName + "-" + counter++;
-                    }
+                int counter = 2;
+                while (!usedNames.add(targetName)) {
+                    targetName = baseName + "-" + counter++;
                 }
                 target.setName(targetName);
                 target.setType(ChannelTarget.TargetType.AGENT);
@@ -171,6 +178,59 @@ public class ChannelConnectorMigration {
         return created;
     }
 
-    private record ConnectorEntry(ChannelConnector connector, String agentId, String channelType) {
+    private record ConnectorEntry(ChannelConnector connector, String agentId,
+            String channelType, String agentName) {
+    }
+
+    /**
+     * Look up the human-readable name for an agent via its document descriptor.
+     * Returns {@code null} if the descriptor is not found or has no name.
+     */
+    private String lookupAgentName(String agentId, Integer version) {
+        try {
+            var descriptor = descriptorStore.readDescriptor(agentId, version);
+            if (descriptor != null && descriptor.getName() != null && !descriptor.getName().isBlank()) {
+                return descriptor.getName();
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read descriptor for agent %s: %s", agentId, e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * Slugify a name for use as a target name / trigger keyword.
+     */
+    private static String slugify(String input) {
+        return input.toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9-]+", "-")
+                .replaceAll("-{2,}", "-")
+                .replaceAll("^-|-$", "");
+    }
+
+    /**
+     * Log WARN if agents sharing the same channelId have divergent credentials, so
+     * operators can reconcile manually after migration.
+     */
+    private void warnOnCredentialDivergence(String groupKey, List<ConnectorEntry> entries) {
+        if (entries.size() < 2)
+            return;
+        String refBotToken = entries.get(0).connector().getConfig().get("botToken");
+        String refSigning = entries.get(0).connector().getConfig().get("signingSecret");
+
+        var divergentAgents = new ArrayList<String>();
+        for (int i = 1; i < entries.size(); i++) {
+            var cfg = entries.get(i).connector().getConfig();
+            if (!Objects.equals(refBotToken, cfg.get("botToken"))
+                    || !Objects.equals(refSigning, cfg.get("signingSecret"))) {
+                divergentAgents.add(entries.get(i).agentId());
+            }
+        }
+        if (!divergentAgents.isEmpty()) {
+            LOGGER.warnf("  CREDENTIAL DIVERGENCE for %s — agents %s have different "
+                    + "botToken/signingSecret than %s. Only the first agent's credentials "
+                    + "will be used. Please reconcile manually after migration.",
+                    groupKey, divergentAgents, entries.get(0).agentId());
+        }
     }
 }

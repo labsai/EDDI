@@ -501,10 +501,7 @@ public class SlackEventHandler {
             botToken = resolved.botToken();
         }
         if (botToken == null || botToken.isEmpty()) {
-            var integration = channelTargetRouter.getIntegration("slack", channelId);
-            if (integration.isPresent() && integration.get().getPlatformConfig() != null) {
-                botToken = integration.get().getPlatformConfig().get("botToken");
-            }
+            botToken = channelTargetRouter.getBotToken("slack", channelId);
         }
 
         if (botToken == null || botToken.isEmpty()) {

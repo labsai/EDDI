@@ -281,4 +281,50 @@ class RestChannelIntegrationStoreValidationTest {
             assertDoesNotThrow(() -> store.validateConfiguration(config));
         }
     }
+
+    // ─── Reserved triggers ────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Reserved trigger validation")
+    class ReservedTriggerValidation {
+
+        @Test
+        @DisplayName("trigger 'help' → BadRequest (reserved)")
+        void helpTriggerRejected() {
+            var target = new ChannelTarget();
+            target.setName("support");
+            target.setTargetId("agent-abc");
+            target.setTriggers(List.of("help"));
+            config.setTargets(List.of(target));
+
+            var ex = assertThrows(BadRequestException.class,
+                    () -> store.validateConfiguration(config));
+            assertTrue(ex.getMessage().contains("reserved"));
+        }
+
+        @Test
+        @DisplayName("trigger 'HELP' → BadRequest (case-insensitive)")
+        void helpUpperCaseRejected() {
+            var target = new ChannelTarget();
+            target.setName("support");
+            target.setTargetId("agent-abc");
+            target.setTriggers(List.of("HELP"));
+            config.setTargets(List.of(target));
+
+            assertThrows(BadRequestException.class,
+                    () -> store.validateConfiguration(config));
+        }
+
+        @Test
+        @DisplayName("trigger 'helper' → passes (not reserved)")
+        void helperAllowed() {
+            var target = new ChannelTarget();
+            target.setName("support");
+            target.setTargetId("agent-abc");
+            target.setTriggers(List.of("helper"));
+            config.setTargets(List.of(target));
+
+            assertDoesNotThrow(() -> store.validateConfiguration(config));
+        }
+    }
 }
