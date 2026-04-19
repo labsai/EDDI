@@ -609,6 +609,12 @@ jobs:
             OVERALL_TEXT="Build Failed"
           fi
 
+          # Only notify on failures or release tag pushes — green branch/PR builds stay silent
+          if [ "$OVERALL_TEXT" = "Build Passed" ] && [[ "$GITHUB_REF" != refs/tags/* ]]; then
+            echo "### ⏭️ Build passed — skipping Slack (only failures and releases notify)" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
           # Branch or tag name
           REF="${GITHUB_REF#refs/heads/}"
           REF="${REF#refs/tags/}"

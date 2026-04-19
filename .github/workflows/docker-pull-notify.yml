@@ -3,6 +3,7 @@ name: Project Metrics Tracker
 on:
   schedule:
     - cron: '*/15 * * * *' # every 15 min — collect metrics + push to analytics
+    - cron: '0 18 * * *'    # daily — 6pm UTC, digest (only if activity)
     - cron: '0 9 * * 0'    # weekly — Sunday 9am UTC, Slack digest
   workflow_dispatch:
     inputs:
@@ -40,11 +41,14 @@ jobs:
             echo "week_docker=$(jq -r '.week_docker // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "week_stars=$(jq -r '.week_stars // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "week_forks=$(jq -r '.week_forks // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "day_docker=$(jq -r '.day_docker // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "day_stars=$(jq -r '.day_stars // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "day_forks=$(jq -r '.day_forks // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "last_milestone=$(jq -r '.last_milestone // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "has_data=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_data=false" >> "$GITHUB_OUTPUT"
-            for key in docker_pulls stars forks week_docker week_stars week_forks last_milestone; do
+            for key in docker_pulls stars forks week_docker week_stars week_forks day_docker day_stars day_forks last_milestone; do
               echo "${key}=0" >> "$GITHUB_OUTPUT"
             done
           fi
@@ -259,10 +263,72 @@ jobs:
               ]
             }"
 
+      # ── Daily digest (only if activity) ──────────────────────
+      - name: Daily digest
+        if: >-
+          github.event.schedule == '0 18 * * *'
+          && steps.prev.outputs.has_data == 'true'
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "$SLACK_WEBHOOK" ]; then
+            echo "No SLACK_WEBHOOK_URL configured, skipping"
+            exit 0
+          fi
+
+          PULLS=${{ steps.docker.outputs.pulls }}
+          STARS=${{ steps.github.outputs.stars }}
+          FORKS=${{ steps.github.outputs.forks }}
+          VIEWS=${{ steps.traffic.outputs.views }}
+          CLONES=${{ steps.traffic.outputs.clones }}
+
+          DAY_PULL_DIFF=$(( PULLS - ${{ steps.prev.outputs.day_docker }} ))
+          DAY_STAR_DIFF=$(( STARS - ${{ steps.prev.outputs.day_stars }} ))
+          DAY_FORK_DIFF=$(( FORKS - ${{ steps.prev.outputs.day_forks }} ))
+
+          # Only send if something actually changed today
+          if [ "$DAY_PULL_DIFF" -eq 0 ] && [ "$DAY_STAR_DIFF" -eq 0 ] && [ "$DAY_FORK_DIFF" -eq 0 ]; then
+            echo "No daily activity — skipping digest"
+            exit 0
+          fi
+
+          # Build sign prefixes
+          pull_sign=""; [ "$DAY_PULL_DIFF" -gt 0 ] && pull_sign="+"
+          star_sign=""; [ "$DAY_STAR_DIFF" -gt 0 ] && star_sign="+"
+          fork_sign=""; [ "$DAY_FORK_DIFF" -gt 0 ] && fork_sign="+"
+
+          PULLS_FMT=$(printf "%'d" "$PULLS")
+
+          curl -sf -X POST "$SLACK_WEBHOOK" \
+            -H 'Content-type: application/json' \
+            -d "{
+              \"blocks\": [
+                {
+                  \"type\": \"header\",
+                  \"text\": { \"type\": \"plain_text\", \"text\": \"📈  EDDI Daily Update\", \"emoji\": true }
+                },
+                {
+                  \"type\": \"section\",
+                  \"text\": {
+                    \"type\": \"mrkdwn\",
+                    \"text\": \"🐳 *Pulls:* ${PULLS_FMT} (${pull_sign}${DAY_PULL_DIFF})  ·  ⭐ *Stars:* ${STARS} (${star_sign}${DAY_STAR_DIFF})  ·  🍴 *Forks:* ${FORKS} (${fork_sign}${DAY_FORK_DIFF})\"
+                  }
+                },
+                {
+                  \"type\": \"context\",
+                  \"elements\": [
+                    { \"type\": \"mrkdwn\", \"text\": \"👀 Views: ${VIEWS} · 📥 Clones: ${CLONES} · <https://github.com/labsai/EDDI|GitHub>\" }
+                  ]
+                }
+              ]
+            }"
+
       # ── Save updated metrics ────────────────────────────────
       - name: Build metrics snapshot
         run: |
           IS_WEEKLY="${{ github.event.schedule == '0 9 * * 0' || github.event.inputs.force_digest == 'true' }}"
+          IS_DAILY="${{ github.event.schedule == '0 18 * * *' }}"
 
           # On weekly digest, reset the week baseline
           if [ "$IS_WEEKLY" = "true" ]; then
@@ -275,10 +341,24 @@ jobs:
             WEEK_FORKS=${{ steps.prev.outputs.week_forks }}
           fi
 
-          # First run: initialize week baseline
+          # On daily digest (or weekly), reset the day baseline
+          if [ "$IS_DAILY" = "true" ] || [ "$IS_WEEKLY" = "true" ]; then
+            DAY_DOCKER=${{ steps.docker.outputs.pulls }}
+            DAY_STARS=${{ steps.github.outputs.stars }}
+            DAY_FORKS=${{ steps.github.outputs.forks }}
+          else
+            DAY_DOCKER=${{ steps.prev.outputs.day_docker }}
+            DAY_STARS=${{ steps.prev.outputs.day_stars }}
+            DAY_FORKS=${{ steps.prev.outputs.day_forks }}
+          fi
+
+          # First run: initialize baselines
           [ "$WEEK_DOCKER" = "0" ] && WEEK_DOCKER=${{ steps.docker.outputs.pulls }}
           [ "$WEEK_STARS" = "0" ] && WEEK_STARS=${{ steps.github.outputs.stars }}
           [ "$WEEK_FORKS" = "0" ] && WEEK_FORKS=${{ steps.github.outputs.forks }}
+          [ "$DAY_DOCKER" = "0" ] && DAY_DOCKER=${{ steps.docker.outputs.pulls }}
+          [ "$DAY_STARS" = "0" ] && DAY_STARS=${{ steps.github.outputs.stars }}
+          [ "$DAY_FORKS" = "0" ] && DAY_FORKS=${{ steps.github.outputs.forks }}
 
           # Current milestone marker
           CURRENT_MS=$(( ${{ steps.docker.outputs.pulls }} / 10000 * 10000 ))
@@ -290,9 +370,13 @@ jobs:
             --argjson week_docker "$WEEK_DOCKER" \
             --argjson week_stars "$WEEK_STARS" \
             --argjson week_forks "$WEEK_FORKS" \
+            --argjson day_docker "$DAY_DOCKER" \
+            --argjson day_stars "$DAY_STARS" \
+            --argjson day_forks "$DAY_FORKS" \
             --argjson last_milestone "$CURRENT_MS" \
             '{docker_pulls: $docker_pulls, stars: $stars, forks: $forks,
               week_docker: $week_docker, week_stars: $week_stars, week_forks: $week_forks,
+              day_docker: $day_docker, day_stars: $day_stars, day_forks: $day_forks,
               last_milestone: $last_milestone}' > metrics.json
 
           echo "Saved metrics:"
