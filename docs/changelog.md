@@ -13,6 +13,49 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Unit Test Coverage Expansion — Batches 6–10 (2026-04-19)
+
+**Repo:** EDDI (`test/coverage-tier-1-2`)
+
+**What changed:** Continued systematic unit test expansion for OpenSSF Silver compliance. Added 7 new test files covering models, services, and core rules engine logic.
+
+### Batch 6 — Service & Utility Tests
+- `AgentCardServiceTest` — getAgentCard, buildAgentCard, listA2AAgents (constructor-injectable, bypassing CDI)
+- `ContextLoggerTest` — MDC context creation, field combos, null safety
+- `SimpleDocumentDescriptorTest` — constructors, setters
+
+### Batch 7 — LlmConfiguration Nested Models
+- `LlmConfigurationModelsTest` — 9 nested classes: RagDefaults, ModelCascadeConfig, CascadeStep, ToolResponseLimits, McpServerConfig, A2AAgentConfig, RetryConfiguration, KnowledgeBaseReference, ConversationSummaryConfig (including `validate()` boundary logic)
+
+### Batch 8 — Small Model Batch
+- `SmallModelsBatchTest` — DeploymentInfo, ConversationStatus, DataFactory, HttpPreRequest, HttpCodeValidator, PropertySetterConfiguration, Deployment.Environment.fromString/toValue, Deployment.Status
+
+### Batch 9 — Rule Deserialization
+- `RuleDeserializationTest` — 11 tests covering the full deserialization pipeline with real ObjectMapper + mock CDI. Tests: empty groups, default/explicit execution strategies, rules with actions, condition type factory (actionmatcher, negation, connector, occurrence, dependency, contentTypeMatcher), nested conditions, invalid JSON error handling.
+
+### Batch 10 — Rules Engine Core
+- `RuleTest` — execute() with no/pass/fail/error conditions, short-circuit on first failure, infinite loop detection, equals/hashCode, clone, toString
+- `RulesEvaluatorTest` — empty sets, success/fail/error routing, execution strategies (executeUntilFirstSuccess vs executeAll), null rule set guard
+
+### Coverage Progress
+
+| Checkpoint | Line % | Branch % |
+|------------|--------|----------|
+| Batch 6    | 48.1%  | 42.7%    |
+| Batch 10   | 49.1%  | 43.2%    |
+
+**Files:**
+- `src/test/java/ai/labs/eddi/engine/a2a/AgentCardServiceTest.java` — new
+- `src/test/java/ai/labs/eddi/engine/internal/ContextLoggerTest.java` — new
+- `src/test/java/ai/labs/eddi/configs/descriptors/model/SimpleDocumentDescriptorTest.java` — new
+- `src/test/java/ai/labs/eddi/modules/llm/model/LlmConfigurationModelsTest.java` — new
+- `src/test/java/ai/labs/eddi/configs/model/SmallModelsBatchTest.java` — new
+- `src/test/java/ai/labs/eddi/modules/rules/impl/RuleDeserializationTest.java` — new
+- `src/test/java/ai/labs/eddi/modules/rules/impl/RuleTest.java` — new
+- `src/test/java/ai/labs/eddi/modules/rules/impl/RulesEvaluatorTest.java` — new
+
+---
+
 ## PR Review Fixes — Quota Ordering, Log Injection, Doc Hygiene (2026-04-17)
 
 **Repo:** EDDI (`feature/observability`)
