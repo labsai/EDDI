@@ -206,4 +206,80 @@ class EngineModelsTest {
         assertEquals(2L, status.totalDeadLettered());
         assertEquals(3, status.queueDepths().get("c1"));
     }
+
+    // ==================== AgentDeployment ====================
+
+    @Test
+    void agentDeployment_defaults() {
+        var deployment = new AgentDeployment();
+        assertEquals(Deployment.Environment.production, deployment.getEnvironment());
+        assertNull(deployment.getAgentId());
+        assertNotNull(deployment.getInitialContext());
+        assertTrue(deployment.getInitialContext().isEmpty());
+    }
+
+    @Test
+    void agentDeployment_setters() {
+        var deployment = new AgentDeployment();
+        deployment.setEnvironment(Deployment.Environment.test);
+        deployment.setAgentId("agent-42");
+        deployment.setInitialContext(Map.of(
+                "lang", new Context(Context.ContextType.string, "en")));
+
+        assertEquals(Deployment.Environment.test, deployment.getEnvironment());
+        assertEquals("agent-42", deployment.getAgentId());
+        assertEquals(1, deployment.getInitialContext().size());
+    }
+
+    // ==================== LogEntry ====================
+
+    @Test
+    void logEntry_record() {
+        var entry = new LogEntry(
+                1700000000L, "INFO", "ai.labs.eddi.TestClass",
+                "Test message", "production", "agent-1", 3,
+                "conv-123", "user-1", "inst-1");
+        assertEquals(1700000000L, entry.timestamp());
+        assertEquals("INFO", entry.level());
+        assertEquals("ai.labs.eddi.TestClass", entry.loggerName());
+        assertEquals("Test message", entry.message());
+        assertEquals("production", entry.environment());
+        assertEquals("agent-1", entry.agentId());
+        assertEquals(3, entry.agentVersion());
+        assertEquals("conv-123", entry.conversationId());
+        assertEquals("user-1", entry.userId());
+        assertEquals("inst-1", entry.instanceId());
+    }
+
+    @Test
+    void logEntry_nullFields() {
+        var entry = new LogEntry(0L, "WARN", "logger", "msg",
+                null, null, null, null, null, null);
+        assertNull(entry.environment());
+        assertNull(entry.agentId());
+        assertNull(entry.agentVersion());
+    }
+
+    @Test
+    void logEntry_jacksonRoundTrip() throws Exception {
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var entry = new LogEntry(1700000000L, "ERROR", "logger",
+                "Something failed", "test", "a1", 1,
+                "c1", "u1", "i1");
+        var json = mapper.writeValueAsString(entry);
+        var deserialized = mapper.readValue(json, LogEntry.class);
+        assertEquals(entry.timestamp(), deserialized.timestamp());
+        assertEquals(entry.message(), deserialized.message());
+        assertEquals(entry.agentId(), deserialized.agentId());
+    }
+
+    @Test
+    void logEntry_jsonExcludesNulls() throws Exception {
+        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        var entry = new LogEntry(0L, "INFO", "log", "msg",
+                null, null, null, null, null, null);
+        var json = mapper.writeValueAsString(entry);
+        assertFalse(json.contains("agentId"));
+        assertFalse(json.contains("userId"));
+    }
 }
