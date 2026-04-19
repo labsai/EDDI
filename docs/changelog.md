@@ -52,6 +52,18 @@ Each entry follows this format:
 - `IdDeserializerTest` — non-BSON deserialization path
 - `ToolExecutionServiceTest` — executeToolWrapped (all feature permutations: success, cached, rate-limited, features individually disabled, null conversationId, tool exception), parallel array validation
 
+### Batch 13 — MCP, Memory, Cache
+- `McpMemoryToolsTest` — all 7 MCP tool methods (list, getVisible, search, getByKey, upsert, delete, deleteAll, count) with null/blank validation, success paths, exception handling
+- `EddiChatMemoryStoreTest` — getMessages (new conversation, store error, empty snapshot), updateMessages (no-op), deleteMessages (success, not found, store error)
+- `CacheImplTest` — full ConcurrentMap delegation + all TTL-aware overloads
+
+### Batch 14 — NLP, Migrations, Engine Models
+- `RegularDictionaryTest` — word lookup (case-sensitive/insensitive), phrases, regex, lookupIfKnown, list immutability
+- `MergedTermsCorrectionTest` — merged word detection, partial match, temp dictionary
+- `PhoneticCorrectionTest` — phonetic code-based word correction
+- `V6QuteMigrationTest` — disabled/already-applied skip, empty collections, Thymeleaf→Qute migration
+- `UserConversationTest` — constructors, setters, Jackson round-trip
+
 ### Coverage Progress
 
 | Checkpoint | Line % | Branch % |
@@ -59,8 +71,9 @@ Each entry follows this format:
 | Batch 6    | 48.1%  | 42.7%    |
 | Batch 10   | 49.1%  | 43.2%    |
 | Batch 12   | 50.8%  | 44.3%    |
+| Batch 14   | 52.0%  | 45.3%    |
 
-**Files (Batch 11-12):**
+**Files (Batch 11-14):**
 - `src/test/java/ai/labs/eddi/modules/output/model/OutputModelsTest.java` — new
 - `src/test/java/ai/labs/eddi/modules/output/model/types/OutputTypesTest.java` — new
 - `src/test/java/ai/labs/eddi/engine/model/EngineModelsTest.java` — new
@@ -72,6 +85,14 @@ Each entry follows this format:
 - `src/test/java/ai/labs/eddi/datastore/serialization/IdSerializerTest.java` — new
 - `src/test/java/ai/labs/eddi/datastore/serialization/IdDeserializerTest.java` — new
 - `src/test/java/ai/labs/eddi/modules/llm/tools/ToolExecutionServiceTest.java` — new
+- `src/test/java/ai/labs/eddi/engine/mcp/McpMemoryToolsTest.java` — new
+- `src/test/java/ai/labs/eddi/modules/llm/memory/EddiChatMemoryStoreTest.java` — new
+- `src/test/java/ai/labs/eddi/engine/caching/CacheImplTest.java` — new
+- `src/test/java/ai/labs/eddi/modules/nlp/extensions/dictionaries/RegularDictionaryTest.java` — new
+- `src/test/java/ai/labs/eddi/modules/nlp/extensions/corrections/MergedTermsCorrectionTest.java` — new
+- `src/test/java/ai/labs/eddi/modules/nlp/extensions/corrections/PhoneticCorrectionTest.java` — new
+- `src/test/java/ai/labs/eddi/configs/migration/V6QuteMigrationTest.java` — new
+- `src/test/java/ai/labs/eddi/engine/triggermanagement/model/UserConversationTest.java` — new
 
 ---
 
