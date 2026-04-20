@@ -150,6 +150,108 @@ class ApiCallsTaskTest {
 
             verify(httpCallExecutor).execute(eq(wildcardCall), any(), any(), any());
         }
+
+        @Test
+        @DisplayName("empty actions list — no API calls executed")
+        @SuppressWarnings("unchecked")
+        void emptyActionsList() throws Exception {
+            IData<List<String>> actionsData = mock(IData.class);
+            when(actionsData.getResult()).thenReturn(List.of());
+            when(currentStep.getLatestData(MemoryKeys.ACTIONS)).thenReturn(actionsData);
+            when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
+
+            ApiCall greetCall = new ApiCall();
+            greetCall.setActions(List.of("greet"));
+
+            ApiCallsConfiguration config = new ApiCallsConfiguration();
+            config.setHttpCalls(List.of(greetCall));
+            config.setTargetServerUrl("http://localhost:8080");
+
+            task.execute(memory, config);
+
+            verifyNoInteractions(httpCallExecutor);
+        }
+
+        @Test
+        @DisplayName("multiple matching API calls execute in order")
+        @SuppressWarnings("unchecked")
+        void multipleMatchingCallsExecuteInOrder() throws Exception {
+            IData<List<String>> actionsData = mock(IData.class);
+            when(actionsData.getResult()).thenReturn(List.of("greet"));
+            when(currentStep.getLatestData(MemoryKeys.ACTIONS)).thenReturn(actionsData);
+            when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
+
+            ApiCall call1 = new ApiCall();
+            call1.setActions(List.of("greet"));
+            ApiCall call2 = new ApiCall();
+            call2.setActions(List.of("greet"));
+
+            ApiCallsConfiguration config = new ApiCallsConfiguration();
+            config.setHttpCalls(List.of(call1, call2));
+            config.setTargetServerUrl("http://localhost:8080");
+
+            when(httpCallExecutor.execute(any(), any(), any(), any())).thenReturn(Map.of("key", "val"));
+
+            task.execute(memory, config);
+
+            var inOrder = inOrder(httpCallExecutor);
+            inOrder.verify(httpCallExecutor).execute(eq(call1), any(), any(), any());
+            inOrder.verify(httpCallExecutor).execute(eq(call2), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("httpCallResult null — does not merge into templateData")
+        @SuppressWarnings("unchecked")
+        void nullResultNoMerge() throws Exception {
+            IData<List<String>> actionsData = mock(IData.class);
+            when(actionsData.getResult()).thenReturn(List.of("fetch"));
+            when(currentStep.getLatestData(MemoryKeys.ACTIONS)).thenReturn(actionsData);
+
+            var templateData = new HashMap<String, Object>();
+            when(memoryItemConverter.convert(memory)).thenReturn(templateData);
+
+            ApiCall fetchCall = new ApiCall();
+            fetchCall.setActions(List.of("fetch"));
+
+            ApiCallsConfiguration config = new ApiCallsConfiguration();
+            config.setHttpCalls(List.of(fetchCall));
+            config.setTargetServerUrl("http://api.example.com");
+
+            when(httpCallExecutor.execute(any(), any(), any(), any())).thenReturn(null);
+
+            task.execute(memory, config);
+
+            // templateData should not have been modified (null result)
+            assertTrue(templateData.isEmpty());
+        }
+
+        @Test
+        @DisplayName("httpCallResult non-empty — merges into templateData for subsequent calls")
+        @SuppressWarnings("unchecked")
+        void nonEmptyResultMerges() throws Exception {
+            IData<List<String>> actionsData = mock(IData.class);
+            when(actionsData.getResult()).thenReturn(List.of("fetch"));
+            when(currentStep.getLatestData(MemoryKeys.ACTIONS)).thenReturn(actionsData);
+
+            var templateData = new HashMap<String, Object>();
+            when(memoryItemConverter.convert(memory)).thenReturn(templateData);
+
+            ApiCall fetchCall = new ApiCall();
+            fetchCall.setActions(List.of("fetch"));
+
+            ApiCallsConfiguration config = new ApiCallsConfiguration();
+            config.setHttpCalls(List.of(fetchCall));
+            config.setTargetServerUrl("http://api.example.com");
+
+            when(httpCallExecutor.execute(any(), any(), any(), any()))
+                    .thenReturn(Map.of("weather", "sunny", "temp", "72"));
+
+            task.execute(memory, config);
+
+            // templateData should now contain merged results
+            assertEquals("sunny", templateData.get("weather"));
+            assertEquals("72", templateData.get("temp"));
+        }
     }
 
     @Nested

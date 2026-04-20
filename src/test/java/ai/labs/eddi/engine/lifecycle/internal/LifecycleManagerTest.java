@@ -411,4 +411,194 @@ class LifecycleManagerTest {
             verify(auditCollector).collect(any());
         }
     }
+
+    @Nested
+    @DisplayName("Thread Interruption")
+    class ThreadInterruptionTests {
+
+        @Test
+        @DisplayName("interrupted thread throws LifecycleInterruptedException")
+        void interruptedThread() {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn("parser");
+            when(task.getType()).thenReturn("input");
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            // Interrupt the current thread before execution
+            Thread.currentThread().interrupt();
+
+            try {
+                assertThrows(LifecycleException.LifecycleInterruptedException.class,
+                        () -> lifecycleManager.executeLifecycle(memory, null));
+            } finally {
+                // Clear interrupt flag so it doesn't affect other tests
+                Thread.interrupted();
+            }
+        }
+    }
+
+    @Nested
+    @DisplayName("Strict Write Discipline — Edge Cases")
+    class StrictWriteDisciplineEdgeCases {
+
+        @Test
+        @DisplayName("keep_all mode — isEffectivelyEnabled() returns false, no SWD applied")
+        void keepAllMode() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn("llm_task");
+            when(task.getType()).thenReturn("langchain");
+
+            doThrow(new LifecycleException("LLM error"))
+                    .when(task).execute(any(), any());
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            // keep_all mode makes isEffectivelyEnabled() return false
+            var memoryPolicy = new AgentConfiguration.MemoryPolicy();
+            var swd = new AgentConfiguration.StrictWriteDiscipline();
+            swd.setEnabled(true);
+            swd.setOnFailure("keep_all");
+            memoryPolicy.setStrictWriteDiscipline(swd);
+            when(memory.getMemoryPolicy()).thenReturn(memoryPolicy);
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            assertThrows(LifecycleException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+
+            // keep_all → isEffectivelyEnabled() is false → no strict write applied
+            verify(currentStep, never()).addConversationOutputList(anyString(), anyList());
+        }
+
+        @Test
+        @DisplayName("null memoryPolicy — strict write discipline not applied")
+        void nullMemoryPolicy() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn("failing_task");
+            when(task.getType()).thenReturn("custom");
+
+            doThrow(new LifecycleException("fail"))
+                    .when(task).execute(any(), any());
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+            when(memory.getMemoryPolicy()).thenReturn(null);
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            assertThrows(LifecycleException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+
+            // No strict write discipline applied — no uncommit, no digest
+            verify(currentStep, never()).addConversationOutputList(anyString(), anyList());
+        }
+
+        @Test
+        @DisplayName("disabled strict write — no uncommit even on failure")
+        void disabledStrictWrite() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn("failing_task");
+            when(task.getType()).thenReturn("custom");
+
+            doThrow(new LifecycleException("fail"))
+                    .when(task).execute(any(), any());
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            var memoryPolicy = new AgentConfiguration.MemoryPolicy();
+            var swd = new AgentConfiguration.StrictWriteDiscipline();
+            swd.setEnabled(false);
+            memoryPolicy.setStrictWriteDiscipline(swd);
+            when(memory.getMemoryPolicy()).thenReturn(memoryPolicy);
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            assertThrows(LifecycleException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+
+            // Strict write is disabled — no error digest
+            verify(currentStep, never()).addConversationOutputList(anyString(), anyList());
+        }
+
+        @Test
+        @DisplayName("failure after first task — second task does NOT execute")
+        void failureStopsPipeline() throws Exception {
+            var task1 = mock(ILifecycleTask.class);
+            when(task1.getId()).thenReturn("parser");
+            when(task1.getType()).thenReturn("input");
+
+            var task2 = mock(ILifecycleTask.class);
+            when(task2.getId()).thenReturn("behavior");
+            when(task2.getType()).thenReturn("behavior_rules");
+
+            doThrow(new LifecycleException("parse error"))
+                    .when(task1).execute(any(), any());
+
+            lifecycleManager.addLifecycleTask(task1);
+            lifecycleManager.addLifecycleTask(task2);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            assertThrows(LifecycleException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+
+            verify(task1).execute(any(), any());
+            verify(task2, never()).execute(any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Selective Execution — Additional")
+    class SelectiveExecutionAdditionalTests {
+
+        @Test
+        @DisplayName("empty lifecycleTaskTypes — all tasks execute (same as null)")
+        void emptyListExecutesAll() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn("parser");
+            when(task.getType()).thenReturn("input");
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            lifecycleManager.executeLifecycle(memory, List.of());
+
+            verify(task).execute(eq(memory), any());
+        }
+    }
 }
