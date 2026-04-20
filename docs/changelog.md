@@ -13,6 +13,20 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Unit Test Coverage Expansion — Batches 25–26 (2026-04-20)
+
+**Repo:** EDDI (`test/coverage-tier-1-2`)
+
+**What changed:** Added 4 new test classes targeting core engine classes: InputParser, Conversation, AgentDeploymentManagement, and MatchMatrix. Total: 3,563 tests, all passing.
+
+### Batch 25 — NLP & Conversation Core
+- `InputParserTest` (16 tests) — Construction (default/custom config), normalize (whitespace, chaining, null language), parse (unknown words, dictionary lookup, language mismatch, corrections, multi-word), Config POJO (equals, hashCode, toString, setters)
+- `ConversationTest` (8 tests) — State management (isEnded, endConversation), init (READY state, CONVERSATION_START action, user property loading from UserMemoryStore, null store skip), say/rerun IN_PROGRESS guards
+
+### Batch 26 — Engine & NLP Matching
+- `AgentDeploymentManagementTest` (8 tests) — checkDeployments (deploy new agents, skip null agentId/version, no re-deploy, ResourceStoreException handling, deploy failure handling, stale deployment cleanup via ResourceNotFoundException), autoDeployAgents (migration order with V6RenameMigration + V6QuteMigration)
+- `MatchMatrixTest` (11 tests) — add/get operations (single result, multiple same key, different terms, out-of-bounds null), SolutionIterator (empty matrix, single entry, two entries combinatorial, NoSuchElementException, for-each loop), MatchingResult basics
+
 ## Unit Test Coverage Expansion — Batches 19–24 (2026-04-20)
 
 **Repo:** EDDI (`test/coverage-tier-1-2`)
