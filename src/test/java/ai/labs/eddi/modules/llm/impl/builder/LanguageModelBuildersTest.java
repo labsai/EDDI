@@ -205,4 +205,86 @@ class LanguageModelBuildersTest {
         }
     }
 
+    // ==================== Gemini ====================
+
+    @Nested
+    @DisplayName("GeminiLanguageModelBuilder")
+    class GeminiTests {
+
+        private final GeminiLanguageModelBuilder builder = new GeminiLanguageModelBuilder();
+
+        @Test
+        @DisplayName("builds ChatModel with all parameters")
+        void buildAll() {
+            Map<String, String> params = new HashMap<>();
+            params.put("apiKey", "gemini-key");
+            params.put("modelName", "gemini-2.0-flash");
+            params.put("temperature", "0.7");
+            params.put("maxOutputTokens", "4096");
+            params.put("allowCodeExecution", "true");
+            params.put("logRequestsAndResponses", "true");
+            params.put("timeout", "30000");
+
+            ChatModel model = builder.build(params);
+            assertNotNull(model);
+        }
+
+        @Test
+        @DisplayName("builds StreamingChatModel")
+        void buildStreaming() {
+            Map<String, String> params = new HashMap<>();
+            params.put("apiKey", "gemini-key");
+            params.put("modelName", "gemini-2.0-flash");
+
+            StreamingChatModel model = builder.buildStreaming(params);
+            assertNotNull(model);
+        }
+    }
+
+    // ==================== Bedrock ====================
+
+    @Nested
+    @DisplayName("BedrockLanguageModelBuilder")
+    class BedrockTests {
+
+        private final BedrockLanguageModelBuilder builder = new BedrockLanguageModelBuilder();
+
+        @Test
+        @DisplayName("builds ChatModel with all parameters")
+        void buildAll() {
+            Map<String, String> params = new HashMap<>();
+            params.put("modelId", "anthropic.claude-v2");
+            params.put("region", "us-east-1");
+            params.put("temperature", "0.5");
+            params.put("maxTokens", "2048");
+            params.put("timeout", "60000");
+
+            ChatModel model = builder.build(params);
+            assertNotNull(model);
+        }
+
+        @Test
+        @DisplayName("builds ChatModel without request parameters")
+        void buildMinimal() {
+            Map<String, String> params = new HashMap<>();
+            params.put("modelId", "meta.llama3-70b-instruct-v1:0");
+            params.put("region", "us-west-2");
+
+            ChatModel model = builder.build(params);
+            assertNotNull(model);
+        }
+
+        @Test
+        @DisplayName("builds StreamingChatModel")
+        void buildStreaming() {
+            Map<String, String> params = new HashMap<>();
+            params.put("modelId", "anthropic.claude-v2");
+            params.put("region", "eu-west-1");
+            params.put("temperature", "0.3");
+
+            StreamingChatModel model = builder.buildStreaming(params);
+            assertNotNull(model);
+        }
+    }
+
 }
