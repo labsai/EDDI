@@ -1,6 +1,8 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -20,11 +22,15 @@ import java.util.Optional;
 /**
  * Web search tool that integrates with search APIs. Supports Google Custom
  * Search, DuckDuckGo, and other search providers.
+ * <p>
+ * Uses Jackson {@link ObjectMapper} for safe, correct JSON parsing of all
+ * search API responses.
  */
 @ApplicationScoped
 public class WebSearchTool {
     private static final Logger LOGGER = Logger.getLogger(WebSearchTool.class);
     private final SafeHttpClient httpClient;
+    private final ObjectMapper objectMapper;
 
     @ConfigProperty(name = "eddi.tools.websearch.google.api-key")
     Optional<String> googleApiKey;
@@ -36,8 +42,9 @@ public class WebSearchTool {
     String searchProvider;
 
     @Inject
-    public WebSearchTool(SafeHttpClient httpClient) {
+    public WebSearchTool(SafeHttpClient httpClient, ObjectMapper objectMapper) {
         this.httpClient = httpClient;
+        this.objectMapper = objectMapper;
     }
 
     @Tool("Searches the web for current information on any topic. Returns relevant search results with titles and snippets.")
@@ -103,88 +110,82 @@ public class WebSearchTool {
         return formatDuckDuckGoResults(response.body(), query, maxResults);
     }
 
-    private String formatGoogleResults(String jsonResponse, String query) {
-        // Simple parsing - in production, use proper JSON library
+    /**
+     * Parses Google Custom Search API JSON response using Jackson.
+     */
+    String formatGoogleResults(String jsonResponse, String query) {
         StringBuilder results = new StringBuilder();
         results.append("Search results for '").append(query).append("':\n\n");
 
-        // Extract items from JSON (simplified - in production use Jackson/Gson)
-        if (jsonResponse.contains("\"items\"")) {
-            String[] items = jsonResponse.split("\"title\"");
-            int count = 0;
+        boolean hasResults = false;
+        try {
+            JsonNode root = objectMapper.readTree(jsonResponse);
+            JsonNode items = root.get("items");
 
-            for (int i = 1; i < items.length && count < 10; i++) {
-                try {
-                    // Extract title
-                    int titleStart = items[i].indexOf(":") + 3;
-                    int titleEnd = items[i].indexOf("\"", titleStart);
-                    String title = items[i].substring(titleStart, titleEnd);
+            if (items != null && items.isArray()) {
+                int count = 0;
+                for (JsonNode item : items) {
+                    if (count >= 10)
+                        break;
 
-                    // Extract snippet
-                    int snippetStart = items[i].indexOf("\"snippet\"") + 12;
-                    int snippetEnd = items[i].indexOf("\"", snippetStart);
-                    String snippet = items[i].substring(snippetStart, snippetEnd);
+                    String title = getTextOrEmpty(item, "title");
+                    String snippet = getTextOrEmpty(item, "snippet");
+                    String link = getTextOrEmpty(item, "link");
 
-                    // Extract link
-                    int linkStart = items[i].indexOf("\"link\"") + 9;
-                    int linkEnd = items[i].indexOf("\"", linkStart);
-                    String link = items[i].substring(linkStart, linkEnd);
-
-                    results.append(++count).append(". ").append(unescapeJson(title)).append("\n");
-                    results.append("   ").append(unescapeJson(snippet)).append("\n");
+                    results.append(++count).append(". ").append(title).append("\n");
+                    results.append("   ").append(snippet).append("\n");
                     results.append("   ").append(link).append("\n\n");
-
-                } catch (Exception e) {
-                    // Skip malformed results
-                    LOGGER.debug("Could not parse search result: " + e.getMessage());
+                    hasResults = true;
                 }
             }
+        } catch (Exception e) {
+            LOGGER.debug("Could not parse Google search results: " + e.getMessage());
         }
 
-        if (results.length() == 0) {
+        if (!hasResults) {
             results.append("No results found for '").append(query).append("'.");
         }
 
         return results.toString();
     }
 
-    private String formatDuckDuckGoResults(String jsonResponse, String query, int maxResults) {
+    /**
+     * Parses DuckDuckGo Instant Answer API JSON response using Jackson.
+     */
+    String formatDuckDuckGoResults(String jsonResponse, String query, int maxResults) {
         StringBuilder results = new StringBuilder();
         results.append("Search results for '").append(query).append("':\n\n");
 
+        boolean hasResults = false;
         try {
-            // Parse DuckDuckGo instant answer
-            if (jsonResponse.contains("\"Abstract\"")) {
-                String abstractText = extractJsonValue(jsonResponse, "Abstract");
-                String abstractUrl = extractJsonValue(jsonResponse, "AbstractURL");
+            JsonNode root = objectMapper.readTree(jsonResponse);
 
-                if (!abstractText.isEmpty()) {
-                    results.append("Quick Answer:\n");
-                    results.append(unescapeJson(abstractText)).append("\n");
-                    if (!abstractUrl.isEmpty()) {
-                        results.append("Source: ").append(abstractUrl).append("\n");
-                    }
-                    results.append("\n");
+            // Parse DuckDuckGo instant answer abstract
+            String abstractText = getTextOrEmpty(root, "Abstract");
+            String abstractUrl = getTextOrEmpty(root, "AbstractURL");
+
+            if (!abstractText.isEmpty()) {
+                results.append("Quick Answer:\n");
+                results.append(abstractText).append("\n");
+                if (!abstractUrl.isEmpty()) {
+                    results.append("Source: ").append(abstractUrl).append("\n");
                 }
+                results.append("\n");
+                hasResults = true;
             }
 
             // Parse related topics
-            if (jsonResponse.contains("\"RelatedTopics\"")) {
-                results.append("Related information:\n");
-                String[] topics = jsonResponse.split("\"Text\"");
+            JsonNode relatedTopics = root.get("RelatedTopics");
+            if (relatedTopics != null && relatedTopics.isArray()) {
                 int count = 0;
+                for (JsonNode topic : relatedTopics) {
+                    if (count >= maxResults)
+                        break;
 
-                for (int i = 1; i < topics.length && count < maxResults; i++) {
-                    try {
-                        int textStart = topics[i].indexOf(":") + 3;
-                        int textEnd = topics[i].indexOf("\"", textStart);
-                        String text = topics[i].substring(textStart, textEnd);
-
-                        if (!text.isEmpty()) {
-                            results.append(++count).append(". ").append(unescapeJson(text)).append("\n");
-                        }
-                    } catch (Exception e) {
-                        // Skip malformed results
+                    String text = getTextOrEmpty(topic, "Text");
+                    if (!text.isEmpty()) {
+                        results.append(++count).append(". ").append(text).append("\n");
+                        hasResults = true;
                     }
                 }
             }
@@ -194,33 +195,11 @@ public class WebSearchTool {
             return "Search completed but could not parse results. Query: " + query;
         }
 
-        if (results.toString().equals("Search results for '" + query + "':\n\n")) {
+        if (!hasResults) {
             results.append("No instant results found. Try refining your search query.");
         }
 
         return results.toString();
-    }
-
-    private String extractJsonValue(String json, String key) {
-        try {
-            String searchKey = "\"" + key + "\":\"";
-            int start = json.indexOf(searchKey);
-            if (start == -1)
-                return "";
-
-            start += searchKey.length();
-            int end = json.indexOf("\"", start);
-            if (end == -1)
-                return "";
-
-            return json.substring(start, end);
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
-    private String unescapeJson(String text) {
-        return text.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\").replace("\\/", "/");
     }
 
     @Tool("Searches for news articles on a specific topic")
@@ -254,32 +233,36 @@ public class WebSearchTool {
         }
     }
 
-    private String formatWikipediaResults(String jsonResponse, String query) {
+    /**
+     * Parses Wikipedia API JSON response using Jackson.
+     */
+    String formatWikipediaResults(String jsonResponse, String query) {
         StringBuilder results = new StringBuilder();
         results.append("Wikipedia results for '").append(query).append("':\n\n");
 
+        boolean hasResults = false;
         try {
-            String[] searchResults = jsonResponse.split("\"title\"");
-            int count = 0;
+            JsonNode root = objectMapper.readTree(jsonResponse);
+            JsonNode queryNode = root.get("query");
+            JsonNode searchResults = queryNode != null ? queryNode.get("search") : null;
 
-            for (int i = 1; i < searchResults.length && count < 3; i++) {
-                try {
-                    int titleStart = searchResults[i].indexOf(":\"") + 2;
-                    int titleEnd = searchResults[i].indexOf("\"", titleStart);
-                    String title = searchResults[i].substring(titleStart, titleEnd);
+            if (searchResults != null && searchResults.isArray()) {
+                int count = 0;
+                for (JsonNode item : searchResults) {
+                    if (count >= 3)
+                        break;
 
-                    int snippetStart = searchResults[i].indexOf("\"snippet\":\"") + 11;
-                    int snippetEnd = searchResults[i].indexOf("\"", snippetStart);
-                    String snippet = searchResults[i].substring(snippetStart, snippetEnd);
+                    String title = getTextOrEmpty(item, "title");
+                    String snippet = getTextOrEmpty(item, "snippet")
+                            .replaceAll("<[^>]*>", ""); // Strip HTML tags
 
-                    String wikiUrl = "https://en.wikipedia.org/wiki/" + URLEncoder.encode(title.replace(" ", "_"), StandardCharsets.UTF_8);
+                    String wikiUrl = "https://en.wikipedia.org/wiki/"
+                            + URLEncoder.encode(title.replace(" ", "_"), StandardCharsets.UTF_8);
 
-                    results.append(++count).append(". ").append(unescapeJson(title)).append("\n");
-                    results.append("   ").append(unescapeJson(snippet).replaceAll("<[^>]*>", "")).append("\n");
+                    results.append(++count).append(". ").append(title).append("\n");
+                    results.append("   ").append(snippet).append("\n");
                     results.append("   ").append(wikiUrl).append("\n\n");
-
-                } catch (Exception e) {
-                    LOGGER.debug("Could not parse Wikipedia result: " + e.getMessage());
+                    hasResults = true;
                 }
             }
 
@@ -288,10 +271,21 @@ public class WebSearchTool {
             return "Wikipedia search completed but could not parse results.";
         }
 
-        if (results.toString().equals("Wikipedia results for '" + query + "':\n\n")) {
+        if (!hasResults) {
             results.append("No Wikipedia articles found for '").append(query).append("'.");
         }
 
         return results.toString();
+    }
+
+    /**
+     * Safely extracts a text value from a JsonNode field, returning empty string if
+     * the field is missing or null.
+     */
+    private static String getTextOrEmpty(JsonNode node, String fieldName) {
+        if (node == null)
+            return "";
+        JsonNode field = node.get(fieldName);
+        return (field != null && !field.isNull()) ? field.asText() : "";
     }
 }

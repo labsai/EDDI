@@ -1,6 +1,8 @@
 package ai.labs.eddi.engine.audit;
 
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -401,6 +403,89 @@ class AuditLedgerServiceTest {
             String hmac2 = AuditHmac.computeHmac(e2, key);
 
             assertEquals(hmac1, hmac2, "HMAC should be the same regardless of Map implementation (keys are sorted)");
+        }
+    }
+
+    // ==================== Dead Letter Serialization ====================
+
+    @Nested
+    class DeadLetterSerialization {
+
+        private final ObjectMapper mapper = new ObjectMapper();
+
+        @Test
+        void serializeDeadLetterEntry_WithType_ShouldIncludeTypeField() throws Exception {
+            AuditEntry entry = createEntry("task-1", "conv-1");
+
+            String json = AuditLedgerService.serializeDeadLetterEntry(entry, "audit_dead_letter");
+
+            // Parse the result to verify it's valid JSON
+            JsonNode node = mapper.readTree(json);
+
+            assertEquals("audit_dead_letter", node.get("type").asText());
+            assertEquals("conv-1", node.get("conversationId").asText());
+            assertEquals("agent-1", node.get("agentId").asText());
+            assertEquals("task-1", node.get("taskId").asText());
+            assertEquals("test-type", node.get("taskType").asText());
+            assertNotNull(node.get("timestamp"));
+        }
+
+        @Test
+        void serializeDeadLetterEntry_WithoutType_ShouldOmitTypeField() throws Exception {
+            AuditEntry entry = createEntry("task-1", "conv-1");
+
+            String json = AuditLedgerService.serializeDeadLetterEntry(entry, null);
+
+            JsonNode node = mapper.readTree(json);
+
+            assertNull(node.get("type"));
+            assertEquals("conv-1", node.get("conversationId").asText());
+            assertEquals("agent-1", node.get("agentId").asText());
+        }
+
+        @Test
+        void serializeDeadLetterEntry_WithSpecialChars_ShouldEscapeCorrectly() throws Exception {
+            AuditEntry entry = new AuditEntry("id-1", "conv-with-\"quotes\"", "agent-with\nnewline", 1,
+                    "user-1", "production", 0, "task/special", "type<html>", 0, 42L,
+                    null, null, null, null, null, 0.0, Instant.now(), null, null);
+
+            String json = AuditLedgerService.serializeDeadLetterEntry(entry, "test");
+
+            // Must be valid JSON despite special characters
+            JsonNode node = mapper.readTree(json);
+
+            assertEquals("conv-with-\"quotes\"", node.get("conversationId").asText());
+            assertEquals("agent-with\nnewline", node.get("agentId").asText());
+            assertEquals("task/special", node.get("taskId").asText());
+            assertEquals("type<html>", node.get("taskType").asText());
+        }
+
+        @Test
+        void serializeDeadLetterEntry_WithNullFields_ShouldProduceValidJson() throws Exception {
+            AuditEntry entry = new AuditEntry("id-1", null, null, null, null, null, 0,
+                    null, null, 0, 0L, null, null, null, null, null, 0.0, null, null, null);
+
+            String json = AuditLedgerService.serializeDeadLetterEntry(entry, null);
+
+            // Must be valid JSON
+            JsonNode node = mapper.readTree(json);
+
+            assertTrue(node.get("conversationId").isNull());
+            assertTrue(node.get("agentId").isNull());
+            assertTrue(node.get("taskId").isNull());
+            assertTrue(node.get("taskType").isNull());
+        }
+
+        @Test
+        void serializeDeadLetterEntry_ShouldAlwaysContainTimestamp() throws Exception {
+            AuditEntry entry = createEntry("task-1", "conv-1");
+
+            String json = AuditLedgerService.serializeDeadLetterEntry(entry, null);
+
+            JsonNode node = mapper.readTree(json);
+
+            assertNotNull(node.get("timestamp"));
+            assertFalse(node.get("timestamp").asText().isEmpty());
         }
     }
 
