@@ -50,10 +50,16 @@ public class PhoneticCorrection implements ICorrection {
         List<IDictionary.IFoundWord> foundWords = new ArrayList<>();
 
         String soundexCode = calculateSoundexCode(word);
-        foundWords.addAll(soundexCodes.get(soundexCode));
+        List<IDictionary.IFoundWord> soundexMatches = soundexCodes.get(soundexCode);
+        if (soundexMatches != null) {
+            foundWords.addAll(soundexMatches);
+        }
 
         String metaphoneCode = calculateMetaphoneCode(word);
-        foundWords.addAll(metaphoneCodes.get(metaphoneCode));
+        List<IDictionary.IFoundWord> metaphoneMatches = metaphoneCodes.get(metaphoneCode);
+        if (metaphoneMatches != null) {
+            foundWords.addAll(metaphoneMatches);
+        }
 
         return foundWords;
     }

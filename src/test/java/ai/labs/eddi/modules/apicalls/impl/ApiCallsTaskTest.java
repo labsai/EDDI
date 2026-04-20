@@ -11,7 +11,7 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
-import ai.labs.eddi.engine.runtime.service.ServiceException;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -87,7 +87,6 @@ class ApiCallsTaskTest {
         @SuppressWarnings("unchecked")
         void executesMatchingCalls() throws Exception {
             // Setup actions
-            @SuppressWarnings("unchecked")
             IData<List<String>> actionsData = mock(IData.class);
             when(actionsData.getResult()).thenReturn(List.of("greet"));
             when(currentStep.getLatestData(MemoryKeys.ACTIONS)).thenReturn(actionsData);
@@ -112,7 +111,6 @@ class ApiCallsTaskTest {
         @DisplayName("skips non-matching API calls")
         @SuppressWarnings("unchecked")
         void skipsNonMatching() throws Exception {
-            @SuppressWarnings("unchecked")
             IData<List<String>> actionsData = mock(IData.class);
             when(actionsData.getResult()).thenReturn(List.of("farewell"));
             when(currentStep.getLatestData(MemoryKeys.ACTIONS)).thenReturn(actionsData);
@@ -134,7 +132,6 @@ class ApiCallsTaskTest {
         @DisplayName("wildcard action matches everything")
         @SuppressWarnings("unchecked")
         void wildcardAction() throws Exception {
-            @SuppressWarnings("unchecked")
             IData<List<String>> actionsData = mock(IData.class);
             when(actionsData.getResult()).thenReturn(List.of("anything"));
             when(currentStep.getLatestData(MemoryKeys.ACTIONS)).thenReturn(actionsData);

@@ -55,4 +55,26 @@ class PhoneticCorrectionTest {
         assertNotNull(result);
         assertFalse(result.isEmpty());
     }
+
+    @Test
+    void correctWord_unknownWord_returnsEmptyList() {
+        // Regression test for NPE fix: unknown words with no phonetic match
+        // should return an empty list, not throw NullPointerException
+        var result = correction.correctWord("xyzzy12345", null, Collections.emptyList());
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void init_emptyDictionary() {
+        var empty = new PhoneticCorrection(false);
+        var dictionary = mock(IDictionary.class);
+        when(dictionary.getWords()).thenReturn(Collections.emptyList());
+        empty.init(List.of(dictionary));
+
+        // Should handle empty dictionaries gracefully
+        var result = empty.correctWord("anything", null, Collections.emptyList());
+        assertNotNull(result);
+        assertTrue(result.isEmpty());
+    }
 }
