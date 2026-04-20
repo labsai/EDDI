@@ -13,6 +13,38 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## MongoDB Adapter ITs + JaCoCo Coverage Fix (2026-04-20)
+
+**Repo:** EDDI (`test/coverage-tier-1-2`)
+
+**What changed:** Added comprehensive Testcontainers-based integration tests for ALL MongoDB adapter stores (75 tests, 6 test classes). Fixed JaCoCo coverage merging by adding `quarkus-jacoco` extension and including `jacoco-quarkus.exec` in the merged report.
+
+### MongoDB Adapter ITs (75 tests)
+- **MongoTestBase** — Shared Testcontainers base (mongo:6.0) with production-matching ObjectMapper config
+- **MongoScheduleStoreIT** (21 tests): CRUD, atomic claiming, double-claim rejection, state transitions (PENDING→CLAIMED→COMPLETED/FAILED→DEAD_LETTERED), requeue, enable/disable, fire logs, due-schedule filtering
+- **MongoSecretPersistenceIT** (13 tests): Secrets CRUD (upsert, find, delete, list by tenant), DEK CRUD (upsert, find, delete, list all), metadata (get/set, upsert)
+- **MongoDeploymentStorageIT** (5 tests): CRUD with upsert, list all, filter by deployment status
+- **MongoAttachmentStorageIT** (7 tests): GridFS binary round-trip, null filename handling, not-found/invalid/null ref, cascade delete by conversation
+- **MongoUserMemoryStoreIT** (14 tests): Flat properties CRUD, structured entry operations, visibility/category/filter queries, count, GDPR deletion
+- **MongoResourceStorageIT** (15 tests): CRUD, upsert, versioning, history resources, deleted flag, permanent removal, find-by-json-path
+
+### JaCoCo Coverage Fix
+- **Added `quarkus-jacoco` test dependency** — Quarkus-native JaCoCo instrumentation that writes coverage data from within the Quarkus classloader, bypassing the Windows JaCoCo agent path quoting issue
+- **Added `jacoco-quarkus.exec` to merge step** — Ensures @QuarkusTest IT coverage is included in the merged report
+- **Documented Windows limitation** — On Windows, the standard JaCoCo agent path with backslashes breaks the Quarkus FacadeClassLoader; `quarkus-jacoco` is the workaround
+
+**Decision:** The `@QuarkusTest` ITs (33 existing test classes, 250+ tests) exercise all REST endpoints but their coverage was invisible because the JaCoCo agent couldn't attach. The `quarkus-jacoco` extension fixes this.
+
+**Files (new):**
+- `MongoTestBase.java`, `MongoScheduleStoreIT.java`, `MongoSecretPersistenceIT.java`
+- `MongoDeploymentStorageIT.java`, `MongoAttachmentStorageIT.java`
+- `MongoUserMemoryStoreIT.java`, `MongoResourceStorageIT.java`
+
+**Files (modified):**
+- `pom.xml` — Added `quarkus-jacoco` dep, added `jacoco-quarkus.exec` to merge includes, documented Windows limitation
+
+---
+
 ## Integration Test Expansion — Batches 6-7: Full Postgres Adapter Coverage (2026-04-20)
 
 **Repo:** EDDI (`test/coverage-tier-1-2`)
