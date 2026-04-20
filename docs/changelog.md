@@ -13,6 +13,36 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Integration Test Expansion — Batch 5 + Code Review (2026-04-20)
+
+**Repo:** EDDI (`test/coverage-tier-1-2`)
+
+**What changed:** Completed code review of Batches 3-4 integration tests, then implemented Batch 5 (PostgresScheduleStoreIT). Total: 3,645 unit tests + 459 ITs, all passing.
+
+### Code Review Fixes
+- **Tautological assertion** — `PostgresAuditStoreIT.multipleEntries` used `assertTrue(a >= b || c)` which always passed because entries inserted in same millisecond. Replaced with taskId content verification.
+- **Weak assertion** — `PostgresSecretPersistenceIT.listAll` used `assertTrue(size >= 2)` instead of exact `assertEquals(2)` (table is truncated in `@BeforeEach`).
+- **Missing content verification** — `ConversationLogGeneratorTest` only verified message roles, not actual text values. Added `assertEquals("Not much!", ...)`, `assertEquals("Hi there!", ...)`, and URL verification for inputFiles.
+- **Unused imports** — Removed 7 unused imports across `PostgresTestBase`, `PostgresAuditStoreIT`, `PostgresResourceStorageIT`, `PostgresSecretPersistenceIT`.
+- **Unused annotation** — Removed `@TestMethodOrder(OrderAnnotation.class)` from `PostgresSecretPersistenceIT` (no `@Order` annotations present).
+
+### Batch 5 — PostgresScheduleStoreIT (24 tests)
+- **CRUD** (6 tests): create+read round-trip, read non-existent, update, update non-existent, delete, deleteByAgentId cascade
+- **List queries** (2 tests): readAll with limit, readByAgent filtering
+- **Enable/Disable** (3 tests): enable with nextFire, disable, non-existent
+- **State machine** (8 tests): tryClaim PENDING, double-claim prevention, markCompleted with reschedule, markCompleted one-shot (disables), markFailed + failCount increment, markDeadLettered, requeueDeadLetter, requeue non-DEAD_LETTERED throws
+- **findDueSchedules** (1 test): filters by enabled + nextFire + status, ignores not-due and disabled
+- **Fire logs** (3 tests): logFire+readFireLogs round-trip, readFailedFireLogs filters FAILED/DEAD_LETTERED, respects limit
+- **Heartbeat** (1 test): heartbeat trigger type preserves intervalSeconds + conversationStrategy
+
+**Files:**
+- `src/test/java/ai/labs/eddi/datastore/postgres/PostgresScheduleStoreIT.java` — new (24 tests)
+- `src/test/java/ai/labs/eddi/datastore/postgres/PostgresTestBase.java` — removed 3 unused imports
+- `src/test/java/ai/labs/eddi/datastore/postgres/PostgresAuditStoreIT.java` — fixed assertion
+- `src/test/java/ai/labs/eddi/datastore/postgres/PostgresResourceStorageIT.java` — removed 2 unused imports
+- `src/test/java/ai/labs/eddi/datastore/postgres/PostgresSecretPersistenceIT.java` — fixed assertion, removed annotation
+- `src/test/java/ai/labs/eddi/engine/memory/ConversationLogGeneratorTest.java` — added content value assertions
+
 ## Unit Test Coverage Expansion — Batches 27–28 (2026-04-20)
 
 **Repo:** EDDI (`test/coverage-tier-1-2`)
