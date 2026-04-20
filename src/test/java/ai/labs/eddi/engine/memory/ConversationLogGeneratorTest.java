@@ -98,6 +98,10 @@ class ConversationLogGeneratorTest {
             assertEquals(2, log.getMessages().size());
             assertEquals("user", log.getMessages().get(0).getRole());
             assertEquals("assistant", log.getMessages().get(1).getRole());
+            // Verify actual content value
+            var assistantContent = log.getMessages().get(1).getContent();
+            assertFalse(assistantContent.isEmpty());
+            assertEquals("Not much!", assistantContent.getFirst().getValue());
         }
 
         @Test
@@ -117,6 +121,8 @@ class ConversationLogGeneratorTest {
 
             assertEquals(2, log.getMessages().size());
             assertEquals("assistant", log.getMessages().get(1).getRole());
+            // Verify actual text content
+            assertEquals("Hi there!", log.getMessages().get(1).getContent().getFirst().getValue());
         }
     }
 
@@ -232,6 +238,9 @@ class ConversationLogGeneratorTest {
             var userMsg = log.getMessages().getFirst();
             assertEquals("user", userMsg.getRole());
             assertEquals(2, userMsg.getContent().size());
+            // First content item should be the image file
+            var imageContent = userMsg.getContent().get(0);
+            assertEquals("https://example.com/img.png", imageContent.getValue());
         }
     }
 

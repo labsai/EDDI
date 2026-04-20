@@ -23,7 +23,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * @since 6.0.0
  */
 @DisplayName("PostgresSecretPersistence IT")
-@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class PostgresSecretPersistenceIT extends PostgresTestBase {
 
     private static PostgresSecretPersistence persistence;
@@ -217,7 +216,7 @@ class PostgresSecretPersistenceIT extends PostgresTestBase {
             persistence.upsertDek(new EncryptedDek(null, "t2", "d2", "iv2", Instant.now()));
 
             List<EncryptedDek> all = persistence.listAllDeks();
-            assertTrue(all.size() >= 2);
+            assertEquals(2, all.size());
         }
     }
 

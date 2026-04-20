@@ -1,7 +1,5 @@
 package ai.labs.eddi.datastore.postgres;
 
-import ai.labs.eddi.datastore.IResourceStorage;
-import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
