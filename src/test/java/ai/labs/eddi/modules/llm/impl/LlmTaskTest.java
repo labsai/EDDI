@@ -1583,11 +1583,9 @@ class LlmTaskTest {
             when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
 
             // Agent mode reaches CDI boundary — same pattern as testExecute_AgentMode
-            Throwable thrown = null;
             try {
                 langChainTask.execute(memory, llmConfig);
-            } catch (Throwable t) {
-                thrown = t;
+            } catch (Throwable ignored) {
             }
 
             // The cascade trace should NOT be stored (cascade was skipped)

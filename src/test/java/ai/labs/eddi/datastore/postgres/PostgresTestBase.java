@@ -67,7 +67,6 @@ public abstract class PostgresTestBase {
     /**
      * Minimal Instance<DataSource> implementation that only supports get().
      */
-    @SuppressWarnings("unchecked")
     private static class SimpleDataSourceInstance implements Instance<DataSource> {
         private final DataSource ds;
 
