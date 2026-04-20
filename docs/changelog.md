@@ -13,6 +13,37 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Unit Test Coverage Expansion — Batches 19–21 (2026-04-20)
+
+**Repo:** EDDI (`test/coverage-tier-1-2`)
+
+**What changed:** Fixed compilation errors in AgentSetupServiceTest and added 4 new test classes. Line coverage: 53.6% → 54.2%.
+
+### Batch 19 — AgentSetupService Fixes + Verification
+- Fixed `AgentSetupServiceTest` API mismatches: `tasks()` record accessor (not `getTasks()`), `getExpressionsAsActions()` (not `isExpressionsAsActions()`), `getEnableBuiltInTools()` (not `isEnableBuiltInTools()`), removed `staging` environment (only `production`/`test` exist)
+- 69/69 tests green
+
+### Batch 20 — Security & Utility Tests
+- `AuditHmacTest` (13 tests) — HMAC key derivation (determinism, independence), compute/verify (valid, tampered, null, wrong key), canonical string building (all fields, null safety, map sorting)
+- `VaultSaltManagerTest` (9 tests) — Salt lifecycle: load existing, fresh deployment generation, legacy upgrade fallback, persistence failure, defensive copy, migration, null/short rejection
+- `LanguageUtilitiesTest` (29 tests) — Time expression parsing (Xh, HH:MM, HH:MM:SS, 24:00 normalization), ordinal number extraction (1st, 2nd, 3rd, 4th patterns)
+
+### Batch 21 — LLM Provider Builder Tests
+- `LanguageModelBuildersTest` (11 tests) — OpenAI, Anthropic, Ollama, Mistral, Azure OpenAI (build + buildStreaming with full/minimal params). HuggingFace excluded (deprecated, Retrofit URL validation prevents offline testing)
+
+### Coverage Summary
+| Metric | Before | After | Delta |
+|---|---|---|---|
+| LINE | 53.6% | 54.2% | +0.6% |
+| INSTRUCTION | 52.3% | 52.9% | +0.6% |
+| METHOD | 60.9% | 61.3% | +0.4% |
+| CLASS | 68.5% | 69.3% | +0.8% |
+
+**Total new tests this session:** 62 (AuditHmac 13 + VaultSaltManager 9 + LanguageUtilities 29 + Builders 11)
+**Total test classes:** ~235
+
+**Next steps:** Target `datastore/postgres` (1,334 missed lines, needs Testcontainers), `backup/impl` (1,211 missed, RestImportService 72KB), `engine/internal` (895 missed, REST endpoints needing CDI mocks).
+
 ## Unit Test Coverage Expansion — Batches 6–10 (2026-04-19)
 
 **Repo:** EDDI (`test/coverage-tier-1-2`)
