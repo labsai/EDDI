@@ -390,8 +390,7 @@ class PostgresScheduleStoreIT extends PostgresTestBase {
 
             List<ScheduleFireLog> failed = store.readFailedFireLogs(10);
             assertEquals(2, failed.size());
-            assertTrue(failed.stream().allMatch(f ->
-                    "FAILED".equals(f.status()) || "DEAD_LETTERED".equals(f.status())));
+            assertTrue(failed.stream().allMatch(f -> "FAILED".equals(f.status()) || "DEAD_LETTERED".equals(f.status())));
         }
 
         @Test

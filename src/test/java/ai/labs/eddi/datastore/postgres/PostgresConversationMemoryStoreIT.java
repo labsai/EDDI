@@ -16,9 +16,11 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Integration tests for {@link PostgresConversationMemoryStore} using Testcontainers.
+ * Integration tests for {@link PostgresConversationMemoryStore} using
+ * Testcontainers.
  * <p>
- * Covers snapshot CRUD, state transitions, active conversation queries, and GDPR operations.
+ * Covers snapshot CRUD, state transitions, active conversation queries, and
+ * GDPR operations.
  *
  * @since 6.0.0
  */
@@ -261,8 +263,8 @@ class PostgresConversationMemoryStoreIT extends PostgresTestBase {
     // ─── Helpers ────────────────────────────────────────────────
 
     private static ConversationMemorySnapshot createSnapshot(String id, String agentId,
-                                                              int agentVersion, String userId,
-                                                              ConversationState state) {
+                                                             int agentVersion, String userId,
+                                                             ConversationState state) {
         var snapshot = new ConversationMemorySnapshot();
         if (id != null) {
             snapshot.setId(id);
