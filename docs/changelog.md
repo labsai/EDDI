@@ -13,6 +13,19 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Unit Test Coverage Expansion — Batches 27–28 (2026-04-20)
+
+**Repo:** EDDI (`test/coverage-tier-1-2`)
+
+**What changed:** Added 3 more test classes targeting interceptors, expression parsing, and NLP matching. Total: 3,600 tests, all passing.
+
+### Batch 27 — Interceptors & Expression Parsing
+- `LegacyPathRewriteFilterTest` (11 tests) — All 8 store path rewrites (bots→agents, packages→workflows, langchains→llms, etc.), 3 no-match cases (modern path, root, arbitrary)
+- `ExpressionProviderTest` (18 tests) — createExpression (simple, single/multi values), parseExpressions (null, empty, single, multiple, nested parens, mixed, whitespace), parseExpression (simple, with value, numeric→Value, special expressions), extractAllValues (simple, nested, no values)
+
+### Batch 28 — NLP Matching Algorithm
+- `IterationCounterTest` (8 tests) — Single/dual input iteration with varying result counts, zero input length, exhaustion NoSuchElementException, IterationPlan defensive copy and equality
+
 ## Unit Test Coverage Expansion — Batches 25–26 (2026-04-20)
 
 **Repo:** EDDI (`test/coverage-tier-1-2`)
