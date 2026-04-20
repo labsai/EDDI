@@ -163,7 +163,7 @@ Add a new "## Security Architecture" section covering:
 
 After completing items above:
 
-- [ ] `./mvnw test` — 2,225+ tests, 0 failures
+- [ ] `./mvnw test` — 4,100+ tests, 0 failures
 - [ ] `./mvnw verify -DskipITs=false` — full integration test suite
 - [ ] Review CodeQL results after first CI run
 - [ ] Review Trivy results after first CI run
