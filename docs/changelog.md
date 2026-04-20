@@ -13,11 +13,11 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
-## Unit Test Coverage Expansion — Batches 19–21 (2026-04-20)
+## Unit Test Coverage Expansion — Batches 19–24 (2026-04-20)
 
 **Repo:** EDDI (`test/coverage-tier-1-2`)
 
-**What changed:** Fixed compilation errors in AgentSetupServiceTest and added 4 new test classes. Line coverage: 53.6% → 54.2%.
+**What changed:** Fixed compilation errors in AgentSetupServiceTest and added 7 new test classes. Line coverage: 53.6% → 54.7%.
 
 ### Batch 19 — AgentSetupService Fixes + Verification
 - Fixed `AgentSetupServiceTest` API mismatches: `tasks()` record accessor (not `getTasks()`), `getExpressionsAsActions()` (not `isExpressionsAsActions()`), `getEnableBuiltInTools()` (not `isEnableBuiltInTools()`), removed `staging` environment (only `production`/`test` exist)
@@ -29,20 +29,33 @@ Each entry follows this format:
 - `LanguageUtilitiesTest` (29 tests) — Time expression parsing (Xh, HH:MM, HH:MM:SS, 24:00 normalization), ordinal number extraction (1st, 2nd, 3rd, 4th patterns)
 
 ### Batch 21 — LLM Provider Builder Tests
-- `LanguageModelBuildersTest` (11 tests) — OpenAI, Anthropic, Ollama, Mistral, Azure OpenAI (build + buildStreaming with full/minimal params). HuggingFace excluded (deprecated, Retrofit URL validation prevents offline testing)
+- `LanguageModelBuildersTest` (16 tests) — OpenAI, Anthropic, Ollama, Mistral, Azure OpenAI, Gemini, Bedrock (build + buildStreaming with full/minimal params). HuggingFace/Oracle/Jlama excluded (deprecated or need credentials/incubator modules)
+
+### Batch 22 — Qute Template Extensions
+- `StringTemplateExtensionsTest` (34 tests) — All 15 extension methods: case conversion, search/replace, substring, trim/strip, length/isEmpty/charAt, concat — each with null safety coverage
+
+### Batch 23 — Memory & API Task Tests
+- `DataFactoryTest` (7 tests) — All 3 createData overloads with various types and null values
+- `ApiCallsTaskTest` (11 tests) — Action matching, wildcard, no-actions early return, configure (URI validation, trailing slash stripping, empty targetServerUrl), extension descriptor
 
 ### Coverage Summary
 | Metric | Before | After | Delta |
 |---|---|---|---|
-| LINE | 53.6% | 54.2% | +0.6% |
-| INSTRUCTION | 52.3% | 52.9% | +0.6% |
-| METHOD | 60.9% | 61.3% | +0.4% |
-| CLASS | 68.5% | 69.3% | +0.8% |
+| LINE | 53.6% | 54.7% | +1.1% |
+| INSTRUCTION | 52.3% | 53.4% | +1.1% |
+| BRANCH | 46.6% | 48.2% | +1.6% |
+| METHOD | 60.9% | 61.9% | +1.0% |
+| CLASS | 68.5% | 70.1% | +1.6% |
 
-**Total new tests this session:** 62 (AuditHmac 13 + VaultSaltManager 9 + LanguageUtilities 29 + Builders 11)
-**Total test classes:** ~235
+**Total new tests this session:** 119
+**Total test count:** 3,448 (0 failures)
 
-**Next steps:** Target `datastore/postgres` (1,334 missed lines, needs Testcontainers), `backup/impl` (1,211 missed, RestImportService 72KB), `engine/internal` (895 missed, REST endpoints needing CDI mocks).
+**Remaining gap to 80%:** ~6,800 missed lines out of 26,787. Top targets:
+- `datastore/postgres` (1,334 lines, needs Testcontainers)
+- `backup/impl` (1,211 lines, RestImportService 72KB needs CDI)
+- `engine/internal` (895 lines, REST endpoints needing CDI)
+- `modules/llm/impl` (675 lines, LlmTask branches)
+
 
 ## Unit Test Coverage Expansion — Batches 6–10 (2026-04-19)
 
