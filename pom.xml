@@ -343,6 +343,14 @@
             <artifactId>quarkus-junit</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- quarkus-jacoco: Quarkus-native JaCoCo instrumentation for @QuarkusTest ITs.
+             Writes coverage data from within the Quarkus classloader, avoiding the
+             Windows agent path quoting issue that breaks the standard JaCoCo agent approach. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-jacoco</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>io.rest-assured</groupId>
             <artifactId>rest-assured</artifactId>
@@ -514,6 +522,10 @@
                     <includes>
                         <include>**/*IT.java</include>
                     </includes>
+                    <!-- NOTE: @{argLine} for JaCoCo IT instrumentation is intentionally NOT added here.
+                         On Windows, the JaCoCo agent path with backslashes breaks the Quarkus
+                         FacadeClassLoader. CI (Linux) uses the quarkus-jacoco extension instead.
+                         See ContainerBaseIT.java line 24 for details. -->
                     <!-- Kill the forked test process if it hasn't completed in 15 minutes.
                          Prevents CI from hanging indefinitely when Docker image builds
                          or container startup fails to propagate errors. -->
@@ -636,6 +648,7 @@
                                     <includes>
                                         <include>jacoco.exec</include>
                                         <include>jacoco-it.exec</include>
+                                        <include>jacoco-quarkus.exec</include>
                                     </includes>
                                 </fileSet>
                             </fileSets>
