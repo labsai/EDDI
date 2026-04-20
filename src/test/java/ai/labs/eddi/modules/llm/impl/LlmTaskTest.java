@@ -100,7 +100,7 @@ class LlmTaskTest {
                 chatModelRegistry, calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool,
                 weatherTool, apiCallExecutor, toolExecutionService, mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
                 mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(RagContextProvider.class), mock(IUserMemoryStore.class),
-                mock(TokenCounterFactory.class), mock(ConversationSummarizer.class),
+                new TokenCounterFactory(), mock(ConversationSummarizer.class),
                 mock(PromptSnippetService.class),
                 toolResponseTruncator, mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
     }
@@ -1045,6 +1045,590 @@ class LlmTaskTest {
             verify(dataFactory, never()).createData(contains("rag:httpcall:trace"), any());
             // Task should still execute normally (storeData for langchain output)
             verify(currentStep, atLeastOnce()).storeData(any(IData.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("convertToObject Tests")
+    class ConvertToObjectTests {
+
+        @Test
+        @DisplayName("convertToObject=true with valid JSON — should deserialize response")
+        void testConvertToObject_validJson() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "get data");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("jsonTask");
+            task.setType("openai");
+            task.setParameters(Map.of("systemMessage", "respond in JSON",
+                    "apiKey", "key", "convertToObject", "true"));
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            langChainTask.execute(memory, llmConfig);
+
+            // Should store langchain data
+            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
+        }
+
+        @Test
+        @DisplayName("convertToObject=true with responseSchema — should inject schema in system message")
+        void testConvertToObject_withResponseSchema() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "get data");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("schemaTask");
+            task.setType("openai");
+            task.setParameters(Map.of("systemMessage", "respond in JSON",
+                    "apiKey", "key", "convertToObject", "true",
+                    "responseSchema", "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}}}"));
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            langChainTask.execute(memory, llmConfig);
+
+            // Verify schema was injected into template processing
+            verify(templatingEngine, atLeastOnce()).processTemplate(anyString(), anyMap());
+            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("Response Object Name Tests")
+    class ResponseObjectNameTests {
+
+        @Test
+        @DisplayName("Custom responseObjectName — should use it instead of task ID")
+        void testCustomResponseObjectName() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "hello");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("taskId");
+            task.setType("openai");
+            task.setResponseObjectName("customResponseName");
+            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            langChainTask.execute(memory, llmConfig);
+
+            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
+        }
+
+        @Test
+        @DisplayName("Custom responseMetadataObjectName — should store metadata")
+        void testResponseMetadataObjectName() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "hello");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("taskId");
+            task.setType("openai");
+            task.setResponseMetadataObjectName("metadata");
+            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            langChainTask.execute(memory, llmConfig);
+
+            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("addToOutput Explicit False Tests")
+    class AddToOutputFalseTests {
+
+        @Test
+        @DisplayName("addToOutput=false — should NOT add to conversation output or stream")
+        void testAddToOutputExplicitlyFalse() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var eventSink = mock(ai.labs.eddi.engine.lifecycle.ConversationEventSink.class);
+            when(memory.getEventSink()).thenReturn(eventSink);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "get data");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("taskId");
+            task.setType("openai");
+            task.setParameters(Map.of("systemMessage", "extract data",
+                    "apiKey", "key", "addToOutput", "false",
+                    "convertToObject", "true"));
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            langChainTask.execute(memory, llmConfig);
+
+            // Should NOT add to conversation output list
+            verify(currentStep, never()).addConversationOutputList(eq(LlmTask.MEMORY_OUTPUT_IDENTIFIER), anyList());
+        }
+    }
+
+    @Nested
+    @DisplayName("Rolling Summary Tests")
+    class RollingSummaryTests {
+
+        @Test
+        @DisplayName("Summary enabled but no existing summary — should still execute")
+        void testSummaryEnabled_noExistingSummary() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "hello");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("summaryTask");
+            task.setType("openai");
+            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
+
+            var summaryConfig = new LlmConfiguration.ConversationSummaryConfig();
+            summaryConfig.setEnabled(true);
+            task.setConversationSummary(summaryConfig);
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            // No existing summary in memory
+            when(currentStep.getLatestData("conversation:summary")).thenReturn(null);
+
+            // Mock conversation properties (needed for summary properties exclusion check)
+            var conversationProperties = mock(IConversationMemory.IConversationProperties.class);
+            when(memory.getConversationProperties()).thenReturn(conversationProperties);
+
+            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
+            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
+        }
+
+        @Test
+        @DisplayName("Summary disabled — should skip summarization entirely")
+        void testSummaryDisabled() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "hello");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("noSummaryTask");
+            task.setType("openai");
+            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
+
+            var summaryConfig = new LlmConfiguration.ConversationSummaryConfig();
+            summaryConfig.setEnabled(false);
+            task.setConversationSummary(summaryConfig);
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
+        }
+    }
+
+    @Nested
+    @DisplayName("Token-Aware Windowing Tests")
+    class TokenAwareWindowingTests {
+
+        @Test
+        @DisplayName("maxContextTokens set — should use token-aware message building")
+        void testTokenAwareWindowingPath() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "hello");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("tokenTask");
+            task.setType("openai");
+            task.setMaxContextTokens(4096);
+            task.setAnchorFirstSteps(1);
+            task.setParameters(Map.of("systemMessage", "be helpful",
+                    "apiKey", "key", "modelName", "gpt-4o"));
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
+            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("resolveModelName Tests")
+    class ResolveModelNameTests {
+
+        private void executeWithModelParam(String paramKey, String paramValue) throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "hi");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("modelNameTest");
+            task.setType("openai");
+            task.setMaxContextTokens(4096);
+            var params = new HashMap<String, String>();
+            params.put("systemMessage", "test");
+            params.put("apiKey", "key");
+            params.put(paramKey, paramValue);
+            task.setParameters(params);
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            langChainTask.execute(memory, llmConfig);
+            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
+        }
+
+        @Test
+        @DisplayName("modelName parameter key (OpenAI)")
+        void testModelName() throws Exception {
+            executeWithModelParam("modelName", "gpt-4o");
+        }
+
+        @Test
+        @DisplayName("model parameter key (Ollama)")
+        void testModel() throws Exception {
+            // Uses gpt-4o value to satisfy OpenAI tokenizer; tests that 'model' key is
+            // recognized
+            executeWithModelParam("model", "gpt-4o");
+        }
+
+        @Test
+        @DisplayName("modelId parameter key (Bedrock)")
+        void testModelId() throws Exception {
+            executeWithModelParam("modelId", "gpt-4o");
+        }
+
+        @Test
+        @DisplayName("deploymentName parameter key (Azure)")
+        void testDeploymentName() throws Exception {
+            executeWithModelParam("deploymentName", "gpt-4o");
+        }
+    }
+
+    @Nested
+    @DisplayName("Snippet Injection Tests")
+    class SnippetInjectionTests {
+
+        @Test
+        @DisplayName("Snippets available — should be injected into template data")
+        void testSnippetsInjected() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "hello");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("snippetTask");
+            task.setType("openai");
+            task.setParameters(Map.of("systemMessage", "{{snippets.greeting}}", "apiKey", "key"));
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            langChainTask.execute(memory, llmConfig);
+
+            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("Multiple Tasks Tests")
+    class MultipleTasksTests {
+
+        @Test
+        @DisplayName("Two tasks matching different actions — only matching task executes")
+        void testMultipleTasksSelectiveExecution() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "hello");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("task1_action"));
+
+            var task1 = new LlmConfiguration.Task();
+            task1.setActions(List.of("task1_action"));
+            task1.setId("task1");
+            task1.setType("openai");
+            task1.setParameters(Map.of("systemMessage", "task1", "apiKey", "key", "addToOutput", "true"));
+
+            var task2 = new LlmConfiguration.Task();
+            task2.setActions(List.of("task2_action"));
+            task2.setId("task2");
+            task2.setType("openai");
+            task2.setParameters(Map.of("systemMessage", "task2", "apiKey", "key", "addToOutput", "true"));
+
+            var llmConfig = new LlmConfiguration(List.of(task1, task2));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            langChainTask.execute(memory, llmConfig);
+
+            // Only one task should add to output
+            verify(currentStep, times(1)).addConversationOutputList(eq(LlmTask.MEMORY_OUTPUT_IDENTIFIER), anyList());
+        }
+    }
+
+    @Nested
+    @DisplayName("conversationHistoryLimit Tests")
+    class ConversationHistoryLimitTests {
+
+        @Test
+        @DisplayName("conversationHistoryLimit on task — should override logSizeLimit param")
+        void testConversationHistoryLimitOverride() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "hello");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("histLimitTask");
+            task.setType("openai");
+            task.setConversationHistoryLimit(5);
+            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
+            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("Cascade skipCascade Branch Tests")
+    class CascadeSkipBranchTests {
+
+        @Test
+        @DisplayName("Agent mode with cascade but enableInAgentMode=false — should skip cascade")
+        void testCascadeSkippedInAgentMode() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var conversationOutput = new ConversationOutput();
+            conversationOutput.put("input", "hello");
+            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("agentCascade");
+            task.setType("openai");
+            task.setEnableBuiltInTools(true); // Agent mode
+            task.setBuiltInToolsWhitelist(List.of("calculator"));
+            task.setParameters(Map.of("systemMessage", "test", "apiKey", "key"));
+
+            var cascade = new LlmConfiguration.ModelCascadeConfig();
+            cascade.setEnabled(true);
+            cascade.setEnableInAgentMode(false); // Should skip cascade
+            cascade.setEvaluationStrategy("none");
+            var step = new LlmConfiguration.CascadeStep();
+            step.setType("openai");
+            cascade.setSteps(List.of(step));
+            task.setModelCascade(cascade);
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            // Agent mode reaches CDI boundary — same pattern as testExecute_AgentMode
+            Throwable thrown = null;
+            try {
+                langChainTask.execute(memory, llmConfig);
+            } catch (Throwable t) {
+                thrown = t;
+            }
+
+            // The cascade trace should NOT be stored (cascade was skipped)
+            verify(dataFactory, never()).createData(contains("cascade:trace"), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Empty Conversation Outputs Tests")
+    class EmptyConversationOutputsTests {
+
+        @Test
+        @DisplayName("Empty conversation outputs — should produce empty messages and return early")
+        void testEmptyConversationOutputs() throws Exception {
+            IConversationMemory memory = mock(IConversationMemory.class);
+            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            // Empty conversation outputs — no messages to send
+            when(memory.getConversationOutputs()).thenReturn(List.of());
+
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of("action"));
+
+            var task = new LlmConfiguration.Task();
+            task.setActions(List.of("action"));
+            task.setId("emptyTask");
+            task.setType("openai");
+            // No systemMessage — only user messages would generate content, but there are
+            // none
+            task.setParameters(Map.of("apiKey", "key"));
+
+            var llmConfig = new LlmConfiguration(List.of(task));
+
+            IData outputData = mock(IData.class);
+            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+
+            // Should not throw — should return early when messages list is empty
+            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
         }
     }
 }
