@@ -178,7 +178,7 @@ class MongoUserMemoryStoreIT extends MongoTestBase {
         }
 
         @Test
-        @DisplayName("getVisibleEntries — self visibility")
+        @DisplayName("getVisibleEntries — self scoped to agent, global visible to all")
         void visibleSelf() throws IResourceStore.ResourceStoreException {
             store.upsert(new UserMemoryEntry(null, "user-1", "self-key", "self-val",
                     "cat", Visibility.self, "agent-A", List.of(), null,
@@ -186,11 +186,21 @@ class MongoUserMemoryStoreIT extends MongoTestBase {
             store.upsert(new UserMemoryEntry(null, "user-1", "other-key", "other-val",
                     "cat", Visibility.self, "agent-B", List.of(), null,
                     false, 0, null, null));
+            // Global entry — visible regardless of agent
+            store.upsert(new UserMemoryEntry(null, "user-1", "global-key", "shared",
+                    "cat", Visibility.global, "agent-B", List.of(), null,
+                    false, 0, null, null));
 
             List<UserMemoryEntry> visible = store.getVisibleEntries(
                     "user-1", "agent-A", List.of(), "most_recent", 100);
-            assertTrue(visible.stream().anyMatch(e -> "self-key".equals(e.key())));
-            assertTrue(visible.stream().noneMatch(e -> "other-key".equals(e.key())));
+            // Self entries: only agent-A's
+            assertTrue(visible.stream().anyMatch(e -> "self-key".equals(e.key())),
+                    "Expected agent-A's self entry");
+            assertTrue(visible.stream().noneMatch(e -> "other-key".equals(e.key())),
+                    "agent-B's self entry should not be visible to agent-A");
+            // Global entries: visible to all agents
+            assertTrue(visible.stream().anyMatch(e -> "global-key".equals(e.key())),
+                    "Global entries should be visible regardless of agent");
         }
 
         @Test

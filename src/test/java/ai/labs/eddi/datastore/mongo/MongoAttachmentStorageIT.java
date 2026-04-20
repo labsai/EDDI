@@ -12,7 +12,8 @@ import java.nio.charset.StandardCharsets;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Integration tests for {@link MongoAttachmentStorage} (GridFS) using Testcontainers.
+ * Integration tests for {@link MongoAttachmentStorage} (GridFS) using
+ * Testcontainers.
  *
  * @since 6.0.0
  */

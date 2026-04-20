@@ -214,7 +214,8 @@ class MongoScheduleStoreIT extends MongoTestBase {
             var cfg = newSchedule("Requeue", "a");
             cfg.setFireStatus(FireStatus.DEAD_LETTERED);
             String id = store.createSchedule(cfg);
-            // Need to set status via markDeadLettered since createSchedule may not persist fireStatus directly
+            // Need to set status via markDeadLettered since createSchedule may not persist
+            // fireStatus directly
             store.markDeadLettered(id);
 
             store.requeueDeadLetter(id);

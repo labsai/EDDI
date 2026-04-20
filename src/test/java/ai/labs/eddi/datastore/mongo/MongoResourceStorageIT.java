@@ -6,6 +6,7 @@ import org.bson.types.ObjectId;
 import org.junit.jupiter.api.*;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -194,10 +195,10 @@ class MongoResourceStorageIT extends MongoTestBase {
     @Test
     @DisplayName("findResourceIdsContaining — searches by JSON path")
     void findResourceIds() throws IOException {
-        storage.store(storage.newResource(Map.of("tags", java.util.List.of("ai", "chatbot"))));
-        storage.store(storage.newResource(Map.of("tags", java.util.List.of("web"))));
+        storage.store(storage.newResource(Map.of("tags", List.of("ai", "chatbot"))));
+        storage.store(storage.newResource(Map.of("tags", List.of("web"))));
 
-        java.util.List<IResourceStore.IResourceId> results =
+        List<IResourceStore.IResourceId> results =
                 storage.findResourceIdsContaining("tags", "ai");
         assertEquals(1, results.size());
     }

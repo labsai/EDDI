@@ -93,6 +93,41 @@ jobs:
           path: target/site/jacoco/
           retention-days: 14
 
+      - name: Coverage summary
+        if: always()
+        run: |
+          CSV="target/site/jacoco/jacoco.csv"
+          if [ ! -f "$CSV" ]; then
+            echo "### ⚠️ No coverage report found" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          # Parse JaCoCo CSV columns:
+          # $6=BRANCH_MISSED, $7=BRANCH_COVERED, $8=LINE_MISSED, $9=LINE_COVERED,
+          # $12=METHOD_MISSED, $13=METHOD_COVERED
+          read LM LC BM BC MM MC <<< $(awk -F',' 'NR>1 {
+            lm+=$8; lc+=$9; bm+=$6; bc+=$7; mm+=$12; mc+=$13
+          } END {
+            print lm, lc, bm, bc, mm, mc
+          }' "$CSV")
+
+          pct() { [ $(($1+$2)) -gt 0 ] && awk "BEGIN {printf \"%.1f\", ($2/($1+$2))*100}" || echo "0.0"; }
+          icon() { local p=$(echo "$1" | awk '{printf "%d", $1}'); [ $p -ge 90 ] && echo "🟢" || { [ $p -ge 80 ] && echo "🟡" || echo "🔴"; }; }
+
+          LINE_PCT=$(pct $LM $LC)
+          BRANCH_PCT=$(pct $BM $BC)
+
+          # Count tests from surefire reports (match only <testsuite lines)
+          TOTAL_TESTS=$(grep -rh '<testsuite ' target/surefire-reports/*.xml 2>/dev/null | sed 's/.*tests="\([0-9]*\)".*/\1/' | awk '{s+=$1} END {print s+0}')
+
+          echo "### 📊 Unit Test Coverage ($TOTAL_TESTS tests)" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Covered | Total | Percentage | |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|---------|-------|------------|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Line | $LC | $((LM+LC)) | **${LINE_PCT}%** | $(icon $LINE_PCT) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | $BC | $((BM+BC)) | **${BRANCH_PCT}%** | $(icon $BRANCH_PCT) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> ℹ️ Unit tests only. See **Integration Tests** job for merged UT+IT coverage." >> $GITHUB_STEP_SUMMARY
+
   # ─── Job 2: Integration Tests ─────────────────────────────────
   integration-test:
     name: Integration Tests
@@ -132,6 +167,57 @@ jobs:
           name: jacoco-it-report
           path: target/site/jacoco-it/
           retention-days: 14
+
+      - name: Upload merged coverage report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: jacoco-merged-report
+          path: target/site/jacoco-merged/
+          retention-days: 14
+
+      - name: Merged coverage summary
+        if: always()
+        run: |
+          # Prefer merged report; fall back to UT-only
+          CSV="target/site/jacoco-merged/jacoco.csv"
+          LABEL="Merged Coverage (UT + IT)"
+          if [ ! -f "$CSV" ]; then
+            CSV="target/site/jacoco/jacoco.csv"
+            LABEL="Coverage (UT only — merged report unavailable)"
+          fi
+          if [ ! -f "$CSV" ]; then
+            echo "### ⚠️ No coverage report found" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          # Parse JaCoCo CSV columns:
+          # $6=BRANCH_MISSED, $7=BRANCH_COVERED, $8=LINE_MISSED, $9=LINE_COVERED,
+          # $12=METHOD_MISSED, $13=METHOD_COVERED
+          read LM LC BM BC MM MC <<< $(awk -F',' 'NR>1 {
+            lm+=$8; lc+=$9; bm+=$6; bc+=$7; mm+=$12; mc+=$13
+          } END {
+            print lm, lc, bm, bc, mm, mc
+          }' "$CSV")
+
+          pct() { [ $(($1+$2)) -gt 0 ] && awk "BEGIN {printf \"%.1f\", ($2/($1+$2))*100}" || echo "0.0"; }
+          icon() { local p=$(echo "$1" | awk '{printf "%d", $1}'); [ $p -ge 90 ] && echo "🟢" || { [ $p -ge 80 ] && echo "🟡" || echo "🔴"; }; }
+
+          LINE_PCT=$(pct $LM $LC)
+          BRANCH_PCT=$(pct $BM $BC)
+          METHOD_PCT=$(pct $MM $MC)
+
+          # Count tests from surefire + failsafe reports (match only <testsuite lines)
+          UT_COUNT=$(grep -rh '<testsuite ' target/surefire-reports/*.xml 2>/dev/null | sed 's/.*tests="\([0-9]*\)".*/\1/' | awk '{s+=$1} END {print s+0}')
+          IT_COUNT=$(grep -rh '<testsuite ' target/failsafe-reports/*.xml 2>/dev/null | sed 's/.*tests="\([0-9]*\)".*/\1/' | awk '{s+=$1} END {print s+0}')
+          TOTAL=$((UT_COUNT + IT_COUNT))
+
+          echo "### 📊 ${LABEL} ($TOTAL tests: $UT_COUNT UT + $IT_COUNT IT)" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Covered | Total | Percentage | |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|---------|-------|------------|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Line | $LC | $((LM+LC)) | **${LINE_PCT}%** | $(icon $LINE_PCT) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | $BC | $((BM+BC)) | **${BRANCH_PCT}%** | $(icon $BRANCH_PCT) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Method | $MC | $((MM+MC)) | **${METHOD_PCT}%** | $(icon $METHOD_PCT) |" >> $GITHUB_STEP_SUMMARY
 
   # ─── Job 2b: CodeQL SAST ───────────────────────────────────────
   codeql:

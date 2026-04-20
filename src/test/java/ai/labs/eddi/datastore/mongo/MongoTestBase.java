@@ -10,6 +10,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -50,6 +51,13 @@ public abstract class MongoTestBase {
 
         jsonSerialization = new JsonSerialization(objectMapper);
         documentBuilder = new DocumentBuilder(jsonSerialization);
+    }
+
+    @AfterAll
+    static void closeMongo() {
+        if (mongoClient != null) {
+            mongoClient.close();
+        }
     }
 
     protected static MongoDatabase getDatabase() {

@@ -161,7 +161,7 @@ class MongoSecretPersistenceIT extends MongoTestBase {
     // ─── Helpers ────────────────────────────────────────────────
 
     private static EncryptedSecret createSecret(String tenant, String key,
-                                                 String value, String iv, String dekId) {
+                                                String value, String iv, String dekId) {
         var secret = new EncryptedSecret();
         secret.setTenantId(tenant);
         secret.setKeyName(key);
