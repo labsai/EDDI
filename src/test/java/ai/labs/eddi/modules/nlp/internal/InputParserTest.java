@@ -103,17 +103,22 @@ class InputParserTest {
             var parser = new InputParser(List.of());
             List<RawSolution> solutions = parser.parse("xyz123");
 
-            assertFalse(solutions.isEmpty());
+            assertEquals(1, solutions.size());
+            // With no dictionaries but includeUnknown=true (default), unknown words produce
+            // PARTLY
+            assertEquals(RawSolution.Match.PARTLY, solutions.get(0).getMatch());
         }
 
         @Test
-        @DisplayName("empty string returns empty solutions")
+        @DisplayName("empty string returns solution with NOTHING match")
         void emptyString() throws Exception {
             var parser = new InputParser(List.of());
             List<RawSolution> solutions = parser.parse("");
 
-            // Empty string splits to [""], which is treated as unknown
+            // Empty string splits to [""], which is treated as an unknown word
             assertNotNull(solutions);
+            assertFalse(solutions.isEmpty());
+            assertEquals(RawSolution.Match.PARTLY, solutions.get(0).getMatch());
         }
 
         @Test

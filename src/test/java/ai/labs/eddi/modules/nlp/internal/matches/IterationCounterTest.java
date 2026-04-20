@@ -91,17 +91,17 @@ class IterationCounterTest {
     class IterationPlanTests {
 
         @Test
-        @DisplayName("getIndexes returns a copy")
-        void getIndexesReturnsCopy() {
+        @DisplayName("getIndexes exposes internal array (mutation visible)")
+        void getIndexesExposesInternalArray() {
             var counter = new IterationCounter(2, new Integer[]{0, 0});
             var plan = counter.next();
             Integer[] indexes = plan.getIndexes();
 
-            // Mutating the returned array shouldn't affect the plan
+            // IterationPlan stores its own copy at construction time,
+            // but getIndexes() returns the stored array directly — not a copy.
             indexes[0] = 99;
-            // The plan stores its own copy, so getIndexes returns the stored array
-            // (not the original). We can only verify the plan was created correctly.
-            assertNotNull(plan.getIndexes());
+            assertEquals(99, plan.getIndexes()[0],
+                    "getIndexes() returns the internal array, so mutations are visible");
         }
 
         @Test

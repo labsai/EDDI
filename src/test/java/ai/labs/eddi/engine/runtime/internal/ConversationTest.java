@@ -102,13 +102,14 @@ class ConversationTest {
         @DisplayName("init sets state to READY and adds CONVERSATION_START action")
         void initSetsReady() throws Exception {
             when(propertiesHandler.getUserMemoryStore()).thenReturn(null);
+            when(propertiesHandler.getUserMemoryConfig()).thenReturn(null);
             when(workflow.getWorkflowId()).thenReturn("wf1");
 
             var conv = createConversation();
             conv.init(new HashMap<>());
 
             verify(memory).setConversationState(ConversationState.READY);
-            verify(currentStep).set(any(), anyList());
+            verify(currentStep).set(any(), argThat(list -> list instanceof List<?> l && l.contains("CONVERSATION_START")));
         }
 
         @Test
