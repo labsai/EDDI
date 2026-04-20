@@ -13,6 +13,32 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Integration Test Expansion — Batches 6-7: Full Postgres Adapter Coverage (2026-04-20)
+
+**Repo:** EDDI (`test/coverage-tier-1-2`)
+
+**What changed:** Completed integration tests for ALL remaining PostgreSQL adapter stores. Every Postgres persistence adapter now has a dedicated Testcontainers IT. Total: 516 ITs, 0 failures.
+
+### Batch 6 — ConversationMemoryStore, DeploymentStorage, DatabaseLogs (30 tests)
+- **PostgresConversationMemoryStoreIT** (14 tests): Snapshot CRUD (store new, update existing, load non-existent), state transitions (set/get, non-existent), delete, active conversation queries (excludes ENDED, count, ended IDs), IResourceStore adapter (create/read, delete, deleteAllPermanently), GDPR (getByUserId via JSONB query, deleteByUserId cascade)
+- **PostgresDeploymentStorageIT** (6 tests): CRUD with upsert (ON CONFLICT), list all, filter by status, empty results
+- **PostgresDatabaseLogsIT** (10 tests): Batch insert + query, null/empty batch no-op, null agentVersion, query filters (environment, userId, skip/limit, no filters), GDPR pseudonymization
+
+### Batch 7 — AgentTriggerStore, UserConversationStore, AttachmentStorage, MigrationLogStore (27 tests)
+- **PostgresAgentTriggerStoreIT** (8 tests): CRUD (create, read, duplicate ResourceAlreadyExistsException, update, update non-existent ResourceNotFoundException, delete), list all, list empty
+- **PostgresUserConversationStoreIT** (8 tests): CRUD (create+read, read non-existent null, duplicate rejection, delete, composite key independence), GDPR (getAllForUser, deleteAllForUser, delete non-existent)
+- **PostgresAttachmentStorageIT** (7 tests): Binary store/load round-trip, zero sizeBytes, load non-existent/invalid/null ref, deleteByConversation cascade, delete non-existent
+- **PostgresMigrationLogStoreIT** (4 tests): Create+read round-trip, read non-existent null, idempotent duplicate (ON CONFLICT DO NOTHING), multi-migration independence
+
+**Files (new):**
+- `PostgresConversationMemoryStoreIT.java` — 14 tests
+- `PostgresDeploymentStorageIT.java` — 6 tests
+- `PostgresDatabaseLogsIT.java` — 10 tests
+- `PostgresAgentTriggerStoreIT.java` — 8 tests
+- `PostgresUserConversationStoreIT.java` — 8 tests
+- `PostgresAttachmentStorageIT.java` — 7 tests
+- `PostgresMigrationLogStoreIT.java` — 4 tests
+
 ## Integration Test Expansion — Batch 5 + Code Review (2026-04-20)
 
 **Repo:** EDDI (`test/coverage-tier-1-2`)
