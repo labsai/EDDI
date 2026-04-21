@@ -1,80 +1,129 @@
 # EDDI Chat UI
 
-A standalone, configurable chat widget for [EDDI](https://github.com/labsai/EDDI) conversational AI agents. Built with React 19, TypeScript, and Vite.
+> Embeddable chat widget for [**EDDI**](https://github.com/labsai/EDDI) — the open-source multi-agent orchestration middleware for conversational AI.
 
-## Features
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/labsai/EDDI/blob/main/LICENSE) ![Tests](https://img.shields.io/badge/tests-46-brightgreen)
 
-- 💬 **Rich markdown** — Tables, code blocks, bold/italic, links, lists
-- 🌊 **SSE streaming** — Real-time token-by-token agent responses with thinking indicator
-- 🎨 **Dark/Light themes** — Toggle via UI or query parameters
-- ⚡ **Quick replies** — Pill buttons for suggested responses
-- ↩↪ **Undo/Redo** — Step through conversation history
-- 🔧 **Configurable** — All features togglable via URL query parameters
+EDDI Chat UI is a standalone, themeable React chat widget that connects to any EDDI agent. It ships **inside** the EDDI Docker image and can also be embedded as an `<iframe>` in any web page. Supports SSE streaming, rich Markdown, LaTeX math, code highlighting, quick replies, and full conversation control — all configurable via URL parameters or a typed config object.
+
+**🌐 Website:** [eddi.labs.ai](https://eddi.labs.ai/) · **📖 Docs:** [docs.labs.ai](https://docs.labs.ai/) · **🐳 Docker:** [hub.docker.com/r/labsai/eddi](https://hub.docker.com/r/labsai/eddi)
+
+---
+
+## 📑 Table of Contents
+
+- [✨ Features](#-features)
+- [🏁 Quick Start](#-quick-start)
+- [🔗 URL Patterns](#-url-patterns)
+- [⚙️ Configuration](#️-configuration)
+- [📦 Embedding](#-embedding)
+- [🏗️ Development](#️-development)
+- [🧰 Tech Stack](#-tech-stack)
+- [📁 Project Structure](#-project-structure)
+- [🔌 Backend Integration](#-backend-integration)
+- [🔗 Related](#-related)
+- [📜 License](#-license)
+
+---
+
+## ✨ Features
+
+- 💬 **Rich Markdown** — Tables, code blocks, bold/italic, links, lists, and raw HTML
+- 🌊 **SSE Streaming** — Real-time token-by-token agent responses with thinking indicator
+- 🧮 **LaTeX Math** — KaTeX rendering for mathematical expressions (`$inline$` and `$$block$$`)
+- 🎨 **Syntax Highlighting** — Code blocks with language-aware highlighting via `rehype-highlight`
+- 🌗 **Dark / Light Themes** — Toggle via UI button, URL parameter, or system preference
+- ⚡ **Quick Replies** — Pill buttons for suggested responses returned by the agent
+- ↩️ **Undo / Redo** — Step through conversation history with backend state sync
+- 🔒 **Password Fields** — Masked input support when agents request sensitive data
+- 🔧 **Fully Configurable** — Every feature togglable via URL query parameters or typed `ChatConfig`
 - 📱 **Responsive** — Mobile-first design with adaptive breakpoints
-- 🎭 **Demo mode** — Full showcase without a running backend
+- 🎭 **Demo Mode** — Full showcase without a running backend (`/chat/demo/showcase`)
+- 🏷️ **Agent Name Display** — Auto-fetches and shows the agent's display name from the backend
 
-## Quick Start
+---
+
+## 🏁 Quick Start
+
+The easiest way to use EDDI Chat UI is via the main EDDI project:
 
 ```bash
-npm install
-npm run dev        # http://localhost:5174
+# One-command installer (includes Chat UI)
+curl -fsSL https://raw.githubusercontent.com/labsai/EDDI/main/install.sh | bash
 ```
 
-### URL Patterns
+Then open [http://localhost:7070/chat.html](http://localhost:7070/chat.html).
 
-| URL                                   | Description                 |
-| ------------------------------------- | --------------------------- |
-| `/chat/:environment/:agentId`         | Connect to a specific agent |
-| `/chat/demo/showcase`                 | Demo mode with mock data    |
-| `/chat/managedagents/:intent/:userId` | Managed agent mode          |
+See the [EDDI README](https://github.com/labsai/EDDI#-quick-start) for full setup instructions.
 
-### Query Parameters
+### Standalone Development
+
+```bash
+# Prerequisites: Node.js ≥ 20, EDDI backend on localhost:7070
+npm install
+npm run dev        # Vite dev server on http://localhost:5174
+```
+
+The Vite dev proxy forwards API calls to the EDDI backend. If no backend is available, navigate to `/chat/demo/showcase` for the built-in demo mode.
+
+---
+
+## 🔗 URL Patterns
+
+| URL                                   | Description                               |
+| ------------------------------------- | ----------------------------------------- |
+| `/chat/:environment/:agentId`         | Connect to a specific agent               |
+| `/chat/:environment/:agentId/:userId` | Connect with explicit user ID             |
+| `/chat/demo/showcase`                 | Demo mode with mock data (no backend)     |
+| `/chat/managed/:intent/:userId`       | Managed agent mode (intent-based routing) |
+
+---
+
+## ⚙️ Configuration
+
+All features can be toggled via **URL query parameters** — ideal for iframe embedding:
 
 | Parameter             | Example                     | Effect                             |
 | --------------------- | --------------------------- | ---------------------------------- |
+| `theme`               | `?theme=light`              | Set initial theme (`dark`/`light`) |
+| `title`               | `?title=My%20Agent`         | Override header title              |
 | `hideUndo`            | `?hideUndo=true`            | Hide undo button                   |
 | `hideRedo`            | `?hideRedo=true`            | Hide redo button                   |
 | `hideNewConversation` | `?hideNewConversation=true` | Hide restart button                |
 | `hideLogo`            | `?hideLogo=true`            | Show text title instead of logo    |
 | `hideQuickReplies`    | `?hideQuickReplies=true`    | Hide quick reply buttons           |
-| `theme`               | `?theme=light`              | Set initial theme (`dark`/`light`) |
-| `title`               | `?title=My%20Agent`         | Override header title              |
 
-## Development
+<details>
+<summary><strong>Programmatic configuration (ChatConfig)</strong></summary>
 
-```bash
-npm run dev          # Dev server (port 5174) with proxy to EDDI backend
-npm run build        # Production build
-npx vitest run       # Run tests (42 tests)
-npx tsc --noEmit     # Type check
+When integrating directly (not via iframe), you can pass a typed `ChatConfig` object:
+
+```typescript
+interface ChatConfig {
+  apiBaseUrl?: string;          // Default: window.location.origin
+  theme?: "dark" | "light" | "system";
+  accentColor?: string;        // CSS value, default: "#113B92"
+  showLogo?: boolean;          // Default: true
+  logoUrl?: string;            // Default: /img/logo_eddi.png
+  title?: string;              // Default: "EDDI"
+  placeholder?: string;        // Default: "Type a message..."
+  enableStreaming?: boolean;    // Default: true
+  enableQuickReplies?: boolean; // Default: true
+  enableMarkdown?: boolean;    // Default: true
+  enableMath?: boolean;        // Default: true
+  enableCodeHighlight?: boolean;// Default: true
+  enableUndo?: boolean;        // Default: true
+  enableRedo?: boolean;        // Default: true
+  enableNewConversation?: boolean; // Default: true
+  showAgentName?: boolean;     // Default: true
+}
 ```
 
-### Project Structure
+</details>
 
-```
-src/
-├── api/              # API layer (fetch + SSE streaming)
-│   ├── chat-api.ts       # Real EDDI backend API
-│   └── demo-api.ts       # Mock API for demo mode
-├── components/       # React components
-│   ├── ChatWidget.tsx    # Main orchestrator
-│   ├── ChatHeader.tsx    # Logo, actions, theme toggle
-│   ├── MessageBubble.tsx # Message rendering with Markdown
-│   ├── ChatInput.tsx     # Auto-grow textarea + send
-│   ├── QuickReplies.tsx  # Suggested reply pills
-│   ├── Indicators.tsx    # Typing + Thinking indicators
-│   └── ScrollToAgenttom.tsx
-├── hooks/
-│   └── useTheme.ts       # Theme management
-├── store/
-│   └── chat-store.tsx    # Context + useReducer
-├── styles/
-│   ├── variables.css     # CSS custom properties (design tokens)
-│   └── chat.css          # Component styles (BEM naming)
-└── types.ts              # Shared types
-```
+---
 
-## Embedding
+## 📦 Embedding
 
 The chat UI can be embedded in any HTML page via iframe:
 
@@ -85,7 +134,92 @@ The chat UI can be embedded in any HTML page via iframe:
 ></iframe>
 ```
 
-## Backend Integration
+Combine query parameters to create a minimal, focused chat experience:
+
+```
+?hideUndo=true&hideRedo=true&hideNewConversation=true&hideLogo=true&title=Support%20Agent&theme=light
+```
+
+---
+
+## 🏗️ Development
+
+```bash
+npm run dev          # Dev server (port 5174) with proxy to EDDI backend
+npm run build        # Production build
+npm run test         # Run tests (46 Vitest unit/component tests)
+npm run typecheck    # TypeScript type checking (tsc --noEmit)
+```
+
+### CSS Convention
+
+All styles use **vanilla CSS** with **BEM naming** and **CSS custom properties** (design tokens) for theming:
+
+```css
+.chat-header__logo    /* Block__Element */
+.message--user        /* Block--Modifier */
+```
+
+Dark/light themes are controlled by `[data-theme]` attribute — no runtime style injection.
+
+### State Management
+
+- **Context + `useReducer`** via `ChatProvider` → `useChatState()` / `useChatDispatch()`
+- No external state libraries (no Redux, no Zustand)
+
+### Testing
+
+- **Vitest** + **React Testing Library** + **jsdom**
+- Wrap components in `<ChatProvider>` for tests
+- `window.matchMedia` mocked in `test-setup.ts`
+
+---
+
+## 🧰 Tech Stack
+
+| Layer     | Technology                                             |
+| --------- | ------------------------------------------------------ |
+| Build     | Vite 6                                                 |
+| UI        | React 19 + TypeScript 5.7 (strict)                     |
+| Styling   | Vanilla CSS with CSS custom properties (BEM naming)    |
+| Markdown  | react-markdown 9 + remark-gfm + remark-math            |
+| Math      | KaTeX 0.16                                             |
+| Code      | rehype-highlight                                       |
+| Routing   | React Router v7                                        |
+| Streaming | Native `fetch` + `ReadableStream` (SSE via AsyncGenerator) |
+| Tests     | Vitest 3 + React Testing Library                       |
+
+---
+
+## 📁 Project Structure
+
+```
+src/
+├── api/              # API layer (fetch + SSE streaming)
+│   ├── chat-api.ts       # Real EDDI backend API
+│   └── demo-api.ts       # Mock API for demo mode
+├── components/       # React components
+│   ├── ChatWidget.tsx    # Main orchestrator (lifecycle, SSE, query params)
+│   ├── ChatHeader.tsx    # Logo/title, undo/redo, theme toggle, new conversation
+│   ├── MessageBubble.tsx # Message rendering with Markdown + math + code
+│   ├── ChatInput.tsx     # Auto-grow textarea, Enter/Shift+Enter
+│   ├── QuickReplies.tsx  # Suggested reply pill buttons
+│   ├── Indicators.tsx    # Typing (dots) + Thinking (brain) indicators
+│   ├── SecretInput.tsx   # Masked password input for secret values
+│   └── ScrollToBottom.tsx # Floating scroll button
+├── hooks/
+│   └── useTheme.ts       # Dark/light/system theme with localStorage
+├── store/
+│   └── chat-store.tsx    # Context + useReducer state management
+├── styles/
+│   ├── variables.css     # CSS custom properties (dark/light design tokens)
+│   └── chat.css          # Component styles (BEM naming)
+└── types.ts              # Shared TypeScript types
+```
+
+---
+
+## 🔌 Backend Integration
 
 The production build is deployed into the EDDI Quarkus backend at:
 
@@ -93,8 +227,18 @@ The production build is deployed into the EDDI Quarkus backend at:
 EDDI/src/main/resources/META-INF/resources/
 ```
 
-This makes the chat UI available at `http://your-eddi-server/chat.html`.
+This makes the chat UI available at `http://your-eddi-server/chat.html` — served directly by Quarkus with no separate web server required.
 
-## License
+---
 
-Part of the EDDI project — see [EDDI License](https://github.com/labsai/EDDI/blob/master/LICENSE).
+## 🔗 Related
+
+- [**EDDI**](https://github.com/labsai/EDDI) — Backend engine (Java 25, Quarkus)
+- [**EDDI Manager**](https://github.com/labsai/EDDI-Manager) — Admin dashboard (React 19)
+- [**quarkus-eddi**](https://github.com/quarkiverse/quarkus-eddi) — Quarkus SDK
+
+---
+
+## 📜 License
+
+Part of the [EDDI](https://github.com/labsai/EDDI) project — [Apache 2.0](https://github.com/labsai/EDDI/blob/main/LICENSE).
