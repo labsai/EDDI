@@ -12,7 +12,6 @@ import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.datastore.IResourceStore;
 import io.quarkus.security.identity.SecurityIdentity;
-import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;

@@ -2,8 +2,6 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
-import ai.labs.eddi.engine.api.IRestAgentAdministration;
-import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.model.Deployment;
@@ -21,8 +19,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.*;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -258,12 +255,14 @@ class RestAgentAdministrationTest {
             when(agent.getDeploymentStatus()).thenReturn(Deployment.Status.IN_PROGRESS);
             when(agentFactory.getAgent(any(), anyString(), anyInt())).thenReturn(agent);
 
-            // Create a future that never completes
-            CompletableFuture<Void> neverDone = new CompletableFuture<>();
-            // Complete it exceptionally with timeout behavior
-            when(runtime.submitCallable(any(Callable.class), any())).thenReturn(neverDone);
-            // Complete immediately to avoid actual 30s wait
-            neverDone.completeExceptionally(new java.util.concurrent.TimeoutException("timed out"));
+            // Use a mock Future that throws TimeoutException from get() —
+            // CompletableFuture wraps exceptions in ExecutionException, which
+            // would hit the wrong catch block
+            @SuppressWarnings("unchecked")
+            Future<Void> timeoutFuture = mock(Future.class);
+            when(timeoutFuture.get(anyLong(), any(TimeUnit.class)))
+                    .thenThrow(new TimeoutException("timed out"));
+            when(runtime.submitCallable(any(Callable.class), any())).thenReturn(timeoutFuture);
 
             Response response = restAgentAdmin.deployAgent(
                     Deployment.Environment.test, "agent-1", 1, true, true);
@@ -272,6 +271,7 @@ class RestAgentAdministrationTest {
             @SuppressWarnings("unchecked")
             var body = (Map<String, Object>) response.getEntity();
             assertNotNull(body.get("status"));
+            assertEquals("Deployment timed out", body.get("error"));
         }
 
         @Test
