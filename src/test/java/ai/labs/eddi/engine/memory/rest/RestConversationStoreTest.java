@@ -35,10 +35,10 @@ class RestConversationStoreTest {
     private IConversationMemoryStore conversationMemoryStore;
     private IUserMemoryStore userMemoryStore;
     private IRuntime runtime;
-    @SuppressWarnings("unchecked")
-    private Instance<IAttachmentStorage> attachmentStorageInstance = mock(Instance.class);
+    private Instance<IAttachmentStorage> attachmentStorageInstance;
     private RestConversationStore restConversationStore;
 
+    @SuppressWarnings("unchecked")
     @BeforeEach
     void setUp() {
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
@@ -46,6 +46,7 @@ class RestConversationStoreTest {
         conversationMemoryStore = mock(IConversationMemoryStore.class);
         userMemoryStore = mock(IUserMemoryStore.class);
         runtime = mock(IRuntime.class);
+        attachmentStorageInstance = mock(Instance.class);
         when(attachmentStorageInstance.isResolvable()).thenReturn(false);
 
         restConversationStore = new RestConversationStore(
