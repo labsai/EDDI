@@ -213,5 +213,120 @@ class RestAgentAdministrationTest {
 
             assertTrue(result.isEmpty());
         }
+
+        @Test
+        @DisplayName("should return sorted list of deployed agents")
+        void returnsSortedList() throws Exception {
+            var agent1 = mock(IAgent.class);
+            when(agent1.getAgentId()).thenReturn("agent-1");
+            when(agent1.getAgentVersion()).thenReturn(1);
+            when(agent1.getDeploymentStatus()).thenReturn(Deployment.Status.READY);
+
+            var desc1 = new ai.labs.eddi.configs.descriptors.model.DocumentDescriptor();
+            desc1.setLastModifiedOn(new java.util.Date(1000));
+            when(documentDescriptorStore.readDescriptor("agent-1", 1)).thenReturn(desc1);
+
+            when(agentFactory.getAllLatestAgents(any())).thenReturn(List.of(agent1));
+
+            var result = restAgentAdmin.getDeploymentStatuses(Deployment.Environment.test);
+
+            assertEquals(1, result.size());
+            assertEquals("agent-1", result.get(0).getAgentId());
+        }
+
+        @Test
+        @DisplayName("should throw ISE on ServiceException")
+        void throwsOnServiceException() throws Exception {
+            when(agentFactory.getAllLatestAgents(any()))
+                    .thenThrow(new ServiceException("DB fail"));
+
+            assertThrows(InternalServerErrorException.class,
+                    () -> restAgentAdmin.getDeploymentStatuses(Deployment.Environment.test));
+        }
+    }
+
+    // --- Deploy wait paths ---
+
+    @Nested
+    @DisplayName("deployAgent wait paths")
+    class DeployAgentWait {
+
+        @Test
+        @DisplayName("should include error when future times out")
+        void timeoutPath() throws Exception {
+            var agent = mock(IAgent.class);
+            when(agent.getDeploymentStatus()).thenReturn(Deployment.Status.IN_PROGRESS);
+            when(agentFactory.getAgent(any(), anyString(), anyInt())).thenReturn(agent);
+
+            // Create a future that never completes
+            CompletableFuture<Void> neverDone = new CompletableFuture<>();
+            // Complete it exceptionally with timeout behavior
+            when(runtime.submitCallable(any(Callable.class), any())).thenReturn(neverDone);
+            // Complete immediately to avoid actual 30s wait
+            neverDone.completeExceptionally(new java.util.concurrent.TimeoutException("timed out"));
+
+            Response response = restAgentAdmin.deployAgent(
+                    Deployment.Environment.test, "agent-1", 1, true, true);
+
+            assertEquals(200, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertNotNull(body.get("status"));
+        }
+
+        @Test
+        @DisplayName("should include error when future fails with ExecutionException")
+        void executionExceptionPath() throws Exception {
+            var agent = mock(IAgent.class);
+            when(agent.getDeploymentStatus()).thenReturn(Deployment.Status.ERROR);
+            when(agentFactory.getAgent(any(), anyString(), anyInt())).thenReturn(agent);
+
+            CompletableFuture<Void> failed = new CompletableFuture<>();
+            failed.completeExceptionally(new RuntimeException("Deploy failed"));
+            when(runtime.submitCallable(any(Callable.class), any())).thenReturn(failed);
+
+            Response response = restAgentAdmin.deployAgent(
+                    Deployment.Environment.test, "agent-1", 1, true, true);
+
+            assertEquals(200, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals("ERROR", body.get("status"));
+            assertNotNull(body.get("error"));
+        }
+    }
+
+    // --- Undeploy cascading ---
+
+    @Nested
+    @DisplayName("undeployAgent cascading versions")
+    class UndeployAgentCascading {
+
+        @Test
+        @DisplayName("should undeploy multiple versions when cascading")
+        void undeploysMultipleVersions() throws Exception {
+            when(conversationMemoryStore.getActiveConversationCount(anyString(), anyInt()))
+                    .thenReturn(0L);
+            when(runtime.submitCallable(any(Callable.class), any()))
+                    .thenReturn(CompletableFuture.completedFuture(null));
+
+            Response response = restAgentAdmin.undeployAgent(
+                    Deployment.Environment.test, "agent-1", 3, false, true);
+
+            assertEquals(202, response.getStatus());
+            // Should submit 3 undeploy calls (versions 3, 2, 1)
+            verify(runtime, times(3)).submitCallable(any(Callable.class), any());
+        }
+
+        @Test
+        @DisplayName("should throw ISE on generic exception")
+        void throwsOnException() throws Exception {
+            when(conversationMemoryStore.getActiveConversationCount(anyString(), anyInt()))
+                    .thenThrow(new RuntimeException("DB crash"));
+
+            assertThrows(InternalServerErrorException.class,
+                    () -> restAgentAdmin.undeployAgent(
+                            Deployment.Environment.test, "agent-1", 1, false, false));
+        }
     }
 }
