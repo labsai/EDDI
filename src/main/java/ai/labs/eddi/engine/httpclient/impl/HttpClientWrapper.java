@@ -398,7 +398,8 @@ public class HttpClientWrapper implements IHttpClient {
         }
     }
 
-    private static String truncateAndClean(String text) {
+    // Package-private for testability (HttpClientWrapperTest)
+    static String truncateAndClean(String text) {
         if (text == null) {
             return null;
         }
@@ -411,7 +412,8 @@ public class HttpClientWrapper implements IHttpClient {
         return text;
     }
 
-    private static Map<String, String> convertHeaderToMap(MultiMap headers) {
+    // Package-private for testability (HttpClientWrapperTest)
+    static Map<String, String> convertHeaderToMap(MultiMap headers) {
         Map<String, String> httpHeader = new HashMap<>();
         for (Map.Entry<String, String> header : headers) {
             httpHeader.put(header.getKey(), header.getValue());

@@ -14,7 +14,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Method;
 import java.net.URI;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -396,35 +395,29 @@ class HttpClientWrapperTest {
         }
     }
 
-    // ==================== truncateAndClean (via reflection) ====================
+    // ==================== truncateAndClean ====================
 
     @Nested
     @DisplayName("truncateAndClean() Tests")
     class TruncateAndCleanTests {
 
-        private String invokeTruncateAndClean(String input) throws Exception {
-            Method method = HttpClientWrapper.class.getDeclaredMethod("truncateAndClean", String.class);
-            method.setAccessible(true);
-            return (String) method.invoke(null, input);
-        }
-
         @Test
         @DisplayName("null input returns null")
-        void nullInput() throws Exception {
-            assertNull(invokeTruncateAndClean(null));
+        void nullInput() {
+            assertNull(HttpClientWrapper.truncateAndClean(null));
         }
 
         @Test
         @DisplayName("Short text is returned unchanged")
-        void shortText() throws Exception {
-            assertEquals("hello", invokeTruncateAndClean("hello"));
+        void shortText() {
+            assertEquals("hello", HttpClientWrapper.truncateAndClean("hello"));
         }
 
         @Test
         @DisplayName("Text longer than 150 chars is truncated with ellipsis")
-        void longText() throws Exception {
+        void longText() {
             String longText = "a".repeat(200);
-            String result = invokeTruncateAndClean(longText);
+            String result = HttpClientWrapper.truncateAndClean(longText);
 
             assertEquals(153, result.length()); // 150 + "..."
             assertTrue(result.endsWith("..."));
@@ -432,8 +425,8 @@ class HttpClientWrapperTest {
 
         @Test
         @DisplayName("Newlines are replaced with spaces")
-        void newlinesReplaced() throws Exception {
-            String result = invokeTruncateAndClean("line1\nline2\r\nline3");
+        void newlinesReplaced() {
+            String result = HttpClientWrapper.truncateAndClean("line1\nline2\r\nline3");
             assertFalse(result.contains("\n"));
             assertFalse(result.contains("\r"));
             assertTrue(result.contains("line1 line2 line3"));
@@ -441,50 +434,42 @@ class HttpClientWrapperTest {
 
         @Test
         @DisplayName("Empty string returns empty string")
-        void emptyString() throws Exception {
-            assertEquals("", invokeTruncateAndClean(""));
+        void emptyString() {
+            assertEquals("", HttpClientWrapper.truncateAndClean(""));
         }
 
         @Test
         @DisplayName("Exactly 150 chars is not truncated")
-        void exactly150Chars() throws Exception {
+        void exactly150Chars() {
             String exact = "b".repeat(150);
-            String result = invokeTruncateAndClean(exact);
+            String result = HttpClientWrapper.truncateAndClean(exact);
             assertEquals(150, result.length());
             assertFalse(result.endsWith("..."));
         }
     }
 
-    // ==================== convertHeaderToMap (via reflection) ====================
+    // ==================== convertHeaderToMap ====================
 
     @Nested
     @DisplayName("convertHeaderToMap() Tests")
     class ConvertHeaderTests {
 
-        private Map<String, String> invokeConvertHeaderToMap(MultiMap headers) throws Exception {
-            Method method = HttpClientWrapper.class.getDeclaredMethod("convertHeaderToMap", MultiMap.class);
-            method.setAccessible(true);
-            @SuppressWarnings("unchecked")
-            Map<String, String> result = (Map<String, String>) method.invoke(null, headers);
-            return result;
-        }
-
         @Test
         @DisplayName("Empty MultiMap produces empty map")
-        void emptyHeaders() throws Exception {
+        void emptyHeaders() {
             MultiMap headers = MultiMap.caseInsensitiveMultiMap();
-            Map<String, String> result = invokeConvertHeaderToMap(headers);
+            Map<String, String> result = HttpClientWrapper.convertHeaderToMap(headers);
             assertTrue(result.isEmpty());
         }
 
         @Test
         @DisplayName("Multiple headers are converted correctly")
-        void multipleHeaders() throws Exception {
+        void multipleHeaders() {
             MultiMap headers = MultiMap.caseInsensitiveMultiMap();
             headers.add("Content-Type", "application/json");
             headers.add("Authorization", "Bearer token");
 
-            Map<String, String> result = invokeConvertHeaderToMap(headers);
+            Map<String, String> result = HttpClientWrapper.convertHeaderToMap(headers);
             assertEquals(2, result.size());
             assertEquals("application/json", result.get("Content-Type"));
             assertEquals("Bearer token", result.get("Authorization"));
