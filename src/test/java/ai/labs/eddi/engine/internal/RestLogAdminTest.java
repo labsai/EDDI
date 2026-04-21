@@ -97,4 +97,51 @@ class RestLogAdminTest {
             assertEquals("instance-abc-123", result.instanceId());
         }
     }
+
+    @Nested
+    @DisplayName("streamLogs")
+    class StreamLogs {
+
+        @Test
+        @DisplayName("should send initial batch and register listener")
+        void sendsInitialBatchAndRegistersListener() {
+            var entry = new LogEntry(System.currentTimeMillis(), "INFO", "test.Logger", "msg",
+                    null, "agent-1", null, "conv-1", null, null);
+            when(boundedLogStore.getEntries("agent-1", null, "INFO", 50))
+                    .thenReturn(List.of(entry));
+            when(boundedLogStore.addListener(any())).thenReturn("listener-1");
+
+            var eventSink = mock(jakarta.ws.rs.sse.SseEventSink.class);
+            var sse = mock(jakarta.ws.rs.sse.Sse.class, RETURNS_DEEP_STUBS);
+            var event = mock(jakarta.ws.rs.sse.OutboundSseEvent.class);
+
+            when(sse.newEventBuilder().name(anyString()).data(any()).build()).thenReturn(event);
+            when(eventSink.send(any(jakarta.ws.rs.sse.OutboundSseEvent.class)))
+                    .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(null));
+            when(eventSink.isClosed()).thenReturn(true); // close immediately to prevent cleanup thread from running long
+
+            restLogAdmin.streamLogs("agent-1", null, "INFO", eventSink, sse);
+
+            // Verify initial batch was sent
+            verify(eventSink).send(event);
+            // Verify listener was registered
+            verify(boundedLogStore).addListener(any());
+        }
+
+        @Test
+        @DisplayName("should handle empty initial batch")
+        void emptyInitialBatch() {
+            when(boundedLogStore.getEntries(any(), any(), any(), anyInt())).thenReturn(List.of());
+            when(boundedLogStore.addListener(any())).thenReturn("listener-2");
+
+            var eventSink = mock(jakarta.ws.rs.sse.SseEventSink.class);
+            var sse = mock(jakarta.ws.rs.sse.Sse.class);
+            when(eventSink.isClosed()).thenReturn(true);
+
+            restLogAdmin.streamLogs(null, null, null, eventSink, sse);
+
+            verify(eventSink, never()).send(any());
+            verify(boundedLogStore).addListener(any());
+        }
+    }
 }

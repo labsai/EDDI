@@ -1,6 +1,8 @@
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
+import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -163,6 +165,17 @@ class RestAgentManagementTest {
 
             assertFalse(restAgentManagement.isRedoAvailable("intent-1", "user-1"));
         }
+
+        @Test
+        @DisplayName("should delegate when conversation exists")
+        void delegatesWhenExists() throws Exception {
+            var userConv = createUserConversation();
+            when(userConversationStore.readUserConversation("intent-1", "user-1"))
+                    .thenReturn(userConv);
+            when(restAgentEngine.isRedoAvailable("conv-1")).thenReturn(true);
+
+            assertTrue(restAgentManagement.isRedoAvailable("intent-1", "user-1"));
+        }
     }
 
     @Nested
@@ -192,6 +205,126 @@ class RestAgentManagementTest {
 
             assertEquals(200, response.getStatus());
             verify(restAgentEngine).redo("conv-1");
+        }
+    }
+
+    // --- loadConversationMemory ---
+
+    @Nested
+    @DisplayName("loadConversationMemory")
+    class LoadConversationMemory {
+
+        @Test
+        @DisplayName("should resume with snapshot when no language property exists")
+        void resumesWithSnapshotNoLang() throws Exception {
+            var userConv = createUserConversation();
+            when(userConversationStore.readUserConversation("intent-1", "user-1"))
+                    .thenReturn(userConv);
+            when(restAgentEngine.getConversationState("conv-1"))
+                    .thenReturn(ConversationState.READY);
+
+            var snapshot = new SimpleConversationMemorySnapshot();
+            when(restAgentEngine.readConversation(eq("conv-1"), any(), any(), any()))
+                    .thenReturn(snapshot);
+
+            restAgentManagement.loadConversationMemory("intent-1", "user-1", "en",
+                    false, false, List.of(), asyncResponse);
+
+            verify(asyncResponse).resume(snapshot);
+        }
+
+        @Test
+        @DisplayName("should rerun when language property differs from requested")
+        void rerunsWhenLangDiffers() throws Exception {
+            var userConv = createUserConversation();
+            when(userConversationStore.readUserConversation("intent-1", "user-1"))
+                    .thenReturn(userConv);
+            when(restAgentEngine.getConversationState("conv-1"))
+                    .thenReturn(ConversationState.READY);
+
+            var snapshot = new SimpleConversationMemorySnapshot();
+            var langProp = new Property("lang", "de", Property.Scope.conversation);
+            var props = new ConversationProperties(null);
+            props.put("lang", langProp);
+            snapshot.setConversationProperties(props);
+            when(restAgentEngine.readConversation(eq("conv-1"), any(), any(), any()))
+                    .thenReturn(snapshot);
+
+            restAgentManagement.loadConversationMemory("intent-1", "user-1", "en",
+                    false, false, List.of(), asyncResponse);
+
+            verify(restAgentEngine).rerunLastConversationStep(eq("conv-1"), eq("en"),
+                    any(), any(), any(), eq(asyncResponse));
+            verify(asyncResponse, never()).resume(any(SimpleConversationMemorySnapshot.class));
+        }
+
+        @Test
+        @DisplayName("should resume without rerun when language matches")
+        void noRerunWhenLangMatches() throws Exception {
+            var userConv = createUserConversation();
+            when(userConversationStore.readUserConversation("intent-1", "user-1"))
+                    .thenReturn(userConv);
+            when(restAgentEngine.getConversationState("conv-1"))
+                    .thenReturn(ConversationState.READY);
+
+            var snapshot = new SimpleConversationMemorySnapshot();
+            var langProp = new Property("lang", "en", Property.Scope.conversation);
+            var props = new ConversationProperties(null);
+            props.put("lang", langProp);
+            snapshot.setConversationProperties(props);
+            when(restAgentEngine.readConversation(eq("conv-1"), any(), any(), any()))
+                    .thenReturn(snapshot);
+
+            restAgentManagement.loadConversationMemory("intent-1", "user-1", "en",
+                    false, false, List.of(), asyncResponse);
+
+            verify(asyncResponse).resume(snapshot);
+            verify(restAgentEngine, never()).rerunLastConversationStep(
+                    anyString(), anyString(), any(), any(), any(), any());
+        }
+    }
+
+    // --- sayWithinContext ---
+
+    @Nested
+    @DisplayName("sayWithinContext")
+    class SayWithinContext {
+
+        @Test
+        @DisplayName("should delegate to engine when conversation exists")
+        void delegatesToEngine() throws Exception {
+            var userConv = createUserConversation();
+            when(userConversationStore.readUserConversation("intent-1", "user-1"))
+                    .thenReturn(userConv);
+            when(restAgentEngine.getConversationState("conv-1"))
+                    .thenReturn(ConversationState.READY);
+
+            var inputData = new InputData("Hello", Map.of());
+
+            restAgentManagement.sayWithinContext("intent-1", "user-1", false, false,
+                    List.of(), inputData, asyncResponse);
+
+            verify(restAgentEngine).sayWithinContext(eq("conv-1"), any(), any(), any(),
+                    eq(inputData), eq(asyncResponse));
+        }
+
+        @Test
+        @DisplayName("should extract language from context")
+        void extractsLanguageFromContext() throws Exception {
+            var userConv = createUserConversation();
+            when(userConversationStore.readUserConversation("intent-1", "user-1"))
+                    .thenReturn(userConv);
+            when(restAgentEngine.getConversationState("conv-1"))
+                    .thenReturn(ConversationState.READY);
+
+            var langContext = new Context(Context.ContextType.string, "fr");
+            var inputData = new InputData("Bonjour", Map.of("lang", langContext));
+
+            restAgentManagement.sayWithinContext("intent-1", "user-1", false, false,
+                    List.of(), inputData, asyncResponse);
+
+            verify(restAgentEngine).sayWithinContext(eq("conv-1"), any(), any(), any(),
+                    eq(inputData), eq(asyncResponse));
         }
     }
 

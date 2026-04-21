@@ -13,6 +13,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 
 /**
  * Unit tests for {@link RestCoordinatorAdmin}.
@@ -133,6 +134,41 @@ class RestCoordinatorAdminTest {
             when(coordinator.purgeDeadLetters()).thenReturn(0);
 
             assertEquals(0, restCoordinatorAdmin.purgeDeadLetters());
+        }
+    }
+
+    @Nested
+    @DisplayName("streamEvents")
+    class StreamEvents {
+
+        @Test
+        @DisplayName("should send initial status and register client")
+        void sendsInitialStatus() {
+            var status = new CoordinatorStatus("in-memory", true, "OK", 0, 0L, 0L, java.util.Map.of());
+            when(coordinator.getStatus()).thenReturn(status);
+
+            var eventSink = mock(jakarta.ws.rs.sse.SseEventSink.class);
+            var sse = mock(jakarta.ws.rs.sse.Sse.class, RETURNS_DEEP_STUBS);
+            var event = mock(jakarta.ws.rs.sse.OutboundSseEvent.class);
+
+            when(sse.newEventBuilder().name(anyString()).data(any()).build()).thenReturn(event);
+
+            restCoordinatorAdmin.streamEvents(eventSink, sse);
+
+            verify(eventSink).send(event);
+            verify(coordinator).getStatus();
+        }
+
+        @Test
+        @DisplayName("should handle exception during initial status send")
+        void handlesInitialStatusError() {
+            when(coordinator.getStatus()).thenThrow(new RuntimeException("Status unavailable"));
+
+            var eventSink = mock(jakarta.ws.rs.sse.SseEventSink.class);
+            var sse = mock(jakarta.ws.rs.sse.Sse.class);
+
+            // Should not throw — error is caught internally
+            assertDoesNotThrow(() -> restCoordinatorAdmin.streamEvents(eventSink, sse));
         }
     }
 }
