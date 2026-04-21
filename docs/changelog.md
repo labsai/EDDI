@@ -13,6 +13,51 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Test Coverage Hardening — Batches 5-8 + JaCoCo Gates (2026-04-21)
+
+**Repo:** EDDI (`chore/test-coverage-hardening`)
+
+**What changed:** Continued systematic test coverage expansion. Added 49 new unit tests across 4 test classes. Raised JaCoCo enforcement gates to 90% instruction / 80% branch for OpenSSF Silver compliance. Total: 3,849 tests, 0 failures.
+
+### Batch 5 — ResourceClientLibrary (16 tests)
+- All 9 store routing paths (parser, llm, httpcalls, behavior, mcpcalls, rag, property, output, dictionary)
+- Alias resolution (ai.labs.rules → behavior, ai.labs.dictionary → regulardictionary)
+- Unknown type returns null, duplicate/delete delegation, permanent flag passthrough
+
+### Batch 6 — RestConversationStore (13 tests)
+- Raw/simple conversation log reads, null ID rejection
+- Permanent vs non-permanent delete, ended conversation cleanup with date filtering
+- Orphaned conversation handling (descriptor missing), active conversation listing
+- Bulk end state transition, user memory retention scheduling skip
+
+### Batch 7 — RestAgentGroupStore (9 tests)
+- JSON schema generation, discussion styles enumeration (all 6 styles)
+- Group CRUD delegation, getCurrentResourceId, ResourceNotFoundException propagation
+
+### Batch 8 — RestOutputStore (11 tests)
+- JSON schema, read/create/delete/duplicate output sets with IResourceId stubbing
+- Output key listing, SET/DELETE patch operations, resource URI and ID delegation
+
+### JaCoCo Enforcement
+- Raised coverage gates from 35% LINE to **90% INSTRUCTION + 80% BRANCH**
+- Enforced at `test` phase via `jacoco:check` goal — fails PRs below threshold
+
+**Design decisions:**
+- **Verify-only pattern for typed stores**: `getResource` tests use `verify()` instead of `doReturn()` to avoid Mockito's `WrongTypeOfReturnValue` when store methods return specific config types (e.g., `readLlm()` → `LlmConfiguration`)
+- **Skipped**: Slack tests (separate branch), HttpClientWrapper (IT coverage sufficient), mock-heavy mongo stores (low value-add over existing ITs)
+- **`IResourceStore.create()` stubbing**: REST store tests that go through `RestVersionInfo.create()` must stub `store.create()` to return a mock `IResourceId` with non-null `getId()`/`getVersion()`, or the URI builder NPEs
+
+**Files (new):**
+- `ResourceClientLibraryTest.java` — 16 tests
+- `RestConversationStoreTest.java` — 13 tests
+- `RestAgentGroupStoreTest.java` — 9 tests
+- `RestOutputStoreTest.java` — 11 tests
+
+**Files (modified):**
+- `pom.xml` — JaCoCo gates raised to 90/80
+
+---
+
 ## MongoDB Adapter ITs + JaCoCo Coverage Fix (2026-04-20)
 
 **Repo:** EDDI (`test/coverage-tier-1-2`)
