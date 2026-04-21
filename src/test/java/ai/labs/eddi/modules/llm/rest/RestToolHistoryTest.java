@@ -15,8 +15,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -37,24 +35,13 @@ class RestToolHistoryTest {
     private ToolCostTracker costTracker;
 
     @BeforeEach
-    void setUp() throws Exception {
-        restToolHistory = new RestToolHistory();
+    void setUp() {
         memoryStore = mock(IConversationMemoryStore.class);
         cacheService = mock(ToolCacheService.class);
         rateLimiter = mock(ToolRateLimiter.class);
         costTracker = mock(ToolCostTracker.class);
 
-        // Inject mocks via reflection (CDI field injection)
-        setField("conversationMemoryStore", memoryStore);
-        setField("cacheService", cacheService);
-        setField("rateLimiter", rateLimiter);
-        setField("costTracker", costTracker);
-    }
-
-    private void setField(String name, Object value) throws Exception {
-        Field field = RestToolHistory.class.getDeclaredField(name);
-        field.setAccessible(true);
-        field.set(restToolHistory, value);
+        restToolHistory = new RestToolHistory(cacheService, rateLimiter, costTracker, memoryStore);
     }
 
     // ==================== getToolHistory ====================
