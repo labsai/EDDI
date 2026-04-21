@@ -591,29 +591,18 @@
                      a running Quarkus container (@QuarkusTest ITs cover these). -->
                 <configuration>
                     <excludes>
-                        <!-- CDI bootstrap wiring (no business logic) -->
+                        <!-- CDI bootstrap producers: @Produces methods that wire beans,
+                             zero business logic, verified by container startup in @QuarkusTest ITs -->
                         <exclude>**/bootstrap/**</exclude>
-                        <!-- External integration adapters (Slack, A2A — require live services) -->
-                        <exclude>**/integrations/slack/**</exclude>
-                        <exclude>**/engine/a2a/**</exclude>
-                        <!-- REST client libraries (generated/wiring) -->
+                        <!-- Generated REST client wrappers (no logic, just JAX-RS proxy interfaces) -->
                         <exclude>**/runtime/client/**</exclude>
-                        <!-- Import/Export services (heavily CDI-coupled, tested via @QuarkusTest ITs) -->
-                        <exclude>**/backup/impl/RestImportService*</exclude>
-                        <exclude>**/backup/impl/RestExportService*</exclude>
-                        <!-- Mongo store implementations (thin CDI delegates around MongoResourceStorage,
-                             which IS tested via MongoResourceStorageTest + MongoAttachmentStorageTest etc.) -->
-                        <exclude>**/mongo/*Store*</exclude>
-                        <!-- REST endpoints (pure JAX-RS wiring, tested via @QuarkusTest ITs) -->
-                        <exclude>**/rest/Rest*</exclude>
-                        <!-- LLM provider builders (factory wiring for external LLM APIs) -->
+                        <!-- LLM provider SDK factory builders: each wraps a single external SDK
+                             constructor call (e.g., OpenAI, Anthropic, Bedrock). No business logic,
+                             cannot be tested without live API keys. -->
                         <exclude>**/llm/impl/builder/**</exclude>
-                        <!-- NLP module (external NLP pipeline integration) -->
-                        <exclude>**/nlp/**</exclude>
-                        <!-- Trigger management (CDI wiring for deployment triggers) -->
-                        <exclude>**/triggermanagement/**</exclude>
-                        <!-- HTTP client wrappers (tested via integration tests) -->
-                        <exclude>**/httpclient/impl/**</exclude>
+                        <!-- Slack integration adapter: requires live Slack webhook API,
+                             not testable without external service -->
+                        <exclude>**/integrations/slack/**</exclude>
                     </excludes>
                 </configuration>
                 <executions>
@@ -644,12 +633,12 @@
                                         <limit>
                                             <counter>INSTRUCTION</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.70</minimum>
+                                            <minimum>0.65</minimum>
                                         </limit>
                                         <limit>
                                             <counter>BRANCH</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.58</minimum>
+                                            <minimum>0.55</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
