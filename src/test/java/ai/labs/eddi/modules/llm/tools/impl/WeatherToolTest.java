@@ -76,4 +76,55 @@ class WeatherToolTest {
         assertNotNull(result);
         assertTrue(result.contains("Error") || result.contains("API key not configured"));
     }
+
+    // === getWeatherForecast tests ===
+
+    @Test
+    void testGetWeatherForecast_NoApiKey() {
+        String result = weatherTool.getWeatherForecast("London", 3, "metric");
+        assertNotNull(result);
+        assertTrue(result.contains("Error") || result.contains("API key not configured"));
+    }
+
+    @Test
+    void testGetWeatherForecast_NullUnits_DefaultsToMetric() {
+        String result = weatherTool.getWeatherForecast("Berlin", 3, null);
+        assertNotNull(result);
+        assertTrue(result.contains("Error"));
+    }
+
+    @Test
+    void testGetWeatherForecast_EmptyUnits_DefaultsToMetric() {
+        String result = weatherTool.getWeatherForecast("Berlin", 3, "");
+        assertNotNull(result);
+        assertTrue(result.contains("Error"));
+    }
+
+    @Test
+    void testGetWeatherForecast_NullDays_DefaultsTo3() {
+        String result = weatherTool.getWeatherForecast("Paris", null, "metric");
+        assertNotNull(result);
+        assertTrue(result.contains("Error"));
+    }
+
+    @Test
+    void testGetWeatherForecast_NegativeDays_DefaultsTo3() {
+        String result = weatherTool.getWeatherForecast("Paris", -1, "metric");
+        assertNotNull(result);
+        assertTrue(result.contains("Error"));
+    }
+
+    @Test
+    void testGetWeatherForecast_DaysExceeds5_ClampedTo5() {
+        String result = weatherTool.getWeatherForecast("Tokyo", 10, "imperial");
+        assertNotNull(result);
+        assertTrue(result.contains("Error"));
+    }
+
+    @Test
+    void testGetCurrentWeather_EmptyUnits_DefaultsToMetric() {
+        String result = weatherTool.getCurrentWeather("London", "");
+        assertNotNull(result);
+        assertTrue(result.contains("Error"));
+    }
 }
