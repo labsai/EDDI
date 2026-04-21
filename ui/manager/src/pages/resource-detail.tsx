@@ -68,17 +68,17 @@ export function ResourceDetailPage() {
   const Icon = ICON_MAP[rt?.icon ?? ""] ?? FileCode;
   const typeName = rt ? t(`${rt.labelKey}.name`) : type ?? "";
 
-  // Cascade context from URL search params (set when navigating from agent/package)
+  // Cascade context from URL search params (set when navigating from agent/workflow)
   // Track in state so versions update after each cascade save
   const initialCascade = useMemo(() => {
-    const pkgId = searchParams.get("pkgId");
-    const pkgVer = searchParams.get("pkgVer");
+    const wfId = searchParams.get("wfId");
+    const wfVer = searchParams.get("wfVer");
     const agentId = searchParams.get("agentId");
     const agentVer = searchParams.get("agentVer");
-    if (pkgId && pkgVer && agentId && agentVer) {
+    if (wfId && wfVer && agentId && agentVer) {
       return {
-        workflowId: pkgId,
-        workflowVersion: parseInt(pkgVer, 10),
+        workflowId: wfId,
+        workflowVersion: parseInt(wfVer, 10),
         agentId: agentId,
         agentVersion: parseInt(agentVer, 10),
       };
@@ -325,10 +325,10 @@ export function ResourceDetailPage() {
     <div className="space-y-6">
       {/* Back link — context-aware: cascade context → back to workflow, otherwise → back to list */}
       {(() => {
-        const pkgId = searchParams.get("pkgId");
+        const wfId = searchParams.get("wfId");
         const agId = searchParams.get("agentId");
         const agVer = searchParams.get("agentVer");
-        if (pkgId) {
+        if (wfId) {
           // Navigated from a workflow — go back to the workflow detail
           const params = new URLSearchParams();
           if (agId) params.set("agentId", agId);
@@ -336,7 +336,7 @@ export function ResourceDetailPage() {
           const qs = params.toString();
           return (
             <BackLink
-              to={`/manage/workflowview/${pkgId}${qs ? `?${qs}` : ""}`}
+              to={`/manage/workflowview/${wfId}${qs ? `?${qs}` : ""}`}
               label={t("resources.backToWorkflow", "Back to Workflow")}
             />
           );

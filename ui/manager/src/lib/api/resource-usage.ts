@@ -23,16 +23,16 @@ export async function findResourceUsage(
 ): Promise<ResourceUsage[]> {
   const usages: ResourceUsage[] = [];
 
-  // 1. Get all packages
-  const pkgDescriptors = await getWorkflowDescriptors(200, 0, "");
+  // 1. Get all workflows
+  const wfDescriptors = await getWorkflowDescriptors(200, 0, "");
 
-  for (const pkgDesc of pkgDescriptors) {
-    const { id: pkgId, version: pkgVersion } = parseResourceUri(pkgDesc.resource);
+  for (const wfDesc of wfDescriptors) {
+    const { id: wfId, version: wfVersion } = parseResourceUri(wfDesc.resource);
 
     try {
-      const pkg = await getWorkflow(pkgId, pkgVersion);
+      const wf = await getWorkflow(wfId, wfVersion);
       // Check if any extension references this resource
-      const hasReference = pkg.workflowSteps.some((ext) => {
+      const hasReference = wf.workflowSteps.some((ext) => {
         const uri = ext.config?.uri;
         return (
           typeof uri === "string" &&
@@ -42,19 +42,19 @@ export async function findResourceUsage(
 
       if (!hasReference) continue;
 
-      // 2. Find agents that reference this package
+      // 2. Find agents that reference this workflow
       const agentDescriptors = await getAgentDescriptors(200, 0, "");
 
       for (const agentDesc of agentDescriptors) {
         const { id: agentId, version: agentVersion } = parseResourceUri(agentDesc.resource);
         try {
           const agent = await getAgent(agentId, agentVersion);
-          const pkgUri = pkgDesc.resource;
-          if (agent.workflows?.some((uri) => uri === pkgUri)) {
+          const wfUri = wfDesc.resource;
+          if (agent.workflows?.some((uri) => uri === wfUri)) {
             usages.push({
-              workflowId: pkgId,
-              workflowVersion: pkgVersion,
-              workflowName: pkgDesc.name || pkgId,
+              workflowId: wfId,
+              workflowVersion: wfVersion,
+              workflowName: wfDesc.name || wfId,
               agentId,
               agentVersion,
               agentName: agentDesc.name || agentId,
@@ -65,7 +65,7 @@ export async function findResourceUsage(
         }
       }
     } catch {
-      // Skip packages that can't be loaded
+      // Skip workflows that can't be loaded
     }
   }
 

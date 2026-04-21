@@ -61,14 +61,14 @@ const AGENTS_MOCK = [
 
 const WORKFLOWS_MOCK = [
   {
-    resource: "eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=2",
+    resource: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2",
     name: "Support Ticket Pipeline",
     description: "Parser → intent rules → LLM response → output with escalation fallback",
     createdOn: Date.now() - 12 * 86400000,
     lastModifiedOn: Date.now() - 3600000,
   },
   {
-    resource: "eddi://ai.labs.workflow/workflowstore/workflows/pkg2?version=1",
+    resource: "eddi://ai.labs.workflow/workflowstore/workflows/wf2?version=1",
     name: "FAQ Lookup Flow",
     description: "Dictionary matching → behavior rules → LLM answer → quick-reply output",
     createdOn: Date.now() - 14 * 86400000,
@@ -664,7 +664,7 @@ export const handlers = [
     // Per-agent configs for a realistic detail view
     const agentConfigs: Record<string, object> = {
       agent1: {
-        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=2"],
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2"],
         channels: [{ type: "web", config: { allowedOrigins: ["*"], maxIdleMinutes: 30 } }],
         a2aEnabled: true,
         description: "24/7 customer support with order tracking, returns processing, and escalation handling",
@@ -693,7 +693,7 @@ export const handlers = [
     };
     const agentFallbacks: Record<string, object> = {
       agent2: {
-        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/pkg2?version=1"],
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf2?version=1"],
         channels: [{ type: "web", config: { allowedOrigins: ["https://support.example.com"], maxIdleMinutes: 15 } }],
         a2aEnabled: true,
         description: "Self-service knowledge base answering product, billing, and account questions",
@@ -711,7 +711,7 @@ export const handlers = [
         memory: { memoryType: "longTerm", maxConversationSteps: 40 },
       },
       agent6: {
-        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=2"],
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2"],
         channels: [
           { type: "web", config: { allowedOrigins: ["https://hr.example.com"] } },
           { type: "slack", config: { channelId: "C0HR_ONBOARD", botToken: "${eddivault:slack-bot-token}", signingSecret: "${eddivault:slack-signing-secret}" } },
@@ -730,7 +730,7 @@ export const handlers = [
         memory: { memoryType: "longTerm", maxConversationSteps: 80 },
       },
       agent8: {
-        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=2"],
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2"],
         channels: [
           { type: "web", config: { allowedOrigins: ["https://internal.example.com"] } },
           { type: "slack", config: { channelId: "C0IT_HELP", botToken: "${eddivault:slack-bot-token}", signingSecret: "${eddivault:slack-signing-secret}", groupId: "group-it" } },
@@ -742,7 +742,7 @@ export const handlers = [
       },
     };
     const config = agentConfigs[agentId] ?? agentFallbacks[agentId] ?? {
-      workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/pkg1?version=2"],
+      workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2"],
       channels: [],
       a2aEnabled: false,
       description: "AI agent configured for EDDI platform",
@@ -911,42 +911,42 @@ export const handlers = [
         {
           conversationStep: [
             { key: "input:initial", value: "Hi, I need help with my order", timestamp: stepTime(300000), originWorkflowId: null },
-            { key: "actions", value: ["greet", "order_inquiry"], timestamp: stepTime(299500), originWorkflowId: "pkg1" },
-            { key: "output:text:greet", value: "Hello! I'd be happy to help with your order. Could you share your order number?", timestamp: stepTime(299000), originWorkflowId: "pkg1" },
+            { key: "actions", value: ["greet", "order_inquiry"], timestamp: stepTime(299500), originWorkflowId: "wf1" },
+            { key: "output:text:greet", value: "Hello! I'd be happy to help with your order. Could you share your order number?", timestamp: stepTime(299000), originWorkflowId: "wf1" },
           ],
           timestamp: stepTime(300000),
         },
         {
           conversationStep: [
             { key: "input:initial", value: "It's ORD-2024-78542", timestamp: stepTime(240000), originWorkflowId: null },
-            { key: "actions", value: ["lookup_order"], timestamp: stepTime(239500), originWorkflowId: "pkg1" },
-            { key: "output:text:lookup_order", value: "I found your order ORD-2024-78542. It was placed on March 28th for a Wireless Keyboard ($89.99). It's currently in transit and expected to arrive by April 2nd. Is there anything specific you'd like to know about it?", timestamp: stepTime(238000), originWorkflowId: "pkg1" },
+            { key: "actions", value: ["lookup_order"], timestamp: stepTime(239500), originWorkflowId: "wf1" },
+            { key: "output:text:lookup_order", value: "I found your order ORD-2024-78542. It was placed on March 28th for a Wireless Keyboard ($89.99). It's currently in transit and expected to arrive by April 2nd. Is there anything specific you'd like to know about it?", timestamp: stepTime(238000), originWorkflowId: "wf1" },
           ],
           timestamp: stepTime(240000),
         },
         {
           conversationStep: [
             { key: "input:initial", value: "Can I change the delivery address?", timestamp: stepTime(180000), originWorkflowId: null },
-            { key: "actions", value: ["address_change"], timestamp: stepTime(179500), originWorkflowId: "pkg1" },
-            { key: "output:text:address_change", value: "Since your order is already in transit, I can try to redirect the package. Please provide the new delivery address and I'll check if a redirect is possible with the carrier.", timestamp: stepTime(178000), originWorkflowId: "pkg1" },
-            { key: "quickReplies", value: ["Keep current address", "Provide new address", "Cancel order instead"], timestamp: stepTime(177500), originWorkflowId: "pkg1" },
+            { key: "actions", value: ["address_change"], timestamp: stepTime(179500), originWorkflowId: "wf1" },
+            { key: "output:text:address_change", value: "Since your order is already in transit, I can try to redirect the package. Please provide the new delivery address and I'll check if a redirect is possible with the carrier.", timestamp: stepTime(178000), originWorkflowId: "wf1" },
+            { key: "quickReplies", value: ["Keep current address", "Provide new address", "Cancel order instead"], timestamp: stepTime(177500), originWorkflowId: "wf1" },
           ],
           timestamp: stepTime(180000),
         },
         {
           conversationStep: [
             { key: "input:initial", value: "123 Oak Street, Suite 4B, Portland OR 97201", timestamp: stepTime(120000), originWorkflowId: null },
-            { key: "actions", value: ["update_address", "notify_carrier"], timestamp: stepTime(119000), originWorkflowId: "pkg1" },
-            { key: "output:text:update_address", value: "Great news! I've submitted a redirect request to the carrier for: 123 Oak Street, Suite 4B, Portland OR 97201. You'll receive a confirmation email within the next 2 hours. The estimated delivery date may shift by 1 business day.", timestamp: stepTime(117000), originWorkflowId: "pkg1" },
+            { key: "actions", value: ["update_address", "notify_carrier"], timestamp: stepTime(119000), originWorkflowId: "wf1" },
+            { key: "output:text:update_address", value: "Great news! I've submitted a redirect request to the carrier for: 123 Oak Street, Suite 4B, Portland OR 97201. You'll receive a confirmation email within the next 2 hours. The estimated delivery date may shift by 1 business day.", timestamp: stepTime(117000), originWorkflowId: "wf1" },
           ],
           timestamp: stepTime(120000),
         },
         {
           conversationStep: [
             { key: "input:initial", value: "Perfect, thank you!", timestamp: stepTime(60000), originWorkflowId: null },
-            { key: "actions", value: ["farewell"], timestamp: stepTime(59500), originWorkflowId: "pkg1" },
-            { key: "output:text:farewell", value: "You're welcome! Your redirect reference is RDR-98765. Is there anything else I can help you with?", timestamp: stepTime(58000), originWorkflowId: "pkg1" },
-            { key: "quickReplies", value: ["Track my order", "View other orders", "No thanks, goodbye"], timestamp: stepTime(57500), originWorkflowId: "pkg1" },
+            { key: "actions", value: ["farewell"], timestamp: stepTime(59500), originWorkflowId: "wf1" },
+            { key: "output:text:farewell", value: "You're welcome! Your redirect reference is RDR-98765. Is there anything else I can help you with?", timestamp: stepTime(58000), originWorkflowId: "wf1" },
+            { key: "quickReplies", value: ["Track my order", "View other orders", "No thanks, goodbye"], timestamp: stepTime(57500), originWorkflowId: "wf1" },
           ],
           timestamp: stepTime(60000),
         },
@@ -1071,11 +1071,11 @@ export const handlers = [
           localVersion: 1,
         },
         {
-          originId: "origin-pkg-1",
+          originId: "origin-wf-1",
           resourceType: "package",
           name: "Main Workflow",
           action: "UPDATE",
-          localId: "pkg1",
+          localId: "wf1",
           localVersion: 1,
         },
         {
@@ -3945,12 +3945,12 @@ const MOCK_EXPORT_PREVIEW = {
   agentVersion: 3,
   resources: [
     { resourceId: "agent1", resourceVersion: 3, resourceType: "agent", name: "Support Agent", parentWorkflowId: null, workflowIndex: 0, required: true },
-    { resourceId: "pkg1", resourceVersion: 2, resourceType: "workflow", name: "Support Ticket Pipeline", parentWorkflowId: null, workflowIndex: 0, required: true },
-    { resourceId: "beh1", resourceVersion: 1, resourceType: "behavior", name: "Support Rules", parentWorkflowId: "pkg1", workflowIndex: 0, required: false },
-    { resourceId: "llm1", resourceVersion: 1, resourceType: "langchain", name: "GPT-4 Task", parentWorkflowId: "pkg1", workflowIndex: 1, required: false },
-    { resourceId: "out1", resourceVersion: 1, resourceType: "output", name: "Support Outputs", parentWorkflowId: "pkg1", workflowIndex: 2, required: false },
-    { resourceId: "ps1", resourceVersion: 1, resourceType: "property", name: "Props", parentWorkflowId: "pkg1", workflowIndex: 3, required: false },
-    { resourceId: "dict1", resourceVersion: 1, resourceType: "regulardictionary", name: "Support Dict", parentWorkflowId: "pkg1", workflowIndex: 4, required: false },
+    { resourceId: "wf1", resourceVersion: 2, resourceType: "workflow", name: "Support Ticket Pipeline", parentWorkflowId: null, workflowIndex: 0, required: true },
+    { resourceId: "beh1", resourceVersion: 1, resourceType: "behavior", name: "Support Rules", parentWorkflowId: "wf1", workflowIndex: 0, required: false },
+    { resourceId: "llm1", resourceVersion: 1, resourceType: "langchain", name: "GPT-4 Task", parentWorkflowId: "wf1", workflowIndex: 1, required: false },
+    { resourceId: "out1", resourceVersion: 1, resourceType: "output", name: "Support Outputs", parentWorkflowId: "wf1", workflowIndex: 2, required: false },
+    { resourceId: "ps1", resourceVersion: 1, resourceType: "property", name: "Props", parentWorkflowId: "wf1", workflowIndex: 3, required: false },
+    { resourceId: "dict1", resourceVersion: 1, resourceType: "regulardictionary", name: "Support Dict", parentWorkflowId: "wf1", workflowIndex: 4, required: false },
     { resourceId: "snip1", resourceVersion: 1, resourceType: "snippet", name: "System Prompt Base", parentWorkflowId: null, workflowIndex: 0, required: false },
   ],
 };

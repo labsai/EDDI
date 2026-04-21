@@ -45,28 +45,28 @@ export async function cascadeSaveResource(
     return { newResourceVersion };
   }
 
-  // 2. Update the parent package
+  // 2. Update the parent workflow
   const oldResourceUri = buildResourceUri(rt, resourceId, resourceVersion);
   const newResourceUri = buildResourceUri(rt, resourceId, newResourceVersion);
 
-  const pkg = await getWorkflow(context.workflowId, context.workflowVersion);
-  const updatedPkg = replaceExtensionUri(pkg, oldResourceUri, newResourceUri);
-  const pkgResult = await updateWorkflow(
+  const wf = await getWorkflow(context.workflowId, context.workflowVersion);
+  const updatedWf = replaceExtensionUri(wf, oldResourceUri, newResourceUri);
+  const wfResult = await updateWorkflow(
     context.workflowId,
     context.workflowVersion,
-    updatedPkg
+    updatedWf
   );
-  const newWorkflowVersion = parseVersionFromLocation(pkgResult.location);
+  const newWorkflowVersion = parseVersionFromLocation(wfResult.location);
 
   // 3. Update the parent agent
-  const oldPkgUri = `eddi://ai.labs.workflow/workflowstore/workflows/${context.workflowId}?version=${context.workflowVersion}`;
-  const newPkgUri = `eddi://ai.labs.workflow/workflowstore/workflows/${context.workflowId}?version=${newWorkflowVersion}`;
+  const oldWfUri = `eddi://ai.labs.workflow/workflowstore/workflows/${context.workflowId}?version=${context.workflowVersion}`;
+  const newWfUri = `eddi://ai.labs.workflow/workflowstore/workflows/${context.workflowId}?version=${newWorkflowVersion}`;
 
   const agent = await getAgent(context.agentId, context.agentVersion);
   const updatedAgent: Agent = {
     ...agent,
     workflows: (agent.workflows ?? []).map((uri) =>
-      uri === oldPkgUri ? newPkgUri : uri
+      uri === oldWfUri ? newWfUri : uri
     ),
   };
   const agentResult = await updateAgent(
@@ -95,15 +95,15 @@ function buildResourceUri(
   return `${baseType}/${rt.store}/${rt.plural}/${id}?version=${version}`;
 }
 
-/** Replace old extension URI with new one inside a package config */
+/** Replace old extension URI with new one inside a workflow config */
 function replaceExtensionUri(
-  pkg: WorkflowConfiguration,
+  wf: WorkflowConfiguration,
   oldUri: string,
   newUri: string
 ): WorkflowConfiguration {
   return {
-    ...pkg,
-    workflowSteps: pkg.workflowSteps.map((ext) => {
+    ...wf,
+    workflowSteps: wf.workflowSteps.map((ext) => {
       const uri = ext.config?.uri;
       if (typeof uri === "string" && uri === oldUri) {
         return { ...ext, config: { ...ext.config, uri: newUri } };
