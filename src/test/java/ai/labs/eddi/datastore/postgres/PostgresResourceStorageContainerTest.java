@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @since 6.0.0
  */
 @DisplayName("PostgresResourceStorage IT")
-class PostgresResourceStorageIT extends PostgresTestBase {
+class PostgresResourceStorageContainerTest extends PostgresTestBase {
 
     private static DataSource ds;
     private PostgresResourceStorage<Map<String, Object>> storage;

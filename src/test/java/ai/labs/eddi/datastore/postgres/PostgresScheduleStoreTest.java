@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @since 6.0.0
  */
 @DisplayName("PostgresScheduleStore IT")
-class PostgresScheduleStoreIT extends PostgresTestBase {
+class PostgresScheduleStoreTest extends PostgresTestBase {
 
     private static PostgresScheduleStore store;
     private static DataSource ds;

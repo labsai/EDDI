@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @since 6.0.0
  */
 @DisplayName("MongoDeploymentStorage IT")
-class MongoDeploymentStorageIT extends MongoTestBase {
+class MongoDeploymentStorageTest extends MongoTestBase {
 
     private static MongoDeploymentStorage storage;
 

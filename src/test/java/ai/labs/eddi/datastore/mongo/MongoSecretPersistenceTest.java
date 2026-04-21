@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @since 6.0.0
  */
 @DisplayName("MongoSecretPersistence IT")
-class MongoSecretPersistenceIT extends MongoTestBase {
+class MongoSecretPersistenceTest extends MongoTestBase {
 
     private static MongoSecretPersistence persistence;
 

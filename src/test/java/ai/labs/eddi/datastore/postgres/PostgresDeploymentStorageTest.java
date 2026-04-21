@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @since 6.0.0
  */
 @DisplayName("PostgresDeploymentStorage IT")
-class PostgresDeploymentStorageIT extends PostgresTestBase {
+class PostgresDeploymentStorageTest extends PostgresTestBase {
 
     private static PostgresDeploymentStorage storage;
     private static DataSource ds;

@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @since 6.0.0
  */
 @DisplayName("PostgresDatabaseLogs IT")
-class PostgresDatabaseLogsIT extends PostgresTestBase {
+class PostgresDatabaseLogsTest extends PostgresTestBase {
 
     private static PostgresDatabaseLogs logs;
     private static DataSource ds;

@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @since 6.0.0
  */
 @DisplayName("PostgresSecretPersistence IT")
-class PostgresSecretPersistenceIT extends PostgresTestBase {
+class PostgresSecretPersistenceTest extends PostgresTestBase {
 
     private static PostgresSecretPersistence persistence;
     private static DataSource ds;

@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @since 6.0.0
  */
 @DisplayName("PostgresAgentTriggerStore IT")
-class PostgresAgentTriggerStoreIT extends PostgresTestBase {
+class PostgresAgentTriggerStoreTest extends PostgresTestBase {
 
     private static PostgresAgentTriggerStore store;
     private static DataSource ds;

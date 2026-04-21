@@ -1,49 +1,96 @@
-package ai.labs.eddi.datastore.postgres;
+package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.datastore.mongo.codec.JacksonProvider;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
+import ai.labs.eddi.engine.memory.ConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.mongodb.MongoClientSettings;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoDatabase;
+import de.undercouch.bson4jackson.BsonFactory;
+import de.undercouch.bson4jackson.BsonParser;
+import org.bson.codecs.*;
+import org.bson.codecs.configuration.CodecRegistry;
 import org.junit.jupiter.api.*;
+import org.testcontainers.containers.MongoDBContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
-import javax.sql.DataSource;
-import java.sql.SQLException;
 import java.util.List;
 
+import static org.bson.codecs.configuration.CodecRegistries.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Integration tests for {@link PostgresConversationMemoryStore} using
+ * Integration tests for {@link ConversationMemoryStore} (MongoDB) using
  * Testcontainers.
  * <p>
- * Covers snapshot CRUD, state transitions, active conversation queries, and
- * GDPR operations.
+ * Requires a custom codec registry (JacksonProvider) because the store uses
+ * {@code getCollection(name, ConversationMemorySnapshot.class)}.
  *
  * @since 6.0.0
  */
-@DisplayName("PostgresConversationMemoryStore IT")
-class PostgresConversationMemoryStoreIT extends PostgresTestBase {
+@Testcontainers
+@DisplayName("MongoConversationMemoryStore IT")
+class MongoConversationMemoryStoreTest {
 
-    private static PostgresConversationMemoryStore store;
-    private static DataSource ds;
+    private static final String DB_NAME = "eddi_conv_test";
+
+    @Container
+    static final MongoDBContainer MONGO = new MongoDBContainer("mongo:6.0");
+
+    private static MongoClient mongoClient;
+    private static MongoDatabase database;
+    private static ConversationMemoryStore store;
 
     @BeforeAll
     static void init() {
-        var dsInstance = createDataSourceInstance();
-        ds = dsInstance.get();
-        IJsonSerialization json = new JsonSerialization(new ObjectMapper());
-        store = new PostgresConversationMemoryStore(dsInstance, json);
+        // Build BSON-aware ObjectMapper matching production PersistenceModule
+        BsonFactory bsonFactory = new BsonFactory();
+        bsonFactory.enable(BsonParser.Feature.HONOR_DOCUMENT_LENGTH);
+        var bsonMapper = new ObjectMapper(bsonFactory);
+        bsonMapper.registerModule(new JavaTimeModule());
+        bsonMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        new SerializationCustomizer(false).customize(bsonMapper);
+
+        CodecRegistry codecRegistry = fromRegistries(
+                MongoClientSettings.getDefaultCodecRegistry(),
+                fromCodecs(new RawBsonDocumentCodec()),
+                fromProviders(
+                        new ValueCodecProvider(),
+                        new BsonValueCodecProvider(),
+                        new DocumentCodecProvider(),
+                        new IterableCodecProvider(),
+                        new MapCodecProvider(),
+                        new JacksonProvider(bsonMapper)));
+
+        var settings = MongoClientSettings.builder()
+                .applyConnectionString(new com.mongodb.ConnectionString(MONGO.getConnectionString()))
+                .codecRegistry(codecRegistry)
+                .build();
+
+        mongoClient = MongoClients.create(settings);
+        database = mongoClient.getDatabase(DB_NAME);
+        store = new ConversationMemoryStore(database);
+    }
+
+    @AfterAll
+    static void closeMongo() {
+        if (mongoClient != null) {
+            mongoClient.close();
+        }
     }
 
     @BeforeEach
     void clean() {
-        try {
-            truncateTables(ds, "conversation_memories");
-        } catch (SQLException ignored) {
-        }
+        database.getCollection("conversationmemories").drop();
     }
 
     // ─── Store + Load ───────────────────────────────────────────
@@ -76,7 +123,6 @@ class PostgresConversationMemoryStoreIT extends PostgresTestBase {
                     ConversationState.IN_PROGRESS);
             String id = store.storeConversationMemorySnapshot(snapshot);
 
-            // Update state
             snapshot.setConversationId(id);
             snapshot.setId(id);
             snapshot.setConversationState(ConversationState.ENDED);
@@ -89,8 +135,7 @@ class PostgresConversationMemoryStoreIT extends PostgresTestBase {
         @Test
         @DisplayName("load non-existent — returns null")
         void loadNonExistent() {
-            assertNull(store.loadConversationMemorySnapshot(
-                    "00000000-0000-0000-0000-000000000000"));
+            assertNull(store.loadConversationMemorySnapshot("000000000000000000000000"));
         }
     }
 
@@ -107,33 +152,26 @@ class PostgresConversationMemoryStoreIT extends PostgresTestBase {
                     createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS));
 
             store.setConversationState(id, ConversationState.ENDED);
-
             assertEquals(ConversationState.ENDED, store.getConversationState(id));
         }
 
         @Test
         @DisplayName("getConversationState — returns null for non-existent")
         void getStateNonExistent() {
-            assertNull(store.getConversationState("00000000-0000-0000-0000-000000000000"));
+            assertNull(store.getConversationState("000000000000000000000000"));
         }
     }
 
     // ─── Delete ─────────────────────────────────────────────────
 
-    @Nested
-    @DisplayName("Delete")
-    class Delete {
+    @Test
+    @DisplayName("deleteConversationMemorySnapshot — removes snapshot")
+    void deleteSnapshot() {
+        String id = store.storeConversationMemorySnapshot(
+                createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS));
 
-        @Test
-        @DisplayName("deleteConversationMemorySnapshot — removes snapshot")
-        void deleteSnapshot() {
-            String id = store.storeConversationMemorySnapshot(
-                    createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS));
-
-            store.deleteConversationMemorySnapshot(id);
-
-            assertNull(store.loadConversationMemorySnapshot(id));
-        }
+        store.deleteConversationMemorySnapshot(id);
+        assertNull(store.loadConversationMemorySnapshot(id));
     }
 
     // ─── Active Conversation Queries ────────────────────────────
@@ -150,8 +188,7 @@ class PostgresConversationMemoryStoreIT extends PostgresTestBase {
             store.storeConversationMemorySnapshot(
                     createSnapshot(null, "agent1", 1, "u2", ConversationState.IN_PROGRESS));
             String endedId = store.storeConversationMemorySnapshot(
-                    createSnapshot(null, "agent1", 1, "u3", ConversationState.ENDED));
-            // Also set state via the dedicated method to match column
+                    createSnapshot(null, "agent1", 1, "u3", ConversationState.IN_PROGRESS));
             store.setConversationState(endedId, ConversationState.ENDED);
 
             List<ConversationMemorySnapshot> active = store.loadActiveConversationMemorySnapshot("agent1", 1);
@@ -164,7 +201,7 @@ class PostgresConversationMemoryStoreIT extends PostgresTestBase {
             store.storeConversationMemorySnapshot(
                     createSnapshot(null, "agent2", 1, "u1", ConversationState.IN_PROGRESS));
             String endedId = store.storeConversationMemorySnapshot(
-                    createSnapshot(null, "agent2", 1, "u2", ConversationState.ENDED));
+                    createSnapshot(null, "agent2", 1, "u2", ConversationState.IN_PROGRESS));
             store.setConversationState(endedId, ConversationState.ENDED);
 
             assertEquals(1L, store.getActiveConversationCount("agent2", 1));
@@ -176,7 +213,7 @@ class PostgresConversationMemoryStoreIT extends PostgresTestBase {
             store.storeConversationMemorySnapshot(
                     createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS));
             String endedId = store.storeConversationMemorySnapshot(
-                    createSnapshot(null, "a", 1, "u", ConversationState.ENDED));
+                    createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS));
             store.setConversationState(endedId, ConversationState.ENDED);
 
             List<String> ended = store.getEndedConversationIds();
@@ -193,7 +230,7 @@ class PostgresConversationMemoryStoreIT extends PostgresTestBase {
 
         @Test
         @DisplayName("create + read round-trip")
-        void createAndRead() {
+        void createAndRead() throws IResourceStore.ResourceNotFoundException {
             var snapshot = createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS);
             var resourceId = store.create(snapshot);
             assertNotNull(resourceId.getId());
@@ -203,23 +240,11 @@ class PostgresConversationMemoryStoreIT extends PostgresTestBase {
         }
 
         @Test
-        @DisplayName("delete — removes via IResourceStore interface")
-        void deleteViaAdapter() {
-            String id = store.storeConversationMemorySnapshot(
-                    createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS));
-            store.delete(id, 0);
-
-            assertNull(store.read(id, 0));
-        }
-
-        @Test
-        @DisplayName("deleteAllPermanently — removes via IResourceStore interface")
-        void deleteAllPermanently() {
-            String id = store.storeConversationMemorySnapshot(
-                    createSnapshot(null, "a", 1, "u", ConversationState.IN_PROGRESS));
-            store.deleteAllPermanently(id);
-
-            assertNull(store.read(id, 0));
+        @DisplayName("getCurrentResourceId — returns same ID")
+        void getCurrentResourceId() {
+            var resourceId = store.getCurrentResourceId("test-id");
+            assertEquals("test-id", resourceId.getId());
+            assertEquals(0, resourceId.getVersion());
         }
     }
 
@@ -230,7 +255,7 @@ class PostgresConversationMemoryStoreIT extends PostgresTestBase {
     class GdprOps {
 
         @Test
-        @DisplayName("getConversationIdsByUserId — finds by userId in JSONB")
+        @DisplayName("getConversationIdsByUserId — finds by userId")
         void getByUserId() {
             store.storeConversationMemorySnapshot(
                     createSnapshot(null, "a", 1, "target_user", ConversationState.IN_PROGRESS));

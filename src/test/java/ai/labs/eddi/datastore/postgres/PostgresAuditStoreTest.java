@@ -1,9 +1,13 @@
-package ai.labs.eddi.datastore.mongo;
+package ai.labs.eddi.datastore.postgres;
 
-import ai.labs.eddi.engine.audit.AuditStore;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
 
+import javax.sql.DataSource;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -13,23 +17,30 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Integration tests for {@link AuditStore} (MongoDB) using Testcontainers.
+ * Integration tests for {@link PostgresAuditStore} using Testcontainers.
  *
  * @since 6.0.0
  */
-@DisplayName("MongoAuditStore IT")
-class MongoAuditStoreIT extends MongoTestBase {
+@DisplayName("PostgresAuditStore IT")
+class PostgresAuditStoreTest extends PostgresTestBase {
 
-    private static AuditStore store;
+    private static PostgresAuditStore store;
+    private static DataSource ds;
 
     @BeforeAll
     static void init() {
-        store = new AuditStore(getDatabase());
+        var dsInstance = createDataSourceInstance();
+        ds = dsInstance.get();
+        IJsonSerialization json = new JsonSerialization(new ObjectMapper());
+        store = new PostgresAuditStore(dsInstance, json);
     }
 
     @BeforeEach
     void clean() {
-        dropCollections("audit_ledger");
+        try {
+            truncateTables(ds, "audit_ledger");
+        } catch (SQLException ignored) {
+        }
     }
 
     // ─── Core CRUD ──────────────────────────────────────────────
@@ -52,7 +63,7 @@ class MongoAuditStoreIT extends MongoTestBase {
         }
 
         @Test
-        @DisplayName("multiple entries — ordered by timestamp DESC")
+        @DisplayName("multiple entries — ordered by created_at DESC")
         void multipleEntries() {
             store.appendEntry(createEntry("conv1", "agent1", 1, "user1", "parser", "input", 0, 0, 10L));
             store.appendEntry(createEntry("conv1", "agent1", 1, "user1", "behavior", "rules", 0, 1, 20L));
@@ -60,6 +71,7 @@ class MongoAuditStoreIT extends MongoTestBase {
 
             List<AuditEntry> results = store.getEntries("conv1", 0, 10);
             assertEquals(3, results.size());
+            // All 3 entries should be present — verify by taskId
             var taskIds = results.stream().map(AuditEntry::taskId).toList();
             assertTrue(taskIds.contains("parser"));
             assertTrue(taskIds.contains("behavior"));
@@ -201,11 +213,11 @@ class MongoAuditStoreIT extends MongoTestBase {
     // ─── JSONB data round-trip ──────────────────────────────────
 
     @Test
-    @DisplayName("BSON data — input/output/actions round-trip")
-    void bsonDataRoundTrip() {
+    @DisplayName("JSONB data — input/output/actions round-trip")
+    void jsonbDataRoundTrip() {
         var entry = new AuditEntry(UUID.randomUUID().toString(), "conv_json", "agent1", 1,
                 "user1", "test", 0, "llm_task", "langchain", 0, 100L,
-                Map.of("userInput", "hello"), Map.of("output", "world"),
+                Map.of("userInput", "hello"), Map.of("output", List.of("world")),
                 Map.of("compiledPrompt", "You are...", "modelName", "gpt-4"),
                 null, List.of("greet", "respond"), 0.05,
                 Instant.now().truncatedTo(ChronoUnit.MILLIS), "hmac_val", null);

@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 @DisplayName("MongoResourceStorage IT")
 @SuppressWarnings("unchecked")
-class MongoResourceStorageIT extends MongoTestBase {
+class MongoResourceStorageTest extends MongoTestBase {
 
     private static MongoResourceStorage<Map> storage;
 

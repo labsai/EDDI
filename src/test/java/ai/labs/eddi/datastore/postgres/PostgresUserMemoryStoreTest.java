@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @since 6.0.0
  */
 @DisplayName("PostgresUserMemoryStore IT")
-class PostgresUserMemoryStoreIT extends PostgresTestBase {
+class PostgresUserMemoryStoreTest extends PostgresTestBase {
 
     private static PostgresUserMemoryStore store;
     private static DataSource ds;

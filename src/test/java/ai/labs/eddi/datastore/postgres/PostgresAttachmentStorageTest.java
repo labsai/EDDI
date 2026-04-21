@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @since 6.0.0
  */
 @DisplayName("PostgresAttachmentStorage IT")
-class PostgresAttachmentStorageIT extends PostgresTestBase {
+class PostgresAttachmentStorageTest extends PostgresTestBase {
 
     private static PostgresAttachmentStorage storage;
     private static DataSource ds;

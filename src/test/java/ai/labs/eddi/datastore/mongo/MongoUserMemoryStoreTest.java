@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @since 6.0.0
  */
 @DisplayName("MongoUserMemoryStore IT")
-class MongoUserMemoryStoreIT extends MongoTestBase {
+class MongoUserMemoryStoreTest extends MongoTestBase {
 
     private static MongoUserMemoryStore store;
 

@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @since 6.0.0
  */
 @DisplayName("MongoScheduleStore IT")
-class MongoScheduleStoreIT extends MongoTestBase {
+class MongoScheduleStoreTest extends MongoTestBase {
 
     private static MongoScheduleStore store;
 
