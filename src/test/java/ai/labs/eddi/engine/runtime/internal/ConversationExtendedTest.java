@@ -92,13 +92,12 @@ class ConversationExtendedTest {
         }
 
         @Test
-        @DisplayName("say throws ConversationNotReadyException when ENDED")
+        @DisplayName("say succeeds when state is ENDED (only IN_PROGRESS blocks)")
         void sayWhenEnded() {
             when(memory.getConversationState()).thenReturn(ConversationState.ENDED);
 
             var conv = createConversation();
-            // ENDED state — should still succeed since only IN_PROGRESS throws
-            // Actually let me check: checkIfConversationInProgress only checks IN_PROGRESS
+
             assertDoesNotThrow(() -> conv.say("hello", Map.of()));
         }
 
@@ -306,7 +305,7 @@ class ConversationExtendedTest {
         }
 
         @Test
-        @DisplayName("init handles null context map for groupId extraction")
+        @DisplayName("init with empty context does not throw")
         void initHandlesNullContext() throws Exception {
             when(propertiesHandler.getUserMemoryStore()).thenReturn(null);
 
@@ -476,7 +475,7 @@ class ConversationExtendedTest {
 
             // Falls through to toString fallback
             verify(conversationProperties).put(eq("data"),
-                    argThat(prop -> prop.getValueString() instanceof String && prop.getValueString().toString().contains("99.9")));
+                    argThat(prop -> prop.getValueString() != null && prop.getValueString().contains("99.9")));
         }
 
         private UserMemoryEntry createEntry(String key, Object value, String category) {

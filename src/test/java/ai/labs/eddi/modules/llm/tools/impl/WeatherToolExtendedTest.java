@@ -208,7 +208,7 @@ class WeatherToolExtendedTest {
 
             String result = weatherTool.getCurrentWeather("Rome", null);
 
-            assertTrue(result.contains("°C") || result.contains("C"),
+            assertTrue(result.contains("°C"),
                     "Should use metric Celsius symbol. Got: " + result);
         }
 
