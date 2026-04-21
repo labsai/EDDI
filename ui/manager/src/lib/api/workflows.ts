@@ -66,7 +66,7 @@ export function deleteWorkflow(
   return api.delete(`/workflowstore/workflows/${id}?${params}`);
 }
 
-/** Get all versions of a specific package (for version picker) */
+/** Get all versions of a specific workflow (for version picker) */
 export function getWorkflowVersions(
   id: string
 ): Promise<AgentDescriptor[]> {

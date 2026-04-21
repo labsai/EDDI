@@ -11,10 +11,10 @@ export interface ResourceUsage {
 }
 
 /**
- * Find all packages and agents that reference a given resource URI.
+ * Find all workflows and agents that reference a given resource URI.
  *
- * Scans all packages for extensions whose config.uri contains
- * the resource ID, then scans all agents for references to those packages.
+ * Scans all workflows for extensions whose config.uri contains
+ * the resource ID, then scans all agents for references to those workflows.
  */
 export async function findResourceUsage(
   resourceId: string,

@@ -40,6 +40,7 @@ import {
 } from "@/lib/api/resource-usage";
 import { useJsonSchema } from "@/hooks/use-json-schema";
 import type { CascadeContext } from "@/lib/api/cascade-save";
+import { cascadeVersionUpdate } from "@/lib/api/cascade-save";
 import { VersionDiffDialog } from "@/components/editors/version-diff-dialog";
 import { getResource } from "@/lib/api/resources";
 import { useAgentContext } from "@/hooks/use-agent-context";
@@ -119,6 +120,7 @@ export function ResourceDetailPage() {
   const [showUsageDialog, setShowUsageDialog] = useState(false);
   const [isCascading, setIsCascading] = useState(false);
   const [newResourceVersion, setNewResourceVersion] = useState<number | null>(null);
+  const [previousResourceVersion, setPreviousResourceVersion] = useState<number | null>(null);
 
   // Agent context for Save & Test
   const agentCtx = useAgentContext();
@@ -147,7 +149,7 @@ export function ResourceDetailPage() {
         const parsed = JSON.parse(jsonString);
 
         if (cascadeContext) {
-          // Path A: Auto-cascade (navigated from agent/package)
+          // Path A: Auto-cascade (navigated from agent/workflow)
           cascadeSave.mutate(
             {
               id: id ?? "",
@@ -158,6 +160,7 @@ export function ResourceDetailPage() {
             {
               onSuccess: (result) => {
                 toast.success(t("editor.saved"));
+                setSaveSuccess(true);
                 setCurrentVersion(result.newResourceVersion);
                 // Update cascade context so next save uses new versions
                 setCascadeContext({
@@ -166,6 +169,7 @@ export function ResourceDetailPage() {
                   agentVersion: result.newAgentVersion ?? cascadeContext.agentVersion,
                 });
               },
+              onError: (err) => toast.error(getErrorMessage(err)),
             }
           );
         } else {
@@ -179,10 +183,12 @@ export function ResourceDetailPage() {
             {
               onSuccess: async (result) => {
                 toast.success(t("editor.saved"));
+                setSaveSuccess(true);
+                setPreviousResourceVersion(currentVersion);
                 setNewResourceVersion(result.newResourceVersion);
                 setCurrentVersion(result.newResourceVersion);
 
-                // Check if any agents/packages reference this
+                // Check if any agents/workflows reference this
                 if (rt) {
                   try {
                     const found = await findResourceUsage(
@@ -199,6 +205,7 @@ export function ResourceDetailPage() {
                   }
                 }
               },
+              onError: (err) => toast.error(getErrorMessage(err)),
             }
           );
         }
@@ -225,13 +232,11 @@ export function ResourceDetailPage() {
             });
             setCurrentVersion(result.newResourceVersion);
             // Update cascade context so next Save & Test uses correct versions
-            if (result.newWorkflowVersion || result.newAgentVersion) {
-              setCascadeContext(prev => prev ? {
-                ...prev,
-                workflowVersion: result.newWorkflowVersion ?? prev.workflowVersion,
-                agentVersion: result.newAgentVersion ?? prev.agentVersion,
-              } : prev);
-            }
+            setCascadeContext(prev => prev ? {
+              ...prev,
+              workflowVersion: result.newWorkflowVersion ?? prev.workflowVersion,
+              agentVersion: result.newAgentVersion ?? prev.agentVersion,
+            } : prev);
             return { newAgentVersion: result.newAgentVersion ?? agentCtx.agentVer };
           },
         });
@@ -244,32 +249,34 @@ export function ResourceDetailPage() {
 
   const handleCascadeConfirm = useCallback(
     async (selected: ResourceUsage[]) => {
-      if (newResourceVersion === null || !rt) return;
+      if (newResourceVersion === null || previousResourceVersion === null || !rt) return;
       setIsCascading(true);
 
       try {
         for (const usage of selected) {
-          await cascadeSave.mutateAsync({
-            id: id ?? "",
-            version: newResourceVersion,
-            body: {}, // Body not needed — config already saved in step 1
-            context: {
+          await cascadeVersionUpdate(
+            rt,
+            id ?? "",
+            previousResourceVersion,
+            newResourceVersion,
+            {
               workflowId: usage.workflowId,
               workflowVersion: usage.workflowVersion,
               agentId: usage.agentId,
               agentVersion: usage.agentVersion,
             },
-          });
+          );
         }
-      } catch {
-        // Some cascades may fail — that's okay
+        toast.success(t("editor.cascadeSuccess", "References updated successfully"));
+      } catch (err) {
+        toast.error(getErrorMessage(err));
       } finally {
         setIsCascading(false);
         setShowUsageDialog(false);
         setUsages([]);
       }
     },
-    [id, newResourceVersion, rt, cascadeSave]
+    [id, previousResourceVersion, newResourceVersion, rt, t]
   );
 
   if (!rt) {

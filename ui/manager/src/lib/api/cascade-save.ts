@@ -25,7 +25,7 @@ export interface CascadeResult {
 
 /**
  * Save a resource config, then cascade version updates up through
- * the package → agent chain.
+ * the workflow → agent chain.
  *
  * The EDDI backend increments version on every PUT, returning the
  * new URI in the Location header. We parse that to update parent references.
@@ -77,6 +77,59 @@ export async function cascadeSaveResource(
   const newAgentVersion = parseVersionFromLocation(agentResult.location);
 
   return { newResourceVersion, newWorkflowVersion, newAgentVersion };
+}
+
+export interface CascadeVersionResult {
+  newWorkflowVersion: number;
+  newAgentVersion: number;
+}
+
+/**
+ * Propagate an already-saved resource version change up through the
+ * workflow → agent chain WITHOUT re-saving the resource itself.
+ *
+ * Use this when the resource was already saved (Path B: standalone editor)
+ * and you just need to update parent references to point to the new version.
+ */
+export async function cascadeVersionUpdate(
+  rt: ResourceTypeConfig,
+  resourceId: string,
+  previousVersion: number,
+  newVersion: number,
+  context: CascadeContext
+): Promise<CascadeVersionResult> {
+  // 1. Update the parent workflow
+  const oldResourceUri = buildResourceUri(rt, resourceId, previousVersion);
+  const newResourceUri = buildResourceUri(rt, resourceId, newVersion);
+
+  const wf = await getWorkflow(context.workflowId, context.workflowVersion);
+  const updatedWf = replaceExtensionUri(wf, oldResourceUri, newResourceUri);
+  const wfResult = await updateWorkflow(
+    context.workflowId,
+    context.workflowVersion,
+    updatedWf
+  );
+  const newWorkflowVersion = parseVersionFromLocation(wfResult.location);
+
+  // 2. Update the parent agent
+  const oldWfUri = `eddi://ai.labs.workflow/workflowstore/workflows/${context.workflowId}?version=${context.workflowVersion}`;
+  const newWfUri = `eddi://ai.labs.workflow/workflowstore/workflows/${context.workflowId}?version=${newWorkflowVersion}`;
+
+  const agent = await getAgent(context.agentId, context.agentVersion);
+  const updatedAgent: Agent = {
+    ...agent,
+    workflows: (agent.workflows ?? []).map((uri) =>
+      uri === oldWfUri ? newWfUri : uri
+    ),
+  };
+  const agentResult = await updateAgent(
+    context.agentId,
+    context.agentVersion,
+    updatedAgent
+  );
+  const newAgentVersion = parseVersionFromLocation(agentResult.location);
+
+  return { newWorkflowVersion, newAgentVersion };
 }
 
 /** Parse version number from a Location URI like `eddi://…?version=2` */
