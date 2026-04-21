@@ -3,8 +3,8 @@ import { getAgentDescriptors, getAgent, parseResourceUri } from "./agents";
 
 export interface ResourceUsage {
   workflowId: string;
-  packageVersion: number;
-  packageName: string;
+  workflowVersion: number;
+  workflowName: string;
   agentId: string;
   agentVersion: number;
   agentName: string;
@@ -53,8 +53,8 @@ export async function findResourceUsage(
           if (agent.workflows?.some((uri) => uri === pkgUri)) {
             usages.push({
               workflowId: pkgId,
-              packageVersion: pkgVersion,
-              packageName: pkgDesc.name || pkgId,
+              workflowVersion: pkgVersion,
+              workflowName: pkgDesc.name || pkgId,
               agentId,
               agentVersion,
               agentName: agentDesc.name || agentId,

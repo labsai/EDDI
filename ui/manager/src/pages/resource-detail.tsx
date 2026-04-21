@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -69,7 +69,8 @@ export function ResourceDetailPage() {
   const typeName = rt ? t(`${rt.labelKey}.name`) : type ?? "";
 
   // Cascade context from URL search params (set when navigating from agent/package)
-  const cascadeContext: CascadeContext | undefined = (() => {
+  // Track in state so versions update after each cascade save
+  const initialCascade = useMemo(() => {
     const pkgId = searchParams.get("pkgId");
     const pkgVer = searchParams.get("pkgVer");
     const agentId = searchParams.get("agentId");
@@ -77,13 +78,20 @@ export function ResourceDetailPage() {
     if (pkgId && pkgVer && agentId && agentVer) {
       return {
         workflowId: pkgId,
-        packageVersion: parseInt(pkgVer, 10),
+        workflowVersion: parseInt(pkgVer, 10),
         agentId: agentId,
         agentVersion: parseInt(agentVer, 10),
       };
     }
     return undefined;
-  })();
+  }, [searchParams]);
+
+  const [cascadeContext, setCascadeContext] = useState<CascadeContext | undefined>(initialCascade);
+
+  // Sync when URL params change (user navigates to a different resource)
+  useEffect(() => {
+    setCascadeContext(initialCascade);
+  }, [initialCascade]);
 
   // Version state
   const [currentVersion, setCurrentVersion] = useState(1);
@@ -151,6 +159,12 @@ export function ResourceDetailPage() {
               onSuccess: (result) => {
                 toast.success(t("editor.saved"));
                 setCurrentVersion(result.newResourceVersion);
+                // Update cascade context so next save uses new versions
+                setCascadeContext({
+                  ...cascadeContext,
+                  workflowVersion: result.newWorkflowVersion ?? cascadeContext.workflowVersion,
+                  agentVersion: result.newAgentVersion ?? cascadeContext.agentVersion,
+                });
               },
             }
           );
@@ -210,6 +224,14 @@ export function ResourceDetailPage() {
               context: cascadeContext,
             });
             setCurrentVersion(result.newResourceVersion);
+            // Update cascade context so next Save & Test uses correct versions
+            if (result.newWorkflowVersion || result.newAgentVersion) {
+              setCascadeContext(prev => prev ? {
+                ...prev,
+                workflowVersion: result.newWorkflowVersion ?? prev.workflowVersion,
+                agentVersion: result.newAgentVersion ?? prev.agentVersion,
+              } : prev);
+            }
             return { newAgentVersion: result.newAgentVersion ?? agentCtx.agentVer };
           },
         });
@@ -233,7 +255,7 @@ export function ResourceDetailPage() {
             body: {}, // Body not needed — config already saved in step 1
             context: {
               workflowId: usage.workflowId,
-              packageVersion: usage.packageVersion,
+              workflowVersion: usage.workflowVersion,
               agentId: usage.agentId,
               agentVersion: usage.agentVersion,
             },

@@ -12,7 +12,7 @@ import { getAgent, updateAgent, type Agent } from "./agents";
 
 export interface CascadeContext {
   workflowId: string;
-  packageVersion: number;
+  workflowVersion: number;
   agentId: string;
   agentVersion: number;
 }
@@ -49,17 +49,17 @@ export async function cascadeSaveResource(
   const oldResourceUri = buildResourceUri(rt, resourceId, resourceVersion);
   const newResourceUri = buildResourceUri(rt, resourceId, newResourceVersion);
 
-  const pkg = await getWorkflow(context.workflowId, context.packageVersion);
+  const pkg = await getWorkflow(context.workflowId, context.workflowVersion);
   const updatedPkg = replaceExtensionUri(pkg, oldResourceUri, newResourceUri);
   const pkgResult = await updateWorkflow(
     context.workflowId,
-    context.packageVersion,
+    context.workflowVersion,
     updatedPkg
   );
   const newWorkflowVersion = parseVersionFromLocation(pkgResult.location);
 
   // 3. Update the parent agent
-  const oldPkgUri = `eddi://ai.labs.workflow/workflowstore/workflows/${context.workflowId}?version=${context.packageVersion}`;
+  const oldPkgUri = `eddi://ai.labs.workflow/workflowstore/workflows/${context.workflowId}?version=${context.workflowVersion}`;
   const newPkgUri = `eddi://ai.labs.workflow/workflowstore/workflows/${context.workflowId}?version=${newWorkflowVersion}`;
 
   const agent = await getAgent(context.agentId, context.agentVersion);

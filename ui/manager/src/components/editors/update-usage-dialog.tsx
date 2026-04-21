@@ -83,7 +83,7 @@ export function UpdateUsageDialog({
                 <span className="text-amber-500">→</span>
                 <span className="flex items-center gap-1 text-amber-800 dark:text-amber-300">
                   <PackageOpen className="h-3.5 w-3.5" />
-                  {usage.packageName} <span className="opacity-50">v{usage.packageVersion}</span>
+                  {usage.workflowName} <span className="opacity-50">v{usage.workflowVersion}</span>
                 </span>
               </div>
             </label>
