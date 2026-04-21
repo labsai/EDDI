@@ -45,6 +45,7 @@ class ConversationOutputTest {
     @Test
     void get_typed_missingKey_returnsNull() {
         var output = new ConversationOutput();
+        output.put("existing", "value");
         assertNull(output.get("missing", String.class));
     }
 

@@ -198,8 +198,7 @@ class MongoResourceStorageIT extends MongoTestBase {
         storage.store(storage.newResource(Map.of("tags", List.of("ai", "chatbot"))));
         storage.store(storage.newResource(Map.of("tags", List.of("web"))));
 
-        List<IResourceStore.IResourceId> results =
-                storage.findResourceIdsContaining("tags", "ai");
+        List<IResourceStore.IResourceId> results = storage.findResourceIdsContaining("tags", "ai");
         assertEquals(1, results.size());
     }
 }

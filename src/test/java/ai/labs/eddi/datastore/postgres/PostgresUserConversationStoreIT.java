@@ -14,7 +14,8 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Integration tests for {@link PostgresUserConversationStore} using Testcontainers.
+ * Integration tests for {@link PostgresUserConversationStore} using
+ * Testcontainers.
  *
  * @since 6.0.0
  */
@@ -145,7 +146,7 @@ class PostgresUserConversationStoreIT extends PostgresTestBase {
     // ─── Helpers ────────────────────────────────────────────────
 
     private static UserConversation createUserConversation(String intent, String userId,
-                                                            String conversationId, String agentId) {
+                                                           String conversationId, String agentId) {
         var uc = new UserConversation();
         uc.setIntent(intent);
         uc.setUserId(userId);

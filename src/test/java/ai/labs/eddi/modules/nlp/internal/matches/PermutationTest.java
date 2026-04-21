@@ -46,8 +46,8 @@ class PermutationTest {
             var perm = new Permutation(new Integer[]{1, 2});
             var results = collect(perm);
 
-            boolean has12 = results.stream().anyMatch(a -> a[0] == 1 && a[1] == 2);
-            boolean has21 = results.stream().anyMatch(a -> a[0] == 2 && a[1] == 1);
+            boolean has12 = results.stream().anyMatch(a -> a[0].intValue() == 1 && a[1].intValue() == 2);
+            boolean has21 = results.stream().anyMatch(a -> a[0].intValue() == 2 && a[1].intValue() == 1);
             assertTrue(has12, "Should contain [1,2]");
             assertTrue(has21, "Should contain [2,1]");
         }

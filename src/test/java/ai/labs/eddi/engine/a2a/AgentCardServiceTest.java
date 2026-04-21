@@ -44,9 +44,11 @@ class AgentCardServiceTest {
         @Test
         void returnsNull_whenConfigNull() throws Exception {
             var resourceId = new IResourceStore.IResourceId() {
+                @Override
                 public String getId() {
                     return "agent-1";
                 }
+                @Override
                 public Integer getVersion() {
                     return 1;
                 }
@@ -61,9 +63,11 @@ class AgentCardServiceTest {
             var config = new AgentConfiguration();
             config.setA2aEnabled(false);
             var resourceId = new IResourceStore.IResourceId() {
+                @Override
                 public String getId() {
                     return "agent-1";
                 }
+                @Override
                 public Integer getVersion() {
                     return 1;
                 }
@@ -79,9 +83,11 @@ class AgentCardServiceTest {
             config.setA2aEnabled(true);
             config.setDescription("My agent");
             var resourceId = new IResourceStore.IResourceId() {
+                @Override
                 public String getId() {
                     return "agent-1";
                 }
+                @Override
                 public Integer getVersion() {
                     return 1;
                 }

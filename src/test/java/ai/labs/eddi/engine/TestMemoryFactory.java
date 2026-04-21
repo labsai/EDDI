@@ -133,8 +133,16 @@ public final class TestMemoryFactory {
      */
     public static MemoryContext createWithExpressions(String expressions) {
         var ctx = create();
+        Data<String> expressionsData = new Data<>("expressions:parsed", expressions);
         when(ctx.currentStep().getLatestData(eq("expressions:parsed")))
-                .thenReturn(new Data<>("expressions:parsed", expressions));
+                .thenAnswer(inv -> expressionsData);
+        when(ctx.currentStep().getLatestData(any(MemoryKey.class))).thenAnswer(invocation -> {
+            MemoryKey<?> key = invocation.getArgument(0);
+            if ("expressions:parsed".equals(key.key())) {
+                return expressionsData;
+            }
+            return null;
+        });
         return ctx;
     }
 

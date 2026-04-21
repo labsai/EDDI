@@ -4,11 +4,7 @@ import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.engine.TestMemoryFactory;
 import ai.labs.eddi.engine.TestMemoryFactory.MemoryContext;
 import ai.labs.eddi.engine.lifecycle.exceptions.UnrecognizedExtensionException;
-import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
-import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
-import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
@@ -19,7 +15,6 @@ import ai.labs.eddi.modules.nlp.extensions.dictionaries.providers.IDictionaryPro
 import ai.labs.eddi.modules.nlp.extensions.normalizers.INormalizer;
 import ai.labs.eddi.modules.nlp.extensions.normalizers.providers.INormalizerProvider;
 import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
-import ai.labs.eddi.modules.output.model.QuickReply;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.inject.Provider;
 import org.junit.jupiter.api.BeforeEach;
@@ -129,8 +124,6 @@ class InputParserTaskTest {
             when(parser.normalize(eq("hi there"), isNull())).thenReturn("hi there");
 
             // Create a raw solution
-            Expressions expressions = new Expressions();
-            expressions.add(new Expression("greeting"));
             RawSolution rawSolution = mock(RawSolution.class);
             var foundWord = mock(IDictionary.IFoundWord.class);
             when(foundWord.getValue()).thenReturn("hi there");
