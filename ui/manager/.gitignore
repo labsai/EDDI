@@ -14,6 +14,22 @@ coverage
 .firebaserc
 firebase.json
 
+node_modules
+dist
+.idea
+.vscode
+*.log
+coverage
+
+# Auth / secrets
+.npmrc
+.env
+.env.*
+
+# Firebase (legacy)
+.firebaserc
+firebase.json
+
 # Test output
 playwright-report/
 test-results/
@@ -21,3 +37,9 @@ test-results.json
 test-output*.txt
 vitest-results.json
 out.txt
+
+.vscode/settings.json
+HANDOFF.md
+openapi.json
+openapi_paths.txt
+test_output.txt

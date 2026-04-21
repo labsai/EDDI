@@ -1,4 +1,5 @@
 {
+  "//": "NOTE: This realm is for LOCAL DEVELOPMENT ONLY. It contains trivial passwords (eddi/eddi, viewer/viewer).",
   "realm": "eddi",
   "enabled": true,
   "sslRequired": "none",

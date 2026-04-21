@@ -1,32 +1,39 @@
-name: CI/CD
+name: CI
 
 on:
-  # Triggers the workflow on push or pull request events but only for the master branch
   push:
-    branches: [master]
+    branches: [main]
+  pull_request:
+    branches: [main]
 
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  deploy-site:
+  build-and-test:
+    name: Build & Test
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
-      - uses: google-github-actions/setup-gcloud@master
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          service_account_key: ${{ secrets.GCP_STORAGE }}
-          export_default_credentials: true
+          node-version: 20
+          cache: npm
 
-      - name: Show GCS bucket info
-        run: gsutil ls -L -b gs://manager-labs-ai
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Install Dependencies
-        run: yarn
+      - name: Lint
+        run: npm run lint
 
-      - name: Build Project
-        run: yarn webpack --env NODE_ENV=production --progress --config webpack.config.babel.js
-      - name: Deploy Site
-        run: gsutil cp -r dist/* gs://manager-labs-ai
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Build
+        run: npm run build
