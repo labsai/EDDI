@@ -378,6 +378,215 @@ class MigrationManagerTest {
             assertTrue(completed[0], "onComplete should still be called");
             verify(migrationLogStore, never()).createMigrationLog(any());
         }
+
+        @Test
+        @DisplayName("should run migration when log returns null (first time)")
+        void runMigrationWhenFirstTime() {
+            when(migrationLogStore.readMigrationLog(MIGRATION_CONFIRMATION))
+                    .thenReturn(null);
+
+            var completed = new boolean[]{false};
+            migrationManager.startMigrationIfFirstTimeRun(() -> completed[0] = true);
+
+            assertTrue(completed[0], "onComplete should be called");
+            verify(migrationLogStore).createMigrationLog(any(MigrationLog.class));
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("skipConversationMemories=false — should also migrate conversation memory")
+        void migrationWithConversationMemories() {
+            // Create a manager with skipConversationMemories=false
+            MongoCollection<Document> mockColl = mock(MongoCollection.class);
+            when(database.getCollection(anyString())).thenReturn(mockColl);
+            when(mockColl.find()).thenReturn(mock(com.mongodb.client.FindIterable.class));
+
+            var managerWithMemories = new MigrationManager(database, migrationLogStore, false);
+            when(migrationLogStore.readMigrationLog(MIGRATION_CONFIRMATION)).thenReturn(null);
+
+            var completed = new boolean[]{false};
+            managerWithMemories.startMigrationIfFirstTimeRun(() -> completed[0] = true);
+
+            assertTrue(completed[0]);
+            verify(migrationLogStore).createMigrationLog(any(MigrationLog.class));
+        }
+    }
+
+    // ─── migrateConversationMemory ────────────────────────────────
+
+    @Nested
+    @DisplayName("Conversation Memory Migration (via migratePropertySetter lambda)")
+    class ConversationMemoryMigration {
+
+        @Test
+        @DisplayName("should convert conversation properties with String value")
+        void convertConversationPropertyString() {
+            var conversationProperty = new HashMap<String, Object>();
+            conversationProperty.put("value", "user-preference");
+
+            var conversationProperties = new HashMap<String, Map<String, Object>>();
+            conversationProperties.put("language", conversationProperty);
+
+            Document doc = new Document("conversationProperties", conversationProperties);
+
+            // The migrateConversationMemory method is private, but we can test its logic
+            // through convertPropertyInstructions which is the shared logic
+            var migration = migrationManager.migratePropertySetter();
+
+            // Test through the property setter migration which uses the same convert logic
+            var propDoc = buildPropertySetterDoc(conversationProperty);
+            Document result = migration.migrate(propDoc);
+
+            assertNotNull(result);
+            assertEquals("user-preference", conversationProperty.get("valueString"));
+            assertFalse(conversationProperty.containsKey("value"));
+        }
+    }
+
+    // ─── Output Migration Edge Cases ──────────────────────────────
+
+    @Nested
+    @DisplayName("Output migration edge cases")
+    class OutputMigrationEdgeCases {
+
+        @Test
+        @DisplayName("isPassword=false — should NOT set password subType")
+        void isPasswordFalse_noSubType() {
+            var outputValue = new HashMap<String, Object>();
+            outputValue.put("placeholder", "Enter text");
+            outputValue.put("isPassword", "false");
+
+            Document doc = buildOutputDoc(List.of(outputValue));
+            migrationManager.migrateOutput().migrate(doc);
+
+            assertEquals("inputField", outputValue.get("type"));
+            assertFalse(outputValue.containsKey("subType"), "subType should not be set for non-password");
+        }
+
+        @Test
+        @DisplayName("text type — removes non-supported properties (keeps text, delay)")
+        void textType_removesNonSupported() {
+            var outputValue = new HashMap<String, Object>();
+            outputValue.put("text", "Hello");
+            outputValue.put("delay", 500);
+            outputValue.put("unsupportedField", "should be removed");
+            outputValue.put("anotherExtra", "also removed");
+
+            Document doc = buildOutputDoc(List.of(outputValue));
+            migrationManager.migrateOutput().migrate(doc);
+
+            assertEquals("text", outputValue.get("type"));
+            assertTrue(outputValue.containsKey("text"));
+            assertTrue(outputValue.containsKey("delay"));
+            assertFalse(outputValue.containsKey("unsupportedField"));
+            assertFalse(outputValue.containsKey("anotherExtra"));
+        }
+
+        @Test
+        @DisplayName("image type — removes non-supported properties (keeps uri, alt)")
+        void imageType_removesNonSupported() {
+            var outputValue = new HashMap<String, Object>();
+            outputValue.put("uri", "https://example.com/img.png");
+            outputValue.put("alt", "An image");
+            outputValue.put("width", 100);
+
+            Document doc = buildOutputDoc(List.of(outputValue));
+            migrationManager.migrateOutput().migrate(doc);
+
+            assertEquals("image", outputValue.get("type"));
+            assertTrue(outputValue.containsKey("uri"));
+            assertTrue(outputValue.containsKey("alt"));
+            assertFalse(outputValue.containsKey("width"));
+        }
+
+        @Test
+        @DisplayName("button type — removes non-supported properties (keeps buttonType, label, onPress)")
+        void buttonType_removesNonSupported() {
+            var outputValue = new HashMap<String, Object>();
+            outputValue.put("onPress", "submit()");
+            outputValue.put("label", "Submit");
+            outputValue.put("buttonType", "primary");
+            outputValue.put("color", "red");
+
+            Document doc = buildOutputDoc(List.of(outputValue));
+            migrationManager.migrateOutput().migrate(doc);
+
+            assertEquals("button", outputValue.get("type"));
+            assertTrue(outputValue.containsKey("onPress"));
+            assertTrue(outputValue.containsKey("label"));
+            assertTrue(outputValue.containsKey("buttonType"));
+            assertFalse(outputValue.containsKey("color"));
+        }
+
+        @Test
+        @DisplayName("inputField type — removes non-supported properties")
+        void inputFieldType_removesNonSupported() {
+            var outputValue = new HashMap<String, Object>();
+            outputValue.put("placeholder", "Enter...");
+            outputValue.put("label", "Name");
+            outputValue.put("defaultValue", "default");
+            outputValue.put("validation", "required");
+            outputValue.put("customProp", "removed");
+
+            Document doc = buildOutputDoc(List.of(outputValue));
+            migrationManager.migrateOutput().migrate(doc);
+
+            assertEquals("inputField", outputValue.get("type"));
+            assertTrue(outputValue.containsKey("placeholder"));
+            assertTrue(outputValue.containsKey("label"));
+            assertTrue(outputValue.containsKey("defaultValue"));
+            assertTrue(outputValue.containsKey("validation"));
+            assertFalse(outputValue.containsKey("customProp"));
+        }
+
+        @Test
+        @DisplayName("other type — removes non-string properties")
+        void otherType_removesNonString() {
+            var outputValue = new HashMap<String, Object>();
+            outputValue.put("customKey", "string value");
+            outputValue.put("numericKey", 42);
+            outputValue.put("listKey", List.of("a", "b"));
+
+            Document doc = buildOutputDoc(List.of(outputValue));
+            migrationManager.migrateOutput().migrate(doc);
+
+            assertEquals("other", outputValue.get("type"));
+            assertTrue(outputValue.containsKey("customKey"));
+            assertFalse(outputValue.containsKey("numericKey"), "Non-string values should be removed");
+            assertFalse(outputValue.containsKey("listKey"), "Non-string values should be removed");
+        }
+
+        @Test
+        @DisplayName("type 'other' explicitly set — removeNonStringProperties still called")
+        void typeOtherExplicit() {
+            var outputValue = new HashMap<String, Object>();
+            outputValue.put("type", "other");
+            outputValue.put("key1", "string");
+            outputValue.put("key2", Map.of("nested", "map"));
+
+            Document doc = buildOutputDoc(List.of(outputValue));
+            migrationManager.migrateOutput().migrate(doc);
+
+            assertTrue(outputValue.containsKey("key1"));
+            assertFalse(outputValue.containsKey("key2"));
+        }
+
+        @Test
+        @DisplayName("multiple valueAlternatives with mixed types")
+        void mixedValueAlternatives() {
+            var textOutput = new HashMap<String, Object>();
+            textOutput.put("text", "Hello");
+
+            var imageOutput = new HashMap<String, Object>();
+            imageOutput.put("uri", "https://img.com/pic.jpg");
+
+            Document doc = buildOutputDoc(List.of("Plain text string", textOutput, imageOutput));
+            Document result = migrationManager.migrateOutput().migrate(doc);
+
+            assertNotNull(result);
+            var alternatives = extractValueAlternatives(result);
+            assertEquals(3, alternatives.size());
+        }
     }
 
     // ─── Test Helpers ────────────────────────────────────────────
