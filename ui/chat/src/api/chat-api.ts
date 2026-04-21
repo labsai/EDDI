@@ -21,6 +21,11 @@ function buildUrl(path: string): string {
   return `${_baseUrl}${path}`;
 }
 
+/** Encode a single path segment so /, ?, # in data don't break the URL. */
+function encodeSegment(value: string): string {
+  return encodeURIComponent(value);
+}
+
 /* ─── Conversation lifecycle ─────────────────── */
 
 /**
@@ -34,12 +39,17 @@ export async function startConversation(
 ): Promise<string> {
   const params = userId ? `?userId=${encodeURIComponent(userId)}` : "";
   const res = await fetch(
-    buildUrl(`/agents/${agentId}/start${params}`),
+    buildUrl(`/agents/${encodeSegment(agentId)}/start${params}`),
     { method: "POST" },
   );
   if (!res.ok) throw new Error(`Failed to start conversation: ${res.statusText}`);
 
-  const location = res.headers.get("Location") ?? "";
+  const location = res.headers.get("Location");
+  if (!location) {
+    throw new Error(
+      "startConversation: server did not return a Location header",
+    );
+  }
   const segments = location.split("/");
   const last = segments[segments.length - 1] || location;
   return last.split("?")[0];
@@ -62,7 +72,7 @@ export async function readConversation(
     returnCurrentStepOnly: String(currentStepOnly),
   });
   const res = await fetch(
-    buildUrl(`/agents/${conversationId}?${params}`),
+    buildUrl(`/agents/${encodeSegment(conversationId)}?${params}`),
   );
   if (!res.ok) throw new Error(`Failed to read conversation: ${res.statusText}`);
   return res.json();
@@ -92,7 +102,7 @@ export async function sendMessage(
   const hasContext = context && Object.keys(context).length > 0;
 
   const res = await fetch(
-    buildUrl(`/agents/${conversationId}?${params}`),
+    buildUrl(`/agents/${encodeSegment(conversationId)}?${params}`),
     {
       method: "POST",
       headers: {
@@ -127,7 +137,7 @@ export async function* sendMessageStreaming(
   }
 
   const res = await fetch(
-    buildUrl(`/agents/${conversationId}/stream`),
+    buildUrl(`/agents/${encodeSegment(conversationId)}/stream`),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -151,21 +161,27 @@ export async function* sendMessageStreaming(
 
       buffer += decoder.decode(value, { stream: true });
 
+      // Normalize CRLF → LF so the parser works with any line ending
+      buffer = buffer.replace(/\r\n/g, "\n");
+
       const parts = buffer.split("\n\n");
       buffer = parts.pop() ?? "";
 
       for (const part of parts) {
         if (!part.trim()) continue;
         let eventType: SSEEventType = "token";
-        let eventData = "";
+        const dataLines: string[] = [];
 
         for (const line of part.split("\n")) {
           if (line.startsWith("event:")) {
             eventType = line.slice(6).trim() as SSEEventType;
           } else if (line.startsWith("data:")) {
-            eventData = line.slice(5).trim();
+            // Per SSE spec, join multiple data: lines with newlines
+            dataLines.push(line.slice(5).trim());
           }
         }
+
+        const eventData = dataLines.join("\n");
 
         if (eventData || eventType) {
           yield { type: eventType, data: eventData };
@@ -192,7 +208,9 @@ export async function sendManagedAgentMessage(
     returnDetailed: "false",
     returnCurrentStepOnly: "true",
   });
-  const url = buildUrl(`/agents/managed/${intent}/${userId}?${params}`);
+  const url = buildUrl(
+    `/agents/managed/${encodeSegment(intent)}/${encodeSegment(userId)}?${params}`,
+  );
 
   if (message) {
     const res = await fetch(url, {
@@ -216,7 +234,7 @@ export async function endConversation(
   conversationId: string,
 ): Promise<void> {
   const res = await fetch(
-    buildUrl(`/agents/${conversationId}/endConversation`),
+    buildUrl(`/agents/${encodeSegment(conversationId)}/endConversation`),
     { method: "POST" },
   );
   if (!res.ok) throw new Error(`Failed to end conversation: ${res.statusText}`);
@@ -233,7 +251,7 @@ export async function undoConversation(
   conversationId: string,
 ): Promise<ConversationSnapshot> {
   const res = await fetch(
-    buildUrl(`/agents/${conversationId}/undo`),
+    buildUrl(`/agents/${encodeSegment(conversationId)}/undo`),
     { method: "POST" },
   );
   if (!res.ok) throw new Error(`Failed to undo: ${res.statusText}`);
@@ -249,7 +267,7 @@ export async function redoConversation(
   conversationId: string,
 ): Promise<ConversationSnapshot> {
   const res = await fetch(
-    buildUrl(`/agents/${conversationId}/redo`),
+    buildUrl(`/agents/${encodeSegment(conversationId)}/redo`),
     { method: "POST" },
   );
   if (!res.ok) throw new Error(`Failed to redo: ${res.statusText}`);
@@ -266,7 +284,7 @@ export async function fetchAgentDescriptor(
   agentId: string,
 ): Promise<{ name?: string; description?: string }> {
   const res = await fetch(
-    buildUrl(`/agentstore/agents/${agentId}`),
+    buildUrl(`/agentstore/agents/${encodeSegment(agentId)}`),
   );
   if (!res.ok) return {};
   try {
@@ -301,7 +319,7 @@ export async function uploadAttachment(
   formData.append("file", file);
 
   const res = await fetch(
-    buildUrl(`/conversations/${conversationId}/attachments`),
+    buildUrl(`/conversations/${encodeSegment(conversationId)}/attachments`),
     { method: "POST", body: formData },
   );
 

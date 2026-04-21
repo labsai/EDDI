@@ -41,6 +41,7 @@ export function ChatHeader() {
           className="chat-header__btn"
           onClick={cycleTheme}
           title="Toggle theme"
+          aria-label="Toggle theme"
           data-testid="theme-toggle"
         >
           ◑

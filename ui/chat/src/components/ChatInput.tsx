@@ -70,12 +70,20 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
       const result = await uploadAttachment(conversationId, file);
       onSend(`📎 ${file.name} [ref:${result.storageRef}]`);
     } catch {
-      // silently fail — user sees no message sent
+      dispatch({
+        type: "ADD_MESSAGE",
+        message: {
+          id: `error-${Date.now()}-${Math.random()}`,
+          role: "agent",
+          content: `⚠️ Failed to upload attachment: ${file.name}`,
+          timestamp: Date.now(),
+        },
+      });
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
-  }, [conversationId, onSend]);
+  }, [conversationId, onSend, dispatch]);
 
   return (
     <div className="chat-input">
@@ -130,6 +138,7 @@ export function ChatInput({ onSend, disabled, conversationId }: ChatInputProps) 
             className="chat-input__eye-toggle"
             onClick={() => setSecretVisible((v) => !v)}
             title={secretVisible ? "Hide" : "Show"}
+            aria-label={secretVisible ? "Hide secret" : "Show secret"}
             data-testid="chat-eye-toggle"
           >
             {secretVisible ? "👁" : "👁‍🗨"}

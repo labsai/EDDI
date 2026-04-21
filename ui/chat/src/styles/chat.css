@@ -323,6 +323,21 @@ a:hover { opacity: 0.85; }
   animation: msgIn 0.25s ease-out;
 }
 
+.indicator__avatar {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--chat-surface-raised);
+  color: var(--chat-text-accent);
+  border: 1px solid var(--chat-agent-border);
+}
+
 .indicator__bubble {
   background: var(--chat-agent-bg);
   border: 1px solid var(--chat-agent-border);

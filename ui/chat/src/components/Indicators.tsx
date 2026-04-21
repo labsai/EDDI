@@ -7,20 +7,7 @@
 export function TypingIndicator() {
   return (
     <div className="indicator" data-testid="typing-indicator">
-      <div className="message__avatar" style={{
-        background: "var(--chat-surface-raised)",
-        color: "var(--chat-text-accent)",
-        border: "1px solid var(--chat-agent-border)",
-        width: 32,
-        height: 32,
-        borderRadius: "50%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: "0.75rem",
-        fontWeight: 600,
-        flexShrink: 0,
-      }}>
+      <div className="indicator__avatar">
         E
       </div>
       <div className="indicator__bubble">
@@ -38,20 +25,7 @@ export function TypingIndicator() {
 export function ThinkingIndicator() {
   return (
     <div className="indicator" data-testid="thinking-indicator">
-      <div className="message__avatar" style={{
-        background: "var(--chat-surface-raised)",
-        color: "var(--chat-text-accent)",
-        border: "1px solid var(--chat-agent-border)",
-        width: 32,
-        height: 32,
-        borderRadius: "50%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: "0.75rem",
-        fontWeight: 600,
-        flexShrink: 0,
-      }}>
+      <div className="indicator__avatar">
         E
       </div>
       <div className="indicator__bubble">

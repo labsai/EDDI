@@ -6,6 +6,7 @@ import { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
 import type { ChatMessage } from "@/types";
 import { useChatState } from "@/store/chat-store";
 
@@ -32,7 +33,7 @@ export const MessageBubble = memo(function MessageBubble({
             {message.content ? (
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeRaw]}
+                rehypePlugins={[rehypeRaw, rehypeSanitize]}
               >
                 {message.content}
               </ReactMarkdown>

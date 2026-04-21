@@ -207,39 +207,41 @@ export function ChatWidget() {
 
       // Handle the "conversationOutputs" format (from POST /agents responses)
       if (snapshot.conversationOutputs?.length) {
-        const output = snapshot.conversationOutputs[0];
-
-        // Extract agent replies and detect input field requests
-        const agentReplies: OutputItem[] = output.output ?? [];
-        for (const reply of agentReplies) {
-          if (reply.type === "inputField") {
-            // Backend is requesting a specific input field (e.g. password)
-            dispatch({
-              type: "SET_INPUT_FIELD",
-              field: {
-                subType: reply.subType || "password",
-                placeholder: reply.placeholder,
-                label: reply.label,
-                defaultValue: reply.defaultValue,
-              },
-            });
-          } else if (reply.text) {
-            dispatch({
-              type: "ADD_MESSAGE",
-              message: {
-                id: `agent-${Date.now()}-${Math.random()}`,
-                role: "agent",
-                content: reply.text,
-                timestamp: Date.now(),
-              },
-            });
+        for (const output of snapshot.conversationOutputs) {
+          // Extract agent replies and detect input field requests
+          const agentReplies: OutputItem[] = output.output ?? [];
+          for (const reply of agentReplies) {
+            if (reply.type === "inputField") {
+              // Backend is requesting a specific input field (e.g. password)
+              dispatch({
+                type: "SET_INPUT_FIELD",
+                field: {
+                  subType: reply.subType || "password",
+                  placeholder: reply.placeholder,
+                  label: reply.label,
+                  defaultValue: reply.defaultValue,
+                },
+              });
+            } else if (reply.text) {
+              dispatch({
+                type: "ADD_MESSAGE",
+                message: {
+                  id: `agent-${Date.now()}-${Math.random()}`,
+                  role: "agent",
+                  content: reply.text,
+                  timestamp: Date.now(),
+                },
+              });
+            }
           }
         }
 
-        // Quick replies
+        // Quick replies from the last output (most recent step)
+        const lastOutput =
+          snapshot.conversationOutputs[snapshot.conversationOutputs.length - 1];
         dispatch({
           type: "SET_QUICK_REPLIES",
-          replies: output.quickReplies ?? [],
+          replies: lastOutput.quickReplies ?? [],
         });
       }
 
@@ -339,7 +341,7 @@ export function ChatWidget() {
 
       // Add user message (display masked if secret)
       const userMsg: ChatMessage = {
-        id: `user-${Date.now()}`,
+        id: `user-${Date.now()}-${Math.random()}`,
         role: "user",
         content: isSecret ? "●●●●●●●●" : text,
         timestamp: Date.now(),
@@ -355,7 +357,7 @@ export function ChatWidget() {
           dispatch({
             type: "ADD_MESSAGE",
             message: {
-              id: `agent-${Date.now()}`,
+              id: `agent-${Date.now()}-${Math.random()}`,
               role: "agent",
               content: "",
               timestamp: Date.now(),
@@ -364,10 +366,12 @@ export function ChatWidget() {
           });
 
           const events = demoSendMessageStreaming(text);
+          let demoDone = false;
           for await (const event of events) {
-            handleSSEEvent(event);
+            if (handleSSEEvent(event)) demoDone = true;
           }
-          dispatch({ type: "FINISH_STREAMING" });
+          // Safety net: finish streaming if the stream closed without a done event
+          if (!demoDone) dispatch({ type: "FINISH_STREAMING" });
 
           // Set quick replies after streaming completes
           const qrs = demoGetQuickReplies(text);
@@ -388,7 +392,7 @@ export function ChatWidget() {
           dispatch({
             type: "ADD_MESSAGE",
             message: {
-              id: `agent-${Date.now()}`,
+              id: `agent-${Date.now()}-${Math.random()}`,
               role: "agent",
               content: "",
               timestamp: Date.now(),
@@ -400,6 +404,7 @@ export function ChatWidget() {
           // Proxies (Vite dev, nginx) may not forward the SSE close signal,
           // so reader.read() would hang forever without this.
           const abort = new AbortController();
+          let streamDone = false;
 
           const events = sendMessageStreaming(
             environment,
@@ -414,6 +419,7 @@ export function ChatWidget() {
             for await (const event of events) {
               const isDone = handleSSEEvent(event);
               if (isDone) {
+                streamDone = true;
                 abort.abort();
                 break;
               }
@@ -425,7 +431,8 @@ export function ChatWidget() {
               throw e;
             }
           }
-          dispatch({ type: "FINISH_STREAMING" });
+          // Safety net: finish streaming if the stream closed without a done event
+          if (!streamDone) dispatch({ type: "FINISH_STREAMING" });
         } else if (environment && agentId && state.conversationId) {
           // Non-streaming path — pass context for secret input
           const snapshot = await sendMessage(
@@ -571,6 +578,10 @@ export function ChatWidget() {
         dispatch({ type: "ADD_MESSAGE", message: result.welcomeMessage });
         dispatch({ type: "SET_QUICK_REPLIES", replies: result.quickReplies });
         dispatch({ type: "SET_CONVERSATION_STATE", state: "READY" });
+      } else if (isManagedAgent && intent && userId) {
+        // Managed agent: GET to load or re-initialize conversation
+        const snapshot = await sendManagedAgentMessage(intent, userId);
+        processSnapshot(snapshot);
       } else if (environment && agentId) {
         const convId = await startConversation(environment, agentId, userId);
         dispatch({ type: "SET_CONVERSATION_ID", id: convId });
@@ -580,7 +591,7 @@ export function ChatWidget() {
     } catch (err) {
       console.error("Failed to restart conversation:", err);
     }
-  }, [dispatch, isDemo, environment, agentId, userId, processSnapshot]);
+  }, [dispatch, isDemo, isManagedAgent, intent, environment, agentId, userId, processSnapshot]);
 
   /* ─── Auto-scroll ───────────────────────────── */
   useEffect(() => {
