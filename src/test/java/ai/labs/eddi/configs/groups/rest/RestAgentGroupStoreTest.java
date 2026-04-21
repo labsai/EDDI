@@ -1,7 +1,6 @@
 package ai.labs.eddi.configs.groups.rest;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
-import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;

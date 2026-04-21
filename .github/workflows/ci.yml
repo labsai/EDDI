@@ -170,10 +170,11 @@ jobs:
 
       - name: Upload merged coverage report
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: jacoco-merged-report
           path: target/site/jacoco-merged/
+          if-no-files-found: ignore
           retention-days: 14
 
       - name: Merged coverage summary

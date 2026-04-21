@@ -228,6 +228,7 @@ Each entry follows this format:
 - `ApiCallsTaskTest` (11 tests) — Action matching, wildcard, no-actions early return, configure (URI validation, trailing slash stripping, empty targetServerUrl), extension descriptor
 
 ### Coverage Summary
+
 | Metric | Before | After | Delta |
 |---|---|---|---|
 | LINE | 53.6% | 54.7% | +1.1% |

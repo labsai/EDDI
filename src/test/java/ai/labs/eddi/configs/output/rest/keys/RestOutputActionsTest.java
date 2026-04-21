@@ -76,6 +76,36 @@ class RestOutputActionsTest {
     }
 
     @Test
+    @DisplayName("should enforce limit across merged sources")
+    void enforcesLimitAcrossMergedSources() throws Exception {
+        var wfConfig = new WorkflowConfiguration();
+        var step1 = new WorkflowStep();
+        step1.setType(URI.create("eddi://ai.labs.rules"));
+        step1.setConfig(Map.of("uri", "eddi://ai.labs.rules/rulesstore/rules/" + VALID_ID + "?version=1"));
+        var step2 = new WorkflowStep();
+        step2.setType(URI.create("eddi://ai.labs.output"));
+        step2.setConfig(Map.of("uri", "eddi://ai.labs.output/outputstore/outputsets/" + VALID_ID + "?version=1"));
+        wfConfig.setWorkflowSteps(List.of(step1, step2));
+
+        when(workflowStore.read("wf-1", 1)).thenReturn(wfConfig);
+
+        var ruleConfig = new RuleConfiguration();
+        ruleConfig.setActions(List.of("rule_action1", "rule_action2"));
+        var groupConfig = new RuleGroupConfiguration();
+        groupConfig.setRules(List.of(ruleConfig));
+        var ruleSetConfig = new RuleSetConfiguration();
+        ruleSetConfig.setBehaviorGroups(List.of(groupConfig));
+        when(behaviorStore.read(VALID_ID, 1)).thenReturn(ruleSetConfig);
+
+        when(outputStore.readActions(VALID_ID, 1, "", 3)).thenReturn(List.of("out_action1", "out_action2"));
+
+        List<String> result = restOutputActions.readOutputActions("wf-1", 1, "", 3);
+        assertEquals(3, result.size());
+        assertTrue(result.contains("rule_action1"));
+        assertTrue(result.contains("rule_action2"));
+    }
+
+    @Test
     @DisplayName("should read from output store")
     void readsFromOutputStore() throws Exception {
         var wfConfig = createWorkflowWithOutputStep();

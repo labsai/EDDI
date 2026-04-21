@@ -41,7 +41,13 @@ class RestCoordinatorAdminTest {
             CoordinatorStatus result = restCoordinatorAdmin.getStatus();
 
             assertEquals("in-memory", result.coordinatorType());
+            assertTrue(result.connected());
+            assertEquals("OK", result.connectionStatus());
             assertEquals(5, result.activeConversations());
+            assertEquals(100L, result.totalProcessed());
+            assertEquals(0L, result.totalDeadLettered());
+            assertTrue(result.queueDepths().isEmpty());
+            verify(coordinator).getStatus();
         }
     }
 
@@ -52,11 +58,14 @@ class RestCoordinatorAdminTest {
         @Test
         @DisplayName("should return dead letter list from coordinator")
         void returnsList() {
-            when(coordinator.getDeadLetters()).thenReturn(List.of());
+            var entries = List.of(new DeadLetterEntry("1", "c1", "err", 0, ""));
+            when(coordinator.getDeadLetters()).thenReturn(entries);
 
             List<DeadLetterEntry> result = restCoordinatorAdmin.getDeadLetters();
 
-            assertTrue(result.isEmpty());
+            assertEquals(1, result.size());
+            assertEquals(entries, result);
+            verify(coordinator).getDeadLetters();
         }
     }
 
@@ -70,6 +79,7 @@ class RestCoordinatorAdminTest {
             when(coordinator.replayDeadLetter("dl-1")).thenReturn(true);
 
             assertDoesNotThrow(() -> restCoordinatorAdmin.replayDeadLetter("dl-1"));
+            verify(coordinator).replayDeadLetter("dl-1");
         }
 
         @Test
@@ -92,6 +102,7 @@ class RestCoordinatorAdminTest {
             when(coordinator.discardDeadLetter("dl-1")).thenReturn(true);
 
             assertDoesNotThrow(() -> restCoordinatorAdmin.discardDeadLetter("dl-1"));
+            verify(coordinator).discardDeadLetter("dl-1");
         }
 
         @Test

@@ -67,11 +67,11 @@ public class RestOutputActions implements IRestOutputActions {
                 List<String> outputKeys = outputStore.readActions(resourceId.getId(), resourceId.getVersion(), filter, limit);
                 CollectionUtilities.addAllWithoutDuplicates(retOutputKeys, outputKeys);
                 if (retOutputKeys.size() >= limit) {
-                    return sortedOutputKeys(retOutputKeys);
+                    return sortedOutputKeys(retOutputKeys.subList(0, limit));
                 }
             }
 
-            return sortedOutputKeys(retOutputKeys);
+            return sortedOutputKeys(retOutputKeys.size() > limit ? retOutputKeys.subList(0, limit) : retOutputKeys);
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
         } catch (IResourceStore.ResourceStoreException e) {

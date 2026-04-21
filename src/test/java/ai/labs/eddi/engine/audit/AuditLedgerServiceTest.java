@@ -416,8 +416,10 @@ class AuditLedgerServiceTest {
         @Test
         void serializeDeadLetterEntry_WithType_ShouldIncludeTypeField() throws Exception {
             AuditEntry entry = createEntry("task-1", "conv-1");
+            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "",
+                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
 
-            String json = AuditLedgerService.serializeDeadLetterEntry(entry, "audit_dead_letter");
+            String json = service.serializeDeadLetterEntry(entry, "audit_dead_letter");
 
             // Parse the result to verify it's valid JSON
             JsonNode node = mapper.readTree(json);
@@ -433,8 +435,10 @@ class AuditLedgerServiceTest {
         @Test
         void serializeDeadLetterEntry_WithoutType_ShouldOmitTypeField() throws Exception {
             AuditEntry entry = createEntry("task-1", "conv-1");
+            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "",
+                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
 
-            String json = AuditLedgerService.serializeDeadLetterEntry(entry, null);
+            String json = service.serializeDeadLetterEntry(entry, null);
 
             JsonNode node = mapper.readTree(json);
 
@@ -448,8 +452,10 @@ class AuditLedgerServiceTest {
             AuditEntry entry = new AuditEntry("id-1", "conv-with-\"quotes\"", "agent-with\nnewline", 1,
                     "user-1", "production", 0, "task/special", "type<html>", 0, 42L,
                     null, null, null, null, null, 0.0, Instant.now(), null, null);
+            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "",
+                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
 
-            String json = AuditLedgerService.serializeDeadLetterEntry(entry, "test");
+            String json = service.serializeDeadLetterEntry(entry, "test");
 
             // Must be valid JSON despite special characters
             JsonNode node = mapper.readTree(json);
@@ -464,8 +470,10 @@ class AuditLedgerServiceTest {
         void serializeDeadLetterEntry_WithNullFields_ShouldProduceValidJson() throws Exception {
             AuditEntry entry = new AuditEntry("id-1", null, null, null, null, null, 0,
                     null, null, 0, 0L, null, null, null, null, null, 0.0, null, null, null);
+            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "",
+                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
 
-            String json = AuditLedgerService.serializeDeadLetterEntry(entry, null);
+            String json = service.serializeDeadLetterEntry(entry, null);
 
             // Must be valid JSON
             JsonNode node = mapper.readTree(json);
@@ -479,8 +487,10 @@ class AuditLedgerServiceTest {
         @Test
         void serializeDeadLetterEntry_ShouldAlwaysContainTimestamp() throws Exception {
             AuditEntry entry = createEntry("task-1", "conv-1");
+            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "",
+                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
 
-            String json = AuditLedgerService.serializeDeadLetterEntry(entry, null);
+            String json = service.serializeDeadLetterEntry(entry, null);
 
             JsonNode node = mapper.readTree(json);
 

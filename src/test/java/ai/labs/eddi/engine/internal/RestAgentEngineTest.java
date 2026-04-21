@@ -55,6 +55,8 @@ class RestAgentEngineTest {
                     Deployment.Environment.production, "user-1");
 
             assertEquals(201, response.getStatus());
+            assertEquals(URI.create("/conversations/conv-1"), response.getLocation());
+            verify(conversationService).startConversation(Deployment.Environment.production, "agent-1", "user-1", Map.of());
         }
 
         @Test

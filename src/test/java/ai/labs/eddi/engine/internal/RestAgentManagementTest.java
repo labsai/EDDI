@@ -136,6 +136,7 @@ class RestAgentManagementTest {
             Response response = restAgentManagement.undo("intent-1", "user-1");
 
             assertEquals(200, response.getStatus());
+            verify(restAgentEngine).undo("conv-1");
         }
 
         @Test
@@ -190,6 +191,7 @@ class RestAgentManagementTest {
             Response response = restAgentManagement.redo("intent-1", "user-1");
 
             assertEquals(200, response.getStatus());
+            verify(restAgentEngine).redo("conv-1");
         }
     }
 

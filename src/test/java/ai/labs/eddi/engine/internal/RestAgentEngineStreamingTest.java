@@ -172,6 +172,7 @@ class RestAgentEngineStreamingTest {
 
             // Should have sent an error event
             verify(eventSink, atLeastOnce()).send(any(OutboundSseEvent.class));
+            verify(eventBuilder, atLeastOnce()).name("error");
         }
 
         @Test

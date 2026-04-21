@@ -46,7 +46,6 @@ public class AuditLedgerService {
 
     private static final Logger LOGGER = Logger.getLogger(AuditLedgerService.class);
     private static final int MAX_FLUSH_RETRIES = 3;
-    private static final ObjectMapper DEAD_LETTER_MAPPER = new ObjectMapper();
 
     private final IAuditStore auditStore;
     private final boolean enabled;
@@ -58,6 +57,7 @@ public class AuditLedgerService {
     private final boolean agentSigningEnabled;
     private final String defaultTenantId;
     private final AgentSigningService agentSigningService;
+    private final ObjectMapper objectMapper;
 
     private byte[] hmacKey;
     private final ConcurrentLinkedQueue<AuditEntry> queue = new ConcurrentLinkedQueue<>();
@@ -72,7 +72,7 @@ public class AuditLedgerService {
             @ConfigProperty(name = "eddi.audit.agent-signing-enabled", defaultValue = "true") boolean agentSigningEnabled,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             io.micrometer.core.instrument.MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
-            AgentSigningService agentSigningService) {
+            AgentSigningService agentSigningService, ObjectMapper objectMapper) {
         this.auditStore = auditStore;
         this.enabled = enabled;
         this.flushIntervalSeconds = flushIntervalSeconds;
@@ -83,6 +83,7 @@ public class AuditLedgerService {
         this.droppedCounter = meterRegistry.counter("eddi_audit_entries_dropped_total");
         this.natsConnectionInstance = natsConnectionInstance;
         this.agentSigningService = agentSigningService;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -92,7 +93,7 @@ public class AuditLedgerService {
     static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
                                                io.micrometer.core.instrument.MeterRegistry meterRegistry) {
         return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig), "eddi-audit-deadletter.jsonl",
-                false, "default", meterRegistry, null, null);
+                false, "default", meterRegistry, null, null, new ObjectMapper());
     }
 
     @PostConstruct
@@ -326,7 +327,7 @@ public class AuditLedgerService {
      *            file output
      * @return JSON string
      */
-    static String serializeDeadLetterEntry(AuditEntry entry, String type) {
+    String serializeDeadLetterEntry(AuditEntry entry, String type) {
         Map<String, Object> dlMap = new LinkedHashMap<>();
         if (type != null) {
             dlMap.put("type", type);
@@ -338,7 +339,7 @@ public class AuditLedgerService {
         dlMap.put("taskType", entry.taskType());
 
         try {
-            return DEAD_LETTER_MAPPER.writeValueAsString(dlMap);
+            return objectMapper.writeValueAsString(dlMap);
         } catch (JsonProcessingException e) {
             // Absolute fallback — should never happen with simple string maps.
             // Do NOT embed entry fields here: we'd reintroduce the escaping bug.

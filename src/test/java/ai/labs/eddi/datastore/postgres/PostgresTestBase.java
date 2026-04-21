@@ -15,8 +15,10 @@ import java.sql.SQLException;
  * delegates to it. No Quarkus CDI augmentation needed — the adapters only
  * require a DataSource.
  * <p>
- * Named *IT.java so Maven Failsafe picks it up (when skipITs=false). However,
- * it is abstract and has no tests itself, so it is never executed.
+ * This abstract base class is intended to be extended by concrete integration
+ * tests that are collected by Maven Failsafe according to the project's test
+ * naming or plugin configuration. This class itself contains no tests and is
+ * not executed directly.
  *
  * @since 6.0.0
  */
