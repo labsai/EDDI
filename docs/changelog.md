@@ -13,6 +13,40 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Test Coverage Hardening — Two-Tier JaCoCo Gates (2026-04-21)
+
+**Repo:** EDDI (`chore/test-coverage-hardening`)
+
+**What changed:** Implemented a two-tier JaCoCo coverage gate architecture and raised coverage from 50% to 68% instruction / 57% branch.
+
+### Coverage Pipeline
+
+- **Tier 1 (`mvn test`):** 65/55 surefire-only gate (actual 68/57). Early warning during local dev.
+- **Tier 2 (`mvn verify`):** 65/55 merged UT+IT gate (starting point). Counts both unit tests and `@QuarkusTest` ITs via merged exec files. TODO: raise to 90/80 after first CI baseline.
+
+### IT → Test Renames (20 files)
+
+Renamed 20 Testcontainers-based datastore tests from `*IT.java` → `*Test.java` (all in `datastore/mongo/` and `datastore/postgres/`). These are pure Testcontainers tests without `@QuarkusTest` dependency — renaming them causes surefire (not failsafe) to run them, contributing to JaCoCo unit test coverage.
+
+### JaCoCo Exclusions (4 audit-defensible categories)
+
+- `**/bootstrap/**` — CDI `@Produces` wiring, zero business logic
+- `**/runtime/client/**` — Generated JAX-RS proxy interfaces
+- `**/llm/impl/builder/**` — LLM SDK factory builders (require live API keys)
+- `**/integrations/slack/**` — Slack webhook adapter (requires live Slack API)
+
+**Decision:** Rejected broader exclusion approach after user feedback. Only pure infrastructure with zero testable business logic is excluded. All REST endpoints, Mongo stores, conversation services, MCP tools, and migration logic remain in coverage scope.
+
+### Merge Infrastructure
+
+- Added `jacoco-quarkus.exec` to the merge `<includes>` so Quarkus-instrumented test coverage is captured.
+- Added `quarkus-jacoco` dependency to resolve Windows agent path issues.
+- Added `merged-check` execution in `verify` phase to enforce gates against combined UT+IT data.
+
+**Files (modified):** `pom.xml`, `.github/workflows/ci.yml`, 20 renamed test files
+
+---
+
 ## Test Coverage Hardening — Code Review Fixes + JaCoCo Threshold Adjustment (2026-04-21)
 
 **Repo:** EDDI (`chore/test-coverage-hardening`)
