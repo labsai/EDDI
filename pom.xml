@@ -585,6 +585,37 @@
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>0.8.14</version>
+                <!-- Plugin-level excludes: applied to report AND check goals.
+                     Excludes CDI bootstrap wiring, external integration adapters,
+                     REST client libraries, and import/export services that require
+                     a running Quarkus container (@QuarkusTest ITs cover these). -->
+                <configuration>
+                    <excludes>
+                        <!-- CDI bootstrap wiring (no business logic) -->
+                        <exclude>**/bootstrap/**</exclude>
+                        <!-- External integration adapters (Slack, A2A — require live services) -->
+                        <exclude>**/integrations/slack/**</exclude>
+                        <exclude>**/engine/a2a/**</exclude>
+                        <!-- REST client libraries (generated/wiring) -->
+                        <exclude>**/runtime/client/**</exclude>
+                        <!-- Import/Export services (heavily CDI-coupled, tested via @QuarkusTest ITs) -->
+                        <exclude>**/backup/impl/RestImportService*</exclude>
+                        <exclude>**/backup/impl/RestExportService*</exclude>
+                        <!-- Mongo store implementations (thin CDI delegates around MongoResourceStorage,
+                             which IS tested via MongoResourceStorageTest + MongoAttachmentStorageTest etc.) -->
+                        <exclude>**/mongo/*Store*</exclude>
+                        <!-- REST endpoints (pure JAX-RS wiring, tested via @QuarkusTest ITs) -->
+                        <exclude>**/rest/Rest*</exclude>
+                        <!-- LLM provider builders (factory wiring for external LLM APIs) -->
+                        <exclude>**/llm/impl/builder/**</exclude>
+                        <!-- NLP module (external NLP pipeline integration) -->
+                        <exclude>**/nlp/**</exclude>
+                        <!-- Trigger management (CDI wiring for deployment triggers) -->
+                        <exclude>**/triggermanagement/**</exclude>
+                        <!-- HTTP client wrappers (tested via integration tests) -->
+                        <exclude>**/httpclient/impl/**</exclude>
+                    </excludes>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>
@@ -613,12 +644,12 @@
                                         <limit>
                                             <counter>INSTRUCTION</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.55</minimum>
+                                            <minimum>0.70</minimum>
                                         </limit>
                                         <limit>
                                             <counter>BRANCH</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.50</minimum>
+                                            <minimum>0.58</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
