@@ -279,5 +279,240 @@ class RestAgentEngineTest {
             verify(asyncResponse).resume(captor.capture());
             assertEquals(410, captor.getValue().getStatus());
         }
+
+        @Test
+        @DisplayName("should resume with NOT_FOUND for agent not ready")
+        void agentNotReady() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            var inputData = new InputData("Hello", Map.of());
+
+            doThrow(new AgentNotReadyException("not deployed"))
+                    .when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            restAgentEngine.sayWithinContext("conv-1", false, false,
+                    List.of(), inputData, asyncResponse);
+
+            verify(asyncResponse).resume(any(jakarta.ws.rs.NotFoundException.class));
+        }
+
+        @Test
+        @DisplayName("should resume with FORBIDDEN for GDPR restriction")
+        void gdprRestricted() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            var inputData = new InputData("Hello", Map.of());
+
+            doThrow(new ProcessingRestrictedException("restricted"))
+                    .when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            restAgentEngine.sayWithinContext("conv-1", false, false,
+                    List.of(), inputData, asyncResponse);
+
+            var captor = ArgumentCaptor.forClass(Response.class);
+            verify(asyncResponse).resume(captor.capture());
+            assertEquals(403, captor.getValue().getStatus());
+        }
+
+        @Test
+        @DisplayName("should resume with NotFoundException for resource not found")
+        void resourceNotFound() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            var inputData = new InputData("Hello", Map.of());
+
+            doThrow(new ResourceNotFoundException("not found"))
+                    .when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            restAgentEngine.sayWithinContext("conv-1", false, false,
+                    List.of(), inputData, asyncResponse);
+
+            verify(asyncResponse).resume(any(jakarta.ws.rs.NotFoundException.class));
+        }
+
+        @Test
+        @DisplayName("should throw ISE for generic exception")
+        void genericException() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+            var inputData = new InputData("Hello", Map.of());
+
+            doThrow(new RuntimeException("unexpected"))
+                    .when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+            assertThrows(InternalServerErrorException.class,
+                    () -> restAgentEngine.sayWithinContext("conv-1", false, false,
+                            List.of(), inputData, asyncResponse));
+        }
+    }
+
+    @Nested
+    @DisplayName("say (plain string)")
+    class SayPlainString {
+
+        @Test
+        @DisplayName("should delegate to sayWithinContext with InputData")
+        void delegatesToSayWithinContext() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+
+            restAgentEngine.say("conv-1", false, false, List.of(), "Hello world", asyncResponse);
+
+            verify(asyncResponse).setTimeout(30, java.util.concurrent.TimeUnit.SECONDS);
+            verify(conversationService).say(eq("conv-1"), eq(false), eq(false),
+                    eq(List.of()), any(InputData.class), eq(false), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("rerunLastConversationStep")
+    class RerunLastStep {
+
+        @Test
+        @DisplayName("should pass rerunOnly=true and language context")
+        void delegatesWithRerunFlag() throws Exception {
+            var asyncResponse = mock(AsyncResponse.class);
+
+            restAgentEngine.rerunLastConversationStep("conv-1", "en", false, false,
+                    List.of(), asyncResponse);
+
+            verify(asyncResponse).setTimeout(30, java.util.concurrent.TimeUnit.SECONDS);
+            var captor = ArgumentCaptor.forClass(InputData.class);
+            verify(conversationService).say(eq("conv-1"), eq(false), eq(false),
+                    eq(List.of()), captor.capture(), eq(true), any());
+            InputData capturedInput = captor.getValue();
+            assertEquals("", capturedInput.getInput());
+            assertTrue(capturedInput.getContext().containsKey("lang"));
+        }
+    }
+
+    @Nested
+    @DisplayName("readConversationLog")
+    class ReadConversationLog {
+
+        @Test
+        @DisplayName("should return 200 with content on success")
+        void success() throws Exception {
+            var logResult = new IConversationService.ConversationLogResult("log content", "text/plain");
+            when(conversationService.readConversationLog("conv-1", "text", null))
+                    .thenReturn(logResult);
+
+            Response response = restAgentEngine.readConversationLog("conv-1", "text", null);
+
+            assertEquals(200, response.getStatus());
+            assertEquals("log content", response.getEntity());
+        }
+
+        @Test
+        @DisplayName("should throw ISE for store exceptions")
+        void storeException() throws Exception {
+            when(conversationService.readConversationLog(anyString(), any(), any()))
+                    .thenThrow(new ResourceStoreException("DB error"));
+
+            assertThrows(InternalServerErrorException.class,
+                    () -> restAgentEngine.readConversationLog("conv-1", "text", null));
+        }
+
+        @Test
+        @DisplayName("should propagate ResourceNotFoundException")
+        void notFound() throws Exception {
+            when(conversationService.readConversationLog(anyString(), any(), any()))
+                    .thenThrow(new ResourceNotFoundException("Not found"));
+
+            assertThrows(ResourceNotFoundException.class,
+                    () -> restAgentEngine.readConversationLog("conv-1", "text", null));
+        }
+    }
+
+    @Nested
+    @DisplayName("isUndoAvailable / isRedoAvailable happy paths")
+    class UndoRedoHappyPaths {
+
+        @Test
+        @DisplayName("isUndoAvailable returns true when available")
+        void undoAvailable() throws Exception {
+            when(conversationService.isUndoAvailable("conv-1")).thenReturn(true);
+
+            assertTrue(restAgentEngine.isUndoAvailable("conv-1"));
+        }
+
+        @Test
+        @DisplayName("isUndoAvailable returns false when not available")
+        void undoNotAvailable() throws Exception {
+            when(conversationService.isUndoAvailable("conv-1")).thenReturn(false);
+
+            assertFalse(restAgentEngine.isUndoAvailable("conv-1"));
+        }
+
+        @Test
+        @DisplayName("isRedoAvailable returns true when available")
+        void redoAvailable() throws Exception {
+            when(conversationService.isRedoAvailable("conv-1")).thenReturn(true);
+
+            assertTrue(restAgentEngine.isRedoAvailable("conv-1"));
+        }
+
+        @Test
+        @DisplayName("isRedoAvailable returns false when not available")
+        void redoNotAvailable() throws Exception {
+            when(conversationService.isRedoAvailable("conv-1")).thenReturn(false);
+
+            assertFalse(restAgentEngine.isRedoAvailable("conv-1"));
+        }
+
+        @Test
+        @DisplayName("isUndoAvailable propagates ResourceNotFoundException")
+        void undoNotFoundPropagated() throws Exception {
+            when(conversationService.isUndoAvailable("conv-1"))
+                    .thenThrow(new ResourceNotFoundException("not found"));
+
+            assertThrows(ResourceNotFoundException.class,
+                    () -> restAgentEngine.isUndoAvailable("conv-1"));
+        }
+
+        @Test
+        @DisplayName("isRedoAvailable propagates ResourceNotFoundException")
+        void redoNotFoundPropagated() throws Exception {
+            when(conversationService.isRedoAvailable("conv-1"))
+                    .thenThrow(new ResourceNotFoundException("not found"));
+
+            assertThrows(ResourceNotFoundException.class,
+                    () -> restAgentEngine.isRedoAvailable("conv-1"));
+        }
+
+        @Test
+        @DisplayName("undo propagates ResourceNotFoundException")
+        void undoResourceNotFound() throws Exception {
+            when(conversationService.undo("conv-1"))
+                    .thenThrow(new ResourceNotFoundException("not found"));
+
+            assertThrows(ResourceNotFoundException.class,
+                    () -> restAgentEngine.undo("conv-1"));
+        }
+
+        @Test
+        @DisplayName("redo propagates ResourceNotFoundException")
+        void redoResourceNotFound() throws Exception {
+            when(conversationService.redo("conv-1"))
+                    .thenThrow(new ResourceNotFoundException("not found"));
+
+            assertThrows(ResourceNotFoundException.class,
+                    () -> restAgentEngine.redo("conv-1"));
+        }
+
+        @Test
+        @DisplayName("undo throws ISE for store error")
+        void undoStoreError() throws Exception {
+            when(conversationService.undo("conv-1"))
+                    .thenThrow(new ResourceStoreException("DB error"));
+
+            assertThrows(InternalServerErrorException.class,
+                    () -> restAgentEngine.undo("conv-1"));
+        }
+
+        @Test
+        @DisplayName("redo throws ISE for store error")
+        void redoStoreError() throws Exception {
+            when(conversationService.redo("conv-1"))
+                    .thenThrow(new ResourceStoreException("DB error"));
+
+            assertThrows(InternalServerErrorException.class,
+                    () -> restAgentEngine.redo("conv-1"));
+        }
     }
 }

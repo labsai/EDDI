@@ -382,4 +382,177 @@ class GroupConversationServiceTest {
 
         assertEquals(1, service.listGroupConversations("g1", 0, 20).size());
     }
+
+    // =========================================================
+    // Additional Style Coverage
+    // =========================================================
+
+    @Nested
+    class AdditionalStyles {
+
+        @Test
+        void delphi_producesMultiRoundOpinions() throws Exception {
+            var cfg = config(DiscussionStyle.DELPHI, 2,
+                    new GroupMember("a1", "Expert1", 1, null),
+                    new GroupMember("a2", "Expert2", 2, null));
+            cfg.setModeratorAgentId("mod");
+            setupStore(cfg);
+            stubAgent("a1", "Expert1 opinion");
+            stubAgent("a2", "Expert2 opinion");
+            stubAgent("mod", "Delphi synthesis");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // Delphi produces multiple rounds of anonymous opinions
+            long opinions = result.getTranscript().stream()
+                    .filter(e -> e.type() == TranscriptEntryType.OPINION)
+                    .count();
+            assertTrue(opinions >= 2, "Expected >=2 opinions, got " + opinions);
+        }
+
+        @Test
+        void noModerator_completesSuccessfully() throws Exception {
+            var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
+                    new GroupMember("a1", "Alice", 1, null),
+                    new GroupMember("a2", "Bob", 2, null));
+            // No moderatorAgentId set
+            setupStore(cfg);
+            stubAgent("a1", "Opinion A");
+            stubAgent("a2", "Opinion B");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // Should still have opinions from both agents
+            long opinions = result.getTranscript().stream()
+                    .filter(e -> e.type() == TranscriptEntryType.OPINION)
+                    .count();
+            assertTrue(opinions >= 2, "Expected >=2 opinions, got " + opinions);
+        }
+    }
+
+    // =========================================================
+    // Additional Error Handling
+    // =========================================================
+
+    @Nested
+    class AdditionalErrors {
+
+        @Test
+        void groupNotFound_nullResourceId_throwsResourceNotFoundException() throws Exception {
+            when(groupStore.getCurrentResourceId("unknown-group")).thenReturn(null);
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> service.discuss("unknown-group", QUESTION, USER_ID, 0));
+        }
+
+        @Test
+        void nullGroupId_throwsException() {
+            assertThrows(Exception.class,
+                    () -> service.discuss(null, QUESTION, USER_ID, 0));
+        }
+
+        @Test
+        void emptyQuestion_producesTranscript() throws Exception {
+            var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
+                    new GroupMember("a1", "Alice", 1, null));
+            cfg.setModeratorAgentId("mod");
+            setupStore(cfg);
+            stubAgent("a1", "Response");
+            stubAgent("mod", "Synthesis");
+
+            var result = service.discuss(GROUP_ID, "", USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+        }
+
+        @Test
+        void sayFails_agentSkippedAndDiscussionContinues() throws Exception {
+            var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
+                    new GroupMember("a1", "Alice", 1, null),
+                    new GroupMember("a2", "Bob", 2, null));
+            cfg.setModeratorAgentId("mod");
+            setupStore(cfg);
+
+            // a1 starts conversation but say() fails
+            when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("a1"))).thenReturn(mock(IAgent.class));
+            when(conversationService.startConversation(any(), eq("a1"), any(), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-a1", null));
+            doThrow(new RuntimeException("say failed"))
+                    .when(conversationService).say(any(Environment.class), eq("a1"), anyString(),
+                            any(), any(), any(), any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
+
+            stubAgent("a2", "Bob response");
+            stubAgent("mod", "Synthesis");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.SKIPPED && "a1".equals(e.speakerAgentId())));
+        }
+    }
+
+    // =========================================================
+    // Multi-Round
+    // =========================================================
+
+    @Nested
+    class MultiRound {
+
+        @Test
+        void multipleRounds_producesMultipleOpinionSets() throws Exception {
+            var cfg = config(DiscussionStyle.ROUND_TABLE, 3,
+                    new GroupMember("a1", "Alice", 1, null));
+            cfg.setModeratorAgentId("mod");
+            setupStore(cfg);
+            stubAgent("a1", "Round opinion");
+            stubAgent("mod", "Final synthesis");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            long opinions = result.getTranscript().stream()
+                    .filter(e -> e.type() == TranscriptEntryType.OPINION)
+                    .count();
+            // 3 rounds × 1 agent = 3 opinions
+            assertTrue(opinions >= 3, "Expected >=3 opinions for 3 rounds, got " + opinions);
+        }
+    }
+
+    // =========================================================
+    // Additional Lifecycle
+    // =========================================================
+
+    @Nested
+    class AdditionalLifecycle {
+
+        @Test
+        void deleteGroupConversation_noMemberConversations_deletesOnly() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-2");
+            // No member conversations
+            when(conversationStore.read("gc-2")).thenReturn(gc);
+
+            service.deleteGroupConversation("gc-2");
+
+            verify(conversationService, never()).endConversation(anyString());
+            verify(conversationStore).delete("gc-2");
+        }
+
+        @Test
+        void readGroupConversation_notFound_returnsNull() throws Exception {
+            when(conversationStore.read("gc-missing")).thenReturn(null);
+
+            assertNull(service.readGroupConversation("gc-missing"));
+        }
+
+        @Test
+        void listGroupConversations_emptyResult() throws Exception {
+            when(conversationStore.listByGroupId("g-empty", 0, 20)).thenReturn(List.of());
+
+            assertTrue(service.listGroupConversations("g-empty", 0, 20).isEmpty());
+        }
+    }
 }

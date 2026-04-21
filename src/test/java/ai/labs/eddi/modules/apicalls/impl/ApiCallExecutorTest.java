@@ -2,6 +2,7 @@ package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.configs.apicalls.model.*;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.httpclient.ICompleteListener;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
@@ -11,13 +12,14 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
@@ -233,6 +235,226 @@ class ApiCallExecutorTest {
     @Test
     void execute_emptyServerUrl_throwsIllegalArgument() {
         assertThrows(IllegalArgumentException.class, () -> executor.execute(new ApiCall(), memory, new HashMap<>(), "  "));
+    }
+
+    // ==================== Fire-and-Forget Tests ====================
+
+    @Test
+    void execute_fireAndForget_returnsEmptyMap() throws Exception {
+        ApiCall call = createSimpleApiCall("fnf-call", false);
+        call.setFireAndForget(true);
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertTrue(result.isEmpty());
+        // Fire-and-forget uses send(ICompleteListener) via executeFireAndForgetCall
+        verify(mockRequest).send(any(ICompleteListener.class));
+    }
+
+    // ==================== Response Header Tests ====================
+
+    @Test
+    void execute_responseHeaderObjectName_storesHeadersInResult() throws Exception {
+        ApiCall call = createSimpleApiCall("header-call", true);
+        call.setResponseHeaderObjectName("respHeaders");
+
+        Map<String, String> responseHeaders = new HashMap<>();
+        responseHeaders.put("X-Request-Id", "abc123");
+        responseHeaders.put("Content-Type", "application/json");
+        when(mockResponse.getHttpCode()).thenReturn(200);
+        when(mockResponse.getContentAsString()).thenReturn("{}");
+        when(mockResponse.getHttpHeader()).thenReturn(responseHeaders);
+        when(jsonSerialization.deserialize("{}", Object.class)).thenReturn(Map.of());
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertNotNull(result.get("headers"));
+        assertEquals(200, result.get("httpCode"));
+    }
+
+    @Test
+    void execute_responseHeaderObjectName_null_skipsHeaderExtraction() throws Exception {
+        ApiCall call = createSimpleApiCall("no-header-call", true);
+        call.setResponseHeaderObjectName(null);
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertNull(result.get("headers"));
+    }
+
+    // ==================== Header Scrubbing Tests ====================
+
+    @Test
+    void execute_sensitiveHeaders_areScrubbed() throws Exception {
+        ApiCall call = createSimpleApiCall("scrub-call", false);
+
+        Map<String, Object> requestMap = new HashMap<>();
+        Map<String, Object> headers = new LinkedHashMap<>();
+        headers.put("Authorization", "Bearer secret-token");
+        headers.put("X-Api-Key", "my-api-key");
+        headers.put("X-Custom", "visible-value");
+        headers.put("Token", "jwt-token");
+        headers.put("X-Secret-Data", "confidential");
+        requestMap.put("headers", headers);
+        when(mockRequest.toMap()).thenReturn(requestMap);
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        // Verify scrubbing via ArgumentCaptor on the memory entry call
+        var captor = ArgumentCaptor.forClass(Object.class);
+        verify(prePostUtils, atLeastOnce()).createMemoryEntry(
+                eq(currentStep), captor.capture(), contains("Request"), eq("httpCalls"));
+
+        @SuppressWarnings("unchecked")
+        var capturedMap = (Map<String, Object>) captor.getValue();
+        @SuppressWarnings("unchecked")
+        var scrubbedHeaders = (Map<String, Object>) capturedMap.get("headers");
+        assertEquals("<REDACTED>", scrubbedHeaders.get("Authorization"));
+        assertEquals("<REDACTED>", scrubbedHeaders.get("X-Api-Key"));
+        assertEquals("<REDACTED>", scrubbedHeaders.get("Token"));
+        assertEquals("<REDACTED>", scrubbedHeaders.get("X-Secret-Data"));
+        assertEquals("visible-value", scrubbedHeaders.get("X-Custom"));
+    }
+
+    @Test
+    void execute_vaultRefInHeaderValue_isScrubbed() throws Exception {
+        ApiCall call = createSimpleApiCall("vault-call", false);
+
+        Map<String, Object> requestMap = new HashMap<>();
+        Map<String, Object> headers = new LinkedHashMap<>();
+        headers.put("X-Custom-Auth", "${eddivault:my-secret}");
+        requestMap.put("headers", headers);
+        when(mockRequest.toMap()).thenReturn(requestMap);
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        var captor = ArgumentCaptor.forClass(Object.class);
+        verify(prePostUtils, atLeastOnce()).createMemoryEntry(
+                eq(currentStep), captor.capture(), contains("Request"), eq("httpCalls"));
+
+        @SuppressWarnings("unchecked")
+        var capturedMap = (Map<String, Object>) captor.getValue();
+        @SuppressWarnings("unchecked")
+        var scrubbedHeaders = (Map<String, Object>) capturedMap.get("headers");
+        assertEquals("<REDACTED>", scrubbedHeaders.get("X-Custom-Auth"));
+    }
+
+    @Test
+    void execute_noHeadersInRequestMap_scrubDoesNotThrow() throws Exception {
+        ApiCall call = createSimpleApiCall("no-headers", false);
+        when(mockRequest.toMap()).thenReturn(new HashMap<>());
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        // Should not throw even when there are no headers in the request map
+        assertDoesNotThrow(() -> executor.execute(call, memory, new HashMap<>(), "http://example.com"));
+    }
+
+    // ==================== Non-2xx Response Tests ====================
+
+    @Test
+    void execute_non2xxResponse_doesNotSaveBody() throws Exception {
+        ApiCall call = createSimpleApiCall("err-call", true);
+        when(mockResponse.getHttpCode()).thenReturn(500);
+        when(mockResponse.getHttpCodeMessage()).thenReturn("Internal Server Error");
+        when(mockResponse.getContentAsString()).thenReturn("error body");
+        when(mockResponse.getHttpHeader()).thenReturn(new HashMap<>());
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertFalse(result.containsKey("body"));
+        verify(jsonSerialization, never()).deserialize(any(), any());
+    }
+
+    @Test
+    void execute_400Response_logsWarning() throws Exception {
+        ApiCall call = createSimpleApiCall("bad-req", false);
+        when(mockResponse.getHttpCode()).thenReturn(400);
+        when(mockResponse.getHttpCodeMessage()).thenReturn("Bad Request");
+        when(mockResponse.getContentAsString()).thenReturn("bad");
+        when(mockResponse.getHttpHeader()).thenReturn(new HashMap<>());
+
+        // Should complete without exception (non-2xx is logged, not thrown)
+        assertDoesNotThrow(() -> executor.execute(call, memory, new HashMap<>(), "http://example.com"));
+    }
+
+    // ==================== Path Handling Tests ====================
+
+    @Test
+    void execute_pathWithoutLeadingSlash_addsSlash() throws Exception {
+        ApiCall call = createSimpleApiCall("path-call", false);
+        call.getRequest().setPath("api/test");
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        // buildRequest should have prepended "/" to the path
+        verify(httpClient).newRequest(eq(URI.create("http://example.com/api/test")), any());
+    }
+
+    @Test
+    void execute_absoluteHttpPath_usesDirectly() throws Exception {
+        ApiCall call = createSimpleApiCall("abs-call", false);
+        call.getRequest().setPath("http://other-server.com/api/test");
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        verify(httpClient).newRequest(eq(URI.create("http://other-server.com/api/test")), any());
+    }
+
+    // ==================== Request Body Tests ====================
+
+    @Test
+    void execute_requestWithBody_setsBodyEntity() throws Exception {
+        ApiCall call = createSimpleApiCall("body-call", false);
+        call.getRequest().setBody("{\"key\":\"value\"}");
+        call.getRequest().setContentType("application/json");
+        call.getRequest().setMethod("POST");
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        verify(mockRequest).setBodyEntity("{\"key\":\"value\"}", "utf-8", "application/json");
+    }
+
+    @Test
+    void execute_requestWithQueryParams_setsParams() throws Exception {
+        ApiCall call = createSimpleApiCall("qp-call", false);
+        call.getRequest().getQueryParams().put("q", "test");
+        call.getRequest().getQueryParams().put("page", "1");
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        verify(mockRequest).setQueryParam("q", "test");
+        verify(mockRequest).setQueryParam("page", "1");
+    }
+
+    @Test
+    void execute_requestWithHeaders_setsHeaders() throws Exception {
+        ApiCall call = createSimpleApiCall("hdr-call", false);
+        call.getRequest().getHeaders().put("Accept", "application/json");
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        verify(mockRequest).setHttpHeader("Accept", "application/json");
+    }
+
+    // ==================== Result Content Tests ====================
+
+    @Test
+    void execute_successfulSave_resultContainsHttpCode() throws Exception {
+        ApiCall call = createSimpleApiCall("code-call", true);
+        setupSuccessResponse(200, "response body", "text/plain");
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        assertEquals(200, result.get("httpCode"));
+        assertEquals("response body", result.get("body"));
     }
 
     // ==================== Helpers ====================
