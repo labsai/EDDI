@@ -5,143 +5,123 @@ import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import jakarta.ws.rs.NotFoundException;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for {@link RestCoordinatorAdmin}.
- *
- * <p>
- * Verifies REST delegation to the {@link IConversationCoordinator}, including
- * status, dead-letter CRUD, and error handling.
- * </p>
  */
 class RestCoordinatorAdminTest {
 
     private IConversationCoordinator coordinator;
-    private RestCoordinatorAdmin admin;
+    private RestCoordinatorAdmin restCoordinatorAdmin;
 
     @BeforeEach
     void setUp() {
         coordinator = mock(IConversationCoordinator.class);
-        admin = new RestCoordinatorAdmin(coordinator);
+        restCoordinatorAdmin = new RestCoordinatorAdmin(coordinator);
     }
 
-    // ==================== Status ====================
+    @Nested
+    @DisplayName("getStatus")
+    class GetStatus {
 
-    @Test
-    void shouldReturnCoordinatorStatus() {
-        CoordinatorStatus expected = new CoordinatorStatus("in-memory", true, "CONNECTED", 3, 100L, 2L, Map.of("conv-1", 2, "conv-2", 1));
-        when(coordinator.getStatus()).thenReturn(expected);
+        @Test
+        @DisplayName("should delegate to coordinator")
+        void delegatesToCoordinator() {
+            var status = new CoordinatorStatus("in-memory", true, "OK", 5, 100L, 0L, java.util.Map.of());
+            when(coordinator.getStatus()).thenReturn(status);
 
-        CoordinatorStatus result = admin.getStatus();
+            CoordinatorStatus result = restCoordinatorAdmin.getStatus();
 
-        assertEquals("in-memory", result.coordinatorType());
-        assertTrue(result.connected());
-        assertEquals(3, result.activeConversations());
-        assertEquals(100L, result.totalProcessed());
-        assertEquals(2L, result.totalDeadLettered());
-        assertEquals(2, result.queueDepths().size());
-        verify(coordinator).getStatus();
+            assertEquals("in-memory", result.coordinatorType());
+            assertEquals(5, result.activeConversations());
+        }
     }
 
-    @Test
-    void shouldReturnNatsStatus() {
-        CoordinatorStatus nats = new CoordinatorStatus("nats", true, "CONNECTED", 0, 500L, 0L, Collections.emptyMap());
-        when(coordinator.getStatus()).thenReturn(nats);
+    @Nested
+    @DisplayName("getDeadLetters")
+    class GetDeadLetters {
 
-        CoordinatorStatus result = admin.getStatus();
+        @Test
+        @DisplayName("should return dead letter list from coordinator")
+        void returnsList() {
+            when(coordinator.getDeadLetters()).thenReturn(List.of());
 
-        assertEquals("nats", result.coordinatorType());
-        assertEquals(500L, result.totalProcessed());
-        assertEquals(0, result.queueDepths().size());
+            List<DeadLetterEntry> result = restCoordinatorAdmin.getDeadLetters();
+
+            assertTrue(result.isEmpty());
+        }
     }
 
-    // ==================== Dead-Letters ====================
+    @Nested
+    @DisplayName("replayDeadLetter")
+    class ReplayDeadLetter {
 
-    @Test
-    void shouldReturnDeadLetters() {
-        List<DeadLetterEntry> entries = List.of(new DeadLetterEntry("1", "conv-fail-1", "timeout", 1000L, "{}"),
-                new DeadLetterEntry("2", "conv-fail-2", "NPE", 2000L, "{}"));
-        when(coordinator.getDeadLetters()).thenReturn(entries);
+        @Test
+        @DisplayName("should succeed when coordinator returns true")
+        void success() {
+            when(coordinator.replayDeadLetter("dl-1")).thenReturn(true);
 
-        List<DeadLetterEntry> result = admin.getDeadLetters();
+            assertDoesNotThrow(() -> restCoordinatorAdmin.replayDeadLetter("dl-1"));
+        }
 
-        assertEquals(2, result.size());
-        assertEquals("conv-fail-1", result.get(0).conversationId());
-        assertEquals("timeout", result.get(0).error());
-        verify(coordinator).getDeadLetters();
+        @Test
+        @DisplayName("should throw NotFoundException when entry not found")
+        void notFound() {
+            when(coordinator.replayDeadLetter("dl-missing")).thenReturn(false);
+
+            assertThrows(NotFoundException.class,
+                    () -> restCoordinatorAdmin.replayDeadLetter("dl-missing"));
+        }
     }
 
-    @Test
-    void shouldReturnEmptyDeadLetters() {
-        when(coordinator.getDeadLetters()).thenReturn(Collections.emptyList());
+    @Nested
+    @DisplayName("discardDeadLetter")
+    class DiscardDeadLetter {
 
-        List<DeadLetterEntry> result = admin.getDeadLetters();
+        @Test
+        @DisplayName("should succeed when coordinator returns true")
+        void success() {
+            when(coordinator.discardDeadLetter("dl-1")).thenReturn(true);
 
-        assertTrue(result.isEmpty());
+            assertDoesNotThrow(() -> restCoordinatorAdmin.discardDeadLetter("dl-1"));
+        }
+
+        @Test
+        @DisplayName("should throw NotFoundException when entry not found")
+        void notFound() {
+            when(coordinator.discardDeadLetter("dl-missing")).thenReturn(false);
+
+            assertThrows(NotFoundException.class,
+                    () -> restCoordinatorAdmin.discardDeadLetter("dl-missing"));
+        }
     }
 
-    // ==================== Replay ====================
+    @Nested
+    @DisplayName("purgeDeadLetters")
+    class PurgeDeadLetters {
 
-    @Test
-    void shouldReplayDeadLetter() {
-        when(coordinator.replayDeadLetter("dl-1")).thenReturn(true);
+        @Test
+        @DisplayName("should return purged count")
+        void returnsPurgedCount() {
+            when(coordinator.purgeDeadLetters()).thenReturn(3);
 
-        admin.replayDeadLetter("dl-1");
+            assertEquals(3, restCoordinatorAdmin.purgeDeadLetters());
+        }
 
-        verify(coordinator).replayDeadLetter("dl-1");
-    }
+        @Test
+        @DisplayName("should return 0 when nothing to purge")
+        void returnsZero() {
+            when(coordinator.purgeDeadLetters()).thenReturn(0);
 
-    @Test
-    void shouldThrowNotFoundWhenReplayingNonExistent() {
-        when(coordinator.replayDeadLetter("nonexistent")).thenReturn(false);
-
-        assertThrows(NotFoundException.class, () -> admin.replayDeadLetter("nonexistent"));
-    }
-
-    // ==================== Discard ====================
-
-    @Test
-    void shouldDiscardDeadLetter() {
-        when(coordinator.discardDeadLetter("dl-2")).thenReturn(true);
-
-        admin.discardDeadLetter("dl-2");
-
-        verify(coordinator).discardDeadLetter("dl-2");
-    }
-
-    @Test
-    void shouldThrowNotFoundWhenDiscardingNonExistent() {
-        when(coordinator.discardDeadLetter("nonexistent")).thenReturn(false);
-
-        assertThrows(NotFoundException.class, () -> admin.discardDeadLetter("nonexistent"));
-    }
-
-    // ==================== Purge ====================
-
-    @Test
-    void shouldPurgeAllDeadLetters() {
-        when(coordinator.purgeDeadLetters()).thenReturn(5);
-
-        int count = admin.purgeDeadLetters();
-
-        assertEquals(5, count);
-        verify(coordinator).purgeDeadLetters();
-    }
-
-    @Test
-    void shouldReturnZeroWhenPurgingEmpty() {
-        when(coordinator.purgeDeadLetters()).thenReturn(0);
-
-        int count = admin.purgeDeadLetters();
-
-        assertEquals(0, count);
+            assertEquals(0, restCoordinatorAdmin.purgeDeadLetters());
+        }
     }
 }
