@@ -108,12 +108,22 @@ export function StudioEditorPanel({
     : [{ version: currentVersion }];
 
   // Cascade context for auto-propagation to parent workflow and agent
+  // Track versions in local state so they update after cascade saves
+  const [localWorkflowVersion, setLocalWorkflowVersion] = useState(workflowVersion);
+  const [localAgentVersion, setLocalAgentVersion] = useState(agentVersion);
+
+  // Reset when the parent re-mounts with different props
+  useEffect(() => {
+    setLocalWorkflowVersion(workflowVersion);
+    setLocalAgentVersion(agentVersion);
+  }, [workflowVersion, agentVersion]);
+
   const cascadeContext = useMemo(() => ({
     workflowId,
-    packageVersion: workflowVersion,
+    workflowVersion: localWorkflowVersion,
     agentId,
-    agentVersion,
-  }), [workflowId, workflowVersion, agentId, agentVersion]);
+    agentVersion: localAgentVersion,
+  }), [workflowId, localWorkflowVersion, agentId, localAgentVersion]);
 
   const handleSave = useCallback(
     (jsonString: string) => {
@@ -131,6 +141,9 @@ export function StudioEditorPanel({
               toast.success(t("editor.saved", "Saved successfully"));
               setSaveSuccess(true);
               setCurrentVersion(result.newResourceVersion);
+              // Update cascade context versions so next save uses correct versions
+              if (result.newWorkflowVersion) setLocalWorkflowVersion(result.newWorkflowVersion);
+              if (result.newAgentVersion) setLocalAgentVersion(result.newAgentVersion);
             },
             onError: (err) => {
               toast.error(getErrorMessage(err));

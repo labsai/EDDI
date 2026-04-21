@@ -33,7 +33,7 @@ function renderPanel(
             workflowStep={step}
             agentId={overrides.agentId ?? "agent1"}
             agentVersion={overrides.agentVersion ?? 1}
-            workflowId={overrides.workflowId ?? "pkg1"}
+            workflowId={overrides.workflowId ?? "wf1"}
             workflowVersion={overrides.workflowVersion ?? 2}
           />
         </ThemeProvider>

@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { WorkflowDetailPage } from "@/pages/workflow-detail";
 
-function renderPage(id = "pkg1") {
+function renderPage(id = "wf1") {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -35,7 +35,7 @@ describe("WorkflowDetailPage", () => {
     renderPage();
 
     await waitFor(() => {
-      // MSW returns descriptor name "Support Ticket Pipeline" for pkg1
+      // MSW returns descriptor name "Support Ticket Pipeline" for wf1
       expect(screen.getByText("Support Ticket Pipeline")).toBeInTheDocument();
     });
   });
@@ -80,7 +80,7 @@ describe("WorkflowDetailPage", () => {
     renderPage();
 
     await waitFor(() => {
-      expect(screen.getByTestId("delete-pkg-btn")).toBeInTheDocument();
+      expect(screen.getByTestId("delete-wf-btn")).toBeInTheDocument();
     });
   });
 });

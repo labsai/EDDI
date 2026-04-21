@@ -11,7 +11,7 @@ export interface AgentContext {
  *
  * The agentId/agentVer params are set by:
  * - agent-detail → workflow links (?agentId=X&agentVer=Y)
- * - pipeline-builder → resource links (?pkgId=…&pkgVer=…&agentId=X&agentVer=Y)
+ * - pipeline-builder → resource links (?wfId=…&wfVer=…&agentId=X&agentVer=Y)
  */
 export function useAgentContext(): AgentContext | null {
   const [searchParams] = useSearchParams();
