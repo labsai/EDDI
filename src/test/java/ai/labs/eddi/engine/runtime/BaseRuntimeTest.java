@@ -7,7 +7,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
-import java.lang.reflect.Field;
 import java.util.concurrent.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -21,6 +20,7 @@ class BaseRuntimeTest {
 
     private BaseRuntime runtime;
     private ManagedExecutor mockExecutor;
+    private ExecutorService realExecutor;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -28,13 +28,13 @@ class BaseRuntimeTest {
 
         // Create a mock ManagedExecutor that delegates to a real single-thread executor
         mockExecutor = Mockito.mock(ManagedExecutor.class);
-        ExecutorService realExecutor = Executors.newSingleThreadExecutor();
+        realExecutor = Executors.newSingleThreadExecutor();
         when(mockExecutor.submit(any(Callable.class))).thenAnswer(inv -> {
             Callable<?> callable = inv.getArgument(0);
             return realExecutor.submit(callable);
         });
 
-        Field executorField = BaseRuntime.class.getDeclaredField("executorService");
+        var executorField = BaseRuntime.class.getDeclaredField("executorService");
         executorField.setAccessible(true);
         executorField.set(runtime, mockExecutor);
     }
@@ -43,6 +43,9 @@ class BaseRuntimeTest {
     void tearDown() {
         if (runtime != null) {
             runtime.getScheduledExecutorService().shutdownNow();
+        }
+        if (realExecutor != null) {
+            realExecutor.shutdownNow();
         }
     }
 
