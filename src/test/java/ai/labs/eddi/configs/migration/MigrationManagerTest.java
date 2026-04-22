@@ -1,6 +1,7 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
+import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
@@ -424,11 +425,6 @@ class MigrationManagerTest {
             var conversationProperty = new HashMap<String, Object>();
             conversationProperty.put("value", "user-preference");
 
-            var conversationProperties = new HashMap<String, Map<String, Object>>();
-            conversationProperties.put("language", conversationProperty);
-
-            Document doc = new Document("conversationProperties", conversationProperties);
-
             // The migrateConversationMemory method is private, but we can test its logic
             // through convertPropertyInstructions which is the shared logic
             var migration = migrationManager.migratePropertySetter();
@@ -586,6 +582,18 @@ class MigrationManagerTest {
             assertNotNull(result);
             var alternatives = extractValueAlternatives(result);
             assertEquals(3, alternatives.size());
+
+            // Plain string should be wrapped in a TextOutputItem
+            assertInstanceOf(TextOutputItem.class, alternatives.get(0), "Plain string should be wrapped in TextOutputItem");
+            var wrappedText = (TextOutputItem) alternatives.get(0);
+            assertEquals("Plain text string", wrappedText.getText());
+            assertEquals("text", wrappedText.getType());
+
+            // Map with "text" field should have type inferred as "text"
+            assertEquals("text", textOutput.get("type"));
+
+            // Map with "uri" field should have type inferred as "image"
+            assertEquals("image", imageOutput.get("type"));
         }
     }
 

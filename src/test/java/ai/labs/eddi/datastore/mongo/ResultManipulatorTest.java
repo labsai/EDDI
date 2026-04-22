@@ -103,16 +103,17 @@ class ResultManipulatorTest {
         }
 
         @Test
-        @DisplayName("exact match with empty quoted string — keeps items with empty getter return")
+        @DisplayName("exact match with empty quoted string — filters out items whose getters return non-empty values")
         void exactMatch_emptyQuotedString() throws ResultManipulator.FilterEntriesException {
             var list = new ArrayList<>(List.of(
                     new Item("hello", "world", 1)));
             var manipulator = new ResultManipulator<>(list, Item.class);
 
-            // "" → searchString is empty string, matches anything via .equals("")
+            // "" → searchString is empty string; only items with a getter returning ""
+            // would match
             manipulator.filterEntities("\"\"");
 
-            // Items with getters that return non-empty values won't match empty string
+            // "hello" and "world" don't equal "" → item is filtered out
             assertTrue(manipulator.getManipulatedList().isEmpty());
         }
 
