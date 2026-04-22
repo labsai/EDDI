@@ -6,6 +6,7 @@ import {
   createWorkflow,
   updateWorkflow,
   deleteWorkflow,
+  duplicateWorkflow,
   type WorkflowConfiguration,
 } from "@/lib/api/workflows";
 import { parseResourceUri, getAgent, updateAgent, type AgentDescriptor } from "@/lib/api/agents";
@@ -115,6 +116,24 @@ export function useDeleteWorkflow() {
   return useMutation({
     mutationFn: ({ id, version }: { id: string; version: number }) =>
       deleteWorkflow(id, version),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: WORKFLOWS_KEY });
+    },
+  });
+}
+
+export function useDuplicateWorkflow() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      version,
+      deepCopy,
+    }: {
+      id: string;
+      version: number;
+      deepCopy?: boolean;
+    }) => duplicateWorkflow(id, version, deepCopy),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: WORKFLOWS_KEY });
     },

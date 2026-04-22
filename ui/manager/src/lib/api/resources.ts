@@ -9,6 +9,8 @@ export interface ResourceTypeConfig {
   slug: string;
   store: string;
   plural: string;
+  /** The backend extension type used in eddi:// URI schemes (e.g. "ai.labs.property") */
+  extension: string;
   labelKey: string;
   icon: string;
 }
@@ -19,6 +21,7 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     slug: "rules",
     store: "rulestore",
     plural: "rulesets",
+    extension: "ai.labs.rules",
     labelKey: "resources.types.rules",
     icon: "GitBranch",
   },
@@ -26,6 +29,7 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     slug: "apicalls",
     store: "apicallstore",
     plural: "apicalls",
+    extension: "ai.labs.apicalls",
     labelKey: "resources.types.apicalls",
     icon: "Globe",
   },
@@ -33,6 +37,7 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     slug: "output",
     store: "outputstore",
     plural: "outputsets",
+    extension: "ai.labs.output",
     labelKey: "resources.types.output",
     icon: "MessageSquareText",
   },
@@ -40,6 +45,7 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     slug: "dictionary",
     store: "dictionarystore",
     plural: "dictionaries",
+    extension: "ai.labs.dictionary",
     labelKey: "resources.types.dictionary",
     icon: "BookOpen",
   },
@@ -47,6 +53,7 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     slug: "llm",
     store: "llmstore",
     plural: "llms",
+    extension: "ai.labs.llm",
     labelKey: "resources.types.llm",
     icon: "Brain",
   },
@@ -54,6 +61,7 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     slug: "propertysetter",
     store: "propertysetterstore",
     plural: "propertysetters",
+    extension: "ai.labs.property",
     labelKey: "resources.types.propertysetter",
     icon: "Settings",
   },
@@ -61,6 +69,7 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     slug: "mcpcalls",
     store: "mcpcallsstore",
     plural: "mcpcalls",
+    extension: "ai.labs.mcpcalls",
     labelKey: "resources.types.mcpcalls",
     icon: "Plug",
   },
@@ -68,6 +77,7 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     slug: "rag",
     store: "ragstore",
     plural: "rags",
+    extension: "ai.labs.rag",
     labelKey: "resources.types.rag",
     icon: "BookOpenCheck",
   },
@@ -75,6 +85,7 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     slug: "snippets",
     store: "snippetstore",
     plural: "snippets",
+    extension: "ai.labs.snippet",
     labelKey: "resources.types.snippets",
     icon: "Puzzle",
   },
@@ -153,12 +164,44 @@ export function duplicateResource(
   );
 }
 
-/** Get all versions of a specific resource */
-export function getResourceVersions(
+/**
+ * Get all versions of a specific resource.
+ *
+ * The GET descriptors endpoint does NOT support includePreviousVersions;
+ * that parameter only works on POST (containingResourceUri lookup).
+ * Instead, we resolve the current (latest) version via the backend's
+ * `currentversion` endpoint and return descriptors for all versions 1..N.
+ */
+export async function getResourceVersions(
   rt: ResourceTypeConfig,
   id: string
 ): Promise<AgentDescriptor[]> {
-  return api.get<AgentDescriptor[]>(
-    `${basePath(rt)}/descriptors?filter=${id}&includePreviousVersions=true`
+  // Resolve the latest version number
+  const currentVersion = await api.get<number>(
+    `${basePath(rt)}/${id}/currentversion`
   );
+  const latest = currentVersion ?? 1;
+
+  // Fetch descriptor for each version in parallel
+  const descriptors = await Promise.all(
+    Array.from({ length: latest }, (_, i) => i + 1).map(async (v) => {
+      try {
+        const results = await api.get<AgentDescriptor[]>(
+          `${basePath(rt)}/descriptors?filter=${id}&version=${v}`
+        );
+        return results;
+      } catch {
+        return [];
+      }
+    })
+  );
+
+  // If individual version queries don't work, fall back to unversioned query
+  const flat = descriptors.flat();
+  if (flat.length === 0) {
+    return api.get<AgentDescriptor[]>(
+      `${basePath(rt)}/descriptors?filter=${id}`
+    );
+  }
+  return flat;
 }

@@ -475,7 +475,7 @@ export function ResourceDetailPage() {
               onClose={() => setShowDiff(false)}
               typeName={typeName}
               versions={versions}
-              currentVersion={currentVersion}
+              currentVersion={currentVersion ?? 1}
               fetchVersion={async (ver: number) => {
                 const data = await getResource(rt, id ?? "", ver);
                 return JSON.stringify(data, null, 2);

@@ -41,6 +41,7 @@ const RT: ResourceTypeConfig = {
   slug: "rules",
   store: "rulestore",
   plural: "rulesets",
+  extension: "ai.labs.rules",
   labelKey: "resources.types.rules",
   icon: "GitBranch",
 };

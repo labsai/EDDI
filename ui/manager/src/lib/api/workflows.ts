@@ -66,11 +66,55 @@ export function deleteWorkflow(
   return api.delete(`/workflowstore/workflows/${id}?${params}`);
 }
 
-/** Get all versions of a specific package (for version picker) */
-export function getWorkflowVersions(
+/**
+ * Get all versions of a specific workflow (for version picker).
+ *
+ * The GET descriptors endpoint does NOT support includePreviousVersions;
+ * we use the currentversion endpoint to resolve the latest version.
+ */
+export async function getWorkflowVersions(
   id: string
 ): Promise<AgentDescriptor[]> {
-  return api.get<AgentDescriptor[]>(
-    `/workflowstore/workflows/descriptors?filter=${id}&includePreviousVersions=true`
+  // Resolve the latest version number
+  const currentVersion = await api.get<number>(
+    `/workflowstore/workflows/${id}/currentversion`
+  );
+  const latest = currentVersion ?? 1;
+
+  // Fetch descriptor for each version in parallel
+  const descriptors = await Promise.all(
+    Array.from({ length: latest }, (_, i) => i + 1).map(async (v) => {
+      try {
+        const results = await api.get<AgentDescriptor[]>(
+          `/workflowstore/workflows/descriptors?filter=${id}&version=${v}`
+        );
+        return results;
+      } catch {
+        return [];
+      }
+    })
+  );
+
+  const flat = descriptors.flat();
+  if (flat.length === 0) {
+    return api.get<AgentDescriptor[]>(
+      `/workflowstore/workflows/descriptors?filter=${id}`
+    );
+  }
+  return flat;
+}
+
+/** Duplicate a workflow (with optional deep-copy of extension resources) */
+export function duplicateWorkflow(
+  id: string,
+  version: number,
+  deepCopy = false
+): Promise<{ location: string }> {
+  const params = new URLSearchParams({
+    version: String(version),
+    deepCopy: String(deepCopy),
+  });
+  return api.post<{ location: string }>(
+    `/workflowstore/workflows/${id}?${params}`
   );
 }

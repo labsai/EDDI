@@ -109,8 +109,7 @@ function buildResourceUri(
   id: string,
   version: number
 ): string {
-  const baseType = `eddi://ai.labs.${rt.slug}`;
-  return `${baseType}/${rt.store}/${rt.plural}/${id}?version=${version}`;
+  return `eddi://${rt.extension}/${rt.store}/${rt.plural}/${id}?version=${version}`;
 }
 
 /**

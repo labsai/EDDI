@@ -51,6 +51,9 @@ export function WorkflowDetailPage() {
   const agentVer = searchParams.get("agentVer") ?? undefined;
 
   const [version, setVersion] = useState<number | undefined>(undefined);
+  const [currentAgentVer, setCurrentAgentVer] = useState<number | undefined>(
+    agentVer ? parseInt(agentVer, 10) : undefined
+  );
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [localExtensions, setLocalExtensions] = useState<
@@ -179,11 +182,15 @@ export function WorkflowDetailPage() {
   const handleSave = useCallback(async () => {
     if (!isDirty || !localExtensions) return;
     try {
-      await updateMutation.mutateAsync({
+      const result = await updateMutation.mutateAsync({
         id: id!,
         version: resolvedVersion,
         config: { workflowSteps: localExtensions },
       });
+      // Track the new version so subsequent saves target the correct version
+      const wfUrl = new URL(result.location, "http://dummy");
+      const newVersion = parseInt(wfUrl.searchParams.get("version") ?? "1", 10);
+      setVersion(newVersion);
       setSaveMessage({
         type: "success",
         text: t("packageEditor.saved", "Workflow saved successfully"),
@@ -198,9 +205,7 @@ export function WorkflowDetailPage() {
   }, [isDirty, localExtensions, updateMutation, id, resolvedVersion, t]);
 
   const handleSaveAndDeploy = useCallback(async () => {
-    if (!isDirty || !localExtensions || !agentId || !agentVer) return;
-    const agentVersion = parseInt(agentVer, 10);
-    if (isNaN(agentVersion)) return;
+    if (!isDirty || !localExtensions || !agentId || !currentAgentVer) return;
 
     await saveAndDeploy({
       agentId,
@@ -211,14 +216,15 @@ export function WorkflowDetailPage() {
           version: resolvedVersion,
           config: { workflowSteps: localExtensions },
         });
-        setLocalExtensions(null);
 
-        // Parse new workflow version from location header (/workflowstore/workflows/id?version=N)
+        // Parse new workflow version from location header
         const wfUrl = new URL(wfResult.location, "http://dummy");
         const newWfVersion = parseInt(wfUrl.searchParams.get("version") ?? "1", 10);
+        setVersion(newWfVersion);
+        setLocalExtensions(null);
 
         // 2. Update parent agent's workflow reference
-        const agent = await getAgent(agentId, agentVersion);
+        const agent = await getAgent(agentId, currentAgentVer);
         const oldPkgUri = `eddi://ai.labs.workflow/workflowstore/workflows/${id}?version=${resolvedVersion}`;
         const newPkgUri = `eddi://ai.labs.workflow/workflowstore/workflows/${id}?version=${newWfVersion}`;
         const updatedAgent = {
@@ -227,14 +233,15 @@ export function WorkflowDetailPage() {
             u === oldPkgUri ? newPkgUri : u
           ),
         };
-        const agentResult = await updateAgent(agentId, agentVersion, updatedAgent);
+        const agentResult = await updateAgent(agentId, currentAgentVer, updatedAgent);
         const agentUrl = new URL(agentResult.location, "http://dummy");
         const newAgentVersion = parseInt(agentUrl.searchParams.get("version") ?? "1", 10);
+        setCurrentAgentVer(newAgentVersion);
 
         return { newAgentVersion };
       },
     });
-  }, [isDirty, localExtensions, updateMutation, id, resolvedVersion, agentId, agentVer, saveAndDeploy]);
+  }, [isDirty, localExtensions, updateMutation, id, resolvedVersion, agentId, currentAgentVer, saveAndDeploy]);
 
   const handleDiscard = useCallback(() => {
     setLocalExtensions(null);
