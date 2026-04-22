@@ -4,6 +4,7 @@ services:
     environment:
       - "EDDI_VAULT_MASTER_KEY=${EDDI_VAULT_MASTER_KEY:-}"
       - "EDDI_DATASTORE_TYPE=${EDDI_DATASTORE_TYPE:-mongodb}"
+      - "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true"
       - "QUARKUS_MONGODB_CONNECTION_STRING=mongodb://${MONGO_INITDB_ROOT_USERNAME:-eddi}:${MONGO_INITDB_ROOT_PASSWORD:-changeme}@mongodb:27017/eddi?authSource=admin"
 #      - "JAVA_OPTS_APPEND=-Dquarkus.http.cors.origins=http://localhost:3000"
     extra_hosts:
