@@ -1,6 +1,5 @@
 package ai.labs.eddi.modules.llm.tools;
 
-import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -41,13 +40,8 @@ public class ToolCostTracker {
     private final Map<String, ConversationCostMetrics> conversationCosts = new ConcurrentHashMap<>();
     private final DoubleAdder totalCost = new DoubleAdder();
 
-    // Metrics
-    private Counter toolCallCounter;
-
     @PostConstruct
     public void init() {
-        this.toolCallCounter = meterRegistry.counter("eddi.tool.calls.total");
-
         // Register gauge for total cost
         meterRegistry.gauge("eddi.tool.costs.total", totalCost, DoubleAdder::sum);
 
@@ -134,8 +128,7 @@ public class ToolCostTracker {
         // Track total cost
         totalCost.add(cost);
 
-        // Record metrics
-        toolCallCounter.increment();
+        // Record per-tool metrics (aggregate available via PromQL sum)
         meterRegistry.counter("eddi.tool.calls", "tool", toolName).increment();
 
         if (cost > 0) {
