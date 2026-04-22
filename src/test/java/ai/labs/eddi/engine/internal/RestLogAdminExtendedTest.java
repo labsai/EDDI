@@ -157,9 +157,13 @@ class RestLogAdminExtendedTest {
         @DisplayName("should send initial entries in reverse order (newest first)")
         void sendsInReverseOrder() {
             var eventSink = mock(SseEventSink.class);
-            var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
+            var sse = mock(Sse.class);
+            var builder = mock(OutboundSseEvent.Builder.class);
             var event = mock(OutboundSseEvent.class);
-            when(sse.newEventBuilder().name(anyString()).data(any()).build()).thenReturn(event);
+            when(sse.newEventBuilder()).thenReturn(builder);
+            when(builder.name(anyString())).thenReturn(builder);
+            when(builder.data(any())).thenReturn(builder);
+            when(builder.build()).thenReturn(event);
             when(eventSink.send(any(OutboundSseEvent.class)))
                     .thenReturn(CompletableFuture.completedFuture(null));
             when(eventSink.isClosed()).thenReturn(false); // keep open so the initial batch can be sent
@@ -174,10 +178,10 @@ class RestLogAdminExtendedTest {
             restLogAdmin.streamLogs(null, null, null, eventSink, sse);
 
             // Verify order: entry3, then entry2, then entry1
-            var inOrder = inOrder(sse.newEventBuilder());
-            inOrder.verify(sse.newEventBuilder()).data(entry3);
-            inOrder.verify(sse.newEventBuilder()).data(entry2);
-            inOrder.verify(sse.newEventBuilder()).data(entry1);
+            var inOrder = inOrder(builder);
+            inOrder.verify(builder).data(entry3);
+            inOrder.verify(builder).data(entry2);
+            inOrder.verify(builder).data(entry1);
             verify(eventSink, times(3)).send(event);
         }
     }

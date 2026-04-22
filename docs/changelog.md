@@ -13,6 +13,28 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Test Suite Hardening & Stabilisation (2026-04-22)
+
+**Repo:** EDDI (main)
+
+**What changed:** Resolved final failing unit tests blocking a clean CI run to secure OpenSSF Silver compliance.
+
+### Test Expectation Fixes
+- **`RestOutputActionsTest`**: Updated `enforcesLimitAcrossMergedSources` to correctly expect alphabetically sorted output keys, which matches the aggregate-and-sort implementation in `RestOutputActions.java`.
+- **`RestLogAdminExtendedTest`**: Fixed `sendsInReverseOrder` which failed due to deep stubbing of the `OutboundSseEvent.Builder`. Extracted the builder into a separate mock to allow Mockito's `InOrder` verification to capture and assert the exact order of elements sent to the SSE stream.
+
+### Implementation Fix
+- **`GroupConversationService`**: Added fail-fast `IllegalArgumentException` checks for `groupId == null` to both `discuss` and `startAndDiscussAsync` to satisfy existing test assertions in `GroupConversationServiceTest` that were previously failing with `ResourceNotFoundException`.
+
+**Files:**
+- `src/main/java/ai/labs/eddi/engine/internal/GroupConversationService.java`
+- `src/test/java/ai/labs/eddi/configs/output/rest/keys/RestOutputActionsTest.java`
+- `src/test/java/ai/labs/eddi/engine/internal/RestLogAdminExtendedTest.java`
+
+**Verification:** `mvn test` — 4973 tests run, 0 failures, 0 errors.
+
+---
+
 ## CI Security Scanning Hardening (2026-04-22)
 
 **Repo:** EDDI (main)

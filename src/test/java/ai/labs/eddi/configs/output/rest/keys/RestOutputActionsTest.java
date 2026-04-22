@@ -101,8 +101,9 @@ class RestOutputActionsTest {
 
         List<String> result = restOutputActions.readOutputActions("wf-1", 1, "", 3);
         assertEquals(3, result.size());
+        assertTrue(result.contains("out_action1"));
+        assertTrue(result.contains("out_action2"));
         assertTrue(result.contains("rule_action1"));
-        assertTrue(result.contains("rule_action2"));
     }
 
     @Test
