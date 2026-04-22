@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
@@ -92,7 +92,7 @@ export function ConfigEditorLayout({
   const [editedData, setEditedData] = useState(data);
 
   // Reset edited data when the source data changes (version switch, initial load)
-  useMemo(() => {
+  useEffect(() => {
     setEditedData(data);
   }, [data]);
 

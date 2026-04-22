@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useParams, Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -85,16 +85,30 @@ export function ResourceDetailPage() {
     return undefined;
   })();
 
-  // Version state
-  const [currentVersion, setCurrentVersion] = useState(1);
+  // Version state — default to latest version once descriptors are loaded
+  const [currentVersion, setCurrentVersion] = useState<number | undefined>(undefined);
+
+  // Fetch version descriptors first — needed to resolve the latest version
+  const { data: versionDescriptors } = useResourceVersions(type ?? "", id ?? "");
+
+  // Resolve latest version from descriptors
+  useEffect(() => {
+    if (currentVersion === undefined && versionDescriptors && versionDescriptors.length > 0) {
+      const latest = versionDescriptors.reduce((max, d) => {
+        const match = d.resource?.match(/\?version=(\d+)/);
+        const v = match ? parseInt(match[1] ?? "1", 10) : 1;
+        return v > max ? v : max;
+      }, 1);
+      setCurrentVersion(latest);
+    }
+  }, [currentVersion, versionDescriptors]);
 
   // Data hooks
   const { data, isLoading, isError, refetch } = useResource(
     type ?? "",
     id ?? "",
-    currentVersion
+    currentVersion ?? 0
   );
-  const { data: versionDescriptors } = useResourceVersions(type ?? "", id ?? "");
   const deleteMutation = useDeleteResource(type ?? "");
   const duplicateMutation = useDuplicateResource(type ?? "");
   const cascadeSave = useCascadeSave(type ?? "");
@@ -150,6 +164,7 @@ export function ResourceDetailPage() {
             {
               onSuccess: (result) => {
                 toast.success(t("editor.saved"));
+                setSaveSuccess(true);
                 setCurrentVersion(result.newResourceVersion);
               },
             }
@@ -165,6 +180,7 @@ export function ResourceDetailPage() {
             {
               onSuccess: async (result) => {
                 toast.success(t("editor.saved"));
+                setSaveSuccess(true);
                 setNewResourceVersion(result.newResourceVersion);
                 setCurrentVersion(result.newResourceVersion);
 
@@ -230,7 +246,8 @@ export function ResourceDetailPage() {
           await cascadeSave.mutateAsync({
             id: id ?? "",
             version: newResourceVersion,
-            body: {}, // Body not needed — config already saved in step 1
+            body: {}, // Not used — skipResourceSave bypasses the resource PUT
+            skipResourceSave: true,
             context: {
               workflowId: usage.workflowId,
               packageVersion: usage.packageVersion,
@@ -270,16 +287,16 @@ export function ResourceDetailPage() {
 
   function handleDelete() {
     deleteMutation.mutate(
-      { id: id ?? "", version: currentVersion },
+      { id: id ?? "", version: currentVersion ?? 1 },
       {
         onSuccess: () => {
           toast.success(t("common.delete") + " ✓");
+          setShowDeleteDialog(false);
           navigate(`/manage/resources/${type}`);
         },
         onError: (err) => toast.error(getErrorMessage(err)),
       }
     );
-    setShowDeleteDialog(false);
   }
 
   function handleDuplicate() {
@@ -454,7 +471,7 @@ export function ResourceDetailPage() {
         open={showDeleteDialog}
         onOpenChange={setShowDeleteDialog}
         title={t("resources.confirmDelete", { type: typeName })}
-        description={t("resources.confirmDelete", { type: typeName })}
+        description={t("resources.confirmDeleteDescription", { type: typeName, defaultValue: "This action cannot be undone. The {{type}} will be permanently deleted." })}
         confirmLabel={t("common.delete")}
         cancelLabel={t("common.cancel")}
         onConfirm={handleDelete}

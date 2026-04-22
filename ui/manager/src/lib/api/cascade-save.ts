@@ -23,6 +23,15 @@ export interface CascadeResult {
   newAgentVersion?: number;
 }
 
+export interface CascadeOptions {
+  /**
+   * When true, skip the resource save (step 1) — used when the resource
+   * was already saved and we only need to cascade version updates to
+   * parent workflow and agent.
+   */
+  skipResourceSave?: boolean;
+}
+
 /**
  * Save a resource config, then cascade version updates up through
  * the package → agent chain.
@@ -35,22 +44,31 @@ export async function cascadeSaveResource(
   resourceId: string,
   resourceVersion: number,
   body: unknown,
-  context?: CascadeContext
+  context?: CascadeContext,
+  options?: CascadeOptions
 ): Promise<CascadeResult> {
-  // 1. Save the resource config
-  const saveResult = await updateResource(rt, resourceId, resourceVersion, body);
-  const newResourceVersion = parseVersionFromLocation(saveResult.location);
+  let newResourceVersion: number;
+
+  if (options?.skipResourceSave) {
+    // Resource was already saved — use the passed version directly
+    newResourceVersion = resourceVersion;
+  } else {
+    // 1. Save the resource config
+    const saveResult = await updateResource(rt, resourceId, resourceVersion, body);
+    newResourceVersion = parseVersionFromLocation(saveResult.location);
+  }
 
   if (!context) {
     return { newResourceVersion };
   }
 
   // 2. Update the parent package
-  const oldResourceUri = buildResourceUri(rt, resourceId, resourceVersion);
   const newResourceUri = buildResourceUri(rt, resourceId, newResourceVersion);
 
   const pkg = await getWorkflow(context.workflowId, context.packageVersion);
-  const updatedPkg = replaceExtensionUri(pkg, oldResourceUri, newResourceUri);
+  const updatedPkg = replaceExtensionUriByResourceId(
+    pkg, rt, resourceId, newResourceUri
+  );
   const pkgResult = await updateWorkflow(
     context.workflowId,
     context.packageVersion,
@@ -95,17 +113,23 @@ function buildResourceUri(
   return `${baseType}/${rt.store}/${rt.plural}/${id}?version=${version}`;
 }
 
-/** Replace old extension URI with new one inside a package config */
-function replaceExtensionUri(
+/**
+ * Replace extension URI matching a resource ID inside a workflow config.
+ * Matches by resource store path pattern (not exact URI) so it works
+ * regardless of which version the workflow currently references.
+ */
+function replaceExtensionUriByResourceId(
   pkg: WorkflowConfiguration,
-  oldUri: string,
+  rt: ResourceTypeConfig,
+  resourceId: string,
   newUri: string
 ): WorkflowConfiguration {
+  const pattern = `/${rt.store}/${rt.plural}/${resourceId}`;
   return {
     ...pkg,
     workflowSteps: pkg.workflowSteps.map((ext) => {
       const uri = ext.config?.uri;
-      if (typeof uri === "string" && uri === oldUri) {
+      if (typeof uri === "string" && uri.includes(pattern)) {
         return { ...ext, config: { ...ext.config, uri: newUri } };
       }
       return ext;

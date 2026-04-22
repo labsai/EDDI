@@ -8,7 +8,7 @@ import {
   deleteWorkflow,
   type WorkflowConfiguration,
 } from "@/lib/api/workflows";
-import { parseResourceUri, updateAgent, type AgentDescriptor } from "@/lib/api/agents";
+import { parseResourceUri, getAgent, updateAgent, type AgentDescriptor } from "@/lib/api/agents";
 import { updateDescriptor } from "@/lib/api/descriptors";
 
 const WORKFLOWS_KEY = ["workflows"] as const;
@@ -133,7 +133,10 @@ export function useUpdateAgentWorkflows() {
       version: number;
       workflows: string[];
     }) => {
-      return updateAgent(agentId, version, { workflows });
+      // Read the full agent first — the backend does a full document replacement
+      // on PUT, so sending only { workflows } would strip all other config fields.
+      const agent = await getAgent(agentId, version);
+      return updateAgent(agentId, version, { ...agent, workflows });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["agents"] });

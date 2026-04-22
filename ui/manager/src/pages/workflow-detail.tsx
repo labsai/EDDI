@@ -246,12 +246,12 @@ export function WorkflowDetailPage() {
       {
         onSuccess: () => {
           toast.success(t("common.delete") + " \u2713");
+          setShowDeleteDialog(false);
           navigate("/manage/workflows");
         },
         onError: (err) => toast.error(getErrorMessage(err)),
       }
     );
-    setShowDeleteDialog(false);
   }
 
   const handleVersionChange = useCallback((v: number) => {
