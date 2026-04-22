@@ -142,12 +142,13 @@ export function ResourceDetailPage() {
           lastModifiedOn: d.lastModifiedOn,
         };
       })
-    : [{ version: currentVersion }];
+    : [{ version: currentVersion ?? 1 }];
 
   // All hooks are above — safe to do early returns below
 
   const handleSave = useCallback(
     async (jsonString: string) => {
+      if (currentVersion === undefined) return;
       setSaveSuccess(false);
       try {
         const parsed = JSON.parse(jsonString);
@@ -213,7 +214,7 @@ export function ResourceDetailPage() {
 
   const handleSaveAndDeploy = useCallback(
     async (jsonString: string) => {
-      if (!cascadeContext || !agentCtx) return;
+      if (!cascadeContext || !agentCtx || currentVersion === undefined) return;
       try {
         const parsed = JSON.parse(jsonString);
         await saveAndDeploy({
@@ -301,7 +302,7 @@ export function ResourceDetailPage() {
 
   function handleDuplicate() {
     duplicateMutation.mutate(
-      { id: id ?? "", version: currentVersion },
+      { id: id ?? "", version: currentVersion ?? 1 },
       {
         onSuccess: (result) => {
           toast.success(t("common.duplicate") + " ✓");
@@ -422,7 +423,7 @@ export function ResourceDetailPage() {
             resourceId={id ?? ""}
             data={JSON.stringify(data, null, 2)}
             versions={versions}
-            currentVersion={currentVersion}
+            currentVersion={currentVersion ?? 1}
             onVersionChange={setCurrentVersion}
             onSave={handleSave}
             onSaveAndDeploy={cascadeContext && agentCtx ? handleSaveAndDeploy : undefined}
