@@ -47,7 +47,7 @@ All repos live under `c:\dev\git\`:
 
 ### During Work
 
-- **Branch**: Ensure you are on the correct user-specified feature branch.
+- **Branch**: **NEVER commit directly to `main`.** Always create a feature branch (e.g. `feat/…`, `fix/…`) before making changes. If you find yourself on `main`, create and switch to a new branch first.
 - **Commit often** with conventional commits: `feat: description`
 
 ### Quality Gates
@@ -146,7 +146,7 @@ All 9 resource types are defined in `src/lib/api/resources.ts` as `RESOURCE_TYPE
 >
 > - Workflows reference a **parser** → parsers reference **dictionaries**
 > - The Manager's `dictionary` slug maps to `dictionarystore` (what users edit)
-> - The `pipeline-builder.tsx` storeMap maps **both** stores → `dictionary` slug
+> - `parserstore` has **no mapping** in `pipeline-builder.tsx` — parser extensions show "Editor not available" because parsers don't have a standalone editor (they are infrastructure binding dictionaries to the pipeline)
 
 #### 3. MSW Mock Handlers
 
