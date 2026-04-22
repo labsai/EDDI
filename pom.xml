@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>ai.labs</groupId>
     <artifactId>eddi</artifactId>
-    <version>6.0.1</version>
+    <version>6.0.2</version>
     <properties>
         <compiler-plugin.version>3.15.0</compiler-plugin.version>
         <maven.compiler.source>25</maven.compiler.source>
@@ -16,7 +16,7 @@
         <quarkus.microprofile.version>3.0.0.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.34.3</quarkus.platform.version>
+        <quarkus.platform.version>3.34.5</quarkus.platform.version>
         <langchain4j-beta.version>1.13.0-beta23</langchain4j-beta.version>
         <langchain4j.version>1.13.0</langchain4j.version>
         <langchain4j-libs.version>1.13.0</langchain4j-libs.version>
@@ -373,7 +373,7 @@
         <dependency>
             <groupId>org.wiremock</groupId>
             <artifactId>wiremock-standalone</artifactId>
-            <version>3.13.0</version>
+            <version>3.13.2</version>
             <scope>test</scope>
         </dependency>
         <!-- Jazzer: coverage-guided fuzz testing for security-critical parsers -->

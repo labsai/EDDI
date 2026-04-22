@@ -80,6 +80,7 @@
 - [RedHat OpenShift](redhat-openshift.md)
 - [Setting Up EDDI on AWS with MongoDB Atlas](setup-eddi-on-aws-with-mongodb-atlas.md)
 - [Release & Versioning Strategy](release-versioning.md)
+- [Release Signing & Verification](release-signing.md)
 - [Metrics & Monitoring](metrics.md)
 - [Log Administration](log-administration.md)
 

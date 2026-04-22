@@ -2,9 +2,9 @@
 
 # E.D.D.I — Multi-Agent Orchestration Middleware for Conversational AI
 
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12355/badge)](https://www.bestpractices.dev/projects/12355) [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/labsai/EDDI/badge)](https://securityscorecards.dev/viewer/?uri=github.com/labsai/EDDI)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12355/badge)](https://www.bestpractices.dev/projects/12355) [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/labsai/EDDI/badge)](https://securityscorecards.dev/viewer/?uri=github.com/labsai/EDDI) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade)
 
-[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) ![Tests](https://img.shields.io/badge/tests-4%2C600%2B-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-%3E80%25-brightgreen)
+[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) ![Tests](https://img.shields.io/badge/tests-5%2C100%2B-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-%3E80%25-brightgreen)
 
 [![Docker Pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi) [![Repository: AI Ready](https://img.shields.io/badge/Repository-AI_Ready-blueviolet?logo=robot)](AGENTS.md)
 
@@ -12,7 +12,7 @@
 
 Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker image**. Native support for **MCP** (Model Context Protocol), **A2A** (Agent-to-Agent), **Slack**, **OpenAPI**, and **OAuth 2.0**.
 
-**Latest version: 6.0.1** · [Website](https://eddi.labs.ai/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
+**Latest version: 6.0.2** · [Website](https://eddi.labs.ai/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
 
 ---
 
@@ -407,7 +407,7 @@ Building a Quarkus app that talks to EDDI? Use the **[quarkus-eddi](https://gith
 <dependency>
     <groupId>io.quarkiverse.eddi</groupId>
     <artifactId>quarkus-eddi</artifactId>
-    <version>6.0.1</version>
+    <version>6.0.2</version>
 </dependency>
 ```
 
