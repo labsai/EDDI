@@ -607,9 +607,16 @@ EDDI ships with security-by-default for production deployments:
 - **Secrets encrypted at rest** — Envelope encryption (PBKDF2 → AES-256-GCM) with per-deployment salt. Never plaintext in DB
 - **SSRF protection** — All LLM tool HTTP calls go through `SafeHttpClient` with private IP blocking, redirect validation, and scheme enforcement
 - **Security headers** — `X-Content-Type-Options`, `X-Frame-Options`, `Content-Security-Policy` configured out of the box
-- **CI scanning** — CodeQL (semantic analysis) + Trivy (CVE scanning) + dependency review on every PR
+- **CI/CD security gates** — Every push/PR is scanned by:
+  - **CodeQL** — Semantic SAST analysis with `security-extended` queries
+  - **Trivy** — CVE scanning for both filesystem dependencies and Docker images (blocking on CRITICAL/HIGH)
+  - **Gitleaks** — Git history scanning to prevent secret/credential leakage
+  - **ZAP** — DAST API scanning against the live Docker image (report-only)
+  - **CycloneDX** — SBOM generation for supply chain transparency
+  - **Jazzer** — Coverage-guided fuzz testing for security-critical parsers (PathNavigator, MatchingUtilities)
+  - All actions SHA-pinned to prevent supply-chain attacks
 
-For vulnerability reports, see our [Security Policy](SECURITY.md). For architecture details, see [Security Architecture](docs/architecture.md#security-architecture).
+For vulnerability reports, see our [Security Policy](SECURITY.md). For architecture details, see [Security Architecture](docs/security.md).
 
 ## 📜 Code of Conduct
 

@@ -268,6 +268,8 @@ jobs:
   codeql:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.code == 'true'
     permissions:
       security-events: write
       contents: read
@@ -299,10 +301,12 @@ jobs:
         with:
           category: "/language:java"
 
-  # ─── Job 2c: Trivy Security Scan ───────────────────────────────
+  # ─── Job 2c: Trivy Filesystem Scan ─────────────────────────────
   trivy-scan:
-    name: Trivy Security Scan
+    name: Trivy Filesystem Scan
     runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.code == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -316,6 +320,52 @@ jobs:
           exit-code: 1
           ignore-unfixed: true
           format: table
+          trivyignores: .trivyignore
+
+  # ─── Job 2d: Gitleaks Secret Scanning ──────────────────────────
+  gitleaks:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ─── Job 2e: CycloneDX SBOM Generation ─────────────────────────
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.event_name == 'push'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Set execute permission for mvnw
+        run: chmod +x mvnw
+
+      - name: Generate CycloneDX SBOM
+        run: ./mvnw org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeBom -DskipTests -B --no-transfer-progress
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: sbom-cyclonedx
+          path: target/bom.json
+          retention-days: 90
 
   # ─── Job 3: Docker Build & Push ─────────────────────────────────
   docker:
@@ -411,6 +461,17 @@ jobs:
             ${TAGS} \
             .
 
+      - name: Scan Docker image for vulnerabilities
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.DOCKER_IMAGE }}:${{ steps.meta.outputs.primary-tag }}
+          severity: CRITICAL,HIGH
+          exit-code: 1
+          ignore-unfixed: true
+          format: table
+          trivyignores: .trivyignore
+
       - name: Login to Docker Hub
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
         with:
@@ -497,10 +558,121 @@ jobs:
             exit 1
           fi
 
+      - name: Verify security headers
+        run: |
+          echo "=== Security Headers Check ==="
+          HEADERS=$(curl -sI http://localhost:7070/q/health/ready)
+          echo "$HEADERS"
+          echo ""
+
+          MISSING=0
+          check_header() {
+            if echo "$HEADERS" | grep -qi "$1"; then
+              echo "✅ $1 present"
+            else
+              echo "⚠️  $1 MISSING"
+              MISSING=1
+            fi
+          }
+
+          check_header "X-Content-Type-Options"
+          check_header "X-Frame-Options"
+          check_header "Content-Security-Policy"
+
+          echo ""
+          if [ "$MISSING" -eq 1 ]; then
+            echo "### ⚠️ Security Headers" >> $GITHUB_STEP_SUMMARY
+            echo "Some recommended security headers are missing — see job output for details." >> $GITHUB_STEP_SUMMARY
+            echo "::warning::Recommended security headers missing — review smoke-test output"
+          else
+            echo "### ✅ Security Headers" >> $GITHUB_STEP_SUMMARY
+            echo "All checked security headers are present." >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: Cleanup
         if: always()
         run: |
           docker rm -f eddi 2>/dev/null || true
+          docker rm -f mongodb 2>/dev/null || true
+
+  # ─── Job 4b: ZAP API Scan (DAST) ────────────────────────────────
+  zap-scan:
+    name: ZAP API Scan
+    runs-on: ubuntu-latest
+    needs: [smoke-test, docker]
+    # Only run on pushes (smoke-test already has the running container infrastructure)
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Start MongoDB
+        run: |
+          docker run -d --name mongodb \
+            --network host \
+            mongo:6.0
+          echo "Waiting for MongoDB..."
+          for i in $(seq 1 15); do
+            if docker exec mongodb mongosh --eval "db.runCommand({ping:1})" > /dev/null 2>&1; then
+              echo "✅ MongoDB ready"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Start EDDI
+        run: |
+          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
+          if [ -z "$PRIMARY_TAG" ]; then
+            POM_VERSION=$(grep -m1 '<version>' pom.xml | sed 's/.*<version>\(.*\)<\/version>.*/\1/')
+            PRIMARY_TAG="${POM_VERSION}-b${{ github.run_number }}"
+          fi
+          echo "Starting ${DOCKER_IMAGE}:${PRIMARY_TAG}..."
+
+          docker pull ${DOCKER_IMAGE}:${PRIMARY_TAG} || true
+          docker run -d --name eddi-zap \
+            --network host \
+            -e "MONGODB_CONNECTIONSTRING=mongodb://localhost:27017/eddi-zap?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000" \
+            -e "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true" \
+            ${DOCKER_IMAGE}:${PRIMARY_TAG}
+
+      - name: Wait for healthy
+        run: |
+          echo "Waiting for EDDI to start..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:7070/q/health/ready > /dev/null 2>&1; then
+              echo "✅ EDDI is healthy after $((i * 2))s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "❌ EDDI failed to start within 60s"
+          docker logs eddi-zap
+          exit 1
+
+      - name: ZAP API Scan
+        uses: zaproxy/action-api-scan@5158fe4d9d8fcc75ea204db81317cce7f9e5453d # v0.10.0
+        with:
+          target: http://localhost:7070/openapi
+          format: openapi
+          fail_action: false  # Report-only — promote to true after tuning false positives
+          cmd_options: '-a -z "-config api.disablekey=true"'
+          allow_issue_writing: false
+
+      - name: Upload ZAP report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: zap-report
+          path: report_json.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f eddi-zap 2>/dev/null || true
           docker rm -f mongodb 2>/dev/null || true
 
   # ─── Job 5: Red Hat Preflight — PR Dry-Run ──────────────────────
@@ -683,7 +855,7 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
-      [detect-changes, build-and-test, integration-test, docker, smoke-test, preflight-check, preflight-push]
+      [detect-changes, build-and-test, integration-test, docker, smoke-test, zap-scan, trivy-scan, gitleaks, preflight-check, preflight-push]
 
     steps:
       - name: Send build notification
@@ -711,6 +883,9 @@ jobs:
           IT="${{ needs.integration-test.result }}"
           DOCKER="${{ needs.docker.result }}"
           SMOKE="${{ needs.smoke-test.result }}"
+          ZAP="${{ needs.zap-scan.result }}"
+          GITLEAKS="${{ needs.gitleaks.result }}"
+          TRIVY="${{ needs.trivy-scan.result }}"
           PREFLIGHT_PR="${{ needs.preflight-check.result }}"
           PREFLIGHT_PUSH="${{ needs.preflight-push.result }}"
           # Merge: whichever preflight job actually ran wins (the other is "skipped")
@@ -732,7 +907,7 @@ jobs:
           }
 
           # Overall status
-          if [ "$BUILD" = "success" ] && [ "$IT" != "failure" ] && [ "$DOCKER" != "failure" ] && [ "$SMOKE" != "failure" ]; then
+          if [ "$BUILD" = "success" ] && [ "$IT" != "failure" ] && [ "$DOCKER" != "failure" ] && [ "$SMOKE" != "failure" ] && [ "$GITLEAKS" != "failure" ] && [ "$TRIVY" != "failure" ]; then
             OVERALL_ICON="✅"
             OVERALL_TEXT="Build Passed"
           else
@@ -764,6 +939,8 @@ jobs:
             --arg it_icon "$(status_icon $IT)" \
             --arg docker_icon "$(status_icon $DOCKER)" \
             --arg smoke_icon "$(status_icon $SMOKE)" \
+            --arg gitleaks_icon "$(status_icon $GITLEAKS)" \
+            --arg trivy_icon "$(status_icon $TRIVY)" \
             --arg preflight_icon "$(status_icon $PREFLIGHT)" \
             --arg run_url "$RUN_URL" \
             --arg run_number "$RUN_NUMBER" \
@@ -787,6 +964,8 @@ jobs:
                     { type: "mrkdwn", text: ($it_icon + " Integration Tests") },
                     { type: "mrkdwn", text: ($docker_icon + " Docker Push") },
                     { type: "mrkdwn", text: ($smoke_icon + " Smoke Test") },
+                    { type: "mrkdwn", text: ($gitleaks_icon + " Secret Scan") },
+                    { type: "mrkdwn", text: ($trivy_icon + " Vuln Scan") },
                     { type: "mrkdwn", text: ($preflight_icon + " Red Hat Preflight") }
                   ]
                 },

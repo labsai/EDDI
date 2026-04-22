@@ -397,10 +397,13 @@ class MigrationManagerTest {
         @Test
         @DisplayName("skipConversationMemories=false — should also migrate conversation memory")
         void migrationWithConversationMemories() {
-            // Create a manager with skipConversationMemories=false
-            MongoCollection<Document> mockColl = mock(MongoCollection.class);
-            when(database.getCollection(anyString())).thenReturn(mockColl);
-            when(mockColl.find()).thenReturn(mock(com.mongodb.client.FindIterable.class));
+            // Use separate mocks so we can verify conversation memory collection access
+            MongoCollection<Document> defaultColl = mock(MongoCollection.class, "defaultColl");
+            MongoCollection<Document> conversationMemoryColl = mock(MongoCollection.class, "conversationMemoryColl");
+            when(database.getCollection(anyString())).thenReturn(defaultColl);
+            when(database.getCollection(COLLECTION_CONVERSATION_MEMORY)).thenReturn(conversationMemoryColl);
+            when(defaultColl.find()).thenReturn(mock(com.mongodb.client.FindIterable.class));
+            when(conversationMemoryColl.find()).thenReturn(mock(com.mongodb.client.FindIterable.class));
 
             var managerWithMemories = new MigrationManager(database, migrationLogStore, false);
             when(migrationLogStore.readMigrationLog(MIGRATION_CONFIRMATION)).thenReturn(null);
@@ -410,6 +413,8 @@ class MigrationManagerTest {
 
             assertTrue(completed[0]);
             verify(migrationLogStore).createMigrationLog(any(MigrationLog.class));
+            // Verify conversation memory collection was actually iterated
+            verify(conversationMemoryColl).find();
         }
     }
 

@@ -107,9 +107,13 @@ public class PathNavigator {
             if (indexStr != null && current instanceof Map<?, ?> parentMap) {
                 Object list = parentMap.get(key);
                 if (list instanceof List<?> l) {
-                    int index = Integer.parseInt(indexStr);
-                    if (index >= 0 && index < l.size()) {
-                        ((List<Object>) l).set(index, value);
+                    try {
+                        int index = Integer.parseInt(indexStr);
+                        if (index >= 0 && index < l.size()) {
+                            ((List<Object>) l).set(index, value);
+                        }
+                    } catch (NumberFormatException _) {
+                        // Index exceeds int range — ignore silently
                     }
                 }
             } else if (current instanceof Map<?, ?>) {
@@ -150,11 +154,15 @@ public class PathNavigator {
 
         // Handle array index if present
         if (indexStr != null && current instanceof List<?> list) {
-            int index = Integer.parseInt(indexStr);
-            if (index >= 0 && index < list.size()) {
-                current = list.get(index);
-            } else {
-                return null;
+            try {
+                int index = Integer.parseInt(indexStr);
+                if (index >= 0 && index < list.size()) {
+                    current = list.get(index);
+                } else {
+                    return null;
+                }
+            } catch (NumberFormatException _) {
+                return null; // Index exceeds int range
             }
         }
 

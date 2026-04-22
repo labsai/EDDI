@@ -332,6 +332,52 @@ evaluate whether this meets their security requirements.
 
 ---
 
+## Supply Chain & CI/CD Security
+
+EDDI's CI/CD pipeline enforces multiple automated security gates before any code reaches production. All GitHub Actions are **SHA-pinned** to immutable commit hashes to prevent supply-chain attacks via tag hijacking.
+
+### Security Scanning Pipeline
+
+| Tool | Type | Scope | Mode | Override |
+|------|------|-------|------|----------|
+| **CodeQL** | SAST | Java source code | Blocking (PR) + weekly deep scan | N/A |
+| **Trivy** | CVE scanning | Filesystem deps + Docker image | Blocking (CRITICAL/HIGH) | `.trivyignore` |
+| **Gitleaks** | Secret scanning | Full git history | Blocking | `.gitleaksignore` |
+| **ZAP** | DAST | Live API (OpenAPI spec) | Report-only | `fail_action` in workflow |
+| **CycloneDX** | SBOM | Maven dependency tree | Artifact generation | N/A |
+| **Jazzer** | Fuzz testing | PathNavigator, MatchingUtilities | JUnit integration | N/A |
+
+### Override Files
+
+For audited false positives, EDDI provides override files at the repository root:
+
+- **`.trivyignore`** — Suppress specific CVEs with mandatory justification comments
+- **`.gitleaksignore`** — Suppress specific Gitleaks fingerprints with justification
+
+Both files should be reviewed periodically to ensure suppressions remain valid.
+
+### Fuzz Testing
+
+Security-critical input parsers are tested with [Jazzer](https://github.com/CodeIntelligenceTesting/jazzer) coverage-guided fuzzing:
+
+- **`PathNavigator`** — Safe path navigation (replaced OGNL). Fuzz targets: `getValue`, `setValue`, arithmetic paths
+- **`MatchingUtilities`** — Condition evaluation for DynamicValueMatcher
+
+In CI, fuzz tests run as standard JUnit regression tests. For deep coverage-guided fuzzing locally:
+
+```bash
+./mvnw test -Dtest=PathNavigatorFuzzTest \
+  -Djazzer.instrument=ai.labs.eddi.utils.PathNavigator
+```
+
+### Docker Image Security
+
+- Trivy scans the built Docker image for CRITICAL/HIGH CVEs **before** pushing to Docker Hub
+- Red Hat Preflight checks verify container certification compliance (labels, licenses)
+- Security headers are validated against the running container in the smoke test
+
+---
+
 ## See Also
 
 - [LangChain Integration](langchain.md) — Full agent configuration reference
