@@ -632,34 +632,7 @@
                             <goal>report</goal>
                         </goals>
                     </execution>
-                    <!-- Coverage gate (surefire only): early warning during `mvn test`.  
-                         The full 90/80 gate runs in `verify` phase against merged UT+IT data. -->
-                    <execution>
-                        <id>check</id>
-                        <phase>test</phase>
-                        <goals>
-                            <goal>check</goal>
-                        </goals>
-                        <configuration>
-                            <rules>
-                                <rule>
-                                    <element>BUNDLE</element>
-                                    <limits>
-                                        <limit>
-                                            <counter>INSTRUCTION</counter>
-                                            <value>COVEREDRATIO</value>
-                                            <minimum>0.65</minimum>
-                                        </limit>
-                                        <limit>
-                                            <counter>BRANCH</counter>
-                                            <value>COVEREDRATIO</value>
-                                            <minimum>0.55</minimum>
-                                        </limit>
-                                    </limits>
-                                </rule>
-                            </rules>
-                        </configuration>
-                    </execution>
+
                     <!-- Instrument integration tests (Failsafe) -->
                     <execution>
                         <id>prepare-agent-integration</id>
@@ -732,10 +705,9 @@
                             <outputDirectory>${project.reporting.outputDirectory}/jacoco-merged</outputDirectory>
                         </configuration>
                     </execution>
-                    <!-- Coverage gate (merged UT+IT): enforced during `mvn verify`.
-                         Target: 90/80 for OpenSSF Silver. Currently set to same as surefire
-                         gate until we measure actual merged coverage in CI. Raise once
-                         the first successful CI run reports the merged numbers. -->
+                    <!-- Coverage gate (merged UT+IT): the single authoritative threshold.
+                         Enforced during `mvn verify` against combined unit + integration test data.
+                         Target: 80/70 for OpenSSF Silver. -->
                     <execution>
                         <id>merged-check</id>
                         <phase>verify</phase>

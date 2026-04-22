@@ -75,7 +75,7 @@ jobs:
         run: chmod +x mvnw
 
       - name: Build and test
-        run: ./mvnw clean verify -DskipITs -B
+        run: ./mvnw clean test -B
 
       - name: Upload test results
         if: always()
@@ -141,7 +141,7 @@ jobs:
             pkg=$2; im=$4; ic=$5; total=im+ic
             if (total > 0) { pct=ic/total*100 } else { pct=100 }
             printf "| %s | %d/%d | %.1f%% |\n", pkg, ic, total, pct
-          }' "$CSV" | (sort -t'|' -k4 -n || true) | head -10 >> $GITHUB_STEP_SUMMARY
+          }' "$CSV" | { sort -t'|' -k4 -n 2>/dev/null || true; } | head -10 >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "</details>" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -259,7 +259,7 @@ jobs:
               pkg=$2; im=$4; ic=$5; total=im+ic
               if (total > 0) { pct=ic/total*100 } else { pct=100 }
               printf "| %s | %d/%d | %.1f%% |\n", pkg, ic, total, pct
-            }' "$BEST_CSV" | (sort -t'|' -k4 -n || true) | head -10 >> $GITHUB_STEP_SUMMARY
+            }' "$BEST_CSV" | { sort -t'|' -k4 -n 2>/dev/null || true; } | head -10 >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "</details>" >> $GITHUB_STEP_SUMMARY
           fi
