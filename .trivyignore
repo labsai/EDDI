@@ -1,0 +1,15 @@
+# Trivy Ignore File
+# ─────────────────────────────────────────────────────────────────
+# Add CVE IDs here to suppress known false positives or accepted risks.
+# Each entry must be justified with a comment explaining why.
+#
+# Format:
+#   # <reason for suppression>
+#   CVE-YYYY-NNNNN
+#
+# Example:
+#   # Disputed CVE — no actual impact in our usage of library X
+#   CVE-2024-99999
+#
+# Review this file periodically to ensure suppressions are still valid.
+# ─────────────────────────────────────────────────────────────────

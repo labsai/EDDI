@@ -124,7 +124,7 @@ public class ToolCacheService {
                 cacheMissCounter.increment();
 
                 // Record miss by tool name
-                meterRegistry.counter("eddi.tool.cache.misses", "tool", toolName).increment();
+                meterRegistry.counter("eddi.tool.cache.misses.by_tool", "tool", toolName).increment();
 
                 LOGGER.debug("Cache miss for " + toolName);
                 return null;
@@ -135,7 +135,7 @@ public class ToolCacheService {
             cacheHitCounter.increment();
 
             // Record hit by tool name
-            meterRegistry.counter("eddi.tool.cache.hits", "tool", toolName).increment();
+            meterRegistry.counter("eddi.tool.cache.hits.by_tool", "tool", toolName).increment();
 
             LOGGER.debug(String.format("Cache hit for %s (age: %dms)", toolName, System.currentTimeMillis() - cached.cachedAt));
             return cached.result;
@@ -161,7 +161,7 @@ public class ToolCacheService {
             cache.put(key, cached, ttl, unit);
 
             // Record put by tool name
-            meterRegistry.counter("eddi.tool.cache.puts", "tool", toolName).increment();
+            meterRegistry.counter("eddi.tool.cache.puts.by_tool", "tool", toolName).increment();
 
             LOGGER.debug(String.format("Cached result for %s (TTL: %d %s)", toolName, ttl, unit.toString().toLowerCase()));
         });

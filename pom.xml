@@ -343,6 +343,14 @@
             <artifactId>quarkus-junit</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- quarkus-jacoco: Quarkus-native JaCoCo instrumentation for @QuarkusTest ITs.
+             Writes coverage data from within the Quarkus classloader, avoiding the
+             Windows agent path quoting issue that breaks the standard JaCoCo agent approach. -->
+        <dependency>
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-jacoco</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>io.rest-assured</groupId>
             <artifactId>rest-assured</artifactId>
@@ -359,6 +367,20 @@
             <groupId>org.mozilla</groupId>
             <artifactId>rhino-engine</artifactId>
             <version>1.9.1</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- WireMock: embedded HTTP mock server for LlmTask and ApiCallsTask integration tests -->
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
+            <version>3.13.0</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Jazzer: coverage-guided fuzz testing for security-critical parsers -->
+        <dependency>
+            <groupId>com.code-intelligence</groupId>
+            <artifactId>jazzer-junit</artifactId>
+            <version>0.30.0</version>
             <scope>test</scope>
         </dependency>
         <!-- Testcontainers: container-based integration testing for E2E agent tests -->
@@ -486,7 +508,7 @@
                 <version>${surefire-plugin.version}</version>
                 <configuration>
                     <!-- @{argLine} preserves JaCoCo's injected agent arg -->
-                    <argLine>@{argLine} -XX:+EnableDynamicAgentLoading -Xshare:off</argLine>
+                    <argLine>@{argLine} -XX:+EnableDynamicAgentLoading -Xshare:off --enable-native-access=ALL-UNNAMED</argLine>
                     <excludes>
                         <exclude>**/*IT.java</exclude>
                     </excludes>
@@ -514,6 +536,10 @@
                     <includes>
                         <include>**/*IT.java</include>
                     </includes>
+                    <!-- NOTE: @{argLine} for JaCoCo IT instrumentation is intentionally NOT added here.
+                         On Windows, the JaCoCo agent path with backslashes breaks the Quarkus
+                         FacadeClassLoader. CI (Linux) uses the quarkus-jacoco extension instead.
+                         See ContainerBaseIT.java line 24 for details. -->
                     <!-- Kill the forked test process if it hasn't completed in 15 minutes.
                          Prevents CI from hanging indefinitely when Docker image builds
                          or container startup fails to propagate errors. -->
@@ -573,6 +599,26 @@
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>0.8.14</version>
+                <!-- Plugin-level excludes: applied to report AND check goals.
+                     Excludes CDI bootstrap wiring, external integration adapters,
+                     REST client libraries, and import/export services that require
+                     a running Quarkus container (@QuarkusTest ITs cover these). -->
+                <configuration>
+                    <excludes>
+                        <!-- CDI bootstrap producers: @Produces methods that wire beans,
+                             zero business logic, verified by container startup in @QuarkusTest ITs -->
+                        <exclude>**/bootstrap/**</exclude>
+                        <!-- Generated REST client wrappers (no logic, just JAX-RS proxy interfaces) -->
+                        <exclude>**/runtime/client/**</exclude>
+                        <!-- LLM provider SDK factory builders: each wraps a single external SDK
+                             constructor call (e.g., OpenAI, Anthropic, Bedrock). No business logic,
+                             cannot be tested without live API keys. -->
+                        <exclude>**/llm/impl/builder/**</exclude>
+                        <!-- Slack integration adapter: requires live Slack webhook API,
+                             not testable without external service -->
+                        <exclude>**/integrations/slack/**</exclude>
+                    </excludes>
+                </configuration>
                 <executions>
                     <execution>
                         <goals>
@@ -586,28 +632,7 @@
                             <goal>report</goal>
                         </goals>
                     </execution>
-                    <!-- Coverage gate: fail build if coverage drops below threshold -->
-                    <execution>
-                        <id>check</id>
-                        <phase>test</phase>
-                        <goals>
-                            <goal>check</goal>
-                        </goals>
-                        <configuration>
-                            <rules>
-                                <rule>
-                                    <element>BUNDLE</element>
-                                    <limits>
-                                        <limit>
-                                            <counter>LINE</counter>
-                                            <value>COVEREDRATIO</value>
-                                            <minimum>0.35</minimum>
-                                        </limit>
-                                    </limits>
-                                </rule>
-                            </rules>
-                        </configuration>
-                    </execution>
+
                     <!-- Instrument integration tests (Failsafe) -->
                     <execution>
                         <id>prepare-agent-integration</id>
@@ -615,12 +640,38 @@
                             <goal>prepare-agent-integration</goal>
                         </goals>
                     </execution>
+                    <!-- Merge IT-only data: failsafe agent + quarkus-jacoco extension.
+                         @QuarkusTest ITs write to jacoco-quarkus.exec (not jacoco-it.exec),
+                         so we merge both to get a complete IT-only picture. -->
+                    <execution>
+                        <id>merge-it</id>
+                        <phase>post-integration-test</phase>
+                        <goals>
+                            <goal>merge</goal>
+                        </goals>
+                        <configuration>
+                            <fileSets>
+                                <fileSet>
+                                    <directory>${project.build.directory}</directory>
+                                    <includes>
+                                        <include>jacoco-it.exec</include>
+                                        <include>jacoco-quarkus.exec</include>
+                                    </includes>
+                                </fileSet>
+                            </fileSets>
+                            <destFile>${project.build.directory}/jacoco-it-all.exec</destFile>
+                        </configuration>
+                    </execution>
                     <execution>
                         <id>report-integration</id>
                         <phase>post-integration-test</phase>
                         <goals>
-                            <goal>report-integration</goal>
+                            <goal>report</goal>
                         </goals>
+                        <configuration>
+                            <dataFile>${project.build.directory}/jacoco-it-all.exec</dataFile>
+                            <outputDirectory>${project.reporting.outputDirectory}/jacoco-it</outputDirectory>
+                        </configuration>
                     </execution>
                     <!-- Merge UT + IT data files for combined coverage -->
                     <execution>
@@ -636,6 +687,7 @@
                                     <includes>
                                         <include>jacoco.exec</include>
                                         <include>jacoco-it.exec</include>
+                                        <include>jacoco-quarkus.exec</include>
                                     </includes>
                                 </fileSet>
                             </fileSets>
@@ -651,6 +703,36 @@
                         <configuration>
                             <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
                             <outputDirectory>${project.reporting.outputDirectory}/jacoco-merged</outputDirectory>
+                        </configuration>
+                    </execution>
+                    <!-- Coverage gate (merged UT+IT): the single authoritative threshold.
+                         Enforced during `mvn verify` against combined unit + integration test data.
+                         Target: 80/70 for OpenSSF Silver. -->
+                    <execution>
+                        <id>merged-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>INSTRUCTION</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.70</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.60</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
                         </configuration>
                     </execution>
                 </executions>

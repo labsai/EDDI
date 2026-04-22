@@ -3,6 +3,8 @@ package ai.labs.eddi.engine.audit;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nats.client.Connection;
 import io.nats.client.JetStream;
 import jakarta.annotation.PostConstruct;
@@ -55,6 +57,7 @@ public class AuditLedgerService {
     private final boolean agentSigningEnabled;
     private final String defaultTenantId;
     private final AgentSigningService agentSigningService;
+    private final ObjectMapper objectMapper;
 
     private byte[] hmacKey;
     private final ConcurrentLinkedQueue<AuditEntry> queue = new ConcurrentLinkedQueue<>();
@@ -69,7 +72,7 @@ public class AuditLedgerService {
             @ConfigProperty(name = "eddi.audit.agent-signing-enabled", defaultValue = "true") boolean agentSigningEnabled,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             io.micrometer.core.instrument.MeterRegistry meterRegistry, Instance<Connection> natsConnectionInstance,
-            AgentSigningService agentSigningService) {
+            AgentSigningService agentSigningService, ObjectMapper objectMapper) {
         this.auditStore = auditStore;
         this.enabled = enabled;
         this.flushIntervalSeconds = flushIntervalSeconds;
@@ -80,6 +83,7 @@ public class AuditLedgerService {
         this.droppedCounter = meterRegistry.counter("eddi_audit_entries_dropped_total");
         this.natsConnectionInstance = natsConnectionInstance;
         this.agentSigningService = agentSigningService;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -89,7 +93,7 @@ public class AuditLedgerService {
     static AuditLedgerService createForTesting(IAuditStore auditStore, boolean enabled, int flushIntervalSeconds, String masterKeyConfig,
                                                io.micrometer.core.instrument.MeterRegistry meterRegistry) {
         return new AuditLedgerService(auditStore, enabled, flushIntervalSeconds, Optional.ofNullable(masterKeyConfig), "eddi-audit-deadletter.jsonl",
-                false, "default", meterRegistry, null, null);
+                false, "default", meterRegistry, null, null, new ObjectMapper());
     }
 
     @PostConstruct
@@ -287,9 +291,7 @@ public class AuditLedgerService {
                 if (conn.getStatus() == Connection.Status.CONNECTED) {
                     JetStream js = conn.jetStream();
                     for (AuditEntry entry : entries) {
-                        String payload = "{\"type\":\"audit_dead_letter\",\"timestamp\":\"" + Instant.now() + "\",\"conversationId\":\""
-                                + entry.conversationId() + "\",\"agentId\":\"" + entry.agentId() + "\",\"taskId\":\"" + entry.taskId()
-                                + "\",\"taskType\":\"" + entry.taskType() + "\"}";
+                        String payload = serializeDeadLetterEntry(entry, "audit_dead_letter");
                         js.publish("eddi.deadletter.audit", payload.getBytes(StandardCharsets.UTF_8));
                     }
                     LOGGER.infov("Published {0} audit dead-letter entries to NATS JetStream", entries.size());
@@ -305,13 +307,44 @@ public class AuditLedgerService {
             Path dlPath = Path.of(deadLetterPath);
             var lines = new ArrayList<String>(entries.size());
             for (AuditEntry entry : entries) {
-                lines.add("{\"timestamp\":\"" + Instant.now() + "\",\"conversationId\":\"" + entry.conversationId() + "\",\"agentId\":\""
-                        + entry.agentId() + "\",\"taskId\":\"" + entry.taskId() + "\",\"taskType\":\"" + entry.taskType() + "\"}");
+                lines.add(serializeDeadLetterEntry(entry, null));
             }
             Files.write(dlPath, lines, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
             LOGGER.infov("Wrote {0} entries to dead-letter log: {1}", entries.size(), dlPath.toAbsolutePath());
         } catch (Exception e) {
             LOGGER.errorv("Failed to write to dead-letter log: {0}", e.getMessage());
+        }
+    }
+
+    /**
+     * Serializes a dead-letter entry as a JSON string using Jackson for correct
+     * escaping of all field values.
+     *
+     * @param entry
+     *            the audit entry to serialize
+     * @param type
+     *            optional type field (e.g. "audit_dead_letter" for NATS), null for
+     *            file output
+     * @return JSON string
+     */
+    String serializeDeadLetterEntry(AuditEntry entry, String type) {
+        Map<String, Object> dlMap = new LinkedHashMap<>();
+        if (type != null) {
+            dlMap.put("type", type);
+        }
+        dlMap.put("timestamp", Instant.now().toString());
+        dlMap.put("conversationId", entry.conversationId());
+        dlMap.put("agentId", entry.agentId());
+        dlMap.put("taskId", entry.taskId());
+        dlMap.put("taskType", entry.taskType());
+
+        try {
+            return objectMapper.writeValueAsString(dlMap);
+        } catch (JsonProcessingException e) {
+            // Absolute fallback — should never happen with simple string maps.
+            // Do NOT embed entry fields here: we'd reintroduce the escaping bug.
+            LOGGER.errorv("Jackson serialization failed for dead-letter entry: {0}", e.getMessage());
+            return "{\"error\":\"serialization_failed\"}";
         }
     }
 }

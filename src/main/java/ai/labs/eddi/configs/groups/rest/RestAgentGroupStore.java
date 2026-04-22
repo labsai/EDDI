@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -147,10 +148,55 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
      */
     private void syncDescriptor(String resourceId, AgentGroupConfiguration config) {
         try {
-            var currentResourceId = groupStore.getCurrentResourceId(resourceId);
-            var descriptor = documentDescriptorStore.readDescriptor(resourceId, currentResourceId.getVersion());
-            boolean changed = false;
+            IResourceId currentResourceId = groupStore.getCurrentResourceId(resourceId);
+            int version = currentResourceId.getVersion();
 
+            // Try to read the descriptor at the current resource version.
+            // On CREATE the descriptor may not exist yet (DocumentDescriptorFilter
+            // creates it in a ContainerResponseFilter that runs AFTER this method).
+            // On UPDATE the descriptor still lives at version-1 until the filter
+            // promotes it — reading the new version would fail too.
+            DocumentDescriptor descriptor = null;
+            int descriptorVersion = version;
+            try {
+                descriptor = documentDescriptorStore.readDescriptor(resourceId, version);
+            } catch (IResourceStore.ResourceNotFoundException ignored) {
+                // Fall through — try the previous version (update path)
+            }
+
+            if (descriptor == null && version > 1) {
+                try {
+                    descriptor = documentDescriptorStore.readDescriptor(resourceId, version - 1);
+                    descriptorVersion = version - 1;
+                } catch (IResourceStore.ResourceNotFoundException ignored) {
+                    // Fall through — create path
+                }
+            }
+
+            if (descriptor == null) {
+                // No descriptor at any version — brand-new resource (create path).
+                descriptor = new DocumentDescriptor();
+                descriptor.setResource(RestUtilities.createURI(resourceURI, resourceId,
+                        "version", version));
+                if (config.getName() != null) {
+                    descriptor.setName(config.getName());
+                }
+                if (config.getDescription() != null) {
+                    descriptor.setDescription(config.getDescription());
+                }
+                try {
+                    documentDescriptorStore.createDescriptor(resourceId, version, descriptor);
+                } catch (IResourceStore.ResourceStoreException ignored) {
+                    // Another request/response filter may have created the descriptor
+                    // after our lookup but before createDescriptor. Apply the same data
+                    // to the existing descriptor instead of treating this as a failure.
+                    documentDescriptorStore.setDescriptor(resourceId, version, descriptor);
+                }
+                return;
+            }
+
+            // Descriptor exists — update name/description if changed.
+            boolean changed = false;
             if (config.getName() != null && !config.getName().equals(descriptor.getName())) {
                 descriptor.setName(config.getName());
                 changed = true;
@@ -161,7 +207,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
             }
 
             if (changed) {
-                documentDescriptorStore.setDescriptor(resourceId, currentResourceId.getVersion(), descriptor);
+                documentDescriptorStore.setDescriptor(resourceId, descriptorVersion, descriptor);
             }
         } catch (Exception e) {
             LOG.warnf(e, "Failed to sync group descriptor name/description for id=%s", sanitizeForLog(resourceId));

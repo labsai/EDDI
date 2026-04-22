@@ -75,7 +75,7 @@ jobs:
         run: chmod +x mvnw
 
       - name: Build and test
-        run: ./mvnw clean verify -DskipITs -B
+        run: ./mvnw clean test -B
 
       - name: Upload test results
         if: always()
@@ -92,6 +92,60 @@ jobs:
           name: jacoco-report
           path: target/site/jacoco/
           retention-days: 14
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          CSV="target/site/jacoco/jacoco.csv"
+          if [ ! -f "$CSV" ]; then
+            echo "### ⚠️ No coverage report found" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          # Parse JaCoCo CSV columns:
+          # $4=INSTRUCTION_MISSED, $5=INSTRUCTION_COVERED,
+          # $6=BRANCH_MISSED, $7=BRANCH_COVERED, $8=LINE_MISSED, $9=LINE_COVERED,
+          # $12=METHOD_MISSED, $13=METHOD_COVERED
+          read IM IC LM LC BM BC MM MC <<< $(awk -F',' 'NR>1 {
+            im+=$4; ic+=$5; lm+=$8; lc+=$9; bm+=$6; bc+=$7; mm+=$12; mc+=$13
+          } END {
+            print im, ic, lm, lc, bm, bc, mm, mc
+          }' "$CSV")
+
+          pct() { [ $(($1+$2)) -gt 0 ] && awk "BEGIN {printf \"%.1f\", ($2/($1+$2))*100}" || echo "0.0"; }
+          icon() { local p=$(echo "$1" | awk '{printf "%d", $1}'); [ $p -ge 90 ] && echo "🟢" || { [ $p -ge 80 ] && echo "🟡" || echo "🔴"; }; }
+
+          INST_PCT=$(pct $IM $IC)
+          LINE_PCT=$(pct $LM $LC)
+          BRANCH_PCT=$(pct $BM $BC)
+          METHOD_PCT=$(pct $MM $MC)
+
+          # Count tests from surefire reports (match only <testsuite lines)
+          TOTAL_TESTS=$(grep -rh '<testsuite ' target/surefire-reports/*.xml 2>/dev/null | sed 's/.*tests="\([0-9]*\)".*/\1/' | awk '{s+=$1} END {print s+0}')
+
+          echo "### 📊 Unit Test Coverage ($TOTAL_TESTS tests)" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Covered | Total | Percentage | |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|---------|-------|------------|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Instruction | $IC | $((IM+IC)) | **${INST_PCT}%** | $(icon $INST_PCT) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | $BC | $((BM+BC)) | **${BRANCH_PCT}%** | $(icon $BRANCH_PCT) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Line | $LC | $((LM+LC)) | **${LINE_PCT}%** | $(icon $LINE_PCT) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Method | $MC | $((MM+MC)) | **${METHOD_PCT}%** | $(icon $METHOD_PCT) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Top 10 least-covered packages (by instruction coverage)
+          echo "<details><summary>📦 Bottom 10 packages by instruction coverage</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | Instructions | Coverage |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------|-------------|----------|" >> $GITHUB_STEP_SUMMARY
+          awk -F',' 'NR>1 {
+            pkg=$2; im=$4; ic=$5; total=im+ic
+            if (total > 0) { pct=ic/total*100 } else { pct=100 }
+            printf "| %s | %d/%d | %.1f%% |\n", pkg, ic, total, pct
+          }' "$CSV" | { sort -t'|' -k4 -n 2>/dev/null || true; } | head -10 >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> ℹ️ Unit tests only. See **Integration Tests** job for merged UT+IT coverage." >> $GITHUB_STEP_SUMMARY
 
   # ─── Job 2: Integration Tests ─────────────────────────────────
   integration-test:
@@ -115,7 +169,9 @@ jobs:
         run: chmod +x mvnw
 
       - name: Run integration tests
-        run: ./mvnw verify -DskipITs=false -B
+        run: ./mvnw verify -DskipITs=false -Dquarkus.bootstrap.effective-model-builder=true -B
+        env:
+          MAVEN_OPTS: "--enable-native-access=ALL-UNNAMED"
 
       - name: Upload integration test results
         if: always()
@@ -131,12 +187,89 @@ jobs:
         with:
           name: jacoco-it-report
           path: target/site/jacoco-it/
+          if-no-files-found: ignore
           retention-days: 14
+
+      - name: Upload merged coverage report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: jacoco-merged-report
+          path: target/site/jacoco-merged/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Coverage summary (UT + IT + Merged)
+        if: always()
+        run: |
+          # Helper functions
+          pct() { [ $(($1+$2)) -gt 0 ] && awk "BEGIN {printf \"%.1f\", ($2/($1+$2))*100}" || echo "0.0"; }
+          icon() { local p=$(echo "$1" | awk '{printf "%d", $1}'); [ $p -ge 90 ] && echo "🟢" || { [ $p -ge 80 ] && echo "🟡" || echo "🔴"; }; }
+
+          # Parse a JaCoCo CSV and emit a markdown table
+          # Columns: $4=INST_MISSED, $5=INST_COVERED, $6=BRANCH_MISSED, $7=BRANCH_COVERED,
+          #          $8=LINE_MISSED, $9=LINE_COVERED, $12=METHOD_MISSED, $13=METHOD_COVERED
+          emit_table() {
+            local csv="$1" title="$2"
+            if [ ! -f "$csv" ]; then
+              echo "### ⚠️ ${title}: report not found" >> $GITHUB_STEP_SUMMARY
+              return
+            fi
+            read IM IC LM LC BM BC MM MC <<< $(awk -F',' 'NR>1 {
+              im+=$4; ic+=$5; lm+=$8; lc+=$9; bm+=$6; bc+=$7; mm+=$12; mc+=$13
+            } END {
+              print im, ic, lm, lc, bm, bc, mm, mc
+            }' "$csv")
+            local INST_PCT=$(pct $IM $IC)
+            local LINE_PCT=$(pct $LM $LC)
+            local BRANCH_PCT=$(pct $BM $BC)
+            local METHOD_PCT=$(pct $MM $MC)
+            echo "#### ${title}" >> $GITHUB_STEP_SUMMARY
+            echo "| Metric | Covered | Total | Percentage | |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|---------|-------|------------|---|" >> $GITHUB_STEP_SUMMARY
+            echo "| Instruction | $IC | $((IM+IC)) | **${INST_PCT}%** | $(icon $INST_PCT) |" >> $GITHUB_STEP_SUMMARY
+            echo "| Branch | $BC | $((BM+BC)) | **${BRANCH_PCT}%** | $(icon $BRANCH_PCT) |" >> $GITHUB_STEP_SUMMARY
+            echo "| Line | $LC | $((LM+LC)) | **${LINE_PCT}%** | $(icon $LINE_PCT) |" >> $GITHUB_STEP_SUMMARY
+            echo "| Method | $MC | $((MM+MC)) | **${METHOD_PCT}%** | $(icon $METHOD_PCT) |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          }
+
+          # Count tests
+          UT_COUNT=$(grep -rh '<testsuite ' target/surefire-reports/*.xml 2>/dev/null | sed 's/.*tests="\([0-9]*\)".*/\1/' | awk '{s+=$1} END {print s+0}')
+          IT_COUNT=$(grep -rh '<testsuite ' target/failsafe-reports/*.xml 2>/dev/null | sed 's/.*tests="\([0-9]*\)".*/\1/' | awk '{s+=$1} END {print s+0}')
+          TOTAL=$((UT_COUNT + IT_COUNT))
+
+          echo "### 📊 Test Coverage Report ($TOTAL tests: $UT_COUNT UT + $IT_COUNT IT)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Emit all three tables
+          emit_table "target/site/jacoco/jacoco.csv" "Unit Tests Only"
+          emit_table "target/site/jacoco-it/jacoco.csv" "Integration Tests Only"
+          emit_table "target/site/jacoco-merged/jacoco.csv" "✅ Merged (UT + IT)"
+
+          # Bottom 10 packages from merged (or UT-only fallback)
+          BEST_CSV="target/site/jacoco-merged/jacoco.csv"
+          [ ! -f "$BEST_CSV" ] && BEST_CSV="target/site/jacoco/jacoco.csv"
+          if [ -f "$BEST_CSV" ]; then
+            echo "<details><summary>📦 Bottom 10 packages by instruction coverage</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Package | Instructions | Coverage |" >> $GITHUB_STEP_SUMMARY
+            echo "|---------|-------------|----------|" >> $GITHUB_STEP_SUMMARY
+            awk -F',' 'NR>1 {
+              pkg=$2; im=$4; ic=$5; total=im+ic
+              if (total > 0) { pct=ic/total*100 } else { pct=100 }
+              printf "| %s | %d/%d | %.1f%% |\n", pkg, ic, total, pct
+            }' "$BEST_CSV" | { sort -t'|' -k4 -n 2>/dev/null || true; } | head -10 >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+          fi
 
   # ─── Job 2b: CodeQL SAST ───────────────────────────────────────
   codeql:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.code == 'true'
     permissions:
       security-events: write
       contents: read
@@ -168,10 +301,12 @@ jobs:
         with:
           category: "/language:java"
 
-  # ─── Job 2c: Trivy Security Scan ───────────────────────────────
+  # ─── Job 2c: Trivy Filesystem Scan ─────────────────────────────
   trivy-scan:
-    name: Trivy Security Scan
+    name: Trivy Filesystem Scan
     runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.code == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -185,6 +320,53 @@ jobs:
           exit-code: 1
           ignore-unfixed: true
           format: table
+          trivyignores: .trivyignore
+
+  # ─── Job 2d: Gitleaks Secret Scanning ──────────────────────────
+  gitleaks:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  # ─── Job 2e: CycloneDX SBOM Generation ─────────────────────────
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.event_name == 'push'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+
+      - name: Set execute permission for mvnw
+        run: chmod +x mvnw
+
+      - name: Generate CycloneDX SBOM
+        run: ./mvnw org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeBom -DskipTests -B --no-transfer-progress
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: sbom-cyclonedx
+          path: target/bom.json
+          retention-days: 90
 
   # ─── Job 3: Docker Build & Push ─────────────────────────────────
   docker:
@@ -280,6 +462,17 @@ jobs:
             ${TAGS} \
             .
 
+      - name: Scan Docker image for vulnerabilities
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.DOCKER_IMAGE }}:${{ steps.meta.outputs.primary-tag }}
+          severity: CRITICAL,HIGH
+          exit-code: 1
+          ignore-unfixed: true
+          format: table
+          trivyignores: .trivyignore
+
       - name: Login to Docker Hub
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
         with:
@@ -366,10 +559,121 @@ jobs:
             exit 1
           fi
 
+      - name: Verify security headers
+        run: |
+          echo "=== Security Headers Check ==="
+          HEADERS=$(curl -sI http://localhost:7070/q/health/ready)
+          echo "$HEADERS"
+          echo ""
+
+          MISSING=0
+          check_header() {
+            if echo "$HEADERS" | grep -qi "$1"; then
+              echo "✅ $1 present"
+            else
+              echo "⚠️  $1 MISSING"
+              MISSING=1
+            fi
+          }
+
+          check_header "X-Content-Type-Options"
+          check_header "X-Frame-Options"
+          check_header "Content-Security-Policy"
+
+          echo ""
+          if [ "$MISSING" -eq 1 ]; then
+            echo "### ⚠️ Security Headers" >> $GITHUB_STEP_SUMMARY
+            echo "Some recommended security headers are missing — see job output for details." >> $GITHUB_STEP_SUMMARY
+            echo "::warning::Recommended security headers missing — review smoke-test output"
+          else
+            echo "### ✅ Security Headers" >> $GITHUB_STEP_SUMMARY
+            echo "All checked security headers are present." >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: Cleanup
         if: always()
         run: |
           docker rm -f eddi 2>/dev/null || true
+          docker rm -f mongodb 2>/dev/null || true
+
+  # ─── Job 4b: ZAP API Scan (DAST) ────────────────────────────────
+  zap-scan:
+    name: ZAP API Scan
+    runs-on: ubuntu-latest
+    needs: [smoke-test, docker]
+    # Only run on pushes (smoke-test already has the running container infrastructure)
+    if: github.event_name == 'push'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Start MongoDB
+        run: |
+          docker run -d --name mongodb \
+            --network host \
+            mongo:6.0
+          echo "Waiting for MongoDB..."
+          for i in $(seq 1 15); do
+            if docker exec mongodb mongosh --eval "db.runCommand({ping:1})" > /dev/null 2>&1; then
+              echo "✅ MongoDB ready"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Start EDDI
+        run: |
+          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
+          if [ -z "$PRIMARY_TAG" ]; then
+            POM_VERSION=$(grep -m1 '<version>' pom.xml | sed 's/.*<version>\(.*\)<\/version>.*/\1/')
+            PRIMARY_TAG="${POM_VERSION}-b${{ github.run_number }}"
+          fi
+          echo "Starting ${DOCKER_IMAGE}:${PRIMARY_TAG}..."
+
+          docker pull ${DOCKER_IMAGE}:${PRIMARY_TAG} || true
+          docker run -d --name eddi-zap \
+            --network host \
+            -e "MONGODB_CONNECTIONSTRING=mongodb://localhost:27017/eddi-zap?retryWrites=true&w=majority&connectTimeoutMS=10000&socketTimeoutMS=30000" \
+            -e "EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true" \
+            ${DOCKER_IMAGE}:${PRIMARY_TAG}
+
+      - name: Wait for healthy
+        run: |
+          echo "Waiting for EDDI to start..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:7070/q/health/ready > /dev/null 2>&1; then
+              echo "✅ EDDI is healthy after $((i * 2))s"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "❌ EDDI failed to start within 60s"
+          docker logs eddi-zap
+          exit 1
+
+      - name: ZAP API Scan
+        uses: zaproxy/action-api-scan@5158fe4d9d8fcc75ea204db81317cce7f9e5453d # v0.10.0
+        with:
+          target: http://localhost:7070/openapi
+          format: openapi
+          fail_action: false  # Report-only — promote to true after tuning false positives
+          cmd_options: '-a -z "-config api.disablekey=true"'
+          allow_issue_writing: false
+
+      - name: Upload ZAP report
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: zap-report
+          path: report_json.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f eddi-zap 2>/dev/null || true
           docker rm -f mongodb 2>/dev/null || true
 
   # ─── Job 5: Red Hat Preflight — PR Dry-Run ──────────────────────
@@ -552,7 +856,7 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     needs:
-      [detect-changes, build-and-test, integration-test, docker, smoke-test, preflight-check, preflight-push]
+      [detect-changes, build-and-test, integration-test, docker, smoke-test, zap-scan, trivy-scan, gitleaks, preflight-check, preflight-push]
 
     steps:
       - name: Send build notification
@@ -580,6 +884,9 @@ jobs:
           IT="${{ needs.integration-test.result }}"
           DOCKER="${{ needs.docker.result }}"
           SMOKE="${{ needs.smoke-test.result }}"
+          ZAP="${{ needs.zap-scan.result }}"
+          GITLEAKS="${{ needs.gitleaks.result }}"
+          TRIVY="${{ needs.trivy-scan.result }}"
           PREFLIGHT_PR="${{ needs.preflight-check.result }}"
           PREFLIGHT_PUSH="${{ needs.preflight-push.result }}"
           # Merge: whichever preflight job actually ran wins (the other is "skipped")
@@ -601,12 +908,18 @@ jobs:
           }
 
           # Overall status
-          if [ "$BUILD" = "success" ] && [ "$IT" != "failure" ] && [ "$DOCKER" != "failure" ] && [ "$SMOKE" != "failure" ]; then
+          if [ "$BUILD" = "success" ] && [ "$IT" != "failure" ] && [ "$DOCKER" != "failure" ] && [ "$SMOKE" != "failure" ] && [ "$GITLEAKS" != "failure" ] && [ "$TRIVY" != "failure" ]; then
             OVERALL_ICON="✅"
             OVERALL_TEXT="Build Passed"
           else
             OVERALL_ICON="❌"
             OVERALL_TEXT="Build Failed"
+          fi
+
+          # Only notify on failures or release tag pushes — green branch/PR builds stay silent
+          if [ "$OVERALL_TEXT" = "Build Passed" ] && [[ "$GITHUB_REF" != refs/tags/* ]]; then
+            echo "### ⏭️ Build passed — skipping Slack (only failures and releases notify)" >> $GITHUB_STEP_SUMMARY
+            exit 0
           fi
 
           # Branch or tag name
@@ -627,6 +940,8 @@ jobs:
             --arg it_icon "$(status_icon $IT)" \
             --arg docker_icon "$(status_icon $DOCKER)" \
             --arg smoke_icon "$(status_icon $SMOKE)" \
+            --arg gitleaks_icon "$(status_icon $GITLEAKS)" \
+            --arg trivy_icon "$(status_icon $TRIVY)" \
             --arg preflight_icon "$(status_icon $PREFLIGHT)" \
             --arg run_url "$RUN_URL" \
             --arg run_number "$RUN_NUMBER" \
@@ -650,6 +965,8 @@ jobs:
                     { type: "mrkdwn", text: ($it_icon + " Integration Tests") },
                     { type: "mrkdwn", text: ($docker_icon + " Docker Push") },
                     { type: "mrkdwn", text: ($smoke_icon + " Smoke Test") },
+                    { type: "mrkdwn", text: ($gitleaks_icon + " Secret Scan") },
+                    { type: "mrkdwn", text: ($trivy_icon + " Vuln Scan") },
                     { type: "mrkdwn", text: ($preflight_icon + " Red Hat Preflight") }
                   ]
                 },

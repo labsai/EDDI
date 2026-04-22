@@ -97,7 +97,7 @@ Follow this order unless the user explicitly requests something different.
 | —     | GDPR/CCPA Framework      | Cascading erasure, data portability, Art. 18 restriction, per-category retention                    |
 | —     | Commit Flags             | Strict write discipline for memory — uncommit failed task data, error digest injection              |
 | —     | Template Preview         | REST endpoint for previewing resolved system prompts with sample/live data                          |
-| —     | RC2 Hardening            | 2,000+ unit tests, 250+ integration tests, branding overhaul, rules deserialization fix             |
+| —     | RC2 Hardening            | 3,500+ unit tests, 550+ integration tests, branding overhaul, rules deserialization fix             |
 | —     | Security Hardening v6.0.2 | SSRF prevention, SafeHttpClient, auth guard, vault salt, security headers, CodeQL + Trivy CI       |
 
 ### In Progress / Upcoming

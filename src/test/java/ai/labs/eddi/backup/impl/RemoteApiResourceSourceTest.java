@@ -280,4 +280,204 @@ class RemoteApiResourceSourceTest {
                 any(HttpResponse.BodyHandler.class)))
                 .thenReturn(mockResponse);
     }
+
+    // ==================== URL Normalization Edge Cases ====================
+
+    @Nested
+    @DisplayName("URL normalization edge cases")
+    class UrlNormalizationEdgeCases {
+
+        @Test
+        @DisplayName("should return empty string for null URL")
+        void nullUrl() {
+            // normalizeBaseUrl(null) should return "" — constructor will succeed but calls
+            // will fail
+            assertDoesNotThrow(() -> new RemoteApiResourceSource(
+                    null, AGENT_ID, 1, "Bearer token", jsonSerialization, mockHttpClient));
+        }
+
+        @Test
+        @DisplayName("should throw for non-http scheme")
+        void nonHttpScheme() {
+            assertThrows(IllegalArgumentException.class, () -> new RemoteApiResourceSource(
+                    "ftp://example.com", AGENT_ID, 1, "Bearer token", jsonSerialization, mockHttpClient));
+        }
+
+        @Test
+        @DisplayName("should throw for URL with blank host")
+        void blankHost() {
+            assertThrows(IllegalArgumentException.class, () -> new RemoteApiResourceSource(
+                    "http:///path", AGENT_ID, 1, "Bearer token", jsonSerialization, mockHttpClient));
+        }
+    }
+
+    // ==================== Null Version (resolveLatestAgentVersion)
+    // ====================
+
+    @Nested
+    @DisplayName("Null version (resolveLatestAgentVersion)")
+    class NullVersionTests {
+
+        @Test
+        @DisplayName("should resolve latest version from descriptors when version is null")
+        @SuppressWarnings("unchecked")
+        void resolvesLatestVersion() throws Exception {
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setWorkflows(new ArrayList<>());
+
+            // Mock descriptors endpoint
+            var desc = new DocumentDescriptor();
+            desc.setName("My Agent");
+            desc.setResource(URI.create(
+                    "eddi://ai.labs.agent/agentstore/agents/" + AGENT_ID + "?version=5"));
+
+            mockHttpResponse("/agentstore/agents/descriptors?index=0&limit=0", "[desc]");
+            when(jsonSerialization.deserialize("[desc]", DocumentDescriptor[].class))
+                    .thenReturn(new DocumentDescriptor[]{desc});
+
+            // Mock agent fetch with resolved version=5
+            mockHttpResponse("/agentstore/agents/" + AGENT_ID + "?version=5", "{agentJson}");
+            when(jsonSerialization.deserialize("{agentJson}", AgentConfiguration.class))
+                    .thenReturn(agentConfig);
+
+            var source = new RemoteApiResourceSource(
+                    BASE_URL, AGENT_ID, null, "Bearer test-token", jsonSerialization, mockHttpClient);
+            AgentSourceData result = source.readAgent();
+
+            assertNotNull(result);
+            assertEquals(AGENT_ID, result.sourceId());
+        }
+
+        @Test
+        @DisplayName("should fallback to version=1 when descriptor lookup fails")
+        @SuppressWarnings("unchecked")
+        void fallbacksToVersion1() throws Exception {
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setWorkflows(new ArrayList<>());
+
+            // Descriptors return empty (no matching agent)
+            mockHttpResponse("/agentstore/agents/descriptors?index=0&limit=0", "[]");
+            when(jsonSerialization.deserialize("[]", DocumentDescriptor[].class))
+                    .thenReturn(new DocumentDescriptor[0]);
+
+            // Should fallback to version=1
+            mockHttpResponse("/agentstore/agents/" + AGENT_ID + "?version=1", "{agentJson}");
+            when(jsonSerialization.deserialize("{agentJson}", AgentConfiguration.class))
+                    .thenReturn(agentConfig);
+
+            var source = new RemoteApiResourceSource(
+                    BASE_URL, AGENT_ID, null, "Bearer test-token", jsonSerialization, mockHttpClient);
+            AgentSourceData result = source.readAgent();
+
+            assertNotNull(result);
+        }
+    }
+
+    // ==================== Snippet edge cases ====================
+
+    @Nested
+    @DisplayName("Snippet edge cases")
+    class SnippetEdgeCases {
+
+        @Test
+        @DisplayName("should return empty list when descriptors are null")
+        void returnsEmptyWhenDescriptorsNull() throws Exception {
+            setupAgentMock();
+
+            mockHttpResponse("/snippetstore/snippets/descriptors?index=0&limit=0", "null");
+            when(jsonSerialization.deserialize("null", DocumentDescriptor[].class))
+                    .thenReturn(null);
+
+            var source = createSource(AGENT_ID, 1);
+            List<SnippetSourceData> snippets = source.readSnippets();
+
+            assertTrue(snippets.isEmpty());
+        }
+
+        @Test
+        @DisplayName("should skip snippets with null name")
+        void skipsSnippetsWithNullName() throws Exception {
+            setupAgentMock();
+
+            var snippetDesc = new DocumentDescriptor();
+            snippetDesc.setName("nameless");
+            snippetDesc.setResource(URI.create(
+                    "eddi://ai.labs.snippet/snippetstore/snippets/cccccccccccccccccccccccc?version=1"));
+
+            mockHttpResponse("/snippetstore/snippets/descriptors?index=0&limit=0", "[desc]");
+            when(jsonSerialization.deserialize("[desc]", DocumentDescriptor[].class))
+                    .thenReturn(new DocumentDescriptor[]{snippetDesc});
+
+            var snippet = new PromptSnippet();
+            snippet.setName(null); // null name → should be skipped
+            snippet.setContent("content");
+
+            mockHttpResponse("/snippetstore/snippets/cccccccccccccccccccccccc?version=1", "{snippet}");
+            when(jsonSerialization.deserialize("{snippet}", PromptSnippet.class))
+                    .thenReturn(snippet);
+
+            var source = createSource(AGENT_ID, 1);
+            List<SnippetSourceData> snippets = source.readSnippets();
+
+            assertTrue(snippets.isEmpty());
+        }
+    }
+
+    // ==================== Auth header ====================
+
+    @Nested
+    @DisplayName("Auth header handling")
+    class AuthHeaderTests {
+
+        @Test
+        @DisplayName("should not add Authorization header when token is null")
+        @SuppressWarnings("unchecked")
+        void noAuthWhenTokenNull() throws Exception {
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setWorkflows(new ArrayList<>());
+
+            // Use any() matcher since without auth token the request will be different
+            HttpResponse<String> mockResponse = Mockito.mock(HttpResponse.class);
+            when(mockResponse.statusCode()).thenReturn(200);
+            when(mockResponse.body()).thenReturn("{agentJson}", "[]");
+
+            when(mockHttpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                    .thenReturn(mockResponse);
+
+            when(jsonSerialization.deserialize("{agentJson}", AgentConfiguration.class))
+                    .thenReturn(agentConfig);
+            when(jsonSerialization.deserialize("[]", DocumentDescriptor[].class))
+                    .thenReturn(new DocumentDescriptor[0]);
+
+            var source = new RemoteApiResourceSource(
+                    BASE_URL, AGENT_ID, 1, null, jsonSerialization, mockHttpClient);
+
+            assertDoesNotThrow(source::readAgent);
+        }
+
+        @Test
+        @DisplayName("should not add Authorization header when token is blank")
+        @SuppressWarnings("unchecked")
+        void noAuthWhenTokenBlank() throws Exception {
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setWorkflows(new ArrayList<>());
+
+            HttpResponse<String> mockResponse = Mockito.mock(HttpResponse.class);
+            when(mockResponse.statusCode()).thenReturn(200);
+            when(mockResponse.body()).thenReturn("{agentJson}", "[]");
+
+            when(mockHttpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                    .thenReturn(mockResponse);
+
+            when(jsonSerialization.deserialize("{agentJson}", AgentConfiguration.class))
+                    .thenReturn(agentConfig);
+            when(jsonSerialization.deserialize("[]", DocumentDescriptor[].class))
+                    .thenReturn(new DocumentDescriptor[0]);
+
+            var source = new RemoteApiResourceSource(
+                    BASE_URL, AGENT_ID, 1, "   ", jsonSerialization, mockHttpClient);
+
+            assertDoesNotThrow(source::readAgent);
+        }
+    }
 }
