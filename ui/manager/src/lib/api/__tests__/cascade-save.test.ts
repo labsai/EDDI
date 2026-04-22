@@ -252,5 +252,87 @@ describe("cascadeSaveResource", () => {
         "eddi://ai.labs.output/outputstore/outputsets/shared-id?version=1"
       );
     });
+
+    it("uses rt.extension for URI scheme (propertysetter → ai.labs.property)", async () => {
+      const RT_PROP: ResourceTypeConfig = {
+        slug: "propertysetter",
+        store: "propertysetterstore",
+        plural: "propertysetters",
+        extension: "ai.labs.property",
+        labelKey: "resources.types.propertysetter",
+        icon: "Settings",
+      };
+
+      vi.mocked(updateResource).mockResolvedValue({
+        location: "eddi://ai.labs.property/propertysetterstore/propertysetters/ps1?version=2",
+      });
+      vi.mocked(getWorkflow).mockResolvedValue({
+        workflowSteps: [
+          {
+            type: "ai.labs.property",
+            extensions: {},
+            config: { uri: "eddi://ai.labs.property/propertysetterstore/propertysetters/ps1?version=1" },
+          },
+        ],
+      });
+      vi.mocked(updateWorkflow).mockResolvedValue({
+        location: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2",
+      });
+      vi.mocked(getAgent).mockResolvedValue({ workflows: [
+        "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1",
+      ] });
+      vi.mocked(updateAgent).mockResolvedValue({
+        location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=2",
+      });
+
+      await cascadeSaveResource(RT_PROP, "ps1", 1, {}, CONTEXT);
+
+      const updatedWorkflow = vi.mocked(updateWorkflow).mock.calls[0]![2] as WorkflowConfiguration;
+      // Must use ai.labs.property (not ai.labs.propertysetter)
+      expect(updatedWorkflow.workflowSteps[0]!.config!.uri).toBe(
+        "eddi://ai.labs.property/propertysetterstore/propertysetters/ps1?version=2"
+      );
+    });
+
+    it("uses rt.extension for URI scheme (snippets → ai.labs.snippet)", async () => {
+      const RT_SNIPPETS: ResourceTypeConfig = {
+        slug: "snippets",
+        store: "snippetstore",
+        plural: "snippets",
+        extension: "ai.labs.snippet",
+        labelKey: "resources.types.snippets",
+        icon: "Puzzle",
+      };
+
+      vi.mocked(updateResource).mockResolvedValue({
+        location: "eddi://ai.labs.snippet/snippetstore/snippets/sn1?version=2",
+      });
+      vi.mocked(getWorkflow).mockResolvedValue({
+        workflowSteps: [
+          {
+            type: "ai.labs.snippet",
+            extensions: {},
+            config: { uri: "eddi://ai.labs.snippet/snippetstore/snippets/sn1?version=1" },
+          },
+        ],
+      });
+      vi.mocked(updateWorkflow).mockResolvedValue({
+        location: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2",
+      });
+      vi.mocked(getAgent).mockResolvedValue({ workflows: [
+        "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1",
+      ] });
+      vi.mocked(updateAgent).mockResolvedValue({
+        location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=2",
+      });
+
+      await cascadeSaveResource(RT_SNIPPETS, "sn1", 1, {}, CONTEXT);
+
+      const updatedWorkflow = vi.mocked(updateWorkflow).mock.calls[0]![2] as WorkflowConfiguration;
+      // Must use ai.labs.snippet (not ai.labs.snippets)
+      expect(updatedWorkflow.workflowSteps[0]!.config!.uri).toBe(
+        "eddi://ai.labs.snippet/snippetstore/snippets/sn1?version=2"
+      );
+    });
   });
 });
