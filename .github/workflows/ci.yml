@@ -697,13 +697,16 @@ jobs:
           docker logs eddi-zap
           exit 1
 
-      - name: ZAP API Scan
+      - name: ZAP API Scan (passive)
         uses: zaproxy/action-api-scan@5158fe4d9d8fcc75ea204db81317cce7f9e5453d # v0.10.0
         with:
           target: http://localhost:7070/openapi
           format: openapi
           fail_action: false  # Report-only — promote to true after tuning false positives
-          cmd_options: '-a -z "-config api.disablekey=true"'
+          # -S  = passive-only (skip active fuzzing — CodeQL SAST + Trivy already cover injection/CVE)
+          # -T 2 = cap spider at 2 min for deterministic CI time
+          # -a  = include alpha passive rules (headers, cookies, CORS, info disclosure)
+          cmd_options: '-S -T 2 -a -z "-config api.disablekey=true"'
           allow_issue_writing: false
 
       - name: Upload ZAP report
