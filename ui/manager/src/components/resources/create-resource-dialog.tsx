@@ -1,10 +1,13 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { X } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { useCreateResource } from "@/hooks/use-resources";
+
+/** Backend pattern for snippet names: lowercase letters, digits, underscores only */
+const SNIPPET_NAME_PATTERN = /^[a-z0-9_]+$/;
 
 interface CreateResourceDialogProps {
   open: boolean;
@@ -25,13 +28,34 @@ export function CreateResourceDialog({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const createMutation = useCreateResource(typeSlug);
+  const isSnippet = typeSlug === "snippets";
 
-  const defaultName = workflowName
-    ? `${workflowName} — ${typeName}`
-    : `${t("common.new", "New")} ${typeName}`;
+  const defaultName = useMemo(() => {
+    if (isSnippet) {
+      // Snippet names must match [a-z0-9_]+ — generate a compliant default
+      const base = workflowName
+        ? workflowName.toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/_+/g, "_").replace(/^_|_$/g, "")
+        : "new_snippet";
+      return base || "new_snippet";
+    }
+    return workflowName
+      ? `${workflowName} — ${typeName}`
+      : `${t("common.new", "New")} ${typeName}`;
+  }, [isSnippet, workflowName, typeName, t]);
 
   const [name, setName] = useState(defaultName);
   const [description, setDescription] = useState("");
+
+  // Client-side validation for snippet names
+  const snippetNameError = useMemo(() => {
+    if (!isSnippet) return "";
+    const trimmed = name.trim();
+    if (!trimmed) return t("resources.snippetNameRequired", "Snippet name is required.");
+    if (!SNIPPET_NAME_PATTERN.test(trimmed)) {
+      return t("resources.snippetNameInvalid", "Only lowercase letters (a-z), digits (0-9), and underscores (_) are allowed.");
+    }
+    return "";
+  }, [isSnippet, name, t]);
 
   // Reset form fields when the dialog opens (handles stale default name)
   useEffect(() => {
@@ -54,9 +78,17 @@ export function CreateResourceDialog({
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
+      if (snippetNameError) return;
       try {
+        // For snippets, embed the name directly in the POST body so the
+        // backend receives a valid PromptSnippet (name is required by
+        // the [a-z0-9_]+ validation on the store).
+        const body = isSnippet
+          ? { name: name.trim(), description: description.trim() || undefined }
+          : {};
+
         const result = await createMutation.mutateAsync({
-          body: {},
+          body,
           name: name.trim() || undefined,
           description: description.trim() || undefined,
         });
@@ -80,7 +112,7 @@ export function CreateResourceDialog({
         toast.error(getErrorMessage(err));
       }
     },
-    [createMutation, name, description, typeName, typeSlug, navigate, onClose, t]
+    [createMutation, name, description, typeName, typeSlug, navigate, onClose, t, isSnippet, snippetNameError]
   );
 
   if (!open) return null;
@@ -131,12 +163,32 @@ export function CreateResourceDialog({
                 id="resource-name"
                 type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder={`My ${typeName}`}
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                onChange={(e) => {
+                  if (isSnippet) {
+                    // Auto-sanitize: lowercase + replace invalid chars with underscores
+                    setName(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, "_"));
+                  } else {
+                    setName(e.target.value);
+                  }
+                }}
+                placeholder={isSnippet ? "e.g. cautious_mode" : `My ${typeName}`}
+                className={`w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring ${
+                  snippetNameError ? "border-destructive focus:ring-destructive" : "border-input"
+                }`}
                 autoFocus
                 data-testid="resource-name-input"
               />
+              {snippetNameError && (
+                <p className="mt-1 text-xs text-destructive">{snippetNameError}</p>
+              )}
+              {isSnippet && !snippetNameError && name.trim() && (
+                <p className="mt-1 text-[11px] text-muted-foreground font-mono">
+                  {t("snippetEditor.usageHint", "Usage:")}{" "}
+                  <code className="rounded bg-primary/10 px-1 py-0.5 text-primary">
+                    {"{{"}<wbr />snippets.{name.trim()}{"}}"}
+                  </code>
+                </p>
+              )}
             </div>
 
             <div>
@@ -163,7 +215,7 @@ export function CreateResourceDialog({
             {/* Error */}
             {createMutation.isError && (
               <p className="text-sm text-destructive" data-testid="create-resource-error">
-                {t("common.error")}
+                {getErrorMessage(createMutation.error)}
               </p>
             )}
 
@@ -178,7 +230,7 @@ export function CreateResourceDialog({
               </button>
               <button
                 type="submit"
-                disabled={createMutation.isPending}
+                disabled={createMutation.isPending || !!snippetNameError}
                 className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
                 data-testid="create-resource-submit"
               >

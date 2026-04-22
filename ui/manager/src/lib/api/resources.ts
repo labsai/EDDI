@@ -176,32 +176,46 @@ export async function getResourceVersions(
   rt: ResourceTypeConfig,
   id: string
 ): Promise<AgentDescriptor[]> {
-  // Resolve the latest version number
-  const currentVersion = await api.get<number>(
-    `${basePath(rt)}/${id}/currentversion`
-  );
-  const latest = currentVersion ?? 1;
-
-  // Fetch descriptor for each version in parallel
-  const descriptors = await Promise.all(
-    Array.from({ length: latest }, (_, i) => i + 1).map(async (v) => {
-      try {
-        const results = await api.get<AgentDescriptor[]>(
-          `${basePath(rt)}/descriptors?filter=${id}&version=${v}`
-        );
-        return results;
-      } catch {
-        return [];
-      }
-    })
-  );
-
-  // If individual version queries don't work, fall back to unversioned query
-  const flat = descriptors.flat();
-  if (flat.length === 0) {
-    return api.get<AgentDescriptor[]>(
-      `${basePath(rt)}/descriptors?filter=${id}`
+  // Try to resolve the latest version number via the dedicated endpoint
+  let latest: number | null = null;
+  try {
+    const currentVersion = await api.get<number>(
+      `${basePath(rt)}/${id}/currentversion`
     );
+    latest = currentVersion ?? null;
+  } catch {
+    // currentversion endpoint may fail (404 on unmigrated data, missing resource, etc.)
+    // Fall through to descriptor-based resolution below
   }
-  return flat;
+
+  if (latest !== null && latest > 0) {
+    // Fetch descriptor for each version in parallel
+    const descriptors = await Promise.all(
+      Array.from({ length: latest }, (_, i) => i + 1).map(async (v) => {
+        try {
+          const results = await api.get<AgentDescriptor[]>(
+            `${basePath(rt)}/descriptors?filter=${id}&version=${v}`
+          );
+          return results;
+        } catch {
+          return [];
+        }
+      })
+    );
+
+    const flat = descriptors.flat();
+    if (flat.length > 0) {
+      return flat;
+    }
+  }
+
+  // Fallback: query descriptors directly (unversioned) and deduce versions from URIs
+  const fallback = await api.get<AgentDescriptor[]>(
+    `${basePath(rt)}/descriptors?filter=${id}`
+  );
+
+  // Filter to only descriptors whose resource URI contains this exact ID
+  return fallback.filter(
+    (d) => d.resource?.includes(`/${id}`)
+  );
 }
