@@ -152,12 +152,12 @@ export function AgentDetailPage() {
       {
         onSuccess: () => {
           toast.success(t("common.delete") + " ✓");
+          setShowDeleteDialog(false);
           navigate("/manage/agents");
         },
         onError: (err) => toast.error(getErrorMessage(err)),
       }
     );
-    setShowDeleteDialog(false);
   }
 
   async function handleDuplicate() {

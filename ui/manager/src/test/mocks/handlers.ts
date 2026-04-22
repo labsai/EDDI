@@ -3466,22 +3466,36 @@ export const scheduleHandlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
+  // ─── Currentversion endpoints (used by version pickers) ─────────
+  // Returns mock latest version for any resource type
+  ...[
+    "agentstore/agents", "workflowstore/workflows",
+    "rulestore/rulesets", "apicallstore/apicalls", "outputstore/outputsets",
+    "dictionarystore/dictionaries", "parserstore/parsers", "llmstore/llms",
+    "propertysetterstore/propertysetters", "mcpcallsstore/mcpcalls",
+    "ragstore/rags", "snippetstore/snippets",
+  ].map((storePath) =>
+    http.get(`*/${storePath}/:id/currentversion`, () => {
+      // Return 2 as default latest version for test data
+      return HttpResponse.text("2", { headers: { "Content-Type": "text/plain" } });
+    })
+  ),
+
   // ─── Generic resource store descriptors ──────────────────────────
   // One handler per resource store type to avoid catching agent/workflow descriptors.
-  // For version lookups (includePreviousVersions), return filtered results.
+  // For filter lookups, return filtered results.
   // For list requests, return sample data so the resource-list test has items.
   ...["rulestore/rulesets", "apicallstore/apicalls", "outputstore/outputsets",
       "dictionarystore/dictionaries", "parserstore/parsers", "llmstore/llms", "propertysetterstore/propertysetters",
-      "mcpcallsstore/mcpcalls", "ragstore/rags"].map((storePath) => {
+      "mcpcallsstore/mcpcalls", "ragstore/rags", "snippetstore/snippets"].map((storePath) => {
     const store = storePath.split("/")[0];
     const plural = storePath.split("/")[1];
     return http.get(`*/${storePath}/descriptors`, ({ request }) => {
       const url = new URL(request.url);
       const filter = url.searchParams.get("filter");
-      const isVersionLookup = url.searchParams.get("includePreviousVersions") === "true";
 
-      if (isVersionLookup && filter) {
-        // Version lookup — return a single descriptor matching the filter ID
+      if (filter) {
+        // Version or filter lookup — return a descriptor matching the filter ID
         return HttpResponse.json([
           {
             resource: `eddi://ai.labs.resource/${store}/${plural}/${filter}?version=1`,

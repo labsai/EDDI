@@ -28,6 +28,7 @@ import {
   MessageSquareText,
   Settings,
   FileCode,
+  Plug,
   Puzzle,
   ArrowUpCircle,
 } from "lucide-react";
@@ -44,6 +45,7 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   MessageSquareText,
   Settings,
   FileCode,
+  Plug,
 };
 
 function getExtensionIcon(type: string): React.ComponentType<{ className?: string }> {
@@ -70,9 +72,10 @@ function parseExtensionUri(uri: string): { slug: string; id: string } | null {
         llmstore: "llm",
         outputstore: "output",
         dictionarystore: "dictionary",
-        parserstore: "dictionary",
         propertysetterstore: "propertysetter",
         mcpcallsstore: "mcpcalls",
+        ragstore: "rag",
+        snippetstore: "snippets",
       };
       const storeName = segments[0];
       const resourceId = segments[2];

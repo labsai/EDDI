@@ -156,15 +156,17 @@ export function useCascadeSave(slug: string) {
       version,
       body,
       context,
+      skipResourceSave,
     }: {
       id: string;
       version: number;
       body: unknown;
       context?: CascadeContext;
+      skipResourceSave?: boolean;
     }) => {
       if (!rt)
         return Promise.reject(new Error(`Unknown resource type: ${slug}`));
-      return cascadeSaveResource(rt, id, version, body, context);
+      return cascadeSaveResource(rt, id, version, body, context, { skipResourceSave });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: resourceKeys(slug) });

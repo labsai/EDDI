@@ -60,7 +60,6 @@ export function getExtensionLabel(type: string): string {
  */
 export const EXTENSION_TO_RESOURCE_SLUG: Record<string, string> = {
   "ai.labs.dictionary": "dictionary",
-  "ai.labs.parser": "dictionary",
   "ai.labs.rules": "rules",
   "ai.labs.httpcalls": "apicalls",
   "ai.labs.apicalls": "apicalls",
@@ -68,6 +67,9 @@ export const EXTENSION_TO_RESOURCE_SLUG: Record<string, string> = {
   "ai.labs.output": "output",
   "ai.labs.property": "propertysetter",
   "ai.labs.mcpcalls": "mcpcalls",
+  "ai.labs.rag": "rag",
+  "ai.labs.snippet": "snippets",
+  "ai.labs.snippets": "snippets",
 };
 
 /** Check if an extension type has a standalone resource config store */

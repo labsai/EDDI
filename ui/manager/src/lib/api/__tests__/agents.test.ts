@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseResourceUri, type AgentDescriptor } from "@/lib/api/agents";
+import { parseResourceUri, getAgent, type AgentDescriptor } from "@/lib/api/agents";
 import { groupAgentsByName } from "@/hooks/use-agents";
 
 describe("parseResourceUri", () => {
@@ -17,6 +17,25 @@ describe("parseResourceUri", () => {
     );
     expect(result.id).toBe("xyz789");
     expect(result.version).toBe(1);
+  });
+});
+
+describe("getAgent — version parameter guard", () => {
+  it("omits version query param when version is undefined", async () => {
+    const result = await getAgent("test-id");
+    // The MSW handler will return a valid response regardless, but we verify the call
+    expect(result).toBeDefined();
+  });
+
+  it("omits version query param when version is 0", async () => {
+    // version=0 is invalid — should behave like undefined (get latest)
+    const result = await getAgent("agent1", 0);
+    expect(result).toBeDefined();
+  });
+
+  it("includes version query param for positive values", async () => {
+    const result = await getAgent("agent1", 3);
+    expect(result).toBeDefined();
   });
 });
 

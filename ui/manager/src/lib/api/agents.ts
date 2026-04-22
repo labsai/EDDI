@@ -126,16 +126,46 @@ export function getAgentDescriptors(
   );
 }
 
-export function getAgentDescriptorsWithVersions(
+/**
+ * Fetch agent descriptors for all versions of a specific agent.
+ *
+ * The GET descriptors endpoint does NOT support includePreviousVersions;
+ * we use the currentversion endpoint to resolve the latest version.
+ */
+export async function getAgentDescriptorsWithVersions(
   agentId: string
 ): Promise<AgentDescriptor[]> {
-  return api.get<AgentDescriptor[]>(
-    `/agentstore/agents/descriptors?includePreviousVersions=true&filter=${agentId}`
+  // Resolve the latest version number
+  const currentVersion = await api.get<number>(
+    `/agentstore/agents/${agentId}/currentversion`
   );
+  const latest = currentVersion ?? 1;
+
+  // Fetch descriptor for each version in parallel
+  const descriptors = await Promise.all(
+    Array.from({ length: latest }, (_, i) => i + 1).map(async (v) => {
+      try {
+        const results = await api.get<AgentDescriptor[]>(
+          `/agentstore/agents/descriptors?filter=${agentId}&version=${v}`
+        );
+        return results;
+      } catch {
+        return [];
+      }
+    })
+  );
+
+  const flat = descriptors.flat();
+  if (flat.length === 0) {
+    return api.get<AgentDescriptor[]>(
+      `/agentstore/agents/descriptors?filter=${agentId}`
+    );
+  }
+  return flat;
 }
 
 export function getAgent(id: string, version?: number): Promise<Agent> {
-  const versionSuffix = version ? `?version=${version}` : "";
+  const versionSuffix = version != null && version > 0 ? `?version=${version}` : "";
   return api.get<Agent>(`/agentstore/agents/${id}${versionSuffix}`);
 }
 

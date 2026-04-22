@@ -94,16 +94,30 @@ export function ResourceDetailPage() {
     setCascadeContext(initialCascade);
   }, [initialCascade]);
 
-  // Version state
-  const [currentVersion, setCurrentVersion] = useState(1);
+  // Version state — default to latest version once descriptors are loaded
+  const [currentVersion, setCurrentVersion] = useState<number | undefined>(undefined);
+
+  // Fetch version descriptors first — needed to resolve the latest version
+  const { data: versionDescriptors } = useResourceVersions(type ?? "", id ?? "");
+
+  // Resolve latest version from descriptors
+  useEffect(() => {
+    if (currentVersion === undefined && versionDescriptors && versionDescriptors.length > 0) {
+      const latest = versionDescriptors.reduce((max, d) => {
+        const match = d.resource?.match(/\?version=(\d+)/);
+        const v = match ? parseInt(match[1] ?? "1", 10) : 1;
+        return v > max ? v : max;
+      }, 1);
+      setCurrentVersion(latest);
+    }
+  }, [currentVersion, versionDescriptors]);
 
   // Data hooks
   const { data, isLoading, isError, refetch } = useResource(
     type ?? "",
     id ?? "",
-    currentVersion
+    currentVersion ?? 0
   );
-  const { data: versionDescriptors } = useResourceVersions(type ?? "", id ?? "");
   const deleteMutation = useDeleteResource(type ?? "");
   const duplicateMutation = useDuplicateResource(type ?? "");
   const cascadeSave = useCascadeSave(type ?? "");
@@ -138,12 +152,13 @@ export function ResourceDetailPage() {
           lastModifiedOn: d.lastModifiedOn,
         };
       })
-    : [{ version: currentVersion }];
+    : [{ version: currentVersion ?? 1 }];
 
   // All hooks are above — safe to do early returns below
 
   const handleSave = useCallback(
     async (jsonString: string) => {
+      if (currentVersion === undefined) return;
       setSaveSuccess(false);
       try {
         const parsed = JSON.parse(jsonString);
@@ -218,7 +233,7 @@ export function ResourceDetailPage() {
 
   const handleSaveAndDeploy = useCallback(
     async (jsonString: string) => {
-      if (!cascadeContext || !agentCtx) return;
+      if (!cascadeContext || !agentCtx || currentVersion === undefined) return;
       try {
         const parsed = JSON.parse(jsonString);
         await saveAndDeploy({
@@ -252,25 +267,55 @@ export function ResourceDetailPage() {
       if (newResourceVersion === null || previousResourceVersion === null || !rt) return;
       setIsCascading(true);
 
+      // Track updated versions across iterations — when the same workflow
+      // or agent appears in multiple usages, subsequent cascades must use
+      // the version produced by the prior cascade (not the original stale one).
+      const updatedWorkflowVersions = new Map<string, number>();
+      const updatedAgentVersions = new Map<string, number>();
+      let failCount = 0;
+
       try {
         for (const usage of selected) {
-          await cascadeVersionUpdate(
-            rt,
-            id ?? "",
-            previousResourceVersion,
-            newResourceVersion,
-            {
-              workflowId: usage.workflowId,
-              workflowVersion: usage.workflowVersion,
-              agentId: usage.agentId,
-              agentVersion: usage.agentVersion,
-            },
-          );
+          const workflowVersion =
+            updatedWorkflowVersions.get(usage.workflowId) ?? usage.workflowVersion;
+          const agentVersion =
+            updatedAgentVersions.get(usage.agentId) ?? usage.agentVersion;
+
+          try {
+            const result = await cascadeVersionUpdate(
+              rt,
+              id ?? "",
+              previousResourceVersion,
+              newResourceVersion,
+              {
+                workflowId: usage.workflowId,
+                workflowVersion,
+                agentId: usage.agentId,
+                agentVersion,
+              },
+            );
+
+            if (result.newWorkflowVersion) {
+              updatedWorkflowVersions.set(usage.workflowId, result.newWorkflowVersion);
+            }
+            if (result.newAgentVersion) {
+              updatedAgentVersions.set(usage.agentId, result.newAgentVersion);
+            }
+          } catch {
+            failCount++;
+          }
         }
-        toast.success(t("editor.cascadeSuccess", "References updated successfully"));
-      } catch (err) {
-        toast.error(getErrorMessage(err));
       } finally {
+        if (failCount > 0) {
+          toast.error(
+            t("editor.cascadePartialFailure", {
+              count: failCount,
+              defaultValue: "{{count}} cascade update(s) failed",
+            })
+          );
+        } else if (selected.length > 0) {
+          toast.success(t("editor.cascadeSuccess", "References updated successfully"));
+        }
         setIsCascading(false);
         setShowUsageDialog(false);
         setUsages([]);
@@ -299,21 +344,21 @@ export function ResourceDetailPage() {
 
   function handleDelete() {
     deleteMutation.mutate(
-      { id: id ?? "", version: currentVersion },
+      { id: id ?? "", version: currentVersion ?? 1 },
       {
         onSuccess: () => {
           toast.success(t("common.delete") + " ✓");
+          setShowDeleteDialog(false);
           navigate(`/manage/resources/${type}`);
         },
         onError: (err) => toast.error(getErrorMessage(err)),
       }
     );
-    setShowDeleteDialog(false);
   }
 
   function handleDuplicate() {
     duplicateMutation.mutate(
-      { id: id ?? "", version: currentVersion },
+      { id: id ?? "", version: currentVersion ?? 1 },
       {
         onSuccess: (result) => {
           toast.success(t("common.duplicate") + " ✓");
@@ -434,7 +479,7 @@ export function ResourceDetailPage() {
             resourceId={id ?? ""}
             data={JSON.stringify(data, null, 2)}
             versions={versions}
-            currentVersion={currentVersion}
+            currentVersion={currentVersion ?? 1}
             onVersionChange={setCurrentVersion}
             onSave={handleSave}
             onSaveAndDeploy={cascadeContext && agentCtx ? handleSaveAndDeploy : undefined}
@@ -457,7 +502,7 @@ export function ResourceDetailPage() {
               onClose={() => setShowDiff(false)}
               typeName={typeName}
               versions={versions}
-              currentVersion={currentVersion}
+              currentVersion={currentVersion ?? 1}
               fetchVersion={async (ver: number) => {
                 const data = await getResource(rt, id ?? "", ver);
                 return JSON.stringify(data, null, 2);
@@ -483,7 +528,7 @@ export function ResourceDetailPage() {
         open={showDeleteDialog}
         onOpenChange={setShowDeleteDialog}
         title={t("resources.confirmDelete", { type: typeName })}
-        description={t("resources.confirmDelete", { type: typeName })}
+        description={t("resources.confirmDeleteDescription", { type: typeName, defaultValue: "This action cannot be undone. The {{type}} will be permanently deleted." })}
         confirmLabel={t("common.delete")}
         cancelLabel={t("common.cancel")}
         onConfirm={handleDelete}

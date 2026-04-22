@@ -1,3 +1,5 @@
+import { api } from "../api-client";
+
 /* ─── Types ─── */
 
 export interface SecretMetadata {
@@ -46,7 +48,8 @@ export async function listSecrets(
   tenantId: string,
 ): Promise<SecretMetadata[]> {
   const res = await fetch(
-    `${window.location.origin}${BASE}/${tenantId}`,
+    `${api.getBaseUrl()}${BASE}/${tenantId}`,
+    { headers: api.getAuthHeader() },
   );
   if (!res.ok) return [];
   return res.json();
@@ -65,10 +68,10 @@ export async function storeSecret(
   if (allowedAgents) body.allowedAgents = allowedAgents;
 
   const res = await fetch(
-    `${window.location.origin}${BASE}/${tenantId}/${keyName}`,
+    `${api.getBaseUrl()}${BASE}/${tenantId}/${keyName}`,
     {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...api.getAuthHeader() },
       body: JSON.stringify(body),
     },
   );
@@ -90,8 +93,8 @@ export async function deleteSecret(
   keyName: string,
 ): Promise<void> {
   const res = await fetch(
-    `${window.location.origin}${BASE}/${tenantId}/${keyName}`,
-    { method: "DELETE" },
+    `${api.getBaseUrl()}${BASE}/${tenantId}/${keyName}`,
+    { method: "DELETE", headers: api.getAuthHeader() },
   );
   if (!res.ok && res.status !== 204) {
     if (res.status === 503) {
@@ -109,7 +112,9 @@ export async function deleteSecret(
 /** Get vault health status. Parses the body on both 200 and 503. */
 export async function getVaultHealth(): Promise<VaultHealth> {
   try {
-    const res = await fetch(`${window.location.origin}${BASE}/health`);
+    const res = await fetch(`${api.getBaseUrl()}${BASE}/health`, {
+      headers: api.getAuthHeader(),
+    });
     const data = await res.json();
     if (res.status === 503) {
       // Backend returns { error, reason, action, docs } on 503
@@ -141,10 +146,10 @@ export async function rotateSecret(
   if (description) body.description = description;
 
   const res = await fetch(
-    `${window.location.origin}${BASE}/${tenantId}/${keyName}/rotate`,
+    `${api.getBaseUrl()}${BASE}/${tenantId}/${keyName}/rotate`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...api.getAuthHeader() },
       body: JSON.stringify(body),
     },
   );

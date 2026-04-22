@@ -528,6 +528,21 @@ export const ENTRY_TYPE_INFO: Record<
 // ─── Bulk Operations ─────────────────────────────────────────────
 
 /**
+ * Resolve the current (latest) version of an agent via the backend
+ * currentversion endpoint. Returns 1 as fallback if lookup fails.
+ */
+async function getCurrentAgentVersion(agentId: string): Promise<number> {
+  try {
+    const version = await api.get<number>(
+      `/agentstore/agents/${agentId}/currentversion`,
+    );
+    return version ?? 1;
+  } catch {
+    return 1;
+  }
+}
+
+/**
  * Soft-delete a group and all its member agents.
  * Each member agent is deleted with permanent=false (soft-delete).
  * The group itself is also soft-deleted.
@@ -537,26 +552,22 @@ export async function deleteGroupWithMembers(
   version: number,
   config: AgentGroupConfiguration,
 ): Promise<void> {
-  // Soft-delete each member agent (best-effort, continue on error)
-  const memberDeletes = config.members
-    .filter((m) => m.agentId && m.memberType !== "GROUP")
-    .map((m) =>
-      deleteAgent(m.agentId, 1, { permanent: false }).catch(() => {
-        // Ignore — agent may already be deleted
-      }),
-    );
-
-  // Also soft-delete moderator agent if separate from members
-  if (
-    config.moderatorAgentId &&
-    !config.members.some((m) => m.agentId === config.moderatorAgentId)
-  ) {
-    memberDeletes.push(
-      deleteAgent(config.moderatorAgentId, 1, { permanent: false }).catch(
-        () => {},
-      ),
-    );
+  // Collect all agent IDs to delete (members + moderator)
+  const agentIds = new Set<string>();
+  for (const m of config.members) {
+    if (m.agentId && m.memberType !== "GROUP") agentIds.add(m.agentId);
   }
+  if (config.moderatorAgentId) agentIds.add(config.moderatorAgentId);
+
+  // Soft-delete each agent at its current version (best-effort)
+  const memberDeletes = Array.from(agentIds).map(async (agentId) => {
+    try {
+      const currentVersion = await getCurrentAgentVersion(agentId);
+      await deleteAgent(agentId, currentVersion, { permanent: false });
+    } catch {
+      // Ignore — agent may already be deleted
+    }
+  });
 
   await Promise.allSettled(memberDeletes);
 

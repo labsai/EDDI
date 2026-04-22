@@ -6,6 +6,7 @@ import { getErrorMessage } from "@/lib/api-client";
 import {
   useInfiniteWorkflowDescriptors,
   useDeleteWorkflow,
+  useDuplicateWorkflow,
   groupWorkflowsByName,
 } from "@/hooks/use-workflows";
 import { WorkflowCard } from "@/components/workflows/workflow-card";
@@ -54,6 +55,7 @@ export function WorkflowsPage() {
   } = useInfiniteWorkflowDescriptors(search);
 
   const deleteMutation = useDeleteWorkflow();
+  const duplicateMutation = useDuplicateWorkflow();
 
   // Flatten infinite pages → group by name → sort
   const enrichedWorkflows = useMemo(() => {
@@ -93,10 +95,16 @@ export function WorkflowsPage() {
     }
   }
 
-  function handleDuplicate(_id: string, _version: number) {
-    // TODO: implement workflow duplicate when backend supports it
-    void _id;
-    void _version;
+  function handleDuplicate(id: string, version: number) {
+    duplicateMutation.mutate(
+      { id, version, deepCopy: false },
+      {
+        onSuccess: () => {
+          toast.success(t("common.duplicate", "Duplicate") + " \u2713");
+        },
+        onError: (err) => toast.error(getErrorMessage(err)),
+      }
+    );
   }
 
   function handleViewChange(mode: ViewMode) {

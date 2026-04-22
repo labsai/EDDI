@@ -23,8 +23,14 @@ export async function findResourceUsage(
 ): Promise<ResourceUsage[]> {
   const usages: ResourceUsage[] = [];
 
-  // 1. Get all workflows
-  const wfDescriptors = await getWorkflowDescriptors(200, 0, "");
+  // 1. Get all workflows and agents up-front (one API call each)
+  const [wfDescriptors, agentDescriptors] = await Promise.all([
+    getWorkflowDescriptors(200, 0, ""),
+    getAgentDescriptors(200, 0, ""),
+  ]);
+
+  // Cache for agent configs (avoid re-fetching the same agent)
+  const agentCache = new Map<string, Awaited<ReturnType<typeof getAgent>>>();
 
   for (const wfDesc of wfDescriptors) {
     const { id: wfId, version: wfVersion } = parseResourceUri(wfDesc.resource);
@@ -43,12 +49,15 @@ export async function findResourceUsage(
       if (!hasReference) continue;
 
       // 2. Find agents that reference this workflow
-      const agentDescriptors = await getAgentDescriptors(200, 0, "");
-
       for (const agentDesc of agentDescriptors) {
         const { id: agentId, version: agentVersion } = parseResourceUri(agentDesc.resource);
         try {
-          const agent = await getAgent(agentId, agentVersion);
+          const cacheKey = `${agentId}@${agentVersion}`;
+          let agent = agentCache.get(cacheKey);
+          if (!agent) {
+            agent = await getAgent(agentId, agentVersion);
+            agentCache.set(cacheKey, agent);
+          }
           const wfUri = wfDesc.resource;
           if (agent.workflows?.some((uri) => uri === wfUri)) {
             usages.push({

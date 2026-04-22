@@ -23,6 +23,15 @@ export interface CascadeResult {
   newAgentVersion?: number;
 }
 
+export interface CascadeOptions {
+  /**
+   * When true, skip the resource save (step 1) — used when the resource
+   * was already saved and we only need to cascade version updates to
+   * parent workflow and agent.
+   */
+  skipResourceSave?: boolean;
+}
+
 /**
  * Save a resource config, then cascade version updates up through
  * the workflow → agent chain.
@@ -35,22 +44,31 @@ export async function cascadeSaveResource(
   resourceId: string,
   resourceVersion: number,
   body: unknown,
-  context?: CascadeContext
+  context?: CascadeContext,
+  options?: CascadeOptions
 ): Promise<CascadeResult> {
-  // 1. Save the resource config
-  const saveResult = await updateResource(rt, resourceId, resourceVersion, body);
-  const newResourceVersion = parseVersionFromLocation(saveResult.location);
+  let newResourceVersion: number;
+
+  if (options?.skipResourceSave) {
+    // Resource was already saved — use the passed version directly
+    newResourceVersion = resourceVersion;
+  } else {
+    // 1. Save the resource config
+    const saveResult = await updateResource(rt, resourceId, resourceVersion, body);
+    newResourceVersion = parseVersionFromLocation(saveResult.location);
+  }
 
   if (!context) {
     return { newResourceVersion };
   }
 
   // 2. Update the parent workflow
-  const oldResourceUri = buildResourceUri(rt, resourceId, resourceVersion);
   const newResourceUri = buildResourceUri(rt, resourceId, newResourceVersion);
 
   const wf = await getWorkflow(context.workflowId, context.workflowVersion);
-  const updatedWf = replaceExtensionUri(wf, oldResourceUri, newResourceUri);
+  const updatedWf = replaceExtensionUriByResourceId(
+    wf, rt, resourceId, newResourceUri
+  );
   const wfResult = await updateWorkflow(
     context.workflowId,
     context.workflowVersion,
@@ -94,16 +112,15 @@ export interface CascadeVersionResult {
 export async function cascadeVersionUpdate(
   rt: ResourceTypeConfig,
   resourceId: string,
-  previousVersion: number,
+  _previousVersion: number,
   newVersion: number,
   context: CascadeContext
 ): Promise<CascadeVersionResult> {
   // 1. Update the parent workflow
-  const oldResourceUri = buildResourceUri(rt, resourceId, previousVersion);
   const newResourceUri = buildResourceUri(rt, resourceId, newVersion);
 
   const wf = await getWorkflow(context.workflowId, context.workflowVersion);
-  const updatedWf = replaceExtensionUri(wf, oldResourceUri, newResourceUri);
+  const updatedWf = replaceExtensionUriByResourceId(wf, rt, resourceId, newResourceUri);
   const wfResult = await updateWorkflow(
     context.workflowId,
     context.workflowVersion,
@@ -144,21 +161,26 @@ function buildResourceUri(
   id: string,
   version: number
 ): string {
-  const baseType = `eddi://ai.labs.${rt.slug}`;
-  return `${baseType}/${rt.store}/${rt.plural}/${id}?version=${version}`;
+  return `eddi://${rt.extension}/${rt.store}/${rt.plural}/${id}?version=${version}`;
 }
 
-/** Replace old extension URI with new one inside a workflow config */
-function replaceExtensionUri(
+/**
+ * Replace extension URI matching a resource ID inside a workflow config.
+ * Matches by resource store path pattern (not exact URI) so it works
+ * regardless of which version the workflow currently references.
+ */
+function replaceExtensionUriByResourceId(
   wf: WorkflowConfiguration,
-  oldUri: string,
+  rt: ResourceTypeConfig,
+  resourceId: string,
   newUri: string
 ): WorkflowConfiguration {
+  const pattern = `/${rt.store}/${rt.plural}/${resourceId}`;
   return {
     ...wf,
     workflowSteps: wf.workflowSteps.map((ext) => {
       const uri = ext.config?.uri;
-      if (typeof uri === "string" && uri === oldUri) {
+      if (typeof uri === "string" && uri.includes(pattern)) {
         return { ...ext, config: { ...ext.config, uri: newUri } };
       }
       return ext;
