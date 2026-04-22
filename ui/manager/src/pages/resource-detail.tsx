@@ -98,17 +98,26 @@ export function ResourceDetailPage() {
   const [currentVersion, setCurrentVersion] = useState<number | undefined>(undefined);
 
   // Fetch version descriptors first — needed to resolve the latest version
-  const { data: versionDescriptors } = useResourceVersions(type ?? "", id ?? "");
+  const {
+    data: versionDescriptors,
+    isLoading: isVersionsLoading,
+    isError: isVersionsError,
+  } = useResourceVersions(type ?? "", id ?? "");
 
   // Resolve latest version from descriptors
   useEffect(() => {
-    if (currentVersion === undefined && versionDescriptors && versionDescriptors.length > 0) {
-      const latest = versionDescriptors.reduce((max, d) => {
-        const match = d.resource?.match(/\?version=(\d+)/);
-        const v = match ? parseInt(match[1] ?? "1", 10) : 1;
-        return v > max ? v : max;
-      }, 1);
-      setCurrentVersion(latest);
+    if (currentVersion === undefined && versionDescriptors) {
+      if (versionDescriptors.length > 0) {
+        const latest = versionDescriptors.reduce((max, d) => {
+          const match = d.resource?.match(/\?version=(\d+)/);
+          const v = match ? parseInt(match[1] ?? "1", 10) : 1;
+          return v > max ? v : max;
+        }, 1);
+        setCurrentVersion(latest);
+      } else {
+        // Descriptors loaded but empty — default to version 1
+        setCurrentVersion(1);
+      }
     }
   }, [currentVersion, versionDescriptors]);
 
@@ -453,7 +462,7 @@ export function ResourceDetailPage() {
       </div>
 
       {/* Content */}
-      {isLoading && (
+      {(isLoading || isVersionsLoading || (currentVersion === undefined && !isVersionsError)) && (
         <div className="space-y-4">
           <div className="flex gap-4">
             <Skeleton className="h-10 w-32" />
@@ -463,7 +472,7 @@ export function ResourceDetailPage() {
         </div>
       )}
 
-      {isError && (
+      {(isError || isVersionsError) && !isLoading && !isVersionsLoading && (
         <ErrorState
           message={t("common.error")}
           onRetry={() => refetch()}
