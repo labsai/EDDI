@@ -72,6 +72,19 @@ We will credit you in the security advisory unless you prefer to remain anonymou
 - No `@JsonTypeInfo(use=Id.CLASS)` for untrusted payloads
 - Read the [Security documentation](docs/security.md) before contributing security-sensitive code
 
+## Release Integrity
+
+All Docker image releases are **cryptographically signed** using [Sigstore cosign](https://github.com/sigstore/cosign) with keyless OIDC signing. Users can verify any image was built by the official CI pipeline:
+
+```bash
+cosign verify \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp "^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$" \
+  labsai/eddi:latest
+```
+
+For full details, see [Release Signing & Verification](docs/release-signing.md).
+
 ## Security-Related Documentation
 
 - [Security Architecture](docs/security.md) — SSRF protection, sandboxed evaluation, tool hardening

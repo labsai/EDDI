@@ -383,6 +383,10 @@ jobs:
       primary-tag: ${{ steps.meta.outputs.primary-tag }}
       is-release: ${{ steps.meta.outputs.is-release }}
 
+    permissions:
+      contents: read
+      id-token: write  # Required for Sigstore cosign keyless signing (OIDC → Fulcio)
+
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -496,6 +500,33 @@ jobs:
 
           echo "### ✅ Pushed to Docker Hub" >> $GITHUB_STEP_SUMMARY
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
+      - name: Sign Docker images (keyless)
+        run: |
+          PRIMARY_TAG="${{ steps.meta.outputs.primary-tag }}"
+          IS_RELEASE="${{ steps.meta.outputs.is-release }}"
+          IS_STABLE="${{ steps.meta.outputs.is-stable }}"
+
+          echo "=== Signing ${DOCKER_IMAGE}:${PRIMARY_TAG} ==="
+          cosign sign --yes ${DOCKER_IMAGE}:${PRIMARY_TAG}
+
+          if [[ "$IS_STABLE" == "true" ]]; then
+            echo "=== Signing semver aliases ==="
+            cosign sign --yes ${DOCKER_IMAGE}:${{ steps.meta.outputs.minor-tag }}
+            cosign sign --yes ${DOCKER_IMAGE}:${{ steps.meta.outputs.major-tag }}
+          fi
+
+          if [[ "$IS_RELEASE" == "true" ]]; then
+            echo "=== Signing latest ==="
+            cosign sign --yes ${DOCKER_IMAGE}:latest
+          fi
+
+          echo "### 🔏 Docker Images Signed (Sigstore cosign)" >> $GITHUB_STEP_SUMMARY
+          echo "Keyless OIDC signing via GitHub Actions identity." >> $GITHUB_STEP_SUMMARY
+          echo "Verify: \`cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity-regexp '^https://github\\.com/labsai/EDDI/\\.github/workflows/ci\\.yml@refs/(heads/main|tags/.+)$' ${DOCKER_IMAGE}:${PRIMARY_TAG}\`" >> $GITHUB_STEP_SUMMARY
+
   # ─── Job 4: Smoke Test ──────────────────────────────────────────
   smoke-test:
     name: Smoke Test
@@ -503,6 +534,20 @@ jobs:
     needs: docker
 
     steps:
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
+      - name: Verify Docker image signature
+        run: |
+          PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
+          echo "=== Verifying signature for ${DOCKER_IMAGE}:${PRIMARY_TAG} ==="
+          cosign verify \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
+            ${DOCKER_IMAGE}:${PRIMARY_TAG}
+          echo "✅ Image signature verified"
+          echo "### 🔏 Image Signature Verified" >> $GITHUB_STEP_SUMMARY
+
       - name: Start MongoDB
         run: |
           docker run -d --name mongodb \
