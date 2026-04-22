@@ -187,6 +187,7 @@ jobs:
         with:
           name: jacoco-it-report
           path: target/site/jacoco-it/
+          if-no-files-found: ignore
           retention-days: 14
 
       - name: Upload merged coverage report

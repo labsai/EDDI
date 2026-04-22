@@ -13,6 +13,32 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## CI Coverage Reporting — Per-Session Breakdown (2026-04-22)
+
+**Repo:** EDDI (main)
+
+**What changed:** Fixed CI JaCoCo reporting to produce accurate per-session coverage breakdowns: Unit Tests Only, Integration Tests Only, and Merged (UT + IT).
+
+### Problem
+
+The IT-only coverage report (`target/site/jacoco-it/`) was incomplete because `report-integration` only reads `jacoco-it.exec` (from `prepare-agent-integration` / failsafe), but `@QuarkusTest` ITs write to `jacoco-quarkus.exec` via the quarkus-jacoco extension. The IT-only report was missing all `@QuarkusTest` coverage data.
+
+### Fix
+
+- **POM**: Added `merge-it` execution that merges `jacoco-it.exec + jacoco-quarkus.exec` → `jacoco-it-all.exec` before generating the IT report. Changed `report-integration` from `jacoco:report-integration` goal to `jacoco:report` with explicit `dataFile` pointing to the merged IT exec file.
+- **CI**: Added `if-no-files-found: ignore` to IT coverage upload for resilience when ITs fail early.
+
+### Result
+
+The CI step summary now shows 3 accurate, independent tables:
+1. **Unit Tests Only** — from `jacoco.exec` (surefire agent)
+2. **Integration Tests Only** — from `jacoco-it-all.exec` (failsafe agent + quarkus-jacoco merged)
+3. **✅ Merged (UT + IT)** — from `jacoco-merged.exec` (all three exec files)
+
+**Files:** `pom.xml`, `.github/workflows/ci.yml`
+
+---
+
 ## Test Coverage Hardening — Session 3: Broad Class Coverage (2026-04-22)
 
 **Repo:** EDDI (`chore/test-coverage-hardening`)

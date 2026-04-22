@@ -660,12 +660,38 @@
                             <goal>prepare-agent-integration</goal>
                         </goals>
                     </execution>
+                    <!-- Merge IT-only data: failsafe agent + quarkus-jacoco extension.
+                         @QuarkusTest ITs write to jacoco-quarkus.exec (not jacoco-it.exec),
+                         so we merge both to get a complete IT-only picture. -->
+                    <execution>
+                        <id>merge-it</id>
+                        <phase>post-integration-test</phase>
+                        <goals>
+                            <goal>merge</goal>
+                        </goals>
+                        <configuration>
+                            <fileSets>
+                                <fileSet>
+                                    <directory>${project.build.directory}</directory>
+                                    <includes>
+                                        <include>jacoco-it.exec</include>
+                                        <include>jacoco-quarkus.exec</include>
+                                    </includes>
+                                </fileSet>
+                            </fileSets>
+                            <destFile>${project.build.directory}/jacoco-it-all.exec</destFile>
+                        </configuration>
+                    </execution>
                     <execution>
                         <id>report-integration</id>
                         <phase>post-integration-test</phase>
                         <goals>
-                            <goal>report-integration</goal>
+                            <goal>report</goal>
                         </goals>
+                        <configuration>
+                            <dataFile>${project.build.directory}/jacoco-it-all.exec</dataFile>
+                            <outputDirectory>${project.reporting.outputDirectory}/jacoco-it</outputDirectory>
+                        </configuration>
                     </execution>
                     <!-- Merge UT + IT data files for combined coverage -->
                     <execution>
