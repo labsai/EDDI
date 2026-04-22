@@ -32,6 +32,7 @@ public abstract class PostgresTestBase {
 
     static {
         PG.start();
+        Runtime.getRuntime().addShutdownHook(new Thread(PG::stop));
     }
 
     /**

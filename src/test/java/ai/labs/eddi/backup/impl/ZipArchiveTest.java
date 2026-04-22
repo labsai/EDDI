@@ -75,8 +75,9 @@ class ZipArchiveTest {
         Files.writeString(sourceDir.resolve("file.txt"), "data");
 
         // Target path escapes the allowed base dir
+        Path evilTarget = tempDir.resolveSibling("evil_output.zip");
         assertThrows(IOException.class,
-                () -> zipArchive.createZip(sourceDir.toString(), "/tmp/evil/output.zip", tempDir));
+                () -> zipArchive.createZip(sourceDir.toString(), evilTarget.toString(), tempDir));
     }
 
     @Test

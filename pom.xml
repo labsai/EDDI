@@ -751,14 +751,12 @@
                                         <limit>
                                             <counter>INSTRUCTION</counter>
                                             <value>COVEREDRATIO</value>
-                                            <!-- TODO: raise to 0.90 once CI reports actual merged coverage -->
-                                            <minimum>0.65</minimum>
+                                            <minimum>0.81</minimum>
                                         </limit>
                                         <limit>
                                             <counter>BRANCH</counter>
                                             <value>COVEREDRATIO</value>
-                                            <!-- TODO: raise to 0.80 once CI reports actual merged coverage -->
-                                            <minimum>0.55</minimum>
+                                            <minimum>0.70</minimum>
                                         </limit>
                                     </limits>
                                 </rule>

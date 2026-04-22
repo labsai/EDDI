@@ -162,7 +162,7 @@ class RestLogAdminExtendedTest {
             when(sse.newEventBuilder().name(anyString()).data(any()).build()).thenReturn(event);
             when(eventSink.send(any(OutboundSseEvent.class)))
                     .thenReturn(CompletableFuture.completedFuture(null));
-            when(eventSink.isClosed()).thenReturn(true); // close immediately
+            when(eventSink.isClosed()).thenReturn(false); // keep open so the initial batch can be sent
 
             var entry1 = logEntry("a1", null, "INFO");
             var entry2 = logEntry("a2", null, "WARN");
@@ -173,7 +173,11 @@ class RestLogAdminExtendedTest {
 
             restLogAdmin.streamLogs(null, null, null, eventSink, sse);
 
-            // Should call send 3 times (one for each entry)
+            // Verify order: entry3, then entry2, then entry1
+            var inOrder = inOrder(sse.newEventBuilder());
+            inOrder.verify(sse.newEventBuilder()).data(entry3);
+            inOrder.verify(sse.newEventBuilder()).data(entry2);
+            inOrder.verify(sse.newEventBuilder()).data(entry1);
             verify(eventSink, times(3)).send(event);
         }
     }

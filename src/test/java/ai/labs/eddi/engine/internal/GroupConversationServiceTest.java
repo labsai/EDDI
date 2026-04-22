@@ -449,7 +449,7 @@ class GroupConversationServiceTest {
 
         @Test
         void nullGroupId_throwsException() {
-            assertThrows(Exception.class,
+            assertThrows(IllegalArgumentException.class,
                     () -> service.discuss(null, QUESTION, USER_ID, 0));
         }
 
