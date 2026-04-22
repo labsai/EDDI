@@ -71,8 +71,8 @@ describe("findResourceUsage", () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({
       workflowId: "wf1",
-      packageVersion: 1,
-      packageName: "My Workflow",
+      workflowVersion: 1,
+      workflowName: "My Workflow",
       agentId: "a1",
       agentVersion: 2,
       agentName: "My Agent",
@@ -206,7 +206,7 @@ describe("findResourceUsage", () => {
 
     const result = await findResourceUsage("res1", "rulestore", "rulesets");
 
-    expect(result[0]!.packageName).toBe("wf1");
+    expect(result[0]!.workflowName).toBe("wf1");
     expect(result[0]!.agentName).toBe("a1");
   });
 });

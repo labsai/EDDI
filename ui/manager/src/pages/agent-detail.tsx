@@ -522,14 +522,14 @@ export function AgentDetailPage() {
             </div>
           )}
 
-          {agent.workflows?.map((pkgUri) => {
-            const { id: pkgId, version: pkgVersion } = parseResourceUri(pkgUri);
-            const latestVer = latestVersions?.[pkgId];
-            const isStale = latestVer !== undefined && latestVer > pkgVersion;
-            const workflowLink = `/manage/workflowview/${pkgId}?agentId=${id}&agentVer=${resolvedVersion}`;
+          {agent.workflows?.map((wfUri) => {
+            const { id: wfId, version: wfVersion } = parseResourceUri(wfUri);
+            const latestVer = latestVersions?.[wfId];
+            const isStale = latestVer !== undefined && latestVer > wfVersion;
+            const workflowLink = `/manage/workflowview/${wfId}?agentId=${id}&agentVer=${resolvedVersion}`;
             return (
               <div
-                key={pkgUri}
+                key={wfUri}
                 className={cn(
                   "group flex items-center gap-3 px-5 py-4 transition-colors",
                   isStale
@@ -545,11 +545,11 @@ export function AgentDetailPage() {
                   className="flex-1 min-w-0"
                 >
                   <p className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors truncate">
-                    {pkgId}
+                    {wfId}
                   </p>
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                      v{pkgVersion}
+                      v{wfVersion}
                     </span>
                     {isStale && (
                       <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
@@ -561,11 +561,11 @@ export function AgentDetailPage() {
                 <div className="flex items-center gap-1.5 shrink-0">
                   {isStale && (
                     <button
-                      onClick={(e) => { e.preventDefault(); handleUpdateWorkflowVersion(pkgUri, latestVer!); }}
+                      onClick={(e) => { e.preventDefault(); handleUpdateWorkflowVersion(wfUri, latestVer!); }}
                       disabled={updateWorkflowsMutation.isPending}
                       className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors disabled:opacity-50"
                       title={t("agentDetail.updateToLatest", "Update to latest version")}
-                      data-testid={`update-workflow-${pkgId}`}
+                      data-testid={`update-workflow-${wfId}`}
                     >
                       <ArrowUpCircle className="h-3 w-3" />
                       v{latestVer}
@@ -579,7 +579,7 @@ export function AgentDetailPage() {
                     <ExternalLink className="h-3 w-3" />
                   </Link>
                   <button
-                    onClick={() => handleRemoveWorkflow(pkgUri)}
+                    onClick={() => handleRemoveWorkflow(wfUri)}
                     disabled={updateWorkflowsMutation.isPending}
                     className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
                     title={t("common.delete")}
@@ -791,7 +791,7 @@ function AddWorkflowPanel({
   const { data: packages, isLoading } = useWorkflowDescriptors(100, 0, filter);
 
   const available = (packages ?? []).filter(
-    (pkg) => !currentWorkflows.includes(pkg.resource)
+    (wf) => !currentWorkflows.includes(wf.resource)
   );
 
   return (
@@ -827,18 +827,18 @@ function AddWorkflowPanel({
             {t("common.noResults")}
           </p>
         )}
-        {available.map((pkg) => (
+        {available.map((wf) => (
           <button
-            key={pkg.resource}
-            onClick={() => onAdd(pkg.resource)}
+            key={wf.resource}
+            onClick={() => onAdd(wf.resource)}
             className="flex w-full items-center justify-between px-5 py-3 text-start hover:bg-secondary/50 transition-colors"
           >
             <div>
               <p className="text-sm font-medium text-foreground">
-                {pkg.name || parseResourceUri(pkg.resource).id}
+                {wf.name || parseResourceUri(wf.resource).id}
               </p>
               <p className="text-xs text-muted-foreground line-clamp-1">
-                {pkg.description || t("agents.noDescription", "No description")}
+                {wf.description || t("agents.noDescription", "No description")}
               </p>
             </div>
             <Plus className="h-4 w-4 text-primary" />

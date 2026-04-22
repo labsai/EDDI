@@ -48,7 +48,7 @@ const RT: ResourceTypeConfig = {
 
 const CONTEXT: CascadeContext = {
   workflowId: "wf1",
-  packageVersion: 1,
+  workflowVersion: 1,
   agentId: "agent1",
   agentVersion: 1,
 };
@@ -333,6 +333,21 @@ describe("cascadeSaveResource", () => {
       expect(updatedWorkflow.workflowSteps[0]!.config!.uri).toBe(
         "eddi://ai.labs.snippet/snippetstore/snippets/sn1?version=2"
       );
+    });
+  });
+
+  describe("CascadeContext interface", () => {
+    it("uses workflowVersion (not legacy packageVersion)", () => {
+      // Type-level verification: this would be a compile error if the field didn't exist
+      const ctx: CascadeContext = {
+        workflowId: "wf1",
+        workflowVersion: 1,
+        agentId: "a1",
+        agentVersion: 1,
+      };
+      expect(ctx.workflowVersion).toBe(1);
+      // @ts-expect-error — packageVersion should not exist on CascadeContext
+      expect(ctx.packageVersion).toBeUndefined();
     });
   });
 });

@@ -81,7 +81,7 @@ export function WorkflowDetailPage() {
   const resolvedVersion = version ?? versions[0]?.version ?? 1;
 
   const {
-    data: pkg,
+    data: workflow,
     isLoading,
     isError,
     refetch,
@@ -91,10 +91,10 @@ export function WorkflowDetailPage() {
 
   // Use local state if user has made edits, otherwise use server data
   const currentExtensions = useMemo(
-    () => localExtensions ?? pkg?.workflowSteps ?? [],
-    [localExtensions, pkg?.workflowSteps]
+    () => localExtensions ?? workflow?.workflowSteps ?? [],
+    [localExtensions, workflow?.workflowSteps]
   );
-  const serverExtensions = pkg?.workflowSteps ?? [];
+  const serverExtensions = workflow?.workflowSteps ?? [];
   const isDirty =
     localExtensions !== null &&
     JSON.stringify(localExtensions) !== JSON.stringify(serverExtensions);
@@ -125,7 +125,7 @@ export function WorkflowDetailPage() {
   // Reset local state when server data changes (version switch)
   useEffect(() => {
     setLocalExtensions(null);
-  }, [pkg?.workflowSteps]);
+  }, [workflow?.workflowSteps]);
 
   // Clear save message after 3s
   useEffect(() => {
@@ -225,12 +225,12 @@ export function WorkflowDetailPage() {
 
         // 2. Update parent agent's workflow reference
         const agent = await getAgent(agentId, currentAgentVer);
-        const oldPkgUri = `eddi://ai.labs.workflow/workflowstore/workflows/${id}?version=${resolvedVersion}`;
-        const newPkgUri = `eddi://ai.labs.workflow/workflowstore/workflows/${id}?version=${newWfVersion}`;
+        const oldWfUri = `eddi://ai.labs.workflow/workflowstore/workflows/${id}?version=${resolvedVersion}`;
+        const newWfUri = `eddi://ai.labs.workflow/workflowstore/workflows/${id}?version=${newWfVersion}`;
         const updatedAgent = {
           ...agent,
           workflows: (agent.workflows ?? []).map((u) =>
-            u === oldPkgUri ? newPkgUri : u
+            u === oldWfUri ? newWfUri : u
           ),
         };
         const agentResult = await updateAgent(agentId, currentAgentVer, updatedAgent);
@@ -275,7 +275,7 @@ export function WorkflowDetailPage() {
     );
   }
 
-  if (isError || !pkg) {
+  if (isError || !workflow) {
     return (
       <div className="space-y-4">
         <BackLink />
@@ -404,7 +404,7 @@ export function WorkflowDetailPage() {
           <button
             onClick={() => setShowDeleteDialog(true)}
             className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
-            data-testid="delete-pkg-btn"
+            data-testid="delete-wf-btn"
           >
             <Trash2 className="h-4 w-4" />
           </button>
@@ -457,7 +457,7 @@ export function WorkflowDetailPage() {
 
 
       {/* Raw config (collapsible) */}
-      <RawConfigSection config={pkg} />
+      <RawConfigSection config={workflow} />
 
       {/* Delete confirmation dialog */}
       <AlertDialog

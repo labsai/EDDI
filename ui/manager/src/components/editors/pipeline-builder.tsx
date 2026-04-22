@@ -279,8 +279,8 @@ function SortableExtensionItem({
     let path = `/manage/resources/${parsed.slug}/${parsed.id}`;
     const params = new URLSearchParams();
     if (workflowId && workflowVersion) {
-      params.set("pkgId", workflowId);
-      params.set("pkgVer", String(workflowVersion));
+      params.set("wfId", workflowId);
+      params.set("wfVer", String(workflowVersion));
     }
     if (agentId) params.set("agentId", agentId);
     if (agentVer) params.set("agentVer", agentVer);

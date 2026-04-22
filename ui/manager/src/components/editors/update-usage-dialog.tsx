@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { PackageOpen, Bot, RefreshCw, Check, X } from "lucide-react";
+import { Workflow, Bot, RefreshCw, Check, X } from "lucide-react";
 import type { ResourceUsage } from "@/lib/api/resource-usage";
 
 export interface UpdateUsageDialogProps {
-  /** List of packages/agents using this resource */
+  /** List of workflows/agents using this resource */
   usages: ResourceUsage[];
   /** Whether cascade update is in progress */
   isUpdating: boolean;
@@ -15,7 +15,7 @@ export interface UpdateUsageDialogProps {
 }
 
 /**
- * Post-save dialog showing which packages/agents use the saved config.
+ * Post-save dialog showing which workflows/agents use the saved config.
  * User can select which to cascade-update to the new version.
  */
 export function UpdateUsageDialog({
@@ -49,7 +49,7 @@ export function UpdateUsageDialog({
       data-testid="update-usage-dialog"
     >
       <div className="mb-3 flex items-center gap-2">
-        <PackageOpen className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+        <Workflow className="h-5 w-5 text-amber-600 dark:text-amber-400" />
         <h3 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
           {t("editor.usedInAgents", {
             count: usages.length,
@@ -60,7 +60,7 @@ export function UpdateUsageDialog({
       <p className="mb-3 text-xs text-amber-700 dark:text-amber-300">
         {t(
           "editor.updateUsageHint",
-          "Update the selected packages and agents to use the new version?"
+          "Update the selected workflows and agents to use the new version?"
         )}
       </p>
       <ul className="mb-3 space-y-2">
@@ -82,8 +82,8 @@ export function UpdateUsageDialog({
                 </span>
                 <span className="text-amber-500">→</span>
                 <span className="flex items-center gap-1 text-amber-800 dark:text-amber-300">
-                  <PackageOpen className="h-3.5 w-3.5" />
-                  {usage.packageName} <span className="opacity-50">v{usage.packageVersion}</span>
+                  <Workflow className="h-3.5 w-3.5" />
+                  {usage.workflowName} <span className="opacity-50">v{usage.workflowVersion}</span>
                 </span>
               </div>
             </label>

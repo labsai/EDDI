@@ -194,10 +194,10 @@ export function WorkflowsPage() {
               className="cq-card-grid"
               data-testid="workflow-grid"
             >
-              {enrichedWorkflows.map((pkg) => (
+              {enrichedWorkflows.map((wf) => (
                 <WorkflowCard
-                  key={pkg.resource}
-                  pkg={pkg}
+                  key={wf.resource}
+                  workflow={wf}
                   onDuplicate={handleDuplicate}
                   onDelete={handleDelete}
                 />
@@ -247,46 +247,46 @@ export function WorkflowsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {enrichedWorkflows.map((pkg) => (
+                  {enrichedWorkflows.map((wf) => (
                     <tr
-                      key={pkg.resource}
+                      key={wf.resource}
                       className="hover:bg-secondary/30 transition-colors"
                     >
                       <td className="px-5 py-3">
                         <Link
-                          to={`/manage/workflowview/${pkg.id}`}
+                          to={`/manage/workflowview/${wf.id}`}
                           className="text-sm font-medium text-foreground hover:text-primary transition-colors"
                         >
-                          {pkg.name || t("packages.unnamed", "Unnamed Workflow")}
+                          {wf.name || t("packages.unnamed", "Unnamed Workflow")}
                           <ExternalLink className="ms-1 inline h-3 w-3 opacity-40" />
                         </Link>
                       </td>
                       <td className="px-5 py-3">
                         <span className="font-mono text-xs text-muted-foreground">
-                          {pkg.id.slice(0, 12)}…
+                          {wf.id.slice(0, 12)}…
                         </span>
                       </td>
                       <td className="px-5 py-3">
                         <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                          v{pkg.version}
+                          v{wf.version}
                         </span>
                       </td>
                       <td className="px-5 py-3">
                         <span className="text-sm text-muted-foreground">
-                          {new Date(pkg.lastModifiedOn).toLocaleString()}
+                          {new Date(wf.lastModifiedOn).toLocaleString()}
                         </span>
                       </td>
                       <td className="px-5 py-3 text-end">
                         <div className="inline-flex items-center gap-1">
                           <button
-                            onClick={() => handleDuplicate(pkg.id, pkg.version)}
+                            onClick={() => handleDuplicate(wf.id, wf.version)}
                             className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
                             title={t("common.duplicate", "Duplicate")}
                           >
                             <Copy className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => handleDelete(pkg.id, pkg.version)}
+                            onClick={() => handleDelete(wf.id, wf.version)}
                             className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                             title={t("common.delete")}
                           >
