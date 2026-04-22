@@ -13,6 +13,26 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🐛 Compose AuthStartupGuard Fix & CI Tag Bypass (2026-04-23)
+
+**Repo:** EDDI (`fix/compose-auth-guard`)
+
+**What changed:** Fixed container startup crash in non-auth Docker Compose configurations and fixed CI pipeline skipping Docker builds on tag pushes.
+
+### Root Cause
+
+The `AuthStartupGuard` (added in 6.0.2) blocks startup if OIDC is not configured and the escape hatch `EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true` is not set. The non-auth compose files were missing this env var, causing immediate crash on `docker compose up`.
+
+### Changes
+
+- **`docker-compose.yml`** — Added `EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true` to environment
+- **`docker-compose.postgres-only.yml`** — Same fix
+- **`docker-compose.postgres.yml`** — Same fix
+- **`docker-compose.auth.yml`** — No change needed (has `QUARKUS_OIDC_TENANT_ENABLED=true`)
+- **`.github/workflows/ci.yml`** — Docker job now uses `always()` with `needs: [detect-changes, build-and-test]` so tag pushes bypass the detect-changes gate. Branch pushes still require `build-and-test.result == 'success'`.
+
+---
+
 ## CI Coverage Gate Consolidation & Broken Pipe Fix (2026-04-22)
 
 **Repo:** EDDI (`chore/test-coverage-hardening`)
