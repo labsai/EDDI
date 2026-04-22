@@ -6,7 +6,7 @@ description: >-
   and integrate with LLM providers via a unified REST API.
 type: application
 version: 1.0.0
-appVersion: "6.0.1"
+appVersion: "6.0.2"
 home: https://eddi.labs.ai
 sources:
   - https://github.com/labsai/EDDI

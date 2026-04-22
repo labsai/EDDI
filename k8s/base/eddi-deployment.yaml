@@ -5,7 +5,7 @@ metadata:
   name: eddi
   labels:
     app.kubernetes.io/name: eddi
-    app.kubernetes.io/version: "6.0.1"
+    app.kubernetes.io/version: "6.0.2"
     app.kubernetes.io/component: server
     app.kubernetes.io/part-of: eddi
 spec:
@@ -23,7 +23,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: eddi
-        app.kubernetes.io/version: "6.0.1"
+        app.kubernetes.io/version: "6.0.2"
         app.kubernetes.io/component: server
         app.kubernetes.io/part-of: eddi
       annotations:
