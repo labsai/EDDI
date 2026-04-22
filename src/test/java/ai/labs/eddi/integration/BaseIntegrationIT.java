@@ -242,6 +242,22 @@ public abstract class BaseIntegrationIT {
         return agentId;
     }
 
+    /**
+     * Polls until conversation has at least one step (welcome message processed).
+     * Shared across all IT subclasses that deploy agents and start conversations.
+     */
+    protected void waitForConversationReady(String agentId, String conversationId) throws InterruptedException {
+        for (int i = 0; i < 20; i++) {
+            Response response = getConversationLog(agentId, conversationId, false);
+            if (response.statusCode() == 200) {
+                var steps = response.jsonPath().getList("conversationSteps");
+                if (steps != null && !steps.isEmpty())
+                    return;
+            }
+            Thread.sleep(500);
+        }
+    }
+
     public record ResourceId(String id, int version) {
     }
 }
