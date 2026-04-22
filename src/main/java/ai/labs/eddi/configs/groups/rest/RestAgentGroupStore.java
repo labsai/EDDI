@@ -184,7 +184,14 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
                 if (config.getDescription() != null) {
                     descriptor.setDescription(config.getDescription());
                 }
-                documentDescriptorStore.createDescriptor(resourceId, version, descriptor);
+                try {
+                    documentDescriptorStore.createDescriptor(resourceId, version, descriptor);
+                } catch (IResourceStore.ResourceStoreException ignored) {
+                    // Another request/response filter may have created the descriptor
+                    // after our lookup but before createDescriptor. Apply the same data
+                    // to the existing descriptor instead of treating this as a failure.
+                    documentDescriptorStore.setDescriptor(resourceId, version, descriptor);
+                }
                 return;
             }
 

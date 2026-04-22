@@ -1,7 +1,10 @@
 package ai.labs.eddi.datastore.mongo;
 
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import org.bson.Document;
@@ -35,6 +38,18 @@ class DescriptorStoreTest {
 
         MongoCollection<Document> mockCollection = mock(MongoCollection.class);
         when(database.getCollection(anyString())).thenReturn(mockCollection);
+
+        // Stub the find() chain so readDescriptors can execute to completion
+        // instead of throwing an NPE from an un-stubbed mock.
+        FindIterable<Document> mockIterable = mock(FindIterable.class);
+        when(mockCollection.find(any(Bson.class))).thenReturn(mockIterable);
+        when(mockIterable.sort(any(Document.class))).thenReturn(mockIterable);
+        when(mockIterable.limit(anyInt())).thenReturn(mockIterable);
+        when(mockIterable.skip(anyInt())).thenReturn(mockIterable);
+        @SuppressWarnings("unchecked")
+        MongoCursor<Document> mockCursor = mock(MongoCursor.class);
+        when(mockCursor.hasNext()).thenReturn(false);
+        when(mockIterable.iterator()).thenReturn(mockCursor);
 
         store = new DescriptorStore<>(database, documentBuilder, Object.class);
     }
@@ -76,20 +91,24 @@ class DescriptorStoreTest {
     class ReadDescriptors {
 
         @Test
-        @DisplayName("should exercise filter != null branch")
-        void appliesFilter() {
-            // DescriptorStore internally creates ResourceFilter — not injectable.
-            // Calling with a non-null filter exercises the queryFiltersOptional branch.
-            // The NullPointerException is expected because the mock collection has no
-            // find() stub, confirming the code path was reached.
-            assertThrows(Exception.class, () -> store.readDescriptors("ai.labs.agent", "searchTerm", 0, 10, false));
+        @DisplayName("should return empty list when filter is non-null and no results match")
+        void appliesFilter() throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+            // Calling with a non-null filter exercises the queryFiltersOptional branch
+            // (OR filter with name, description, userId, resource fields).
+            List<Object> result = store.readDescriptors("ai.labs.agent", "searchTerm", 0, 10, false);
+
+            assertNotNull(result);
+            assertTrue(result.isEmpty(), "Expected empty list when no documents match the filter");
         }
 
         @Test
-        @DisplayName("should exercise filter == null branch")
-        void noOptionalFiltersWhenNull() {
+        @DisplayName("should return empty list when filter is null (required filters only)")
+        void noOptionalFiltersWhenNull() throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
             // Null filter → empty queryFiltersOptional → single required filter only.
-            assertThrows(Exception.class, () -> store.readDescriptors("ai.labs.agent", null, 0, 10, false));
+            List<Object> result = store.readDescriptors("ai.labs.agent", null, 0, 10, false);
+
+            assertNotNull(result);
+            assertTrue(result.isEmpty(), "Expected empty list when no documents exist");
         }
     }
 
