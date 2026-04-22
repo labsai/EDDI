@@ -923,8 +923,8 @@ jobs:
             exit 0
           fi
 
-          # Skip notification for docs-only changes (all jobs skipped)
-          if [ "${{ needs.detect-changes.outputs.code }}" = "false" ]; then
+          # Skip notification for docs-only changes (all jobs skipped) — but always notify on tags
+          if [ "${{ needs.detect-changes.outputs.code }}" = "false" ] && [[ "$GITHUB_REF" != refs/tags/* ]]; then
             echo "### ⏭️ Docs-only change — no build notification sent" >> $GITHUB_STEP_SUMMARY
             exit 0
           fi
@@ -956,6 +956,13 @@ jobs:
               *)        echo "❓" ;;
             esac
           }
+
+          # On tag pushes, build-and-test may be skipped (detect-changes bypass) — that's OK
+          # because Docker builds from source independently
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            [ "$BUILD" = "skipped" ] && BUILD="success"
+            [ "$IT" = "skipped" ] && IT="success"
+          fi
 
           # Overall status
           if [ "$BUILD" = "success" ] && [ "$IT" != "failure" ] && [ "$DOCKER" != "failure" ] && [ "$SMOKE" != "failure" ] && [ "$GITLEAKS" != "failure" ] && [ "$TRIVY" != "failure" ]; then
