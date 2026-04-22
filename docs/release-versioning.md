@@ -232,3 +232,22 @@ After tagging `v6.0.0`, update `pom.xml` on the feature branch to the next versi
 # Update pom.xml: <version>6.1.0</version>
 # CI builds will now produce 6.1.0-b1, 6.1.0-b2, etc.
 ```
+
+---
+
+## Release Signing
+
+All Docker images pushed by CI are **cryptographically signed** using [Sigstore cosign](https://github.com/sigstore/cosign) with keyless OIDC signing. This ensures that users can verify any image was built by the official `labsai/EDDI` GitHub Actions pipeline.
+
+For full details on how signing works and how to verify images, see [Release Signing & Verification](release-signing.md).
+
+### Signed Git Tags
+
+When creating release tags, use signed tags:
+
+```bash
+# Instead of: git tag v6.0.0
+# Use:
+git tag -s v6.0.0 -m "Release 6.0.0"
+git push origin v6.0.0
+```
