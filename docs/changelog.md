@@ -13,6 +13,27 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## CI Coverage Gate Consolidation & Broken Pipe Fix (2026-04-22)
+
+**Repo:** EDDI (`chore/test-coverage-hardening`)
+
+**What changed:** Consolidated JaCoCo coverage enforcement to a single merged UT+IT gate and fixed the CI coverage summary broken pipe error.
+
+### Changes
+
+- **Removed UT-only JaCoCo check gate** — The `check` execution (test phase, 65% instruction / 55% branch) was removed. Coverage thresholds now only apply to the combined UT+IT data.
+- **Single authoritative gate: `merged-check`** — Enforced during `verify` phase against `jacoco-merged.exec` (70% instruction / 60% branch). This means ITs contribute to the coverage threshold.
+- **Build job: `verify -DskipITs` → `test`** — Since no check gate runs in `test` phase, the build-and-test job no longer needs `verify`. The integration-test job runs `verify` which triggers the merged gate.
+- **Fixed broken pipe in CI coverage summaries** — Both `sort|head` pipelines in the coverage summary steps produced `sort: write failed: 'standard output': Broken pipe` errors. Root cause: `head` closes stdin after 10 lines, `sort` gets SIGPIPE, and GitHub Actions' `set -o pipefail` propagates the error. Fix: `{ sort ... 2>/dev/null || true; }` suppresses both stderr and exit code.
+- **Deleted `check_coverage.ps1`** — Local dev script with hardcoded machine-specific path; not used in CI.
+
+**Files:**
+- `.github/workflows/ci.yml`
+- `pom.xml`
+- `check_coverage.ps1` (deleted)
+
+---
+
 ## CI Gitleaks License & Coverage Adjustment (2026-04-22)
 
 **Repo:** EDDI (chore/test-coverage-hardening)
