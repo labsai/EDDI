@@ -112,7 +112,7 @@ export interface CascadeVersionResult {
 export async function cascadeVersionUpdate(
   rt: ResourceTypeConfig,
   resourceId: string,
-  previousVersion: number,
+  _previousVersion: number,
   newVersion: number,
   context: CascadeContext
 ): Promise<CascadeVersionResult> {

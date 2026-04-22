@@ -108,14 +108,17 @@ describe("deleteGroupWithMembers", () => {
     vi.mocked(api.delete).mockResolvedValue(undefined);
 
     await deleteGroupWithMembers("grp1", 1, {
+      name: "Test Group",
+      description: "Test",
       members: [
-        { agentId: "agent-a", memberType: "AGENT", name: "A" },
-        { agentId: "agent-b", memberType: "AGENT", name: "B" },
+        { agentId: "agent-a", memberType: "AGENT", displayName: "A", speakingOrder: null, role: null },
+        { agentId: "agent-b", memberType: "AGENT", displayName: "B", speakingOrder: null, role: null },
       ],
       moderatorAgentId: "agent-mod",
-      moderatorInitialPrompt: "",
-      discussionRounds: 3,
-      summaryMode: "final",
+      style: "ROUND_TABLE",
+      maxRounds: 3,
+      phases: null,
+      protocol: null,
     });
 
     // Should have called currentversion for each unique agent (agent-a, agent-b, agent-mod)
