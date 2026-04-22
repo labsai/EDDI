@@ -11,10 +11,10 @@ export interface ResourceUsage {
 }
 
 /**
- * Find all packages and agents that reference a given resource URI.
+ * Find all workflows and agents that reference a given resource URI.
  *
- * Scans all packages for extensions whose config.uri contains
- * the resource ID, then scans all agents for references to those packages.
+ * Scans all workflows for extensions whose config.uri contains
+ * the resource ID, then scans all agents for references to those workflows.
  */
 export async function findResourceUsage(
   resourceId: string,
@@ -23,8 +23,14 @@ export async function findResourceUsage(
 ): Promise<ResourceUsage[]> {
   const usages: ResourceUsage[] = [];
 
-  // 1. Get all packages
-  const pkgDescriptors = await getWorkflowDescriptors(200, 0, "");
+  // 1. Get all workflows and agents up-front (one API call each)
+  const [pkgDescriptors, agentDescriptors] = await Promise.all([
+    getWorkflowDescriptors(200, 0, ""),
+    getAgentDescriptors(200, 0, ""),
+  ]);
+
+  // Cache for agent configs (avoid re-fetching the same agent)
+  const agentCache = new Map<string, Awaited<ReturnType<typeof getAgent>>>();
 
   for (const pkgDesc of pkgDescriptors) {
     const { id: pkgId, version: pkgVersion } = parseResourceUri(pkgDesc.resource);
@@ -42,13 +48,16 @@ export async function findResourceUsage(
 
       if (!hasReference) continue;
 
-      // 2. Find agents that reference this package
-      const agentDescriptors = await getAgentDescriptors(200, 0, "");
-
+      // 2. Find agents that reference this workflow
       for (const agentDesc of agentDescriptors) {
         const { id: agentId, version: agentVersion } = parseResourceUri(agentDesc.resource);
         try {
-          const agent = await getAgent(agentId, agentVersion);
+          const cacheKey = `${agentId}@${agentVersion}`;
+          let agent = agentCache.get(cacheKey);
+          if (!agent) {
+            agent = await getAgent(agentId, agentVersion);
+            agentCache.set(cacheKey, agent);
+          }
           const pkgUri = pkgDesc.resource;
           if (agent.workflows?.some((uri) => uri === pkgUri)) {
             usages.push({
@@ -65,7 +74,7 @@ export async function findResourceUsage(
         }
       }
     } catch {
-      // Skip packages that can't be loaded
+      // Skip workflows that can't be loaded
     }
   }
 

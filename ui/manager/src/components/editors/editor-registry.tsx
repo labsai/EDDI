@@ -97,7 +97,6 @@ export const EXTENSION_TO_SLUG: Record<string, string> = {
   "ai.labs.property": "propertysetter",
   "ai.labs.mcpcalls": "mcpcalls",
   "ai.labs.dictionary": "dictionary",
-  "ai.labs.parser": "dictionary",
   "ai.labs.rag": "rag",
   "ai.labs.snippets": "snippets",
 };

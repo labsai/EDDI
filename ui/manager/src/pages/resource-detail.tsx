@@ -242,30 +242,59 @@ export function ResourceDetailPage() {
       if (newResourceVersion === null || !rt) return;
       setIsCascading(true);
 
+      // Track updated versions across iterations — when the same workflow
+      // or agent appears in multiple usages, subsequent cascades must use
+      // the version produced by the prior cascade (not the original stale one).
+      const updatedWorkflowVersions = new Map<string, number>();
+      const updatedAgentVersions = new Map<string, number>();
+      let failCount = 0;
+
       try {
         for (const usage of selected) {
-          await cascadeSave.mutateAsync({
-            id: id ?? "",
-            version: newResourceVersion,
-            body: {}, // Not used — skipResourceSave bypasses the resource PUT
-            skipResourceSave: true,
-            context: {
-              workflowId: usage.workflowId,
-              packageVersion: usage.packageVersion,
-              agentId: usage.agentId,
-              agentVersion: usage.agentVersion,
-            },
-          });
+          const workflowVersion =
+            updatedWorkflowVersions.get(usage.workflowId) ?? usage.packageVersion;
+          const agentVersion =
+            updatedAgentVersions.get(usage.agentId) ?? usage.agentVersion;
+
+          try {
+            const result = await cascadeSave.mutateAsync({
+              id: id ?? "",
+              version: newResourceVersion,
+              body: {},
+              skipResourceSave: true,
+              context: {
+                workflowId: usage.workflowId,
+                packageVersion: workflowVersion,
+                agentId: usage.agentId,
+                agentVersion: agentVersion,
+              },
+            });
+
+            if (result.newWorkflowVersion) {
+              updatedWorkflowVersions.set(usage.workflowId, result.newWorkflowVersion);
+            }
+            if (result.newAgentVersion) {
+              updatedAgentVersions.set(usage.agentId, result.newAgentVersion);
+            }
+          } catch {
+            failCount++;
+          }
         }
-      } catch {
-        // Some cascades may fail — that's okay
       } finally {
+        if (failCount > 0) {
+          toast.error(
+            t("editor.cascadePartialFailure", {
+              count: failCount,
+              defaultValue: "{{count}} cascade update(s) failed",
+            })
+          );
+        }
         setIsCascading(false);
         setShowUsageDialog(false);
         setUsages([]);
       }
     },
-    [id, newResourceVersion, rt, cascadeSave]
+    [id, newResourceVersion, rt, cascadeSave, t]
   );
 
   if (!rt) {

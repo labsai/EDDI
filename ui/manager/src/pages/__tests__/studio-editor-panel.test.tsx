@@ -125,21 +125,20 @@ describe("StudioEditorPanel", () => {
     });
   });
 
-  it("maps parser type to dictionary slug", async () => {
+  it("shows unsupported type for parser extension (no standalone editor)", async () => {
     renderPanel({
       type: "ai.labs.parser",
       extensions: {},
       config: { uri: "eddi://ai.labs.parser/parserstore/parsers/parser1?version=1" },
     });
 
-    // Parser should map to dictionary slug and attempt to render
-    // Since parserstore/parsers won't match dictionarystore, it may show loading or error
-    // But it should NOT show "unsupported type" — it's a known extension
+    // Parsers don't have a standalone editor — they're infrastructure that
+    // binds dictionaries to the pipeline. The old parser→dictionary mapping
+    // was incorrect (it sent a parser ID to the dictionary store).
     await waitFor(() => {
-      const unsupported = screen.queryByText(/Editor not available/i);
-      const noConfig = screen.queryByText(/no configuration URI/i);
-      expect(unsupported).not.toBeInTheDocument();
-      expect(noConfig).not.toBeInTheDocument();
+      expect(
+        screen.getByText(/Editor not available/i)
+      ).toBeInTheDocument();
     });
   });
 
