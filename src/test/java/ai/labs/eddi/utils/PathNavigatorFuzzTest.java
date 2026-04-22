@@ -100,8 +100,7 @@ class PathNavigatorFuzzTest {
     void fuzzGetValue(FuzzedDataProvider data) {
         String path = data.consumeString(500);
         // Must not throw any uncaught exception
-        Object result = PathNavigator.getValue(path, SEED_DATA);
-        // Result is either null or a valid object — never an exception
+        PathNavigator.getValue(path, SEED_DATA);
     }
 
     @FuzzTest(maxDuration = "120s")
@@ -124,7 +123,7 @@ class PathNavigatorFuzzTest {
         String rightPart = data.consumeString(100);
         String fullPath = leftPath + operator + rightPart;
 
-        Object result = PathNavigator.getValue(fullPath, SEED_DATA);
+        PathNavigator.getValue(fullPath, SEED_DATA);
         // Should return null or a computed value — never crash
     }
 

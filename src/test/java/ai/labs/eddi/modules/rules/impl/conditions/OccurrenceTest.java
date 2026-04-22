@@ -1,12 +1,10 @@
 package ai.labs.eddi.modules.rules.impl.conditions;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.modules.rules.impl.Rule;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.LinkedList;
-import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -74,7 +72,6 @@ class OccurrenceTest {
 
         var memory = mock(IConversationMemory.class);
         var allSteps = mock(IConversationMemory.IConversationStepStack.class);
-        var allData = mock(List.class);
         org.mockito.Mockito.when(memory.getAllSteps()).thenReturn(allSteps);
         org.mockito.Mockito.when(allSteps.getAllData("behavior_rules:success")).thenReturn(null);
 

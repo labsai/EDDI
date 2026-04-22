@@ -3,7 +3,6 @@ package ai.labs.eddi.modules.nlp.extensions.dictionaries;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.model.FoundDictionaryEntry;
-import ai.labs.eddi.modules.nlp.model.FoundWord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 

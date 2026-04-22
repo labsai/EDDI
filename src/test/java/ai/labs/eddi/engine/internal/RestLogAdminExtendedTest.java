@@ -64,7 +64,6 @@ class RestLogAdminExtendedTest {
 
             restLogAdmin.streamLogs("agent-1", "conv-1", "WARN", eventSink, sse);
 
-            @SuppressWarnings("unchecked")
             var captor = ArgumentCaptor.forClass(Consumer.class);
             verify(boundedLogStore).addListener(captor.capture());
             capturedListener = captor.getValue();

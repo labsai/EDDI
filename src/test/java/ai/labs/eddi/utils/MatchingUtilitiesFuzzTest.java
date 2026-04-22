@@ -56,9 +56,8 @@ class MatchingUtilitiesFuzzTest {
         String equals = data.consumeBoolean() ? data.consumeString(100) : null;
         String contains = data.consumeBoolean() ? data.consumeString(100) : null;
 
-        // Must return a boolean and never throw
-        boolean result = MatchingUtilities.executeValuePath(CONVERSATION_DATA, valuePath, equals, contains);
-        // result is either true or false — that's the only valid contract
+        // Must never throw
+        MatchingUtilities.executeValuePath(CONVERSATION_DATA, valuePath, equals, contains);
     }
 
     @FuzzTest(maxDuration = "120s")

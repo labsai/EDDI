@@ -46,7 +46,6 @@ class DescriptorStoreTest {
         when(mockIterable.sort(any(Document.class))).thenReturn(mockIterable);
         when(mockIterable.limit(anyInt())).thenReturn(mockIterable);
         when(mockIterable.skip(anyInt())).thenReturn(mockIterable);
-        @SuppressWarnings("unchecked")
         MongoCursor<Document> mockCursor = mock(MongoCursor.class);
         when(mockCursor.hasNext()).thenReturn(false);
         when(mockIterable.iterator()).thenReturn(mockCursor);

@@ -320,7 +320,6 @@ class RemoteApiResourceSourceTest {
 
         @Test
         @DisplayName("should resolve latest version from descriptors when version is null")
-        @SuppressWarnings("unchecked")
         void resolvesLatestVersion() throws Exception {
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(new ArrayList<>());
@@ -340,17 +339,17 @@ class RemoteApiResourceSourceTest {
             when(jsonSerialization.deserialize("{agentJson}", AgentConfiguration.class))
                     .thenReturn(agentConfig);
 
-            var source = new RemoteApiResourceSource(
-                    BASE_URL, AGENT_ID, null, "Bearer test-token", jsonSerialization, mockHttpClient);
-            AgentSourceData result = source.readAgent();
+            try (var source = new RemoteApiResourceSource(
+                    BASE_URL, AGENT_ID, null, "Bearer test-token", jsonSerialization, mockHttpClient)) {
+                AgentSourceData result = source.readAgent();
 
-            assertNotNull(result);
-            assertEquals(AGENT_ID, result.sourceId());
+                assertNotNull(result);
+                assertEquals(AGENT_ID, result.sourceId());
+            }
         }
 
         @Test
         @DisplayName("should fallback to version=1 when descriptor lookup fails")
-        @SuppressWarnings("unchecked")
         void fallbacksToVersion1() throws Exception {
             var agentConfig = new AgentConfiguration();
             agentConfig.setWorkflows(new ArrayList<>());
@@ -365,11 +364,12 @@ class RemoteApiResourceSourceTest {
             when(jsonSerialization.deserialize("{agentJson}", AgentConfiguration.class))
                     .thenReturn(agentConfig);
 
-            var source = new RemoteApiResourceSource(
-                    BASE_URL, AGENT_ID, null, "Bearer test-token", jsonSerialization, mockHttpClient);
-            AgentSourceData result = source.readAgent();
+            try (var source = new RemoteApiResourceSource(
+                    BASE_URL, AGENT_ID, null, "Bearer test-token", jsonSerialization, mockHttpClient)) {
+                AgentSourceData result = source.readAgent();
 
-            assertNotNull(result);
+                assertNotNull(result);
+            }
         }
     }
 
@@ -449,10 +449,10 @@ class RemoteApiResourceSourceTest {
             when(jsonSerialization.deserialize("[]", DocumentDescriptor[].class))
                     .thenReturn(new DocumentDescriptor[0]);
 
-            var source = new RemoteApiResourceSource(
-                    BASE_URL, AGENT_ID, 1, null, jsonSerialization, mockHttpClient);
-
-            assertDoesNotThrow(source::readAgent);
+            try (var source = new RemoteApiResourceSource(
+                    BASE_URL, AGENT_ID, 1, null, jsonSerialization, mockHttpClient)) {
+                assertDoesNotThrow(source::readAgent);
+            }
         }
 
         @Test
@@ -474,10 +474,10 @@ class RemoteApiResourceSourceTest {
             when(jsonSerialization.deserialize("[]", DocumentDescriptor[].class))
                     .thenReturn(new DocumentDescriptor[0]);
 
-            var source = new RemoteApiResourceSource(
-                    BASE_URL, AGENT_ID, 1, "   ", jsonSerialization, mockHttpClient);
-
-            assertDoesNotThrow(source::readAgent);
+            try (var source = new RemoteApiResourceSource(
+                    BASE_URL, AGENT_ID, 1, "   ", jsonSerialization, mockHttpClient)) {
+                assertDoesNotThrow(source::readAgent);
+            }
         }
     }
 }
