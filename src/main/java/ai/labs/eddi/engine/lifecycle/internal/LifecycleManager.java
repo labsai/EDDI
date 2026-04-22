@@ -183,6 +183,8 @@ public class LifecycleManager implements ILifecycleManager {
      * @throws ConversationStopException
      *             if STOP_CONVERSATION action is triggered
      */
+    @SuppressWarnings("null") // Objects.requireNonNullElse guarantees non-null but Eclipse JDT doesn't track
+                              // it
     public void executeLifecycle(final IConversationMemory conversationMemory, List<String> lifecycleTaskTypes)
             throws LifecycleException, ConversationStopException {
 
