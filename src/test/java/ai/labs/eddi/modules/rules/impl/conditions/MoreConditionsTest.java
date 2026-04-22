@@ -1,14 +1,11 @@
 package ai.labs.eddi.modules.rules.impl.conditions;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKey;
-import ai.labs.eddi.modules.rules.impl.Rule;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 

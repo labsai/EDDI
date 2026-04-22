@@ -1,6 +1,5 @@
 package ai.labs.eddi.datastore.postgres;
 
-import ai.labs.eddi.engine.memory.IAttachmentStorage;
 import ai.labs.eddi.engine.memory.IAttachmentStorage.AttachmentNotFoundException;
 import org.junit.jupiter.api.*;
 

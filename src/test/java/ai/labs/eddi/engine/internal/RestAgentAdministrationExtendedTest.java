@@ -108,7 +108,6 @@ class RestAgentAdministrationExtendedTest {
             admin.deployAgent(Deployment.Environment.test, "agent-1", 1, true, false);
 
             // Capture and execute — we need to verify the status callback
-            @SuppressWarnings("unchecked")
             var captor = ArgumentCaptor.forClass(Callable.class);
             verify(runtime).submitCallable(captor.capture(), any());
 
@@ -158,7 +157,6 @@ class RestAgentAdministrationExtendedTest {
 
             admin.deployAgent(Deployment.Environment.test, "agent-1", 1, false, false);
 
-            @SuppressWarnings("unchecked")
             var captor = ArgumentCaptor.forClass(Callable.class);
             verify(runtime).submitCallable(captor.capture(), any());
 
@@ -177,7 +175,6 @@ class RestAgentAdministrationExtendedTest {
 
             admin.deployAgent(Deployment.Environment.test, "agent-1", 1, false, false);
 
-            @SuppressWarnings("unchecked")
             var captor = ArgumentCaptor.forClass(Callable.class);
             verify(runtime).submitCallable(captor.capture(), any());
 
@@ -308,7 +305,6 @@ class RestAgentAdministrationExtendedTest {
 
             admin.undeployAgent(Deployment.Environment.test, "agent-1", 1, false, false);
 
-            @SuppressWarnings("unchecked")
             var captor = ArgumentCaptor.forClass(Callable.class);
             verify(runtime).submitCallable(captor.capture(), any());
 
@@ -326,7 +322,6 @@ class RestAgentAdministrationExtendedTest {
 
             admin.undeployAgent(Deployment.Environment.test, "agent-1", 1, false, false);
 
-            @SuppressWarnings("unchecked")
             var captor = ArgumentCaptor.forClass(Callable.class);
             verify(runtime).submitCallable(captor.capture(), any());
 
@@ -344,7 +339,6 @@ class RestAgentAdministrationExtendedTest {
 
             admin.undeployAgent(Deployment.Environment.test, "agent-1", 1, false, false);
 
-            @SuppressWarnings("unchecked")
             var captor = ArgumentCaptor.forClass(Callable.class);
             verify(runtime).submitCallable(captor.capture(), any());
 

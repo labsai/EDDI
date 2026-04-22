@@ -24,7 +24,6 @@ class WebScraperToolExtendedTest {
     private WebScraperTool webScraperTool;
 
     @BeforeEach
-    @SuppressWarnings("unchecked")
     void setUp() {
         mockHttpClient = mock(SafeHttpClient.class);
         webScraperTool = new WebScraperTool(mockHttpClient);

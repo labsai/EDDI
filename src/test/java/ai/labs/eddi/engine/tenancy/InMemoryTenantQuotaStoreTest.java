@@ -1,6 +1,5 @@
 package ai.labs.eddi.engine.tenancy;
 
-import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
 import org.junit.jupiter.api.BeforeEach;

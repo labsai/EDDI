@@ -1,6 +1,5 @@
 package ai.labs.eddi.datastore.mongo;
 
-import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceFilter.QueryFilter;
 import ai.labs.eddi.datastore.IResourceFilter.QueryFilters;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -9,7 +8,6 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import org.bson.BsonDocument;
 import org.bson.Document;
-import org.bson.conversions.Bson;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;

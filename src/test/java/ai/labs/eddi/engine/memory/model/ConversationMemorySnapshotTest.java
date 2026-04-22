@@ -1,6 +1,5 @@
 package ai.labs.eddi.engine.memory.model;
 
-import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.model.Deployment;
 import org.junit.jupiter.api.Test;
 

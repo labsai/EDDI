@@ -3,7 +3,6 @@ package ai.labs.eddi.engine.httpclient.impl;
 
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
-import ai.labs.eddi.engine.httpclient.IResponse;
 import io.vertx.core.MultiMap;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.http.HttpMethod;
@@ -222,7 +221,6 @@ class HttpClientWrapperTest {
             IRequest request = httpClientWrapper.newRequest(URI.create("https://example.com/path"));
             Map<String, Object> map = request.toMap();
 
-            @SuppressWarnings("unchecked")
             Map<String, ?> queryParams = (Map<String, ?>) map.get("queryParams");
             assertNotNull(queryParams);
             assertTrue(queryParams.isEmpty());
@@ -235,7 +233,6 @@ class HttpClientWrapperTest {
                     URI.create("https://example.com/path?key=value"));
             Map<String, Object> map = request.toMap();
 
-            @SuppressWarnings("unchecked")
             Map<String, ?> queryParams = (Map<String, ?>) map.get("queryParams");
             assertTrue(queryParams.containsKey("key"));
         }
@@ -247,7 +244,6 @@ class HttpClientWrapperTest {
                     URI.create("https://example.com?a=1&b=2&c=3"));
             Map<String, Object> map = request.toMap();
 
-            @SuppressWarnings("unchecked")
             Map<String, ?> queryParams = (Map<String, ?>) map.get("queryParams");
             assertEquals(3, queryParams.size());
         }
@@ -259,7 +255,6 @@ class HttpClientWrapperTest {
                     URI.create("https://example.com?hello%20world=foo%20bar"));
             Map<String, Object> map = request.toMap();
 
-            @SuppressWarnings("unchecked")
             Map<String, ?> queryParams = (Map<String, ?>) map.get("queryParams");
             assertTrue(queryParams.containsKey("hello world"));
         }
@@ -271,7 +266,6 @@ class HttpClientWrapperTest {
                     URI.create("https://example.com?flag"));
             Map<String, Object> map = request.toMap();
 
-            @SuppressWarnings("unchecked")
             Map<String, ?> queryParams = (Map<String, ?>) map.get("queryParams");
             assertTrue(queryParams.containsKey("flag"));
         }
