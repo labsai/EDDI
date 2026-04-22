@@ -13,6 +13,50 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## Test Coverage Hardening — Session 3: Broad Class Coverage (2026-04-22)
+
+**Repo:** EDDI (`chore/test-coverage-hardening`)
+
+**What changed:** Raised instruction coverage from 72.6% → 73.6% (+1.0pp), class coverage from 83.1% → 86.0% (+2.9pp), and method coverage past 80% (80.5%). Total test count: 4,898 (up from 4,774).
+
+### New Test Suites Created (11 files)
+
+| Test File | Target Class(es) | Coverage Impact |
+|-----------|------------------|-----------------|
+| `ExceptionMappersTest` | 6 JAX-RS exception mappers (ResourceStore, IllegalArgument, NotFound, Modified, AlreadyExists, ProcessingRestricted) | 87 instructions, 6 classes → 100% |
+| `WorkflowFactoryTest` | WorkflowFactory + inner WorkflowId | 118 instructions, caching + equals/hashCode |
+| `CronDescriberExtendedTest` | CronDescriber weekends/months/ordinals | 78 missed branches |
+| `AgentsReadinessTest` | AgentsReadiness + AgentsReadinessHealthCheck | 34 instructions, 2 classes → 100% |
+| `CacheFactoryTest` | CacheFactory (Caffeine) | 104 instructions, both getCache overloads |
+| `WebSearchToolExtendedTest` | WebSearchTool JSON formatters (Google, DDG, Wikipedia) | 236 missed instructions |
+| `ToolExecutionServiceExtendedTest` | ToolExecutionService (executeTool, executeToolWrapped, parallel) | 513 missed → major gap closure |
+| `RuleConditionsTest` | Occurrence + Dependency conditions | 217 missed instructions, execute/clone/config |
+| `ValueTest` | NLP Value expression type detection/conversion | 52 missed, equals/hashCode float comparison |
+| `EddiChatMemoryStoreExtendedTest` | EddiChatMemoryStore (getMessages, deleteMessages) | 58 missed, error path coverage |
+| `NlpExtensionProvidersTest` | 6 NLP providers (3 normalizers + 3 corrections) | 107 instructions, 6 classes → 100% |
+
+### Current Metrics
+
+| Metric | Value |
+|--------|-------|
+| Instruction | 89,695 / 121,941 = **73.6%** |
+| Branch | 6,506 / 10,429 = **62.4%** |
+| Method | 4,169 / 5,179 = **80.5%** |
+| Class | 620 / 721 = **86.0%** |
+| Tests | **4,898** (0 failures) |
+
+### Remaining High-Value Targets
+
+- **ToolExecutionService**: Still has residual gaps in parallel execution paths
+- **ConversationService$3**: 101 missed (async callback lambda)
+- **Migration package**: V6RenameMigration (619), MigrationManager (298)
+- **McpAdminTools**: 1,121 missed (requires heavy REST store mocking)
+- **PdfReaderTool**: 278 missed (HTTP client dependency)
+- **RestA2AEndpoint**: 282 missed (A2A protocol endpoint)
+- **Gap to 80%**: ~8,246 more instructions needed (97,553 target)
+
+---
+
 ## Test Coverage Hardening — Two-Tier JaCoCo Gates (2026-04-21)
 
 **Repo:** EDDI (`chore/test-coverage-hardening`)
