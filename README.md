@@ -450,7 +450,7 @@ Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming
 | **[Audit Ledger](docs/audit-ledger.md)**                     | EU AI Act-compliant audit trail                    |
 | **[Kubernetes](docs/kubernetes.md)**                         | Deploy with Kustomize or Helm                      |
 | **[Monitoring & Tracing](docs/monitoring/monitoring-guide.md)** | Prometheus, Grafana, OpenTelemetry, alerting     |
-| **[Red Hat OpenShift](docs/redhat-openshift.md)**            | Certified container, automated release             |
+| **[Red Hat & OpenShift](docs/redhat-openshift.md)**          | RHEL support, certified container, automated release |
 | **[Agent Father Deep Dive](docs/agent-father-deep-dive.md)** | How the meta-agent works                           |
 | **[Full Documentation](https://docs.labs.ai/)**              | Complete documentation site                        |
 

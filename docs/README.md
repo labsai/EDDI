@@ -84,7 +84,7 @@ Build agent behavior by composing these extensions:
 | ----------------------- | -------------------------------------------------- |
 | 🐳 Docker               | [→ Guide](docker.md)                               |
 | ☸️ Kubernetes & Helm    | [→ Guide](kubernetes.md)                           |
-| 🔴 Red Hat OpenShift    | [→ Guide](redhat-openshift.md)                     |
+| 🔴 Red Hat & OpenShift  | [→ Guide](redhat-openshift.md)                     |
 | ☁️ AWS + MongoDB Atlas  | [→ Guide](setup-eddi-on-aws-with-mongodb-atlas.md) |
 | 📊 Metrics & Monitoring | [→ Guide](metrics.md)                              |
 | 📋 Log Administration   | [→ Guide](log-administration.md)                   |
