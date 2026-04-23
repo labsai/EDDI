@@ -918,19 +918,47 @@ jobs:
           chmod +x /usr/local/bin/preflight
           preflight --version
 
-      - name: Preflight check (pushed image, no submit)
+      - name: Preflight check (pushed image)
+        env:
+          REDHAT_API_TOKEN: ${{ secrets.REDHAT_API_TOKEN }}
+          REDHAT_CERT_PROJECT_ID: ${{ secrets.REDHAT_CERT_PROJECT_ID }}
         run: |
           PRIMARY_TAG="${{ needs.docker.outputs.primary-tag }}"
+          IS_RELEASE="${{ needs.docker.outputs.is-release }}"
+
+          # On release tags, submit results to Red Hat Partner Connect
+          SUBMIT_FLAG=""
+          if [ "$IS_RELEASE" = "true" ]; then
+            if [ -n "$REDHAT_API_TOKEN" ] && [ -n "$REDHAT_CERT_PROJECT_ID" ]; then
+              # Pass credentials via preflight's native env vars (avoids process-listing exposure)
+              export PFLT_PYXIS_API_TOKEN="$REDHAT_API_TOKEN"
+              export PFLT_CERTIFICATION_COMPONENT_ID="$REDHAT_CERT_PROJECT_ID"
+              SUBMIT_FLAG="--submit"
+              echo "📤 Release tag detected — submitting to Red Hat Partner Connect"
+            else
+              echo "::warning::Release tag detected but REDHAT_API_TOKEN or REDHAT_CERT_PROJECT_ID secret is missing — running dry-run only"
+            fi
+          else
+            echo "🔍 Non-release push — running preflight in dry-run mode (no submit)"
+          fi
+
           preflight check container \
             docker.io/${DOCKER_IMAGE}:${PRIMARY_TAG} \
             --docker-config=${HOME}/.docker/config.json \
+            ${SUBMIT_FLAG} \
             2>&1 | tee preflight-push-results.txt
+          PREFLIGHT_EXIT=${PIPESTATUS[0]}
           echo ""
           echo "=== Preflight Summary ==="
-          if grep -q "FAILED" preflight-push-results.txt; then
-            echo "::warning::Preflight check has failures on pushed image — review output above."
+          if [ "$PREFLIGHT_EXIT" -ne 0 ] || grep -q "FAILED" preflight-push-results.txt; then
+            echo "::error::Preflight certification check FAILED on pushed image (exit code: ${PREFLIGHT_EXIT})"
+            echo "The container will not pass Red Hat certification in its current state."
+            exit 1
           else
             echo "✅ All preflight checks passed on pushed image"
+            if [ -n "$SUBMIT_FLAG" ]; then
+              echo "📤 Results submitted to Red Hat Partner Connect"
+            fi
           fi
 
       - name: Upload preflight results
@@ -938,8 +966,10 @@ jobs:
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: preflight-push-results
-          path: preflight-push-results.txt
-          retention-days: 14
+          path: |
+            preflight-push-results.txt
+            artifacts/
+          retention-days: 30
 
   # ─── Job 7: Slack Notification ─────────────────────────────────
   notify-slack:

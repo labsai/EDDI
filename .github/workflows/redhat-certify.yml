@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'EDDI version (e.g. 6.0.1)'
+        description: 'EDDI version (e.g. 6.0.2)'
         required: true
-        default: '6.0.1'
+        default: '6.0.2'
       release:
         description: 'Release number (e.g. 1, 2, 3)'
         required: true
@@ -109,16 +109,30 @@ jobs:
           docker push ${{ steps.image.outputs.image }}:latest
 
       - name: Install preflight
+        env:
+          PREFLIGHT_VERSION: "1.17.1"
+          PREFLIGHT_SHA256: "15f58d0de7212ac948706515f824d0d2f42b94c11fa85cdb1bc08ad8993226ca"
         run: |
-          PREFLIGHT_VERSION=$(curl -s https://api.github.com/repos/redhat-openshift-ecosystem/openshift-preflight/releases/latest | jq -r .tag_name)
           echo "Installing preflight ${PREFLIGHT_VERSION}..."
           curl -sL "https://github.com/redhat-openshift-ecosystem/openshift-preflight/releases/download/${PREFLIGHT_VERSION}/preflight-linux-amd64" \
             -o /usr/local/bin/preflight
+          echo "${PREFLIGHT_SHA256}  /usr/local/bin/preflight" | sha256sum -c -
           chmod +x /usr/local/bin/preflight
           preflight --version
 
       - name: Run preflight check
+        env:
+          REDHAT_API_TOKEN: ${{ secrets.REDHAT_API_TOKEN }}
+          REDHAT_CERT_PROJECT_ID: ${{ secrets.REDHAT_CERT_PROJECT_ID }}
         run: |
+          # Pass credentials via preflight's native env vars (avoids process-listing exposure)
+          if [ -n "$REDHAT_API_TOKEN" ] && [ -n "$REDHAT_CERT_PROJECT_ID" ]; then
+            export PFLT_PYXIS_API_TOKEN="$REDHAT_API_TOKEN"
+            export PFLT_CERTIFICATION_COMPONENT_ID="$REDHAT_CERT_PROJECT_ID"
+          else
+            echo "::warning::REDHAT_API_TOKEN or REDHAT_CERT_PROJECT_ID secret is missing"
+          fi
+
           SUBMIT_FLAG=""
           if [ "${{ inputs.submit }}" = "true" ]; then
             SUBMIT_FLAG="--submit"
@@ -126,11 +140,22 @@ jobs:
 
           preflight check container \
             ${{ steps.image.outputs.full }} \
-            --certification-project-id=${{ secrets.REDHAT_CERT_PROJECT_ID }} \
-            --pyxis-api-token=${{ secrets.REDHAT_API_TOKEN }} \
             --docker-config=${HOME}/.docker/config.json \
             ${SUBMIT_FLAG} \
             2>&1 | tee preflight-results.txt
+          PREFLIGHT_EXIT=${PIPESTATUS[0]}
+          echo ""
+          echo "=== Preflight Summary ==="
+          if [ "$PREFLIGHT_EXIT" -ne 0 ] || grep -q "FAILED" preflight-results.txt; then
+            echo "::error::Preflight certification check FAILED (exit code: ${PREFLIGHT_EXIT})"
+            echo "The container will not pass Red Hat certification in its current state."
+            exit 1
+          else
+            echo "✅ All preflight checks passed"
+            if [ -n "$SUBMIT_FLAG" ]; then
+              echo "📤 Results submitted to Red Hat Partner Connect"
+            fi
+          fi
 
       - name: Upload preflight results
         if: always()
