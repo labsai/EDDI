@@ -37,7 +37,7 @@ echo "Detected JDK $JAVA_VER — targeting --release $RELEASE_VER"
 
 # Compile utility classes
 mkdir -p $OUT/classes
-javac --release $RELEASE_VER \
+javac --release $RELEASE_VER -encoding UTF-8 \
     -d $OUT/classes \
     $FUZZ_SRC/ai/labs/eddi/utils/PathNavigator.java \
     $FUZZ_SRC/ai/labs/eddi/utils/MatchingUtilities.java \
@@ -114,7 +114,7 @@ public class MatchingUtilitiesFuzzer {
 EOF
 
 # ── Compile fuzz targets against the utility classes + Jazzer API ──
-javac --release $RELEASE_VER \
+javac --release $RELEASE_VER -encoding UTF-8 \
     -cp "$OUT/classes:$JAZZER_API_PATH" \
     -d $OUT \
     $SRC/PathNavigatorFuzzer.java \
