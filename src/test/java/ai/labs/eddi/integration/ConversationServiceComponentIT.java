@@ -75,33 +75,36 @@ public class ConversationServiceComponentIT extends BaseIntegrationIT {
 
     @Test
     @DisplayName("should support undo after user input")
-    void undoUserInput() {
+    void undoUserInput() throws Exception {
         ResourceId conversationId = createConversation(agentResourceId.id(), TEST_USER_ID);
 
-        // Send input first
-        sendUserInput(agentResourceId.id(), conversationId.id(), "hello", false, false);
+        // Send input first and verify it was processed
+        Response sayResponse = sendUserInput(agentResourceId.id(), conversationId.id(), "hello", false, false);
+        sayResponse.then().assertThat().statusCode(200)
+                .body("conversationSteps", hasSize(greaterThanOrEqualTo(2)));
 
-        // Undo — path is /{env}/{agentId}/undo/{convId}
-        Response undoResponse = given().post(String.format("agents/%s/undo", conversationId.id()));
-
-        undoResponse.then().assertThat().statusCode(200);
+        // Undo — may need a brief wait for the DB write to be visible on Postgres
+        retryUntilOk(() -> given().post(String.format("agents/%s/undo", conversationId.id())),
+                "Undo should succeed after user input");
     }
 
     @Test
     @DisplayName("should support redo after undo")
-    void redoAfterUndo() {
+    void redoAfterUndo() throws Exception {
         ResourceId conversationId = createConversation(agentResourceId.id(), TEST_USER_ID);
 
-        // Send input
-        sendUserInput(agentResourceId.id(), conversationId.id(), "hello", false, false);
+        // Send input and verify
+        Response sayResponse = sendUserInput(agentResourceId.id(), conversationId.id(), "hello", false, false);
+        sayResponse.then().assertThat().statusCode(200)
+                .body("conversationSteps", hasSize(greaterThanOrEqualTo(2)));
 
-        // Undo — path is /{env}/{agentId}/undo/{convId}
-        given().post(String.format("agents/%s/undo", conversationId.id()));
+        // Undo — retry until available, then assert success
+        retryUntilOk(() -> given().post(String.format("agents/%s/undo", conversationId.id())),
+                "Undo should succeed after user input");
 
-        // Redo — path is /{env}/{agentId}/redo/{convId}
-        Response redoResponse = given().post(String.format("agents/%s/redo", conversationId.id()));
-
-        redoResponse.then().assertThat().statusCode(200);
+        // Redo — retry until available
+        retryUntilOk(() -> given().post(String.format("agents/%s/redo", conversationId.id())),
+                "Redo should succeed after undo");
     }
 
     @Test

@@ -1,4 +1,6 @@
 *
+!.clusterfuzzlite/
+!.clusterfuzzlite/**
 !target/*-runner
 !target/*-runner.jar
 !target/lib/*

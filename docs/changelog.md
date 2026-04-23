@@ -13,6 +13,46 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔒 OpenSSF Scorecard: Fuzzing + SLSA Provenance + Signed Releases (2026-04-23)
+
+**Repo:** EDDI (`chore/scorecard-improvements`)
+
+**What changed:** Added continuous fuzzing, SLSA supply-chain provenance attestation, and automated GitHub Release creation to satisfy three remaining OpenSSF Scorecard checks.
+
+### ClusterFuzzLite Fuzzing
+
+- Created `.clusterfuzzlite/` config directory with `project.yaml`, `Dockerfile`, and `build.sh`
+- `build.sh` compiles standalone Jazzer fuzz targets for `PathNavigator` and `MatchingUtilities` using proper `jazzer_driver` + `$this_dir`-relative classpath
+- Added `.github/workflows/clusterfuzzlite.yml` with two modes:
+  - **PR mode:** code-change fuzzing (5 min) on PRs touching `src/`
+  - **Weekly batch:** deep continuous fuzzing (30 min) on Sunday 4am UTC
+
+### SLSA Provenance Attestation
+
+- Captures Docker image digest after push (`docker inspect --format`)
+- Generates SLSA build provenance attestation via `actions/attest-build-provenance@v4.1.0`
+- Pushes attestation to Docker Hub registry alongside the image
+
+### GitHub Releases (Signed-Releases)
+
+- Auto-creates GitHub Release on tag pushes via `softprops/action-gh-release@v3.0.0`
+- Release body includes Docker pull instructions and `cosign verify` command
+- Documents that EDDI is container-only (no binary downloads)
+
+### Action Version Pinning
+
+- `sigstore/cosign-installer@v4.1.1` (SHA `cad07c2e...`)
+- `actions/attest-build-provenance@v4.1.0` (SHA `a2bbfa25...`)
+- `softprops/action-gh-release@v3.0.0` (SHA `b4309332...`)
+- `google/clusterfuzzlite@v1` (SHA `52ecc61c...`) — all 4 references
+
+### Code Review Findings (fixed)
+
+- **Critical:** Original `build.sh` used absolute build-time container paths in runtime wrapper scripts — rewrote to use `$this_dir`-relative paths and `jazzer_driver` from the base image
+- **Minor:** Added `try/catch` in fuzz targets for expected exceptions to prevent Jazzer misreporting
+
+---
+
 ## 🐛 Compose AuthStartupGuard Fix & CI Tag Bypass (2026-04-23)
 
 **Repo:** EDDI (`fix/compose-auth-guard`)

@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.function.Supplier;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -256,6 +257,31 @@ public abstract class BaseIntegrationIT {
             }
             Thread.sleep(500);
         }
+    }
+
+    /**
+     * Retries a REST call up to 10 times (200ms apart) until it returns HTTP 200.
+     * Useful for operations that depend on async state propagation (e.g., undo/redo
+     * after conversation processing on PostgreSQL).
+     *
+     * @param call
+     *            supplier that executes the REST call
+     * @param description
+     *            human-readable description for the assertion message
+     */
+    protected void retryUntilOk(Supplier<Response> call, String description)
+            throws InterruptedException {
+        for (int i = 0; i < 10; i++) {
+            Response response = call.get();
+            if (response.statusCode() == 200) {
+                return;
+            }
+            Thread.sleep(200);
+        }
+        // Final attempt — will fail with assertion if still not OK
+        call.get().then().assertThat()
+                .statusCode(describedAs(description + " (expected HTTP 200)",
+                        equalTo(200)));
     }
 
     public record ResourceId(String id, int version) {

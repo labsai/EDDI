@@ -386,8 +386,9 @@ jobs:
       is-release: ${{ steps.meta.outputs.is-release }}
 
     permissions:
-      contents: read
+      contents: write  # Required for creating GitHub Releases on tag pushes
       id-token: write  # Required for Sigstore cosign keyless signing (OIDC → Fulcio)
+      attestations: write  # Required for SLSA provenance attestation
 
     steps:
       - name: Checkout
@@ -486,6 +487,7 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Push to Docker Hub
+        id: docker-push
         run: |
           PRIMARY_TAG="${{ steps.meta.outputs.primary-tag }}"
           IS_RELEASE="${{ steps.meta.outputs.is-release }}"
@@ -500,7 +502,11 @@ jobs:
             docker push ${DOCKER_IMAGE}:latest
           fi
 
+          # Capture the pushed image digest for provenance attestation
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${DOCKER_IMAGE}:${PRIMARY_TAG} | cut -d'@' -f2)
+          echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
           echo "### ✅ Pushed to Docker Hub" >> $GITHUB_STEP_SUMMARY
+          echo "Image digest: \`${DIGEST}\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Install cosign
         uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
@@ -528,6 +534,41 @@ jobs:
           echo "### 🔏 Docker Images Signed (Sigstore cosign)" >> $GITHUB_STEP_SUMMARY
           echo "Keyless OIDC signing via GitHub Actions identity." >> $GITHUB_STEP_SUMMARY
           echo "Verify: \`cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity-regexp '^https://github\\.com/labsai/EDDI/\\.github/workflows/ci\\.yml@refs/(heads/main|tags/.+)$' ${DOCKER_IMAGE}:${PRIMARY_TAG}\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Generate SLSA provenance attestation
+        if: steps.docker-push.outputs.digest != ''
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-name: docker.io/${{ env.DOCKER_IMAGE }}
+          subject-digest: ${{ steps.docker-push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          generate_release_notes: true
+          make_latest: true
+          body: |
+            ## 🐳 Docker Image
+
+            This release is distributed as a Docker image:
+
+            ```bash
+            docker pull ${{ env.DOCKER_IMAGE }}:${{ steps.meta.outputs.primary-tag }}
+            ```
+
+            ### Verify image signature
+
+            ```bash
+            cosign verify \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
+              ${{ env.DOCKER_IMAGE }}:${{ steps.meta.outputs.primary-tag }}
+            ```
+
+            > **Note:** EDDI is distributed exclusively as a Docker image. There are no binary downloads.
+            > See the [Docker Hub page](https://hub.docker.com/r/labsai/eddi) for all available tags.
 
   # ─── Job 4: Smoke Test ──────────────────────────────────────────
   smoke-test:
