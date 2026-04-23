@@ -1,0 +1,75 @@
+# ClusterFuzzLite — coverage-guided fuzzing for EDDI
+# Detected by OpenSSF Scorecard as the "Fuzzing" check
+# Fuzz targets: PathNavigator (OGNL replacement), MatchingUtilities (behavior rule conditions)
+#
+# Modes:
+#   - PR: code-change fuzzing (5 min) — catches regressions in changed code
+#   - Weekly: batch fuzzing (30 min) — deep continuous fuzzing for rare crashes
+
+name: ClusterFuzzLite
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/main/java/**'
+      - 'src/test/java/**/Fuzz*.java'
+      - 'src/test/java/**/*Fuzz*.java'
+      - '.clusterfuzzlite/**'
+  schedule:
+    - cron: '0 4 * * 0'  # Sunday 4am UTC — weekly deep fuzz
+
+permissions: {}
+
+jobs:
+  # ─── PR mode: fuzz only changed code paths ─────────────────────
+  pr-fuzzing:
+    name: Fuzz (PR)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    permissions:
+      security-events: write  # Upload SARIF findings
+
+    steps:
+      - name: Build Fuzzers
+        id: build
+        uses: google/clusterfuzzlite/actions/build_fuzzers@52ecc61cb587ee99c26825a112a21abf19c7448c # v1
+        with:
+          language: jvm
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          sanitizer: address
+
+      - name: Run Fuzzers
+        id: run
+        uses: google/clusterfuzzlite/actions/run_fuzzers@52ecc61cb587ee99c26825a112a21abf19c7448c # v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fuzz-seconds: 300
+          mode: code-change
+
+  # ─── Weekly batch mode: deep continuous fuzzing ─────────────────
+  batch-fuzzing:
+    name: Fuzz (Weekly)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+
+    permissions:
+      security-events: write
+
+    steps:
+      - name: Build Fuzzers
+        id: build
+        uses: google/clusterfuzzlite/actions/build_fuzzers@52ecc61cb587ee99c26825a112a21abf19c7448c # v1
+        with:
+          language: jvm
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          sanitizer: address
+
+      - name: Run Fuzzers
+        id: run
+        uses: google/clusterfuzzlite/actions/run_fuzzers@52ecc61cb587ee99c26825a112a21abf19c7448c # v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fuzz-seconds: 1800
+          mode: batch
