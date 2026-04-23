@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.function.Supplier;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -268,7 +269,7 @@ public abstract class BaseIntegrationIT {
      * @param description
      *            human-readable description for the assertion message
      */
-    protected void retryUntilOk(java.util.function.Supplier<Response> call, String description)
+    protected void retryUntilOk(Supplier<Response> call, String description)
             throws InterruptedException {
         for (int i = 0; i < 10; i++) {
             Response response = call.get();
@@ -278,7 +279,9 @@ public abstract class BaseIntegrationIT {
             Thread.sleep(200);
         }
         // Final attempt — will fail with assertion if still not OK
-        call.get().then().assertThat().statusCode(200);
+        call.get().then().assertThat()
+                .statusCode(describedAs(description + " (expected HTTP 200)",
+                        equalTo(200)));
     }
 
     public record ResourceId(String id, int version) {
