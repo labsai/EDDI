@@ -143,9 +143,3 @@ done
 
 echo "=== ClusterFuzzLite build complete ==="
 echo "Fuzz targets: PathNavigatorFuzzer, MatchingUtilitiesFuzzer"
-echo "--- $OUT contents ---"
-ls -la $OUT/
-echo "--- file types ---"
-file $OUT/PathNavigatorFuzzer $OUT/MatchingUtilitiesFuzzer 2>&1 || true
-echo "--- wrapper content check ---"
-grep -c jazzer_driver $OUT/PathNavigatorFuzzer || echo "jazzer_driver NOT found in wrapper"

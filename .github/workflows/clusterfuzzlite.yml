@@ -42,12 +42,12 @@ jobs:
           # Keep all fuzz targets even if the PR only touches vendored copies
           # in .clusterfuzzlite/ (not the original src/ files)
           keep-unaffected-fuzz-targets: true
-          bad-build-check: false
 
       - name: Run Fuzzers
         id: run
         uses: google/clusterfuzzlite/actions/run_fuzzers@52ecc61cb587ee99c26825a112a21abf19c7448c # v1
         with:
+          language: jvm
           github-token: ${{ secrets.GITHUB_TOKEN }}
           fuzz-seconds: 300
           mode: code-change
@@ -74,6 +74,7 @@ jobs:
         id: run
         uses: google/clusterfuzzlite/actions/run_fuzzers@52ecc61cb587ee99c26825a112a21abf19c7448c # v1
         with:
+          language: jvm
           github-token: ${{ secrets.GITHUB_TOKEN }}
           fuzz-seconds: 1800
           mode: batch
