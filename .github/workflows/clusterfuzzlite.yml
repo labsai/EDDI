@@ -39,6 +39,9 @@ jobs:
           language: jvm
           github-token: ${{ secrets.GITHUB_TOKEN }}
           sanitizer: address
+          # Keep all fuzz targets even if the PR only touches vendored copies
+          # in .clusterfuzzlite/ (not the original src/ files)
+          keep-unaffected-fuzz-targets: true
 
       - name: Run Fuzzers
         id: run

@@ -73,8 +73,8 @@ public class PathNavigatorFuzzer {
         String path = data.consumeString(500);
         try {
             PathNavigator.getValue(path, SEED_DATA);
-        } catch (Exception ignored) {
-            // Expected — fuzzer explores error paths
+        } catch (IllegalArgumentException | StackOverflowError ignored) {
+            // Expected: invalid paths and deep recursion are normal fuzz inputs
         }
     }
 }
@@ -106,8 +106,8 @@ public class MatchingUtilitiesFuzzer {
         String contains = data.consumeBoolean() ? data.consumeString(100) : null;
         try {
             MatchingUtilities.executeValuePath(DATA, valuePath, equals, contains);
-        } catch (Exception ignored) {
-            // Expected — fuzzer explores error paths
+        } catch (IllegalArgumentException ignored) {
+            // Expected: invalid value paths are normal fuzz inputs
         }
     }
 }
@@ -130,7 +130,7 @@ for fuzzer in PathNavigatorFuzzer MatchingUtilitiesFuzzer; do
     cat > $OUT/${fuzzer} << WRAPPER
 #!/bin/bash
 this_dir=\$(dirname "\$0")
-LD_LIBRARY_PATH="\${JVM_LD_LIBRARY_PATH:-}":\$this_dir
+export LD_LIBRARY_PATH="\${JVM_LD_LIBRARY_PATH:-}":\$this_dir
 \$this_dir/jazzer_driver \\
     --agent_path=\$this_dir/jazzer_agent_deploy.jar \\
     --cp=${RUNTIME_CP} \\
