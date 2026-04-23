@@ -126,19 +126,24 @@ echo "✅ Fuzz targets compiled"
 RUNTIME_CP="\$this_dir/classes:\$this_dir"
 
 # ── Generate Jazzer wrapper scripts ──
+# The "LLVMFuzzerTestOneInput" comment is required — bad_build_check scans
+# wrapper scripts for this string to detect valid fuzz targets.
 for fuzzer in PathNavigatorFuzzer MatchingUtilitiesFuzzer; do
-    cat > $OUT/${fuzzer} << WRAPPER
-#!/bin/bash
-this_dir=\$(dirname "\$0")
-export LD_LIBRARY_PATH="\${JVM_LD_LIBRARY_PATH:-}":\$this_dir
-\$this_dir/jazzer_driver \\
-    --agent_path=\$this_dir/jazzer_agent_deploy.jar \\
-    --cp=${RUNTIME_CP} \\
-    --target_class=${fuzzer} \\
-    --jvm_args="-Xmx2048m" \\
-    "\$@"
-WRAPPER
-    chmod +x $OUT/${fuzzer}
+    echo "#!/bin/bash
+# LLVMFuzzerTestOneInput for fuzzer detection.
+this_dir=\$(dirname \"\$0\")
+if [[ \"\$@\" =~ (^| )-runs=[0-9]+($| ) ]]; then
+  mem_settings='-Xmx1900m:-Xss900k'
+else
+  mem_settings='-Xmx2048m:-Xss1024k'
+fi
+LD_LIBRARY_PATH=\"$JVM_LD_LIBRARY_PATH\":\$this_dir \\
+\$this_dir/jazzer_driver --agent_path=\$this_dir/jazzer_agent_deploy.jar \\
+--cp=$RUNTIME_CP \\
+--target_class=$fuzzer \\
+--jvm_args=\"\$mem_settings\" \\
+\$@" > $OUT/$fuzzer
+    chmod +x $OUT/$fuzzer
 done
 
 echo "=== ClusterFuzzLite build complete ==="
