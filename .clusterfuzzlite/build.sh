@@ -1,7 +1,8 @@
 #!/bin/bash -eu
 # ClusterFuzzLite build script for EDDI
 # Compiles ONLY the specific utility classes needed by fuzz targets.
-# No Maven, no full project build — avoids JDK version mismatches.
+# Source files are vendored in .clusterfuzzlite/ to avoid needing the
+# full project source tree (which is blocked by .dockerignore).
 #
 # The base-builder-jvm image provides:
 #   $OUT          — directory for final fuzzer executables
@@ -10,29 +11,39 @@
 
 cd $SRC/project
 
-# ── Copy and patch source files for JDK 21 compatibility ──
+# ── Patch vendored sources for pre-22 JDK compatibility ──
 # The project targets Java 25 and uses unnamed variables (catch Exception _)
-# which is a Java 22+ feature. Patch these for JDK 21 compatibility.
+# which is a Java 22+ feature. Patch these for the CFL image's JDK.
 FUZZ_SRC=$SRC/fuzz-src
 mkdir -p $FUZZ_SRC/ai/labs/eddi/utils
 
 for f in PathNavigator.java MatchingUtilities.java RuntimeUtilities.java; do
-    cp "src/main/java/ai/labs/eddi/utils/$f" "$FUZZ_SRC/ai/labs/eddi/utils/$f"
+    cp ".clusterfuzzlite/$f" "$FUZZ_SRC/ai/labs/eddi/utils/$f"
 done
 
-# Patch unnamed variables: catch (SomeException _) → catch (SomeException ignored)
-# This is a Java 22+ feature; CFL runtime uses Java 21.
-perl -pi -e 's/(\w+)\s+_\s*\)/\1 ignored)/g' $FUZZ_SRC/ai/labs/eddi/utils/*.java
+# Patch: catch (SomeException _) → catch (SomeException ignored)
+# Only target catch-block patterns to avoid false matches in other contexts.
+perl -pi -e 's/\bcatch\s*\(\s*(\w+)\s+_\s*\)/catch ($1 ignored)/g' \
+    $FUZZ_SRC/ai/labs/eddi/utils/*.java
 
-# Compile utility classes (target Java 21 to match CFL runtime JVM)
+# Detect JDK version (base image may ship 17 or 21)
+JAVA_VER=$(javac -version 2>&1 | grep -oP '\d+' | head -1)
+if [ "$JAVA_VER" -ge 21 ] 2>/dev/null; then
+    RELEASE_VER=21
+else
+    RELEASE_VER=17
+fi
+echo "Detected JDK $JAVA_VER — targeting --release $RELEASE_VER"
+
+# Compile utility classes
 mkdir -p $OUT/classes
-javac -source 21 -target 21 \
+javac --release $RELEASE_VER \
     -d $OUT/classes \
     $FUZZ_SRC/ai/labs/eddi/utils/PathNavigator.java \
     $FUZZ_SRC/ai/labs/eddi/utils/MatchingUtilities.java \
     $FUZZ_SRC/ai/labs/eddi/utils/RuntimeUtilities.java
 
-echo "✅ Utility classes compiled (Java 21 target)"
+echo "✅ Utility classes compiled (--release $RELEASE_VER)"
 
 # ── Fuzz Target: PathNavigatorFuzzer ──
 cat > $SRC/PathNavigatorFuzzer.java << 'EOF'
@@ -102,9 +113,9 @@ public class MatchingUtilitiesFuzzer {
 }
 EOF
 
-# ── Compile fuzz targets against the utility classes ──
-javac -source 21 -target 21 \
-    -cp "$OUT/classes" \
+# ── Compile fuzz targets against the utility classes + Jazzer API ──
+javac --release $RELEASE_VER \
+    -cp "$OUT/classes:$JAZZER_API_PATH" \
     -d $OUT \
     $SRC/PathNavigatorFuzzer.java \
     $SRC/MatchingUtilitiesFuzzer.java
