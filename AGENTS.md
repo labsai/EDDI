@@ -546,7 +546,7 @@ When designing any new feature, always consider these before finalizing the desi
 
 | File                                        | Purpose                                                     |
 | ------------------------------------------- | ----------------------------------------------------------- |
-| `src/main/docker/Dockerfile.jvm`            | Production JVM container image (digest-pinned base)         |
+| `src/main/docker/Dockerfile`                | Production JVM container image (digest-pinned base)         |
 | `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, MongoDB)             |
 | `src/main/resources/initial-agents/`        | Agent Father and sample agent configs                       |
 | `.github/workflows/ci.yml`                  | CI/CD pipeline (build, test, Docker push, smoke test)       |
@@ -561,7 +561,7 @@ When designing any new feature, always consider these before finalizing the desi
 
 #### Base Image Management
 
-The production image (`Dockerfile.jvm`) uses a Red Hat UBI 9 base pinned by **SHA256 digest** for OpenSSF supply-chain compliance. This means:
+The production image (`Dockerfile`) uses a Red Hat UBI 9 base pinned by **SHA256 digest** for OpenSSF supply-chain compliance. This means:
 
 - The `FROM` line must always include `@sha256:...` — never use a bare tag like `:1.24`
 - Red Hat periodically republishes the same tag with security patches baked in
@@ -576,7 +576,7 @@ When Trivy (CI container scan) flags a base image CVE:
    # Check the digest in the pull output
    docker run --rm <image> rpm -q <vulnerable-package>
    ```
-2. **If the newer digest includes the fix**: update the `@sha256:...` in `Dockerfile.jvm` — done
+2. **If the newer digest includes the fix**: update the `@sha256:...` in `Dockerfile` — done
 3. **If no fixed digest exists yet**: use `microdnf update -y <package> && microdnf clean all` as a **temporary stopgap** in the `USER root` section, with a CVE comment. Remove it once a fixed base image is available
 4. **Never remove the digest pin** to "auto-fix" CVEs — this violates OpenSSF supply-chain requirements
 

@@ -2,5 +2,5 @@ services:
   eddi:
     build:
       context: .
-      dockerfile: "./src/main/docker/Dockerfile.jvm"
+      dockerfile: "./src/main/docker/Dockerfile"
     image: labsai/eddi:local

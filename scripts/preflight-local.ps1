@@ -73,7 +73,7 @@ if (-not $SkipBuild) {
         docker build `
             --build-arg EDDI_VERSION="local" `
             --build-arg EDDI_RELEASE="1" `
-            -f src/main/docker/Dockerfile.jvm `
+            -f src/main/docker/Dockerfile `
             -t $IMAGE `
             .
         if ($LASTEXITCODE -ne 0) {
@@ -120,7 +120,7 @@ foreach ($label in $requiredLabels) {
 if ($missing.Count -gt 0) {
     Write-Information -MessageData "" -InformationAction Continue
     Write-Error -Message "❌ Missing labels: $($missing -join ', ')"
-    Write-Information -MessageData "   Fix in: src/main/docker/Dockerfile.jvm (LABEL directive)" -InformationAction Continue
+    Write-Information -MessageData "   Fix in: src/main/docker/Dockerfile (LABEL directive)" -InformationAction Continue
     exit 1
 }
 

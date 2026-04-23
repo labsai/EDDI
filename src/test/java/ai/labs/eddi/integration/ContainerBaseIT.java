@@ -66,7 +66,7 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
      * flat build context paths.
      * <p>
      * <b>Why not use the production Dockerfile?</b> The production Dockerfile
-     * ({@code src/main/docker/Dockerfile.jvm}) uses
+     * ({@code src/main/docker/Dockerfile}) uses
      * {@code COPY target/quarkus-app/lib/ ...} — paths nested under
      * {@code target/}. When Testcontainers sends the project root as build context,
      * the project's {@code .dockerignore} (which uses a deny-all {@code *} +
@@ -95,7 +95,7 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
                     "target/quarkus-app/ not found. Run 'mvn package -DskipTests' before running container-based ITs.");
         }
 
-        // Inline Dockerfile — mirrors the production Dockerfile.jvm but uses
+        // Inline Dockerfile — mirrors the production Dockerfile but uses
         // flat COPY source paths (quarkus-app/ instead of target/quarkus-app/)
         // because target/quarkus-app is mapped to quarkus-app in the build context.
         String testDockerfile = """

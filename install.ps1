@@ -474,7 +474,7 @@ function Get-ComposeFiles {
     if ($Local) {
         $repoRoot = if ($ScriptDir) { $ScriptDir } else { Get-Location }
         $localCompose = Join-Path -Path $repoRoot -ChildPath "docker-compose.local.yml"
-        $dockerfile = Join-Path -Path $repoRoot -ChildPath "src\main\docker\Dockerfile.jvm"
+        $dockerfile = Join-Path -Path $repoRoot -ChildPath "src\main\docker\Dockerfile"
         if (-not (Test-Path $localCompose)) {
             Write-Fail "-Local requires running from the EDDI repo root.`n     Run: cd C:\path\to\EDDI; .\install.ps1 -Local"
         }
