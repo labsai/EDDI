@@ -1,35 +1,38 @@
 #!/bin/bash -eu
 # ClusterFuzzLite build script for EDDI
-# Compiles the project and packages fuzz targets for Jazzer
+# Compiles ONLY the specific utility classes needed by fuzz targets.
+# No Maven, no full project build — avoids JDK version mismatches.
 #
 # The base-builder-jvm image provides:
 #   $OUT          — directory for final fuzzer executables
-#   $SRC          — source directory
+#   $SRC          — source directory (this is /src)
 #   $JAZZER_API_PATH — path to jazzer_agent_deploy.jar
 
 cd $SRC/project
 
-# Build project (skip tests — we just need the compiled classes + deps)
-mvn clean compile test-compile -DskipTests -B -q
+# ── Copy and patch source files for JDK 21 compatibility ──
+# The project targets Java 25 and uses unnamed variables (catch Exception _)
+# which is a Java 22+ feature. Patch these for JDK 21 compatibility.
+FUZZ_SRC=$SRC/fuzz-src
+mkdir -p $FUZZ_SRC/ai/labs/eddi/utils
 
-# Copy dependency JARs into a flat directory
-mvn dependency:copy-dependencies \
-    -DoutputDirectory=target/deps \
-    -DincludeScope=test -B -q
+for f in PathNavigator.java MatchingUtilities.java RuntimeUtilities.java; do
+    cp "src/main/java/ai/labs/eddi/utils/$f" "$FUZZ_SRC/ai/labs/eddi/utils/$f"
+done
 
-# ── Stage all runtime artifacts into $OUT ────────────────────────
+# Patch unnamed variables: catch (SomeException _) → catch (SomeException ignored)
+# This is a Java 22+ feature; CFL runtime uses Java 21.
+perl -pi -e 's/(\w+)\s+_\s*\)/\1 ignored)/g' $FUZZ_SRC/ai/labs/eddi/utils/*.java
 
-# Project classes and test classes
-cp -r target/classes $OUT/classes
-cp -r target/test-classes $OUT/test-classes
+# Compile utility classes (target Java 21 to match CFL runtime JVM)
+mkdir -p $OUT/classes
+javac -source 21 -target 21 \
+    -d $OUT/classes \
+    $FUZZ_SRC/ai/labs/eddi/utils/PathNavigator.java \
+    $FUZZ_SRC/ai/labs/eddi/utils/MatchingUtilities.java \
+    $FUZZ_SRC/ai/labs/eddi/utils/RuntimeUtilities.java
 
-# All dependency JARs
-mkdir -p $OUT/deps
-cp target/deps/*.jar $OUT/deps/ 2>/dev/null || true
-
-# Build the runtime classpath (relative to $OUT via $this_dir)
-# This will be interpolated into each wrapper script
-RUNTIME_CP="\$this_dir/classes:\$this_dir/test-classes:\$this_dir/deps/*"
+echo "✅ Utility classes compiled (Java 21 target)"
 
 # ── Fuzz Target: PathNavigatorFuzzer ──
 cat > $SRC/PathNavigatorFuzzer.java << 'EOF'
@@ -60,7 +63,7 @@ public class PathNavigatorFuzzer {
         try {
             PathNavigator.getValue(path, SEED_DATA);
         } catch (Exception ignored) {
-            // Expected — fuzzer explores crash paths
+            // Expected — fuzzer explores error paths
         }
     }
 }
@@ -93,18 +96,23 @@ public class MatchingUtilitiesFuzzer {
         try {
             MatchingUtilities.executeValuePath(DATA, valuePath, equals, contains);
         } catch (Exception ignored) {
-            // Expected — fuzzer explores crash paths
+            // Expected — fuzzer explores error paths
         }
     }
 }
 EOF
 
-# ── Compile standalone fuzz targets against the project classpath ──
-BUILD_CP="target/classes:target/test-classes:target/deps/*"
-javac -cp "${BUILD_CP}" \
+# ── Compile fuzz targets against the utility classes ──
+javac -source 21 -target 21 \
+    -cp "$OUT/classes" \
     -d $OUT \
     $SRC/PathNavigatorFuzzer.java \
     $SRC/MatchingUtilitiesFuzzer.java
+
+echo "✅ Fuzz targets compiled"
+
+# ── Build runtime classpath (relative to $OUT via $this_dir) ──
+RUNTIME_CP="\$this_dir/classes:\$this_dir"
 
 # ── Generate Jazzer wrapper scripts ──
 for fuzzer in PathNavigatorFuzzer MatchingUtilitiesFuzzer; do

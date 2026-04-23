@@ -1,7 +1,7 @@
 FROM gcr.io/oss-fuzz-base/base-builder-jvm
 
-# Install Maven (project uses Maven wrapper, but ClusterFuzzLite needs mvn on PATH)
-RUN apt-get update && apt-get install -y maven && rm -rf /var/lib/apt/lists/*
+# No Maven or JDK 25 needed — build.sh compiles only the 2 utility
+# classes directly with javac (targeting Java 17 to match the runtime JVM).
 
 COPY . $SRC/project
 WORKDIR $SRC/project

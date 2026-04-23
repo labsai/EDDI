@@ -1,4 +1,6 @@
 *
+!.clusterfuzzlite/
+!src/main/java/ai/labs/eddi/utils/
 !target/*-runner
 !target/*-runner.jar
 !target/lib/*
