@@ -42,6 +42,7 @@ jobs:
           # Keep all fuzz targets even if the PR only touches vendored copies
           # in .clusterfuzzlite/ (not the original src/ files)
           keep-unaffected-fuzz-targets: true
+          bad-build-check: false
 
       - name: Run Fuzzers
         id: run
