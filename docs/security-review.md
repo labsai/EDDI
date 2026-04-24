@@ -9,7 +9,7 @@ EDDI is a multi-agent orchestration middleware. Its security boundary includes:
 - **REST API endpoints** — agent management, conversation handling, resource CRUD
 - **LLM tool execution** — HTTP calls, MCP calls, built-in tools invoked by AI models
 - **Secrets management** — API keys, vault master key, encrypted property storage
-- **Template engine** — Thymeleaf-based templating with user-controlled inputs
+- **Template engine** — Qute-based templating with user-controlled inputs
 - **Container runtime** — Docker image, base image supply chain, Kubernetes deployment
 
 ## Automated Security Tooling (Continuous)
@@ -37,9 +37,9 @@ The following tools run **on every push and PR** via [GitHub Actions CI](https:/
 **Duration:** April 2–24, 2026
 
 #### Phase 1: SAST Remediation (April 2)
-- CodeQL scanner findings remediation across entire codebase
-- Fixed: SQL injection vectors, unsafe deserialization patterns, hardcoded credentials
-- CVE-2025-59340 (Jinjava template injection) — mitigated by upgrading dependency
+- CodeQL scanner findings remediation — 9 findings across 6 files
+- Fixed: regex injection (ReDoS), path traversal, error message exposure
+- CVE-2026-25526 (Jinjava template injection) — mitigated by upgrading dependency
 
 #### Phase 2: SSRF & Input Validation (April 13)
 - `SafeHttpClient` introduced — all HTTP calls must go through SSRF-validated client
