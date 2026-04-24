@@ -1,3 +1,7 @@
+/*
+ * Copyright (c) 2016-2026 EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
 package ai.labs.eddi.modules.llm.impl;
 
 import dev.langchain4j.model.chat.ChatModel;
