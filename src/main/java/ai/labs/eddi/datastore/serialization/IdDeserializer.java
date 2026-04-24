@@ -1,5 +1,5 @@
 /*
- * Copyright EDDI contributors
+ * Portions copyright EDDI contributors
  * SPDX-License-Identifier: Apache-2.0
  */
 /*

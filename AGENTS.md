@@ -71,7 +71,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 ### After Completing Work (or if interrupted/switching sessions)
 
-7. **Update the changelog**: Edit [`docs/changelog.md`](docs/changelog.md) and add an entry with:
+8. **Update the changelog**: Edit [`docs/changelog.md`](docs/changelog.md) and add an entry with:
    - Date and short title
    - Repo and branch
    - What changed (files + reasoning)
