@@ -7,7 +7,7 @@
 #
 # Then, build the image with:
 #
-# docker build -f src/main/docker/Dockerfile.jvm -t labsai/eddi .
+# docker build -f src/main/docker/Dockerfile -t labsai/eddi .
 #
 # Then run the container using:
 #

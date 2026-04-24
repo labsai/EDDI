@@ -80,7 +80,7 @@ jobs:
           docker build \
             --build-arg EDDI_VERSION=${{ inputs.version }} \
             --build-arg EDDI_RELEASE=${{ inputs.release }} \
-            -f src/main/docker/Dockerfile.jvm \
+            -f src/main/docker/Dockerfile \
             -t ${{ steps.image.outputs.full }} \
             -t ${{ steps.image.outputs.image }}:${{ inputs.version }} \
             -t ${{ steps.image.outputs.image }}:latest \

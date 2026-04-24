@@ -465,7 +465,7 @@ jobs:
           docker build \
             --build-arg EDDI_VERSION="${PRIMARY_TAG}" \
             --build-arg EDDI_RELEASE="${{ github.run_number }}" \
-            -f src/main/docker/Dockerfile.jvm \
+            -f src/main/docker/Dockerfile \
             ${TAGS} \
             .
 
@@ -794,7 +794,7 @@ jobs:
       - name: Build Docker image with Red Hat labels
         run: |
           docker build \
-            -f src/main/docker/Dockerfile.jvm \
+            -f src/main/docker/Dockerfile \
             -t eddi-preflight-check:test \
             .
 

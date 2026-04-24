@@ -545,7 +545,7 @@ resolve_compose_files() {
     if [[ ! -f "$EDDI_REPO_ROOT/docker-compose.local.yml" ]]; then
       fail "--local requires running from the EDDI repo root.\n     Run: cd /path/to/EDDI && bash install.sh --local"
     fi
-    if [[ ! -f "$EDDI_REPO_ROOT/src/main/docker/Dockerfile.jvm" ]]; then
+    if [[ ! -f "$EDDI_REPO_ROOT/src/main/docker/Dockerfile" ]]; then
       fail "Dockerfile not found. Run: ./mvnw package -DskipTests first."
     fi
     # Use the file directly from the repo (build context must be repo root)
