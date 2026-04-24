@@ -103,7 +103,8 @@ public class EmbeddingModelFactory {
         TaskType taskType = GoogleAiEmbeddingModel.TaskType.valueOf(params.getOrDefault("tasktype", "RETRIEVAL_DOCUMENT"));
 
         return GoogleAiEmbeddingModel.builder()
-                .modelName(params.getOrDefault("model", "text-embedding-001"))
+                .modelName(params.getOrDefault("model", "text-embedding-005"))
+                .apiKey(params.get("apiKey"))
                 .taskType(taskType)
                 .build();
     }

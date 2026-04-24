@@ -15,6 +15,8 @@ import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 import dev.langchain4j.store.embedding.mongodb.MongoDbEmbeddingStore;
 import dev.langchain4j.store.embedding.pgvector.PgVectorEmbeddingStore;
 import dev.langchain4j.store.embedding.qdrant.QdrantEmbeddingStore;
+import dev.langchain4j.store.embedding.chroma.ChromaEmbeddingStore;
+import dev.langchain4j.store.embedding.chroma.ChromaApiVersion;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -75,8 +77,9 @@ public class EmbeddingStoreFactory {
             case "mongodb-atlas" -> buildMongoDbAtlas(config, kbId);
             case "elasticsearch" -> buildElasticsearch(config, kbId);
             case "qdrant" -> buildQdrant(config, kbId);
+            case "chroma" -> buildChroma(config, kbId);
             default -> throw new IllegalArgumentException(
-                    "Unsupported store type: " + storeType + ". Supported: in-memory, pgvector, mongodb-atlas, elasticsearch, qdrant");
+                    "Unsupported store type: " + storeType + ". Supported: in-memory, pgvector, mongodb-atlas, elasticsearch, qdrant, chroma");
         };
     }
 
@@ -226,6 +229,48 @@ public class EmbeddingStoreFactory {
         if (params.containsKey("apiKey")) {
             builder.apiKey(params.get("apiKey"));
         }
+
+        return builder.build();
+    }
+
+    // ──────────────────────────────────────────────────
+    // Chroma
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds a Chroma-backed embedding store.
+     * <p>
+     * Supported storeParameters:
+     * <ul>
+     * <li>{@code baseUrl} — Chroma server URL (default:
+     * "http://localhost:8000")</li>
+     * <li>{@code tenantName} — tenant name (default: "default")</li>
+     * <li>{@code databaseName} — database name (default: "default")</li>
+     * <li>{@code collectionName} — collection name (default: auto-generated from
+     * kbId)</li>
+     * <li>{@code apiKey} — Chroma API key (optional, supports
+     * {@code ${eddivault:...}})</li>
+     * <li>{@code apiVersion} — API version: "v1" or "v2" (default: "v2")</li>
+     * </ul>
+     */
+    private EmbeddingStore<TextSegment> buildChroma(RagConfiguration config, String kbId) {
+        Map<String, String> params = resolveParams(config);
+
+        String baseUrl = params.getOrDefault("baseUrl", "http://localhost:8000");
+        String tenantName = params.getOrDefault("tenantName", "default");
+        String databaseName = params.getOrDefault("databaseName", "default");
+        String collectionName = params.getOrDefault("collectionName", "eddi_kb_" + kbId.toLowerCase().replaceAll("[^a-z0-9_]", "_"));
+        String apiVersion = params.getOrDefault("apiVersion", "v2");
+
+        LOGGER.infof("Building Chroma store: baseUrl=%s, tenant=%s, database=%s, collection=%s, apiVersion=%s",
+                baseUrl, tenantName, databaseName, collectionName, apiVersion);
+
+        var builder = ChromaEmbeddingStore.builder()
+                .baseUrl(baseUrl)
+                .tenantName(tenantName)
+                .databaseName(databaseName)
+                .collectionName(collectionName)
+                .apiVersion("v2".equalsIgnoreCase(apiVersion) ? ChromaApiVersion.V2 : ChromaApiVersion.V1);
 
         return builder.build();
     }
