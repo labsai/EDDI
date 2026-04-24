@@ -642,6 +642,7 @@ resolve_compose_files() {
   echo "COMPOSE_FILES=${COMPOSE_FILES[*]}" > "$EDDI_DIR/.eddi-config"
   echo "EDDI_PORT=$EDDI_PORT" >> "$EDDI_DIR/.eddi-config"
   echo "EDDI_HTTPS_PORT=$EDDI_HTTPS_PORT" >> "$EDDI_DIR/.eddi-config"
+  echo "EDDI_BRANCH=$EDDI_BRANCH" >> "$EDDI_DIR/.eddi-config"
 
   # Write .env file for docker compose variable substitution
   # Escape double quotes in vault key to prevent .env corruption
@@ -866,6 +867,13 @@ fi
 _cfg() { grep "^$1=" "$CONFIG_FILE" 2>/dev/null | head -1 | cut -d= -f2- | sed 's/^"//;s/"$//'; }
 EDDI_PORT=$(_cfg EDDI_PORT)
 EDDI_HTTPS_PORT=$(_cfg EDDI_HTTPS_PORT)
+EDDI_BRANCH="${EDDI_BRANCH:-$(_cfg EDDI_BRANCH)}"
+EDDI_BRANCH="${EDDI_BRANCH:-main}"
+if [[ ! "$EDDI_BRANCH" =~ ^[a-zA-Z0-9._/-]+$ ]]; then
+  echo "Invalid EDDI_BRANCH: $EDDI_BRANCH" >&2
+  exit 1
+fi
+COMPOSE_BASE_URL="https://raw.githubusercontent.com/labsai/EDDI/${EDDI_BRANCH}"
 
 # Parse compose files into array (handles paths with spaces)
 read -ra COMPOSE_FILE_LIST <<< "$(_cfg COMPOSE_FILES)"
@@ -907,6 +915,21 @@ case "${1:-help}" in
     docker compose "${compose_args[@]}" logs "${@}"
     ;;
   update)
+    echo "Refreshing compose files from GitHub..."
+    for f in "${COMPOSE_FILE_LIST[@]}"; do
+      local_name=$(basename "$f")
+      download_url="${COMPOSE_BASE_URL}/${local_name}"
+      tmp_file="${f}.tmp"
+      echo -n "  Updating ${local_name}... "
+      if curl -fsSL "${download_url}" -o "$tmp_file" 2>/dev/null && [[ -s "$tmp_file" ]]; then
+        mv -f "$tmp_file" "$f"
+        echo "✅"
+      else
+        rm -f "$tmp_file"
+        echo "⚠️  (keeping existing file)"
+      fi
+    done
+    echo ""
     echo "Pulling latest images..."
     docker compose "${compose_args[@]}" pull
     docker compose "${compose_args[@]}" up -d
@@ -937,7 +960,7 @@ case "${1:-help}" in
     echo "  restart     Restart EDDI containers"
     echo "  status      Show health and agent count"
     echo "  logs [-f]   View container logs"
-    echo "  update      Pull latest images and restart"
+    echo "  update      Refresh configs, pull latest images, restart"
     echo "  uninstall   Remove EDDI and all data"
     ;;
 esac
