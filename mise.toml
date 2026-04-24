@@ -5,14 +5,19 @@ maven = "3.9.15"
 [tasks]
 dev = { run = "mvn compile quarkus:dev", description = "Start dev mode with live reload (port 7070)" }
 compile = { run = "mvn compile", description = "Compile sources only (fast feedback)" }
+
 clean-build = { run = "mvn clean compile", description = "Clean build — delete target/ and recompile from scratch" }
 test = { run = "mvn test", description = "Run unit tests (excludes *IT.java integration tests)" }
+
 verify = { run = "mvn verify -DskipITs", description = "Compile + unit tests + package (no integration tests)" }
 full-build = { run = "mvn verify", description = "Full build — compile + unit tests + integration tests (requires Docker)" }
 validate = { run = "mvn validate", description = "Run Checkstyle code style checks" }
 format = { run = "mvn formatter:format", description = "Auto-format Java sources using the project Eclipse formatter" }
-package-skip-tests = { run = "mvn package -DskipTests", description = "Build the JAR without running tests (for install.sh --local)" }
+
 docker-build = { run = "mvn clean package '-Dquarkus.container-image.build=true'", description = "Build the app + Docker image" }
 license-gen = { run = "mvn package -Plicense-gen -DskipTests", description = "Generate third-party licenses (Red Hat certification)" }
+
 debug = { run = "mvn quarkus:dev -Dsuspend", description = "Start dev mode and wait for debugger on port 5005" }
 dev-no-debug = { run = "mvn quarkus:dev -Ddebug=false", description = "Start dev mode without the debug agent" }
+chroma = { run = "docker-compose -f docker-compose.chroma.yml up", description = "Starts ChromaDB" }
+
