@@ -2,7 +2,7 @@
 
 ## Project Leadership
 
-EDDI is maintained by [Labs.ai](https://labs.ai) under the stewardship of the following roles:
+EDDI is maintained by [Labs.ai](https://eddi.labs.ai) under the stewardship of the following roles:
 
 ### Project Lead
 
