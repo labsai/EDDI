@@ -39,6 +39,11 @@ public class ChannelConnectorMigration {
     private static final Logger LOGGER = Logger.getLogger(ChannelConnectorMigration.class);
     private static final String MIGRATION_KEY = "channel-connector-migration-complete";
 
+    /**
+     * Trigger keywords reserved by the router — migration must not generate these.
+     */
+    private static final Set<String> RESERVED_TRIGGERS = Set.of("help");
+
     private final IDeploymentStore deploymentStore;
     private final IAgentStore agentStore;
     private final IChannelIntegrationStore channelStore;
@@ -136,7 +141,16 @@ public class ChannelConnectorMigration {
             var config = new ChannelIntegrationConfiguration();
             config.setName(channelType + " — " + channelId);
             config.setChannelType(channelType);
-            config.setPlatformConfig(new HashMap<>(first.connector().getConfig()));
+            // Clean platformConfig: only carry channel-level credentials
+            // (channelId, botToken, signingSecret), not per-connector fields like groupId
+            var cleanedPlatformConfig = new HashMap<String, String>();
+            var rawConfig = first.connector().getConfig();
+            for (String credKey : List.of("channelId", "botToken", "signingSecret")) {
+                if (rawConfig.containsKey(credKey)) {
+                    cleanedPlatformConfig.put(credKey, rawConfig.get(credKey));
+                }
+            }
+            config.setPlatformConfig(cleanedPlatformConfig);
 
             var targets = new ArrayList<ChannelTarget>();
             var usedNames = new HashSet<String>();
@@ -159,7 +173,14 @@ public class ChannelConnectorMigration {
                     target.setTargetId(groupId);
                 }
 
-                target.setTriggers(List.of(targetName));
+                // Only assign trigger if it's not a reserved keyword
+                if (!RESERVED_TRIGGERS.contains(targetName)) {
+                    target.setTriggers(List.of(targetName));
+                } else {
+                    LOGGER.warnf("  Skipping reserved trigger '%s' for target in channel %s:%s",
+                            targetName, channelType, channelId);
+                    target.setTriggers(List.of());
+                }
                 targets.add(target);
             }
 
@@ -202,10 +223,12 @@ public class ChannelConnectorMigration {
      * Slugify a name for use as a target name / trigger keyword.
      */
     private static String slugify(String input) {
-        return input.toLowerCase(Locale.ROOT)
+        String slug = input.toLowerCase(Locale.ROOT)
                 .replaceAll("[^a-z0-9-]+", "-")
                 .replaceAll("-{2,}", "-")
                 .replaceAll("^-|-$", "");
+        // Fallback: if input was all special chars (emoji, etc.), use a prefix
+        return slug.isEmpty() ? "target" : slug;
     }
 
     /**

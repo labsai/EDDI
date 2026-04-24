@@ -138,15 +138,24 @@ class RestChannelIntegrationStoreValidationTest {
         @Test
         @DisplayName("target with null name → BadRequest")
         void targetNullName() {
-            var target = new ChannelTarget();
-            target.setName(null);
-            target.setTargetId("agent-x");
-            target.setTriggers(List.of("x"));
-            config.setTargets(List.of(target));
-            config.setDefaultTargetName("x"); // will fail before default check
+            // Include a valid target so the default-target check passes;
+            // the null-name target must be second to reach the per-target loop
+            var validTarget = new ChannelTarget();
+            validTarget.setName("x");
+            validTarget.setTargetId("agent-valid");
+            validTarget.setTriggers(List.of("x"));
 
-            assertThrows(BadRequestException.class,
+            var badTarget = new ChannelTarget();
+            badTarget.setName(null);
+            badTarget.setTargetId("agent-x");
+            badTarget.setTriggers(List.of("y"));
+
+            config.setTargets(List.of(validTarget, badTarget));
+            config.setDefaultTargetName("x");
+
+            var ex = assertThrows(BadRequestException.class,
                     () -> store.validateConfiguration(config));
+            assertTrue(ex.getMessage().contains("name"));
         }
 
         @Test

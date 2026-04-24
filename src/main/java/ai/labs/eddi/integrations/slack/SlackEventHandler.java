@@ -212,7 +212,7 @@ public class SlackEventHandler {
 
         // Lock target for this thread
         if (threadTs != null) {
-            channelTargetRouter.lockThreadTarget(threadTs, resolved.target());
+            channelTargetRouter.lockThreadTarget("slack", channelId, threadTs, resolved.target());
         }
 
         // Store resolved target for credential resolution in postMessage

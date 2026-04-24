@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -278,7 +279,7 @@ class ChannelTargetRouterTest {
             target.setName("architect");
             target.setTargetId("agent-arch-id");
 
-            router.lockThreadTarget("1713400000.123456", target);
+            router.lockThreadTarget("slack", "C07TEST", "1713400000.123456", target);
 
             ResolvedTarget result = router.resolveThreadTarget("slack", "C07TEST",
                     "1713400000.123456");
@@ -305,8 +306,8 @@ class ChannelTargetRouterTest {
             var sec = new ChannelTarget();
             sec.setName("security");
 
-            router.lockThreadTarget("thread-1", arch);
-            router.lockThreadTarget("thread-2", sec);
+            router.lockThreadTarget("slack", "C07TEST", "thread-1", arch);
+            router.lockThreadTarget("slack", "C07TEST", "thread-2", sec);
 
             assertEquals("architect",
                     router.resolveThreadTarget("slack", "C07TEST", "thread-1")
@@ -375,6 +376,336 @@ class ChannelTargetRouterTest {
             assertNotNull(result);
             assertEquals("support", result.target().getName());
             assertEquals("I need help with my order", result.strippedMessage());
+        }
+
+        @Test
+        @DisplayName("integration with no default target → returns null for unmatched message")
+        void noDefaultTarget() {
+            var cfg = new ChannelIntegrationConfiguration();
+            cfg.setDefaultTargetName("nonexistent");
+            var t = new ChannelTarget();
+            t.setName("only");
+            t.setTriggers(List.of("only"));
+            t.setTargetId("agent-x");
+            cfg.setTargets(List.of(t));
+
+            ResolvedTarget result = router.resolveFromIntegration(cfg, "unmatched message");
+            assertNull(result);
+        }
+
+        @Test
+        @DisplayName("integration with null defaultTargetName → returns null for unmatched message")
+        void nullDefaultTargetName() {
+            var cfg = new ChannelIntegrationConfiguration();
+            cfg.setDefaultTargetName(null);
+            var t = new ChannelTarget();
+            t.setName("only");
+            t.setTriggers(List.of("only"));
+            t.setTargetId("agent-x");
+            cfg.setTargets(List.of(t));
+
+            ResolvedTarget result = router.resolveFromIntegration(cfg, "unmatched message");
+            assertNull(result);
+        }
+
+        @Test
+        @DisplayName("target with null triggers list → skipped, falls to default")
+        void targetWithNullTriggersList() {
+            var cfg = new ChannelIntegrationConfiguration();
+            cfg.setDefaultTargetName("default-target");
+
+            var noTriggers = new ChannelTarget();
+            noTriggers.setName("no-triggers");
+            noTriggers.setTriggers(null);
+            noTriggers.setTargetId("agent-1");
+
+            var defaultTarget = new ChannelTarget();
+            defaultTarget.setName("default-target");
+            defaultTarget.setTriggers(List.of("dt"));
+            defaultTarget.setTargetId("agent-2");
+
+            cfg.setTargets(List.of(noTriggers, defaultTarget));
+
+            ResolvedTarget result = router.resolveFromIntegration(cfg, "something: message");
+            assertNotNull(result);
+            assertEquals("default-target", result.target().getName());
+        }
+
+        @Test
+        @DisplayName("target with null trigger entry → skipped")
+        void targetWithNullTriggerEntry() {
+            var cfg = new ChannelIntegrationConfiguration();
+            cfg.setDefaultTargetName("t1");
+
+            var t1 = new ChannelTarget();
+            t1.setName("t1");
+            var triggers = new java.util.ArrayList<String>();
+            triggers.add(null);
+            triggers.add("real");
+            t1.setTriggers(triggers);
+            t1.setTargetId("agent-1");
+            cfg.setTargets(List.of(t1));
+
+            // "real:" should still match even though there's a null in the trigger list
+            ResolvedTarget result = router.resolveFromIntegration(cfg, "real: hello");
+            assertNotNull(result);
+            assertEquals("t1", result.target().getName());
+            assertEquals("hello", result.strippedMessage());
+        }
+    }
+
+    // ─── ResolvedTarget credential resolution ─────────────────────────────────
+
+    @Nested
+    @DisplayName("ResolvedTarget credential resolution")
+    class ResolvedTargetCredentials {
+
+        @Test
+        @DisplayName("botToken from integration platformConfig")
+        void botTokenFromIntegration() {
+            var cfg = new ChannelIntegrationConfiguration();
+            cfg.setPlatformConfig(Map.of("botToken", "xoxb-integration-token"));
+
+            var target = new ChannelTarget();
+            var resolved = new ResolvedTarget(target, "msg", cfg, null, null);
+
+            assertEquals("xoxb-integration-token", resolved.botToken());
+        }
+
+        @Test
+        @DisplayName("signingSecret from integration platformConfig")
+        void signingSecretFromIntegration() {
+            var cfg = new ChannelIntegrationConfiguration();
+            cfg.setPlatformConfig(Map.of("signingSecret", "secret-from-integration"));
+
+            var target = new ChannelTarget();
+            var resolved = new ResolvedTarget(target, "msg", cfg, null, null);
+
+            assertEquals("secret-from-integration", resolved.signingSecret());
+        }
+
+        @Test
+        @DisplayName("botToken falls back to legacy when integration is null")
+        void botTokenFallsBackToLegacy() {
+            var target = new ChannelTarget();
+            var resolved = new ResolvedTarget(target, "msg", null,
+                    "xoxb-legacy-token", "legacy-secret");
+
+            assertEquals("xoxb-legacy-token", resolved.botToken());
+        }
+
+        @Test
+        @DisplayName("signingSecret falls back to legacy when integration is null")
+        void signingSecretFallsBackToLegacy() {
+            var target = new ChannelTarget();
+            var resolved = new ResolvedTarget(target, "msg", null,
+                    "xoxb-legacy", "legacy-signing-secret");
+
+            assertEquals("legacy-signing-secret", resolved.signingSecret());
+        }
+
+        @Test
+        @DisplayName("botToken returns null when integration has no platformConfig")
+        void botTokenNullWhenNoPlatformConfig() {
+            var cfg = new ChannelIntegrationConfiguration();
+            cfg.setPlatformConfig(null);
+
+            var target = new ChannelTarget();
+            var resolved = new ResolvedTarget(target, "msg", cfg, null, null);
+
+            assertNull(resolved.botToken());
+        }
+
+        @Test
+        @DisplayName("signingSecret returns null when integration has no platformConfig")
+        void signingSecretNullWhenNoPlatformConfig() {
+            var cfg = new ChannelIntegrationConfiguration();
+            cfg.setPlatformConfig(null);
+
+            var target = new ChannelTarget();
+            var resolved = new ResolvedTarget(target, "msg", cfg, null, null);
+
+            assertNull(resolved.signingSecret());
+        }
+
+        @Test
+        @DisplayName("botToken returns null when both integration and legacy are null")
+        void botTokenNullWhenBothNull() {
+            var target = new ChannelTarget();
+            var resolved = new ResolvedTarget(target, "msg", null, null, null);
+
+            assertNull(resolved.botToken());
+        }
+    }
+
+    // ─── LegacyTarget ─────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("LegacyTarget")
+    class LegacyTargetTests {
+
+        @Test
+        @DisplayName("toChannelTarget with agentId → AGENT type")
+        void toChannelTargetAgent() {
+            var legacy = new ChannelTargetRouter.LegacyTarget("agent-123", "token", "secret", null);
+            var target = legacy.toChannelTarget();
+
+            assertEquals("default", target.getName());
+            assertEquals(ChannelTarget.TargetType.AGENT, target.getType());
+            assertEquals("agent-123", target.getTargetId());
+        }
+
+        @Test
+        @DisplayName("toChannelTarget with groupId → GROUP type")
+        void toChannelTargetGroup() {
+            var legacy = new ChannelTargetRouter.LegacyTarget("agent-123", "token", "secret", "group-456");
+            var target = legacy.toChannelTarget();
+
+            assertEquals("default", target.getName());
+            assertEquals(ChannelTarget.TargetType.GROUP, target.getType());
+            assertEquals("group-456", target.getTargetId());
+        }
+    }
+
+    // ─── Thread lock composite key isolation ───────────────────────────────────
+
+    @Nested
+    @DisplayName("Thread lock composite key isolation")
+    class ThreadLockIsolation {
+
+        @Test
+        @DisplayName("same threadTs in different channels → independent locks")
+        void crossChannelIsolation() {
+            var target1 = new ChannelTarget();
+            target1.setName("target-channel-1");
+
+            var target2 = new ChannelTarget();
+            target2.setName("target-channel-2");
+
+            // Lock same threadTs but in different channels
+            router.lockThreadTarget("slack", "C001", "thread-abc", target1);
+            router.lockThreadTarget("slack", "C002", "thread-abc", target2);
+
+            var result1 = router.resolveThreadTarget("slack", "C001", "thread-abc");
+            var result2 = router.resolveThreadTarget("slack", "C002", "thread-abc");
+
+            assertNotNull(result1);
+            assertNotNull(result2);
+            assertEquals("target-channel-1", result1.target().getName());
+            assertEquals("target-channel-2", result2.target().getName());
+        }
+
+        @Test
+        @DisplayName("same threadTs in different platform types → independent locks")
+        void crossPlatformIsolation() {
+            var slackTarget = new ChannelTarget();
+            slackTarget.setName("slack-target");
+
+            var teamsTarget = new ChannelTarget();
+            teamsTarget.setName("teams-target");
+
+            router.lockThreadTarget("slack", "C001", "thread-1", slackTarget);
+            router.lockThreadTarget("teams", "C001", "thread-1", teamsTarget);
+
+            var slackResult = router.resolveThreadTarget("slack", "C001", "thread-1");
+            var teamsResult = router.resolveThreadTarget("teams", "C001", "thread-1");
+
+            assertNotNull(slackResult);
+            assertNotNull(teamsResult);
+            assertEquals("slack-target", slackResult.target().getName());
+            assertEquals("teams-target", teamsResult.target().getName());
+        }
+
+        @Test
+        @DisplayName("channelType normalization in lock/resolve — SLACK matches slack")
+        void channelTypeNormalization() {
+            var target = new ChannelTarget();
+            target.setName("test-target");
+
+            // Lock with mixed case
+            router.lockThreadTarget("SLACK", "C001", "thread-1", target);
+
+            // Resolve with lowercase
+            var result = router.resolveThreadTarget("slack", "C001", "thread-1");
+            assertNotNull(result);
+            assertEquals("test-target", result.target().getName());
+        }
+
+        @Test
+        @DisplayName("null channelType is handled safely in lockThreadTarget")
+        void nullChannelTypeInLock() {
+            var target = new ChannelTarget();
+            target.setName("test");
+            assertDoesNotThrow(() -> router.lockThreadTarget(null, "C001", "t1", target));
+        }
+    }
+
+    // ─── Locale-safe API normalization ─────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Locale-safe channel type normalization")
+    class LocaleNormalization {
+
+        @Test
+        @DisplayName("getSigningSecrets with mixed case → normalizes to slack")
+        void getSigningSecretsCaseInsensitive() {
+            // Without integration data loaded, returns empty set for any type
+            Set<String> secrets = router.getSigningSecrets("SLACK");
+            assertNotNull(secrets);
+            assertTrue(secrets.isEmpty());
+        }
+
+        @Test
+        @DisplayName("getSigningSecrets with null channelType → empty set")
+        void getSigningSecretsNull() {
+            assertDoesNotThrow(() -> {
+                Set<String> secrets = router.getSigningSecrets(null);
+                assertTrue(secrets.isEmpty());
+            });
+        }
+
+        @Test
+        @DisplayName("getIntegration with null channelType → empty Optional")
+        void getIntegrationNullType() {
+            assertDoesNotThrow(() -> {
+                assertTrue(router.getIntegration(null, "C001").isEmpty());
+            });
+        }
+
+        @Test
+        @DisplayName("getBotToken with null channelType → null")
+        void getBotTokenNullType() {
+            assertDoesNotThrow(() -> {
+                assertNull(router.getBotToken(null, "C001"));
+            });
+        }
+
+        @Test
+        @DisplayName("hasAnyChannels with null channelType → false")
+        void hasAnyChannelsNullType() {
+            assertDoesNotThrow(() -> {
+                assertFalse(router.hasAnyChannels(null));
+            });
+        }
+
+        @Test
+        @DisplayName("resolveTarget with null channelType → null (no match)")
+        void resolveTargetNullType() {
+            assertDoesNotThrow(() -> {
+                assertNull(router.resolveTarget(null, "C001", "hello"));
+            });
+        }
+
+        @Test
+        @DisplayName("resolveTarget with non-slack type → null (no match)")
+        void resolveTargetUnknownType() {
+            assertNull(router.resolveTarget("teams", "C001", "hello"));
+        }
+
+        @Test
+        @DisplayName("hasAnyChannels with unknown non-slack type → false")
+        void hasAnyChannelsUnknown() {
+            assertFalse(router.hasAnyChannels("teams"));
         }
     }
 

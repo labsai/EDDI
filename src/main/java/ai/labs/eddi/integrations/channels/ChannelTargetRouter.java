@@ -19,6 +19,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.util.*;
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
@@ -109,9 +110,10 @@ public class ChannelTargetRouter {
     public ResolvedTarget resolveTarget(String channelType, String platformChannelId,
                                         String messageText) {
         refreshIfNeeded();
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
 
         // 1. Try new-style ChannelIntegrationConfiguration
-        String key = channelType + ":" + platformChannelId;
+        String key = normalizedType + ":" + platformChannelId;
         ChannelIntegrationConfiguration integration = integrationMap.get(key);
         if (integration != null) {
             return resolveFromIntegration(integration, messageText);
@@ -119,7 +121,7 @@ public class ChannelTargetRouter {
 
         // 2. Fallback: legacy ChannelConnector (only if no new-style config covers this
         // channel)
-        if (CHANNEL_TYPE_SLACK.equals(channelType)) {
+        if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
             LegacyTarget legacy = legacyMap.get(platformChannelId);
             if (legacy != null) {
                 return new ResolvedTarget(legacy.toChannelTarget(), messageText, null,
@@ -137,24 +139,48 @@ public class ChannelTargetRouter {
      */
     public ResolvedTarget resolveThreadTarget(String channelType, String platformChannelId,
                                               String threadTs) {
-        ChannelTarget locked = threadTargetLock.get(threadTs);
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        String lockKey = normalizedType + ":" + platformChannelId + ":" + threadTs;
+        ChannelTarget locked = threadTargetLock.get(lockKey);
         if (locked == null) {
             return null;
         }
 
         refreshIfNeeded();
-        String key = channelType + ":" + platformChannelId;
+        String key = normalizedType + ":" + platformChannelId;
         ChannelIntegrationConfiguration integration = integrationMap.get(key);
 
-        return new ResolvedTarget(locked, null, integration, null, null);
+        // Attach legacy credentials when no new-style integration exists
+        String legacyBotToken = null;
+        String legacySigningSecret = null;
+        if (integration == null && CHANNEL_TYPE_SLACK.equals(normalizedType)) {
+            LegacyTarget legacy = legacyMap.get(platformChannelId);
+            if (legacy != null) {
+                legacyBotToken = legacy.botToken();
+                legacySigningSecret = legacy.signingSecret();
+            }
+        }
+        return new ResolvedTarget(locked, null, integration, legacyBotToken, legacySigningSecret);
     }
 
     /**
      * Lock a target for a thread. Subsequent messages in this thread will always
      * route to the same target, ignoring trigger keywords.
+     *
+     * @param channelType
+     *            platform type (e.g., "slack")
+     * @param platformChannelId
+     *            the platform-specific channel ID
+     * @param threadTs
+     *            the thread timestamp
+     * @param target
+     *            the target to lock for this thread
      */
-    public void lockThreadTarget(String threadTs, ChannelTarget target) {
-        threadTargetLock.put(threadTs, target);
+    public void lockThreadTarget(String channelType, String platformChannelId,
+                                 String threadTs, ChannelTarget target) {
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        String lockKey = normalizedType + ":" + platformChannelId + ":" + threadTs;
+        threadTargetLock.put(lockKey, target);
     }
 
     /**
@@ -163,7 +189,8 @@ public class ChannelTargetRouter {
      */
     public Set<String> getSigningSecrets(String channelType) {
         refreshIfNeeded();
-        if (CHANNEL_TYPE_SLACK.equals(channelType)) {
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
             return slackSigningSecrets;
         }
         return Set.of();
@@ -176,7 +203,8 @@ public class ChannelTargetRouter {
     public Optional<ChannelIntegrationConfiguration> getIntegration(String channelType,
                                                                     String platformChannelId) {
         refreshIfNeeded();
-        return Optional.ofNullable(integrationMap.get(channelType + ":" + platformChannelId));
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        return Optional.ofNullable(integrationMap.get(normalizedType + ":" + platformChannelId));
     }
 
     /**
@@ -185,7 +213,8 @@ public class ChannelTargetRouter {
      */
     public String getBotToken(String channelType, String platformChannelId) {
         refreshIfNeeded();
-        String key = channelType + ":" + platformChannelId;
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        String key = normalizedType + ":" + platformChannelId;
         ChannelIntegrationConfiguration integration = integrationMap.get(key);
         if (integration != null && integration.getPlatformConfig() != null) {
             String token = integration.getPlatformConfig().get("botToken");
@@ -194,7 +223,7 @@ public class ChannelTargetRouter {
             }
         }
         // Fallback: legacy map (Slack only)
-        if (CHANNEL_TYPE_SLACK.equals(channelType)) {
+        if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
             LegacyTarget legacy = legacyMap.get(platformChannelId);
             if (legacy != null && legacy.botToken() != null) {
                 return legacy.botToken();
@@ -208,11 +237,12 @@ public class ChannelTargetRouter {
      */
     public boolean hasAnyChannels(String channelType) {
         refreshIfNeeded();
-        if (CHANNEL_TYPE_SLACK.equals(channelType)) {
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
             return integrationMap.keySet().stream().anyMatch(k -> k.startsWith("slack:"))
                     || !legacyMap.isEmpty();
         }
-        return integrationMap.keySet().stream().anyMatch(k -> k.startsWith(channelType + ":"));
+        return integrationMap.keySet().stream().anyMatch(k -> k.startsWith(normalizedType + ":"));
     }
 
     // ─── Trigger matching ──────────────────────────────────────────────────────
@@ -246,13 +276,13 @@ public class ChannelTargetRouter {
         // Check for colon-delimited trigger
         int colonIdx = trimmed.indexOf(':');
         if (colonIdx > 0) {
-            String candidateTrigger = trimmed.substring(0, colonIdx).trim().toLowerCase();
+            String candidateTrigger = trimmed.substring(0, colonIdx).trim().toLowerCase(Locale.ROOT);
             String remainder = trimmed.substring(colonIdx + 1).trim();
 
             for (ChannelTarget target : integration.getTargets()) {
                 if (target.getTriggers() != null) {
                     for (String trigger : target.getTriggers()) {
-                        if (trigger != null && trigger.toLowerCase().trim().equals(candidateTrigger)) {
+                        if (trigger != null && trigger.toLowerCase(Locale.ROOT).trim().equals(candidateTrigger)) {
                             return new ResolvedTarget(target, remainder, integration,
                                     null, null);
                         }
@@ -326,13 +356,13 @@ public class ChannelTargetRouter {
                         if (channelId != null && !channelId.isBlank()) {
                             var copy = deepCopyConfig(config);
                             resolvePlatformSecrets(copy);
-                            String key = copy.getChannelType().toLowerCase() + ":" + channelId;
+                            String key = copy.getChannelType().toLowerCase(Locale.ROOT) + ":" + channelId;
                             newIntegrationMap.put(key, copy);
                             coveredChannelIds.add(channelId);
 
                             // Collect signing secrets for Slack
                             if (CHANNEL_TYPE_SLACK.equals(
-                                    config.getChannelType().toLowerCase())) {
+                                    config.getChannelType().toLowerCase(Locale.ROOT))) {
                                 String ss = copy.getPlatformConfig().get("signingSecret");
                                 if (ss != null && !ss.isBlank()) {
                                     newSigningSecrets.add(ss);

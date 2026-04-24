@@ -95,6 +95,12 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     public Response duplicateChannel(String id, Integer version) {
         restVersionInfo.validateParameters(id, version);
         ChannelIntegrationConfiguration config = restVersionInfo.read(id, version);
+        // Clear channelId so the duplicate doesn't collide in the router's
+        // integrationMap (each channelType:channelId must be unique)
+        if (config.getPlatformConfig() != null) {
+            config.getPlatformConfig().remove("channelId");
+        }
+        validateConfiguration(config);
         Response response = restVersionInfo.create(config);
         URI location = response.getLocation();
         if (location != null) {
@@ -137,7 +143,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         if (channelType == null || channelType.isBlank()) {
             throw new BadRequestException("Channel type is required.");
         }
-        if (!REGISTERED_CHANNEL_TYPES.contains(channelType.toLowerCase())) {
+        if (!REGISTERED_CHANNEL_TYPES.contains(channelType.toLowerCase(Locale.ROOT))) {
             throw new BadRequestException(
                     "Unknown channel type: '" + channelType + "'. Registered types: "
                             + REGISTERED_CHANNEL_TYPES);

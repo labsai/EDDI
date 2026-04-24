@@ -608,6 +608,181 @@ class ChannelTargetRouterRefreshTest {
         }
     }
 
+    // ─── resolveThreadTarget with legacy credentials ──────────────────────────
+
+    @Nested
+    @DisplayName("resolveThreadTarget with legacy credentials")
+    class ThreadTargetLegacyCredentials {
+
+        @Test
+        @DisplayName("thread target attaches legacy credentials when no new-style config exists")
+        void legacyCredentialsAttached() throws Exception {
+            when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+            setupLegacyAgent(AGENT_ID, CHANNEL_ID, "xoxb-leg", "sign-leg", null);
+            when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+
+            // Force refresh
+            router.hasAnyChannels("slack");
+
+            // Lock a thread target
+            var target = new ChannelTarget();
+            target.setName("locked-target");
+            router.lockThreadTarget("slack", CHANNEL_ID, "thread-1", target);
+
+            ResolvedTarget result = router.resolveThreadTarget("slack", CHANNEL_ID, "thread-1");
+
+            assertNotNull(result);
+            assertEquals("locked-target", result.target().getName());
+            assertEquals("xoxb-leg", result.legacyBotToken());
+            assertEquals("sign-leg", result.legacySigningSecret());
+        }
+
+        @Test
+        @DisplayName("thread target has null legacy credentials when new-style config exists")
+        void noLegacyWhenNewStyleExists() throws Exception {
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-new", "sign-new");
+
+            // Lock a thread target
+            var target = new ChannelTarget();
+            target.setName("locked-target");
+            router.lockThreadTarget("slack", CHANNEL_ID, "thread-1", target);
+
+            ResolvedTarget result = router.resolveThreadTarget("slack", CHANNEL_ID, "thread-1");
+
+            assertNotNull(result);
+            assertNull(result.legacyBotToken());
+            assertNull(result.legacySigningSecret());
+            assertNotNull(result.integration());
+        }
+    }
+
+    // ─── Refresh edge cases for legacy agents ─────────────────────────────────
+
+    @Nested
+    @DisplayName("Legacy refresh edge cases")
+    class LegacyRefreshEdgeCases {
+
+        @Test
+        @DisplayName("agent with deleted descriptor → skipped")
+        void deletedDescriptorSkipped() throws Exception {
+            when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+
+            var desc = new DocumentDescriptor();
+            desc.setDeleted(true);
+
+            var status = new AgentDeploymentStatus(
+                    Deployment.Environment.production, AGENT_ID, 1,
+                    Deployment.Status.READY, desc);
+            when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
+                    .thenReturn(List.of(status));
+
+            assertNull(router.resolveTarget("slack", CHANNEL_ID, "hello"));
+        }
+
+        @Test
+        @DisplayName("agent with null descriptor → skipped")
+        void nullDescriptorSkipped() throws Exception {
+            when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+
+            var status = new AgentDeploymentStatus(
+                    Deployment.Environment.production, AGENT_ID, 1,
+                    Deployment.Status.READY, null);
+            when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
+                    .thenReturn(List.of(status));
+
+            assertNull(router.resolveTarget("slack", CHANNEL_ID, "hello"));
+        }
+
+        @Test
+        @DisplayName("agent with non-slack connector type → skipped in legacy path")
+        void nonSlackConnectorSkipped() throws Exception {
+            when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+
+            var connector = new ChannelConnector();
+            connector.setType(URI.create("teams")); // not slack
+            connector.setConfig(Map.of("channelId", CHANNEL_ID, "botToken", "tok"));
+
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setChannels(List.of(connector));
+
+            var desc = new DocumentDescriptor();
+            desc.setDeleted(false);
+            var status = new AgentDeploymentStatus(
+                    Deployment.Environment.production, AGENT_ID, 1,
+                    Deployment.Status.READY, desc);
+            when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
+                    .thenReturn(List.of(status));
+            when(agentStore.readAgent(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
+
+            assertNull(router.resolveTarget("slack", CHANNEL_ID, "hello"));
+            assertFalse(router.hasAnyChannels("slack"));
+        }
+
+        @Test
+        @DisplayName("connector with null config → skipped")
+        void connectorNullConfigSkipped() throws Exception {
+            when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+
+            var connector = new ChannelConnector();
+            connector.setType(URI.create("slack"));
+            connector.setConfig(null);
+
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setChannels(List.of(connector));
+
+            var desc = new DocumentDescriptor();
+            desc.setDeleted(false);
+            var status = new AgentDeploymentStatus(
+                    Deployment.Environment.production, AGENT_ID, 1,
+                    Deployment.Status.READY, desc);
+            when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
+                    .thenReturn(List.of(status));
+            when(agentStore.readAgent(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
+
+            assertNull(router.resolveTarget("slack", CHANNEL_ID, "hello"));
+        }
+
+        @Test
+        @DisplayName("legacy agent with blank groupId → AGENT type (not GROUP)")
+        void blankGroupIdIsAgent() throws Exception {
+            when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+            setupLegacyAgent(AGENT_ID, CHANNEL_ID, "xoxb-tok", "sign-sec", null);
+            // The helper passes null for groupId, so set up an agent with blank groupId
+            // explicitly
+            var connector = new ChannelConnector();
+            connector.setType(URI.create("slack"));
+            var cfg = new HashMap<String, String>();
+            cfg.put("channelId", CHANNEL_ID);
+            cfg.put("botToken", "xoxb-tok");
+            cfg.put("signingSecret", "sign-sec");
+            cfg.put("groupId", "   "); // blank, not null
+            connector.setConfig(cfg);
+
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setChannels(List.of(connector));
+
+            var desc = new DocumentDescriptor();
+            desc.setDeleted(false);
+            var status = new AgentDeploymentStatus(
+                    Deployment.Environment.production, AGENT_ID, 1,
+                    Deployment.Status.READY, desc);
+            when(agentAdmin.getDeploymentStatuses(Deployment.Environment.production))
+                    .thenReturn(List.of(status));
+            when(agentStore.readAgent(eq(AGENT_ID), eq(1))).thenReturn(agentConfig);
+            when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+
+            ResolvedTarget result = router.resolveTarget("slack", CHANNEL_ID, "hello");
+            assertNotNull(result);
+            assertEquals(ChannelTarget.TargetType.AGENT, result.target().getType());
+        }
+    }
+
     // ─── getBotToken ───────────────────────────────────────────────────────────
 
     @Nested
