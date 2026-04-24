@@ -1,0 +1,31 @@
+#!/bin/sh
+# Pre-push hook: block force-pushes entirely.
+# Activated by: git config core.hooksPath .githooks
+# Bypassed by: git push --no-verify (human emergency only)
+
+# stdin receives lines: <local ref> <local sha> <remote ref> <remote sha>
+
+while read local_ref local_sha remote_ref remote_sha; do
+  # Skip new branches (remote doesn't exist yet) and branch deletions
+  if [ "$remote_sha" = "0000000000000000000000000000000000000000" ] || \
+     [ "$local_sha" = "0000000000000000000000000000000000000000" ]; then
+    continue
+  fi
+
+  # Check if remote_sha is an ancestor of local_sha (= fast-forward, allowed)
+  if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+    echo ""
+    echo "❌ BLOCKED: Non-fast-forward push detected on $remote_ref"
+    echo ""
+    echo "   Your local branch has diverged from the remote."
+    echo "   This means commits exist on the remote that are not in your local branch."
+    echo ""
+    echo "   To fix this, run:"
+    echo "     git pull --rebase"
+    echo "   Then push again normally."
+    echo ""
+    exit 1
+  fi
+done
+
+exit 0

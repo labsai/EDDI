@@ -43,18 +43,34 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 ### During Work
 
 3. **Branching**: Check `git branch --show-current` and `git log -5 --oneline` to understand the current branch context. **Do NOT commit directly to `main`.** If unsure which branch to use, ask the user.
-4. **Commit often**: Every working unit gets a commit. Use conventional commits:
+4. **Never force-push**: `git push --force` and `git push --force-with-lease` are **forbidden**. To avoid ever needing them, follow these sub-rules:
+   - **Never `git commit --amend` after pushing.** Amend only works on unpushed commits. If you already pushed, make a new commit instead.
+   - **Never `git rebase -i` on a pushed branch.** Interactive rebase rewrites history. If the branch is pushed, history is immutable.
+   - **Never `git reset` on a pushed branch.** Use `git revert` to undo pushed commits (it creates a new forward commit).
+   - **Always `git pull --rebase` before pushing** if the remote has new commits.
+   - A `.githooks/pre-push` hook will block non-fast-forward pushes as a safety net.
+5. **Commit often**: Every working unit gets a commit. Use conventional commits:
    ```
    feat(scope): description
    fix(scope): description
    chore(scope): description
    refactor(scope): description
    ```
-5. **Each commit must build**: Run `./mvnw compile` (or `./mvnw test` for backend) before committing. Never commit broken code.
+6. **Each commit must build**: Run `./mvnw compile` (or `./mvnw test` for backend) before committing. Never commit broken code.
+
+#### Git Recovery — What To Do Instead of Force-Push
+
+| Situation | ❌ Wrong (rewrites history) | ✅ Correct (moves forward) |
+|-----------|---------------------------|---------------------------|
+| Committed to wrong branch, **not yet pushed** | — | `git branch fix/my-work` → `git checkout main` → `git reset --hard origin/main` (safe: nothing was pushed) |
+| Committed to wrong branch, **already pushed** | `git reset && git push --force` | `git revert <sha>` on wrong branch, then cherry-pick onto correct branch |
+| Need to undo a pushed commit | `git reset --hard HEAD~1 && git push --force` | `git revert <sha> && git push` (new commit that undoes the change) |
+| Local branch diverged from remote | `git push --force` | `git pull --rebase` then `git push` |
+| Want to clean up commits before merge | `git rebase -i && git push --force` | Use GitHub's "Squash and merge" button on the PR instead |
 
 ### After Completing Work (or if interrupted/switching sessions)
 
-6. **Update the changelog**: Edit [`docs/changelog.md`](docs/changelog.md) and add an entry with:
+7. **Update the changelog**: Edit [`docs/changelog.md`](docs/changelog.md) and add an entry with:
    - Date and short title
    - Repo and branch
    - What changed (files + reasoning)
