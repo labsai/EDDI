@@ -25,7 +25,7 @@ The following tools run **on every push and PR** via [GitHub Actions CI](https:/
 | **OWASP ZAP** | DAST | API scan against live EDDI instance in CI | Every push to `main` |
 | **ClusterFuzzLite** | Fuzz testing | `PathNavigator`, `MatchingUtilities` via Jazzer | PRs touching `src/` + weekly batch |
 | **Cosign** | Supply chain | Keyless OIDC signing of Docker images | Every release |
-| **CycloneDX** | SBOM | Software Bill of Materials generation | Every CI run |
+| **CycloneDX** | SBOM | Software Bill of Materials generation | Every push to `main` |
 | **SLSA Provenance** | Attestation | Build provenance attestation (Level 1) | Every release |
 
 ## Manual Security Reviews

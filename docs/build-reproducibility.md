@@ -59,7 +59,7 @@ cosign verify \
 
 ### SBOM
 
-Every CI build generates a [CycloneDX](https://cyclonedx.org/) Software Bill of Materials (SBOM). The SBOM is uploaded as a CI artifact and can be downloaded from the GitHub Actions run summary.
+CI builds on `main` generate a [CycloneDX](https://cyclonedx.org/) Software Bill of Materials (SBOM). The SBOM is uploaded as a CI artifact and can be downloaded from the GitHub Actions run summary.
 
 ## Known Limitations
 
