@@ -57,6 +57,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
    refactor(scope): description
    ```
 6. **Each commit must build**: Run `./mvnw compile` (or `./mvnw test` for backend) before committing. Never commit broken code.
+7. **Verify factual claims against authoritative sources**: When writing documentation about the project's technology stack, dependencies, or CI configuration, **always verify against the canonical source** (`pom.xml` for dependencies, `ci.yml` for CI behavior, `Dockerfile` for container config). **Never infer from codebase grep results** — migration code, comments about "previous implementations," and backward-compatibility references describe what the project *used to* use, not what it currently uses. If a term appears 40 times in the codebase but zero times in `pom.xml`, the project does not use it.
 
 #### Git Recovery — What To Do Instead of Force-Push
 
