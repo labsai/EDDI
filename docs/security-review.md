@@ -19,14 +19,14 @@ The following tools run **on every push and PR** via [GitHub Actions CI](https:/
 | Tool | Type | Scope | Frequency |
 |------|------|-------|-----------|
 | **CodeQL** | SAST | Java source code — injection, XSS, hardcoded creds, unsafe deserialization | Every push + PR |
-| **Trivy** | Container scanning | OS packages + Java dependencies in Docker image | Every Docker build |
+| **Trivy** | Container + FS scanning | Filesystem scan (every push + PR), Docker image scan (every push to `main`) | Every CI run |
 | **Gitleaks** | Secret scanning | Git history + staged files for leaked credentials | Every push + PR |
 | **Dependency Review** | SCA | New dependency license + vulnerability check on PRs | Every PR |
 | **OWASP ZAP** | DAST | API scan against live EDDI instance in CI | Every push to `main` |
 | **ClusterFuzzLite** | Fuzz testing | `PathNavigator`, `MatchingUtilities` via Jazzer | PRs touching `src/` + weekly batch |
-| **Cosign** | Supply chain | Keyless OIDC signing of Docker images | Every release |
+| **Cosign** | Supply chain | Keyless OIDC signing of Docker images | Every push to `main` + tags |
 | **CycloneDX** | SBOM | Software Bill of Materials generation | Every push to `main` |
-| **SLSA Provenance** | Attestation | Build provenance attestation (Level 1) | Every release |
+| **SLSA Provenance** | Attestation | Build provenance attestation (Level 1) | Every push to `main` + tags |
 
 ## Manual Security Reviews
 
