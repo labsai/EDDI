@@ -26,7 +26,7 @@ Every pull request must receive at least **one approval** from a core maintainer
 Changes touching the following areas require **extra scrutiny** and explicit security sign-off:
 
 - **Authentication / authorization** — `AuthStartupGuard`, OIDC configuration, role checks
-- **Secrets handling** — `SecretsVault`, `VaultSaltManager`, `SecretResolver`, property `scope: secret`
+- **Secrets handling** — `VaultSecretProvider`, `VaultSaltManager`, `SecretResolver`, property `scope: secret`
 - **HTTP clients** — Must use `SafeHttpClient`. No direct `HttpClient.newBuilder()`. All URLs validated via `UrlValidationUtils`.
 - **Input validation** — Template injection, path traversal, SSRF vectors
 - **Deserialization** — Jackson `@JsonTypeInfo`, polymorphic type handling
