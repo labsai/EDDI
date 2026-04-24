@@ -6,7 +6,7 @@ EDDI is maintained by [Labs.ai](https://labs.ai) under the stewardship of the fo
 
 ### Project Lead
 
-- **Gregor Jarisch** ([@gjarisch](https://github.com/gjarisch)) — Founder, architect, and primary maintainer. Responsible for roadmap, architecture decisions, and release management.
+- **Gregor Jarisch** ([@ginccc](https://github.com/ginccc)) — Founder, architect, and primary maintainer. Responsible for roadmap, architecture decisions, and release management.
 
 ### Core Maintainers
 
@@ -14,8 +14,8 @@ Core maintainers have commit access and review authority over all areas of the c
 
 | Maintainer | GitHub | Focus Areas |
 |------------|--------|-------------|
-| Gregor Jarisch | [@gjarisch](https://github.com/gjarisch) | Full stack, architecture, security |
-| Roland Pickl | [@rpickl](https://github.com/rpickl) | Backend, testing, code review |
+| Gregor Jarisch | [@ginccc](https://github.com/ginccc) | Full stack, architecture, security |
+| Roland Pickl | [@rolandpickl](https://github.com/rolandpickl) | Backend, testing, code review |
 
 ## Decision-Making Process
 
