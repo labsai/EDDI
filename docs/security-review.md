@@ -72,7 +72,7 @@ The following tools run **on every push and PR** via [GitHub Actions CI](https:/
 
 ## Threat Model
 
-The EDDI threat model is documented in [docs/security.md](security.md) and covers:
+EDDI's security architecture is documented in [docs/security.md](security.md). Key threats and mitigations:
 
 - **T1: Prompt injection** — mitigated by template sandboxing, PathNavigator (no OGNL)
 - **T2: SSRF via tool execution** — mitigated by `SafeHttpClient`, URL validation
