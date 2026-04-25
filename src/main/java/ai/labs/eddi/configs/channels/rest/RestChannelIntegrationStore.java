@@ -169,11 +169,17 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                             + "' does not match any target name.");
         }
 
-        // No duplicate trigger keywords across targets
+        // No duplicate target names or trigger keywords across targets
+        Set<String> usedNames = new HashSet<>();
         Set<String> allTriggers = new HashSet<>();
         for (ChannelTarget target : targets) {
             if (target.getName() == null || target.getName().isBlank()) {
                 throw new BadRequestException("Every target must have a name.");
+            }
+            if (!usedNames.add(target.getName().toLowerCase(Locale.ROOT))) {
+                throw new BadRequestException(
+                        "Duplicate target name: '" + target.getName()
+                                + "'. Each target must have a unique name.");
             }
             if (target.getTargetId() == null || target.getTargetId().isBlank()) {
                 throw new BadRequestException(

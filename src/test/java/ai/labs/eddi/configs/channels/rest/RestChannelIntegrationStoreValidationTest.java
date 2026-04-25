@@ -171,6 +171,27 @@ class RestChannelIntegrationStoreValidationTest {
                     () -> store.validateConfiguration(config));
             assertTrue(ex.getMessage().contains("targetId"));
         }
+
+        @Test
+        @DisplayName("duplicate target names (case-insensitive) → BadRequest")
+        void duplicateTargetNames() {
+            var t1 = new ChannelTarget();
+            t1.setName("Support");
+            t1.setTargetId("agent-1");
+            t1.setTriggers(List.of("assist"));
+
+            var t2 = new ChannelTarget();
+            t2.setName("support"); // same name, different case
+            t2.setTargetId("agent-2");
+            t2.setTriggers(List.of("review"));
+
+            config.setTargets(List.of(t1, t2));
+            config.setDefaultTargetName("Support");
+
+            var ex = assertThrows(BadRequestException.class,
+                    () -> store.validateConfiguration(config));
+            assertTrue(ex.getMessage().contains("Duplicate target name"));
+        }
     }
 
     // ─── Default target ────────────────────────────────────────────────────────
