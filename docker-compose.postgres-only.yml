@@ -14,6 +14,7 @@ services:
       QUARKUS_DATASOURCE_USERNAME: eddi
       QUARKUS_DATASOURCE_PASSWORD: eddi
       EDDI_DATASTORE_TYPE: "${EDDI_DATASTORE_TYPE:-postgres}"
+      EDDI_SECURITY_ALLOW_UNAUTHENTICATED: "true"
       EDDI_VAULT_MASTER_KEY: "${EDDI_VAULT_MASTER_KEY:-}"
     extra_hosts:
       - "host.docker.internal:host-gateway"

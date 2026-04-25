@@ -1,9 +1,14 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
+import io.quarkus.security.ForbiddenException;
+import io.quarkus.security.identity.SecurityIdentity;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for McpToolUtils — shared MCP utility methods.
@@ -132,5 +137,111 @@ class McpToolUtilsTest {
     void errorJson_messageWithNewlines() {
         String result = McpToolUtils.errorJson("line1\nline2");
         assertEquals("{\"error\":\"line1\\nline2\"}", result);
+    }
+
+    // --- requireRole ---
+
+    @Test
+    void requireRole_authDisabled_neverThrows() {
+        assertDoesNotThrow(() -> McpToolUtils.requireRole(null, false, "eddi-admin"));
+    }
+
+    @Test
+    void requireRole_authEnabled_nullIdentity_throws() {
+        assertThrows(ForbiddenException.class,
+                () -> McpToolUtils.requireRole(null, true, "eddi-admin"));
+    }
+
+    @Test
+    void requireRole_authEnabled_anonymousIdentity_throws() {
+        var identity = mock(SecurityIdentity.class);
+        when(identity.isAnonymous()).thenReturn(true);
+        assertThrows(ForbiddenException.class,
+                () -> McpToolUtils.requireRole(identity, true, "eddi-admin"));
+    }
+
+    @Test
+    void requireRole_authEnabled_lacksRole_throws() {
+        var identity = mock(SecurityIdentity.class);
+        when(identity.isAnonymous()).thenReturn(false);
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        assertThrows(ForbiddenException.class,
+                () -> McpToolUtils.requireRole(identity, true, "eddi-admin"));
+    }
+
+    @Test
+    void requireRole_authEnabled_hasRole_passes() {
+        var identity = mock(SecurityIdentity.class);
+        when(identity.isAnonymous()).thenReturn(false);
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        assertDoesNotThrow(() -> McpToolUtils.requireRole(identity, true, "eddi-admin"));
+    }
+
+    // --- extractIdFromLocation ---
+
+    @Test
+    void extractIdFromLocation_withVersionQuery() {
+        assertEquals("abc123", McpToolUtils.extractIdFromLocation("/store/resources/abc123?version=1"));
+    }
+
+    @Test
+    void extractIdFromLocation_withoutQuery() {
+        assertEquals("abc123", McpToolUtils.extractIdFromLocation("/store/resources/abc123"));
+    }
+
+    @Test
+    void extractIdFromLocation_nullOrBlank_returnsNull() {
+        assertNull(McpToolUtils.extractIdFromLocation(null));
+        assertNull(McpToolUtils.extractIdFromLocation(""));
+        assertNull(McpToolUtils.extractIdFromLocation("  "));
+    }
+
+    @Test
+    void extractIdFromLocation_trailingSlash_returnsNull() {
+        assertNull(McpToolUtils.extractIdFromLocation("/store/resources/"));
+    }
+
+    // --- extractVersionFromLocation ---
+
+    @Test
+    void extractVersionFromLocation_present() {
+        assertEquals(3, McpToolUtils.extractVersionFromLocation("/store/resources/abc?version=3"));
+    }
+
+    @Test
+    void extractVersionFromLocation_multipleParams() {
+        assertEquals(5, McpToolUtils.extractVersionFromLocation("/store/resources/abc?version=5&other=val"));
+    }
+
+    @Test
+    void extractVersionFromLocation_missing_returns1() {
+        assertEquals(1, McpToolUtils.extractVersionFromLocation("/store/resources/abc"));
+    }
+
+    @Test
+    void extractVersionFromLocation_null_returns1() {
+        assertEquals(1, McpToolUtils.extractVersionFromLocation(null));
+    }
+
+    @Test
+    void extractVersionFromLocation_invalidNumber_returns1() {
+        assertEquals(1, McpToolUtils.extractVersionFromLocation("/store/resources/abc?version=xyz"));
+    }
+
+    // --- getRestStore ---
+
+    @Test
+    void getRestStore_success() throws Exception {
+        var factory = mock(IRestInterfaceFactory.class);
+        var proxy = mock(Runnable.class);
+        when(factory.get(Runnable.class)).thenReturn(proxy);
+        assertSame(proxy, McpToolUtils.getRestStore(factory, Runnable.class));
+    }
+
+    @Test
+    void getRestStore_factoryException_wrapsInRuntime() throws Exception {
+        var factory = mock(IRestInterfaceFactory.class);
+        when(factory.get(any())).thenThrow(new RestInterfaceFactory.RestInterfaceFactoryException("fail", new Exception("cause")));
+        assertThrows(RuntimeException.class, () -> McpToolUtils.getRestStore(factory, Runnable.class));
     }
 }

@@ -53,9 +53,6 @@ public class RestOutputActions implements IRestOutputActions {
                         for (String action : behaviorRuleConfiguration.getActions()) {
                             if (action.contains(filter)) {
                                 CollectionUtilities.addAllWithoutDuplicates(retOutputKeys, List.of(action));
-                                if (retOutputKeys.size() >= limit) {
-                                    return sortedOutputKeys(retOutputKeys);
-                                }
                             }
                         }
                     }
@@ -66,12 +63,13 @@ public class RestOutputActions implements IRestOutputActions {
             for (IResourceStore.IResourceId resourceId : resourceIds) {
                 List<String> outputKeys = outputStore.readActions(resourceId.getId(), resourceId.getVersion(), filter, limit);
                 CollectionUtilities.addAllWithoutDuplicates(retOutputKeys, outputKeys);
-                if (retOutputKeys.size() >= limit) {
-                    return sortedOutputKeys(retOutputKeys);
-                }
             }
 
-            return sortedOutputKeys(retOutputKeys);
+            // Sort the full aggregated list first, then truncate to the requested limit.
+            // This ensures deterministic, alphabetically-first results regardless of
+            // insertion order.
+            List<String> sorted = sortedOutputKeys(retOutputKeys);
+            return sorted.size() > limit ? sorted.subList(0, limit) : sorted;
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
         } catch (IResourceStore.ResourceStoreException e) {

@@ -364,6 +364,338 @@ class ConversationServiceTest {
         assertNull(handler.getUserMemoryConfig());
     }
 
+    // --- readConversationLog tests ---
+
+    @Test
+    void readConversationLog_textOutputType_returnsTextPlain() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(AGENT_ID);
+        snapshot.setUserId(USER_ID);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+
+        var result = conversationService.readConversationLog(CONVERSATION_ID, "text", 10);
+        assertNotNull(result);
+        assertEquals("text/plain", result.mediaType());
+    }
+
+    @Test
+    void readConversationLog_stringOutputType_returnsTextPlain() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(AGENT_ID);
+        snapshot.setUserId(USER_ID);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+
+        var result = conversationService.readConversationLog(CONVERSATION_ID, "string", 10);
+        assertEquals("text/plain", result.mediaType());
+    }
+
+    @Test
+    void readConversationLog_jsonOutputType_returnsApplicationJson() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(AGENT_ID);
+        snapshot.setUserId(USER_ID);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+
+        var result = conversationService.readConversationLog(CONVERSATION_ID, "json", 10);
+        assertEquals("application/json", result.mediaType());
+    }
+
+    // --- say with GDPR restriction ---
+
+    @Test
+    void say_gdprRestricted_throwsProcessingRestrictedException() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(AGENT_ID);
+        snapshot.setUserId(USER_ID);
+        snapshot.setAgentVersion(1);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+        when(gdprComplianceService.isProcessingRestricted(USER_ID)).thenReturn(true);
+
+        var handler = mock(ConversationResponseHandler.class);
+
+        assertThrows(ProcessingRestrictedException.class, () -> conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
+                new InputData("hello", Map.of()), false, handler));
+    }
+
+    // --- say with quota exceeded ---
+
+    @Test
+    void say_quotaExceeded_throwsQuotaExceededException() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(AGENT_ID);
+        snapshot.setUserId(USER_ID);
+        snapshot.setAgentVersion(1);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        IAgent mockAgent = mock(IAgent.class);
+        IConversation mockConversation = mock(IConversation.class);
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+        when(AgentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(mockAgent);
+        when(mockAgent.continueConversation(any(), any(), any())).thenReturn(mockConversation);
+        when(mockConversation.isEnded()).thenReturn(false);
+        when(tenantQuotaService.acquireApiCallSlot()).thenReturn(new QuotaCheckResult(false, "Quota exceeded"));
+
+        var handler = mock(ConversationResponseHandler.class);
+
+        assertThrows(ai.labs.eddi.engine.tenancy.QuotaExceededException.class,
+                () -> conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
+                        new InputData("hello", Map.of()), false, handler));
+    }
+
+    // --- say with audit enabled ---
+
+    @Test
+    void say_auditEnabled_setsAuditCollector() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(AGENT_ID);
+        snapshot.setUserId(USER_ID);
+        snapshot.setAgentVersion(1);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        IAgent mockAgent = mock(IAgent.class);
+        IConversation mockConversation = mock(IConversation.class);
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+        when(AgentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(mockAgent);
+        when(mockAgent.continueConversation(any(), any(), any())).thenReturn(mockConversation);
+        when(mockConversation.isEnded()).thenReturn(false);
+        when(auditLedgerService.isEnabled()).thenReturn(true);
+
+        var handler = mock(ConversationResponseHandler.class);
+
+        conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(), new InputData("hello", Map.of()), false, handler);
+
+        verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
+    }
+
+    // --- say with agent not deployed (auto-deploy) ---
+
+    @Test
+    void say_agentNotDeployed_throwsAgentNotReadyException() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(AGENT_ID);
+        snapshot.setUserId(USER_ID);
+        snapshot.setAgentVersion(1);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+        // Agent returns null even after deploy attempt
+        when(AgentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(null);
+
+        var handler = mock(ConversationResponseHandler.class);
+
+        assertThrows(AgentNotReadyException.class,
+                () -> conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
+                        new InputData("hello", Map.of()), false, handler));
+
+        // Verify auto-deploy was attempted
+        verify(AgentFactory).deployAgent(ENV, AGENT_ID, 1, null);
+    }
+
+    // --- String-only overload: getConversationState(String) ---
+
+    @Test
+    void getConversationState_stringOnly_cached_returnsCachedState() {
+        when(conversationStateCache.get(CONVERSATION_ID)).thenReturn(ConversationState.READY);
+
+        ConversationState state = conversationService.getConversationState(CONVERSATION_ID);
+
+        assertEquals(ConversationState.READY, state);
+    }
+
+    @Test
+    void getConversationState_stringOnly_notCached_loadsFromStore() {
+        when(conversationStateCache.get(CONVERSATION_ID)).thenReturn(null);
+        when(conversationMemoryStore.getConversationState(CONVERSATION_ID)).thenReturn(ConversationState.READY);
+
+        ConversationState state = conversationService.getConversationState(CONVERSATION_ID);
+
+        assertEquals(ConversationState.READY, state);
+        verify(conversationStateCache).put(CONVERSATION_ID, ConversationState.READY);
+    }
+
+    @Test
+    void getConversationState_stringOnly_notFound_throwsConversationNotFoundException() {
+        when(conversationStateCache.get(CONVERSATION_ID)).thenReturn(null);
+        when(conversationMemoryStore.getConversationState(CONVERSATION_ID)).thenReturn(null);
+
+        assertThrows(ConversationNotFoundException.class, () -> conversationService.getConversationState(CONVERSATION_ID));
+    }
+
+    // --- String-only overload: readConversation(String) ---
+
+    @Test
+    void readConversation_stringOnly_success() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(AGENT_ID);
+        snapshot.setUserId(USER_ID);
+        snapshot.setEnvironment(ENV);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+
+        var result = conversationService.readConversation(CONVERSATION_ID, false, false, List.of());
+
+        assertNotNull(result);
+        assertEquals(ConversationState.READY, result.getConversationState());
+    }
+
+    // --- String-only overload: say(String) ---
+
+    @Test
+    void say_stringOnly_delegatesToFullOverload() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(AGENT_ID);
+        snapshot.setUserId(USER_ID);
+        snapshot.setAgentVersion(1);
+        snapshot.setEnvironment(ENV);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        IAgent mockAgent = mock(IAgent.class);
+        IConversation mockConversation = mock(IConversation.class);
+
+        // Will be loaded twice: once by string overload, once by full overload
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+        when(AgentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(mockAgent);
+        when(mockAgent.continueConversation(any(), any(), any())).thenReturn(mockConversation);
+        when(mockConversation.isEnded()).thenReturn(false);
+
+        var handler = mock(ConversationResponseHandler.class);
+
+        conversationService.say(CONVERSATION_ID, false, false, List.of(), new InputData("hello", Map.of()), false, handler);
+
+        verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
+    }
+
+    // --- String-only overload: isUndoAvailable(String) ---
+
+    @Test
+    void isUndoAvailable_stringOnly_delegatesToFullOverload() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(AGENT_ID);
+        snapshot.setEnvironment(ENV);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+
+        Boolean result = conversationService.isUndoAvailable(CONVERSATION_ID);
+        assertFalse(result);
+    }
+
+    // --- String-only overload: isRedoAvailable(String) ---
+
+    @Test
+    void isRedoAvailable_stringOnly_delegatesToFullOverload() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(AGENT_ID);
+        snapshot.setEnvironment(ENV);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+
+        Boolean result = conversationService.isRedoAvailable(CONVERSATION_ID);
+        assertFalse(result);
+    }
+
+    // --- String-only overload: undo(String) ---
+
+    @Test
+    void undo_stringOnly_delegatesToFullOverload() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(AGENT_ID);
+        snapshot.setEnvironment(ENV);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+
+        boolean result = conversationService.undo(CONVERSATION_ID);
+        assertFalse(result);
+    }
+
+    // --- String-only overload: redo(String) ---
+
+    @Test
+    void redo_stringOnly_delegatesToFullOverload() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(AGENT_ID);
+        snapshot.setEnvironment(ENV);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+
+        boolean result = conversationService.redo(CONVERSATION_ID);
+        assertFalse(result);
+    }
+
+    // --- sayStreaming with GDPR ---
+
+    @Test
+    void sayStreaming_gdprRestricted_throwsProcessingRestrictedException() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(AGENT_ID);
+        snapshot.setUserId(USER_ID);
+        snapshot.setAgentVersion(1);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+        when(gdprComplianceService.isProcessingRestricted(USER_ID)).thenReturn(true);
+
+        var handler = mock(ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler.class);
+
+        assertThrows(ProcessingRestrictedException.class, () -> conversationService.sayStreaming(ENV, AGENT_ID, CONVERSATION_ID, false, false,
+                List.of(), new InputData("hello", Map.of()), handler));
+    }
+
+    // --- sayStreaming with quota exceeded ---
+
+    @Test
+    void sayStreaming_quotaExceeded_throwsQuotaExceededException() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(AGENT_ID);
+        snapshot.setUserId(USER_ID);
+        snapshot.setAgentVersion(1);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        IAgent mockAgent = mock(IAgent.class);
+        IConversation mockConversation = mock(IConversation.class);
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+        when(AgentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(mockAgent);
+        when(mockAgent.continueConversation(any(), any(), any())).thenReturn(mockConversation);
+        when(mockConversation.isEnded()).thenReturn(false);
+        when(tenantQuotaService.acquireApiCallSlot()).thenReturn(new QuotaCheckResult(false, "Quota exceeded"));
+
+        var handler = mock(ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler.class);
+
+        assertThrows(ai.labs.eddi.engine.tenancy.QuotaExceededException.class,
+                () -> conversationService.sayStreaming(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
+                        new InputData("hello", Map.of()), handler));
+    }
+
     // --- sayStreaming tests ---
 
     @Test
@@ -429,5 +761,45 @@ class ConversationServiceTest {
         conversationService.sayStreaming(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(), new InputData("hello", Map.of()), handler);
 
         verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any(Callable.class));
+    }
+
+    // --- String-only overload: sayStreaming(String) ---
+
+    @Test
+    void sayStreaming_stringOnly_delegatesToFullOverload() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId(AGENT_ID);
+        snapshot.setUserId(USER_ID);
+        snapshot.setAgentVersion(1);
+        snapshot.setEnvironment(ENV);
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationSteps(new ArrayList<>());
+
+        IAgent mockAgent = mock(IAgent.class);
+        IConversation mockConversation = mock(IConversation.class);
+
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+        when(AgentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(mockAgent);
+        when(mockAgent.continueConversation(any(), any(), any())).thenReturn(mockConversation);
+        when(mockConversation.isEnded()).thenReturn(false);
+
+        var handler = mock(ai.labs.eddi.engine.api.IConversationService.StreamingResponseHandler.class);
+
+        conversationService.sayStreaming(CONVERSATION_ID, false, false, List.of(), new InputData("hello", Map.of()), handler);
+
+        verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
+    }
+
+    // --- startConversation quota exceeded ---
+
+    @Test
+    void startConversation_quotaExceeded_throwsQuotaExceededException() throws Exception {
+        IAgent mockAgent = mock(IAgent.class);
+        when(AgentFactory.getLatestReadyAgent(ENV, AGENT_ID)).thenReturn(mockAgent);
+        when(conversationSetup.computeAnonymousUserIdIfEmpty(eq(USER_ID), any())).thenReturn(USER_ID);
+        when(tenantQuotaService.acquireConversationSlot()).thenReturn(new QuotaCheckResult(false, "Conversation quota exceeded"));
+
+        assertThrows(ai.labs.eddi.engine.tenancy.QuotaExceededException.class,
+                () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, new LinkedHashMap<>()));
     }
 }

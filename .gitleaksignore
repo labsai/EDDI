@@ -1,0 +1,13 @@
+# Gitleaks Ignore File
+# ─────────────────────────────────────────────────────────────────
+# Add fingerprints here to suppress known false positives.
+# Each entry must be justified with a comment explaining why.
+#
+# To get a fingerprint, run: gitleaks detect --report-format json
+# and copy the "Fingerprint" field from the finding.
+#
+# Format:
+#   <fingerprint>  # <reason for suppression>
+#
+# Review this file periodically to ensure suppressions are still valid.
+# ─────────────────────────────────────────────────────────────────

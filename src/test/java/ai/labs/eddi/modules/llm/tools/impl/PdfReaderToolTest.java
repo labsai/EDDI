@@ -105,4 +105,34 @@ class PdfReaderToolTest {
         assertNotNull(result);
         // Either succeeds or fails with download error, NOT validation error
     }
+
+    @Test
+    void testGetPdfInfo_AcceptsHttpsUrl() {
+        String result = pdfReaderTool.getPdfInfo("https://example.com/test.pdf");
+        assertNotNull(result);
+    }
+
+    @Test
+    void testExtractTextFromPdfPages_AcceptsHttpsUrl() {
+        String result = pdfReaderTool.extractTextFromPdfPages("https://example.com/test.pdf", 1, 1);
+        assertNotNull(result);
+    }
+
+    @Test
+    void testGetPdfInfo_RejectsCloudMetadata() {
+        String result = pdfReaderTool.getPdfInfo("http://169.254.169.254/latest/meta-data/");
+        assertTrue(result.contains("Error"));
+    }
+
+    @Test
+    void testExtractTextFromPdfPages_RejectsCloudMetadata() {
+        String result = pdfReaderTool.extractTextFromPdfPages("http://169.254.169.254/", 1, 1);
+        assertTrue(result.contains("Error"));
+    }
+
+    @Test
+    void testExtractTextFromPdf_RejectsInvalidUrl() {
+        String result = pdfReaderTool.extractTextFromPdf("not-a-valid-url");
+        assertTrue(result.contains("Error"));
+    }
 }

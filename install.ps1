@@ -474,7 +474,7 @@ function Get-ComposeFiles {
     if ($Local) {
         $repoRoot = if ($ScriptDir) { $ScriptDir } else { Get-Location }
         $localCompose = Join-Path -Path $repoRoot -ChildPath "docker-compose.local.yml"
-        $dockerfile = Join-Path -Path $repoRoot -ChildPath "src\main\docker\Dockerfile.jvm"
+        $dockerfile = Join-Path -Path $repoRoot -ChildPath "src\main\docker\Dockerfile"
         if (-not (Test-Path $localCompose)) {
             Write-Fail "-Local requires running from the EDDI repo root.`n     Run: cd C:\path\to\EDDI; .\install.ps1 -Local"
         }
@@ -584,6 +584,7 @@ function Get-ComposeFiles {
 COMPOSE_FILES=$($ComposeFiles -join " ")
 EDDI_PORT=$EddiPort
 EDDI_HTTPS_PORT=$EddiHttpsPort
+EDDI_BRANCH=$EddiBranch
 "@ | Set-Content -Path $configPath
 
     # Write .env file for docker compose variable substitution
@@ -829,11 +830,17 @@ rem Safe config parsing — only extract known keys to prevent variable injectio
 set "COMPOSE_FILES="
 set "EDDI_PORT="
 set "EDDI_HTTPS_PORT="
+set "CFG_BRANCH="
 for /f "usebackq tokens=1,* delims==" %%A in ("%CONFIG_FILE%") do (
     if "%%A"=="COMPOSE_FILES" set "COMPOSE_FILES=%%B"
     if "%%A"=="EDDI_PORT" set "EDDI_PORT=%%B"
     if "%%A"=="EDDI_HTTPS_PORT" set "EDDI_HTTPS_PORT=%%B"
+    if "%%A"=="EDDI_BRANCH" set "CFG_BRANCH=%%B"
 )
+if not defined EDDI_BRANCH (
+    if defined CFG_BRANCH (set "EDDI_BRANCH=!CFG_BRANCH!") else (set "EDDI_BRANCH=main")
+)
+set "COMPOSE_BASE_URL=https://raw.githubusercontent.com/labsai/EDDI/!EDDI_BRANCH!"
 
 rem Build compose flags with delayed expansion for proper quoting
 set "FLAGS=--env-file "%ENV_FILE%""
@@ -882,6 +889,17 @@ docker compose %FLAGS% logs %1 %2 %3 %4 %5 %6 %7 %8 %9
 goto :eof
 
 :cmd_update
+echo Refreshing compose files from GitHub...
+for %%F in (%COMPOSE_FILES%) do (
+    for %%N in (%%~nxF) do (
+        echo   Updating %%N...
+        curl -fsSL "%COMPOSE_BASE_URL%/%%N" -o "%%F.tmp" 2>nul && move /y "%%F.tmp" "%%F" >nul 2>nul || (
+            del "%%F.tmp" 2>nul
+            echo   Warning: could not update %%N, keeping existing file
+        )
+    )
+)
+echo.
 echo Pulling latest images...
 docker compose %FLAGS% pull
 docker compose %FLAGS% up -d
@@ -918,7 +936,7 @@ echo   stop        Stop EDDI containers
 echo   restart     Restart EDDI containers
 echo   status      Show health and agent count
 echo   logs [-f]   View container logs
-echo   update      Pull latest images and restart
+echo   update      Refresh configs, pull latest images, restart
 echo   uninstall   Remove EDDI and all data
 goto :eof
 "@

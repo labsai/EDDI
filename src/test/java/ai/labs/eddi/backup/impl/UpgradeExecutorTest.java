@@ -295,7 +295,6 @@ class UpgradeExecutorTest {
             try (cdiMock) {
                 var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
                 cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                @SuppressWarnings("unchecked")
                 var instanceLlm = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.llm.IRestLlmStore>) Mockito
                         .mock(jakarta.enterprise.inject.Instance.class);
                 when(cdiInstance.select(ai.labs.eddi.configs.llm.IRestLlmStore.class)).thenReturn(instanceLlm);
@@ -367,14 +366,12 @@ class UpgradeExecutorTest {
                 cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
 
                 // CDI lookup for IRestRagStore (getStore in resolveExtensionOps)
-                @SuppressWarnings("unchecked")
                 var instanceRestRag = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.rag.IRestRagStore>) Mockito
                         .mock(jakarta.enterprise.inject.Instance.class);
                 when(cdiInstance.select(ai.labs.eddi.configs.rag.IRestRagStore.class)).thenReturn(instanceRestRag);
                 when(instanceRestRag.get()).thenReturn(ragRestStore);
 
                 // CDI lookup for IRagStore (dispatchCreateDirect)
-                @SuppressWarnings("unchecked")
                 var instanceRag = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.rag.IRagStore>) Mockito
                         .mock(jakarta.enterprise.inject.Instance.class);
                 when(cdiInstance.select(ai.labs.eddi.configs.rag.IRagStore.class)).thenReturn(instanceRag);
@@ -428,7 +425,6 @@ class UpgradeExecutorTest {
             try (cdiMock) {
                 var cdiInstance = Mockito.mock(jakarta.enterprise.inject.spi.CDI.class);
                 cdiMock.when(jakarta.enterprise.inject.spi.CDI::current).thenReturn(cdiInstance);
-                @SuppressWarnings("unchecked")
                 var instanceWf = (jakarta.enterprise.inject.Instance<ai.labs.eddi.configs.workflows.IWorkflowStore>) Mockito
                         .mock(jakarta.enterprise.inject.Instance.class);
                 when(cdiInstance.select(ai.labs.eddi.configs.workflows.IWorkflowStore.class)).thenReturn(instanceWf);

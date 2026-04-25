@@ -117,6 +117,9 @@ public class GroupConversationService implements IGroupConversationService {
         if (depth > maxDepth) {
             throw new GroupDepthExceededException("Maximum group discussion depth (%d) exceeded".formatted(maxDepth));
         }
+        if (groupId == null) {
+            throw new IllegalArgumentException("groupId must not be null");
+        }
 
         // Load group config — null-safe: getCurrentResourceId may return null on
         // PostgreSQL
@@ -142,6 +145,10 @@ public class GroupConversationService implements IGroupConversationService {
     @Override
     public GroupConversation startAndDiscussAsync(String groupId, String question, String userId, GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+
+        if (groupId == null) {
+            throw new IllegalArgumentException("groupId must not be null");
+        }
 
         // Validate early — so errors are returned synchronously
         IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(groupId);

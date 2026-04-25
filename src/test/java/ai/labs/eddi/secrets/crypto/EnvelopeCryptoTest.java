@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Unit tests for AES-256-GCM envelope encryption utilities.
  */
+@SuppressWarnings("deprecation") // Intentionally testing deprecated single-arg deriveKeyFromString for backward
+                                 // compat
 class EnvelopeCryptoTest {
 
     @Test

@@ -36,6 +36,19 @@ updates:
           - minor
           - patch
 
+  # Docker base image digests
+  - package-ecosystem: docker
+    directory: /src/main/docker
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - security
+    commit-message:
+      prefix: "chore(docker)"
+
   # GitHub Actions versions
   - package-ecosystem: github-actions
     directory: /

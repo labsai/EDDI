@@ -142,7 +142,7 @@ This is documentation/config work, not code changes.
 
 ## Verification
 
-- [ ] `./mvnw test` — 2,225+ tests pass
+- [ ] `./mvnw test` — 4,600+ tests pass
 - [ ] OpenTelemetry traces visible in Jaeger/Zipkin after item 1
 - [ ] LlmTask unit tests pass unchanged after item 2
 - [ ] Load test coordinator with 1000 concurrent conversations after item 3

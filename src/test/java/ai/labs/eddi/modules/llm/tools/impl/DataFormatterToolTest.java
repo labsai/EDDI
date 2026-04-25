@@ -225,4 +225,62 @@ class DataFormatterToolTest {
         assertTrue(result.contains("Jane"));
         assertTrue(result.contains("Bob"));
     }
+
+    // === validateXml tests ===
+
+    @Test
+    void testValidateXml_ValidXml() {
+        String xml = "<root><item>test</item></root>";
+        String result = dataFormatterTool.validateXml(xml);
+        assertNotNull(result);
+        assertTrue(result.contains("Valid XML"));
+    }
+
+    @Test
+    void testValidateXml_InvalidXml() {
+        String xml = "<root><unclosed>";
+        String result = dataFormatterTool.validateXml(xml);
+        assertTrue(result.startsWith("Error"));
+    }
+
+    @Test
+    void testValidateXml_EmptyString() {
+        String result = dataFormatterTool.validateXml("");
+        // Jackson XML mapper treats empty string as error
+        assertNotNull(result);
+    }
+
+    // === minifyJson tests ===
+
+    @Test
+    void testMinifyJson_FormattedJson() {
+        String json = "{\n  \"name\": \"John\",\n  \"age\": 30\n}";
+        String result = dataFormatterTool.minifyJson(json);
+        assertNotNull(result);
+        assertFalse(result.contains("Error"));
+        assertFalse(result.contains("\n"), "Minified JSON should not contain newlines");
+        assertTrue(result.contains("\"name\":\"John\"") || result.contains("\"name\" : \"John\""));
+    }
+
+    @Test
+    void testMinifyJson_AlreadyMinified() {
+        String json = "{\"key\":\"value\"}";
+        String result = dataFormatterTool.minifyJson(json);
+        assertEquals(json, result);
+    }
+
+    @Test
+    void testMinifyJson_InvalidJson() {
+        String result = dataFormatterTool.minifyJson("{invalid json}");
+        assertTrue(result.startsWith("Error"));
+    }
+
+    // === extractJsonValue with numeric value ===
+
+    @Test
+    void testExtractJsonValue_NumericField() {
+        String json = "{\"count\": 42}";
+        String result = dataFormatterTool.extractJsonValue(json, "count");
+        assertEquals("42", result);
+    }
 }

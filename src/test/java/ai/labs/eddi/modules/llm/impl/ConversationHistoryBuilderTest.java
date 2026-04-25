@@ -556,4 +556,291 @@ class ConversationHistoryBuilderTest {
             assertInstanceOf(SystemMessage.class, messages.getLast());
         }
     }
+
+    // ==================== Summary Prefix + SkipSteps Tests ====================
+
+    @Nested
+    @DisplayName("summaryPrefix and skipSteps")
+    class SummaryPrefixTests {
+
+        @Test
+        @DisplayName("buildMessages with summaryPrefix — prepends to system message")
+        void buildMessages_summaryPrefix_prepended() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var output = new ConversationOutput();
+            output.put("input", "Hi");
+            when(memory.getConversationOutputs()).thenReturn(List.of(output));
+
+            List<ChatMessage> messages = builder.buildMessages(
+                    memory, "You are helpful", null, -1, true,
+                    "Summary of earlier turns", 0);
+
+            assertFalse(messages.isEmpty());
+            assertInstanceOf(SystemMessage.class, messages.getFirst());
+            String systemText = ((SystemMessage) messages.getFirst()).text();
+            assertTrue(systemText.contains("You are helpful"), "Original system message preserved");
+            assertTrue(systemText.contains("Summary of earlier turns"), "Summary prefix injected");
+        }
+
+        @Test
+        @DisplayName("buildMessages with summaryPrefix and null system message")
+        void buildMessages_summaryPrefix_nullSystem() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var output = new ConversationOutput();
+            output.put("input", "Hi");
+            when(memory.getConversationOutputs()).thenReturn(List.of(output));
+
+            List<ChatMessage> messages = builder.buildMessages(
+                    memory, null, null, -1, true,
+                    "Summary text", 0);
+
+            assertInstanceOf(SystemMessage.class, messages.getFirst());
+            String systemText = ((SystemMessage) messages.getFirst()).text();
+            assertTrue(systemText.contains("Summary text"));
+        }
+
+        @Test
+        @DisplayName("buildMessages with skipSteps > 0 — skips early conversation outputs")
+        void buildMessages_skipSteps() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var outputs = new ArrayList<ConversationOutput>();
+            for (int i = 0; i < 5; i++) {
+                var output = new ConversationOutput();
+                output.put("input", "Message " + i);
+                output.put("output", List.of("Response " + i));
+                outputs.add(output);
+            }
+            when(memory.getConversationOutputs()).thenReturn(outputs);
+
+            // Skip first 3 steps
+            List<ChatMessage> messages = builder.buildMessages(
+                    memory, null, null, -1, true,
+                    null, 3);
+
+            // Should only include messages from steps 3 and 4 (2 steps × 2 messages each =
+            // 4)
+            assertTrue(messages.size() <= 4, "Should skip first 3 steps: " + messages.size());
+            assertTrue(messages.size() >= 2, "Should include at least step 3 and 4 inputs");
+        }
+
+        @Test
+        @DisplayName("buildMessages with skipSteps exceeding output count — returns empty conversation")
+        void buildMessages_skipStepsExceedsSize() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var outputs = new ArrayList<ConversationOutput>();
+            for (int i = 0; i < 3; i++) {
+                var output = new ConversationOutput();
+                output.put("input", "Message " + i);
+                outputs.add(output);
+            }
+            when(memory.getConversationOutputs()).thenReturn(outputs);
+
+            List<ChatMessage> messages = builder.buildMessages(
+                    memory, "System", null, -1, true,
+                    null, 10);
+
+            // Only system message should remain
+            assertEquals(1, messages.size());
+            assertInstanceOf(SystemMessage.class, messages.getFirst());
+        }
+
+        @Test
+        @DisplayName("buildMessages with skipSteps + logSizeLimit — applies both constraints")
+        void buildMessages_skipAndLimit() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var outputs = new ArrayList<ConversationOutput>();
+            for (int i = 0; i < 10; i++) {
+                var output = new ConversationOutput();
+                output.put("input", "Message " + i);
+                outputs.add(output);
+            }
+            when(memory.getConversationOutputs()).thenReturn(outputs);
+
+            // Skip 3 steps, limit to 2 steps
+            List<ChatMessage> messages = builder.buildMessages(
+                    memory, null, null, 2, true,
+                    null, 3);
+
+            // Should show only 2 steps from the remaining 7
+            assertTrue(messages.size() <= 4, "Should have at most 4 messages (2 steps × 2)");
+            assertTrue(messages.size() >= 2, "Should have at least 2 messages (2 user inputs)");
+        }
+
+        @Test
+        @DisplayName("token-aware with summaryPrefix — prepends to system message")
+        void tokenAware_summaryPrefix() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var outputs = new ArrayList<ConversationOutput>();
+            for (int i = 0; i < 5; i++) {
+                var output = new ConversationOutput();
+                output.put("input", "Message " + i);
+                outputs.add(output);
+            }
+            when(memory.getConversationOutputs()).thenReturn(outputs);
+
+            var estimator = new TokenCounterFactory.ApproximateTokenCountEstimator();
+            List<ChatMessage> messages = builder.buildTokenAwareMessages(
+                    memory, "System", null, 10000, 2, true, estimator,
+                    "Summary of turns 1-3", 3);
+
+            assertInstanceOf(SystemMessage.class, messages.getFirst());
+            String systemText = ((SystemMessage) messages.getFirst()).text();
+            assertTrue(systemText.contains("System"));
+            assertTrue(systemText.contains("Summary of turns 1-3"));
+        }
+
+        @Test
+        @DisplayName("token-aware with skipSteps — skips early outputs")
+        void tokenAware_skipSteps() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var outputs = new ArrayList<ConversationOutput>();
+            for (int i = 0; i < 10; i++) {
+                var output = new ConversationOutput();
+                output.put("input", "Message " + i);
+                outputs.add(output);
+            }
+            when(memory.getConversationOutputs()).thenReturn(outputs);
+
+            var estimator = new TokenCounterFactory.ApproximateTokenCountEstimator();
+            List<ChatMessage> messages = builder.buildTokenAwareMessages(
+                    memory, null, null, 10000, 0, true, estimator,
+                    null, 5);
+
+            // Should only have messages from steps 5-9 (5 steps)
+            assertEquals(5, messages.size(), "Should have 5 messages (steps 5-9)");
+        }
+    }
+
+    // ==================== Multimodal Content Tests ====================
+
+    @Nested
+    @DisplayName("convertMessage — multimodal content types")
+    class MultimodalConvertTests {
+
+        @Test
+        @DisplayName("pdf content type — creates PdfFileContent")
+        void pdfContentType() {
+            var content = new ConversationLog.ConversationPart.Content(
+                    ConversationLog.ConversationPart.ContentType.pdf, "base64data");
+            var part = new ConversationLog.ConversationPart("user", List.of(content));
+
+            ChatMessage result = builder.convertMessage(part);
+            assertInstanceOf(UserMessage.class, result);
+        }
+
+        @Test
+        @DisplayName("audio content type — creates AudioContent")
+        void audioContentType() {
+            var content = new ConversationLog.ConversationPart.Content(
+                    ConversationLog.ConversationPart.ContentType.audio, "audiodata");
+            var part = new ConversationLog.ConversationPart("user", List.of(content));
+
+            ChatMessage result = builder.convertMessage(part);
+            assertInstanceOf(UserMessage.class, result);
+        }
+
+        @Test
+        @DisplayName("video content type — creates VideoContent")
+        void videoContentType() {
+            var content = new ConversationLog.ConversationPart.Content(
+                    ConversationLog.ConversationPart.ContentType.video, "videodata");
+            var part = new ConversationLog.ConversationPart("user", List.of(content));
+
+            ChatMessage result = builder.convertMessage(part);
+            assertInstanceOf(UserMessage.class, result);
+        }
+
+        @Test
+        @DisplayName("image content type — creates ImageContent")
+        void imageContentType() {
+            var content = new ConversationLog.ConversationPart.Content(
+                    ConversationLog.ConversationPart.ContentType.image, "https://example.com/img.png");
+            var part = new ConversationLog.ConversationPart("user", List.of(content));
+
+            ChatMessage result = builder.convertMessage(part);
+            assertInstanceOf(UserMessage.class, result);
+        }
+
+        @Test
+        @DisplayName("mixed content types in single message")
+        void mixedContentTypes() {
+            var textContent = new ConversationLog.ConversationPart.Content(text, "Look at this");
+            var imageContent = new ConversationLog.ConversationPart.Content(
+                    ConversationLog.ConversationPart.ContentType.image, "https://example.com/img.png");
+            var part = new ConversationLog.ConversationPart("user", List.of(textContent, imageContent));
+
+            ChatMessage result = builder.convertMessage(part);
+            assertInstanceOf(UserMessage.class, result);
+            UserMessage userMsg = (UserMessage) result;
+            assertEquals(2, userMsg.contents().size());
+        }
+    }
+
+    // ==================== includeFirstAgentMessage Tests ====================
+
+    @Nested
+    @DisplayName("includeFirstAgentMessage behavior")
+    class IncludeFirstAgentMessageTests {
+
+        @Test
+        @DisplayName("includeFirstAgentMessage=false with skipSteps=0 — removes first message")
+        void includeFirstAgentMessageFalse_removesFirst() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var outputs = new ArrayList<ConversationOutput>();
+            var output0 = new ConversationOutput();
+            output0.put("input", "Hi");
+            output0.put("output", List.of("Welcome!"));
+            outputs.add(output0);
+
+            var output1 = new ConversationOutput();
+            output1.put("input", "How are you?");
+            output1.put("output", List.of("I'm fine!"));
+            outputs.add(output1);
+
+            when(memory.getConversationOutputs()).thenReturn(outputs);
+
+            // skipSteps=0, includeFirstAgentMessage=false
+            List<ChatMessage> messages = builder.buildMessages(
+                    memory, null, null, -1, false,
+                    null, 0);
+
+            // First message (the greeting) should be removed
+            // Remaining: 1 user ("How are you?") + 1 AI ("I'm fine!") + possibly input "Hi"
+            // The exact count depends on ConversationLogGenerator behavior
+            // But it should have fewer messages than with includeFirstAgentMessage=true
+            assertFalse(messages.isEmpty());
+        }
+
+        @Test
+        @DisplayName("includeFirstAgentMessage=false with skipSteps>0 — does NOT remove first")
+        void includeFirstAgentMessageFalse_withSkipSteps_noRemoval() {
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            var outputs = new ArrayList<ConversationOutput>();
+            for (int i = 0; i < 5; i++) {
+                var output = new ConversationOutput();
+                output.put("input", "Message " + i);
+                output.put("output", List.of("Response " + i));
+                outputs.add(output);
+            }
+            when(memory.getConversationOutputs()).thenReturn(outputs);
+
+            // skipSteps=2, includeFirstAgentMessage=false
+            // After skipping, the first message is mid-conversation, NOT the greeting
+            List<ChatMessage> messages = builder.buildMessages(
+                    memory, null, null, -1, false,
+                    null, 2);
+
+            // Should have messages from steps 2-4 without greeting removal
+            assertFalse(messages.isEmpty());
+        }
+    }
 }

@@ -31,17 +31,21 @@ import java.util.Map;
 public class RestToolHistory {
     private static final Logger LOGGER = Logger.getLogger(RestToolHistory.class);
 
-    @Inject
-    ToolCacheService cacheService;
+    private final ToolCacheService cacheService;
+    private final ToolRateLimiter rateLimiter;
+    private final ToolCostTracker costTracker;
+    private final IConversationMemoryStore conversationMemoryStore;
 
     @Inject
-    ToolRateLimiter rateLimiter;
-
-    @Inject
-    ToolCostTracker costTracker;
-
-    @Inject
-    IConversationMemoryStore conversationMemoryStore;
+    public RestToolHistory(ToolCacheService cacheService,
+            ToolRateLimiter rateLimiter,
+            ToolCostTracker costTracker,
+            IConversationMemoryStore conversationMemoryStore) {
+        this.cacheService = cacheService;
+        this.rateLimiter = rateLimiter;
+        this.costTracker = costTracker;
+        this.conversationMemoryStore = conversationMemoryStore;
+    }
 
     /**
      * Get tool execution history for a conversation

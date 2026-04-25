@@ -1,10 +1,8 @@
-name: CodeQL
+name: "CodeQL (Scheduled)"
 
+# Schedule-only: weekly deep scan with latest CodeQL rules.
+# Push/PR analysis is handled by the main ci.yml workflow.
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
   schedule:
     - cron: '0 6 * * 1' # Weekly on Monday at 06:00 UTC
 
@@ -37,17 +35,18 @@ jobs:
           cache: maven
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@c10b8064de6f491fea524254123dbe5e09572f13 # v4
+        uses: github/codeql-action/init@ce64ddcb0d8d890d2df4a9d1c04ff297367dea2a # v3
         with:
           languages: ${{ matrix.language }}
+          queries: security-extended
 
       - name: Set execute permission for mvnw
         run: chmod +x mvnw
 
       - name: Build
-        run: ./mvnw clean compile -DskipTests -B
+        run: ./mvnw clean compile -DskipTests -B --no-transfer-progress
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@c10b8064de6f491fea524254123dbe5e09572f13 # v4
+        uses: github/codeql-action/analyze@ce64ddcb0d8d890d2df4a9d1c04ff297367dea2a # v3
         with:
           category: "/language:${{ matrix.language }}"

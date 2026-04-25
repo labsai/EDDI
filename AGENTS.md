@@ -97,7 +97,7 @@ Follow this order unless the user explicitly requests something different.
 | —     | GDPR/CCPA Framework      | Cascading erasure, data portability, Art. 18 restriction, per-category retention                    |
 | —     | Commit Flags             | Strict write discipline for memory — uncommit failed task data, error digest injection              |
 | —     | Template Preview         | REST endpoint for previewing resolved system prompts with sample/live data                          |
-| —     | RC2 Hardening            | 2,000+ unit tests, 250+ integration tests, branding overhaul, rules deserialization fix             |
+| —     | RC2 Hardening            | 3,500+ unit tests, 550+ integration tests, branding overhaul, rules deserialization fix             |
 | —     | Security Hardening v6.0.2 | SSRF prevention, SafeHttpClient, auth guard, vault salt, security headers, CodeQL + Trivy CI       |
 
 ### In Progress / Upcoming
@@ -546,6 +546,7 @@ When designing any new feature, always consider these before finalizing the desi
 
 | File                                        | Purpose                                                     |
 | ------------------------------------------- | ----------------------------------------------------------- |
+| `src/main/docker/Dockerfile`                | Production JVM container image (digest-pinned base)         |
 | `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, MongoDB)             |
 | `src/main/resources/initial-agents/`        | Agent Father and sample agent configs                       |
 | `.github/workflows/ci.yml`                  | CI/CD pipeline (build, test, Docker push, smoke test)       |
@@ -555,6 +556,31 @@ When designing any new feature, always consider these before finalizing the desi
 | `src/main/java/.../httpclient/SafeHttpClient.java` | Centralized SSRF-safe HTTP client wrapper              |
 | `src/main/java/.../security/AuthStartupGuard.java` | Production auth enforcement guard                      |
 | `.env.example`                              | Required environment variables                              |
+
+### Docker & Container Security
+
+#### Base Image Management
+
+The production image (`Dockerfile`) uses a Red Hat UBI 9 base pinned by **SHA256 digest** for OpenSSF supply-chain compliance. This means:
+
+- The `FROM` line must always include `@sha256:...` — never use a bare tag like `:1.24`
+- Red Hat periodically republishes the same tag with security patches baked in
+
+#### Trivy CVE Remediation Procedure
+
+When Trivy (CI container scan) flags a base image CVE:
+
+1. **Check for a newer digest first** — pull the latest image for the same tag and compare:
+   ```bash
+   docker pull registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24
+   # Check the digest in the pull output
+   docker run --rm <image> rpm -q <vulnerable-package>
+   ```
+2. **If the newer digest includes the fix**: update the `@sha256:...` in `Dockerfile` — done
+3. **If no fixed digest exists yet**: use `microdnf update -y <package> && microdnf clean all` as a **temporary stopgap** in the `USER root` section, with a CVE comment. Remove it once a fixed base image is available
+4. **Never remove the digest pin** to "auto-fix" CVEs — this violates OpenSSF supply-chain requirements
+
+> **Key principle**: Digest update is the clean fix. `microdnf update` is the escape hatch.
 
 ---
 
