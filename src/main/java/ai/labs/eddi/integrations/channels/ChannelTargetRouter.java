@@ -279,12 +279,15 @@ public class ChannelTargetRouter {
             String candidateTrigger = trimmed.substring(0, colonIdx).trim().toLowerCase(Locale.ROOT);
             String remainder = trimmed.substring(colonIdx + 1).trim();
 
-            for (ChannelTarget target : integration.getTargets()) {
-                if (target.getTriggers() != null) {
-                    for (String trigger : target.getTriggers()) {
-                        if (trigger != null && trigger.toLowerCase(Locale.ROOT).trim().equals(candidateTrigger)) {
-                            return new ResolvedTarget(target, remainder, integration,
-                                    null, null);
+            var targets = integration.getTargets();
+            if (targets != null) {
+                for (ChannelTarget target : targets) {
+                    if (target.getTriggers() != null) {
+                        for (String trigger : target.getTriggers()) {
+                            if (trigger != null && trigger.toLowerCase(Locale.ROOT).trim().equals(candidateTrigger)) {
+                                return new ResolvedTarget(target, remainder, integration,
+                                        null, null);
+                            }
                         }
                     }
                 }
@@ -303,7 +306,7 @@ public class ChannelTargetRouter {
 
     private ChannelTarget findDefaultTarget(ChannelIntegrationConfiguration integration) {
         String defaultName = integration.getDefaultTargetName();
-        if (defaultName == null)
+        if (defaultName == null || integration.getTargets() == null)
             return null;
         return integration.getTargets().stream()
                 .filter(t -> t.getName() != null

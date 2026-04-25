@@ -76,8 +76,16 @@ public class ChannelConnectorMigration {
         LOGGER.info("Starting channel connector migration...");
 
         try {
-            int migrated = migrateConnectors();
-            LOGGER.infof("Channel connector migration complete: %d configs created", migrated);
+            int[] result = migrateConnectors(); // [created, failed]
+            int created = result[0];
+            int failed = result[1];
+            LOGGER.infof("Channel connector migration complete: %d configs created, %d failed", created, failed);
+
+            if (failed > 0) {
+                LOGGER.errorf("Channel connector migration had %d failure(s) — "
+                        + "will retry on next startup. Check WARN logs above for details.", failed);
+                return; // Don't set flag so it retries
+            }
         } catch (Exception e) {
             LOGGER.error("Channel connector migration failed — will retry on next startup", e);
             return; // Don't set flag so it retries
@@ -86,7 +94,7 @@ public class ChannelConnectorMigration {
         migrationLogStore.createMigrationLog(new MigrationLog(MIGRATION_KEY));
     }
 
-    private int migrateConnectors() {
+    private int[] migrateConnectors() {
         // Group connectors by channelType:channelId
         var channelGroups = new LinkedHashMap<String, List<ConnectorEntry>>();
 
@@ -126,6 +134,7 @@ public class ChannelConnectorMigration {
         }
 
         int created = 0;
+        int failed = 0;
         for (var entry : channelGroups.entrySet()) {
             var entries = entry.getValue();
             // Sort for deterministic default target
@@ -192,11 +201,12 @@ public class ChannelConnectorMigration {
                 created++;
                 LOGGER.infof("  Migrated channel %s:%s (%d targets)", channelType, channelId, targets.size());
             } catch (Exception e) {
+                failed++;
                 LOGGER.warnf("  Failed to create config for %s:%s — %s", channelType, channelId, e.getMessage());
             }
         }
 
-        return created;
+        return new int[]{created, failed};
     }
 
     private record ConnectorEntry(ChannelConnector connector, String agentId,

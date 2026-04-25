@@ -72,11 +72,11 @@ public class ChannelIntegrationConfiguration {
      * Secret values should use vault references: {@code ${eddivault:key-name}}.
      */
     public Map<String, String> getPlatformConfig() {
-        return platformConfig;
+        return new HashMap<>(platformConfig);
     }
 
     public void setPlatformConfig(Map<String, String> platformConfig) {
-        this.platformConfig = platformConfig;
+        this.platformConfig = platformConfig == null ? new HashMap<>() : new HashMap<>(platformConfig);
     }
 
     /**
@@ -84,11 +84,11 @@ public class ChannelIntegrationConfiguration {
      * agent or group. At least one target is required.
      */
     public List<ChannelTarget> getTargets() {
-        return targets;
+        return new ArrayList<>(targets);
     }
 
     public void setTargets(List<ChannelTarget> targets) {
-        this.targets = targets;
+        this.targets = targets == null ? new ArrayList<>() : new ArrayList<>(targets);
     }
 
     /**
