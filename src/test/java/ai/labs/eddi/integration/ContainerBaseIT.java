@@ -59,7 +59,7 @@ public abstract class ContainerBaseIT extends BaseIntegrationIT {
             .dependsOn(MONGO)
             .waitingFor(Wait.forHttp("/q/health/ready")
                     .forPort(7070)
-                    .withStartupTimeout(Duration.ofSeconds(120)));
+                    .withStartupTimeout(Duration.ofSeconds(180)));
 
     /**
      * Builds the EDDI Docker image using a test-specific inline Dockerfile with

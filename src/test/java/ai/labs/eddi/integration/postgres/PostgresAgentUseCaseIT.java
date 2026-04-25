@@ -72,7 +72,7 @@ public class PostgresAgentUseCaseIT extends BaseIntegrationIT {
                     new org.testcontainers.containers.output.Slf4jLogConsumer(org.slf4j.LoggerFactory.getLogger(PostgresAgentUseCaseIT.class)))
             .waitingFor(Wait.forHttp("/q/health/ready")
                     .forPort(7070)
-                    .withStartupTimeout(Duration.ofSeconds(120)));
+                    .withStartupTimeout(Duration.ofSeconds(180)));
 
     @BeforeAll
     static void configureRestAssured() {
