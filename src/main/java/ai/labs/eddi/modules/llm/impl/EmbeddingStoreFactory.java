@@ -270,7 +270,7 @@ public class EmbeddingStoreFactory {
                 .tenantName(tenantName)
                 .databaseName(databaseName)
                 .collectionName(collectionName)
-                .apiVersion("v2".equalsIgnoreCase(apiVersion) ? ChromaApiVersion.V2 : ChromaApiVersion.V1);
+                .apiVersion(ChromaApiVersion.V2);
 
         return builder.build();
     }

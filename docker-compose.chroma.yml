@@ -3,7 +3,7 @@ services:
     image: chromadb/chroma:1.1.0
     restart: always
     ports:
-      - "127.0.0.1:${CHROMA_PORT:-8000}:8000"
+      - "${CHROMA_PORT:-8000}:8000"
     volumes:
       - chroma-data:/chroma/chroma
     environment:
