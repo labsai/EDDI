@@ -98,7 +98,9 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         // Clear channelId so the duplicate doesn't collide in the router's
         // integrationMap (each channelType:channelId must be unique)
         if (config.getPlatformConfig() != null) {
-            config.getPlatformConfig().remove("channelId");
+            var platformConfig = config.getPlatformConfig();
+            platformConfig.remove("channelId");
+            config.setPlatformConfig(platformConfig);
         }
         validateConfiguration(config);
         Response response = restVersionInfo.create(config);
