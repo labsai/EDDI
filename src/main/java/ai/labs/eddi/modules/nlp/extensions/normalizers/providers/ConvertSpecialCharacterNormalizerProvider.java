@@ -1,3 +1,7 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
 package ai.labs.eddi.modules.nlp.extensions.normalizers.providers;
 
 import ai.labs.eddi.modules.nlp.extensions.normalizers.ConvertSpecialCharacterNormalizer;

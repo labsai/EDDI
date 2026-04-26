@@ -1,4 +1,7 @@
-// SPDX-License-Identifier: Apache-2.0
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
 package ai.labs.eddi.engine.httpclient.impl;
 
 import ai.labs.eddi.engine.httpclient.IHttpClient;

@@ -1,3 +1,7 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
 package ai.labs.eddi.engine.memory.model;
 
 import ai.labs.eddi.configs.properties.model.Property;
