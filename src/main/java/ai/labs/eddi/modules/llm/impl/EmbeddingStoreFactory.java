@@ -250,20 +250,17 @@ public class EmbeddingStoreFactory {
      * kbId)</li>
      * <li>{@code apiKey} — Chroma API key (optional, supports
      * {@code ${eddivault:...}})</li>
-     * <li>{@code apiVersion} — API version: "v1" or "v2" (default: "v2")</li>
      * </ul>
      */
     private EmbeddingStore<TextSegment> buildChroma(RagConfiguration config, String kbId) {
         Map<String, String> params = resolveParams(config);
 
         String baseUrl = params.getOrDefault("baseUrl", "http://localhost:8000");
-        String tenantName = params.getOrDefault("tenantName", "default");
-        String databaseName = params.getOrDefault("databaseName", "default");
+        String tenantName = params.getOrDefault("tenantName", "default_tenant");
+        String databaseName = params.getOrDefault("databaseName", "default_database");
         String collectionName = params.getOrDefault("collectionName", "eddi_kb_" + kbId.toLowerCase().replaceAll("[^a-z0-9_]", "_"));
-        String apiVersion = params.getOrDefault("apiVersion", "v2");
 
-        LOGGER.infof("Building Chroma store: baseUrl=%s, tenant=%s, database=%s, collection=%s, apiVersion=%s",
-                baseUrl, tenantName, databaseName, collectionName, apiVersion);
+        LOGGER.infof("Building Chroma store: baseUrl=%s, tenant=%s, database=%s, collection=%s", baseUrl, tenantName, databaseName, collectionName);
 
         var builder = ChromaEmbeddingStore.builder()
                 .baseUrl(baseUrl)

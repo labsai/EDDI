@@ -100,7 +100,10 @@ public class EmbeddingModelFactory {
     }
 
     private EmbeddingModel buildGemini(Map<String, String> params) {
-        TaskType taskType = GoogleAiEmbeddingModel.TaskType.valueOf(params.getOrDefault("tasktype", "RETRIEVAL_DOCUMENT"));
+        String taskTypeStr = params.get("tasktype");
+        TaskType taskType = (taskTypeStr == null || taskTypeStr.isBlank())
+                ? GoogleAiEmbeddingModel.TaskType.RETRIEVAL_DOCUMENT
+                : GoogleAiEmbeddingModel.TaskType.valueOf(taskTypeStr);
 
         return GoogleAiEmbeddingModel.builder()
                 .modelName(params.getOrDefault("model", "gemini-embedding-2"))
