@@ -22,7 +22,7 @@ class V6RenameMigrationTest {
     @Mock
     private MongoDatabase database;
     @Mock
-    private MigrationLogStore migrationLogStore;
+    private IMigrationLogStore migrationLogStore;
 
     private V6RenameMigration migration;
 

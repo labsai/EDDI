@@ -99,10 +99,25 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     public void autoDeployAgents() {
         LOGGER.info("Starting deployment of agents...");
 
-        // V6 rename migration must run before document-level migrations
-        v6RenameMigration.runIfNeeded();
-        v6QuteMigration.runIfNeeded();
-        channelConnectorMigration.runIfNeeded();
+        // V6 rename migration must run before document-level migrations.
+        // Each migration is independently guarded: a failure logs the error
+        // and lets the remaining migrations + agent deployment proceed.
+        // The failed migration will retry on next startup (flag not set).
+        try {
+            v6RenameMigration.runIfNeeded();
+        } catch (Exception e) {
+            LOGGER.error("V6 rename migration failed — will retry on next startup", e);
+        }
+        try {
+            v6QuteMigration.runIfNeeded();
+        } catch (Exception e) {
+            LOGGER.error("V6 Qute migration failed — will retry on next startup", e);
+        }
+        try {
+            channelConnectorMigration.runIfNeeded();
+        } catch (Exception e) {
+            LOGGER.error("Channel connector migration failed — will retry on next startup", e);
+        }
 
         migrationManager.startMigrationIfFirstTimeRun(() -> {
             checkDeployments();

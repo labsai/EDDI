@@ -14,6 +14,34 @@ Each entry follows this format:
 - **Files** — Links to modified files
 
 
+## Fix: Postgres Integration Tests — MigrationLogStore Injection (2026-04-26)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+**What changed:** Fixed 503 Service Unavailable errors in `PostgresInfrastructureIT` and `PostgresAgentUseCaseIT` caused by MongoDB dependency in the Postgres test profile.
+
+### Root Cause
+
+`ChannelConnectorMigration`, `V6RenameMigration`, and `V6QuteMigration` all injected the concrete `MigrationLogStore` class (MongoDB implementation) instead of the `IMigrationLogStore` interface. When running with `eddi.datastore.type=postgres`, the `DataStoreProducers` correctly routes `IMigrationLogStore` to `PostgresMigrationLogStore`, but CDI injection of the **concrete class** bypasses the producer entirely.
+
+During startup, `channelConnectorMigration.runIfNeeded()` called `migrationLogStore.readMigrationLog()` which attempted to query MongoDB (not available in Postgres profile). This threw `MongoTimeoutException` after 30 seconds. Since this call was **outside** any try-catch block, the exception killed the entire `autoDeployAgents()` scheduled task, preventing `agentsReadiness.setAgentsReadiness(true)` from ever being called. The health check remained DOWN indefinitely.
+
+### Fix
+
+Changed all three migration classes to inject `IMigrationLogStore` (interface) instead of `MigrationLogStore` (concrete MongoDB class). The `DataStoreProducers` now correctly routes to the appropriate implementation based on `eddi.datastore.type`.
+
+**Files:**
+- `ChannelConnectorMigration.java` — `MigrationLogStore` → `IMigrationLogStore`
+- `V6RenameMigration.java` — `MigrationLogStore` → `IMigrationLogStore`
+- `V6QuteMigration.java` — `MigrationLogStore` → `IMigrationLogStore`
+- `ChannelConnectorMigrationTest.java` — updated mock type
+- `V6QuteMigrationTest.java` — updated mock type
+- `V6RenameMigrationTest.java` — updated mock type
+
+**Verification:** `mvnw compile` BUILD SUCCESS, `mvnw test` 94 migration tests pass (0 failures).
+
+---
+
 ## Channel Integration — External Review Round 4 (2026-04-19)
 
 **Repo:** EDDI (`feature/channel-integrations`)

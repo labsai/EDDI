@@ -48,14 +48,14 @@ public class ChannelConnectorMigration {
     private final IAgentStore agentStore;
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore descriptorStore;
-    private final MigrationLogStore migrationLogStore;
+    private final IMigrationLogStore migrationLogStore;
 
     @Inject
     public ChannelConnectorMigration(IDeploymentStore deploymentStore,
             IAgentStore agentStore,
             IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore descriptorStore,
-            MigrationLogStore migrationLogStore) {
+            IMigrationLogStore migrationLogStore) {
         this.deploymentStore = deploymentStore;
         this.agentStore = agentStore;
         this.channelStore = channelStore;

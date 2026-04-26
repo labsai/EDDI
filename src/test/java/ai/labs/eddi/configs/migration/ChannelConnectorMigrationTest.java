@@ -37,7 +37,7 @@ class ChannelConnectorMigrationTest {
     private IAgentStore agentStore;
     private IChannelIntegrationStore channelStore;
     private IDocumentDescriptorStore descriptorStore;
-    private MigrationLogStore migrationLogStore;
+    private IMigrationLogStore migrationLogStore;
     private ChannelConnectorMigration migration;
 
     @BeforeEach
@@ -46,7 +46,7 @@ class ChannelConnectorMigrationTest {
         agentStore = mock(IAgentStore.class);
         channelStore = mock(IChannelIntegrationStore.class);
         descriptorStore = mock(IDocumentDescriptorStore.class);
-        migrationLogStore = mock(MigrationLogStore.class);
+        migrationLogStore = mock(IMigrationLogStore.class);
 
         migration = new ChannelConnectorMigration(
                 deploymentStore, agentStore, channelStore, descriptorStore, migrationLogStore);
