@@ -132,7 +132,7 @@ public class McpToolProviderManager {
     private McpClient getOrCreateClient(McpServerConfig config) {
         return clientCache.computeIfAbsent(config.getUrl(), url -> {
             LOGGER.infof("Creating MCP client for '%s' (%s transport)", sanitize(config.getName() != null ? config.getName() : url),
-                    config.getTransport());
+                    sanitize(config.getTransport()));
 
             Duration timeout = Duration.ofMillis(config.getTimeoutMs() != null ? config.getTimeoutMs() : 30000L);
 
@@ -173,9 +173,9 @@ public class McpToolProviderManager {
         if (client != null) {
             try {
                 client.close();
-                LOGGER.infof("Closed MCP client for '%s'", url);
+                LOGGER.infof("Closed MCP client for '%s'", sanitize(url));
             } catch (Exception e) {
-                LOGGER.warnf(e, "Error closing MCP client for '%s'", url);
+                LOGGER.warnf(e, "Error closing MCP client for '%s'", sanitize(url));
             }
         }
     }
@@ -190,7 +190,7 @@ public class McpToolProviderManager {
             try {
                 entry.getValue().close();
             } catch (Exception e) {
-                LOGGER.warnf(e, "Error closing MCP client for '%s'", entry.getKey());
+                LOGGER.warnf(e, "Error closing MCP client for '%s'", sanitize(entry.getKey()));
             }
         }
         clientCache.clear();
