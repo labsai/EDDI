@@ -128,7 +128,9 @@ public class ToolCacheService {
                 // Record miss by tool name
                 meterRegistry.counter("eddi.tool.cache.misses.by_tool", "tool", toolName).increment();
 
-                LOGGER.debug("Cache miss for " + sanitize(toolName));
+                if (LOGGER.isDebugEnabled()) {
+                    LOGGER.debugf("Cache miss for %s", sanitize(toolName));
+                }
                 return null;
             }
 
@@ -139,7 +141,9 @@ public class ToolCacheService {
             // Record hit by tool name
             meterRegistry.counter("eddi.tool.cache.hits.by_tool", "tool", toolName).increment();
 
-            LOGGER.debug(String.format("Cache hit for %s (age: %dms)", sanitize(toolName), System.currentTimeMillis() - cached.cachedAt));
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debugf("Cache hit for %s (age: %dms)", sanitize(toolName), System.currentTimeMillis() - cached.cachedAt);
+            }
             return cached.result;
         });
     }
@@ -165,7 +169,9 @@ public class ToolCacheService {
             // Record put by tool name
             meterRegistry.counter("eddi.tool.cache.puts.by_tool", "tool", toolName).increment();
 
-            LOGGER.debug(String.format("Cached result for %s (TTL: %d %s)", sanitize(toolName), ttl, unit.toString().toLowerCase()));
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debugf("Cached result for %s (TTL: %d %s)", sanitize(toolName), ttl, unit.toString().toLowerCase());
+            }
         });
     }
 
@@ -188,7 +194,9 @@ public class ToolCacheService {
         }
 
         // Default TTL for unknown tools
-        LOGGER.debug("Using default TTL for unknown tool: " + sanitize(toolName));
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debugf("Using default TTL for unknown tool: %s", sanitize(toolName));
+        }
         return DEFAULT_TTL_SECONDS;
     }
 
@@ -198,7 +206,9 @@ public class ToolCacheService {
     public void invalidate(String toolName, String arguments) {
         String key = buildKey(toolName, arguments);
         cache.remove(key);
-        LOGGER.debug("Invalidated cache for " + sanitize(toolName));
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.debugf("Invalidated cache for %s", sanitize(toolName));
+        }
     }
 
     /**

@@ -15,7 +15,7 @@ public final class LogSanitizer {
     /**
      * Remove newlines and control characters from a value before logging. Newlines
      * and tabs are replaced with underscores (preserving readability); other
-     * control characters (U+0000-U+001F, U+007F) are stripped entirely.
+     * control characters are stripped entirely.
      *
      * @param value
      *            the value to sanitize (may be null)
@@ -26,7 +26,16 @@ public final class LogSanitizer {
         if (value == null) {
             return "null";
         }
-        return value.replaceAll("[\\r\\n\\t]", "_")
-                .replaceAll("[\\x00-\\x1F\\x7F]", "");
+        StringBuilder sanitized = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '\r' || c == '\n' || c == '\t') {
+                sanitized.append('_');
+            } else if (!Character.isISOControl(c)) {
+                sanitized.append(c);
+            }
+            // else: control character — stripped
+        }
+        return sanitized.toString();
     }
 }

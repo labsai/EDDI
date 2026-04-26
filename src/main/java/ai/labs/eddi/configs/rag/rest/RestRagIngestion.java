@@ -9,6 +9,8 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.util.Map;
 
 /**
@@ -39,7 +41,7 @@ public class RestRagIngestion implements IRestRagIngestion {
         try {
             ragConfig = restRagStore.readRag(ragConfigId, version);
         } catch (Exception e) {
-            LOGGER.warnf("Failed to load RAG config %s v%d: %s", ragConfigId, version, e.getMessage());
+            LOGGER.warnf("Failed to load RAG config %s v%d: %s", sanitize(ragConfigId), version, e.getMessage());
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "RAG configuration not found: " + ragConfigId + " v" + version))
                     .build();
         }
@@ -49,7 +51,8 @@ public class RestRagIngestion implements IRestRagIngestion {
 
         String ingestionId = ragIngestionService.ingest(effectiveKbId, documentContent, documentName, ragConfig);
 
-        LOGGER.infof("Ingestion started: id=%s, kb=%s, doc=%s, chars=%d", ingestionId, effectiveKbId, documentName, documentContent.length());
+        LOGGER.infof("Ingestion started: id=%s, kb=%s, doc=%s, chars=%d", ingestionId, sanitize(effectiveKbId), sanitize(documentName),
+                documentContent.length());
 
         return Response.accepted(Map.of("ingestionId", ingestionId, "kbId", effectiveKbId, "status", "pending")).build();
     }

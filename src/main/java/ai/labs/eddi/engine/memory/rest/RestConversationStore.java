@@ -85,12 +85,15 @@ public class RestConversationStore implements IRestConversationStore {
                                                                     String agentId, Integer agentVersion, ConversationState conversationState,
                                                                     ConversationDescriptor.ViewState viewState) {
         // Sanitize pagination parameters to prevent overflow (CodeQL: integer-overflow)
-        if (index == null || index < 0)
+        if (index == null || index < 0) {
             index = 0;
-        if (limit == null || limit < 1)
+        }
+        if (limit == null || limit < 1) {
             limit = 20;
-        if (limit > 100)
+        }
+        if (limit > 100) {
             limit = 100;
+        }
 
         try {
             List<ConversationDescriptor> conversationDescriptors;

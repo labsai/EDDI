@@ -135,7 +135,9 @@ public class ToolCostTracker {
 
         if (cost > 0) {
             meterRegistry.counter("eddi.tool.costs", "tool", toolName).increment(cost);
-            LOGGER.debug(String.format("Tool '%s' cost: $%.4f", sanitize(toolName), cost));
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debugf("Tool '%s' cost: $%.4f", sanitize(toolName), cost);
+            }
         }
 
         return cost;
