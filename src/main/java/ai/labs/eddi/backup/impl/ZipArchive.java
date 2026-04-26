@@ -110,7 +110,11 @@ public class ZipArchive implements IZipArchive {
         try (ZipInputStream zipIn = new ZipInputStream(new BufferedInputStream(zipFile))) {
             ZipEntry entry;
             while ((entry = zipIn.getNextEntry()) != null) {
-                File destFile = new File(targetDir, entry.getName());
+                // Normalize Windows backslashes in entry names to forward slashes.
+                // ZIPs created on Windows may use '\' which Java on Linux treats as
+                // literal filename characters, not directory separators.
+                String entryName = entry.getName().replace('\\', '/');
+                File destFile = new File(targetDir, entryName);
                 String destFilePath = destFile.getCanonicalPath();
 
                 // Ensure the resolved destination path starts with the target directory path
