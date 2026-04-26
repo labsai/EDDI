@@ -508,7 +508,7 @@
                 <version>${surefire-plugin.version}</version>
                 <configuration>
                     <!-- @{argLine} preserves JaCoCo's injected agent arg -->
-                    <argLine>@{argLine} -XX:+EnableDynamicAgentLoading -Xshare:off --enable-native-access=ALL-UNNAMED</argLine>
+                    <argLine>@{argLine} -ea -XX:+EnableDynamicAgentLoading -Xshare:off --enable-native-access=ALL-UNNAMED</argLine>
                     <excludes>
                         <exclude>**/*IT.java</exclude>
                     </excludes>

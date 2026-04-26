@@ -1,4 +1,8 @@
 /*
+ * Portions copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+/*
  * Copyright 2015 Yann Le Moigne
  * https://github.com/ylemoigne/mongo-jackson-codec
  *
