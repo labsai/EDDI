@@ -45,6 +45,7 @@ const EMBEDDING_PROVIDERS = [
   { value: "bedrock", label: "Amazon Bedrock", hint: "amazon.titan-embed-text-v2:0" },
   { value: "cohere", label: "Cohere", hint: "embed-english-v3.0" },
   { value: "vertex", label: "Google Vertex AI", hint: "text-embedding-005" },
+  { value: "gemini", label: "Google AI", hint: "gemini-embedding-2" },
 ] as const;
 
 /** Provider-specific parameter hints — shown as suggested keys in the embedding params editor */
@@ -79,6 +80,11 @@ const EMBEDDING_PARAM_HINTS: Record<string, { key: string; placeholder: string }
     { key: "location", placeholder: "us-central1" },
     { key: "model", placeholder: "text-embedding-005" },
   ],
+  gemini: [
+    { key: "apiKey", placeholder: "${eddivault:gemini-key}" },
+    { key: "model", placeholder: "gemini-embedding-2"},
+    { key: "tasktype", placeholder: "RETRIEVAL_DOCUMENT"},
+  ]
 };
 
 const STORE_TYPES = [
@@ -87,6 +93,7 @@ const STORE_TYPES = [
   { value: "mongodb-atlas", label: "MongoDB Atlas", hint: "Atlas vector search" },
   { value: "elasticsearch", label: "Elasticsearch", hint: "Elasticsearch vector search" },
   { value: "qdrant", label: "Qdrant", hint: "High-performance vector DB" },
+  { value: "chroma", label: "Chroma", hint: "Fast, serverless, and scalable infrastructure supporting vector, full-text, regex, and metadata search." },
 ] as const;
 
 const STORE_PARAM_HINTS: Record<string, { key: string; placeholder: string }[]> = {
@@ -119,6 +126,15 @@ const STORE_PARAM_HINTS: Record<string, { key: string; placeholder: string }[]> 
     { key: "collectionName", placeholder: "kb-product-docs" },
     { key: "apiKey", placeholder: "${eddivault:qdrant-key}" },
     { key: "useTls", placeholder: "false" },
+  ],
+  chroma: [
+    { key: "baseUrl", placeholder: "http://localhost:8000" },
+    { key: "collectionName", placeholder: "kb-product-docs" },
+    { key: "apiKey", placeholder: "" },
+    { key: "useTls", placeholder: "false" },
+    { key: "tenantName", placeholder: "default_tenant" },
+    { key: "databaseName", placeholder: "default_database" },
+    { key: "apiVersion", placeholder: "v2" },
   ],
 };
 
