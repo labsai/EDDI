@@ -13,6 +13,8 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.util.Map;
 import java.util.Set;
 
@@ -118,7 +120,7 @@ public class RestSlackWebhook {
 
                 if (event != null) {
                     String eventType = (String) event.get("type");
-                    LOGGER.debugf("Slack event received: type=%s, event_id=%s", eventType, eventId);
+                    LOGGER.debugf("Slack event received: type=%s, event_id=%s", sanitize(eventType), sanitize(eventId));
 
                     // Delegate to handler (async — returns immediately)
                     eventHandler.handleEventAsync(eventId, event);

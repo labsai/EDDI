@@ -52,7 +52,13 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         }
 
         int effectiveLimit = (limit == null || limit < 1) ? 20 : limit;
-        int skip = (index != null && index > 0) ? index * effectiveLimit : 0;
+        int skip;
+        if (index != null && index > 0) {
+            long skipLong = (long) index * effectiveLimit;
+            skip = (int) Math.min(skipLong, Integer.MAX_VALUE);
+        } else {
+            skip = 0;
+        }
 
         IResourceFilter.QueryFilters[] allFilters;
         if (!queryFiltersOptional.isEmpty()) {

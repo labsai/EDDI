@@ -9,6 +9,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.util.List;
 
 /**
@@ -105,7 +107,7 @@ public class ConversationSummarizer {
             return;
         }
 
-        LOGGER.infof("[SUMMARY] Updating rolling summary for conversation='%s': steps %d→%d (recent window=%d)", memory.getConversationId(),
+        LOGGER.infof("[SUMMARY] Updating rolling summary for conversation='%s': steps %d→%d (recent window=%d)", sanitize(memory.getConversationId()),
                 alreadySummarized, summarizeThroughStep, recentWindow);
 
         // Build content to summarize: previous summary + new unsummarized turns
@@ -131,7 +133,7 @@ public class ConversationSummarizer {
         String summary = summarizationService.summarize(contentToSummarize, instructions, config.getLlmProvider(), config.getLlmModel());
 
         if (summary.isEmpty()) {
-            LOGGER.warnf("[SUMMARY] Summarization returned empty for conversation='%s'. Will retry next turn.", memory.getConversationId());
+            LOGGER.warnf("[SUMMARY] Summarization returned empty for conversation='%s'. Will retry next turn.", sanitize(memory.getConversationId()));
             return;
         }
 
@@ -141,7 +143,7 @@ public class ConversationSummarizer {
         props.put(PROP_SUMMARY_THROUGH_STEP, new Property(PROP_SUMMARY_THROUGH_STEP, summarizeThroughStep, Scope.conversation));
 
         LOGGER.infof("[SUMMARY] Updated rolling summary for conversation='%s': covers steps 1-%d, summary length=%d chars",
-                memory.getConversationId(), summarizeThroughStep, summary.length());
+                sanitize(memory.getConversationId()), summarizeThroughStep, summary.length());
     }
 
     /**

@@ -11,6 +11,8 @@ import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -185,7 +187,7 @@ public class ChatModelRegistry {
 
         if (evicted > 0) {
             LOGGER.infof("Evicted %d model(s) using secret '%s/%s'",
-                    evicted, reference.tenantId(), reference.keyName());
+                    evicted, sanitize(reference.tenantId()), sanitize(reference.keyName()));
         }
     }
 

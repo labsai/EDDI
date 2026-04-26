@@ -17,6 +17,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.time.Duration;
 import java.util.Map;
 import java.util.TreeMap;
@@ -63,7 +65,7 @@ public class EmbeddingStoreFactory {
 
     private EmbeddingStore<TextSegment> build(RagConfiguration config, String kbId) {
         String storeType = config.getStoreType();
-        LOGGER.infof("Building embedding store: type=%s, kbId=%s", storeType, kbId);
+        LOGGER.infof("Building embedding store: type=%s, kbId=%s", sanitize(storeType), sanitize(kbId));
 
         return switch (storeType) {
             case "in-memory" -> new InMemoryEmbeddingStore<>();
@@ -142,7 +144,8 @@ public class EmbeddingStoreFactory {
         String collectionName = params.getOrDefault("collectionName", "eddi_kb_" + kbId);
         String indexName = params.getOrDefault("indexName", "vector_index");
 
-        LOGGER.infof("Building MongoDB Atlas store: database=%s, collection=%s, index=%s", databaseName, collectionName, indexName);
+        LOGGER.infof("Building MongoDB Atlas store: database=%s, collection=%s, index=%s", sanitize(databaseName), sanitize(collectionName),
+                sanitize(indexName));
 
         MongoClient mongoClient = mongoClientCache.computeIfAbsent(connectionString, MongoClients::create);
 

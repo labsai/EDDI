@@ -8,6 +8,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -137,7 +139,7 @@ public class ToolCacheService {
             // Record hit by tool name
             meterRegistry.counter("eddi.tool.cache.hits.by_tool", "tool", toolName).increment();
 
-            LOGGER.debug(String.format("Cache hit for %s (age: %dms)", toolName, System.currentTimeMillis() - cached.cachedAt));
+            LOGGER.debug(String.format("Cache hit for %s (age: %dms)", sanitize(toolName), System.currentTimeMillis() - cached.cachedAt));
             return cached.result;
         });
     }
@@ -163,7 +165,7 @@ public class ToolCacheService {
             // Record put by tool name
             meterRegistry.counter("eddi.tool.cache.puts.by_tool", "tool", toolName).increment();
 
-            LOGGER.debug(String.format("Cached result for %s (TTL: %d %s)", toolName, ttl, unit.toString().toLowerCase()));
+            LOGGER.debug(String.format("Cached result for %s (TTL: %d %s)", sanitize(toolName), ttl, unit.toString().toLowerCase()));
         });
     }
 
@@ -186,7 +188,7 @@ public class ToolCacheService {
         }
 
         // Default TTL for unknown tools
-        LOGGER.debug("Using default TTL for unknown tool: " + toolName);
+        LOGGER.debug("Using default TTL for unknown tool: " + sanitize(toolName));
         return DEFAULT_TTL_SECONDS;
     }
 
