@@ -1,3 +1,7 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
 package ai.labs.eddi.backup.impl;
 
 import ai.labs.eddi.backup.IResourceSource;
