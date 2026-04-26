@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-    E.D.D.I — One-Command Install & Onboarding Wizard
+    E.D.D.I -- One-Command Install & Onboarding Wizard
 
 .DESCRIPTION
     Installs and configures E.D.D.I (Enhanced Dialog Driven Interface),
@@ -81,7 +81,7 @@ if ($Help) {
     exit 0
 }
 
-# Detect piped execution (iwr | iex) — disable interactive prompts
+# Detect piped execution (iwr | iex) -- disable interactive prompts
 if (-not [Environment]::UserInteractive -or $Host.Name -eq 'Default Host') {
     $Defaults = $true
 }
@@ -96,7 +96,7 @@ if ($Database -and $Database -notin @("mongodb", "postgres")) {
     throw "Invalid -Database value '$Database'. Must be 'mongodb' or 'postgres'."
 }
 
-# ── Configuration ──────────────────────────────────────────
+# -- Configuration ------------------------------------------
 if (-not $EddiPort) { $EddiPort = "7070" }
 if (-not $EddiHttpsPort) { $EddiHttpsPort = "7443" }
 if (-not $EddiDir) { $EddiDir = Join-Path -Path $HOME -ChildPath ".eddi" }
@@ -118,14 +118,14 @@ if ($Defaults -and -not $Database) {
     $Database = "mongodb"
 }
 
-# ── State ──────────────────────────────────────────────────
+# -- State --------------------------------------------------
 $ContainersStarted = $false
 $Healthy = $false
 $EddiAlreadyRunning = $false
 $ComposeFiles = @()
 $EddiVaultMasterKey = ""
 
-# ── Helpers ────────────────────────────────────────────────
+# -- Helpers ------------------------------------------------
 
 function Write-Banner {
     Write-Information -MessageData ""
@@ -148,12 +148,12 @@ function Write-Fail($msg) {
 }
 function Write-Step($num, $total, $title) {
     Write-Information -MessageData ""
-    Write-Information -MessageData "─── Step $num of $total`: $title ───────────────────────"
+    Write-Information -MessageData "--- Step $num of $total`: $title -----------------------"
     Write-Information -MessageData ""
 }
 function Write-Section($title) {
     Write-Information -MessageData ""
-    Write-Information -MessageData "─── $title ───────────────────────────────"
+    Write-Information -MessageData "--- $title -------------------------------"
     Write-Information -MessageData ""
 }
 
@@ -233,7 +233,7 @@ function Read-Port([string]$PortName, [int]$DefaultPort) {
     }
 }
 
-# ── Pre-flight checks ─────────────────────────────────────
+# -- Pre-flight checks -------------------------------------
 
 function Test-Prerequisites {
     # Docker
@@ -265,12 +265,12 @@ function Test-Prerequisites {
 
         Write-Information -MessageData "     Install Docker Desktop:"
         Write-Information -MessageData "       winget install Docker.DockerDesktop"
-        Write-Information -MessageData "       — or —"
+        Write-Information -MessageData "       -- or --"
         Write-Information -MessageData "       https://docs.docker.com/desktop/install/windows-install/"
         Write-Information -MessageData ""
         Write-Information -MessageData "     Prerequisites:"
-        Write-Information -MessageData "       • Windows 10 (build 19041+) or Windows 11"
-        Write-Information -MessageData "       • WSL2 enabled (wsl --install)"
+        Write-Information -MessageData "       * Windows 10 (build 19041+) or Windows 11"
+        Write-Information -MessageData "       * WSL2 enabled (wsl --install)"
         Write-Information -MessageData ""
         exit 1
     }
@@ -307,7 +307,7 @@ function Test-Prerequisites {
         Write-Verbose "Could not check disk space: $($_.Exception.Message)"
     }
 
-    # Port check — is EDDI already running?
+    # Port check -- is EDDI already running?
     try {
         Invoke-RestMethod -Uri "http://localhost:${EddiPort}/q/health/ready" -TimeoutSec 3 -ErrorAction Stop | Out-Null
         $script:EddiAlreadyRunning = $true
@@ -318,7 +318,7 @@ function Test-Prerequisites {
     }
 }
 
-# ── Detect deployed agents ─────────────────────────────────
+# -- Detect deployed agents ---------------------------------
 
 function Get-DeployedAgentCount {
     try {
@@ -331,7 +331,7 @@ function Get-DeployedAgentCount {
     }
 }
 
-# ── Wizard steps ──────────────────────────────────────────
+# -- Wizard steps ------------------------------------------
 
 $TotalSteps = 5
 
@@ -379,7 +379,7 @@ function Step-Security {
 
     Write-Step -num 2 -total $TotalSteps -title "Security"
     Write-Information -MessageData "  EDDI encrypts API keys and secrets using a vault master key."
-    Write-Information -MessageData "  This key is unique to your installation — keep it safe!"
+    Write-Information -MessageData "  This key is unique to your installation -- keep it safe!"
     Write-Information -MessageData ""
 
     if ($Defaults) {
@@ -453,7 +453,7 @@ function Step-Ports {
     $script:EddiHttpsPort = Read-Port "HTTPS" ([int]$EddiHttpsPort)
 }
 
-# ── Compose file management ──────────────────────────────
+# -- Compose file management ------------------------------
 
 function Get-ComposeFiles {
     New-Item -ItemType Directory -Force -Path $EddiDir | Out-Null
@@ -498,12 +498,12 @@ function Get-ComposeFiles {
         $localFile = if ($ScriptDir) { Join-Path -Path $ScriptDir -ChildPath $f } else { "" }
 
         if ($localFile -and (Test-Path $localFile)) {
-            # File exists next to the script — copy to install dir
+            # File exists next to the script -- copy to install dir
             Copy-Item -Path $localFile -Destination $target -Force
             Write-Information -MessageData "  Using local $f ✅"
         }
         else {
-            # Not available locally — download from GitHub
+            # Not available locally -- download from GitHub
             $downloadUrl = "$ComposeBaseUrl/$f"
             Write-Information -MessageData "  Downloading $f... "
             try {
@@ -578,7 +578,7 @@ function Get-ComposeFiles {
         }
     }
 
-    # Save config for CLI wrapper (vault key NOT stored here — it's in .env only)
+    # Save config for CLI wrapper (vault key NOT stored here -- it's in .env only)
     $configPath = Join-Path -Path $EddiDir -ChildPath ".eddi-config"
     @"
 COMPOSE_FILES=$($ComposeFiles -join " ")
@@ -602,7 +602,7 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
     $envPath = Join-Path -Path $EddiDir -ChildPath ".env"
     $envContent | Set-Content -Path $envPath
 
-    # Restrict sensitive file permissions — remove broad read access but keep SYSTEM/Admins
+    # Restrict sensitive file permissions -- remove broad read access but keep SYSTEM/Admins
     foreach ($securePath in @($envPath, $configPath)) {
         try {
             $acl = Get-Acl $securePath
@@ -627,7 +627,7 @@ EDDI_HTTPS_PORT=$EddiHttpsPort
     }
 }
 
-# ── Start containers ─────────────────────────────────────
+# -- Start containers -------------------------------------
 
 function Start-Eddi {
     [CmdletBinding(SupportsShouldProcess)]
@@ -636,7 +636,7 @@ function Start-Eddi {
     Write-Section "Starting EDDI"
 
     # Export port env vars so docker-compose variable substitution picks them up
-    # Note: vault key is NOT exported — it's read from --env-file only
+    # Note: vault key is NOT exported -- it's read from --env-file only
     $env:EDDI_PORT = $EddiPort
     $env:EDDI_HTTPS_PORT = $EddiHttpsPort
 
@@ -682,7 +682,7 @@ function Start-Eddi {
     }
 }
 
-# ── Health check ─────────────────────────────────────────
+# -- Health check -----------------------------------------
 
 function Wait-ForReady {
     # Keycloak can take 60-90s to start; EDDI won't start until it's healthy
@@ -718,7 +718,7 @@ function Wait-ForReady {
     exit 1
 }
 
-# ── Import initial agents ──────────────────────────────────
+# -- Import initial agents ----------------------------------
 
 function Import-InitialAgents {
     $agentCount = Get-DeployedAgentCount
@@ -730,7 +730,7 @@ function Import-InitialAgents {
             Write-Information -MessageData "✅"
         }
         catch {
-            Write-Information -MessageData "⚠️  (non-fatal — EDDI is still usable)"
+            Write-Information -MessageData "⚠️  (non-fatal -- EDDI is still usable)"
         }
     }
     else {
@@ -738,69 +738,69 @@ function Import-InitialAgents {
     }
 }
 
-# ── Success banner ───────────────────────────────────────
+# -- Success banner ---------------------------------------
 
 function Write-Success {
     Write-Information -MessageData ""
-    Write-Information -MessageData "─── 🎉 Setup Complete! ────────────────────────────"
+    Write-Information -MessageData "--- [done] Setup Complete! ----------------------------"
     Write-Information -MessageData ""
-    Write-Information -MessageData "  Dashboard  →  http://localhost:${EddiPort}"
-    Write-Information -MessageData "  HTTPS      →  https://localhost:${EddiHttpsPort}"
-    Write-Information -MessageData "  MCP        →  http://localhost:${EddiPort}/mcp"
-    Write-Information -MessageData "  API docs   →  http://localhost:${EddiPort}/q/swagger-ui"
+    Write-Information -MessageData "  Dashboard  ->  http://localhost:${EddiPort}"
+    Write-Information -MessageData "  HTTPS      ->  https://localhost:${EddiHttpsPort}"
+    Write-Information -MessageData "  MCP        ->  http://localhost:${EddiPort}/mcp"
+    Write-Information -MessageData "  API docs   ->  http://localhost:${EddiPort}/q/swagger-ui"
 
     if ($WithMonitoring) {
         Write-Information -MessageData ""
-        Write-Information -MessageData "  Grafana    →  http://localhost:3000  (admin/admin)"
-        Write-Information -MessageData "  Prometheus →  http://localhost:9090"
-        Write-Information -MessageData "  Jaeger     →  http://localhost:16686  (trace visualization)"
+        Write-Information -MessageData "  Grafana    ->  http://localhost:3000  (admin/admin)"
+        Write-Information -MessageData "  Prometheus ->  http://localhost:9090"
+        Write-Information -MessageData "  Jaeger     ->  http://localhost:16686  (trace visualization)"
     }
 
     if ($WithAuth) {
         Write-Information -MessageData ""
-        Write-Information -MessageData "  ┌─ 🔐 Login Credentials ─────────────────────────────┐"
-        Write-Information -MessageData "  │                                                    │"
-        Write-Information -MessageData "  │  EDDI Admin:  eddi / eddi  (change on first login) │"
-        Write-Information -MessageData "  │  Read-only:   viewer / viewer                      │"
-        Write-Information -MessageData "  │                                                    │"
-        Write-Information -MessageData "  │  Keycloak Console:  http://localhost:8180           │"
-        Write-Information -MessageData "  │  Console Admin:     admin / admin                  │"
-        Write-Information -MessageData "  └────────────────────────────────────────────────────┘"
+        Write-Information -MessageData "  +- [lock] Login Credentials -----------------------------+"
+        Write-Information -MessageData "  |                                                    |"
+        Write-Information -MessageData "  |  EDDI Admin:  eddi / eddi  (change on first login) |"
+        Write-Information -MessageData "  |  Read-only:   viewer / viewer                      |"
+        Write-Information -MessageData "  |                                                    |"
+        Write-Information -MessageData "  |  Keycloak Console:  http://localhost:8180          |"
+        Write-Information -MessageData "  |  Console Admin:     admin / admin                  |"
+        Write-Information -MessageData "  +----------------------------------------------------+"
     }
 
     Write-Information -MessageData ""
-    Write-Information -MessageData "  ┌─ 🔑 Vault Master Key ──────────────────────────────┐"
-    Write-Information -MessageData "  │                                                    │"
-    Write-Information -MessageData "  │  Stored in: $EddiDir\.env"
-    Write-Information -MessageData "  │  Back up this file! If lost, encrypted             │"
-    Write-Information -MessageData "  │  secrets (API keys) are unrecoverable.             │"
-    Write-Information -MessageData "  └────────────────────────────────────────────────────┘"
+    Write-Information -MessageData "  +- [key] Vault Master Key ------------------------------+"
+    Write-Information -MessageData "  |                                                    |"
+    Write-Information -MessageData "  |  Stored in: $EddiDir\.env"
+    Write-Information -MessageData "  |  Back up this file! If lost, encrypted             |"
+    Write-Information -MessageData "  |  secrets (API keys) are unrecoverable.             |"
+    Write-Information -MessageData "  +----------------------------------------------------+"
     Write-Information -MessageData ""
-    Write-Information -MessageData "  🤖 Ready to create your first agent?"
+    Write-Information -MessageData "  [bot] Ready to create your first agent?"
     Write-Information -MessageData "     Open the dashboard and chat with Agent Father!"
     Write-Information -MessageData "     It will guide you through choosing an AI provider,"
     Write-Information -MessageData "     setting up API keys, and building your first agent."
     Write-Information -MessageData ""
-    Write-Information -MessageData "  ┌─ Claude Desktop / Cursor ──────────────────────────┐"
-    Write-Information -MessageData "  │ Add to your MCP config:                            │"
-    Write-Information -MessageData "  │   `"eddi`": { `"url`": `"http://localhost:${EddiPort}/mcp`" }   │"
-    Write-Information -MessageData "  └────────────────────────────────────────────────────┘"
+    Write-Information -MessageData "  +- Claude Desktop / Cursor --------------------------+"
+    Write-Information -MessageData "  | Add to your MCP config:                            |"
+    Write-Information -MessageData "  |   `"eddi`": { `"url`": `"http://localhost:${EddiPort}/mcp`" }   |"
+    Write-Information -MessageData "  +----------------------------------------------------+"
     Write-Information -MessageData ""
     Write-Information -MessageData "  Install dir: $EddiDir"
     Write-Information -MessageData ""
 
-    # Open browser — Manager SPA handles Keycloak login if auth is enabled
+    # Open browser -- Manager SPA handles Keycloak login if auth is enabled
     $dashUrl = "http://localhost:${EddiPort}/manage"
     try { Start-Process $dashUrl } catch { Write-Verbose "Browser failed to launch: $($_.Exception.Message)" }
 }
 
-# ── Config summary ───────────────────────────────────────
+# -- Config summary ---------------------------------------
 
 function Write-ConfigSummary {
     Write-Section "Configuration"
     $dbLabel = if ($Database -eq "postgres") { "PostgreSQL" } else { "MongoDB" }
     Write-Information -MessageData "  Database:       $dbLabel"
-    Write-Information -MessageData "  Vault:          🔒 enabled (unique key)"
+    Write-Information -MessageData "  Vault:          [lock] enabled (unique key)"
     $authLabel = if ($WithAuth) { "Keycloak" } else { "open access" }
     Write-Information -MessageData "  Authentication: $authLabel"
     $monLabel = if ($WithMonitoring) { "Grafana + Prometheus" } else { "none" }
@@ -810,7 +810,7 @@ function Write-ConfigSummary {
     Write-Information -MessageData "  Install dir:    $EddiDir"
 }
 
-# ── Install CLI wrapper ─────────────────────────────────
+# -- Install CLI wrapper ---------------------------------
 
 function Install-CliWrapper {
     $cliPath = Join-Path -Path $EddiDir -ChildPath "eddi.cmd"
@@ -826,7 +826,7 @@ if not exist "%ENV_FILE%" (
     exit /b 1
 )
 
-rem Safe config parsing — only extract known keys to prevent variable injection
+rem Safe config parsing -- only extract known keys to prevent variable injection
 set "COMPOSE_FILES="
 set "EDDI_PORT="
 set "EDDI_HTTPS_PORT="
@@ -956,7 +956,7 @@ goto :eof
     }
 }
 
-# ── Main ─────────────────────────────────────────────────
+# -- Main -------------------------------------------------
 
 $startTime = Get-Date
 
@@ -969,7 +969,7 @@ try {
         # Ensure .eddi-config exists (may be missing if EDDI was started manually)
         $configPath = Join-Path -Path $EddiDir -ChildPath ".eddi-config"
         if (-not (Test-Path $configPath)) {
-            Write-Warn "No .eddi-config found — creating minimal config for CLI wrapper."
+            Write-Warn "No .eddi-config found -- creating minimal config for CLI wrapper."
             New-Item -ItemType Directory -Force -Path $EddiDir | Out-Null
             @"
 COMPOSE_FILES=$(Join-Path -Path $EddiDir -ChildPath 'docker-compose.yml')
