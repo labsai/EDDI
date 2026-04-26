@@ -17,6 +17,8 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.net.URI;
 import java.util.Arrays;
 import java.util.List;
@@ -210,24 +212,8 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
                 documentDescriptorStore.setDescriptor(resourceId, descriptorVersion, descriptor);
             }
         } catch (Exception e) {
-            LOG.warnf(e, "Failed to sync group descriptor name/description for id=%s", sanitizeForLog(resourceId));
+            LOG.warnf(e, "Failed to sync group descriptor name/description for id=%s", sanitize(resourceId));
         }
     }
 
-    private String sanitizeForLog(String value) {
-        if (value == null) {
-            return null;
-        }
-
-        StringBuilder sanitized = new StringBuilder(value.length());
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if (c == '\r' || c == '\n' || c == '\t' || c < 0x20 || c == 0x7F) {
-                sanitized.append('_');
-            } else {
-                sanitized.append(c);
-            }
-        }
-        return sanitized.toString();
-    }
 }

@@ -9,6 +9,8 @@ import io.quarkus.arc.DefaultBean;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -92,16 +94,9 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
         return queues.values().stream().mapToInt(BlockingQueue::size).sum();
     }
 
-    private static String sanitizeForLog(String value) {
-        if (value == null) {
-            return "null";
-        }
-        return value.replace('\n', '_').replace('\r', '_');
-    }
-
     @Override
     public void submitInOrder(String conversationId, Callable<Void> callable) {
-        final String safeConversationId = sanitizeForLog(conversationId);
+        final String safeConversationId = sanitize(conversationId);
         // Max-size check: only reject truly new conversations, not follow-up messages.
         // Note: this check is intentionally non-atomic (soft limit). Two threads
         // could both pass the check and briefly exceed maxActiveConversations.
@@ -162,11 +157,11 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
             public void onFailure(Throwable t) {
                 int nextAttempt = attempt + 1;
                 if (nextAttempt < MAX_RETRIES) {
-                    log.warnf(t, "In-memory task failed (conversationId=%s, attempt=%d/%d), retrying...", sanitizeForLog(conversationId), nextAttempt,
+                    log.warnf(t, "In-memory task failed (conversationId=%s, attempt=%d/%d), retrying...", sanitize(conversationId), nextAttempt,
                             MAX_RETRIES);
                     executeWithRetry(conversationId, queue, callable, nextAttempt);
                 } else {
-                    log.errorf(t, "In-memory task exhausted retries (conversationId=%s, attempts=%d), dead-lettering", sanitizeForLog(conversationId),
+                    log.errorf(t, "In-memory task exhausted retries (conversationId=%s, attempts=%d), dead-lettering", sanitize(conversationId),
                             nextAttempt);
                     routeToDeadLetter(conversationId, t);
                     totalProcessed.incrementAndGet();
@@ -248,7 +243,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
             if (entry.id().equals(entryId)) {
                 it.remove();
                 log.infof("Replayed dead-letter %s for conversation %s (in-memory — task reference lost, removed from DL queue)",
-                        sanitizeForLog(entryId), sanitizeForLog(entry.conversationId()));
+                        sanitize(entryId), sanitize(entry.conversationId()));
                 return true;
             }
         }
@@ -262,7 +257,7 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
             DeadLetterEntry entry = it.next();
             if (entry.id().equals(entryId)) {
                 it.remove();
-                log.infof("Discarded dead-letter %s for conversation %s", sanitizeForLog(entryId), sanitizeForLog(entry.conversationId()));
+                log.infof("Discarded dead-letter %s for conversation %s", sanitize(entryId), sanitize(entry.conversationId()));
                 return true;
             }
         }
