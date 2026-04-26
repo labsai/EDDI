@@ -112,7 +112,8 @@ public class EmbeddingStoreFactory {
         // Table name: use explicit param, or derive a safe name from kbId
         String table = params.getOrDefault("table", sanitizeTableName(kbId));
 
-        LOGGER.infof("Building pgvector store: host=%s, port=%d, database=%s, table=%s, dimension=%d", host, port, database, table, dimension);
+        LOGGER.infof("Building pgvector store: host=%s, port=%d, database=%s, table=%s, dimension=%d", sanitize(host), port, sanitize(database),
+                sanitize(table), dimension);
 
         return PgVectorEmbeddingStore.builder().host(host).port(port).database(database).user(user).password(password).table(table)
                 .dimension(dimension).createTable(true).build();
@@ -187,7 +188,7 @@ public class EmbeddingStoreFactory {
             builder.password(params.get("password"));
         }
 
-        LOGGER.infof("Building Elasticsearch store: serverUrl=%s, index=%s", serverUrl, indexName);
+        LOGGER.infof("Building Elasticsearch store: serverUrl=%s, index=%s", sanitize(serverUrl), sanitize(indexName));
 
         return builder.build();
     }
@@ -218,7 +219,7 @@ public class EmbeddingStoreFactory {
         String collectionName = params.getOrDefault("collectionName", "eddi_kb_" + kbId.toLowerCase().replaceAll("[^a-z0-9_]", "_"));
         boolean useTls = Boolean.parseBoolean(params.getOrDefault("useTls", "false"));
 
-        LOGGER.infof("Building Qdrant store: host=%s, port=%d, collection=%s, tls=%b", host, port, collectionName, useTls);
+        LOGGER.infof("Building Qdrant store: host=%s, port=%d, collection=%s, tls=%b", sanitize(host), port, sanitize(collectionName), useTls);
 
         var builder = QdrantEmbeddingStore.builder().host(host).port(port).collectionName(collectionName).useTls(useTls);
 

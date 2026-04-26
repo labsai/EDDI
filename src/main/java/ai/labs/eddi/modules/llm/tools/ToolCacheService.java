@@ -128,7 +128,7 @@ public class ToolCacheService {
                 // Record miss by tool name
                 meterRegistry.counter("eddi.tool.cache.misses.by_tool", "tool", toolName).increment();
 
-                LOGGER.debug("Cache miss for " + toolName);
+                LOGGER.debug("Cache miss for " + sanitize(toolName));
                 return null;
             }
 
@@ -198,7 +198,7 @@ public class ToolCacheService {
     public void invalidate(String toolName, String arguments) {
         String key = buildKey(toolName, arguments);
         cache.remove(key);
-        LOGGER.debug("Invalidated cache for " + toolName);
+        LOGGER.debug("Invalidated cache for " + sanitize(toolName));
     }
 
     /**
