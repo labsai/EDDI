@@ -1,3 +1,7 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
 package ai.labs.eddi.secrets.sanitize;
 
 import com.fasterxml.jackson.databind.ObjectMapper;

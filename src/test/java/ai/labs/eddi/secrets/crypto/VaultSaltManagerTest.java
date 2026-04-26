@@ -1,3 +1,7 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
 package ai.labs.eddi.secrets.crypto;
 
 import ai.labs.eddi.secrets.model.EncryptedDek;

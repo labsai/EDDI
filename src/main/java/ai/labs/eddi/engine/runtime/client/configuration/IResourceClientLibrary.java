@@ -1,3 +1,7 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
 package ai.labs.eddi.engine.runtime.client.configuration;
 
 import ai.labs.eddi.engine.runtime.service.ServiceException;
