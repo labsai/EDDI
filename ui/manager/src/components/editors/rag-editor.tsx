@@ -131,10 +131,8 @@ const STORE_PARAM_HINTS: Record<string, { key: string; placeholder: string }[]> 
     { key: "baseUrl", placeholder: "http://localhost:8000" },
     { key: "collectionName", placeholder: "kb-product-docs" },
     { key: "apiKey", placeholder: "" },
-    { key: "useTls", placeholder: "false" },
     { key: "tenantName", placeholder: "default_tenant" },
     { key: "databaseName", placeholder: "default_database" },
-    { key: "apiVersion", placeholder: "v2" },
   ],
 };
 
