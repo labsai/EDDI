@@ -350,8 +350,14 @@ function Step-Database {
 
 function New-VaultKey {
     $bytes = New-Object byte[] 24
-    $rng = [System.Security.Cryptography.RNGCryptoServiceProvider]::new()
-    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    try {
+        # PS 7+ / .NET 6+
+        [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    } catch {
+        # PS 5.1 / .NET Framework 4.x fallback
+        $rng = [System.Security.Cryptography.RNGCryptoServiceProvider]::new()
+        try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    }
     return [System.Convert]::ToBase64String($bytes)
 }
 
