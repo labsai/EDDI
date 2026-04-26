@@ -234,14 +234,13 @@ public class SlackEventHandler {
                                          String userId, String threadTs, String originalText)
             throws Exception {
         String agentId = resolved.target().getTargetId();
-        String targetName = resolved.target().getName();
         String threadKey = threadTs != null ? threadTs : "main";
 
-        // Compose intent key for conversation tracking
-        String integrationId = resolved.integration() != null
-                ? resolved.integration().getName()
-                : "legacy";
-        String intent = "channel:" + integrationId + ":" + targetName + ":" + threadKey;
+        // Compose a stable intent key for conversation tracking.
+        // Uses channelId + targetId (agentId/groupId) — NOT mutable display names
+        // like integration name or target name, which would break
+        // IUserConversationStore lookups on rename.
+        String intent = "channel:slack:" + channelId + ":" + agentId + ":" + threadKey;
 
         // Use strippedMessage (trigger keyword removed) or fall back to original text
         // (thread replies from resolveThreadTarget have strippedMessage=null)
@@ -553,9 +552,10 @@ public class SlackEventHandler {
         for (ChannelTarget target : config.getTargets()) {
             String name = target.getName() != null ? target.getName() : "(unnamed)";
             String type = target.getType() == ChannelTarget.TargetType.GROUP ? "group" : "agent";
-            String isDefault = name.equalsIgnoreCase(config.getDefaultTargetName())
-                    ? " _(default)_"
-                    : "";
+            String isDefault = config.getDefaultTargetName() != null
+                    && name.equalsIgnoreCase(config.getDefaultTargetName())
+                            ? " _(default)_"
+                            : "";
             sb.append("• *").append(name).append("*").append(isDefault);
             sb.append(" [").append(type).append("]\n");
             if (target.getTriggers() != null && !target.getTriggers().isEmpty()) {

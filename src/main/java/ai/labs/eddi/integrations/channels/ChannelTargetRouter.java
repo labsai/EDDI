@@ -57,9 +57,10 @@ public class ChannelTargetRouter {
 
     /**
      * channelType:channelId → deep-copied ChannelIntegrationConfiguration with
-     * resolved secrets. These instances are never returned to callers outside the
-     * router — the REST layer reads from the store directly and returns vault
-     * references.
+     * resolved secrets. These cached instances may be returned by router methods
+     * (e.g., {@link #getIntegration}) and must be treated as sensitive internal
+     * data that must not be logged or serialized. The REST layer reads from the
+     * store directly and returns vault references instead.
      */
     private volatile Map<String, ChannelIntegrationConfiguration> integrationMap = Map.of();
 
@@ -124,6 +125,11 @@ public class ChannelTargetRouter {
         if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
             LegacyTarget legacy = legacyMap.get(platformChannelId);
             if (legacy != null) {
+                // Apply same help/blank check as new-style path for consistency
+                String trimmed = messageText != null ? messageText.trim() : "";
+                if (trimmed.isEmpty() || "help".equalsIgnoreCase(trimmed)) {
+                    return null;
+                }
                 return new ResolvedTarget(legacy.toChannelTarget(), messageText, null,
                         legacy.botToken(), legacy.signingSecret());
             }

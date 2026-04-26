@@ -13,10 +13,11 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.deployed;
+import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
+
 import java.util.*;
 import java.util.Locale;
-
-import static ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus.deployed;
 
 /**
  * One-shot startup migration: converts legacy {@link ChannelConnector} entries
@@ -76,10 +77,12 @@ public class ChannelConnectorMigration {
         LOGGER.info("Starting channel connector migration...");
 
         try {
-            int[] result = migrateConnectors(); // [created, failed]
+            int[] result = migrateConnectors(); // [created, failed, skipped]
             int created = result[0];
             int failed = result[1];
-            LOGGER.infof("Channel connector migration complete: %d configs created, %d failed", created, failed);
+            int skipped = result[2];
+            LOGGER.infof("Channel connector migration complete: %d created, %d failed, %d skipped (already existed)",
+                    created, failed, skipped);
 
             if (failed > 0) {
                 LOGGER.errorf("Channel connector migration had %d failure(s) — "
@@ -133,9 +136,21 @@ public class ChannelConnectorMigration {
             throw new RuntimeException("Cannot read deployment infos", e);
         }
 
+        // Pre-load existing channel configs to avoid creating duplicates on retry.
+        // channelStore.create() generates a new UUID every time, so re-running
+        // after partial failure would accumulate duplicate configs without this check.
+        var existingKeys = loadExistingChannelKeys();
+
         int created = 0;
+        int skipped = 0;
         int failed = 0;
         for (var entry : channelGroups.entrySet()) {
+            // Skip if a config for this channelType:channelId already exists
+            if (existingKeys.contains(entry.getKey())) {
+                skipped++;
+                LOGGER.debugf("  Skipping %s — config already exists", entry.getKey());
+                continue;
+            }
             var entries = entry.getValue();
             // Sort for deterministic default target
             entries.sort(Comparator.comparing(ConnectorEntry::agentId));
@@ -206,11 +221,47 @@ public class ChannelConnectorMigration {
             }
         }
 
-        return new int[]{created, failed};
+        return new int[]{created, failed, skipped};
     }
 
     private record ConnectorEntry(ChannelConnector connector, String agentId,
             String channelType, String agentName) {
+    }
+
+    /**
+     * Load all existing channel integration configs and return their
+     * {@code channelType:channelId} keys. Used to detect duplicates on retry.
+     */
+    private Set<String> loadExistingChannelKeys() {
+        var keys = new HashSet<String>();
+        try {
+            var descriptors = descriptorStore.readDescriptors(
+                    "ai.labs.channel", "", 0, 1000, false);
+            for (var descriptor : descriptors) {
+                try {
+                    var resId = extractResourceId(
+                            descriptor.getResource());
+                    if (resId == null || resId.getId() == null)
+                        continue;
+                    var config = channelStore.read(resId.getId(), resId.getVersion());
+                    if (config != null && config.getChannelType() != null
+                            && config.getPlatformConfig() != null) {
+                        String chId = config.getPlatformConfig().get("channelId");
+                        if (chId != null && !chId.isBlank()) {
+                            keys.add(config.getChannelType().toLowerCase(Locale.ROOT)
+                                    + ":" + chId);
+                        }
+                    }
+                } catch (Exception e) {
+                    LOGGER.debugf("Skipping descriptor during duplicate check: %s",
+                            e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warn("Failed to load existing channel configs for duplicate check — "
+                    + "migration will proceed but may create duplicates", e);
+        }
+        return keys;
     }
 
     /**
