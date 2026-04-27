@@ -144,20 +144,32 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Create or reset the branch
-          git checkout -B "$BRANCH"
-          git add "$DOCKERFILE"
-          git commit -m "chore(docker): update base image digest"
-
-          # Force-push to update the branch in place (preserves any existing PR)
-          git push --force-with-lease origin "$BRANCH"
-
-          # Create PR if one doesn't already exist
+          # Check for existing PR BEFORE touching branches
           EXISTING=$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number' 2>/dev/null || echo "")
+
           if [ -n "$EXISTING" ]; then
-            echo "PR #${EXISTING} already exists — updated branch"
-            echo "### ✅ Updated existing PR #${EXISTING}" >> $GITHUB_STEP_SUMMARY
+            # PR exists — apply update on top of the existing branch (fast-forward, no force-push)
+            git checkout -- "$DOCKERFILE"
+            git fetch origin "$BRANCH"
+            git checkout "$BRANCH"
+            # Use a broad digest pattern so sed works regardless of what digest the branch currently has
+            sed -i "s|${IMAGE}:${TAG}@sha256:[a-f0-9]*|${IMAGE}:${TAG}@${NEW_DIGEST}|" "$DOCKERFILE"
+            if git diff --quiet "$DOCKERFILE"; then
+              echo "### ✅ PR #${EXISTING} already has the latest digest" >> $GITHUB_STEP_SUMMARY
+            else
+              git add "$DOCKERFILE"
+              git commit -m "chore(docker): update base image digest"
+              git push origin "$BRANCH"
+              echo "### ✅ Updated existing PR #${EXISTING}" >> $GITHUB_STEP_SUMMARY
+            fi
           else
+            # No open PR — safe to delete stale remote branch (nothing to auto-close)
+            git push origin --delete "$BRANCH" 2>/dev/null || true
+            git checkout -B "$BRANCH"
+            git add "$DOCKERFILE"
+            git commit -m "chore(docker): update base image digest"
+            git push -u origin "$BRANCH"
+
             PR_URL=$(gh pr create \
               --title "chore(docker): update base image digest" \
               --label "dependencies,security" \

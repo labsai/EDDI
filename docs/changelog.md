@@ -13,6 +13,31 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🐳 Base Image Check — PR Dedup Fix (2026-04-27)
+
+**Repo:** EDDI (`chore/base-image-scan-advisory`)
+
+**What changed:** Fixed a bug where the weekly digest-update PR was re-created every run instead of updating the existing one.
+
+### Problem
+
+The `base-image-check.yml` workflow used `git push origin --delete "$BRANCH"` before re-pushing the updated branch. Deleting the remote branch causes GitHub to **auto-close** any open PR pointing at it. Re-pushing the branch does not reopen the closed PR. As a result:
+- The `gh pr list --head "$BRANCH" --state open` check on the next line always returned empty
+- The "Updated existing PR" code path was dead code
+- Every weekly run closed the previous PR and opened a new one, losing review discussion
+
+### Fix
+
+Restructured to check for an existing PR **before** any branch operations:
+- **PR exists** → discard working-tree change, `git fetch` + `git checkout` the PR branch, re-apply digest sed (using a broad `sha256:[a-f0-9]*` pattern so it works regardless of what digest the branch currently has), commit on top, normal `git push` (fast-forward)
+- **No open PR** → safe to `git push origin --delete` the stale remote branch (nothing to auto-close), then create a fresh branch and PR
+
+No force-push anywhere — respects the project's strict no-force-push rule.
+
+**Files:** `.github/workflows/base-image-check.yml`
+
+---
+
 ## 🐳 Base Image Scan — Advisory Mode + Scheduled Monitoring (2026-04-27)
 
 **Repo:** EDDI (`chore/base-image-scan-advisory`)
