@@ -134,7 +134,7 @@ class EmbeddingModelFactoryTest {
         void geminiProvider_customTaskType_shouldCreateModel() {
             var config = createConfig("gemini", Map.of(
                     "apiKey", "test-key",
-                    "tasktype", "RETRIEVAL_QUERY"));
+                    "taskType", "RETRIEVAL_QUERY"));
             EmbeddingModel model = factory.getOrCreate(config);
             assertNotNull(model);
         }
@@ -144,7 +144,7 @@ class EmbeddingModelFactoryTest {
         void geminiProvider_invalidTaskType_shouldThrow() {
             var config = createConfig("gemini", Map.of(
                     "apiKey", "test-key",
-                    "tasktype", "INVALID_TASK"));
+                    "taskType", "INVALID_TASK"));
             assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config));
         }
 

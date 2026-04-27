@@ -37,7 +37,7 @@ public class RagConfiguration {
      * {@code region}</li>
      * <li>{@code "cohere"} — Cohere. Params: {@code model}, {@code apiKey}</li>
      * <li>{@code "gemini"} — Google Gemini. Params: {@code model}, {@code apiKey},
-     * {@code tasktype}</li>
+     * {@code taskType}</li>
      * <li>{@code "vertex"} — Google Vertex AI. Params: {@code project},
      * {@code location}, {@code model}</li>
      * </ul>
@@ -59,7 +59,7 @@ public class RagConfiguration {
      * <li>Cohere: {"model": "embed-english-v3.0", "apiKey":
      * "${eddivault:...}"}</li>
      * <li>Gemini: {"model": "gemini-embedding-001", "apiKey": "${eddivault:...}",
-     * "tasktype": "RETRIEVAL_DOCUMENT"}</li>
+     * "taskType": "RETRIEVAL_DOCUMENT"}</li>
      * <li>Vertex: {"project": "my-project", "location": "us-central1", "model":
      * "text-embedding-005"}</li>
      * </ul>

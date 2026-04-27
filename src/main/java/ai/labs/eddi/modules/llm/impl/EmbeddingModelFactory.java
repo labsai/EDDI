@@ -102,7 +102,7 @@ public class EmbeddingModelFactory {
     }
 
     private EmbeddingModel buildGemini(Map<String, String> params) {
-        String taskTypeStr = params.get("tasktype");
+        String taskTypeStr = params.get("taskType");
 
         TaskType taskType = (taskTypeStr == null || taskTypeStr.isBlank())
                 ? GoogleAiEmbeddingModel.TaskType.RETRIEVAL_DOCUMENT
