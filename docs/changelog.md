@@ -13,6 +13,40 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🐳 Base Image Scan — Advisory Mode + Scheduled Monitoring (2026-04-27)
+
+**Repo:** EDDI (`chore/base-image-scan-advisory`)
+
+**What changed:** Decoupled Docker base image vulnerability scanning from the CI build gate and added a dedicated weekly monitoring workflow.
+
+### Problem
+
+The Docker image Trivy scan (`exit-code: 1`) was blocking all builds when Red Hat's base image contained unfixed OS-level CVEs (libcap, python3, OpenJDK). These are upstream issues outside our control — Red Hat hasn't rebuilt the container image with the patched RPMs yet. Result: broken builds with no actionable fix.
+
+### Changes
+
+- **`ci.yml`** — Changed Docker image Trivy scan from `exit-code: 1` (blocking) to `exit-code: 0` (advisory). The filesystem scan (Job 2c) remains strict for our own dependencies.
+- **`base-image-check.yml`** — [NEW] Weekly scheduled workflow that:
+  - Parses the pinned image/tag/digest from the Dockerfile (no hardcoded values)
+  - Fetches the remote manifest digest via `skopeo inspect --raw | sha256sum` (OCI-spec compliant)
+  - Compares against the pinned digest and auto-creates a PR when it changes
+  - Checks for newer tag versions (e.g., 1.24 → 1.25) and creates an issue if found
+  - Runs Trivy scan for vulnerability awareness (reported in job summary)
+  - Supports `workflow_dispatch` for on-demand runs
+
+### Design Decisions
+
+- **`skopeo` over `docker pull` for digest check** — `skopeo inspect --raw` returns exact registry bytes without pulling layers. SHA256 of the raw manifest is the OCI content-addressable digest. Faster and more reliable than `docker manifest inspect` (which reformats JSON, breaking the hash).
+- **`gh` CLI for PR/issue creation** — Avoids third-party action dependencies and SHA-pinning concerns. Pre-installed on ubuntu-latest.
+- **Issue deduplication** — Searches for existing open issues with the same title before creating duplicates.
+- **Complements Dependabot** — Dependabot also watches for digest changes (configured in `dependabot.yml`). This workflow adds Trivy reporting and newer-tag detection that Dependabot doesn't provide. Both mechanisms are complementary.
+
+**Files:**
+- `.github/workflows/ci.yml` — Advisory Trivy scan
+- `.github/workflows/base-image-check.yml` — [NEW] Scheduled base image monitor
+
+---
+
 ## 🔒 CodeQL Remediation — Array Bounds, Arithmetic Overflow, Log Injection (2026-04-26)
 
 **Repo:** EDDI (`fix/codeql-remediation-pr455`)
