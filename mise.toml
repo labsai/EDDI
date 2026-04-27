@@ -19,5 +19,5 @@ license-gen = { run = "mvn package -Plicense-gen -DskipTests", description = "Ge
 
 debug = { run = "mvn quarkus:dev -Dsuspend", description = "Start dev mode and wait for debugger on port 5005" }
 dev-no-debug = { run = "mvn quarkus:dev -Ddebug=false", description = "Start dev mode without the debug agent" }
-chroma = { run = "docker-compose -f docker-compose.chroma.yml up", description = "Starts ChromaDB" }
+chroma = { run = "docker compose -f docker-compose.chroma.yml up", description = "Starts ChromaDB" }
 

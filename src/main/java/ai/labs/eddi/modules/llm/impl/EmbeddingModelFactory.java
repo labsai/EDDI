@@ -32,7 +32,8 @@ import java.util.TreeMap;
  * {@link ChatModelRegistry} for LLM models.
  * <p>
  * Supported providers: {@code openai}, {@code azure-openai}, {@code ollama},
- * {@code mistral}, {@code bedrock}, {@code cohere}, {@code vertex}.
+ * {@code mistral}, {@code bedrock}, {@code cohere}, {@code gemini},
+ * {@code vertex}.
  * <p>
  * Cache is bounded (max 50 entries, 30-minute idle TTL) to prevent memory leaks
  * in multi-tenant or dynamic-config environments.
@@ -76,7 +77,8 @@ public class EmbeddingModelFactory {
             case "gemini" -> buildGemini(params);
             case "vertex" -> buildVertex(params);
             default -> throw new IllegalArgumentException(
-                    "Unsupported embedding provider: " + provider + ". Supported: openai, azure-openai, ollama, mistral, bedrock, cohere, vertex");
+                    "Unsupported embedding provider: " + provider
+                            + ". Supported: openai, azure-openai, ollama, mistral, bedrock, cohere, gemini, vertex");
         };
     }
 
@@ -101,12 +103,18 @@ public class EmbeddingModelFactory {
 
     private EmbeddingModel buildGemini(Map<String, String> params) {
         String taskTypeStr = params.get("tasktype");
-        TaskType taskType = (taskTypeStr == null || taskTypeStr.isBlank())
-                ? GoogleAiEmbeddingModel.TaskType.RETRIEVAL_DOCUMENT
-                : GoogleAiEmbeddingModel.TaskType.valueOf(taskTypeStr);
+        TaskType taskType;
+        try {
+            taskType = (taskTypeStr == null || taskTypeStr.isBlank())
+                    ? GoogleAiEmbeddingModel.TaskType.RETRIEVAL_DOCUMENT
+                    : GoogleAiEmbeddingModel.TaskType.valueOf(taskTypeStr);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid tasktype '" + taskTypeStr + "'. Valid values: " +
+                    java.util.Arrays.toString(TaskType.values()));
+        }
 
         return GoogleAiEmbeddingModel.builder()
-                .modelName(params.getOrDefault("model", "gemini-embedding-2"))
+                .modelName(params.getOrDefault("model", "gemini-embedding-001"))
                 .apiKey(params.get("apiKey"))
                 .taskType(taskType)
                 .build();

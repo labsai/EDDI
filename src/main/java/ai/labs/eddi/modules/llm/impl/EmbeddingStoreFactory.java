@@ -34,7 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>
  * Each knowledge base gets its own store instance (collection-per-KB
  * isolation). Supported store types: {@code in-memory}, {@code pgvector},
- * {@code mongodb-atlas}, {@code elasticsearch}, {@code qdrant}.
+ * {@code mongodb-atlas}, {@code elasticsearch}, {@code qdrant}, {@code chroma}.
  * <p>
  * Cache is bounded (max 50 entries, 30-minute idle TTL) to prevent memory leaks
  * in multi-tenant or dynamic-config environments.
@@ -244,12 +244,10 @@ public class EmbeddingStoreFactory {
      * <ul>
      * <li>{@code baseUrl} — Chroma server URL (default:
      * "http://localhost:8000")</li>
-     * <li>{@code tenantName} — tenant name (default: "default")</li>
-     * <li>{@code databaseName} — database name (default: "default")</li>
+     * <li>{@code tenantName} — tenant name (default: "default_tenant")</li>
+     * <li>{@code databaseName} — database name (default: "default_database")</li>
      * <li>{@code collectionName} — collection name (default: auto-generated from
      * kbId)</li>
-     * <li>{@code apiKey} — Chroma API key (optional, supports
-     * {@code ${eddivault:...}})</li>
      * </ul>
      */
     private EmbeddingStore<TextSegment> buildChroma(RagConfiguration config, String kbId) {
@@ -262,14 +260,13 @@ public class EmbeddingStoreFactory {
 
         LOGGER.infof("Building Chroma store: baseUrl=%s, tenant=%s, database=%s, collection=%s", baseUrl, tenantName, databaseName, collectionName);
 
-        var builder = ChromaEmbeddingStore.builder()
+        return ChromaEmbeddingStore.builder()
                 .baseUrl(baseUrl)
                 .tenantName(tenantName)
                 .databaseName(databaseName)
                 .collectionName(collectionName)
-                .apiVersion(ChromaApiVersion.V2);
-
-        return builder.build();
+                .apiVersion(ChromaApiVersion.V2)
+                .build();
     }
 
     // ──────────────────────────────────────────────────
