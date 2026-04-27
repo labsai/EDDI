@@ -189,8 +189,9 @@ jobs:
           NEXT="${{ steps.newer.outputs.tag }}"
           TITLE="chore(docker): newer base image tag ${NEXT} available"
 
-          # Don't create duplicate issues
-          EXISTING=$(gh issue list --search "\"${TITLE}\" in:title" --state open --json number -q '.[0].number' 2>/dev/null || echo "")
+          # Don't create duplicate issues (exact title match — gh search is fuzzy)
+          ISSUES=$(gh issue list --search "\"${TITLE}\" in:title" --state open --json number,title 2>/dev/null || echo "[]")
+          EXISTING=$(echo "$ISSUES" | jq -r --arg t "$TITLE" '[.[] | select(.title == $t) | .number] | first // empty')
           if [ -n "$EXISTING" ]; then
             echo "Issue #${EXISTING} already exists — skipping"
           else
