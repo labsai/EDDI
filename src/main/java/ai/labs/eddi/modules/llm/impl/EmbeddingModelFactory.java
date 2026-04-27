@@ -103,15 +103,10 @@ public class EmbeddingModelFactory {
 
     private EmbeddingModel buildGemini(Map<String, String> params) {
         String taskTypeStr = params.get("tasktype");
-        TaskType taskType;
-        try {
-            taskType = (taskTypeStr == null || taskTypeStr.isBlank())
-                    ? GoogleAiEmbeddingModel.TaskType.RETRIEVAL_DOCUMENT
-                    : GoogleAiEmbeddingModel.TaskType.valueOf(taskTypeStr);
-        } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException("Invalid tasktype '" + taskTypeStr + "'. Valid values: " +
-                    java.util.Arrays.toString(TaskType.values()));
-        }
+
+        TaskType taskType = (taskTypeStr == null || taskTypeStr.isBlank())
+            ? GoogleAiEmbeddingModel.TaskType.RETRIEVAL_DOCUMENT
+            : GoogleAiEmbeddingModel.TaskType.valueOf(taskTypeStr);
 
         return GoogleAiEmbeddingModel.builder()
                 .modelName(params.getOrDefault("model", "gemini-embedding-001"))
