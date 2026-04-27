@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.integrations.slack.rest;
 
-import ai.labs.eddi.integrations.slack.SlackChannelRouter;
+import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.slack.SlackEventHandler;
 import ai.labs.eddi.integrations.slack.SlackIntegrationConfig;
 import ai.labs.eddi.integrations.slack.SlackSignatureVerifier;
@@ -15,19 +15,20 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Unit tests for {@link RestSlackWebhook}.
+ * Unit tests for {@link RestSlackWebhook}. Covers signature verification, URL
+ * verification challenge, event dispatching, and disabled/error paths.
  */
 class RestSlackWebhookTest {
 
     private SlackIntegrationConfig config;
-    private SlackChannelRouter channelRouter;
+    private ChannelTargetRouter channelTargetRouter;
     private SlackSignatureVerifier signatureVerifier;
     private SlackEventHandler eventHandler;
     private ObjectMapper objectMapper;
@@ -36,60 +37,68 @@ class RestSlackWebhookTest {
     @BeforeEach
     void setUp() {
         config = mock(SlackIntegrationConfig.class);
-        channelRouter = mock(SlackChannelRouter.class);
+        channelTargetRouter = mock(ChannelTargetRouter.class);
         signatureVerifier = mock(SlackSignatureVerifier.class);
         eventHandler = mock(SlackEventHandler.class);
         objectMapper = new ObjectMapper();
-        webhook = new RestSlackWebhook(config, channelRouter, signatureVerifier, eventHandler, objectMapper);
+
+        webhook = new RestSlackWebhook(config, channelTargetRouter, signatureVerifier,
+                eventHandler, objectMapper);
     }
 
+    // ─── Disabled ──────────────────────────────────────────────────────────────
+
     @Nested
-    @DisplayName("When Slack integration is disabled")
+    @DisplayName("Disabled integration")
     class Disabled {
 
         @Test
-        @DisplayName("should return 404 when disabled")
+        @DisplayName("returns 404 when slack integration is disabled")
         void returns404WhenDisabled() {
             when(config.enabled()).thenReturn(false);
 
             Response response = webhook.handleEvents("{}", "sig", "ts");
 
             assertEquals(404, response.getStatus());
+            verifyNoInteractions(signatureVerifier, eventHandler);
         }
     }
+
+    // ─── Signature verification ───────────────────────────────────────────────
 
     @Nested
     @DisplayName("Signature verification")
     class SignatureVerification {
 
         @Test
-        @DisplayName("should return 403 when signature verification fails")
+        @DisplayName("returns 403 when signature verification fails")
         void returns403OnBadSignature() {
             when(config.enabled()).thenReturn(true);
-            when(channelRouter.getAllSigningSecrets()).thenReturn(Set.of("secret1"));
-            when(signatureVerifier.verify("ts", "{}", "bad-sig", Set.of("secret1")))
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
+            when(signatureVerifier.verify(eq("ts"), eq("{}"), eq("bad-sig"), any()))
                     .thenReturn(false);
 
             Response response = webhook.handleEvents("{}", "bad-sig", "ts");
 
             assertEquals(403, response.getStatus());
+            verifyNoInteractions(eventHandler);
         }
     }
 
+    // ─── URL verification ─────────────────────────────────────────────────────
+
     @Nested
-    @DisplayName("URL Verification challenge")
+    @DisplayName("URL verification challenge")
     class UrlVerification {
 
         @Test
-        @DisplayName("should echo challenge for url_verification type")
-        void echoesChallenge() throws Exception {
+        @DisplayName("echoes challenge for url_verification type")
+        void echoesChallenge() {
             when(config.enabled()).thenReturn(true);
-            when(channelRouter.getAllSigningSecrets()).thenReturn(Set.of("secret1"));
-            when(signatureVerifier.verify(anyString(), anyString(), anyString(), any()))
-                    .thenReturn(true);
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
-            String body = objectMapper.writeValueAsString(
-                    Map.of("type", "url_verification", "challenge", "abc123"));
+            String body = "{\"type\":\"url_verification\",\"challenge\":\"abc123\"}";
 
             Response response = webhook.handleEvents(body, "sig", "ts");
 
@@ -99,15 +108,13 @@ class RestSlackWebhookTest {
         }
 
         @Test
-        @DisplayName("should handle null challenge gracefully")
-        void handlesNullChallenge() throws Exception {
+        @DisplayName("handles null challenge gracefully")
+        void handleNullChallenge() {
             when(config.enabled()).thenReturn(true);
-            when(channelRouter.getAllSigningSecrets()).thenReturn(Set.of("s1"));
-            when(signatureVerifier.verify(anyString(), anyString(), anyString(), any()))
-                    .thenReturn(true);
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
-            String body = objectMapper.writeValueAsString(
-                    Map.of("type", "url_verification"));
+            String body = "{\"type\":\"url_verification\"}";
 
             Response response = webhook.handleEvents(body, "sig", "ts");
 
@@ -115,62 +122,50 @@ class RestSlackWebhookTest {
         }
     }
 
+    // ─── Event callback ───────────────────────────────────────────────────────
+
     @Nested
-    @DisplayName("Event callbacks")
-    class EventCallbacks {
+    @DisplayName("Event callback")
+    class EventCallback {
 
         @Test
-        @DisplayName("should delegate event_callback to handler and return 200")
-        void delegatesEventCallback() throws Exception {
+        @DisplayName("delegates event_callback to eventHandler")
+        void delegatesEventCallback() {
             when(config.enabled()).thenReturn(true);
-            when(channelRouter.getAllSigningSecrets()).thenReturn(Set.of("s1"));
-            when(signatureVerifier.verify(anyString(), anyString(), anyString(), any()))
-                    .thenReturn(true);
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
-            String body = objectMapper.writeValueAsString(Map.of(
-                    "type", "event_callback",
-                    "event_id", "ev-1",
-                    "event", Map.of("type", "app_mention", "text", "hello")));
+            String body = "{\"type\":\"event_callback\",\"event_id\":\"evt-1\",\"event\":{\"type\":\"message\",\"text\":\"hello\"}}";
 
             Response response = webhook.handleEvents(body, "sig", "ts");
 
             assertEquals(200, response.getStatus());
-            verify(eventHandler).handleEventAsync(eq("ev-1"), any());
+            verify(eventHandler).handleEventAsync(eq("evt-1"), any());
         }
 
         @Test
-        @DisplayName("should handle event_callback with null event gracefully")
-        void handlesNullEvent() throws Exception {
+        @DisplayName("returns 200 even when event is null")
+        void nullEvent() {
             when(config.enabled()).thenReturn(true);
-            when(channelRouter.getAllSigningSecrets()).thenReturn(Set.of("s1"));
-            when(signatureVerifier.verify(anyString(), anyString(), anyString(), any()))
-                    .thenReturn(true);
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
-            // event_callback without "event" key
-            String body = objectMapper.writeValueAsString(Map.of(
-                    "type", "event_callback",
-                    "event_id", "ev-1"));
+            String body = "{\"type\":\"event_callback\",\"event_id\":\"evt-1\"}";
 
             Response response = webhook.handleEvents(body, "sig", "ts");
 
             assertEquals(200, response.getStatus());
             verifyNoInteractions(eventHandler);
         }
-    }
-
-    @Nested
-    @DisplayName("Unknown event types")
-    class UnknownTypes {
 
         @Test
-        @DisplayName("should return 200 for unknown event types")
-        void returns200ForUnknown() throws Exception {
+        @DisplayName("unknown type returns 200 (Slack expects it)")
+        void unknownType() {
             when(config.enabled()).thenReturn(true);
-            when(channelRouter.getAllSigningSecrets()).thenReturn(Set.of("s1"));
-            when(signatureVerifier.verify(anyString(), anyString(), anyString(), any()))
-                    .thenReturn(true);
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
-            String body = objectMapper.writeValueAsString(Map.of("type", "unknown_type"));
+            String body = "{\"type\":\"something_else\"}";
 
             Response response = webhook.handleEvents(body, "sig", "ts");
 
@@ -178,19 +173,20 @@ class RestSlackWebhookTest {
         }
     }
 
+    // ─── Malformed payload ────────────────────────────────────────────────────
+
     @Nested
-    @DisplayName("Error handling")
-    class ErrorHandling {
+    @DisplayName("Malformed payload")
+    class MalformedPayload {
 
         @Test
-        @DisplayName("should return 400 for invalid JSON")
-        void returns400ForBadJson() {
+        @DisplayName("returns 400 for invalid JSON")
+        void invalidJson() {
             when(config.enabled()).thenReturn(true);
-            when(channelRouter.getAllSigningSecrets()).thenReturn(Set.of("s1"));
-            when(signatureVerifier.verify(anyString(), anyString(), anyString(), any()))
-                    .thenReturn(true);
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
-            Response response = webhook.handleEvents("not-json{{{", "sig", "ts");
+            Response response = webhook.handleEvents("not json", "sig", "ts");
 
             assertEquals(400, response.getStatus());
         }

@@ -101,7 +101,7 @@ public class McpAdminTools {
             + "Returns the deployment status.")
     public String deployAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                               @ToolArg(description = "Version number to deploy (required)") Integer version,
-                              @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
+                              @ToolArg(description = "Environment: 'production' (default) or 'test'") String environment) {
         requireRole(identity, authEnabled, "eddi-admin");
         try {
             var env = parseEnvironment(environment);
@@ -151,7 +151,7 @@ public class McpAdminTools {
     @Tool(name = "undeploy_agent", description = "Undeploy a Agent from an environment. Optionally end all active conversations.")
     public String undeployAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                                 @ToolArg(description = "Version number to undeploy (required)") Integer version,
-                                @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment,
+                                @ToolArg(description = "Environment: 'production' (default) or 'test'") String environment,
                                 @ToolArg(description = "End all active conversations? (default: false)") Boolean endConversations) {
         requireRole(identity, authEnabled, "eddi-admin");
         try {
@@ -170,7 +170,7 @@ public class McpAdminTools {
     @Tool(name = "get_deployment_status", description = "Get the deployment status of a specific Agent version in an environment.")
     public String getDeploymentStatus(@ToolArg(description = "Agent ID (required)") String agentId,
                                       @ToolArg(description = "Version number (required)") Integer version,
-                                      @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
+                                      @ToolArg(description = "Environment: 'production' (default) or 'test'") String environment) {
         requireRole(identity, authEnabled, "eddi-admin");
         try {
             var env = parseEnvironment(environment);
@@ -942,7 +942,7 @@ public class McpAdminTools {
                                  @ToolArg(description = "Conversation strategy: 'new' or 'persistent' "
                                          + "(CRON defaults to 'new', HEARTBEAT defaults to 'persistent')") String conversationStrategy,
                                  @ToolArg(description = "User identity for the scheduled message (default: 'system:scheduler')") String userId,
-                                 @ToolArg(description = "Environment: 'production' (default), 'production', or 'test'") String environment) {
+                                 @ToolArg(description = "Environment: 'production' (default) or 'test'") String environment) {
         requireRole(identity, authEnabled, "eddi-admin");
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
@@ -1170,6 +1170,139 @@ public class McpAdminTools {
         } catch (Exception e) {
             LOGGER.error("MCP retry_failed_schedule failed for " + scheduleId, e);
             return errorJson("Failed to retry schedule: " + e.getMessage());
+        }
+    }
+
+    // ==================== Channel Integration Tools ====================
+
+    @Tool(name = "list_channel_integrations", description = "List all channel integration configurations. "
+            + "Returns descriptors with name, channelType, and target count.")
+    public String listChannelIntegrations(
+                                          @ToolArg(description = "Optional filter string") String filter,
+                                          @ToolArg(description = "Maximum number of results (default 20)") Integer limit) {
+        requireRole(identity, authEnabled, "eddi-admin");
+        try {
+            int limitInt = limit != null ? limit : 20;
+            String filterStr = filter != null ? filter : "";
+            var channelStore = getRestStore(
+                    ai.labs.eddi.configs.channels.IRestChannelIntegrationStore.class);
+            var descriptors = channelStore.readChannelDescriptors(filterStr, 0, limitInt);
+            return jsonSerialization.serialize(descriptors);
+        } catch (Exception e) {
+            LOGGER.error("MCP list_channel_integrations failed", e);
+            return errorJson("Failed to list channel integrations: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "read_channel_integration", description = "Read a channel integration configuration by ID. "
+            + "Returns the full config with targets, triggers, platformConfig, and observe mode settings.")
+    public String readChannelIntegration(
+                                         @ToolArg(description = "Channel integration resource ID (required)") String resourceId,
+                                         @ToolArg(description = "Version number (default: latest)") Integer version) {
+        requireRole(identity, authEnabled, "eddi-admin");
+        if (resourceId == null || resourceId.isBlank())
+            return errorJson("resourceId is required");
+        try {
+            var channelStore = getRestStore(
+                    ai.labs.eddi.configs.channels.IRestChannelIntegrationStore.class);
+            int ver = version != null ? version : channelStore.getCurrentVersion(resourceId);
+            var config = channelStore.readChannel(resourceId, ver);
+
+            var result = new LinkedHashMap<String, Object>();
+            result.put("resourceId", resourceId);
+            result.put("version", ver);
+            result.put("configuration", config);
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.error("MCP read_channel_integration failed for " + resourceId, e);
+            return errorJson("Failed to read channel integration: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "create_channel_integration", description = "Create a new channel integration configuration. "
+            + "Requires JSON body with name, channelType, platformConfig, targets[], and defaultTargetName. "
+            + "Returns the new resource ID and URI.")
+    public String createChannelIntegration(
+                                           @ToolArg(description = "Full JSON configuration body (required)") String config) {
+        requireRole(identity, authEnabled, "eddi-admin");
+        if (config == null || config.isBlank())
+            return errorJson("config is required");
+        try {
+            var channelConfig = jsonSerialization.deserialize(config,
+                    ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration.class);
+            var channelStore = getRestStore(
+                    ai.labs.eddi.configs.channels.IRestChannelIntegrationStore.class);
+            Response response = channelStore.createChannel(channelConfig);
+            String location = response.getHeaderString("Location");
+            String newId = extractIdFromLocation(location);
+
+            return resultJson("created", Map.of(
+                    "resourceId", newId != null ? newId : "unknown",
+                    "name", channelConfig.getName() != null ? channelConfig.getName() : "",
+                    "channelType", channelConfig.getChannelType() != null ? channelConfig.getChannelType() : "",
+                    "targetCount", channelConfig.getTargets() != null ? channelConfig.getTargets().size() : 0,
+                    "location", location != null ? location : "unknown",
+                    "status", response.getStatus()));
+        } catch (Exception e) {
+            LOGGER.error("MCP create_channel_integration failed", e);
+            return errorJson("Failed to create channel integration: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "update_channel_integration", description = "Update an existing channel integration configuration.")
+    public String updateChannelIntegration(
+                                           @ToolArg(description = "Channel integration resource ID (required)") String resourceId,
+                                           @ToolArg(description = "Current version number (required)") Integer version,
+                                           @ToolArg(description = "Full JSON configuration body (required)") String config) {
+        requireRole(identity, authEnabled, "eddi-admin");
+        if (resourceId == null || resourceId.isBlank())
+            return errorJson("resourceId is required");
+        if (config == null || config.isBlank())
+            return errorJson("config is required");
+        try {
+            int ver = version != null ? version : 1;
+            var channelConfig = jsonSerialization.deserialize(config,
+                    ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration.class);
+            var channelStore = getRestStore(
+                    ai.labs.eddi.configs.channels.IRestChannelIntegrationStore.class);
+            Response response = channelStore.updateChannel(resourceId, ver, channelConfig);
+            String location = response.getHeaderString("Location");
+            int newVersion = extractVersionFromLocation(location);
+
+            return resultJson("updated", Map.of(
+                    "resourceId", resourceId,
+                    "previousVersion", ver,
+                    "newVersion", newVersion,
+                    "status", response.getStatus()));
+        } catch (Exception e) {
+            LOGGER.error("MCP update_channel_integration failed for " + resourceId, e);
+            return errorJson("Failed to update channel integration: " + e.getMessage());
+        }
+    }
+
+    @Tool(name = "delete_channel_integration", description = "Delete a channel integration configuration.")
+    public String deleteChannelIntegration(
+                                           @ToolArg(description = "Channel integration resource ID (required)") String resourceId,
+                                           @ToolArg(description = "Current version number (required)") Integer version,
+                                           @ToolArg(description = "Permanently delete? (default: false)") Boolean permanent) {
+        requireRole(identity, authEnabled, "eddi-admin");
+        if (resourceId == null || resourceId.isBlank())
+            return errorJson("resourceId is required");
+        try {
+            int ver = version != null ? version : 1;
+            boolean isPermanent = permanent != null ? permanent : false;
+            var channelStore = getRestStore(
+                    ai.labs.eddi.configs.channels.IRestChannelIntegrationStore.class);
+            Response response = channelStore.deleteChannel(resourceId, ver, isPermanent);
+
+            return resultJson("deleted", Map.of(
+                    "resourceId", resourceId,
+                    "version", ver,
+                    "permanent", isPermanent,
+                    "status", response.getStatus()));
+        } catch (Exception e) {
+            LOGGER.error("MCP delete_channel_integration failed for " + resourceId, e);
+            return errorJson("Failed to delete channel integration: " + e.getMessage());
         }
     }
 }

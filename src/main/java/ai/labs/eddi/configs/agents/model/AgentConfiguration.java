@@ -19,6 +19,14 @@ import java.util.Map;
 public class AgentConfiguration {
     @JsonAlias("packages")
     private List<URI> workflows = new ArrayList<>();
+    /**
+     * @deprecated Since 6.1.0. Use standalone
+     *             {@code ChannelIntegrationConfiguration} documents instead. Legacy
+     *             connectors are auto-migrated at startup by
+     *             {@code ChannelConnectorMigration}. This field will be removed in
+     *             a future release.
+     */
+    @Deprecated(since = "6.1.0", forRemoval = true)
     private List<ChannelConnector> channels = new ArrayList<>();
 
     /**
@@ -70,6 +78,11 @@ public class AgentConfiguration {
      */
     private MemoryPolicy memoryPolicy;
 
+    /**
+     * @deprecated Since 6.1.0. Replaced by {@code ChannelIntegrationConfiguration}
+     *             with multi-target routing support.
+     */
+    @Deprecated(since = "6.1.0", forRemoval = true)
     public static class ChannelConnector {
         private URI type;
         private Map<String, String> config = new HashMap<>();
@@ -99,10 +112,12 @@ public class AgentConfiguration {
         this.workflows = workflows;
     }
 
+    @Deprecated(since = "6.1.0", forRemoval = true)
     public List<ChannelConnector> getChannels() {
         return channels;
     }
 
+    @Deprecated(since = "6.1.0", forRemoval = true)
     public void setChannels(List<ChannelConnector> channels) {
         this.channels = channels;
     }

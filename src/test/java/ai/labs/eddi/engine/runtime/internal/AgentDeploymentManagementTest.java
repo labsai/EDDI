@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
+import ai.labs.eddi.configs.migration.ChannelConnectorMigration;
 import ai.labs.eddi.configs.migration.V6QuteMigration;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -40,6 +41,7 @@ class AgentDeploymentManagementTest {
     private IMigrationManager migrationManager;
     private V6RenameMigration v6RenameMigration;
     private V6QuteMigration v6QuteMigration;
+    private ChannelConnectorMigration channelConnectorMigration;
     private IRuntime runtime;
     private AgentDeploymentManagement management;
 
@@ -54,6 +56,7 @@ class AgentDeploymentManagementTest {
         migrationManager = mock(IMigrationManager.class);
         v6RenameMigration = mock(V6RenameMigration.class);
         v6QuteMigration = mock(V6QuteMigration.class);
+        channelConnectorMigration = mock(ChannelConnectorMigration.class);
         runtime = mock(IRuntime.class);
 
         var scheduler = mock(ScheduledExecutorService.class);
@@ -63,7 +66,7 @@ class AgentDeploymentManagementTest {
                 deploymentStore, agentFactory, agentStore, agentsReadiness,
                 conversationMemoryStore, documentDescriptorStore,
                 migrationManager, v6RenameMigration, v6QuteMigration,
-                runtime, 30);
+                channelConnectorMigration, runtime, 30);
     }
 
     @Nested

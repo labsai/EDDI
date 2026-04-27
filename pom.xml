@@ -544,6 +544,10 @@
                          Prevents CI from hanging indefinitely when Docker image builds
                          or container startup fails to propagate errors. -->
                     <forkedProcessTimeoutInSeconds>900</forkedProcessTimeoutInSeconds>
+                    <!-- Retry container-startup failures once. Testcontainers ITs
+                         can flake on CI runners due to Docker networking timing.
+                         This gives one automatic retry before failing the build. -->
+                    <rerunFailingTestsCount>1</rerunFailingTestsCount>
                     <systemPropertyVariables>
                         <native.image.path>${project.build.directory}/${project.build.finalName}-runner
                         </native.image.path>

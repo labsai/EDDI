@@ -38,12 +38,12 @@ public class V6QuteMigration {
     private static final String[] TEMPLATE_COLLECTIONS = {"apicalls", "outputs", "propertysetter", "llms"};
 
     private final MongoDatabase database;
-    private final MigrationLogStore migrationLogStore;
+    private final IMigrationLogStore migrationLogStore;
     private final TemplateSyntaxMigrator migrator;
     private final boolean enabled;
 
     @Inject
-    public V6QuteMigration(MongoDatabase database, MigrationLogStore migrationLogStore, TemplateSyntaxMigrator migrator,
+    public V6QuteMigration(MongoDatabase database, IMigrationLogStore migrationLogStore, TemplateSyntaxMigrator migrator,
             @ConfigProperty(name = "eddi.migration.v6-qute.enabled", defaultValue = "false") boolean enabled) {
         this.database = database;
         this.migrationLogStore = migrationLogStore;

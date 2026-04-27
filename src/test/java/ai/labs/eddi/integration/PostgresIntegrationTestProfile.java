@@ -30,8 +30,9 @@ public class PostgresIntegrationTestProfile implements QuarkusTestProfile {
                 Map.entry("quarkus.datasource.db-kind", "postgresql"),
                 Map.entry("quarkus.datasource.active", "true"),
                 Map.entry("quarkus.datasource.devservices.enabled", "true"),
-                // Disable MongoDB
+                // Disable MongoDB — both DevServices and health check
                 Map.entry("quarkus.mongodb.devservices.enabled", "false"),
+                Map.entry("quarkus.mongodb.health.enabled", "false"),
                 // Auth disabled
                 Map.entry("quarkus.oidc.tenant-enabled", "false"),
                 Map.entry("authorization.enabled", "false"),
