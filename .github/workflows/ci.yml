@@ -470,12 +470,15 @@ jobs:
             .
 
       - name: Scan Docker image for vulnerabilities
+        # Advisory only — OS-level CVEs in Red Hat's base image are outside our control.
+        # The base-image-check.yml workflow monitors for digest updates weekly.
+        # Filesystem scan (Job 2c) remains strict for our own dependencies.
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
           scan-type: image
           image-ref: ${{ env.DOCKER_IMAGE }}:${{ steps.meta.outputs.primary-tag }}
           severity: CRITICAL,HIGH
-          exit-code: 1
+          exit-code: 0
           ignore-unfixed: true
           format: table
           trivyignores: .trivyignore

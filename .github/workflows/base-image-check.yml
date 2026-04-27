@@ -1,0 +1,229 @@
+name: Base Image Check
+
+# Weekly check for base image digest updates and OS-level vulnerabilities.
+# Complements Dependabot (which also watches for digest changes) by adding:
+#   1. Trivy vulnerability reporting on the base image
+#   2. Detection of newer tag versions (e.g., 1.24 → 1.25)
+#   3. Auto-PR creation when the digest changes
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+env:
+  DOCKERFILE: src/main/docker/Dockerfile
+
+jobs:
+  check-base-image:
+    name: Check Base Image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Parse Dockerfile
+        id: parse
+        run: |
+          # Extract the last FROM line (runtime stage)
+          FROM_LINE=$(grep -E '^FROM\s+' "$DOCKERFILE" | tail -1)
+
+          # Parse: FROM image:tag@sha256:hex
+          IMAGE=$(echo "$FROM_LINE" | sed -n 's/^FROM[[:space:]]*\([^:]*\):.*/\1/p')
+          TAG=$(echo "$FROM_LINE" | sed -n 's/.*:\([^@]*\)@.*/\1/p')
+          DIGEST=$(echo "$FROM_LINE" | sed -n 's/.*@\(sha256:[a-f0-9]*\).*/\1/p')
+
+          if [ -z "$IMAGE" ] || [ -z "$TAG" ] || [ -z "$DIGEST" ]; then
+            echo "::error::Failed to parse FROM line: ${FROM_LINE}"
+            exit 1
+          fi
+
+          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
+
+          echo "### 📌 Pinned Base Image" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`${IMAGE}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tag | \`${TAG}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Digest | \`${DIGEST}\` |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fetch remote digest
+        id: remote
+        run: |
+          IMAGE="${{ steps.parse.outputs.image }}"
+          TAG="${{ steps.parse.outputs.tag }}"
+          PINNED="${{ steps.parse.outputs.digest }}"
+
+          # skopeo inspect --raw returns the exact manifest bytes from the registry.
+          # SHA256 of those bytes is the content-addressable digest per OCI spec.
+          # skopeo is pre-installed on ubuntu-latest runners.
+          REMOTE_DIGEST=$(skopeo inspect --raw "docker://${IMAGE}:${TAG}" \
+            | sha256sum | awk '{print "sha256:"$1}')
+
+          if [ -z "$REMOTE_DIGEST" ] || [ "$REMOTE_DIGEST" = "sha256:" ]; then
+            echo "::error::Failed to fetch remote digest for ${IMAGE}:${TAG}"
+            exit 1
+          fi
+
+          echo "digest=${REMOTE_DIGEST}" >> $GITHUB_OUTPUT
+
+          if [ "$REMOTE_DIGEST" = "$PINNED" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "### ✅ Digest Current" >> $GITHUB_STEP_SUMMARY
+            echo "Remote digest matches pinned digest — no update needed." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "### 🔄 New Digest Available" >> $GITHUB_STEP_SUMMARY
+            echo "| | Digest |" >> $GITHUB_STEP_SUMMARY
+            echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+            echo "| Pinned | \`${PINNED}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| Remote | \`${REMOTE_DIGEST}\` |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Check for newer tag
+        id: newer
+        run: |
+          IMAGE="${{ steps.parse.outputs.image }}"
+          TAG="${{ steps.parse.outputs.tag }}"
+
+          # Increment minor version: 1.24 → 1.25
+          MAJOR=$(echo "$TAG" | cut -d. -f1)
+          MINOR=$(echo "$TAG" | cut -d. -f2)
+          NEXT="${MAJOR}.$((MINOR + 1))"
+
+          echo "### 🔍 Newer Tag Check" >> $GITHUB_STEP_SUMMARY
+          if skopeo inspect "docker://${IMAGE}:${NEXT}" > /dev/null 2>&1; then
+            echo "tag=${NEXT}" >> $GITHUB_OUTPUT
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "⬆️ **\`${NEXT}\` is available** — consider upgrading from \`${TAG}\`." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "\`${TAG}\` is the latest tag (checked \`${NEXT}\` — not found)." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Trivy scan on base image
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: image
+          image-ref: "${{ steps.parse.outputs.image }}:${{ steps.parse.outputs.tag }}"
+          severity: CRITICAL,HIGH
+          exit-code: 0
+          ignore-unfixed: false
+          format: table
+
+      - name: Create PR for digest update
+        if: steps.remote.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          IMAGE="${{ steps.parse.outputs.image }}"
+          TAG="${{ steps.parse.outputs.tag }}"
+          OLD_DIGEST="${{ steps.parse.outputs.digest }}"
+          NEW_DIGEST="${{ steps.remote.outputs.digest }}"
+          BRANCH="chore/update-base-image-digest"
+
+          # Update the digest in the Dockerfile
+          sed -i "s|${IMAGE}:${TAG}@${OLD_DIGEST}|${IMAGE}:${TAG}@${NEW_DIGEST}|" "$DOCKERFILE"
+
+          # Verify the replacement actually changed something
+          if git diff --quiet "$DOCKERFILE"; then
+            echo "::warning::sed replacement produced no diff — skipping PR"
+            exit 0
+          fi
+
+          # Configure git for the bot commit
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Create or reset the branch
+          git checkout -B "$BRANCH"
+          git add "$DOCKERFILE"
+          git commit -m "chore(docker): update base image digest"
+
+          # Push (delete remote branch first to avoid conflicts with stale bot branches)
+          git push origin --delete "$BRANCH" 2>/dev/null || true
+          git push -u origin "$BRANCH"
+
+          # Create PR if one doesn't already exist
+          EXISTING=$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number' 2>/dev/null || echo "")
+          if [ -n "$EXISTING" ]; then
+            echo "PR #${EXISTING} already exists — updated branch"
+            echo "### ✅ Updated existing PR #${EXISTING}" >> $GITHUB_STEP_SUMMARY
+          else
+            PR_URL=$(gh pr create \
+              --title "chore(docker): update base image digest" \
+              --label "dependencies,security" \
+              --body "## 🐳 Base Image Digest Update
+
+          The weekly base image check detected a new digest for the pinned base image.
+
+          | | Value |
+          |---|---|
+          | **Image** | \`${IMAGE}:${TAG}\` |
+          | **Old digest** | \`${OLD_DIGEST}\` |
+          | **New digest** | \`${NEW_DIGEST}\` |
+
+          Review the Trivy scan in the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+
+          > Auto-generated by \`base-image-check.yml\`.")
+
+            echo "### ✅ Created ${PR_URL}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Notify about newer tag
+        if: steps.newer.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          IMAGE="${{ steps.parse.outputs.image }}"
+          TAG="${{ steps.parse.outputs.tag }}"
+          NEXT="${{ steps.newer.outputs.tag }}"
+          TITLE="chore(docker): newer base image tag ${NEXT} available"
+
+          # Don't create duplicate issues
+          EXISTING=$(gh issue list --search "\"${TITLE}\" in:title" --state open --json number -q '.[0].number' 2>/dev/null || echo "")
+          if [ -n "$EXISTING" ]; then
+            echo "Issue #${EXISTING} already exists — skipping"
+          else
+            gh issue create \
+              --title "$TITLE" \
+              --label "dependencies,security" \
+              --body "## ⬆️ Newer Base Image Tag Available
+
+          | | Value |
+          |---|---|
+          | **Current tag** | \`${TAG}\` |
+          | **Available tag** | \`${NEXT}\` |
+          | **Image** | \`${IMAGE}\` |
+
+          A newer tag is available for the base image. This may include security patches, JDK updates, or UBI OS updates.
+
+          ### Action Required
+          1. Update the \`FROM\` line in \`${DOCKERFILE}\`
+          2. Run Trivy locally to verify the new image
+          3. Test the build
+
+          > Auto-generated by \`base-image-check.yml\`."
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Result" >> $GITHUB_STEP_SUMMARY
+          CHANGED="${{ steps.remote.outputs.changed }}"
+          NEWER="${{ steps.newer.outputs.exists }}"
+          [ "$CHANGED" = "true" ] && echo "- 🔄 Digest changed — PR created" >> $GITHUB_STEP_SUMMARY \
+                                  || echo "- ✅ Digest current — no action needed" >> $GITHUB_STEP_SUMMARY
+          [ "$NEWER" = "true" ] && echo "- ⬆️ Newer tag \`${{ steps.newer.outputs.tag }}\` detected" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔍 Trivy scan completed" >> $GITHUB_STEP_SUMMARY
