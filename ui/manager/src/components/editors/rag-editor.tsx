@@ -83,7 +83,7 @@ const EMBEDDING_PARAM_HINTS: Record<string, { key: string; placeholder: string }
   gemini: [
     { key: "apiKey", placeholder: "${eddivault:gemini-key}" },
     { key: "model", placeholder: "gemini-embedding-2"},
-    { key: "tasktype", placeholder: "RETRIEVAL_DOCUMENT"},
+    { key: "taskType", placeholder: "RETRIEVAL_DOCUMENT"},
   ]
 };
 
@@ -130,7 +130,6 @@ const STORE_PARAM_HINTS: Record<string, { key: string; placeholder: string }[]> 
   chroma: [
     { key: "baseUrl", placeholder: "http://localhost:8000" },
     { key: "collectionName", placeholder: "kb-product-docs" },
-    { key: "apiKey", placeholder: "" },
     { key: "tenantName", placeholder: "default_tenant" },
     { key: "databaseName", placeholder: "default_database" },
   ],
