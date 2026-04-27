@@ -27,7 +27,7 @@ Each entry follows this format:
 
 ### Medium Severity — Log Injection (77 findings)
 
-Created `LogSanitizer.java` in `ai.labs.eddi.utils` — strips `\r\n\t` and control characters from log values. Applied `sanitize()` wrapper to user-controlled values across 13 files:
+Created `LogSanitizer.java` in `ai.labs.eddi.utils` — replaces `\r`, `\n`, `\t` with `_` and strips remaining control characters from log values. Applied `sanitize()` wrapper to user-controlled values across 13 files:
 
 | File | Values sanitized |
 |------|-----------------|

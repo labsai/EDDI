@@ -418,7 +418,7 @@ class AgentOrchestrator {
         var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config);
         tools.add(tool);
         LOGGER.infof("[MEMORY] UserMemoryTool enabled for agent='%s', user='%s', groups=%s", sanitize(memory.getAgentId()),
-                sanitize(memory.getUserId()), groupIds);
+                sanitize(memory.getUserId()), groupIds.stream().map(g -> sanitize(g)).toList());
     }
 
     /**

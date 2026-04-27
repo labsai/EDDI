@@ -92,7 +92,7 @@ class LogSanitizerTest {
         }
 
         @Test
-        @DisplayName("should strip all control chars 0x01-0x08, 0x0E-0x1F")
+        @DisplayName("should strip all non-whitespace control chars (0x01-0x08, 0x0B-0x0C, 0x0E-0x1F)")
         void stripsAllNonWhitespaceControlChars() {
             // Build a string with every control char that is NOT \r \n \t
             StringBuilder sb = new StringBuilder("start");
