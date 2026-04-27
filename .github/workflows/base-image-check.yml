@@ -149,9 +149,8 @@ jobs:
           git add "$DOCKERFILE"
           git commit -m "chore(docker): update base image digest"
 
-          # Push (delete remote branch first to avoid conflicts with stale bot branches)
-          git push origin --delete "$BRANCH" 2>/dev/null || true
-          git push -u origin "$BRANCH"
+          # Force-push to update the branch in place (preserves any existing PR)
+          git push --force-with-lease origin "$BRANCH"
 
           # Create PR if one doesn't already exist
           EXISTING=$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number' 2>/dev/null || echo "")
