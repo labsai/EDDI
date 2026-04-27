@@ -240,4 +240,73 @@ class RestConversationStoreTest {
             verify(runtime, never()).submitCallable(any(), any());
         }
     }
+
+    @Nested
+    @DisplayName("pagination parameter sanitization (CodeQL fix)")
+    class PaginationParameterSanitization {
+
+        @Test
+        @DisplayName("should clamp null index to 0")
+        void nullIndex() throws Exception {
+            when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+
+            List<ConversationDescriptor> result = restConversationStore.readConversationDescriptors(
+                    null, 10, null, null, null, null, null, null);
+
+            // Should not throw, empty result is fine
+            assertNotNull(result);
+            // Verify it called with index=0 (clamped from null)
+            verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(10), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("should clamp negative index to 0")
+        void negativeIndex() throws Exception {
+            when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+
+            List<ConversationDescriptor> result = restConversationStore.readConversationDescriptors(
+                    -5, 10, null, null, null, null, null, null);
+
+            assertNotNull(result);
+            verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(10), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("should clamp null limit to 20")
+        void nullLimit() throws Exception {
+            when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+
+            restConversationStore.readConversationDescriptors(
+                    0, null, null, null, null, null, null, null);
+
+            verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("should clamp limit > 100 to 100")
+        void excessiveLimit() throws Exception {
+            when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+
+            restConversationStore.readConversationDescriptors(
+                    0, 500, null, null, null, null, null, null);
+
+            verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(100), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("should accept valid limit within bounds")
+        void validLimit() throws Exception {
+            when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+
+            restConversationStore.readConversationDescriptors(
+                    0, 50, null, null, null, null, null, null);
+
+            verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(50), anyBoolean());
+        }
+    }
 }

@@ -19,6 +19,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -111,12 +113,12 @@ public class McpToolProviderManager {
                         allSpecs.add(spec);
                         allExecutors.put(spec.name(), executor);
                     }
-                    LOGGER.infof("Discovered %d tools from MCP server '%s'", result.tools().size(), serverName);
+                    LOGGER.infof("Discovered %d tools from MCP server '%s'", result.tools().size(), sanitize(serverName));
                 }
 
             } catch (Exception e) {
                 String serverName = serverConfig.getName() != null ? serverConfig.getName() : serverConfig.getUrl();
-                LOGGER.warnf(e, "Failed to connect to MCP server '%s': %s", serverName, e.getMessage());
+                LOGGER.warnf(e, "Failed to connect to MCP server '%s': %s", sanitize(serverName), e.getMessage());
             }
         }
 
@@ -129,7 +131,8 @@ public class McpToolProviderManager {
      */
     private McpClient getOrCreateClient(McpServerConfig config) {
         return clientCache.computeIfAbsent(config.getUrl(), url -> {
-            LOGGER.infof("Creating MCP client for '%s' (%s transport)", config.getName() != null ? config.getName() : url, config.getTransport());
+            LOGGER.infof("Creating MCP client for '%s' (%s transport)", sanitize(config.getName() != null ? config.getName() : url),
+                    sanitize(config.getTransport()));
 
             Duration timeout = Duration.ofMillis(config.getTimeoutMs() != null ? config.getTimeoutMs() : 30000L);
 
@@ -170,9 +173,9 @@ public class McpToolProviderManager {
         if (client != null) {
             try {
                 client.close();
-                LOGGER.infof("Closed MCP client for '%s'", url);
+                LOGGER.infof("Closed MCP client for '%s'", sanitize(url));
             } catch (Exception e) {
-                LOGGER.warnf(e, "Error closing MCP client for '%s'", url);
+                LOGGER.warnf(e, "Error closing MCP client for '%s'", sanitize(url));
             }
         }
     }
@@ -187,7 +190,7 @@ public class McpToolProviderManager {
             try {
                 entry.getValue().close();
             } catch (Exception e) {
-                LOGGER.warnf(e, "Error closing MCP client for '%s'", entry.getKey());
+                LOGGER.warnf(e, "Error closing MCP client for '%s'", sanitize(entry.getKey()));
             }
         }
         clientCache.clear();

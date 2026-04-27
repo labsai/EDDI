@@ -13,6 +13,46 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔒 CodeQL Remediation — Array Bounds, Arithmetic Overflow, Log Injection (2026-04-26)
+
+**Repo:** EDDI (`fix/codeql-remediation-pr455`)
+
+**What changed:** Remediated all CodeQL findings from PR #455 scan — 4 High severity (array bounds, arithmetic overflow) and 77 Medium severity (log injection / CWE-117).
+
+### High Severity (4 findings)
+
+- **CronDescriber.java** — Added `v >= 0` lower-bound guard in `formatSet()`. `CronParser.parseField()` could theoretically return negative values, causing `ArrayIndexOutOfBoundsException`. (2 findings)
+- **RestConversationStore.java** — Clamped pagination parameters (`index`, `limit`) at method entry, added `Integer.MAX_VALUE` overflow guard on `index++`. Prevents infinite loop if user provides max-int index. (1 finding)
+- **DescriptorStore.java** — Replaced `index * effectiveLimit` (int×int overflow) with `(long) index * effectiveLimit` + `Math.min(skipLong, Integer.MAX_VALUE)`. Resolves all 30 CodeQL annotations (same finding across generic instantiations). (1 finding, 30 annotations)
+
+### Medium Severity — Log Injection (77 findings)
+
+Created `LogSanitizer.java` in `ai.labs.eddi.utils` — replaces `\r`, `\n`, `\t` with `_` and strips remaining control characters from log values. Applied `sanitize()` wrapper to user-controlled values across 13 files:
+
+| File | Values sanitized |
+|------|-----------------|
+| RestSecretStore | `tenantId`, `keyName` |
+| RagIngestionService | `kbId`, `documentName` |
+| ExpressionProvider | `expression` |
+| ToolRateLimiter | `toolName` |
+| ToolCostTracker | `toolName`, `conversationId` |
+| ToolCacheService | `toolName` |
+| McpToolProviderManager | `serverName`, URL |
+| LlmTask | `conversationId` |
+| EmbeddingStoreFactory | `storeType`, `kbId`, config params |
+| ConversationSummarizer | `conversationId` |
+| ChatModelRegistry | `tenantId`, `keyName` |
+| AgentOrchestrator | `agentId`, `userId`, budget error |
+| RestSlackWebhook | `eventType`, `eventId` |
+
+**Note:** 4 earlier files (InMemoryConversationCoordinator, NatsConversationCoordinator, RestAgentEngineStreaming, InMemoryTenantQuotaStore) already had inline `sanitizeForLog()` from PR #424 review. These pre-existing fixes remain; the new `LogSanitizer` centralizes the pattern for all remaining files.
+
+**Files (new):** `LogSanitizer.java`
+**Files (modified):** CronDescriber, RestConversationStore, DescriptorStore + 13 log injection files
+**Verification:** `mvnw compile` — BUILD SUCCESS.
+
+---
+
 ## 🔒 OpenSSF Scorecard: Fuzzing + SLSA Provenance + Signed Releases (2026-04-23)
 
 **Repo:** EDDI (`chore/scorecard-improvements`)

@@ -15,6 +15,8 @@ import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.util.List;
 import java.util.Map;
 
@@ -44,18 +46,11 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         this.conversationService = conversationService;
     }
 
-    private static String sanitizeForLog(String value) {
-        if (value == null) {
-            return "null";
-        }
-        return value.replace('\n', '_').replace('\r', '_');
-    }
-
     @Override
     public void sayStreaming(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields,
                              InputData inputData, SseEventSink eventSink, Sse sse) {
 
-        final String safeConversationId = sanitizeForLog(conversationId);
+        final String safeConversationId = sanitize(conversationId);
         try {
             conversationService.sayStreaming(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
                     new IConversationService.StreamingResponseHandler() {
