@@ -84,6 +84,7 @@ const EMBEDDING_PARAM_HINTS: Record<string, { key: string; placeholder: string }
     { key: "apiKey", placeholder: "${eddivault:gemini-key}" },
     { key: "model", placeholder: "gemini-embedding-2"},
     { key: "taskType", placeholder: "RETRIEVAL_DOCUMENT"},
+    { key: "outputDimensionality", placeholder: "3072"},
   ]
 };
 
