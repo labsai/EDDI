@@ -83,10 +83,42 @@ public class EmbeddingModelFactory {
         };
     }
 
+    // ──────────────────────────────────────────────────
+    // OpenAI
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds an OpenAI-backed {@link EmbeddingModel} from configuration
+     * parameters.
+     * <p>
+     * Supported embeddingParameters:
+     * <ul>
+     * <li>{@code apiKey} — OpenAI API key, supports {@code ${eddivault:...}}
+     * (required)</li>
+     * <li>{@code model} — model name (default: "text-embedding-3-small")</li>
+     * </ul>
+     */
     private EmbeddingModel buildOpenAi(Map<String, String> params) {
         return OpenAiEmbeddingModel.builder().modelName(params.getOrDefault("model", "text-embedding-3-small")).apiKey(params.get("apiKey")).build();
     }
 
+    // ──────────────────────────────────────────────────
+    // Azure OpenAI
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds an Azure OpenAI-backed {@link EmbeddingModel} from configuration
+     * parameters.
+     * <p>
+     * Supported embeddingParameters:
+     * <ul>
+     * <li>{@code apiKey} — Azure API key, supports {@code ${eddivault:...}}
+     * (required)</li>
+     * <li>{@code deploymentName} — deployment name (default:
+     * "text-embedding-3-small")</li>
+     * <li>{@code endpoint} — Azure endpoint (optional)</li>
+     * </ul>
+     */
     private EmbeddingModel buildAzureOpenAi(Map<String, String> params) {
         var builder = dev.langchain4j.model.azure.AzureOpenAiEmbeddingModel.builder()
                 .deploymentName(params.getOrDefault("deploymentName", "text-embedding-3-small")).apiKey(params.get("apiKey"));
@@ -97,11 +129,43 @@ public class EmbeddingModelFactory {
         return builder.build();
     }
 
+    // ──────────────────────────────────────────────────
+    // Ollama
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds an Ollama-backed {@link EmbeddingModel} from configuration
+     * parameters.
+     * <p>
+     * Supported embeddingParameters:
+     * <ul>
+     * <li>{@code model} — model name (default: "nomic-embed-text")</li>
+     * <li>{@code baseUrl} — Ollama server URL (default:
+     * "http://localhost:11434")</li>
+     * </ul>
+     */
     private EmbeddingModel buildOllama(Map<String, String> params) {
         return OllamaEmbeddingModel.builder().modelName(params.getOrDefault("model", "nomic-embed-text"))
                 .baseUrl(params.getOrDefault("baseUrl", "http://localhost:11434")).build();
     }
 
+    // ──────────────────────────────────────────────────
+    // Gemini
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds a Google Gemini-backed {@link EmbeddingModel} from configuration
+     * parameters.
+     * <p>
+     * Supported embeddingParameters:
+     * <ul>
+     * <li>{@code apiKey} — Google AI API key, supports {@code ${eddivault:...}}
+     * (required)</li>
+     * <li>{@code model} — model name (default: "gemini-embedding-2")</li>
+     * <li>{@code taskType} — task type (default: "RETRIEVAL_DOCUMENT")</li>
+     * <li>{@code outputDimensionality} — output dimension (default: 3072)</li>
+     * </ul>
+     */
     private EmbeddingModel buildGemini(Map<String, String> params) {
         TaskType taskType = parseTaskType(params.getOrDefault("taskType", "RETRIEVAL_DOCUMENT"));
         Integer outputDimensionality = parseIntParam(params, "outputDimensionality", 3072);
@@ -114,20 +178,80 @@ public class EmbeddingModelFactory {
                 .build();
     }
 
+    // ──────────────────────────────────────────────────
+    // Mistral
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds a Mistral AI-backed {@link EmbeddingModel} from configuration
+     * parameters.
+     * <p>
+     * Supported embeddingParameters:
+     * <ul>
+     * <li>{@code apiKey} — Mistral API key, supports {@code ${eddivault:...}}
+     * (required)</li>
+     * <li>{@code model} — model name (default: "mistral-embed")</li>
+     * </ul>
+     */
     private EmbeddingModel buildMistral(Map<String, String> params) {
         return MistralAiEmbeddingModel.builder().modelName(params.getOrDefault("model", "mistral-embed")).apiKey(params.get("apiKey")).build();
     }
 
+    // ──────────────────────────────────────────────────
+    // Bedrock
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds an AWS Bedrock-backed {@link EmbeddingModel} from configuration
+     * parameters.
+     * <p>
+     * Supported embeddingParameters:
+     * <ul>
+     * <li>{@code model} — model name (default:
+     * "amazon.titan-embed-text-v2:0")</li>
+     * <li>{@code region} — AWS region (default: "us-east-1")</li>
+     * </ul>
+     */
     private EmbeddingModel buildBedrock(Map<String, String> params) {
         String model = params.getOrDefault("model", "amazon.titan-embed-text-v2:0");
         String region = params.getOrDefault("region", "us-east-1");
         return BedrockTitanEmbeddingModel.builder().model(model).region(Region.of(region)).build();
     }
 
+    // ──────────────────────────────────────────────────
+    // Cohere
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds a Cohere-backed {@link EmbeddingModel} from configuration
+     * parameters.
+     * <p>
+     * Supported embeddingParameters:
+     * <ul>
+     * <li>{@code apiKey} — Cohere API key, supports {@code ${eddivault:...}}
+     * (required)</li>
+     * <li>{@code model} — model name (default: "embed-english-v3.0")</li>
+     * </ul>
+     */
     private EmbeddingModel buildCohere(Map<String, String> params) {
         return CohereEmbeddingModel.builder().modelName(params.getOrDefault("model", "embed-english-v3.0")).apiKey(params.get("apiKey")).build();
     }
 
+    // ──────────────────────────────────────────────────
+    // Vertex AI
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds a Google Vertex AI-backed {@link EmbeddingModel} from configuration
+     * parameters.
+     * <p>
+     * Supported embeddingParameters:
+     * <ul>
+     * <li>{@code project} — GCP project ID (required)</li>
+     * <li>{@code location} — GCP location (default: "us-central1")</li>
+     * <li>{@code model} — model name (default: "text-embedding-005")</li>
+     * </ul>
+     */
     private EmbeddingModel buildVertex(Map<String, String> params) {
         String project = params.get("project");
         String location = params.getOrDefault("location", "us-central1");
