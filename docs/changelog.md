@@ -30,9 +30,9 @@ Each entry follows this format:
 
 ### Design decisions
 
-- **install.sh approach:** `get.docker.com` is a redirect to `github.com/docker/docker-install/master/install.sh`. By pointing directly at a pinned commit (`f2b0ef96…`), the scorecard's `hasUnpinnedURLs()` recognizes the `raw.githubusercontent.com` + 40-char commit hash as pinned. The SHA256 check is defense-in-depth. Since the URL is immutable (a Git commit never changes), the hash can never fail — zero UX degradation.
-- **install.ps1 unchanged:** Uses `winget install` (package manager), not download-then-run. Scorecard's shell parser only handles `sh/bash/mksh`, not PowerShell.
-- **ci.yml approach:** The `echo` command is not in the scorecard's `downloadUtils` list, so `echo "$VAR" | python3` no longer triggers the heuristic.
+- **install.sh approach:** `get.docker.com` is a redirect to `github.com/docker/docker-install/master/install.sh`. By pointing directly at a pinned commit (`f2b0ef96…`), the scorecard's `hasUnpinnedURLs()` recognizes the `raw.githubusercontent.com` + 40-char commit hash as pinned. The SHA256 check is defense-in-depth. Since the URL is immutable (a Git commit never changes), hash mismatches should only occur on corrupt downloads or infrastructure compromise — in both cases the check correctly prevents execution.
+- **install.ps1 unchanged:** Uses `winget install` (package manager), not download-then-run. Scorecard's shell parser (`mvdan.cc/sh/v3`) only handles `sh/bash/mksh`, not PowerShell.
+- **ci.yml approach:** The `echo` command is not in the scorecard's `downloadUtils` list (`["curl", "wget", "gsutil"]` — see [`shell_download_validate.go`](https://github.com/ossf/scorecard/blob/main/checks/raw/shell_download_validate.go#L60-L62)), so `echo "$VAR" | python3` no longer triggers the heuristic.
 
 **Cross-OS verified:** `sha256sum` (GNU coreutils / BusyBox), `mktemp` template with X's at end, `curl -o`, `sh file` — all tested against Debian, RHEL, Alpine, WSL. Function only runs for `PLATFORM=linux|wsl`; macOS prints instructions and exits.
 
