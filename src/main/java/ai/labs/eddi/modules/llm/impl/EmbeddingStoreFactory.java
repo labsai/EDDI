@@ -10,13 +10,13 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.store.embedding.EmbeddingStore;
+import dev.langchain4j.store.embedding.chroma.ChromaEmbeddingStore;
+import dev.langchain4j.store.embedding.chroma.ChromaApiVersion;
 import dev.langchain4j.store.embedding.elasticsearch.ElasticsearchEmbeddingStore;
 import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 import dev.langchain4j.store.embedding.mongodb.MongoDbEmbeddingStore;
 import dev.langchain4j.store.embedding.pgvector.PgVectorEmbeddingStore;
 import dev.langchain4j.store.embedding.qdrant.QdrantEmbeddingStore;
-import dev.langchain4j.store.embedding.chroma.ChromaEmbeddingStore;
-import dev.langchain4j.store.embedding.chroma.ChromaApiVersion;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -24,6 +24,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
@@ -219,7 +220,7 @@ public class EmbeddingStoreFactory {
 
         String host = params.getOrDefault("host", "localhost");
         int port = parseIntParam(params, "port", 6334);
-        String collectionName = params.getOrDefault("collectionName", "eddi_kb_" + kbId.toLowerCase().replaceAll("[^a-z0-9_]", "_"));
+        String collectionName = params.getOrDefault("collectionName", sanitizeCollection(kbId));
         boolean useTls = Boolean.parseBoolean(params.getOrDefault("useTls", "false"));
 
         LOGGER.infof("Building Qdrant store: host=%s, port=%d, collection=%s, tls=%b", host, port, collectionName, useTls);
@@ -256,16 +257,19 @@ public class EmbeddingStoreFactory {
         String baseUrl = params.getOrDefault("baseUrl", "http://localhost:8000");
         String tenantName = params.getOrDefault("tenantName", "default_tenant");
         String databaseName = params.getOrDefault("databaseName", "default_database");
-        String collectionName = params.getOrDefault("collectionName", "eddi_kb_" + kbId.toLowerCase().replaceAll("[^a-z0-9_]", "_"));
+        String collectionName = params.getOrDefault("collectionName", sanitizeCollection(kbId));
 
-        LOGGER.infof("Building Chroma store: baseUrl=%s, tenant=%s, database=%s, collection=%s", baseUrl, tenantName, databaseName, collectionName);
+        ChromaApiVersion version = parseChromaApiVersion(params.getOrDefault("apiVersion", "V2"));
+
+        LOGGER.infof("Building Chroma store: baseUrl=%s, tenant=%s, database=%s, collection=%s, apiVersion=%s", baseUrl, tenantName, databaseName,
+                collectionName, version.toString());
 
         return ChromaEmbeddingStore.builder()
                 .baseUrl(baseUrl)
                 .tenantName(tenantName)
                 .databaseName(databaseName)
                 .collectionName(collectionName)
-                .apiVersion(ChromaApiVersion.V2)
+                .apiVersion(version)
                 .build();
     }
 
@@ -279,6 +283,21 @@ public class EmbeddingStoreFactory {
     private Map<String, String> resolveParams(RagConfiguration config) {
         Map<String, String> rawParams = config.getStoreParameters() != null ? config.getStoreParameters() : Map.of();
         return secretResolver.resolveSecrets(rawParams);
+    }
+
+    private ChromaApiVersion parseChromaApiVersion(String apiVersionStr) {
+        try {
+            ChromaApiVersion chromaApiVersion = (apiVersionStr == null || apiVersionStr.isBlank())
+                    ? ChromaApiVersion.V2
+                    : ChromaApiVersion.valueOf(apiVersionStr);
+            return chromaApiVersion;
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    String.format("Invalid '%s' ChromaApiVersion. Valid ChromaApiVersion '%s'",
+                            apiVersionStr,
+                            Arrays.toString(ChromaApiVersion.values())),
+                    e);
+        }
     }
 
     /**
@@ -307,6 +326,10 @@ public class EmbeddingStoreFactory {
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Invalid integer value for '" + key + "': " + raw, e);
         }
+    }
+
+    static String sanitizeCollection(String kbId) {
+        return "eddi_kb_" + kbId.toLowerCase().replaceAll("[^a-z0-9_]", "_").replaceAll("_+$", "");
     }
 
     /**

@@ -23,6 +23,7 @@ import org.jboss.logging.Logger;
 import software.amazon.awssdk.regions.Region;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -102,15 +103,13 @@ public class EmbeddingModelFactory {
     }
 
     private EmbeddingModel buildGemini(Map<String, String> params) {
-        String taskTypeStr = params.get("taskType");
-
-        TaskType taskType = (taskTypeStr == null || taskTypeStr.isBlank())
-                ? GoogleAiEmbeddingModel.TaskType.RETRIEVAL_DOCUMENT
-                : GoogleAiEmbeddingModel.TaskType.valueOf(taskTypeStr);
+        TaskType taskType = parseTaskType(params.getOrDefault("taskType", "RETRIEVAL_DOCUMENT"));
+        Integer outputDimensionality = parseIntParam(params, "outputDimensionality", 3072);
 
         return GoogleAiEmbeddingModel.builder()
-                .modelName(params.getOrDefault("model", "gemini-embedding-001"))
+                .modelName(params.getOrDefault("model", "gemini-embedding-2"))
                 .apiKey(params.get("apiKey"))
+                .outputDimensionality(outputDimensionality)
                 .taskType(taskType)
                 .build();
     }
@@ -137,6 +136,35 @@ public class EmbeddingModelFactory {
             throw new IllegalArgumentException("Vertex AI embedding requires 'project' parameter");
         }
         return VertexAiEmbeddingModel.builder().project(project).location(location).modelName(model).build();
+    }
+
+    private TaskType parseTaskType(String taskTypeStr) {
+        try {
+            TaskType taskType = (taskTypeStr == null || taskTypeStr.isBlank())
+                    ? TaskType.RETRIEVAL_DOCUMENT
+                    : TaskType.valueOf(taskTypeStr);
+            return taskType;
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(String.format("Invalid '%s' TaskType. Valid TaskTypes '%s'", taskTypeStr,
+                    Arrays.toString(TaskType.values())), e);
+        }
+    }
+
+    /**
+     * Parses an integer parameter with a default, providing a clear error on
+     * invalid values.
+     */
+    private int parseIntParam(Map<String, String> params, String key, int defaultValue) {
+        String raw = params.get(key);
+        if (raw == null || raw.isBlank()) {
+            return defaultValue;
+        }
+
+        try {
+            return Integer.parseInt(raw);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid integer value for '" + key + "': " + raw, e);
+        }
     }
 
     /**

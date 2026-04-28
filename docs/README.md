@@ -49,7 +49,7 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 ### 🧠 Intelligence & Memory
 
 - **[LLM Integration](langchain.md)** — Connect any of 12 providers with agent mode and tool calling
-- **[RAG](rag.md)** — 7 embedding providers, 5 vector stores, plus zero-infrastructure httpCall RAG
+- **[RAG](rag.md)** — 8 embedding providers, 6 vector stores, plus zero-infrastructure httpCall RAG
 - **[Persistent User Memory](user-memory.md)** — Agents remember facts across conversations
 - **[Properties](properties.md)** — Config-driven slot-filling and importance extraction
 

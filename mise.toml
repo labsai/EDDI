@@ -1,6 +1,6 @@
 [tools]
-java = "openjdk-25.0.2"
-maven = "3.9.15"
+java = "temurin-25.0.3+9.0.LTS"
+maven = "3.9.12"
 
 [tasks]
 dev = { run = "mvn compile quarkus:dev", description = "Start dev mode with live reload (port 7070)" }
