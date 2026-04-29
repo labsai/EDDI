@@ -639,7 +639,8 @@ jobs:
       - name: Verify API responds
         run: |
           echo "=== Health endpoint ==="
-          curl -sf http://localhost:7070/q/health/ready | python3 -m json.tool
+          HEALTH_JSON=$(curl -sf http://localhost:7070/q/health/ready)
+          echo "$HEALTH_JSON" | python3 -m json.tool
 
           echo ""
           echo "=== OpenAPI spec available ==="
