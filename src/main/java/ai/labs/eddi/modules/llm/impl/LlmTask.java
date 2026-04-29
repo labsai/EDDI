@@ -33,6 +33,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
@@ -499,7 +501,8 @@ public class LlmTask implements ILifecycleTask {
                 }
                 conversationSummarizer.updateIfNeeded(memory, summaryConfig, propertiesContext);
             } catch (Exception e) {
-                LOGGER.warnf(e, "[SUMMARY] Rolling summary update failed for conversation '%s'. Will retry next turn.", memory.getConversationId());
+                LOGGER.warnf(e, "[SUMMARY] Rolling summary update failed for conversation '%s'. Will retry next turn.",
+                        sanitize(memory.getConversationId()));
                 // Non-fatal — conversation continues, summary will catch up next turn
             }
         }

@@ -23,6 +23,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Map;
@@ -70,7 +72,7 @@ public class EmbeddingStoreFactory {
 
     private EmbeddingStore<TextSegment> build(RagConfiguration config, String kbId) {
         String storeType = config.getStoreType();
-        LOGGER.infof("Building embedding store: type=%s, kbId=%s", storeType, kbId);
+        LOGGER.infof("Building embedding store: type=%s, kbId=%s", sanitize(storeType), sanitize(kbId));
 
         return switch (storeType) {
             case "in-memory" -> new InMemoryEmbeddingStore<>();
@@ -118,7 +120,8 @@ public class EmbeddingStoreFactory {
         // Table name: use explicit param, or derive a safe name from kbId
         String table = params.getOrDefault("table", sanitizeTableName(kbId));
 
-        LOGGER.infof("Building pgvector store: host=%s, port=%d, database=%s, table=%s, dimension=%d", host, port, database, table, dimension);
+        LOGGER.infof("Building pgvector store: host=%s, port=%d, database=%s, table=%s, dimension=%d", sanitize(host), port, sanitize(database),
+                sanitize(table), dimension);
 
         return PgVectorEmbeddingStore.builder().host(host).port(port).database(database).user(user).password(password).table(table)
                 .dimension(dimension).createTable(true).build();
@@ -150,7 +153,8 @@ public class EmbeddingStoreFactory {
         String collectionName = params.getOrDefault("collectionName", "eddi_kb_" + kbId);
         String indexName = params.getOrDefault("indexName", "vector_index");
 
-        LOGGER.infof("Building MongoDB Atlas store: database=%s, collection=%s, index=%s", databaseName, collectionName, indexName);
+        LOGGER.infof("Building MongoDB Atlas store: database=%s, collection=%s, index=%s", sanitize(databaseName), sanitize(collectionName),
+                sanitize(indexName));
 
         MongoClient mongoClient = mongoClientCache.computeIfAbsent(connectionString, MongoClients::create);
 
@@ -192,7 +196,7 @@ public class EmbeddingStoreFactory {
             builder.password(params.get("password"));
         }
 
-        LOGGER.infof("Building Elasticsearch store: serverUrl=%s, index=%s", serverUrl, indexName);
+        LOGGER.infof("Building Elasticsearch store: serverUrl=%s, index=%s", sanitize(serverUrl), sanitize(indexName));
 
         return builder.build();
     }
@@ -223,7 +227,7 @@ public class EmbeddingStoreFactory {
         String collectionName = params.getOrDefault("collectionName", sanitizeCollection(kbId));
         boolean useTls = Boolean.parseBoolean(params.getOrDefault("useTls", "false"));
 
-        LOGGER.infof("Building Qdrant store: host=%s, port=%d, collection=%s, tls=%b", host, port, collectionName, useTls);
+        LOGGER.infof("Building Qdrant store: host=%s, port=%d, collection=%s, tls=%b", sanitize(host), port, sanitize(collectionName), useTls);
 
         var builder = QdrantEmbeddingStore.builder().host(host).port(port).collectionName(collectionName).useTls(useTls);
 

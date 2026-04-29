@@ -153,9 +153,10 @@ public final class CronDescriber {
     private static String formatSet(Set<Integer> values, String[] labels) {
         if (values.size() == 1) {
             int v = values.iterator().next();
-            return v < labels.length ? labels[v] : String.valueOf(v);
+            return v >= 0 && v < labels.length ? labels[v] : String.valueOf(v);
         }
-        return values.stream().map(v -> v < labels.length ? labels[v] : String.valueOf(v)).collect(java.util.stream.Collectors.joining(", "));
+        return values.stream().map(v -> v >= 0 && v < labels.length ? labels[v] : String.valueOf(v))
+                .collect(java.util.stream.Collectors.joining(", "));
     }
 
     private static String substituteNames(String field, Map<String, String> names) {

@@ -275,12 +275,12 @@ function Test-Prerequisites {
         exit 1
     }
 
-    # Docker daemon
-    try {
-        docker info 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "not running" }
-    }
-    catch {
+    # Docker daemon -- use cmd /c to isolate stderr from PS error stream.
+    # docker info writes warnings to stderr (e.g. "WARNING: No blkio...").
+    # With ErrorActionPreference=Stop, PS 5.1 treats native stderr as
+    # terminating errors -- even 2>$null and 2>&1 don't prevent this.
+    cmd /c "docker info >nul 2>&1"
+    if ($LASTEXITCODE -ne 0) {
         Write-Fail "Docker is installed but not running.`n     Start Docker Desktop."
     }
 
@@ -350,7 +350,14 @@ function Step-Database {
 
 function New-VaultKey {
     $bytes = New-Object byte[] 24
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    try {
+        # PS 7+ / .NET 6+
+        [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    } catch {
+        # PS 5.1 / .NET Framework 4.x fallback
+        $rng = [System.Security.Cryptography.RNGCryptoServiceProvider]::new()
+        try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    }
     return [System.Convert]::ToBase64String($bytes)
 }
 

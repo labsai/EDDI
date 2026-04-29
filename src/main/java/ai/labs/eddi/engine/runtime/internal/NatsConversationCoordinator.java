@@ -20,6 +20,8 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -194,13 +196,6 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
         }
     }
 
-    private static String sanitizeForLog(String value) {
-        if (value == null) {
-            return "null";
-        }
-        return value.replace('\n', '_').replace('\r', '_');
-    }
-
     /**
      * Submit a conversation task for ordered processing.
      *
@@ -217,7 +212,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
      */
     @Override
     public void submitInOrder(String conversationId, Callable<Void> callable) {
-        final String safeConversationId = sanitizeForLog(conversationId);
+        final String safeConversationId = sanitize(conversationId);
         // Max-size check: only reject truly new conversations, not follow-up messages.
         // Note: this check is intentionally non-atomic (soft limit).
         if (!conversationQueues.containsKey(conversationId) && conversationQueues.size() >= maxActiveConversations) {
@@ -278,7 +273,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 m.getPublishDuration().record(Duration.ofNanos(durationNanos));
             });
         } catch (IOException | JetStreamApiException e) {
-            log.warnf(e, "Failed to publish to NATS for conversation %s, executing locally", sanitizeForLog(conversationId));
+            log.warnf(e, "Failed to publish to NATS for conversation %s, executing locally", sanitize(conversationId));
         }
 
         // Execute the callable via the runtime thread pool
@@ -297,13 +292,13 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 int attempt = retryable.incrementAndGetAttempt();
 
                 if (attempt < maxRetries) {
-                    log.warnf(t, "Conversation task failed (conversationId=%s, attempt=%d/%d), retrying...", sanitizeForLog(conversationId), attempt,
+                    log.warnf(t, "Conversation task failed (conversationId=%s, attempt=%d/%d), retrying...", sanitize(conversationId), attempt,
                             maxRetries);
                     // Re-execute the same callable (retry)
                     publishAndExecute(conversationId, queue, retryable);
                 } else {
                     log.errorf(t, "Conversation task exhausted retries (conversationId=%s, attempts=%d), " + "routing to dead-letter",
-                            sanitizeForLog(conversationId),
+                            sanitize(conversationId),
                             attempt);
                     routeToDeadLetter(conversationId, t);
                     submitNext(conversationId, queue);
@@ -332,12 +327,12 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                     failure.getMessage() != null ? failure.getMessage().replace("\"", "\\\"") : "unknown", System.currentTimeMillis());
 
             jetStream.publish(deadLetterSubject, payload.getBytes());
-            log.infof("Published dead-letter for conversation %s to %s", sanitizeForLog(conversationId), sanitizeForLog(deadLetterSubject));
+            log.infof("Published dead-letter for conversation %s to %s", sanitize(conversationId), sanitize(deadLetterSubject));
 
             totalDeadLettered.incrementAndGet();
             getMetrics().ifPresent(m -> m.getDeadLetterCount().increment());
         } catch (IOException | JetStreamApiException e) {
-            log.errorf(e, "Failed to publish dead-letter for conversation %s", sanitizeForLog(conversationId));
+            log.errorf(e, "Failed to publish dead-letter for conversation %s", sanitize(conversationId));
         }
     }
 
@@ -452,7 +447,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     public boolean discardDeadLetter(String entryId) {
         // For NATS, we can't selectively delete individual messages from a stream.
         // Instead, we log it and let the operator know.
-        log.infof("Dead-letter %s acknowledged (NATS stream messages expire via retention policy)", sanitizeForLog(entryId));
+        log.infof("Dead-letter %s acknowledged (NATS stream messages expire via retention policy)", sanitize(entryId));
         return true;
     }
 

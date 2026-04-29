@@ -37,6 +37,8 @@ import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 
 import java.io.IOException;
@@ -270,7 +272,7 @@ class AgentOrchestrator {
                         if (maxBudget != null && conversationId != null
                                 && !toolExecutionService.getCostTracker().isWithinBudget(conversationId, maxBudget)) {
                             String budgetError = "Budget exceeded for conversation " + conversationId;
-                            LOGGER.warn(budgetError);
+                            LOGGER.warn(sanitize(budgetError));
 
                             Map<String, Object> budgetStep = new HashMap<>();
                             budgetStep.put("type", "tool_error");
@@ -415,7 +417,8 @@ class AgentOrchestrator {
 
         var tool = new UserMemoryTool(userMemoryStore, memory.getUserId(), memory.getAgentId(), memory.getConversationId(), groupIds, config);
         tools.add(tool);
-        LOGGER.infof("[MEMORY] UserMemoryTool enabled for agent='%s', user='%s', groups=%s", memory.getAgentId(), memory.getUserId(), groupIds);
+        LOGGER.infof("[MEMORY] UserMemoryTool enabled for agent='%s', user='%s', groups=%s", sanitize(memory.getAgentId()),
+                sanitize(memory.getUserId()), groupIds.stream().map(g -> sanitize(g)).toList());
     }
 
     /**
