@@ -17,9 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
+  contents: read
 
 env:
   DOCKERFILE: src/main/docker/Dockerfile
@@ -28,6 +26,10 @@ jobs:
   check-base-image:
     name: Check Base Image
     runs-on: ubuntu-latest
+    permissions:
+      contents: write      # git push for PR branch
+      pull-requests: write  # gh pr create/edit
+      issues: write         # gh issue create
 
     steps:
       - name: Checkout
