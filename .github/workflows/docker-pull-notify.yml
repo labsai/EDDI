@@ -28,7 +28,7 @@ jobs:
       contents: read
     steps:
       # ── Restore cached metrics ──────────────────────────────
-      # Uses date-based key rotation to avoid needing actions:write for cache delete.
+      # Uses run_id-based key rotation to avoid needing actions:write for cache delete.
       # Save always creates a new key; restore-keys finds the latest.
       - name: Restore metrics cache
         id: cache-restore
