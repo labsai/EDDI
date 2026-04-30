@@ -386,9 +386,9 @@ jobs:
       is-release: ${{ steps.meta.outputs.is-release }}
 
     permissions:
-      contents: write  # Required for creating GitHub Releases on tag pushes
-      id-token: write  # Required for Sigstore cosign keyless signing (OIDC → Fulcio)
-      attestations: write  # Required for SLSA provenance attestation
+      contents: read       # checkout + build
+      id-token: write      # Sigstore cosign keyless signing (OIDC → Fulcio)
+      attestations: write  # SLSA provenance attestation
 
     steps:
       - name: Checkout
@@ -470,12 +470,15 @@ jobs:
             .
 
       - name: Scan Docker image for vulnerabilities
+        # Advisory only — OS-level CVEs in Red Hat's base image are outside our control.
+        # The base-image-check.yml workflow monitors for digest updates weekly.
+        # Filesystem scan (Job 2c) remains strict for our own dependencies.
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
           image-ref: ${{ env.DOCKER_IMAGE }}:${{ steps.meta.outputs.primary-tag }}
           severity: CRITICAL,HIGH
-          exit-code: 1
+          exit-code: 0
           ignore-unfixed: true
           format: table
           trivyignores: .trivyignore
@@ -543,8 +546,17 @@ jobs:
           subject-digest: ${{ steps.docker-push.outputs.digest }}
           push-to-registry: true
 
+
+  # ─── Job 3b: GitHub Release (tag pushes only) ──────────────────
+  release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: docker
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write  # Required for creating GitHub Releases
+    steps:
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           generate_release_notes: true
@@ -555,7 +567,7 @@ jobs:
             This release is distributed as a Docker image:
 
             ```bash
-            docker pull ${{ env.DOCKER_IMAGE }}:${{ steps.meta.outputs.primary-tag }}
+            docker pull ${{ env.DOCKER_IMAGE }}:${{ needs.docker.outputs.primary-tag }}
             ```
 
             ### Verify image signature
@@ -564,7 +576,7 @@ jobs:
             cosign verify \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com \
               --certificate-identity-regexp '^https://github\.com/labsai/EDDI/\.github/workflows/ci\.yml@refs/(heads/main|tags/.+)$' \
-              ${{ env.DOCKER_IMAGE }}:${{ steps.meta.outputs.primary-tag }}
+              ${{ env.DOCKER_IMAGE }}:${{ needs.docker.outputs.primary-tag }}
             ```
 
             > **Note:** EDDI is distributed exclusively as a Docker image. There are no binary downloads.
@@ -636,7 +648,8 @@ jobs:
       - name: Verify API responds
         run: |
           echo "=== Health endpoint ==="
-          curl -sf http://localhost:7070/q/health/ready | python3 -m json.tool
+          HEALTH_JSON=$(curl -sf http://localhost:7070/q/health/ready)
+          echo "$HEALTH_JSON" | python3 -m json.tool
 
           echo ""
           echo "=== OpenAPI spec available ==="
