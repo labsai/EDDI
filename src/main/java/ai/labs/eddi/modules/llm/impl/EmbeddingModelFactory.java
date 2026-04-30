@@ -11,6 +11,8 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.langchain4j.model.bedrock.BedrockTitanEmbeddingModel;
 import dev.langchain4j.model.cohere.CohereEmbeddingModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.googleai.GoogleAiEmbeddingModel;
+import dev.langchain4j.model.googleai.GoogleAiEmbeddingModel.TaskType;
 import dev.langchain4j.model.mistralai.MistralAiEmbeddingModel;
 import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
 import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
@@ -21,6 +23,7 @@ import org.jboss.logging.Logger;
 import software.amazon.awssdk.regions.Region;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -30,7 +33,8 @@ import java.util.TreeMap;
  * {@link ChatModelRegistry} for LLM models.
  * <p>
  * Supported providers: {@code openai}, {@code azure-openai}, {@code ollama},
- * {@code mistral}, {@code bedrock}, {@code cohere}, {@code vertex}.
+ * {@code mistral}, {@code bedrock}, {@code cohere}, {@code gemini},
+ * {@code vertex}.
  * <p>
  * Cache is bounded (max 50 entries, 30-minute idle TTL) to prevent memory leaks
  * in multi-tenant or dynamic-config environments.
@@ -71,16 +75,50 @@ public class EmbeddingModelFactory {
             case "mistral" -> buildMistral(params);
             case "bedrock" -> buildBedrock(params);
             case "cohere" -> buildCohere(params);
+            case "gemini" -> buildGemini(params);
             case "vertex" -> buildVertex(params);
             default -> throw new IllegalArgumentException(
-                    "Unsupported embedding provider: " + provider + ". Supported: openai, azure-openai, ollama, mistral, bedrock, cohere, vertex");
+                    "Unsupported embedding provider: " + provider
+                            + ". Supported: openai, azure-openai, ollama, mistral, bedrock, cohere, gemini, vertex");
         };
     }
 
+    // ──────────────────────────────────────────────────
+    // OpenAI
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds an OpenAI-backed {@link EmbeddingModel} from configuration
+     * parameters.
+     * <p>
+     * Supported embeddingParameters:
+     * <ul>
+     * <li>{@code apiKey} — OpenAI API key, supports {@code ${eddivault:...}}
+     * (required)</li>
+     * <li>{@code model} — model name (default: "text-embedding-3-small")</li>
+     * </ul>
+     */
     private EmbeddingModel buildOpenAi(Map<String, String> params) {
         return OpenAiEmbeddingModel.builder().modelName(params.getOrDefault("model", "text-embedding-3-small")).apiKey(params.get("apiKey")).build();
     }
 
+    // ──────────────────────────────────────────────────
+    // Azure OpenAI
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds an Azure OpenAI-backed {@link EmbeddingModel} from configuration
+     * parameters.
+     * <p>
+     * Supported embeddingParameters:
+     * <ul>
+     * <li>{@code apiKey} — Azure API key, supports {@code ${eddivault:...}}
+     * (required)</li>
+     * <li>{@code deploymentName} — deployment name (default:
+     * "text-embedding-3-small")</li>
+     * <li>{@code endpoint} — Azure endpoint (optional)</li>
+     * </ul>
+     */
     private EmbeddingModel buildAzureOpenAi(Map<String, String> params) {
         var builder = dev.langchain4j.model.azure.AzureOpenAiEmbeddingModel.builder()
                 .deploymentName(params.getOrDefault("deploymentName", "text-embedding-3-small")).apiKey(params.get("apiKey"));
@@ -91,25 +129,129 @@ public class EmbeddingModelFactory {
         return builder.build();
     }
 
+    // ──────────────────────────────────────────────────
+    // Ollama
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds an Ollama-backed {@link EmbeddingModel} from configuration
+     * parameters.
+     * <p>
+     * Supported embeddingParameters:
+     * <ul>
+     * <li>{@code model} — model name (default: "nomic-embed-text")</li>
+     * <li>{@code baseUrl} — Ollama server URL (default:
+     * "http://localhost:11434")</li>
+     * </ul>
+     */
     private EmbeddingModel buildOllama(Map<String, String> params) {
         return OllamaEmbeddingModel.builder().modelName(params.getOrDefault("model", "nomic-embed-text"))
                 .baseUrl(params.getOrDefault("baseUrl", "http://localhost:11434")).build();
     }
 
+    // ──────────────────────────────────────────────────
+    // Gemini
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds a Google Gemini-backed {@link EmbeddingModel} from configuration
+     * parameters.
+     * <p>
+     * Supported embeddingParameters:
+     * <ul>
+     * <li>{@code apiKey} — Google AI API key, supports {@code ${eddivault:...}}
+     * (required)</li>
+     * <li>{@code model} — model name (default: "gemini-embedding-2")</li>
+     * <li>{@code taskType} — task type (default: "RETRIEVAL_DOCUMENT")</li>
+     * <li>{@code outputDimensionality} — output dimension (default: 3072)</li>
+     * </ul>
+     */
+    private EmbeddingModel buildGemini(Map<String, String> params) {
+        TaskType taskType = parseTaskType(params.getOrDefault("taskType", "RETRIEVAL_DOCUMENT"));
+        Integer outputDimensionality = parseIntParam(params, "outputDimensionality", 3072);
+
+        return GoogleAiEmbeddingModel.builder()
+                .modelName(params.getOrDefault("model", "gemini-embedding-2"))
+                .apiKey(params.get("apiKey"))
+                .outputDimensionality(outputDimensionality)
+                .taskType(taskType)
+                .build();
+    }
+
+    // ──────────────────────────────────────────────────
+    // Mistral
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds a Mistral AI-backed {@link EmbeddingModel} from configuration
+     * parameters.
+     * <p>
+     * Supported embeddingParameters:
+     * <ul>
+     * <li>{@code apiKey} — Mistral API key, supports {@code ${eddivault:...}}
+     * (required)</li>
+     * <li>{@code model} — model name (default: "mistral-embed")</li>
+     * </ul>
+     */
     private EmbeddingModel buildMistral(Map<String, String> params) {
         return MistralAiEmbeddingModel.builder().modelName(params.getOrDefault("model", "mistral-embed")).apiKey(params.get("apiKey")).build();
     }
 
+    // ──────────────────────────────────────────────────
+    // Bedrock
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds an AWS Bedrock-backed {@link EmbeddingModel} from configuration
+     * parameters.
+     * <p>
+     * Supported embeddingParameters:
+     * <ul>
+     * <li>{@code model} — model name (default:
+     * "amazon.titan-embed-text-v2:0")</li>
+     * <li>{@code region} — AWS region (default: "us-east-1")</li>
+     * </ul>
+     */
     private EmbeddingModel buildBedrock(Map<String, String> params) {
         String model = params.getOrDefault("model", "amazon.titan-embed-text-v2:0");
         String region = params.getOrDefault("region", "us-east-1");
         return BedrockTitanEmbeddingModel.builder().model(model).region(Region.of(region)).build();
     }
 
+    // ──────────────────────────────────────────────────
+    // Cohere
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds a Cohere-backed {@link EmbeddingModel} from configuration
+     * parameters.
+     * <p>
+     * Supported embeddingParameters:
+     * <ul>
+     * <li>{@code apiKey} — Cohere API key, supports {@code ${eddivault:...}}
+     * (required)</li>
+     * <li>{@code model} — model name (default: "embed-english-v3.0")</li>
+     * </ul>
+     */
     private EmbeddingModel buildCohere(Map<String, String> params) {
         return CohereEmbeddingModel.builder().modelName(params.getOrDefault("model", "embed-english-v3.0")).apiKey(params.get("apiKey")).build();
     }
 
+    // ──────────────────────────────────────────────────
+    // Vertex AI
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds a Google Vertex AI-backed {@link EmbeddingModel} from configuration
+     * parameters.
+     * <p>
+     * Supported embeddingParameters:
+     * <ul>
+     * <li>{@code project} — GCP project ID (required)</li>
+     * <li>{@code location} — GCP location (default: "us-central1")</li>
+     * <li>{@code model} — model name (default: "text-embedding-005")</li>
+     * </ul>
+     */
     private EmbeddingModel buildVertex(Map<String, String> params) {
         String project = params.get("project");
         String location = params.getOrDefault("location", "us-central1");
@@ -118,6 +260,35 @@ public class EmbeddingModelFactory {
             throw new IllegalArgumentException("Vertex AI embedding requires 'project' parameter");
         }
         return VertexAiEmbeddingModel.builder().project(project).location(location).modelName(model).build();
+    }
+
+    private TaskType parseTaskType(String taskTypeStr) {
+        try {
+            TaskType taskType = (taskTypeStr == null || taskTypeStr.isBlank())
+                    ? TaskType.RETRIEVAL_DOCUMENT
+                    : TaskType.valueOf(taskTypeStr);
+            return taskType;
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(String.format("Invalid '%s' TaskType. Valid TaskTypes '%s'", taskTypeStr,
+                    Arrays.toString(TaskType.values())), e);
+        }
+    }
+
+    /**
+     * Parses an integer parameter with a default, providing a clear error on
+     * invalid values.
+     */
+    private int parseIntParam(Map<String, String> params, String key, int defaultValue) {
+        String raw = params.get(key);
+        if (raw == null || raw.isBlank()) {
+            return defaultValue;
+        }
+
+        try {
+            return Integer.parseInt(raw);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid integer value for '" + key + "': " + raw, e);
+        }
     }
 
     /**

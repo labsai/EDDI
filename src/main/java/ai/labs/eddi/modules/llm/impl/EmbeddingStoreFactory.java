@@ -10,6 +10,8 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.store.embedding.EmbeddingStore;
+import dev.langchain4j.store.embedding.chroma.ChromaEmbeddingStore;
+import dev.langchain4j.store.embedding.chroma.ChromaApiVersion;
 import dev.langchain4j.store.embedding.elasticsearch.ElasticsearchEmbeddingStore;
 import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 import dev.langchain4j.store.embedding.mongodb.MongoDbEmbeddingStore;
@@ -24,6 +26,7 @@ import org.jboss.logging.Logger;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,7 +37,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>
  * Each knowledge base gets its own store instance (collection-per-KB
  * isolation). Supported store types: {@code in-memory}, {@code pgvector},
- * {@code mongodb-atlas}, {@code elasticsearch}, {@code qdrant}.
+ * {@code mongodb-atlas}, {@code elasticsearch}, {@code qdrant}, {@code chroma}.
  * <p>
  * Cache is bounded (max 50 entries, 30-minute idle TTL) to prevent memory leaks
  * in multi-tenant or dynamic-config environments.
@@ -77,8 +80,9 @@ public class EmbeddingStoreFactory {
             case "mongodb-atlas" -> buildMongoDbAtlas(config, kbId);
             case "elasticsearch" -> buildElasticsearch(config, kbId);
             case "qdrant" -> buildQdrant(config, kbId);
+            case "chroma" -> buildChroma(config, kbId);
             default -> throw new IllegalArgumentException(
-                    "Unsupported store type: " + storeType + ". Supported: in-memory, pgvector, mongodb-atlas, elasticsearch, qdrant");
+                    "Unsupported store type: " + storeType + ". Supported: in-memory, pgvector, mongodb-atlas, elasticsearch, qdrant, chroma");
         };
     }
 
@@ -220,7 +224,7 @@ public class EmbeddingStoreFactory {
 
         String host = params.getOrDefault("host", "localhost");
         int port = parseIntParam(params, "port", 6334);
-        String collectionName = params.getOrDefault("collectionName", "eddi_kb_" + kbId.toLowerCase().replaceAll("[^a-z0-9_]", "_"));
+        String collectionName = params.getOrDefault("collectionName", sanitizeCollection(kbId));
         boolean useTls = Boolean.parseBoolean(params.getOrDefault("useTls", "false"));
 
         LOGGER.infof("Building Qdrant store: host=%s, port=%d, collection=%s, tls=%b", sanitize(host), port, sanitize(collectionName), useTls);
@@ -235,6 +239,45 @@ public class EmbeddingStoreFactory {
     }
 
     // ──────────────────────────────────────────────────
+    // Chroma
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds a Chroma-backed embedding store.
+     * <p>
+     * Supported storeParameters:
+     * <ul>
+     * <li>{@code baseUrl} — Chroma server URL (default:
+     * "http://localhost:8000")</li>
+     * <li>{@code tenantName} — tenant name (default: "default_tenant")</li>
+     * <li>{@code databaseName} — database name (default: "default_database")</li>
+     * <li>{@code collectionName} — collection name (default: auto-generated from
+     * kbId)</li>
+     * </ul>
+     */
+    private EmbeddingStore<TextSegment> buildChroma(RagConfiguration config, String kbId) {
+        Map<String, String> params = resolveParams(config);
+
+        String baseUrl = params.getOrDefault("baseUrl", "http://localhost:8000");
+        String tenantName = params.getOrDefault("tenantName", "default_tenant");
+        String databaseName = params.getOrDefault("databaseName", "default_database");
+        String collectionName = params.getOrDefault("collectionName", sanitizeCollection(kbId));
+
+        ChromaApiVersion version = parseChromaApiVersion(params.getOrDefault("apiVersion", "V2"));
+
+        LOGGER.infof("Building Chroma store: baseUrl=%s, tenant=%s, database=%s, collection=%s, apiVersion=%s", baseUrl, tenantName, databaseName,
+                collectionName, version.toString());
+
+        return ChromaEmbeddingStore.builder()
+                .baseUrl(baseUrl)
+                .tenantName(tenantName)
+                .databaseName(databaseName)
+                .collectionName(collectionName)
+                .apiVersion(version)
+                .build();
+    }
+
+    // ──────────────────────────────────────────────────
     // Utility methods
     // ──────────────────────────────────────────────────
 
@@ -244,6 +287,21 @@ public class EmbeddingStoreFactory {
     private Map<String, String> resolveParams(RagConfiguration config) {
         Map<String, String> rawParams = config.getStoreParameters() != null ? config.getStoreParameters() : Map.of();
         return secretResolver.resolveSecrets(rawParams);
+    }
+
+    private ChromaApiVersion parseChromaApiVersion(String apiVersionStr) {
+        try {
+            ChromaApiVersion chromaApiVersion = (apiVersionStr == null || apiVersionStr.isBlank())
+                    ? ChromaApiVersion.V2
+                    : ChromaApiVersion.valueOf(apiVersionStr);
+            return chromaApiVersion;
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    String.format("Invalid '%s' ChromaApiVersion. Valid ChromaApiVersion '%s'",
+                            apiVersionStr,
+                            Arrays.toString(ChromaApiVersion.values())),
+                    e);
+        }
     }
 
     /**
@@ -272,6 +330,10 @@ public class EmbeddingStoreFactory {
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Invalid integer value for '" + key + "': " + raw, e);
         }
+    }
+
+    static String sanitizeCollection(String kbId) {
+        return "eddi_kb_" + kbId.toLowerCase().replaceAll("[^a-z0-9_]", "_").replaceAll("_+$", "");
     }
 
     /**
