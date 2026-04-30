@@ -60,10 +60,10 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
    **Only stage files you actually worked on.** Never use `git add .` or `git add -A`. The working tree may contain changes from other people, other branches, or other tools — those are not yours to commit. Always:
    - Stage files individually: `git add path/to/file1 path/to/file2`
    - Run `git status` before committing — if any staged file is not part of your task, unstage it
-   - Run `git diff --stat HEAD` after committing to confirm the commit only contains your files
+   - Run `git log --stat -1` after committing to confirm the commit only contains your files
 6. **Each commit must build**: Run `./mvnw compile` (or `./mvnw test` for backend) before committing. Never commit broken code.
 7. **Verify factual claims against authoritative sources**: When writing documentation about the project's technology stack, dependencies, or CI configuration, **always verify against the canonical source** (`pom.xml` for dependencies, `ci.yml` for CI behavior, `Dockerfile` for container config). **Never infer from codebase grep results** — migration code, comments about "previous implementations," and backward-compatibility references describe what the project *used to* use, not what it currently uses. If a term appears 40 times in the codebase but zero times in `pom.xml`, the project does not use it.
-8. **Update the changelog BEFORE committing**: Edit [`docs/changelog.md`](docs/changelog.md) and include it in the same commit (or the final commit of a task). The changelog must land on the **same branch** as the work it documents — never on a different branch after the fact. Each entry should include:
+8. **Update the changelog immediately before committing**: Edit [`docs/changelog.md`](docs/changelog.md) and include it in the commit that contains the changes being documented. The changelog must land on the **same branch** as the work it documents — never on a different branch after the fact. Each entry should include:
    - Date and short title
    - Repo and branch
    - What changed (files + reasoning)
