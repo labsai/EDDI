@@ -26,6 +26,7 @@ Each entry follows this format:
 | `GlobalVariable` | Record model: `key`, `value`, `description`, `exportable` |
 | `IGlobalVariableStore` | Persistence interface (non-versioned, flat key-value) |
 | `GlobalVariableStore` | MongoDB adapter (`globalvariables` collection, `_id` = key) |
+| `PostgresGlobalVariableStore` | PostgreSQL adapter (`global_variables` table, `key` = PK) |
 | `GlobalVariableResolver` | Regex-based `${eddivar:<key>}` resolution with Caffeine cache + invalidation listeners |
 | `IRestGlobalVariableStore` | JAX-RS REST API (`/variablestore/variables`) |
 | `RestGlobalVariableStore` | REST implementation with key validation and write-through cache invalidation |
@@ -68,6 +69,9 @@ Resolution order: Jinja2/Qute templates → **eddivar** → eddivault. Integrate
 | `GlobalVariableResolverTest` | 14 | Unit — resolution, cache, invalidation |
 | `RestGlobalVariableStoreTest` | 11 | Unit — CRUD, validation |
 | `GlobalVariableCrudIT` | 8 | Integration — MongoDB CRUD lifecycle |
+| `PostgresGlobalVariableCrudIT` | 8 | Integration — PostgreSQL CRUD lifecycle |
+| `GlobalVariableStoreTest` | 10 | Unit — MongoDB adapter with mocked MongoCollection |
+| `PostgresGlobalVariableStoreTest` | 15 | Unit — PostgreSQL adapter with mocked JDBC |
 | 9 modified test suites | — | Constructor dependency updates |
 
 **Files:** `src/main/java/ai/labs/eddi/configs/variables/` (6 new files), `src/main/java/ai/labs/eddi/modules/llm/impl/LlmTask.java`, `src/main/java/ai/labs/eddi/modules/llm/impl/ChatModelRegistry.java`, `docs/global-variables.md`, `AGENTS.md`

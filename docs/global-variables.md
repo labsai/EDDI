@@ -26,6 +26,7 @@ EDDI includes a built-in global variable store for managing deployment-wide conf
 | `GlobalVariable` | `configs.variables.model` | Record: `key`, `value`, `description`, `exportable` |
 | `IGlobalVariableStore` | `configs.variables` | Persistence interface (non-versioned, flat key-value) |
 | `GlobalVariableStore` | `configs.variables.mongo` | MongoDB implementation (`globalvariables` collection) |
+| `PostgresGlobalVariableStore` | `datastore.postgres` | PostgreSQL implementation (`global_variables` table) |
 | `GlobalVariableResolver` | `configs.variables` | Resolves `${eddivar:...}` references with Caffeine cache |
 | `IRestGlobalVariableStore` | `configs.variables.rest` | JAX-RS REST interface |
 | `RestGlobalVariableStore` | `configs.variables.rest` | REST implementation with key validation and cache invalidation |
@@ -264,9 +265,12 @@ Current API version: {{vars.api-version}}.
 | `GlobalVariableTest` | 7 | Model record, defaults, JSON serialization, equality |
 | `GlobalVariableResolverTest` | 14 | Resolution, caching, invalidation, edge cases, patterns |
 | `RestGlobalVariableStoreTest` | 11 | CRUD, validation, cache invalidation, key patterns |
+| `GlobalVariableStoreTest` | 10 | MongoDB adapter CRUD with mocked MongoCollection |
+| `PostgresGlobalVariableStoreTest` | 15 | PostgreSQL adapter CRUD with mocked JDBC, error paths |
 | `GlobalVariableCrudIT` | 8 | Full CRUD lifecycle against MongoDB (Testcontainers) |
+| `PostgresGlobalVariableCrudIT` | 8 | Full CRUD lifecycle against PostgreSQL (Testcontainers) |
 
-> **Note:** A PostgreSQL adapter for `IGlobalVariableStore` is not yet implemented. The current `GlobalVariableStore` is MongoDB-only. A PostgreSQL integration test will be added alongside the adapter in a future release.
+**Aggregate coverage across all 5 production classes: 99% instruction / 93% branch.**
 
 ### Integration Tests
 
@@ -281,4 +285,4 @@ The integration tests verify the complete REST API lifecycle:
 7. Verify validation rejects invalid key patterns
 8. Delete the variable and verify removal
 
-Tests run against MongoDB via Quarkus DevServices (Testcontainers).
+Tests run against both MongoDB and PostgreSQL via Quarkus DevServices (Testcontainers).
