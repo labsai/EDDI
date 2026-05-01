@@ -83,9 +83,12 @@ Resolution order: Jinja2/Qute templates → **eddivar** → eddivault. Integrate
 - **Invalidation listeners**: Downstream caches (ChatModelRegistry) register `Runnable` callbacks. When variables change, all cached model instances are evicted so agents pick up new config on next request.
 - **`exportable` flag**: Variables marked `exportable: false` are excluded from agent exports (e.g., environment-specific URLs).
 
-### Bug Fix
+### Bug Fixes
 
 - **BUG-1 (LlmTask)**: `task.getType()` was used raw (unresolved) in `tokenCounterFactory.getEstimator()` (line 288) and `chatModelRegistry.getOrCreateStreaming()` (line 411). Hoisted `resolvedType` above both branches so `${vars:default-provider}` works correctly for token-aware windowing and streaming mode.
+- **BUG-2 (Resolver Null Safety)**: Added guard in `GlobalVariableResolver.resolveValue(value, tenantId)` to default a `null` tenantId to `"default"` before hitting the store, preventing potential undefined behavior.
+- **BUG-3 (MongoDB Filter Parity)**: Extracted `compositeId()` helper and updated MongoDB `get()` and `delete()` methods to filter by `_id` (consistent with `upsert()`) instead of by fields. Added `Sorts.ascending` to MongoDB `getAll`/`listAll` for parity with Postgres.
+- **BUG-4 (Postgres Reserved Words)**: Quoted SQL reserved words `"key"` and `"value"` across all DDL and DML in `PostgresGlobalVariableStore` and updated the corresponding test matchers.
 
 ### Documentation
 

@@ -19,15 +19,17 @@ import java.util.*;
 /**
  * PostgreSQL implementation of {@link IGlobalVariableStore}.
  * <p>
- * Uses a dedicated {@code global_variables} table with {@code key} as the
- * primary key. Schema is auto-created on first access.
+ * Uses a dedicated {@code global_variables} table with a composite primary key
+ * {@code (tenant_id, key)}. Schema is auto-created on first access.
  *
  * <pre>
  * CREATE TABLE IF NOT EXISTS global_variables (
- *     key   VARCHAR(255) PRIMARY KEY,
- *     value TEXT NOT NULL,
+ *     tenant_id   VARCHAR(255) NOT NULL DEFAULT 'default',
+ *     "key"       VARCHAR(255) NOT NULL,
+ *     "value"     TEXT NOT NULL,
  *     description TEXT,
- *     exportable BOOLEAN DEFAULT TRUE
+ *     exportable  BOOLEAN DEFAULT TRUE,
+ *     PRIMARY KEY (tenant_id, "key")
  * );
  * </pre>
  *
@@ -42,10 +44,12 @@ public class PostgresGlobalVariableStore implements IGlobalVariableStore {
 
     private static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS global_variables (
-                key VARCHAR(255) PRIMARY KEY,
-                value TEXT NOT NULL,
+                tenant_id VARCHAR(255) NOT NULL DEFAULT 'default',
+                "key" VARCHAR(255) NOT NULL,
+                "value" TEXT NOT NULL,
                 description TEXT,
-                exportable BOOLEAN DEFAULT TRUE
+                exportable BOOLEAN DEFAULT TRUE,
+                PRIMARY KEY (tenant_id, "key")
             )
             """;
 
@@ -71,36 +75,39 @@ public class PostgresGlobalVariableStore implements IGlobalVariableStore {
     }
 
     @Override
-    public Map<String, String> getAll() {
+    public Map<String, String> getAll(String tenantId) {
         ensureSchema();
         Map<String, String> result = new LinkedHashMap<>();
-        String sql = "SELECT key, value FROM global_variables ORDER BY key";
+        String sql = "SELECT \"key\", \"value\" FROM global_variables WHERE tenant_id = ? ORDER BY \"key\"";
         try (Connection conn = dataSourceInstance.get().getConnection();
-                PreparedStatement ps = conn.prepareStatement(sql);
-                ResultSet rs = ps.executeQuery()) {
-            while (rs.next()) {
-                result.put(rs.getString("key"), rs.getString("value"));
+                PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, tenantId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.put(rs.getString("key"), rs.getString("value"));
+                }
             }
         } catch (SQLException e) {
-            LOGGER.error("Failed to list all global variables", e);
+            LOGGER.error("Failed to list all global variables for tenant: " + tenantId, e);
         }
         return result;
     }
 
     @Override
-    public GlobalVariable get(String key) {
+    public GlobalVariable get(String tenantId, String key) {
         ensureSchema();
-        String sql = "SELECT key, value, description, exportable FROM global_variables WHERE key = ?";
+        String sql = "SELECT tenant_id, \"key\", \"value\", description, exportable FROM global_variables WHERE tenant_id = ? AND \"key\" = ?";
         try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, key);
+            ps.setString(1, tenantId);
+            ps.setString(2, key);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     return toGlobalVariable(rs);
                 }
             }
         } catch (SQLException e) {
-            LOGGER.error("Failed to get global variable: " + key, e);
+            LOGGER.error("Failed to get global variable: " + tenantId + "/" + key, e);
         }
         return null;
     }
@@ -109,57 +116,62 @@ public class PostgresGlobalVariableStore implements IGlobalVariableStore {
     public void upsert(GlobalVariable variable) {
         ensureSchema();
         String sql = """
-                INSERT INTO global_variables (key, value, description, exportable)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT (key) DO UPDATE
-                SET value = EXCLUDED.value,
+                INSERT INTO global_variables (tenant_id, "key", "value", description, exportable)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (tenant_id, "key") DO UPDATE
+                SET "value" = EXCLUDED."value",
                     description = EXCLUDED.description,
                     exportable = EXCLUDED.exportable
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, variable.key());
-            ps.setString(2, variable.value());
-            ps.setString(3, variable.description());
-            ps.setBoolean(4, variable.exportable());
+            ps.setString(1, variable.tenantId());
+            ps.setString(2, variable.key());
+            ps.setString(3, variable.value());
+            ps.setString(4, variable.description());
+            ps.setBoolean(5, variable.exportable());
             ps.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.error("Failed to upsert global variable: " + variable.key(), e);
+            LOGGER.error("Failed to upsert global variable: " + variable.tenantId() + "/" + variable.key(), e);
         }
     }
 
     @Override
-    public void delete(String key) {
+    public void delete(String tenantId, String key) {
         ensureSchema();
-        String sql = "DELETE FROM global_variables WHERE key = ?";
+        String sql = "DELETE FROM global_variables WHERE tenant_id = ? AND \"key\" = ?";
         try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, key);
+            ps.setString(1, tenantId);
+            ps.setString(2, key);
             ps.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.error("Failed to delete global variable: " + key, e);
+            LOGGER.error("Failed to delete global variable: " + tenantId + "/" + key, e);
         }
     }
 
     @Override
-    public List<GlobalVariable> listAll() {
+    public List<GlobalVariable> listAll(String tenantId) {
         ensureSchema();
         List<GlobalVariable> result = new ArrayList<>();
-        String sql = "SELECT key, value, description, exportable FROM global_variables ORDER BY key";
+        String sql = "SELECT tenant_id, \"key\", \"value\", description, exportable FROM global_variables WHERE tenant_id = ? ORDER BY \"key\"";
         try (Connection conn = dataSourceInstance.get().getConnection();
-                PreparedStatement ps = conn.prepareStatement(sql);
-                ResultSet rs = ps.executeQuery()) {
-            while (rs.next()) {
-                result.add(toGlobalVariable(rs));
+                PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, tenantId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(toGlobalVariable(rs));
+                }
             }
         } catch (SQLException e) {
-            LOGGER.error("Failed to list all global variables", e);
+            LOGGER.error("Failed to list all global variables for tenant: " + tenantId, e);
         }
         return result;
     }
 
     private static GlobalVariable toGlobalVariable(ResultSet rs) throws SQLException {
         return new GlobalVariable(
+                rs.getString("tenant_id"),
                 rs.getString("key"),
                 rs.getString("value"),
                 rs.getString("description"),

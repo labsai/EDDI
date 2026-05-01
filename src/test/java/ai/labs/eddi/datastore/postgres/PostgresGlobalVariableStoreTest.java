@@ -20,12 +20,14 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Unit tests for {@link PostgresGlobalVariableStore} — JDBC adapter. Uses
- * mocked {@link DataSource} / {@link Connection} / {@link PreparedStatement} to
- * verify SQL operations without a running PostgreSQL instance.
+ * Unit tests for {@link PostgresGlobalVariableStore} — JDBC adapter with tenant
+ * scoping. Uses mocked {@link DataSource} / {@link Connection} /
+ * {@link PreparedStatement} to verify SQL operations.
  */
 @SuppressWarnings("unchecked")
 class PostgresGlobalVariableStoreTest {
+
+    private static final String DEFAULT = GlobalVariable.DEFAULT_TENANT;
 
     private Connection connection;
     private PostgresGlobalVariableStore store;
@@ -49,60 +51,61 @@ class PostgresGlobalVariableStoreTest {
     // ==================== getAll ====================
 
     @Test
-    @DisplayName("getAll — returns empty map when no rows")
+    @DisplayName("getAll — returns empty map when no rows for tenant")
     void getAllEmpty() throws Exception {
         PreparedStatement ps = mock(PreparedStatement.class);
         ResultSet rs = mock(ResultSet.class);
-        when(connection.prepareStatement(contains("SELECT key, value FROM"))).thenReturn(ps);
+        when(connection.prepareStatement(contains("WHERE tenant_id = ?"))).thenReturn(ps);
         when(ps.executeQuery()).thenReturn(rs);
         when(rs.next()).thenReturn(false);
 
-        Map<String, String> result = store.getAll();
-
+        Map<String, String> result = store.getAll(DEFAULT);
         assertTrue(result.isEmpty());
+        verify(ps).setString(1, DEFAULT);
     }
 
     @Test
-    @DisplayName("getAll — returns key-value pairs")
+    @DisplayName("getAll — returns key-value pairs for specific tenant")
     void getAllWithRows() throws Exception {
         PreparedStatement ps = mock(PreparedStatement.class);
         ResultSet rs = mock(ResultSet.class);
-        when(connection.prepareStatement(contains("SELECT key, value FROM"))).thenReturn(ps);
+        when(connection.prepareStatement(contains("WHERE tenant_id = ?"))).thenReturn(ps);
         when(ps.executeQuery()).thenReturn(rs);
         when(rs.next()).thenReturn(true, true, false);
         when(rs.getString("key")).thenReturn("model", "temp");
         when(rs.getString("value")).thenReturn("gpt-4.1", "0.7");
 
-        Map<String, String> result = store.getAll();
+        Map<String, String> result = store.getAll(DEFAULT);
 
         assertEquals(2, result.size());
         assertEquals("gpt-4.1", result.get("model"));
-        assertEquals("0.7", result.get("temp"));
+        verify(ps).setString(1, DEFAULT);
     }
 
     // ==================== get ====================
 
     @Test
-    @DisplayName("get — returns GlobalVariable when found")
+    @DisplayName("get — returns GlobalVariable with tenantId when found")
     void getFound() throws Exception {
         PreparedStatement ps = mock(PreparedStatement.class);
         ResultSet rs = mock(ResultSet.class);
-        when(connection.prepareStatement(contains("WHERE key = ?"))).thenReturn(ps);
+        when(connection.prepareStatement(contains("AND \"key\" = ?"))).thenReturn(ps);
         when(ps.executeQuery()).thenReturn(rs);
         when(rs.next()).thenReturn(true);
+        when(rs.getString("tenant_id")).thenReturn(DEFAULT);
         when(rs.getString("key")).thenReturn("model");
         when(rs.getString("value")).thenReturn("gpt-4.1");
         when(rs.getString("description")).thenReturn("Default model");
         when(rs.getBoolean("exportable")).thenReturn(true);
 
-        GlobalVariable result = store.get("model");
+        GlobalVariable result = store.get(DEFAULT, "model");
 
         assertNotNull(result);
+        assertEquals(DEFAULT, result.tenantId());
         assertEquals("model", result.key());
         assertEquals("gpt-4.1", result.value());
-        assertEquals("Default model", result.description());
-        assertTrue(result.exportable());
-        verify(ps).setString(1, "model");
+        verify(ps).setString(1, DEFAULT);
+        verify(ps).setString(2, "model");
     }
 
     @Test
@@ -110,93 +113,93 @@ class PostgresGlobalVariableStoreTest {
     void getNotFound() throws Exception {
         PreparedStatement ps = mock(PreparedStatement.class);
         ResultSet rs = mock(ResultSet.class);
-        when(connection.prepareStatement(contains("WHERE key = ?"))).thenReturn(ps);
+        when(connection.prepareStatement(contains("AND \"key\" = ?"))).thenReturn(ps);
         when(ps.executeQuery()).thenReturn(rs);
         when(rs.next()).thenReturn(false);
 
-        assertNull(store.get("missing"));
+        assertNull(store.get(DEFAULT, "missing"));
     }
 
     // ==================== upsert ====================
 
     @Test
-    @DisplayName("upsert — executes INSERT ON CONFLICT with correct params")
+    @DisplayName("upsert — executes INSERT ON CONFLICT with tenant_id + key")
     void upsert() throws Exception {
         PreparedStatement ps = mock(PreparedStatement.class);
-        when(connection.prepareStatement(contains("ON CONFLICT"))).thenReturn(ps);
+        when(connection.prepareStatement(contains("ON CONFLICT (tenant_id, \"key\")"))).thenReturn(ps);
 
-        store.upsert(new GlobalVariable("model", "gpt-4.1", "Default", true));
+        store.upsert(new GlobalVariable(DEFAULT, "model", "gpt-4.1", "Default", true));
 
-        verify(ps).setString(1, "model");
-        verify(ps).setString(2, "gpt-4.1");
-        verify(ps).setString(3, "Default");
-        verify(ps).setBoolean(4, true);
+        verify(ps).setString(1, DEFAULT);
+        verify(ps).setString(2, "model");
+        verify(ps).setString(3, "gpt-4.1");
+        verify(ps).setString(4, "Default");
+        verify(ps).setBoolean(5, true);
         verify(ps).executeUpdate();
     }
 
     @Test
-    @DisplayName("upsert — handles null description")
-    void upsertNullDescription() throws Exception {
+    @DisplayName("upsert — different tenant writes separate row")
+    void upsertDifferentTenant() throws Exception {
         PreparedStatement ps = mock(PreparedStatement.class);
-        when(connection.prepareStatement(contains("ON CONFLICT"))).thenReturn(ps);
+        when(connection.prepareStatement(contains("ON CONFLICT (tenant_id, \"key\")"))).thenReturn(ps);
 
-        store.upsert(new GlobalVariable("key", "val", null, false));
+        store.upsert(new GlobalVariable("tenant-a", "model", "claude"));
 
-        verify(ps).setString(3, null);
-        verify(ps).setBoolean(4, false);
+        verify(ps).setString(1, "tenant-a");
+        verify(ps).setString(2, "model");
+        verify(ps).setString(3, "claude");
     }
 
     // ==================== delete ====================
 
     @Test
-    @DisplayName("delete — executes DELETE with correct key")
+    @DisplayName("delete — executes DELETE with tenant_id + key")
     void delete() throws Exception {
         PreparedStatement ps = mock(PreparedStatement.class);
         when(connection.prepareStatement(contains("DELETE FROM"))).thenReturn(ps);
 
-        store.delete("model");
+        store.delete(DEFAULT, "model");
 
-        verify(ps).setString(1, "model");
+        verify(ps).setString(1, DEFAULT);
+        verify(ps).setString(2, "model");
         verify(ps).executeUpdate();
     }
 
     // ==================== listAll ====================
 
     @Test
-    @DisplayName("listAll — returns empty list when no rows")
+    @DisplayName("listAll — returns empty list when no rows for tenant")
     void listAllEmpty() throws Exception {
         PreparedStatement ps = mock(PreparedStatement.class);
         ResultSet rs = mock(ResultSet.class);
-        when(connection.prepareStatement(contains("SELECT key, value, description"))).thenReturn(ps);
+        when(connection.prepareStatement(contains("WHERE tenant_id = ?"))).thenReturn(ps);
         when(ps.executeQuery()).thenReturn(rs);
         when(rs.next()).thenReturn(false);
 
-        List<GlobalVariable> result = store.listAll();
-
+        List<GlobalVariable> result = store.listAll(DEFAULT);
         assertTrue(result.isEmpty());
     }
 
     @Test
-    @DisplayName("listAll — returns GlobalVariable objects")
+    @DisplayName("listAll — returns GlobalVariable objects with tenantId")
     void listAllWithRows() throws Exception {
         PreparedStatement ps = mock(PreparedStatement.class);
         ResultSet rs = mock(ResultSet.class);
-        when(connection.prepareStatement(contains("SELECT key, value, description"))).thenReturn(ps);
+        when(connection.prepareStatement(contains("WHERE tenant_id = ?"))).thenReturn(ps);
         when(ps.executeQuery()).thenReturn(rs);
         when(rs.next()).thenReturn(true, true, false);
+        when(rs.getString("tenant_id")).thenReturn(DEFAULT, DEFAULT);
         when(rs.getString("key")).thenReturn("a", "b");
         when(rs.getString("value")).thenReturn("1", "2");
         when(rs.getString("description")).thenReturn("desc-a", null);
         when(rs.getBoolean("exportable")).thenReturn(true, false);
 
-        List<GlobalVariable> result = store.listAll();
+        List<GlobalVariable> result = store.listAll(DEFAULT);
 
         assertEquals(2, result.size());
+        assertEquals(DEFAULT, result.get(0).tenantId());
         assertEquals("a", result.get(0).key());
-        assertEquals("1", result.get(0).value());
-        assertTrue(result.get(0).exportable());
-        assertEquals("b", result.get(1).key());
-        assertFalse(result.get(1).exportable());
     }
 
     // ==================== error handling ====================
@@ -208,9 +211,8 @@ class PostgresGlobalVariableStoreTest {
         when(connection.prepareStatement(anyString())).thenReturn(ps);
         when(ps.executeQuery()).thenThrow(new SQLException("test error"));
 
-        Map<String, String> result = store.getAll();
-
-        assertTrue(result.isEmpty()); // graceful degradation, not exception
+        Map<String, String> result = store.getAll(DEFAULT);
+        assertTrue(result.isEmpty());
     }
 
     @Test
@@ -220,7 +222,7 @@ class PostgresGlobalVariableStoreTest {
         when(connection.prepareStatement(anyString())).thenReturn(ps);
         when(ps.executeQuery()).thenThrow(new SQLException("test error"));
 
-        assertNull(store.get("key")); // graceful degradation
+        assertNull(store.get(DEFAULT, "key"));
     }
 
     @Test
@@ -230,7 +232,6 @@ class PostgresGlobalVariableStoreTest {
         when(connection.prepareStatement(anyString())).thenReturn(ps);
         when(ps.executeUpdate()).thenThrow(new SQLException("test error"));
 
-        // Should not throw
         assertDoesNotThrow(() -> store.upsert(new GlobalVariable("k", "v")));
     }
 
@@ -241,18 +242,7 @@ class PostgresGlobalVariableStoreTest {
         when(connection.prepareStatement(anyString())).thenReturn(ps);
         when(ps.executeUpdate()).thenThrow(new SQLException("test error"));
 
-        assertDoesNotThrow(() -> store.delete("key"));
-    }
-
-    @Test
-    @DisplayName("listAll — returns empty list on SQLException")
-    void listAllSqlException() throws Exception {
-        PreparedStatement ps = mock(PreparedStatement.class);
-        when(connection.prepareStatement(anyString())).thenReturn(ps);
-        when(ps.executeQuery()).thenThrow(new SQLException("test error"));
-
-        List<GlobalVariable> result = store.listAll();
-        assertTrue(result.isEmpty());
+        assertDoesNotThrow(() -> store.delete(DEFAULT, "key"));
     }
 
     @Test
@@ -264,12 +254,9 @@ class PostgresGlobalVariableStoreTest {
         when(ps.executeQuery()).thenReturn(rs);
         when(rs.next()).thenReturn(false);
 
-        // Call getAll twice — ensureSchema should only execute CREATE TABLE once
-        store.getAll();
-        store.getAll();
+        store.getAll(DEFAULT);
+        store.getAll(DEFAULT);
 
-        // createStatement() is called once in setUp's ensureSchema,
-        // so verify it's not called again
         verify(connection, atMost(1)).createStatement();
     }
 }

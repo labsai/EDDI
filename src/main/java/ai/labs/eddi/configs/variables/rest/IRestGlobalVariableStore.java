@@ -15,12 +15,13 @@ import jakarta.ws.rs.core.Response;
 import java.util.List;
 
 /**
- * REST API for global configuration variables.
+ * REST API for global configuration variables, scoped per tenant.
  * <p>
- * Global variables are deployment-wide key-value pairs available in agent
- * configurations via:
+ * Global variables are key-value pairs available in agent configurations via:
  * <ul>
- * <li>{@code ${vars:<key>}} — late-binding (works everywhere)</li>
+ * <li>{@code ${vars:<key>}} — late-binding, default tenant (works
+ * everywhere)</li>
+ * <li>{@code ${vars:tenantId/<key>}} — late-binding, explicit tenant</li>
  * <li>{@code {{vars.<key>}}} — template layer (LlmTask system prompts)</li>
  * </ul>
  *
@@ -33,24 +34,26 @@ import java.util.List;
 public interface IRestGlobalVariableStore {
 
     @GET
+    @Path("/{tenantId}")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(operationId = "listGlobalVariables", description = "List all global variables.")
-    List<GlobalVariable> listVariables();
+    @Operation(operationId = "listGlobalVariables", description = "List all global variables for a tenant.")
+    List<GlobalVariable> listVariables(@PathParam("tenantId") String tenantId);
 
     @GET
-    @Path("/{key}")
+    @Path("/{tenantId}/{key}")
     @Produces(MediaType.APPLICATION_JSON)
-    @Operation(operationId = "getGlobalVariable", description = "Get a single global variable by key.")
-    GlobalVariable getVariable(@PathParam("key") String key);
+    @Operation(operationId = "getGlobalVariable", description = "Get a single global variable by tenant and key.")
+    GlobalVariable getVariable(@PathParam("tenantId") String tenantId, @PathParam("key") String key);
 
     @PUT
-    @Path("/{key}")
+    @Path("/{tenantId}/{key}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(operationId = "upsertGlobalVariable", description = "Create or update a global variable.")
-    Response upsertVariable(@PathParam("key") String key, GlobalVariable variable);
+    Response upsertVariable(@PathParam("tenantId") String tenantId, @PathParam("key") String key,
+                            GlobalVariable variable);
 
     @DELETE
-    @Path("/{key}")
+    @Path("/{tenantId}/{key}")
     @Operation(operationId = "deleteGlobalVariable", description = "Delete a global variable.")
-    Response deleteVariable(@PathParam("key") String key);
+    Response deleteVariable(@PathParam("tenantId") String tenantId, @PathParam("key") String key);
 }

@@ -16,8 +16,8 @@ import static org.hamcrest.Matchers.*;
  * Integration test for Global Variable CRUD operations.
  * <p>
  * Tests Create → Read → Update → Delete lifecycle for
- * {@code /variablestore/variables}. Unlike versioned resources, global
- * variables use a flat key-based API (PUT upsert, no version query param).
+ * {@code /variablestore/variables/{tenantId}/{key}}. Uses the default tenant
+ * ({@code "default"}) for simplicity.
  */
 @QuarkusTest
 @TestProfile(IntegrationTestProfile.class)
@@ -25,21 +25,22 @@ import static org.hamcrest.Matchers.*;
 public class GlobalVariableCrudIT extends BaseIntegrationIT {
 
     private static final String BASE_PATH = "/variablestore/variables";
+    private static final String TENANT = "default";
     private static final String TEST_KEY = "it-test-model";
 
     @AfterAll
     static void cleanup() {
         try {
-            given().delete(BASE_PATH + "/" + TEST_KEY);
+            given().delete(BASE_PATH + "/" + TENANT + "/" + TEST_KEY);
         } catch (Exception ignored) {
         }
     }
 
     @Test
     @Order(1)
-    @DisplayName("List variables (initially empty or existing)")
+    @DisplayName("List variables for default tenant (initially empty or existing)")
     void listVariables() {
-        given().get(BASE_PATH)
+        given().get(BASE_PATH + "/" + TENANT)
                 .then().assertThat()
                 .statusCode(200)
                 .contentType(ContentType.JSON)
@@ -61,20 +62,21 @@ public class GlobalVariableCrudIT extends BaseIntegrationIT {
 
         given().contentType(ContentType.JSON)
                 .body(body)
-                .put(BASE_PATH + "/" + TEST_KEY)
+                .put(BASE_PATH + "/" + TENANT + "/" + TEST_KEY)
                 .then().assertThat()
                 .statusCode(200);
     }
 
     @Test
     @Order(3)
-    @DisplayName("Read created variable by key")
+    @DisplayName("Read created variable by tenant and key")
     void readVariable() {
-        given().get(BASE_PATH + "/" + TEST_KEY)
+        given().get(BASE_PATH + "/" + TENANT + "/" + TEST_KEY)
                 .then().assertThat()
                 .statusCode(200)
                 .contentType(ContentType.JSON)
                 .body("key", equalTo(TEST_KEY))
+                .body("tenantId", equalTo(TENANT))
                 .body("value", equalTo("gpt-4.1"))
                 .body("description", equalTo("Integration test model"))
                 .body("exportable", equalTo(true));
@@ -95,12 +97,12 @@ public class GlobalVariableCrudIT extends BaseIntegrationIT {
 
         given().contentType(ContentType.JSON)
                 .body(body)
-                .put(BASE_PATH + "/" + TEST_KEY)
+                .put(BASE_PATH + "/" + TENANT + "/" + TEST_KEY)
                 .then().assertThat()
                 .statusCode(200);
 
         // Verify update
-        given().get(BASE_PATH + "/" + TEST_KEY)
+        given().get(BASE_PATH + "/" + TENANT + "/" + TEST_KEY)
                 .then().assertThat()
                 .statusCode(200)
                 .body("value", equalTo("gpt-4.1-mini"))
@@ -110,9 +112,9 @@ public class GlobalVariableCrudIT extends BaseIntegrationIT {
 
     @Test
     @Order(5)
-    @DisplayName("Variable appears in list")
+    @DisplayName("Variable appears in tenant's list")
     void variableInList() {
-        given().get(BASE_PATH)
+        given().get(BASE_PATH + "/" + TENANT)
                 .then().assertThat()
                 .statusCode(200)
                 .body("key", hasItem(TEST_KEY));
@@ -122,7 +124,7 @@ public class GlobalVariableCrudIT extends BaseIntegrationIT {
     @Order(6)
     @DisplayName("GET non-existent key returns 404")
     void getNonExistent() {
-        given().get(BASE_PATH + "/does-not-exist-" + System.currentTimeMillis())
+        given().get(BASE_PATH + "/" + TENANT + "/does-not-exist-" + System.currentTimeMillis())
                 .then().assertThat()
                 .statusCode(404);
     }
@@ -137,7 +139,7 @@ public class GlobalVariableCrudIT extends BaseIntegrationIT {
 
         given().contentType(ContentType.JSON)
                 .body(body)
-                .put(BASE_PATH + "/bad key!")
+                .put(BASE_PATH + "/" + TENANT + "/bad key!")
                 .then().assertThat()
                 .statusCode(anyOf(equalTo(400), equalTo(500)));
     }
@@ -146,12 +148,12 @@ public class GlobalVariableCrudIT extends BaseIntegrationIT {
     @Order(8)
     @DisplayName("Delete variable")
     void deleteVariable() {
-        given().delete(BASE_PATH + "/" + TEST_KEY)
+        given().delete(BASE_PATH + "/" + TENANT + "/" + TEST_KEY)
                 .then().assertThat()
                 .statusCode(204);
 
         // Verify deletion
-        given().get(BASE_PATH + "/" + TEST_KEY)
+        given().get(BASE_PATH + "/" + TENANT + "/" + TEST_KEY)
                 .then().assertThat()
                 .statusCode(404);
     }

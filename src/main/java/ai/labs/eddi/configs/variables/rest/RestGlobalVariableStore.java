@@ -16,6 +16,8 @@ import org.jboss.logging.Logger;
 import java.util.List;
 import java.util.regex.Pattern;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * REST implementation for global variable CRUD.
  * <p>
@@ -29,7 +31,7 @@ import java.util.regex.Pattern;
 public class RestGlobalVariableStore implements IRestGlobalVariableStore {
 
     private static final Logger LOGGER = Logger.getLogger(RestGlobalVariableStore.class);
-    private static final Pattern KEY_PATTERN = Pattern.compile("[a-zA-Z0-9_.\\-]+");
+    private static final Pattern ID_PATTERN = Pattern.compile("[a-zA-Z0-9_.\\-]+");
 
     private final IGlobalVariableStore store;
     private final GlobalVariableResolver resolver;
@@ -41,46 +43,52 @@ public class RestGlobalVariableStore implements IRestGlobalVariableStore {
     }
 
     @Override
-    public List<GlobalVariable> listVariables() {
-        return store.listAll();
+    public List<GlobalVariable> listVariables(String tenantId) {
+        validateId(tenantId, "tenantId");
+        return store.listAll(tenantId);
     }
 
     @Override
-    public GlobalVariable getVariable(String key) {
-        var variable = store.get(key);
+    public GlobalVariable getVariable(String tenantId, String key) {
+        validateId(tenantId, "tenantId");
+        validateId(key, "key");
+        var variable = store.get(tenantId, key);
         if (variable == null) {
-            throw new NotFoundException("Global variable not found: " + key);
+            throw new NotFoundException("Global variable not found: " + sanitize(tenantId) + "/" + sanitize(key));
         }
         return variable;
     }
 
     @Override
-    public Response upsertVariable(String key, GlobalVariable variable) {
-        validateKey(key);
+    public Response upsertVariable(String tenantId, String key, GlobalVariable variable) {
+        validateId(tenantId, "tenantId");
+        validateId(key, "key");
 
-        // Ensure the key in the path matches the body (or override body key with path
-        // key)
-        var toStore = new GlobalVariable(key, variable.value(), variable.description(), variable.exportable());
+        // Ensure the path params take precedence over anything in the body
+        var toStore = new GlobalVariable(tenantId, key, variable.value(), variable.description(), variable.exportable());
         store.upsert(toStore);
         resolver.invalidateCache();
 
-        LOGGER.infof("Global variable upserted: %s", key);
+        LOGGER.infof("Global variable upserted: %s/%s", sanitize(tenantId), sanitize(key));
         return Response.ok().build();
     }
 
     @Override
-    public Response deleteVariable(String key) {
-        store.delete(key);
+    public Response deleteVariable(String tenantId, String key) {
+        validateId(tenantId, "tenantId");
+        validateId(key, "key");
+        store.delete(tenantId, key);
         resolver.invalidateCache();
 
-        LOGGER.infof("Global variable deleted: %s", key);
+        LOGGER.infof("Global variable deleted: %s/%s", sanitize(tenantId), sanitize(key));
         return Response.noContent().build();
     }
 
-    private static void validateKey(String key) {
-        if (key == null || !KEY_PATTERN.matcher(key).matches()) {
+    private static void validateId(String value, String fieldName) {
+        if (value == null || !ID_PATTERN.matcher(value).matches()) {
             throw new IllegalArgumentException(
-                    "Variable key must match [a-zA-Z0-9_.\\-]+ (letters, digits, dots, underscores, hyphens). Got: " + key);
+                    fieldName + " must match [a-zA-Z0-9_.\\-]+ (letters, digits, dots, underscores, hyphens). Got: "
+                            + sanitize(value));
         }
     }
 }

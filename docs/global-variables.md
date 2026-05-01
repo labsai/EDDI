@@ -1,6 +1,6 @@
 # Global Variables
 
-EDDI includes a built-in global variable store for managing deployment-wide configuration values like default LLM model names, API base URLs, temperature settings, and feature flags. Unlike secrets, global variables are **not encrypted** and are **fully visible** in the UI and logs.
+EDDI includes a built-in global variable store for managing configuration values like default LLM model names, API base URLs, temperature settings, and feature flags. Variables are **scoped per tenant** — single-tenant deployments use `"default"` implicitly, while multi-tenant deployments can maintain separate variable sets per tenant. Unlike secrets, global variables are **not encrypted** and are **fully visible** in the UI and logs.
 
 ## Architecture
 
@@ -23,10 +23,10 @@ EDDI includes a built-in global variable store for managing deployment-wide conf
 
 | Component | Package | Purpose |
 |-----------|---------|---------|
-| `GlobalVariable` | `configs.variables.model` | Record: `key`, `value`, `description`, `exportable` |
-| `IGlobalVariableStore` | `configs.variables` | Persistence interface (non-versioned, flat key-value) |
-| `GlobalVariableStore` | `configs.variables.mongo` | MongoDB implementation (`globalvariables` collection) |
-| `PostgresGlobalVariableStore` | `datastore.postgres` | PostgreSQL implementation (`global_variables` table) |
+| `GlobalVariable` | `configs.variables.model` | Record: `tenantId`, `key`, `value`, `description`, `exportable` |
+| `IGlobalVariableStore` | `configs.variables` | Persistence interface (non-versioned, tenant-scoped key-value) |
+| `GlobalVariableStore` | `configs.variables.mongo` | MongoDB implementation (`globalvariables` collection, composite `_id: tenantId/key`) |
+| `PostgresGlobalVariableStore` | `datastore.postgres` | PostgreSQL implementation (`global_variables` table, PK: `(tenant_id, key)`) |
 | `GlobalVariableResolver` | `configs.variables` | Resolves `${vars:...}` references with Caffeine cache |
 | `IRestGlobalVariableStore` | `configs.variables.rest` | JAX-RS REST interface |
 | `RestGlobalVariableStore` | `configs.variables.rest` | REST implementation with key validation and cache invalidation |
@@ -44,9 +44,16 @@ You are an AI assistant powered by {{vars.default-model}}.
 Always respond at temperature {{vars.default-temperature}}.
 ```
 
-### 2. Late-Binding Syntax: `${vars:<key>}`
+### 2. Late-Binding Syntax: `${vars:<key>}` / `${vars:tenantId/<key>}`
 
 Available **everywhere** — in LLM task parameters, HTTP call configurations, MCP/A2A settings, embedding configs, Slack configs, and even the `type` field that selects the LLM provider. Resolved by `GlobalVariableResolver` at runtime, after template processing but before vault secret resolution.
+
+Supports two forms, mirroring the vault's pattern:
+
+| Form | Syntax | Behavior |
+|------|--------|----------|
+| **Short form** | `${vars:key}` | Uses the context tenant (defaults to `"default"`) |
+| **Full form** | `${vars:tenantId/key}` | Uses the explicit tenant |
 
 ```json
 {
@@ -55,6 +62,15 @@ Available **everywhere** — in LLM task parameters, HTTP call configurations, M
     "model": "${vars:default-model}",
     "apiKey": "${vault:openai-api-key}",
     "baseUrl": "${vars:api-base-url}"
+  }
+}
+```
+
+Multi-tenant example:
+```json
+{
+  "parameters": {
+    "model": "${vars:tenant-a/default-model}"
   }
 }
 ```
@@ -103,35 +119,39 @@ All endpoints require the `eddi-admin` or `eddi-editor` role.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/variablestore/variables` | List all global variables |
-| `GET` | `/variablestore/variables/{key}` | Get a single variable by key |
-| `PUT` | `/variablestore/variables/{key}` | Create or update a variable |
-| `DELETE` | `/variablestore/variables/{key}` | Delete a variable |
+| `GET` | `/variablestore/variables/{tenantId}` | List all variables for a tenant |
+| `GET` | `/variablestore/variables/{tenantId}/{key}` | Get a single variable by tenant and key |
+| `PUT` | `/variablestore/variables/{tenantId}/{key}` | Create or update a variable |
+| `DELETE` | `/variablestore/variables/{tenantId}/{key}` | Delete a variable |
 
-### Key Validation
+> **Single-tenant shortcut:** Use `default` as the tenantId for single-tenant deployments.
 
-Variable keys must match the pattern `[a-zA-Z0-9_.\-]+`:
+### ID Validation
+
+Both `tenantId` and `key` must match the pattern `[a-zA-Z0-9_.\-]+`:
 
 | Valid ✅ | Invalid ❌ |
 |---------|-----------|
-| `default-model` | `has space` |
-| `api.base-url` | `key=value` |
-| `feature_flag_v2` | `key/path` |
-| `openai.temperature` | `special!char` |
+| `default` | `has space` |
+| `tenant-a` | `key=value` |
+| `api.base-url` | `key/path` |
+| `feature_flag_v2` | `special!char` |
 
 ### Response Examples
 
-**`GET /variablestore/variables`**:
+**`GET /variablestore/variables/default`**:
 
 ```json
 [
   {
+    "tenantId": "default",
     "key": "default-model",
     "value": "gpt-4.1",
     "description": "The default LLM model used by all agents",
     "exportable": true
   },
   {
+    "tenantId": "default",
     "key": "api.base-url",
     "value": "https://api.openai.com",
     "description": "OpenAI API base URL",
@@ -140,7 +160,7 @@ Variable keys must match the pattern `[a-zA-Z0-9_.\-]+`:
 ]
 ```
 
-**`PUT /variablestore/variables/default-model`** — request body:
+**`PUT /variablestore/variables/default/default-model`** — request body:
 
 ```json
 {
@@ -151,7 +171,7 @@ Variable keys must match the pattern `[a-zA-Z0-9_.\-]+`:
 }
 ```
 
-**`GET /variablestore/variables/missing-key`** — returns `404 Not Found`.
+**`GET /variablestore/variables/default/missing-key`** — returns `404 Not Found`.
 
 ## Caching
 
@@ -182,8 +202,8 @@ When global variables change, downstream caches that were built with old variabl
 Set a default model for all agents:
 
 ```bash
-# Set the variable
-curl -X PUT http://localhost:7070/variablestore/variables/default-model \
+# Set the variable (default tenant)
+curl -X PUT http://localhost:7070/variablestore/variables/default/default-model \
   -H "Content-Type: application/json" \
   -d '{"key": "default-model", "value": "gpt-4.1", "description": "Fleet default"}'
 ```
@@ -200,9 +220,34 @@ Reference it in all agents' `langchain.json`:
 
 Switch all agents at once:
 ```bash
-curl -X PUT http://localhost:7070/variablestore/variables/default-model \
+curl -X PUT http://localhost:7070/variablestore/variables/default/default-model \
   -H "Content-Type: application/json" \
   -d '{"key": "default-model", "value": "gpt-4.1-mini"}'
+```
+
+### Multi-Tenant Model Switching
+
+Set a different default model per tenant:
+
+```bash
+# Tenant A uses GPT
+curl -X PUT http://localhost:7070/variablestore/variables/tenant-a/default-model \
+  -H "Content-Type: application/json" \
+  -d '{"key": "default-model", "value": "gpt-4.1"}'
+
+# Tenant B uses Claude
+curl -X PUT http://localhost:7070/variablestore/variables/tenant-b/default-model \
+  -H "Content-Type: application/json" \
+  -d '{"key": "default-model", "value": "claude-sonnet-4-20250514"}'
+```
+
+Reference in agent config:
+```json
+{
+  "parameters": {
+    "model": "${vars:default-model}"
+  }
+}
 ```
 
 ### Environment-Specific API Endpoints
@@ -239,14 +284,14 @@ Current API version: {{vars.api-version}}.
 | Aspect | Global Variables | Secrets Vault | Properties | Snippets |
 |--------|-----------------|---------------|------------|----------|
 | **Purpose** | Operational config | Sensitive credentials | Per-user/conversation state | Reusable prompt text |
-| **Scope** | Deployment-wide | Deployment-wide | Per-user or per-conversation | Deployment-wide |
+| **Scope** | Per-tenant (all agents) | Per-tenant | Per-user or per-conversation | Deployment-wide |
 | **Encryption** | None | AES-256-GCM | None | None |
 | **Visibility** | Fully visible | Write-only | Fully visible | Fully visible |
 | **Template syntax** | `{{vars.<key>}}` | — | `{{properties.<key>}}` | `{{snippets.<name>}}` |
-| **Late-binding** | `${vars:<key>}` | `${vault:<key>}` | — | — |
+| **Late-binding** | `${vars:<key>}` or `${vars:tenantId/<key>}` | `${vault:<key>}` or `${vault:tenantId/<key>}` | — | — |
 | **Versioned** | No | No | No | Yes |
-| **REST path** | `/variablestore/variables` | `/secretstore/secrets` | via PropertySetter | `/snippetstore/snippets` |
-| **Caching** | 2 min | 5 min | No cache | 5 min |
+| **REST path** | `/variablestore/variables/{tenantId}` | `/secretstore/secrets/{tenantId}` | via PropertySetter | `/snippetstore/snippets` |
+| **Caching** | 2 min (per-tenant) | 5 min | No cache | 5 min |
 | **Export** | Configurable (`exportable`) | Always scrubbed | Per-user | Included |
 
 ### Decision Guide
@@ -262,15 +307,13 @@ Current API version: {{vars.api-version}}.
 
 | Test Class | Tests | Coverage |
 |-----------|-------|---------|
-| `GlobalVariableTest` | 7 | Model record, defaults, JSON serialization, equality |
-| `GlobalVariableResolverTest` | 14 | Resolution, caching, invalidation, edge cases, patterns |
-| `RestGlobalVariableStoreTest` | 11 | CRUD, validation, cache invalidation, key patterns |
-| `GlobalVariableStoreTest` | 10 | MongoDB adapter CRUD with mocked MongoCollection |
-| `PostgresGlobalVariableStoreTest` | 15 | PostgreSQL adapter CRUD with mocked JDBC, error paths |
+| `GlobalVariableTest` | 9 | Model record, tenant defaults, JSON serialization, equality |
+| `GlobalVariableResolverTest` | 16 | Short/full form resolution, tenant caching, invalidation, edge cases |
+| `RestGlobalVariableStoreTest` | 11 | CRUD, tenant+key validation, cache invalidation, patterns |
+| `GlobalVariableStoreTest` | 9 | MongoDB adapter CRUD with mocked MongoCollection, tenant scoping |
+| `PostgresGlobalVariableStoreTest` | 14 | PostgreSQL adapter CRUD with mocked JDBC, tenant isolation, error paths |
 | `GlobalVariableCrudIT` | 8 | Full CRUD lifecycle against MongoDB (Testcontainers) |
 | `PostgresGlobalVariableCrudIT` | 8 | Full CRUD lifecycle against PostgreSQL (Testcontainers) |
-
-**Aggregate coverage across all 5 production classes: 99% instruction / 93% branch.**
 
 ### Integration Tests
 

@@ -18,10 +18,12 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Unit tests for {@link RestGlobalVariableStore} — CRUD operations, validation,
- * and cache invalidation.
+ * Unit tests for {@link RestGlobalVariableStore} — CRUD operations with tenant
+ * scoping, validation, and cache invalidation.
  */
 class RestGlobalVariableStoreTest {
+
+    private static final String DEFAULT = GlobalVariable.DEFAULT_TENANT;
 
     private IGlobalVariableStore store;
     private GlobalVariableResolver resolver;
@@ -37,75 +39,89 @@ class RestGlobalVariableStoreTest {
     @Test
     void listVariables() {
         var expected = List.of(new GlobalVariable("k", "v"));
-        when(store.listAll()).thenReturn(expected);
-        assertEquals(expected, rest.listVariables());
+        when(store.listAll(DEFAULT)).thenReturn(expected);
+        assertEquals(expected, rest.listVariables(DEFAULT));
     }
 
     @Test
     void getVariableFound() {
         var gv = new GlobalVariable("k", "v");
-        when(store.get("k")).thenReturn(gv);
-        assertEquals(gv, rest.getVariable("k"));
+        when(store.get(DEFAULT, "k")).thenReturn(gv);
+        assertEquals(gv, rest.getVariable(DEFAULT, "k"));
     }
 
     @Test
     void getVariableNotFound() {
-        when(store.get("missing")).thenReturn(null);
-        assertThrows(NotFoundException.class, () -> rest.getVariable("missing"));
+        when(store.get(DEFAULT, "missing")).thenReturn(null);
+        assertThrows(NotFoundException.class, () -> rest.getVariable(DEFAULT, "missing"));
     }
 
     @Test
     void upsertVariable() {
-        var input = new GlobalVariable("model", "gpt-4.1", "default model", true);
-        Response response = rest.upsertVariable("model", input);
+        var input = new GlobalVariable(DEFAULT, "model", "gpt-4.1", "default model", true);
+        Response response = rest.upsertVariable(DEFAULT, "model", input);
         assertEquals(200, response.getStatus());
         verify(store).upsert(any(GlobalVariable.class));
         verify(resolver).invalidateCache();
     }
 
     @Test
-    void upsertVariableKeyOverridesBody() {
-        // Path key should take precedence
-        var input = new GlobalVariable("wrong-key", "val");
-        rest.upsertVariable("correct-key", input);
+    void upsertVariablePathOverridesBody() {
+        // Path tenantId + key should take precedence over body values
+        var input = new GlobalVariable("wrong-tenant", "wrong-key", "val");
+        rest.upsertVariable(DEFAULT, "correct-key", input);
 
         var captor = org.mockito.ArgumentCaptor.forClass(GlobalVariable.class);
         verify(store).upsert(captor.capture());
+        assertEquals(DEFAULT, captor.getValue().tenantId());
         assertEquals("correct-key", captor.getValue().key());
     }
 
     @Test
     void upsertVariableInvalidKey() {
         var input = new GlobalVariable("bad key!", "val");
-        assertThrows(IllegalArgumentException.class, () -> rest.upsertVariable("bad key!", input));
+        assertThrows(IllegalArgumentException.class, () -> rest.upsertVariable(DEFAULT, "bad key!", input));
+        verifyNoInteractions(store);
+    }
+
+    @Test
+    void upsertVariableInvalidTenantId() {
+        var input = new GlobalVariable("model", "val");
+        assertThrows(IllegalArgumentException.class, () -> rest.upsertVariable("bad tenant!", "model", input));
         verifyNoInteractions(store);
     }
 
     @Test
     void deleteVariable() {
-        Response response = rest.deleteVariable("k");
+        Response response = rest.deleteVariable(DEFAULT, "k");
         assertEquals(204, response.getStatus());
-        verify(store).delete("k");
+        verify(store).delete(DEFAULT, "k");
         verify(resolver).invalidateCache();
     }
 
     @Test
     void validKeyPatterns() {
-        // These should all be valid keys
         for (String key : List.of("model", "default-model", "api.key", "version_2", "A-Z.test_123")) {
-            assertDoesNotThrow(() -> rest.upsertVariable(key, new GlobalVariable(key, "v")),
+            assertDoesNotThrow(() -> rest.upsertVariable(DEFAULT, key, new GlobalVariable(key, "v")),
                     "Key should be valid: " + key);
+        }
+    }
+
+    @Test
+    void validTenantIdPatterns() {
+        for (String tenant : List.of("default", "tenant-a", "org.example", "t_1")) {
+            assertDoesNotThrow(() -> rest.upsertVariable(tenant, "key", new GlobalVariable("key", "v")),
+                    "Tenant should be valid: " + tenant);
         }
     }
 
     @Test
     void invalidKeyPatterns() {
         for (String key : List.of("", "has space", "key=value", "key/path")) {
-            assertThrows(Exception.class, () -> rest.upsertVariable(key, new GlobalVariable(key, "v")),
+            assertThrows(Exception.class, () -> rest.upsertVariable(DEFAULT, key, new GlobalVariable(key, "v")),
                     "Key should be invalid: " + key);
         }
-        // null key tested separately (can't be in List.of)
-        assertThrows(Exception.class, () -> rest.upsertVariable(null, new GlobalVariable(null, "v")),
+        assertThrows(Exception.class, () -> rest.upsertVariable(DEFAULT, null, new GlobalVariable(null, "v")),
                 "Null key should be invalid");
     }
 }
