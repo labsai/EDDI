@@ -198,6 +198,8 @@ When tasks process templates (system prompts, HTTP call bodies, property instruc
 | `context`          | `Map<String, Object>`                        | Input context variables set per turn                                       | `{{context.language}}`                           |
 | `properties`       | `Map<String, Object>`                        | Conversation properties — raw values from `ConversationProperties.toMap()` | `{properties.preferred_language}`                |
 | `memory`           | `Map` with `current`, `last`, `past`         | Conversation step data from the pipeline                                   | `{memory.current.output}`, `{memory.last.input}` |
+| `snippets`         | `Map<String, Object>`                        | Prompt Snippets — auto-injected from `PromptSnippetService`                | `{{snippets.cautious_mode}}`                     |
+| `vars`             | `Map<String, Object>`                        | Global Variables — deployment-wide config from `GlobalVariableResolver`    | `{{vars.default-model}}`                         |
 | `userInfo`         | `Map` with `userId`                          | Authenticated user identity                                                | `{{userInfo.userId}}`                            |
 | `conversationInfo` | `Map` with `conversationId`, `agentId`, etc. | Conversation metadata                                                      | `{{conversationInfo.agentId}}`                   |
 | `conversationLog`  | `String`                                     | Formatted conversation history                                             | `{{conversationLog}}`                            |
@@ -635,6 +637,8 @@ This is because `ConversationProperties.put()` stores `property.getValueString()
 | `{memory.current.output}`           | Output text for current step       |                                              |
 | `{memory.last.input}`               | Previous step's input              |                                              |
 | `{context.key}`                     | Context variable set by client     | `{context.language}`                         |
+| `{snippets.name}`                   | Prompt snippet content             | `{snippets.cautious_mode}`                   |
+| `{vars.key}`                        | Global variable value              | `{vars.default-model}`                       |
 | `{userInfo.userId}`                 | Authenticated user ID              |                                              |
 | `{conversationInfo.agentId}`        | Current agent ID                   |                                              |
 | `{conversationInfo.conversationId}` | Current conversation ID            |                                              |

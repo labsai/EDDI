@@ -13,6 +13,67 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## ⚙️ Global Variable Store — `eddivar` (2026-05-01)
+
+**Repo:** EDDI (`feat/global-variables`)
+
+**What changed:** Added a non-encrypted, deployment-wide Global Variable Store for runtime configuration parameters. Enables changing operational values (LLM models, API endpoints, temperatures, feature flags) across all agents simultaneously without redeployment.
+
+### New Components
+
+| Component | Purpose |
+|-----------|---------|
+| `GlobalVariable` | Record model: `key`, `value`, `description`, `exportable` |
+| `IGlobalVariableStore` | Persistence interface (non-versioned, flat key-value) |
+| `GlobalVariableStore` | MongoDB adapter (`globalvariables` collection, `_id` = key) |
+| `GlobalVariableResolver` | Regex-based `${eddivar:<key>}` resolution with Caffeine cache + invalidation listeners |
+| `IRestGlobalVariableStore` | JAX-RS REST API (`/variablestore/variables`) |
+| `RestGlobalVariableStore` | REST implementation with key validation and write-through cache invalidation |
+
+### Pipeline Integration (8 callsites)
+
+Resolution order: Jinja2/Qute templates → **eddivar** → eddivault. Integrated into:
+
+1. **LlmTask** — `{{vars.<key>}}` template injection + `${eddivar:...}` in `type` field (provider late-binding)
+2. **ChatModelRegistry** — `resolveAll` before `resolveSecrets`, registers invalidation listener
+3. **ApiCallExecutor** — URL, body, headers, query params
+4. **McpToolProviderManager** — API key/URL resolution
+5. **A2AToolProviderManager** — API key/URL resolution
+6. **EmbeddingModelFactory** — config params before model creation
+7. **EmbeddingStoreFactory** — config params before store creation
+8. **SlackChannelRouter** — channel config values
+
+### Design Decisions
+
+- **Two syntaxes**: `{{vars.<key>}}` for template layer (system prompts), `${eddivar:<key>}` for late-binding layer (everywhere). Same data, two access patterns for different resolution stages.
+- **Non-versioned**: Unlike agent configs, global variables are operational deployment config. No version history — upsert semantics with PUT.
+- **Non-encrypted**: Fully visible in UI and logs. Use the vault (`${eddivault:...}`) for sensitive values.
+- **Invalidation listeners**: Downstream caches (ChatModelRegistry) register `Runnable` callbacks. When variables change, all cached model instances are evicted so agents pick up new config on next request.
+- **`exportable` flag**: Variables marked `exportable: false` are excluded from agent exports (e.g., environment-specific URLs).
+
+### Bug Fix
+
+- **BUG-1 (LlmTask)**: `task.getType()` was used raw (unresolved) in `tokenCounterFactory.getEstimator()` (line 288) and `chatModelRegistry.getOrCreateStreaming()` (line 411). Hoisted `resolvedType` above both branches so `${eddivar:default-provider}` works correctly for token-aware windowing and streaming mode.
+
+### Documentation
+
+- New: `docs/global-variables.md` — comprehensive public docs with architecture, syntax, REST API, use cases, and comparison table
+- Updated: `AGENTS.md` — added `snippets` and `vars` to both template data model tables (sections 4.2 and 5.1)
+
+### Tests (48 total)
+
+| Test Class | Tests | Type |
+|-----------|-------|------|
+| `GlobalVariableTest` | 7 | Unit — model, defaults, JSON |
+| `GlobalVariableResolverTest` | 14 | Unit — resolution, cache, invalidation |
+| `RestGlobalVariableStoreTest` | 11 | Unit — CRUD, validation |
+| `GlobalVariableCrudIT` | 8 | Integration — MongoDB CRUD lifecycle |
+| 9 modified test suites | — | Constructor dependency updates |
+
+**Files:** `src/main/java/ai/labs/eddi/configs/variables/` (6 new files), `src/main/java/ai/labs/eddi/modules/llm/impl/LlmTask.java`, `src/main/java/ai/labs/eddi/modules/llm/impl/ChatModelRegistry.java`, `docs/global-variables.md`, `AGENTS.md`
+
+---
+
 ## 🔒 OpenSSF Scorecard: Pinned-Dependencies Remediation (2026-04-28)
 
 **Repo:** EDDI (`chore/openssf-pinned-dependencies`)

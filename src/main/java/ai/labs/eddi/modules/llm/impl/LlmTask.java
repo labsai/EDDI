@@ -281,11 +281,15 @@ public class LlmTask implements ILifecycleTask {
             }
         }
 
+        // Resolve global variable references in task type BEFORE any model
+        // lookups — used by token estimator, sync model, and streaming model.
+        var resolvedType = globalVariableResolver.resolveValue(task.getType());
+
         List<ChatMessage> messages;
         if (maxContextTokens != null && maxContextTokens > 0) {
             // Resolve model name from provider-specific parameter keys
             String resolvedModelName = resolveModelName(processedParams);
-            var estimator = tokenCounterFactory.getEstimator(task.getType(), resolvedModelName);
+            var estimator = tokenCounterFactory.getEstimator(resolvedType, resolvedModelName);
             messages = conversationHistoryBuilder.buildTokenAwareMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), maxContextTokens,
                     anchorFirstSteps, includeFirstAgentMessage, estimator, summaryPrefix, skipSteps);
         } else {
@@ -302,9 +306,6 @@ public class LlmTask implements ILifecycleTask {
             return;
         }
 
-        // Resolve global variable references in task type (e.g.,
-        // ${eddivar:default-provider})
-        var resolvedType = globalVariableResolver.resolveValue(task.getType());
         var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams);
         prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
 
@@ -408,7 +409,7 @@ public class LlmTask implements ILifecycleTask {
                 }
             } else if (eventSink != null) {
                 // Legacy mode with streaming — try to get a streaming model
-                var streamingModel = chatModelRegistry.getOrCreateStreaming(task.getType(), processedParams);
+                var streamingModel = chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
                 if (streamingModel != null) {
                     responseContent = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink);
                 } else {
