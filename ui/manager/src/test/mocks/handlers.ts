@@ -2586,6 +2586,66 @@ const MOCK_SECRETS = [
   },
 ];
 
+// ─── Global Variables Mock Data ────────────────────────────────────────────────
+
+const MOCK_VARIABLES = [
+  {
+    key: "default-model",
+    value: "gpt-4.1",
+    description: "The default LLM model used by all agents",
+    exportable: true,
+  },
+  {
+    key: "api.base-url",
+    value: "https://api.openai.com",
+    description: "OpenAI API base URL",
+    exportable: false,
+  },
+  {
+    key: "temperature",
+    value: "0.7",
+    description: "Default LLM temperature for all tasks",
+    exportable: true,
+  },
+  {
+    key: "feature_flag_v2",
+    value: "enabled",
+    description: "Enable v2 processing pipeline",
+    exportable: true,
+  },
+];
+
+export const variablesHandlers = [
+  // List all global variables
+  http.get("*/variablestore/variables", ({ request }) => {
+    const url = new URL(request.url);
+    // Only match the exact /variablestore/variables path (no trailing segments)
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length > 2) return;
+    return HttpResponse.json(MOCK_VARIABLES);
+  }),
+
+  // Get a single variable by key
+  http.get("*/variablestore/variables/:key", ({ params }) => {
+    const key = params.key as string;
+    const found = MOCK_VARIABLES.find((v) => v.key === key);
+    if (!found) {
+      return new HttpResponse(null, { status: 404 });
+    }
+    return HttpResponse.json(found);
+  }),
+
+  // Create or update a variable
+  http.put("*/variablestore/variables/:key", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Delete a variable
+  http.delete("*/variablestore/variables/:key", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+];
+
 export const secretsHandlers = [
   // List secrets (tenant-scoped, no agentId)
   http.get("*/secretstore/secrets/:tenantId", ({ params, request }) => {
