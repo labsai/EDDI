@@ -2,10 +2,10 @@ name: Project Metrics Tracker
 
 on:
   schedule:
-    # Offset to :05 to avoid overlapping with daily (18:00) and weekly (09:00)
+    # Offset to :05 to avoid overlapping with daily (07:00) and weekly (07:00)
     - cron: '5,20,35,50 * * * *' # every 15 min — collect metrics + push to analytics
-    - cron: '0 18 * * *'          # daily — 6pm UTC, digest (only if activity)
-    - cron: '0 9 * * 0'           # weekly — Sunday 9am UTC, Slack digest
+    - cron: '0 7 * * *'           # daily — 7am UTC (9am CEST), digest (only if activity)
+    - cron: '0 7 * * 1'           # weekly — Monday 7am UTC (9am CEST), Slack digest
   workflow_dispatch:
     inputs:
       force_digest:
@@ -131,9 +131,9 @@ jobs:
           FORCE="${{ github.event.inputs.force_digest }}"
 
           # Determine which schedule triggered this run
-          if [ "$SCHEDULE" = "0 18 * * *" ]; then
+          if [ "$SCHEDULE" = "0 7 * * *" ]; then
             TYPE="daily"
-          elif [ "$SCHEDULE" = "0 9 * * 0" ] || [ "$FORCE" = "true" ]; then
+          elif [ "$SCHEDULE" = "0 7 * * 1" ] || [ "$FORCE" = "true" ]; then
             TYPE="weekly"
           else
             TYPE="collect"
