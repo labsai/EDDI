@@ -19,7 +19,7 @@ const variableKeys = {
 export function useVariables() {
   return useQuery({
     queryKey: variableKeys.list,
-    queryFn: listVariables,
+    queryFn: () => listVariables(),
   });
 }
 
