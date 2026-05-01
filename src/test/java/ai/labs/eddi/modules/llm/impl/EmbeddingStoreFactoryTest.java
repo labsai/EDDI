@@ -170,7 +170,7 @@ class EmbeddingStoreFactoryTest {
 
             var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, "kb"));
             assertTrue(ex.getMessage().contains("password"), "Error should mention missing password");
-            assertTrue(ex.getMessage().contains("eddivault"), "Error should mention vault reference");
+            assertTrue(ex.getMessage().contains("vault"), "Error should mention vault reference");
         }
 
         @Test

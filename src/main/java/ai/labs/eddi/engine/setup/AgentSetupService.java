@@ -475,7 +475,7 @@ public class AgentSetupService {
     /**
      * Auto-vault an API key if the vault is available. When the vault is active,
      * the plaintext key is stored encrypted and a vault reference string
-     * ({@code ${eddivault:keyName}}) is returned. Downstream consumers
+     * ({@code ${vault:keyName}}) is returned. Downstream consumers
      * ({@link ai.labs.eddi.modules.llm.impl.ChatModelRegistry}) resolve vault
      * references transparently at model-load time.
      *

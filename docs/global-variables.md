@@ -8,7 +8,7 @@ EDDI includes a built-in global variable store for managing deployment-wide conf
 ┌─────────────────┐     ┌──────────────────┐     ┌──────────────────┐
 │  Configuration   │────>│ GlobalVariable   │────>│  GlobalVariable  │
 │  (JSON configs)  │     │ Resolver         │     │  Store           │
-│  ${eddivar:..}   │     │ (regex + cache)  │     │  (MongoDB/PG)    │
+│  ${vars:..}   │     │ (regex + cache)  │     │  (MongoDB/PG)    │
 └─────────────────┘     └──────────────────┘     └──────────────────┘
         │
         ▼
@@ -27,7 +27,7 @@ EDDI includes a built-in global variable store for managing deployment-wide conf
 | `IGlobalVariableStore` | `configs.variables` | Persistence interface (non-versioned, flat key-value) |
 | `GlobalVariableStore` | `configs.variables.mongo` | MongoDB implementation (`globalvariables` collection) |
 | `PostgresGlobalVariableStore` | `datastore.postgres` | PostgreSQL implementation (`global_variables` table) |
-| `GlobalVariableResolver` | `configs.variables` | Resolves `${eddivar:...}` references with Caffeine cache |
+| `GlobalVariableResolver` | `configs.variables` | Resolves `${vars:...}` references with Caffeine cache |
 | `IRestGlobalVariableStore` | `configs.variables.rest` | JAX-RS REST interface |
 | `RestGlobalVariableStore` | `configs.variables.rest` | REST implementation with key validation and cache invalidation |
 
@@ -44,17 +44,17 @@ You are an AI assistant powered by {{vars.default-model}}.
 Always respond at temperature {{vars.default-temperature}}.
 ```
 
-### 2. Late-Binding Syntax: `${eddivar:<key>}`
+### 2. Late-Binding Syntax: `${vars:<key>}`
 
 Available **everywhere** — in LLM task parameters, HTTP call configurations, MCP/A2A settings, embedding configs, Slack configs, and even the `type` field that selects the LLM provider. Resolved by `GlobalVariableResolver` at runtime, after template processing but before vault secret resolution.
 
 ```json
 {
-  "type": "${eddivar:default-provider}",
+  "type": "${vars:default-provider}",
   "parameters": {
-    "model": "${eddivar:default-model}",
-    "apiKey": "${eddivault:openai-api-key}",
-    "baseUrl": "${eddivar:api-base-url}"
+    "model": "${vars:default-model}",
+    "apiKey": "${vault:openai-api-key}",
+    "baseUrl": "${vars:api-base-url}"
   }
 }
 ```
@@ -64,7 +64,7 @@ Available **everywhere** — in LLM task parameters, HTTP call configurations, M
 | Syntax | Where It Works | When to Use |
 |--------|---------------|-------------|
 | `{{vars.<key>}}` | System prompts, template-processed strings | Dynamic prompt content that changes per-deployment |
-| `${eddivar:<key>}` | Everywhere (params, URLs, headers, type) | Operational config that affects infrastructure |
+| `${vars:<key>}` | Everywhere (params, URLs, headers, type) | Operational config that affects infrastructure |
 
 ### Resolution Order
 
@@ -72,17 +72,17 @@ EDDI resolves configuration values in a strict three-step order:
 
 ```
 1. Jinja2/Qute templates   →  {{vars.x}}, {{snippets.x}}, {{properties.x}}, etc.
-2. Global variables         →  ${eddivar:x}   ← this feature
-3. Vault secrets           →  ${eddivault:x}
+2. Global variables         →  ${vars:x}   ← this feature
+3. Vault secrets           →  ${vault:x}
 ```
 
 This ordering is important: vault secrets can contain global variable references, and global variables can be composed with template expressions.
 
-> **⚠️ Nesting is not supported.** `${eddivar:${eddivault:x}}` and `${eddivault:${eddivar:x}}` will NOT work. Each resolution layer operates independently on the fully-resolved output of the previous layer.
+> **⚠️ Nesting is not supported.** `${vars:${vault:x}}` and `${vault:${vars:x}}` will NOT work. Each resolution layer operates independently on the fully-resolved output of the previous layer.
 
 ## Where References Work
 
-`${eddivar:...}` references are resolved in these pipeline callsites:
+`${vars:...}` references are resolved in these pipeline callsites:
 
 | Configuration Type | Fields Resolved |
 |-------------------|-----------------|
@@ -173,7 +173,7 @@ eddi.variables.cache-ttl-minutes=2
 When global variables change, downstream caches that were built with old variable values need to be evicted. The `GlobalVariableResolver` supports an **invalidation listener** pattern:
 
 - **ChatModelRegistry** registers a listener that clears all cached model instances when variables change
-- This ensures that if you change `${eddivar:default-model}` from `gpt-4.1` to `gpt-4.1-mini`, all agents pick up the new model on their next request
+- This ensures that if you change `${vars:default-model}` from `gpt-4.1` to `gpt-4.1-mini`, all agents pick up the new model on their next request
 
 ## Use Cases
 
@@ -191,9 +191,9 @@ curl -X PUT http://localhost:7070/variablestore/variables/default-model \
 Reference it in all agents' `langchain.json`:
 ```json
 {
-  "type": "${eddivar:default-provider}",
+  "type": "${vars:default-provider}",
   "parameters": {
-    "model": "${eddivar:default-model}"
+    "model": "${vars:default-model}"
   }
 }
 ```
@@ -243,7 +243,7 @@ Current API version: {{vars.api-version}}.
 | **Encryption** | None | AES-256-GCM | None | None |
 | **Visibility** | Fully visible | Write-only | Fully visible | Fully visible |
 | **Template syntax** | `{{vars.<key>}}` | — | `{{properties.<key>}}` | `{{snippets.<name>}}` |
-| **Late-binding** | `${eddivar:<key>}` | `${eddivault:<key>}` | — | — |
+| **Late-binding** | `${vars:<key>}` | `${vault:<key>}` | — | — |
 | **Versioned** | No | No | No | Yes |
 | **REST path** | `/variablestore/variables` | `/secretstore/secrets` | via PropertySetter | `/snippetstore/snippets` |
 | **Caching** | 2 min | 5 min | No cache | 5 min |
@@ -251,8 +251,8 @@ Current API version: {{vars.api-version}}.
 
 ### Decision Guide
 
-- **Need to store an API key?** → Use the **Secrets Vault** (`${eddivault:...}`)
-- **Need to change the LLM model for all agents?** → Use a **Global Variable** (`${eddivar:...}`)
+- **Need to store an API key?** → Use the **Secrets Vault** (`${vault:...}`)
+- **Need to change the LLM model for all agents?** → Use a **Global Variable** (`${vars:...}`)
 - **Need to remember a user's name across conversations?** → Use **Properties** with `scope: longTerm`
 - **Need reusable system prompt instructions?** → Use **Prompt Snippets** (`{{snippets.<name>}}`)
 

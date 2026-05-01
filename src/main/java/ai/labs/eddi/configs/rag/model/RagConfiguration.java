@@ -46,16 +46,15 @@ public class RagConfiguration {
      * Provider-specific parameters. Keys vary by provider:
      * <ul>
      * <li>OpenAI: {"model": "text-embedding-3-small", "apiKey":
-     * "${eddivault:tenant/agent/openai-key}"}</li>
+     * "${vault:tenant/agent/openai-key}"}</li>
      * <li>Azure OpenAI: {"endpoint": "https://my.openai.azure.com/", "apiKey":
-     * "${eddivault:...}", "deploymentName": "text-embedding-3-small"}</li>
+     * "${vault:...}", "deploymentName": "text-embedding-3-small"}</li>
      * <li>Ollama: {"model": "nomic-embed-text", "baseUrl":
      * "http://localhost:11434"}</li>
-     * <li>Mistral: {"model": "mistral-embed", "apiKey": "${eddivault:...}"}</li>
+     * <li>Mistral: {"model": "mistral-embed", "apiKey": "${vault:...}"}</li>
      * <li>Bedrock: {"model": "amazon.titan-embed-text-v2:0", "region":
      * "us-east-1"}</li>
-     * <li>Cohere: {"model": "embed-english-v3.0", "apiKey":
-     * "${eddivault:...}"}</li>
+     * <li>Cohere: {"model": "embed-english-v3.0", "apiKey": "${vault:...}"}</li>
      * <li>Vertex: {"project": "my-project", "location": "us-central1", "model":
      * "text-embedding-005"}</li>
      * </ul>

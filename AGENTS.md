@@ -744,7 +744,7 @@ Matcher:      "actions" : "ask_for_model"
 | `step`         | Cleared at end of turn                                                                                                                        |
 | `conversation` | Lives for the session (default for most agent-building properties)                                                                            |
 | `longTerm`     | Persisted to `usermemories` collection across conversations                                                                                   |
-| `secret`       | Auto-vaulted: plaintext stored in SecretsVault, raw input scrubbed from memory, vault reference (`${eddivault:...}`) stored as property value |
+| `secret`       | Auto-vaulted: plaintext stored in SecretsVault, raw input scrubbed from memory, vault reference (`${vault:...}`) stored as property value |
 
 > **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If vault is disabled (common in dev mode), `autoVaultSecret()` fails and falls back to storing plaintext — but logs an ERROR that may confuse users. For wizard-style agents that collect API keys and pass them to an endpoint (like the Agent Father), prefer `scope: "conversation"` and delegate vaulting to the receiving service.
 

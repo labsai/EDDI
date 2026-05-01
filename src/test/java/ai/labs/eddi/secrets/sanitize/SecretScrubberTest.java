@@ -40,7 +40,7 @@ class SecretScrubberTest {
     void scrubJson_vaultReferences_passthrough() throws Exception {
         String json = """
                 {
-                    "apiKey": "${eddivault:default/agent1/openaiKey}",
+                    "apiKey": "${vault:default/agent1/openaiKey}",
                     "name": "My Config"
                 }
                 """;
@@ -48,7 +48,7 @@ class SecretScrubberTest {
         String scrubbed = scrubber.scrubJson(json);
 
         // Vault references should be preserved (they're already safe)
-        assertTrue(scrubbed.contains("${eddivault:default/agent1/openaiKey}"));
+        assertTrue(scrubbed.contains("${vault:default/agent1/openaiKey}"));
         assertTrue(scrubbed.contains("My Config"));
     }
 

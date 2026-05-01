@@ -35,7 +35,7 @@ class McpCallsModelsTest {
         config.setMcpServerUrl("http://localhost:7070/mcp");
         config.setName("GitHub MCP");
         config.setTransport("sse");
-        config.setApiKey("${eddivault:github-key}");
+        config.setApiKey("${vault:github-key}");
         config.setTimeoutMs(60000L);
         config.setToolsWhitelist(List.of("list_repos", "create_issue"));
         config.setToolsBlacklist(List.of("delete_repo"));
@@ -47,7 +47,7 @@ class McpCallsModelsTest {
         assertEquals("http://localhost:7070/mcp", config.getMcpServerUrl());
         assertEquals("GitHub MCP", config.getName());
         assertEquals("sse", config.getTransport());
-        assertEquals("${eddivault:github-key}", config.getApiKey());
+        assertEquals("${vault:github-key}", config.getApiKey());
         assertEquals(60000L, config.getTimeoutMs());
         assertEquals(2, config.getToolsWhitelist().size());
         assertEquals(1, config.getToolsBlacklist().size());

@@ -330,7 +330,7 @@ class ApiCallExecutorTest {
 
         Map<String, Object> requestMap = new HashMap<>();
         Map<String, Object> headers = new LinkedHashMap<>();
-        headers.put("X-Custom-Auth", "${eddivault:my-secret}");
+        headers.put("X-Custom-Auth", "${vault:my-secret}");
         requestMap.put("headers", headers);
         when(mockRequest.toMap()).thenReturn(requestMap);
         setupSuccessResponse(200, "ok", "text/plain");

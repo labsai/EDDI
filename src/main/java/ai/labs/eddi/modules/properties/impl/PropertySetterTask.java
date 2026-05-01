@@ -391,7 +391,7 @@ public class PropertySetterTask implements ILifecycleTask {
      * <p>
      * The keyName is namespaced with the agentId to prevent cross-agent collisions:
      * {@code agentId.keyName}. Since the tenant is typically "default", the
-     * short-form syntax is used: {@code ${eddivault:agentId.keyName}}.
+     * short-form syntax is used: {@code ${vault:agentId.keyName}}.
      *
      * @param memory
      *            the conversation memory (used for agentId and input scrubbing)
@@ -399,8 +399,7 @@ public class PropertySetterTask implements ILifecycleTask {
      *            the property name used as the vault key
      * @param plaintext
      *            the secret value to store
-     * @return the vault reference string, e.g.
-     *         {@code ${eddivault:69c687.userApiKey}}
+     * @return the vault reference string, e.g. {@code ${vault:69c687.userApiKey}}
      */
     private String autoVaultSecret(IConversationMemory memory, String keyName, String plaintext) {
         // Determine tenantId — use conversation property if set, else "default"

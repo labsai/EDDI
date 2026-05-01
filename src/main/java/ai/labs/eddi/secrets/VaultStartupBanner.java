@@ -45,7 +45,7 @@ public final class VaultStartupBanner {
                 |  SECRETS VAULT: ENABLED                                          |
                 |                                                                  |
                 |  Envelope encryption is active (AES-256-GCM).                    |
-                |  ${eddivault:...} references will be resolved at runtime.        |
+                |  ${vault:...} references will be resolved at runtime.           |
                 |  Audit entries will be HMAC-signed for tamper detection.         |
                 +------------------------------------------------------------------+
 
@@ -64,7 +64,7 @@ public final class VaultStartupBanner {
                 +------------------------------------------------------------------+
                 |                                                                  |
                 |  What this means:                                                |
-                |    * ${eddivault:...} secret references will NOT be resolved     |
+                |    * ${vault:...} secret references will NOT be resolved        |
                 |    * API keys in configs are stored/transmitted as PLAINTEXT     |
                 |    * Audit log entries will NOT have HMAC integrity signatures   |
                 |                                                                  |

@@ -106,11 +106,11 @@ class SlackChannelRouterTest {
     @Test
     void resolveCredentials_vaultReferencesResolved() throws Exception {
         // Configure SecretResolver to resolve vault references
-        when(secretResolver.resolveValue("${eddivault:slack-token}")).thenReturn("xoxb-resolved");
-        when(secretResolver.resolveValue("${eddivault:slack-secret}")).thenReturn("resolved-secret");
+        when(secretResolver.resolveValue("${vault:slack-token}")).thenReturn("xoxb-resolved");
+        when(secretResolver.resolveValue("${vault:slack-secret}")).thenReturn("resolved-secret");
 
         setupDeployedAgent("agent-1", 1, "C0123",
-                "${eddivault:slack-token}", "${eddivault:slack-secret}", null);
+                "${vault:slack-token}", "${vault:slack-secret}", null);
 
         var creds = router.resolveCredentials("C0123");
         assertTrue(creds.isPresent());
@@ -240,13 +240,13 @@ class SlackChannelRouterTest {
     @Test
     void resolveCredentials_vaultFailure_botTokenNull_channelStillMapped() throws Exception {
         // Vault throws for the botToken reference but signingSecret resolves fine
-        when(secretResolver.resolveValue("${eddivault:bad-token-ref}"))
+        when(secretResolver.resolveValue("${vault:bad-token-ref}"))
                 .thenThrow(new RuntimeException("Vault key not found: bad-token-ref"));
         when(secretResolver.resolveValue("plain-secret"))
                 .thenReturn("plain-secret");
 
         setupDeployedAgent("agent-1", 1, "C0123",
-                "${eddivault:bad-token-ref}", "plain-secret", null);
+                "${vault:bad-token-ref}", "plain-secret", null);
 
         // Channel should still be mapped (routing works)
         assertEquals(Optional.of("agent-1"), router.resolveAgentId("C0123"));
@@ -263,11 +263,11 @@ class SlackChannelRouterTest {
         // Signing secret vault ref fails — should not appear in getAllSigningSecrets()
         when(secretResolver.resolveValue("xoxb-good-token"))
                 .thenReturn("xoxb-good-token");
-        when(secretResolver.resolveValue("${eddivault:bad-secret-ref}"))
+        when(secretResolver.resolveValue("${vault:bad-secret-ref}"))
                 .thenThrow(new RuntimeException("Vault key not found"));
 
         setupDeployedAgent("agent-1", 1, "C0123",
-                "xoxb-good-token", "${eddivault:bad-secret-ref}", null);
+                "xoxb-good-token", "${vault:bad-secret-ref}", null);
 
         // Signing secrets set should be empty (failed resolution excluded)
         assertTrue(router.getAllSigningSecrets().isEmpty());

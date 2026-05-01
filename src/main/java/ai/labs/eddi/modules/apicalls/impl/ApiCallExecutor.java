@@ -370,7 +370,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         || headerName.contains("apikey") || headerName.contains("x-api-key") || headerName.contains("token")
                         || headerName.contains("secret") || headerName.contains("credential")) {
                     entry.setValue("<REDACTED>");
-                } else if (entry.getValue() instanceof String val && val.contains("${eddivault:")) {
+                } else if (entry.getValue() instanceof String val && (val.contains("${vault:") || val.contains("${eddivault:"))) {
                     entry.setValue("<REDACTED>");
                 }
             }

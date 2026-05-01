@@ -42,7 +42,7 @@ A `RagConfiguration` is a versioned resource at `/ragstore/rags/`. It defines:
   "embeddingProvider": "openai",
   "embeddingParameters": {
     "model": "text-embedding-3-small",
-    "apiKey": "${eddivault:tenant/agent/openai-key}"
+    "apiKey": "${vault:tenant/agent/openai-key}"
   },
   "storeType": "in-memory",
   "storeParameters": {},
@@ -185,7 +185,7 @@ These are visible in the conversation memory snapshot and the audit ledger.
 
 | Provider | Default Model | Required Parameters | Notes |
 |---|---|---|---|
-| `openai` | `text-embedding-3-small` | `apiKey` | Use `${eddivault:...}` for keys |
+| `openai` | `text-embedding-3-small` | `apiKey` | Use `${vault:...}` for keys |
 | `azure-openai` | `text-embedding-3-small` | `endpoint`, `apiKey`, `deploymentName` | Azure-hosted OpenAI models |
 | `ollama` | `nomic-embed-text` | — | `baseUrl` (default: `localhost:11434`) |
 | `mistral` | `mistral-embed` | `apiKey` | Mistral AI embedding model |

@@ -169,8 +169,9 @@ public class ChatModelRegistry {
      * <p>
      * When {@code reference} is non-null (single secret changed), scan cache
      * entries and evict only those whose parameter values contain a vault reference
-     * to the changed secret — either short form ({@code ${eddivault:keyName}}) or
-     * full form ({@code ${eddivault:tenantId/keyName}}).
+     * to the changed secret — either short form ({@code ${vault:keyName}}) or full
+     * form ({@code ${vault:tenantId/keyName}}). Also matches the legacy
+     * {@code ${eddivault:...}} prefix for backward compatibility.
      * <p>
      * When {@code reference} is null (DEK/KEK rotation — all secrets affected),
      * clear everything.
@@ -191,17 +192,22 @@ public class ChatModelRegistry {
         }
 
         // Build the vault reference forms to search for in cached parameters.
-        // Full form: ${eddivault:tenantId/keyName} — always valid
-        String fullRef = "${eddivault:" + reference.tenantId() + "/" + reference.keyName() + "}";
-        // Short form: ${eddivault:keyName} — only valid for the default tenant.
+        // New canonical form: ${vault:tenantId/keyName} — always valid
+        String fullRef = "${vault:" + reference.tenantId() + "/" + reference.keyName() + "}";
+        // Legacy form: ${eddivault:tenantId/keyName} — for backward compat
+        String legacyFullRef = "${eddivault:" + reference.tenantId() + "/" + reference.keyName() + "}";
+        // Short form: ${vault:keyName} — only valid for the default tenant.
         // The short form always resolves to "default", so a non-default tenant's
         // secret must NOT match short-form references (that would be a false positive).
         String shortRef = SecretReference.DEFAULT_TENANT.equals(reference.tenantId())
+                ? "${vault:" + reference.keyName() + "}"
+                : null;
+        String legacyShortRef = SecretReference.DEFAULT_TENANT.equals(reference.tenantId())
                 ? "${eddivault:" + reference.keyName() + "}"
                 : null;
 
-        int evicted = evictMatching(modelCache, fullRef, shortRef)
-                + evictMatching(streamingModelCache, fullRef, shortRef);
+        int evicted = evictMatching(modelCache, fullRef, legacyFullRef, shortRef, legacyShortRef)
+                + evictMatching(streamingModelCache, fullRef, legacyFullRef, shortRef, legacyShortRef);
 
         if (evicted > 0) {
             LOGGER.infof("Evicted %d model(s) using secret '%s/%s'",
@@ -210,15 +216,15 @@ public class ChatModelRegistry {
     }
 
     /**
-     * Scan a cache and remove entries whose parameter values contain either vault
-     * reference form.
+     * Scan a cache and remove entries whose parameter values contain any of the
+     * given vault reference forms (new and legacy prefixes).
      */
-    private <T> int evictMatching(Map<ModelCacheKey, T> cache, String ref1, String ref2) {
+    private <T> int evictMatching(Map<ModelCacheKey, T> cache, String... refs) {
         int count = 0;
         Iterator<ModelCacheKey> it = cache.keySet().iterator();
         while (it.hasNext()) {
             ModelCacheKey key = it.next();
-            if (parametersContainRef(key.parameters(), ref1, ref2)) {
+            if (parametersContainRef(key.parameters(), refs)) {
                 it.remove();
                 count++;
             }
@@ -226,10 +232,14 @@ public class ChatModelRegistry {
         return count;
     }
 
-    private static boolean parametersContainRef(Map<String, String> params, String ref1, String ref2) {
+    private static boolean parametersContainRef(Map<String, String> params, String... refs) {
         for (String value : params.values()) {
-            if (value != null && (value.contains(ref1) || (ref2 != null && value.contains(ref2)))) {
-                return true;
+            if (value == null)
+                continue;
+            for (String ref : refs) {
+                if (ref != null && value.contains(ref)) {
+                    return true;
+                }
             }
         }
         return false;

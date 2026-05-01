@@ -14,7 +14,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * <ul>
  * <li><b>Template layer</b>: {@code {{vars.<key>}}} — in LlmTask system
  * prompts</li>
- * <li><b>Late-binding layer</b>: {@code ${eddivar:<key>}} — everywhere (LLM
+ * <li><b>Late-binding layer</b>: {@code ${vars:<key>}} — everywhere (LLM
  * params, httpCalls, MCP, A2A, embeddings, Slack, the {@code type} field)</li>
  * </ul>
  * <p>

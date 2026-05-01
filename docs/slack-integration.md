@@ -64,8 +64,8 @@ Add a `ChannelConnector` to your agent configuration:
       "type": "slack",
       "config": {
         "channelId": "C0123ABCDEF",
-        "botToken": "${eddivault:slack-bot-token}",
-        "signingSecret": "${eddivault:slack-signing-secret}",
+        "botToken": "${vault:slack-bot-token}",
+        "signingSecret": "${vault:slack-signing-secret}",
         "groupId": "optional-group-id-for-discussions"
       }
     }
@@ -134,8 +134,8 @@ All credentials live in the agent's `ChannelConnector.config` map:
 
 ```
 Agent Config → ChannelConnector.config
-  ├─ botToken: "${eddivault:slack-bot-token}"
-  └─ signingSecret: "${eddivault:slack-signing-secret}"
+  ├─ botToken: "${vault:slack-bot-token}"
+  └─ signingSecret: "${vault:slack-signing-secret}"
         │
         ▼
 SlackChannelRouter (60s cache refresh)
@@ -277,8 +277,8 @@ Configure on each agent's `channels[]` array:
   "type": "slack",
   "config": {
     "channelId": "C0123ABCDEF",
-    "botToken": "${eddivault:slack-bot-token}",
-    "signingSecret": "${eddivault:slack-signing-secret}",
+    "botToken": "${vault:slack-bot-token}",
+    "signingSecret": "${vault:slack-signing-secret}",
     "groupId": "optional-group-id"
   }
 }

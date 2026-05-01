@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
 /**
  * Resolves global variable references in parameter maps and strings.
  * <p>
- * Supports the syntax {@code ${eddivar:keyName}} where {@code keyName} matches
+ * Supports the syntax {@code ${vars:keyName}} where {@code keyName} matches
  * {@code [a-zA-Z0-9_.\-]+}. Multiple references in a single string are
  * resolved.
  * <p>
@@ -31,9 +31,8 @@ import java.util.regex.Pattern;
  * order in the pipeline:
  * <ol>
  * <li>Jinja2 templates ({@code {{vars.x}}}, {@code {{snippets.x}}}, etc.)</li>
- * <li><b>Global Variable resolution</b> ({@code ${eddivar:x}}) — this
- * class</li>
- * <li>Vault secret resolution ({@code ${eddivault:x}})</li>
+ * <li><b>Global Variable resolution</b> ({@code ${vars:x}}) — this class</li>
+ * <li>Vault secret resolution ({@code ${vault:x}})</li>
  * </ol>
  * <p>
  * Global variables are also available in the template layer as
@@ -53,9 +52,9 @@ public class GlobalVariableResolver {
     private static final Logger LOGGER = Logger.getLogger(GlobalVariableResolver.class);
 
     /**
-     * Pattern matching {@code ${eddivar:keyName}} references.
+     * Pattern matching {@code ${vars:keyName}} references.
      */
-    static final Pattern EDDIVAR_PATTERN = Pattern.compile("\\$\\{eddivar:([a-zA-Z0-9_.\\-]+)\\}");
+    static final Pattern VARS_PATTERN = Pattern.compile("\\$\\{vars:([a-zA-Z0-9_.\\-]+)\\}");
 
     private final IGlobalVariableStore store;
     private final int cacheTtlMinutes;
@@ -86,20 +85,20 @@ public class GlobalVariableResolver {
     }
 
     /**
-     * Quick check whether a string contains any {@code ${eddivar:...}} reference.
+     * Quick check whether a string contains any {@code ${vars:...}} reference.
      */
     public static boolean containsReference(String value) {
-        return value != null && value.contains("${eddivar:");
+        return value != null && value.contains("${vars:");
     }
 
     /**
-     * Resolve all {@code ${eddivar:...}} references in a single string value.
+     * Resolve all {@code ${vars:...}} references in a single string value.
      * <p>
      * Missing variables are left as-is (passthrough) so they can be reported by
      * downstream validation or logged for debugging.
      *
      * @param value
-     *            the value that may contain {@code ${eddivar:...}} references
+     *            the value that may contain {@code ${vars:...}} references
      * @return the value with references replaced by stored values
      */
     public String resolveValue(String value) {
@@ -108,7 +107,7 @@ public class GlobalVariableResolver {
         }
 
         Map<String, String> variables = loadVariables();
-        Matcher matcher = EDDIVAR_PATTERN.matcher(value);
+        Matcher matcher = VARS_PATTERN.matcher(value);
         StringBuilder result = new StringBuilder();
 
         while (matcher.find()) {
@@ -127,7 +126,7 @@ public class GlobalVariableResolver {
     }
 
     /**
-     * Resolve all {@code ${eddivar:...}} references in a parameter map. Values not
+     * Resolve all {@code ${vars:...}} references in a parameter map. Values not
      * containing references pass through unchanged.
      *
      * @param params

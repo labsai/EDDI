@@ -39,10 +39,10 @@ class SecretRedactionFilterTest {
 
     @Test
     void redact_vaultReference() {
-        String input = "Resolved secret: ${eddivault:default/agent1/apiKey}";
+        String input = "Resolved secret: ${vault:default/agent1/apiKey}";
         String result = SecretRedactionFilter.redact(input);
 
-        assertTrue(result.contains("${eddivault:<REDACTED>}"));
+        assertTrue(result.contains("${vault:<REDACTED>}"));
         assertFalse(result.contains("default/agent1/apiKey"));
     }
 

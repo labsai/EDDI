@@ -20,7 +20,7 @@ import java.util.List;
  * Global variables are deployment-wide key-value pairs available in agent
  * configurations via:
  * <ul>
- * <li>{@code ${eddivar:<key>}} — late-binding (works everywhere)</li>
+ * <li>{@code ${vars:<key>}} — late-binding (works everywhere)</li>
  * <li>{@code {{vars.<key>}}} — template layer (LlmTask system prompts)</li>
  * </ul>
  *

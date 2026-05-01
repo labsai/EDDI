@@ -35,8 +35,9 @@ public final class SecretRedactionFilter {
                     "$1=" + REDACTED),
 
             // Vault references (should never appear in logs, but defense-in-depth)
+            // Matches both ${vault:...} and legacy ${eddivault:...}
             // Note: $ must be escaped in replacement strings for Matcher.replaceAll()
-            new RedactionRule(Pattern.compile("\\$\\{eddivault:[^}]+}"), "\\${eddivault:" + REDACTED + "}"));
+            new RedactionRule(Pattern.compile("\\$\\{(?:vault|eddivault):[^}]+}"), "\\${vault:" + REDACTED + "}"));
 
     private SecretRedactionFilter() {
         // Utility class

@@ -99,7 +99,7 @@ public class EmbeddingStoreFactory {
      * <li>{@code port} — PostgreSQL port (default: 5432)</li>
      * <li>{@code database} — database name (default: "eddi")</li>
      * <li>{@code user} — database user (default: "eddi")</li>
-     * <li>{@code password} — database password, supports {@code ${eddivault:...}}
+     * <li>{@code password} — database password, supports {@code ${vault:...}}
      * (required)</li>
      * <li>{@code table} — table name (default: auto-generated from kbId)</li>
      * <li>{@code dimension} — embedding vector dimension (default: 1536 for OpenAI
@@ -136,7 +136,7 @@ public class EmbeddingStoreFactory {
      * Supported storeParameters:
      * <ul>
      * <li>{@code connectionString} — MongoDB connection string (required, supports
-     * {@code ${eddivault:...}})</li>
+     * {@code ${vault:...}})</li>
      * <li>{@code databaseName} — database name (default: "eddi")</li>
      * <li>{@code collectionName} — collection name (default: auto-generated from
      * kbId)</li>
@@ -172,8 +172,7 @@ public class EmbeddingStoreFactory {
      * <ul>
      * <li>{@code serverUrl} — Elasticsearch URL (default:
      * "http://localhost:9200")</li>
-     * <li>{@code apiKey} — API key (optional, supports
-     * {@code ${eddivault:...}})</li>
+     * <li>{@code apiKey} — API key (optional, supports {@code ${vault:...}})</li>
      * <li>{@code indexName} — index name (default: auto-generated from kbId)</li>
      * </ul>
      */
@@ -214,7 +213,7 @@ public class EmbeddingStoreFactory {
      * <li>{@code collectionName} — collection name (default: auto-generated from
      * kbId)</li>
      * <li>{@code apiKey} — Qdrant API key (optional, supports
-     * {@code ${eddivault:...}})</li>
+     * {@code ${vault:...}})</li>
      * <li>{@code useTls} — use TLS (default: "false")</li>
      * </ul>
      */
@@ -257,7 +256,7 @@ public class EmbeddingStoreFactory {
     private String requireParam(Map<String, String> params, String key, String storeType) {
         String value = params.get(key);
         if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(storeType + " requires '" + key + "' in storeParameters (use ${eddivault:...} for secrets)");
+            throw new IllegalArgumentException(storeType + " requires '" + key + "' in storeParameters (use ${vault:...} for secrets)");
         }
         return value;
     }

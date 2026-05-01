@@ -8,7 +8,7 @@ EDDI includes a built-in secrets vault for managing sensitive values like API ke
 ┌─────────────────┐     ┌──────────────┐     ┌───────────────────┐
 │  Configuration   │────>│ SecretResolver│────>│  VaultSecretProv.  │
 │  (JSON configs)  │     │  (resolves    │     │  (envelope crypto  │
-│  ${eddivault:..} │     │   at runtime) │     │   + persistence)   │
+│  ${vault:..} │     │   at runtime) │     │   + persistence)   │
 └─────────────────┘     └──────────────┘     └───────────────────┘
                                                        │
                                               ┌────────▼────────┐
@@ -26,9 +26,9 @@ EDDI includes a built-in secrets vault for managing sensitive values like API ke
 | `EnvelopeCrypto`                       | `secrets.crypto`   | AES-256-GCM encryption with envelope key wrapping               |
 | `ISecretProvider`                      | `secrets`          | SPI for reading/writing encrypted secrets                       |
 | `VaultSecretProvider`                  | `secrets.impl`     | Production implementation with envelope crypto + persistence    |
-| `SecretResolver`                       | `secrets`          | Resolves `${eddivault:...}` references to plaintext at runtime  |
+| `SecretResolver`                       | `secrets`          | Resolves `${vault:...}` references to plaintext at runtime  |
 | `IRestSecretStore` / `RestSecretStore` | `secrets.rest`     | JAX-RS endpoints for secret CRUD and key rotation               |
-| `SecretScrubber`                       | `secrets.sanitize` | Removes `${eddivault:...}` references from export payloads      |
+| `SecretScrubber`                       | `secrets.sanitize` | Removes `${vault:...}` references from export payloads      |
 | `SecretRedactionFilter`                | `secrets.sanitize` | Regex-based log redaction for API keys, tokens, vault refs      |
 | `ISecretPersistence`                   | `secrets.persist.` | DB abstraction (MongoDB default, PostgreSQL via profile)        |
 
@@ -38,12 +38,12 @@ Secrets are referenced in configuration JSON using the vault URI syntax:
 
 **Short form** (uses `default` tenant):
 ```
-${eddivault:keyName}
+${vault:keyName}
 ```
 
 **Full form** (explicit tenant):
 ```
-${eddivault:tenantId/keyName}
+${vault:tenantId/keyName}
 ```
 
 - **tenantId** — tenant namespace (e.g., `default`, `acme-corp`)
@@ -61,7 +61,7 @@ ${eddivault:tenantId/keyName}
 
 Vault references are resolved **at runtime** when the task executes, never stored as plaintext in conversation memory. The resolution flow:
 
-1. Task reads configuration containing `${eddivault:...}` reference
+1. Task reads configuration containing `${vault:...}` reference
 2. `SecretResolver.resolveValue()` finds and replaces vault URIs
 3. `VaultSecretProvider.resolve()` decrypts and returns the plaintext
 4. Plaintext is used for the operation (e.g., HTTP call header)
@@ -87,7 +87,7 @@ Secret → tenant DEK → AES-256-GCM encrypt → ciphertext
 
 ### Configuration
 
-The vault requires a master key (KEK) to encrypt/decrypt secrets. If not set, the vault is **disabled** — all `${eddivault:...}` references pass through unresolved and a prominent warning is logged at startup.
+The vault requires a master key (KEK) to encrypt/decrypt secrets. If not set, the vault is **disabled** — all `${vault:...}` references pass through unresolved and a prominent warning is logged at startup.
 
 #### Installer (Recommended)
 
@@ -148,7 +148,7 @@ When a property has `scope: secret`:
 
 1. **PropertySetterTask** detects `scope == secret` on the property instruction
 2. The raw value is immediately stored in the vault via `ISecretProvider.store()`
-3. A vault reference (`${eddivault:...}`) replaces the plaintext in memory
+3. A vault reference (`${vault:...}`) replaces the plaintext in memory
 4. The raw `input:initial` entry is scrubbed from the conversation step
 
 When the **client flags input as secret** (via the `secretInput` context key):
@@ -212,7 +212,7 @@ The default Agent Father agent demonstrates vault integration during API key set
 }
 ```
 
-The `scope: secret` instruction causes `PropertySetterTask` to store the API key in the vault and replace the memory value with a `${eddivault:...}` reference.
+The `scope: secret` instruction causes `PropertySetterTask` to store the API key in the vault and replace the memory value with a `${vault:...}` reference.
 
 ## Auto-Vaulting (Agent Setup)
 
@@ -222,7 +222,7 @@ When creating agents through the **Agent Father** wizard or the Setup API, API k
 
 1. User provides an API key during agent setup
 2. `AgentSetupService.vaultApiKey()` stores the key in the vault
-3. A vault reference (`${eddivault:setup.<agent-name>.<timestamp>.apiKey}`) is written to the LLM configuration
+3. A vault reference (`${vault:setup.<agent-name>.<timestamp>.apiKey}`) is written to the LLM configuration
 4. When the vault is enabled, the plaintext key is never persisted in MongoDB — only the vault reference is stored
 
 ### Collision Prevention
@@ -261,7 +261,7 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 
 ```json
 {
-  "reference": "${eddivault:apiKey}",
+  "reference": "${vault:apiKey}",
   "tenantId": "default",
   "keyName": "apiKey"
 }
@@ -399,7 +399,7 @@ The EDDI Manager includes a dedicated **Secrets Admin** page at `/manage/secrets
 | Anthropic keys (`sk-ant-...`) | `sk-ant-<REDACTED>`       | `sk-ant-api03-...` → `sk-ant-<REDACTED>`                |
 | Bearer tokens                 | `Bearer <REDACTED>`       | `Bearer eyJhb...` → `Bearer <REDACTED>`                 |
 | API key params                | `apikey=<REDACTED>`       | `apikey=secret123` → `apikey=<REDACTED>`                |
-| Vault references              | `${eddivault:<REDACTED>}` | `${eddivault:t/key}` → `${eddivault:<REDACTED>}`        |
+| Vault references              | `${vault:<REDACTED>}` | `${vault:t/key}` → `${vault:<REDACTED>}`        |
 
 ### Export Sanitization
 

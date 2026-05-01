@@ -34,22 +34,22 @@ class GlobalVariableResolverTest {
     @Test
     void resolveValueSimple() {
         when(store.getAll()).thenReturn(Map.of("default-model", "gpt-4.1"));
-        String result = resolver.resolveValue("${eddivar:default-model}");
+        String result = resolver.resolveValue("${vars:default-model}");
         assertEquals("gpt-4.1", result);
     }
 
     @Test
     void resolveValueMultiple() {
         when(store.getAll()).thenReturn(Map.of("model", "gpt-4.1", "temp", "0.7"));
-        String result = resolver.resolveValue("model=${eddivar:model}&temp=${eddivar:temp}");
+        String result = resolver.resolveValue("model=${vars:model}&temp=${vars:temp}");
         assertEquals("model=gpt-4.1&temp=0.7", result);
     }
 
     @Test
     void resolveValueMissing() {
         when(store.getAll()).thenReturn(Map.of());
-        String result = resolver.resolveValue("${eddivar:missing}");
-        assertEquals("${eddivar:missing}", result, "Missing variables should pass through unchanged");
+        String result = resolver.resolveValue("${vars:missing}");
+        assertEquals("${vars:missing}", result, "Missing variables should pass through unchanged");
     }
 
     @Test
@@ -68,7 +68,7 @@ class GlobalVariableResolverTest {
     void resolveAllMap() {
         when(store.getAll()).thenReturn(Map.of("model", "gpt-4.1"));
         Map<String, String> input = new HashMap<>();
-        input.put("type", "${eddivar:model}");
+        input.put("type", "${vars:model}");
         input.put("plain", "no-change");
 
         Map<String, String> result = resolver.resolveAll(input);
@@ -98,8 +98,8 @@ class GlobalVariableResolverTest {
     @Test
     void cachingAvoidsDuplicateLoads() {
         when(store.getAll()).thenReturn(Map.of("k", "v"));
-        resolver.resolveValue("${eddivar:k}");
-        resolver.resolveValue("${eddivar:k}");
+        resolver.resolveValue("${vars:k}");
+        resolver.resolveValue("${vars:k}");
         // Cache should mean only one call to store
         verify(store, times(1)).getAll();
     }
@@ -107,11 +107,11 @@ class GlobalVariableResolverTest {
     @Test
     void invalidateCacheForcesReload() {
         when(store.getAll()).thenReturn(Map.of("k", "v1"));
-        resolver.resolveValue("${eddivar:k}");
+        resolver.resolveValue("${vars:k}");
 
         when(store.getAll()).thenReturn(Map.of("k", "v2"));
         resolver.invalidateCache();
-        String result = resolver.resolveValue("${eddivar:k}");
+        String result = resolver.resolveValue("${vars:k}");
         assertEquals("v2", result);
         verify(store, times(2)).getAll();
     }
@@ -135,10 +135,10 @@ class GlobalVariableResolverTest {
 
     @Test
     void containsReference() {
-        assertTrue(GlobalVariableResolver.containsReference("${eddivar:x}"));
+        assertTrue(GlobalVariableResolver.containsReference("${vars:x}"));
         assertFalse(GlobalVariableResolver.containsReference("plain text"));
         assertFalse(GlobalVariableResolver.containsReference(null));
-        assertFalse(GlobalVariableResolver.containsReference("${eddivault:x}"));
+        assertFalse(GlobalVariableResolver.containsReference("${vault:x}"));
     }
 
     @Test
@@ -148,15 +148,15 @@ class GlobalVariableResolverTest {
                 "api-key", "sk-123",
                 "version_2", "v2"));
 
-        assertEquals("gpt-4", resolver.resolveValue("${eddivar:model.name}"));
-        assertEquals("sk-123", resolver.resolveValue("${eddivar:api-key}"));
-        assertEquals("v2", resolver.resolveValue("${eddivar:version_2}"));
+        assertEquals("gpt-4", resolver.resolveValue("${vars:model.name}"));
+        assertEquals("sk-123", resolver.resolveValue("${vars:api-key}"));
+        assertEquals("v2", resolver.resolveValue("${vars:version_2}"));
     }
 
     @Test
     void resolveValueMixedWithText() {
         when(store.getAll()).thenReturn(Map.of("host", "api.openai.com"));
-        String result = resolver.resolveValue("https://${eddivar:host}/v1/chat");
+        String result = resolver.resolveValue("https://${vars:host}/v1/chat");
         assertEquals("https://api.openai.com/v1/chat", result);
     }
 }

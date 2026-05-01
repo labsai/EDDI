@@ -158,7 +158,7 @@ class A2AToolProviderManagerExtendedTest {
         void eddiVaultRefKey() {
             var config = new A2AAgentConfig();
             config.setUrl("http://192.0.2.1:1");
-            config.setApiKey("${eddivault:my-key}");
+            config.setApiKey("${vault:my-key}");
             config.setTimeoutMs(100L);
 
             assertDoesNotThrow(() -> manager.discoverTools(List.of(config)));

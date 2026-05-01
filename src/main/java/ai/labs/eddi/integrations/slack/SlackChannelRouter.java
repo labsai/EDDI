@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>
  * All Slack credentials (bot token, signing secret) live in the agent's
  * {@code ChannelConnector.config} map and are resolved via
- * {@link SecretResolver} (supporting {@code ${eddivault:...}} references).
+ * {@link SecretResolver} (supporting {@code ${vault:...}} references).
  * <p>
  * Resolution order for agent routing:
  * <ol>
@@ -155,7 +155,7 @@ public class SlackChannelRouter {
     /**
      * Refresh the channel→credentials mapping by scanning deployed agents. Uses a
      * simple time-based cache invalidation (1 minute). Vault references
-     * (${eddivault:...}) are resolved during refresh via {@link SecretResolver}.
+     * (${vault:...}) are resolved during refresh via {@link SecretResolver}.
      */
     private void refreshIfNeeded() {
         long now = System.currentTimeMillis();
