@@ -51,9 +51,11 @@ describe("VariablesPage", () => {
     renderVariables();
     await waitFor(() => {
       expect(screen.getByText("default-model")).toBeInTheDocument();
+      expect(screen.getByText("fallback-model")).toBeInTheDocument();
       expect(screen.getByText("api.base-url")).toBeInTheDocument();
-      expect(screen.getByText("temperature")).toBeInTheDocument();
-      expect(screen.getByText("feature_flag_v2")).toBeInTheDocument();
+      expect(screen.getByText("llm.temperature")).toBeInTheDocument();
+      expect(screen.getByText("branding.bot-name")).toBeInTheDocument();
+      expect(screen.getByText("environment")).toBeInTheDocument();
     });
   });
 
@@ -61,8 +63,10 @@ describe("VariablesPage", () => {
     renderVariables();
     await waitFor(() => {
       expect(
-        screen.getByText("The default LLM model used by all agents"),
+        screen.getByText(/cascades to gpt-4\.1-mini on budget overflow/),
       ).toBeInTheDocument();
+      // "environment" has description: null — should show em-dash
+      expect(screen.getByText("Display name shown in chat UI and system prompts")).toBeInTheDocument();
     });
   });
 
@@ -166,10 +170,10 @@ describe("VariablesPage", () => {
       expect(screen.getByText("default-model")).toBeInTheDocument();
     });
 
-    await user.type(screen.getByTestId("variables-search"), "temperature");
+    await user.type(screen.getByTestId("variables-search"), "branding");
 
-    // Should see temperature
-    expect(screen.getByText("temperature")).toBeInTheDocument();
+    // Should see branding.bot-name
+    expect(screen.getByText("branding.bot-name")).toBeInTheDocument();
     // Should NOT see default-model
     expect(screen.queryByText("default-model")).not.toBeInTheDocument();
   });
