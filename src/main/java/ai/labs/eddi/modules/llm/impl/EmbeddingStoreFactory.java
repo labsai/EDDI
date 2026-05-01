@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -48,10 +49,12 @@ public class EmbeddingStoreFactory {
     private final Cache<String, EmbeddingStore<TextSegment>> cache = Caffeine.newBuilder().maximumSize(50).expireAfterAccess(Duration.ofMinutes(30))
             .build();
     private final Map<String, MongoClient> mongoClientCache = new ConcurrentHashMap<>();
+    private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
 
     @Inject
-    public EmbeddingStoreFactory(SecretResolver secretResolver) {
+    public EmbeddingStoreFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
+        this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
     }
 
@@ -239,11 +242,12 @@ public class EmbeddingStoreFactory {
     // ──────────────────────────────────────────────────
 
     /**
-     * Resolves vault references in store parameters.
+     * Resolves global variable and vault references in store parameters.
      */
     private Map<String, String> resolveParams(RagConfiguration config) {
         Map<String, String> rawParams = config.getStoreParameters() != null ? config.getStoreParameters() : Map.of();
-        return secretResolver.resolveSecrets(rawParams);
+        Map<String, String> resolved = globalVariableResolver.resolveAll(rawParams);
+        return secretResolver.resolveSecrets(resolved);
     }
 
     /**

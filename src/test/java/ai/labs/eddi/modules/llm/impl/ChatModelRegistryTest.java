@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -73,11 +74,13 @@ class ChatModelRegistryTest {
             // Uses default buildStreaming — throws UnsupportedOperationException
         });
 
-        // Create a pass-through SecretResolver mock (vault not configured)
+        // Create pass-through mocks
         SecretResolver secretResolver = mock(SecretResolver.class);
         when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
+        when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        registry = new ChatModelRegistry(builders, secretResolver);
+        registry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
     }
 
     @Nested
@@ -276,7 +279,9 @@ class ChatModelRegistryTest {
 
             SecretResolver secretResolver = mock(SecretResolver.class);
             when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
-            invalidationRegistry = new ChatModelRegistry(builders, secretResolver);
+            GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
+            when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+            invalidationRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
         }
 
         @Test

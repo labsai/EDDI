@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -38,6 +39,7 @@ public class A2AToolProviderManager {
     private static final Logger LOGGER = Logger.getLogger(A2AToolProviderManager.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
+    private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
     private final HttpClient httpClient;
 
@@ -61,7 +63,8 @@ public class A2AToolProviderManager {
     }
 
     @Inject
-    public A2AToolProviderManager(SecretResolver secretResolver) {
+    public A2AToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
+        this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
@@ -186,6 +189,7 @@ public class A2AToolProviderManager {
 
         String apiKey = config.getApiKey();
         if (!isNullOrEmpty(apiKey)) {
+            apiKey = globalVariableResolver.resolveValue(apiKey);
             apiKey = secretResolver.resolveValue(apiKey);
             requestBuilder.header("Authorization", "Bearer " + apiKey);
         }
@@ -251,6 +255,7 @@ public class A2AToolProviderManager {
 
         String apiKey = config.getApiKey();
         if (!isNullOrEmpty(apiKey)) {
+            apiKey = globalVariableResolver.resolveValue(apiKey);
             apiKey = secretResolver.resolveValue(apiKey);
             requestBuilder.header("Authorization", "Bearer " + apiKey);
         }

@@ -7,6 +7,7 @@ package ai.labs.eddi.integrations.slack;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.ChannelConnector;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
@@ -43,6 +44,7 @@ public class SlackChannelRouter {
 
     private final IRestAgentAdministration agentAdmin;
     private final IRestAgentStore agentStore;
+    private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
 
     /**
@@ -79,9 +81,10 @@ public class SlackChannelRouter {
 
     @Inject
     public SlackChannelRouter(IRestAgentAdministration agentAdmin, IRestAgentStore agentStore,
-            SecretResolver secretResolver) {
+            GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
         this.agentAdmin = agentAdmin;
         this.agentStore = agentStore;
+        this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
     }
 
@@ -259,7 +262,8 @@ public class SlackChannelRouter {
             return null;
         }
         try {
-            return secretResolver.resolveValue(value);
+            String resolved = globalVariableResolver.resolveValue(value);
+            return secretResolver.resolveValue(resolved);
         } catch (Exception e) {
             LOGGER.warnf("Failed to resolve %s for agent %s: %s", fieldName, agentId, e.getMessage());
             return null;

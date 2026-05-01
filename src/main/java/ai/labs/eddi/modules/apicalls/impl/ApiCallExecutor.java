@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.configs.apicalls.model.*;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
@@ -53,15 +54,17 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private final IJsonSerialization jsonSerialization;
     private final IRuntime runtime;
     private final PrePostUtils prePostUtils;
+    private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
 
     @Inject
     public ApiCallExecutor(IHttpClient httpClient, IJsonSerialization jsonSerialization, IRuntime runtime, PrePostUtils prePostUtils,
-            SecretResolver secretResolver) {
+            GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
         this.httpClient = httpClient;
         this.jsonSerialization = jsonSerialization;
         this.runtime = runtime;
         this.prePostUtils = prePostUtils;
+        this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
     }
 
@@ -314,12 +317,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
         var targetDestination = !path.startsWith("http") ? targetServerUrl + path : path;
         var targetUriStr = prePostUtils.templateValues(targetDestination, templateDataObjects);
-        // Resolve vault references in URL (e.g., target server with embedded
-        // credentials)
+        // Resolve global variable references, then vault references in URL
+        targetUriStr = globalVariableResolver.resolveValue(targetUriStr);
         targetUriStr = secretResolver.resolveValue(targetUriStr);
         var targetUri = URI.create(targetUriStr);
         var requestBody = prePostUtils.templateValues(requestConfig.getBody(), templateDataObjects);
-        // Resolve vault references in request body
+        // Resolve global variable references, then vault references in request body
+        requestBody = globalVariableResolver.resolveValue(requestBody);
         requestBody = secretResolver.resolveValue(requestBody);
 
         var method = IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase());
@@ -332,8 +336,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
         Map<String, String> headers = requestConfig.getHeaders();
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
-            // Resolve vault references in headers (e.g., Authorization: Bearer
-            // ${eddivault:...})
+            // Resolve global variable references, then vault references in headers
+            headerValue = globalVariableResolver.resolveValue(headerValue);
             headerValue = secretResolver.resolveValue(headerValue);
             request.setHttpHeader(headerName, headerValue);
         }
@@ -341,7 +345,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
         Map<String, String> queryParams = requestConfig.getQueryParams();
         for (String queryParam : queryParams.keySet()) {
             var qpValue = prePostUtils.templateValues(queryParams.get(queryParam), templateDataObjects);
-            // Resolve vault references in query params
+            // Resolve global variable references, then vault references in query params
+            qpValue = globalVariableResolver.resolveValue(qpValue);
             qpValue = secretResolver.resolveValue(qpValue);
             request.setQueryParam(queryParam, qpValue);
         }

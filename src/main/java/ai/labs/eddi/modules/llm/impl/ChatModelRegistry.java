@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -46,13 +47,16 @@ public class ChatModelRegistry {
     private static final Logger LOGGER = Logger.getLogger(ChatModelRegistry.class);
 
     private final Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders;
+    private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
     private final Map<ModelCacheKey, ChatModel> modelCache = new ConcurrentHashMap<>(1);
     private final Map<ModelCacheKey, StreamingChatModel> streamingModelCache = new ConcurrentHashMap<>(1);
 
     @Inject
-    ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders, SecretResolver secretResolver) {
+    ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders,
+            GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
         this.languageModelApiConnectorBuilders = languageModelApiConnectorBuilders;
+        this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
     }
 
@@ -65,7 +69,15 @@ public class ChatModelRegistry {
     @PostConstruct
     void registerSecretInvalidation() {
         secretResolver.registerInvalidationListener(this::invalidateForSecret);
-        LOGGER.info("ChatModelRegistry registered for secret invalidation events");
+        globalVariableResolver.registerInvalidationListener(() -> {
+            int total = modelCache.size() + streamingModelCache.size();
+            modelCache.clear();
+            streamingModelCache.clear();
+            if (total > 0) {
+                LOGGER.infof("Invalidated all %d model(s) due to global variable change", total);
+            }
+        });
+        LOGGER.info("ChatModelRegistry registered for secret and global variable invalidation events");
     }
 
     /**
@@ -91,9 +103,10 @@ public class ChatModelRegistry {
             throw new UnsupportedLlmTaskException(String.format("Type \"%s\" is not supported", type));
         }
 
-        // Resolve vault references (late-binding: after Qute, before
-        // builder.build())
-        var resolvedParams = secretResolver.resolveSecrets(filteredParams);
+        // Resolve global variable references, then vault secrets (late-binding:
+        // after Qute, before builder.build())
+        var resolvedParams = globalVariableResolver.resolveAll(filteredParams);
+        resolvedParams = secretResolver.resolveSecrets(resolvedParams);
         var rawModel = languageModelApiConnectorBuilders.get(type).get().build(resolvedParams);
         var model = ObservableChatModel.wrapIfNeeded(rawModel, type, timeoutMs, logReq, logResp);
         modelCache.put(cacheKey, model);
@@ -119,9 +132,10 @@ public class ChatModelRegistry {
         }
 
         try {
-            // Resolve vault references (late-binding: after Qute, before
-            // builder.build())
-            var resolvedParams = secretResolver.resolveSecrets(filteredParams);
+            // Resolve global variable references, then vault secrets (late-binding:
+            // after Qute, before builder.build())
+            var resolvedParams = globalVariableResolver.resolveAll(filteredParams);
+            resolvedParams = secretResolver.resolveSecrets(resolvedParams);
             var model = languageModelApiConnectorBuilders.get(type).get().buildStreaming(resolvedParams);
             streamingModelCache.put(cacheKey, model);
             return model;

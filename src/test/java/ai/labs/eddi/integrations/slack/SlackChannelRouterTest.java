@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.ChannelConnector;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
@@ -31,6 +32,7 @@ class SlackChannelRouterTest {
     private IRestAgentAdministration agentAdmin;
     private IRestAgentStore agentStore;
     private SecretResolver secretResolver;
+    private GlobalVariableResolver globalVariableResolver;
     private SlackChannelRouter router;
 
     @BeforeEach
@@ -38,11 +40,13 @@ class SlackChannelRouterTest {
         agentAdmin = mock(IRestAgentAdministration.class);
         agentStore = mock(IRestAgentStore.class);
         secretResolver = mock(SecretResolver.class);
+        globalVariableResolver = mock(GlobalVariableResolver.class);
 
-        // By default, SecretResolver passes through unchanged
+        // By default, both resolvers pass through unchanged
         when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
-        router = new SlackChannelRouter(agentAdmin, agentStore, secretResolver);
+        router = new SlackChannelRouter(agentAdmin, agentStore, globalVariableResolver, secretResolver);
     }
 
     // ─── Agent Resolution ───

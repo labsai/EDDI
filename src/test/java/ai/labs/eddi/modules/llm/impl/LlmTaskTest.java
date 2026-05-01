@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -96,7 +97,11 @@ class LlmTaskTest {
         var toolExecutionService = mock(ToolExecutionService.class);
         var secretResolver = mock(SecretResolver.class);
         when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
-        var chatModelRegistry = new ChatModelRegistry(languageModelApiConnectorBuilders, secretResolver);
+        var globalVariableResolver = mock(GlobalVariableResolver.class);
+        when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(globalVariableResolver.getTemplateData()).thenReturn(java.util.Map.of());
+        var chatModelRegistry = new ChatModelRegistry(languageModelApiConnectorBuilders, globalVariableResolver, secretResolver);
 
         var toolResponseTruncator = new ToolResponseTruncator(new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
 
@@ -106,6 +111,7 @@ class LlmTaskTest {
                 mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(RagContextProvider.class), mock(IUserMemoryStore.class),
                 new TokenCounterFactory(), mock(ConversationSummarizer.class),
                 mock(PromptSnippetService.class),
+                globalVariableResolver,
                 toolResponseTruncator, mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
     }
 
