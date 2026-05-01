@@ -321,8 +321,14 @@ jobs:
           pull_sign=""; [ "$WEEK_PULL_DIFF" -gt 0 ] && pull_sign="+"
           star_sign=""; [ "$WEEK_STAR_DIFF" -gt 0 ] && star_sign="+"
           fork_sign=""; [ "$WEEK_FORK_DIFF" -gt 0 ] && fork_sign="+"
-          view_sign=""; [ "$WEEK_VIEW_DIFF" -gt 0 ] && view_sign="+"
-          clone_sign=""; [ "$WEEK_CLONE_DIFF" -gt 0 ] && clone_sign="+"
+
+          # Views/clones: suppress delta when baseline was 0 (field missing from old cache)
+          view_delta=""; if [ "${{ steps.prev.outputs.week_views }}" -ne 0 ] || [ "$VIEWS" -eq 0 ]; then
+            vs=""; [ "$WEEK_VIEW_DIFF" -gt 0 ] && vs="+"; view_delta=", ${vs}${WEEK_VIEW_DIFF}"
+          fi
+          clone_delta=""; if [ "${{ steps.prev.outputs.week_clones }}" -ne 0 ] || [ "$CLONES" -eq 0 ]; then
+            cs=""; [ "$WEEK_CLONE_DIFF" -gt 0 ] && cs="+"; clone_delta=" (${cs}${WEEK_CLONE_DIFF})"
+          fi
 
           curl -sf -X POST "$SLACK_WEBHOOK" \
             -H 'Content-type: application/json' \
@@ -338,8 +344,8 @@ jobs:
                     { \"type\": \"mrkdwn\", \"text\": \"*🐳 Docker Pulls*\n${PULLS_FMT} (${pull_sign}${WEEK_PULL_DIFF})\" },
                     { \"type\": \"mrkdwn\", \"text\": \"*⭐ GitHub Stars*\n${STARS} (${star_sign}${WEEK_STAR_DIFF})\" },
                     { \"type\": \"mrkdwn\", \"text\": \"*🍴 Forks*\n${FORKS} (${fork_sign}${WEEK_FORK_DIFF})\" },
-                    { \"type\": \"mrkdwn\", \"text\": \"*👀 Repo Views (14d)*\n${VIEWS} (${UNIQUES} unique, ${view_sign}${WEEK_VIEW_DIFF})\" },
-                    { \"type\": \"mrkdwn\", \"text\": \"*📥 Git Clones (14d)*\n${CLONES} (${clone_sign}${WEEK_CLONE_DIFF})\" }
+                    { \"type\": \"mrkdwn\", \"text\": \"*👀 Repo Views (14d)*\n${VIEWS} (${UNIQUES} unique${view_delta})\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"*📥 Git Clones (14d)*\n${CLONES}${clone_delta}\" }
                   ]
                 },
                 {
@@ -393,8 +399,14 @@ jobs:
           pull_sign=""; [ "$DAY_PULL_DIFF" -gt 0 ] && pull_sign="+"
           star_sign=""; [ "$DAY_STAR_DIFF" -gt 0 ] && star_sign="+"
           fork_sign=""; [ "$DAY_FORK_DIFF" -gt 0 ] && fork_sign="+"
-          view_sign=""; [ "$DAY_VIEW_DIFF" -gt 0 ] && view_sign="+"
-          clone_sign=""; [ "$DAY_CLONE_DIFF" -gt 0 ] && clone_sign="+"
+
+          # Views/clones: suppress delta when baseline was 0 (field missing from old cache)
+          view_delta=""; if [ "${{ steps.prev.outputs.day_views }}" -ne 0 ] || [ "$VIEWS" -eq 0 ]; then
+            vs=""; [ "$DAY_VIEW_DIFF" -gt 0 ] && vs="+"; view_delta=" (${vs}${DAY_VIEW_DIFF})"
+          fi
+          clone_delta=""; if [ "${{ steps.prev.outputs.day_clones }}" -ne 0 ] || [ "$CLONES" -eq 0 ]; then
+            cs=""; [ "$DAY_CLONE_DIFF" -gt 0 ] && cs="+"; clone_delta=" (${cs}${DAY_CLONE_DIFF})"
+          fi
 
           PULLS_FMT=$(printf "%'d" "$PULLS")
 
@@ -416,7 +428,7 @@ jobs:
                 {
                   \"type\": \"context\",
                   \"elements\": [
-                    { \"type\": \"mrkdwn\", \"text\": \"👀 Views: ${VIEWS} (${view_sign}${DAY_VIEW_DIFF}) · 📥 Clones: ${CLONES} (${clone_sign}${DAY_CLONE_DIFF}) · <https://github.com/labsai/EDDI|GitHub>\" }
+                    { \"type\": \"mrkdwn\", \"text\": \"👀 Views (14d): ${VIEWS}${view_delta} · 📥 Clones (14d): ${CLONES}${clone_delta} · <https://github.com/labsai/EDDI|GitHub>\" }
                   ]
                 }
               ]

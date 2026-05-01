@@ -13,22 +13,29 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
-## 🔔 Slack Notification — Bogus Delta Fix (2026-05-01)
+## 🔔 Slack Notification — Digest Improvements (2026-05-01)
 
 **Repo:** EDDI (`fix/slack-notification-deltas`)
 
-**What changed:** Fixed Slack daily/weekly digests showing deltas equal to the total value (e.g., `+391490` pulls, `+320` stars, `+107` forks) instead of the actual daily/weekly change.
+**What changed:** Fixed bogus Slack daily/weekly deltas, added views/clones delta tracking, rescheduled digests, and made daily/weekly baselines independent.
 
-### Root Cause
+### Root Cause (bogus deltas)
 
-The `Validate baselines` step only checked whether `day_docker`/`week_docker` fields **existed** in the cached `metrics.json`, not whether they contained sensible values. When the GitHub Actions cache was evicted or rebuilt, the baseline fields were present but set to `0` (from the initial seeding), making `day_valid=true`. The daily digest then computed `delta = current - 0 = current`, producing absurd deltas.
+The `Validate baselines` step only checked whether the required day/week baseline fields **existed** in the cached `metrics.json`, not whether they contained sensible values. When the GitHub Actions cache was evicted or rebuilt, those baseline fields were present, but the Docker baseline could still be set to `0` (from the initial seeding), making `day_valid=true`. The daily digest then computed `delta = current - 0 = current`, producing absurd deltas (e.g., `+391490` pulls).
 
-### Fix (two-layer defense)
+### Changes
 
-1. **Strengthened baseline validation** — baselines are now rejected if the Docker pulls baseline is `0`. Docker pulls only increase, so a zero baseline is always a cold-start artifact for an established project. Stars and forks can legitimately be 0 for new repos, but Docker pulls cannot.
-2. **Added sanity guards in digest steps** — both daily and weekly digest steps now detect when `delta == current` (baseline was 0) and skip sending the digest. This catches any future edge case where validation passes but the baseline is still bogus.
+1. **Strengthened baseline validation** — baselines are now rejected if the Docker pulls baseline is `0`. Docker pulls only increase, so a zero baseline is always a cold-start artifact for an established project.
+2. **Added sanity guards in digest steps** — both daily and weekly digest steps detect when `delta == current` (baseline was 0) and skip the notification.
+3. **Views/clones delta tracking** — added `day_views`, `day_clones`, `week_views`, `week_clones` baselines to the metrics cache. Digests now show deltas for all 5 stats. Deltas are conditionally suppressed when the baseline field is missing from an older cache (avoids one-time bogus delta on first deploy).
+4. **Rescheduled digests** — daily moved from 6pm UTC (8pm CEST) to 7am UTC (9am CEST); weekly moved from Sunday 9am UTC to Monday 7am UTC (9am CEST).
+5. **Independent day/week baselines** — weekly runs no longer reset daily baselines. On Mondays both digests fire independently: daily shows yesterday's change, weekly shows the full week.
 
-**Files:** `.github/workflows/docker-pull-notify.yml`
+### Decision
+
+- Views/clones baselines are NOT included in the field-presence check (`DAY_PRESENT`/`WEEK_PRESENT`). Adding them would skip the entire digest on first deploy (old cache lacks the new fields). Instead, view/clone deltas are conditionally hidden when the baseline is 0.
+
+**Files:** `.github/workflows/docker-pull-notify.yml`, `docs/changelog.md`
 
 ---
 
