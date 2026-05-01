@@ -63,10 +63,10 @@ export function VariablesPage() {
 
   /* ─── Copy reference ─── */
   const copyRef = useCallback(
-    (key: string, syntax: "eddivar" | "vars") => {
+    (key: string, syntax: "vars" | "template") => {
       const ref =
-        syntax === "eddivar"
-          ? `\${eddivar:${key}}`
+        syntax === "vars"
+          ? `\${vars:${key}}`
           : `{{vars.${key}}}`;
       navigator.clipboard.writeText(ref).then(
         () => {
@@ -197,7 +197,7 @@ export function VariablesPage() {
           <p className="text-xs text-muted-foreground">
             {t(
               "variables.infoLine1",
-              "Use {{vars.<key>}} in system prompts or ${eddivar:<key>} anywhere in agent configurations.",
+              "Use {{vars.<key>}} in system prompts or ${vars:<key>} anywhere in agent configurations.",
             )}
           </p>
           <p className="text-xs text-muted-foreground">
@@ -320,13 +320,13 @@ export function VariablesPage() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={() => copyRef(v.key, "eddivar")}
+                          onClick={() => copyRef(v.key, "vars")}
                           className="inline-flex items-center gap-1 rounded-md bg-muted/50 px-2 py-1 font-mono text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                          title={t("variables.copyEddivar", "Copy ${eddivar:…} reference")}
-                          data-testid={`copy-eddivar-${v.key}`}
+                          title={t("variables.copyVars", "Copy ${vars:…} reference")}
+                          data-testid={`copy-vars-${v.key}`}
                         >
                           <Copy className="h-3 w-3" />
-                          {`\${eddivar:${v.key}}`}
+                          {`\${vars:${v.key}}`}
                         </button>
                       </div>
                     </td>
@@ -583,7 +583,7 @@ export function VariablesPage() {
             >
               {t("variables.confirmDeleteMessage", {
                 key: deleteTarget.key,
-                defaultValue: `Are you sure you want to delete "${deleteTarget.key}"? Agents using \${eddivar:${deleteTarget.key}} will see unresolved references.`,
+                defaultValue: `Are you sure you want to delete "${deleteTarget.key}"? Agents using \${vars:${deleteTarget.key}} will see unresolved references.`,
               })}
             </p>
             <div className="mt-6 flex justify-end gap-2">

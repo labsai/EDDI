@@ -2664,17 +2664,17 @@ const MOCK_VARIABLES = [
 ];
 
 export const variablesHandlers = [
-  // List all global variables
-  http.get("*/variablestore/variables", ({ request }) => {
+  // List all global variables for a tenant
+  http.get("*/variablestore/variables/:tenantId", ({ request }) => {
     const url = new URL(request.url);
-    // Only match the exact /variablestore/variables path (no trailing segments)
+    // Only match /variablestore/variables/:tenantId (no trailing key segment)
     const segments = url.pathname.split("/").filter(Boolean);
-    if (segments.length > 2) return;
+    if (segments.length > 3) return;
     return HttpResponse.json(MOCK_VARIABLES);
   }),
 
   // Get a single variable by key
-  http.get("*/variablestore/variables/:key", ({ params }) => {
+  http.get("*/variablestore/variables/:tenantId/:key", ({ params }) => {
     const key = params.key as string;
     const found = MOCK_VARIABLES.find((v) => v.key === key);
     if (!found) {
@@ -2684,12 +2684,12 @@ export const variablesHandlers = [
   }),
 
   // Create or update a variable
-  http.put("*/variablestore/variables/:key", () => {
+  http.put("*/variablestore/variables/:tenantId/:key", () => {
     return new HttpResponse(null, { status: 200 });
   }),
 
   // Delete a variable
-  http.delete("*/variablestore/variables/:key", () => {
+  http.delete("*/variablestore/variables/:tenantId/:key", () => {
     return new HttpResponse(null, { status: 204 });
   }),
 ];

@@ -83,7 +83,7 @@ describe("VariablesPage", () => {
   it("shows copy reference buttons", async () => {
     renderVariables();
     await waitFor(() => {
-      expect(screen.getByTestId("copy-eddivar-default-model")).toBeInTheDocument();
+      expect(screen.getByTestId("copy-vars-default-model")).toBeInTheDocument();
     });
   });
 
@@ -183,7 +183,7 @@ describe("VariablesPage", () => {
     const { server } = await import("@/test/mocks/server");
     const { http, HttpResponse } = await import("msw");
     server.use(
-      http.get("*/variablestore/variables", () => HttpResponse.json([])),
+      http.get("*/variablestore/variables/:tenantId", () => HttpResponse.json([])),
     );
 
     renderVariables();
@@ -193,7 +193,7 @@ describe("VariablesPage", () => {
     });
   });
 
-  it("copies eddivar reference to clipboard when copy button is clicked", async () => {
+  it("copies vars reference to clipboard when copy button is clicked", async () => {
     renderVariables();
     const user = userEvent.setup();
 
@@ -205,17 +205,17 @@ describe("VariablesPage", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId("copy-eddivar-default-model")).toBeInTheDocument();
+      expect(screen.getByTestId("copy-vars-default-model")).toBeInTheDocument();
     });
 
-    await user.click(screen.getByTestId("copy-eddivar-default-model"));
-    expect(writeText).toHaveBeenCalledWith("${eddivar:default-model}");
+    await user.click(screen.getByTestId("copy-vars-default-model"));
+    expect(writeText).toHaveBeenCalledWith("${vars:default-model}");
   });
 
   it("info box displays usage syntax examples", () => {
     renderVariables();
     expect(
-      screen.getByText(/\$\{eddivar:<key>\}/, { exact: false }),
+      screen.getByText(/\$\{vars:<key>\}/, { exact: false }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/Changes take effect within 2 minutes/),
