@@ -170,29 +170,34 @@ jobs:
           fi
 
       # ── Validate baselines ──────────────────────────────────
-      # Use field-presence (not > 0) to distinguish "missing from legacy cache"
-      # from "legitimately zero". A repo with 0 forks should still get digests.
+      # A baseline is valid when: (1) the cache existed, (2) the fields are present,
+      # AND (3) the Docker pulls baseline is non-zero. Docker pulls only ever increase,
+      # so a zero baseline is always a cold-start artifact (cache eviction/rebuild).
+      # Stars and forks CAN legitimately be 0 for new repos, but Docker pulls cannot
+      # be 0 for an established project with 300k+ pulls.
       - name: Validate baselines
         id: baselines
         run: |
           HAS_DATA="${{ steps.prev.outputs.has_data }}"
           DAY_PRESENT="${{ steps.prev.outputs.day_fields_present }}"
           WEEK_PRESENT="${{ steps.prev.outputs.week_fields_present }}"
+          DAY_DOCKER="${{ steps.prev.outputs.day_docker }}"
+          WEEK_DOCKER="${{ steps.prev.outputs.week_docker }}"
 
-          # Day baselines are valid only if cache existed AND the fields were present
-          if [ "$HAS_DATA" = "true" ] && [ "$DAY_PRESENT" = "true" ]; then
+          # Day baselines: fields must exist AND docker baseline must be non-zero
+          if [ "$HAS_DATA" = "true" ] && [ "$DAY_PRESENT" = "true" ] && [ "$DAY_DOCKER" -gt 0 ]; then
             echo "day_valid=true" >> "$GITHUB_OUTPUT"
           else
             echo "day_valid=false" >> "$GITHUB_OUTPUT"
-            echo "⚠️  Day baselines invalid (has_data=$HAS_DATA, day_fields_present=$DAY_PRESENT)"
+            echo "⚠️  Day baselines invalid (has_data=$HAS_DATA, day_present=$DAY_PRESENT, day_docker=$DAY_DOCKER)"
           fi
 
-          # Week baselines are valid only if cache existed AND the fields were present
-          if [ "$HAS_DATA" = "true" ] && [ "$WEEK_PRESENT" = "true" ]; then
+          # Week baselines: fields must exist AND docker baseline must be non-zero
+          if [ "$HAS_DATA" = "true" ] && [ "$WEEK_PRESENT" = "true" ] && [ "$WEEK_DOCKER" -gt 0 ]; then
             echo "week_valid=true" >> "$GITHUB_OUTPUT"
           else
             echo "week_valid=false" >> "$GITHUB_OUTPUT"
-            echo "⚠️  Week baselines invalid (has_data=$HAS_DATA, week_fields_present=$WEEK_PRESENT)"
+            echo "⚠️  Week baselines invalid (has_data=$HAS_DATA, week_present=$WEEK_PRESENT, week_docker=$WEEK_DOCKER)"
           fi
 
       # ── Push to analytics (always, if data changed) ─────────
@@ -298,6 +303,12 @@ jobs:
           WEEK_STAR_DIFF=$(( STARS - ${{ steps.prev.outputs.week_stars }} ))
           WEEK_FORK_DIFF=$(( FORKS - ${{ steps.prev.outputs.week_forks }} ))
 
+          # Sanity check: if delta equals current, baseline was 0 (cold-start artifact)
+          if [ "$WEEK_PULL_DIFF" -eq "$PULLS" ] && [ "$PULLS" -gt 0 ]; then
+            echo "⚠️  Weekly deltas are bogus (baseline was 0) — skipping digest"
+            exit 0
+          fi
+
           PULLS_FMT=$(printf "%'d" "$PULLS")
 
           # Build sign prefixes
@@ -355,6 +366,12 @@ jobs:
           DAY_PULL_DIFF=$(( PULLS - ${{ steps.prev.outputs.day_docker }} ))
           DAY_STAR_DIFF=$(( STARS - ${{ steps.prev.outputs.day_stars }} ))
           DAY_FORK_DIFF=$(( FORKS - ${{ steps.prev.outputs.day_forks }} ))
+
+          # Sanity check: if delta equals current, baseline was 0 (cold-start artifact)
+          if [ "$DAY_PULL_DIFF" -eq "$PULLS" ] && [ "$PULLS" -gt 0 ]; then
+            echo "⚠️  Daily deltas are bogus (baseline was 0) — skipping digest"
+            exit 0
+          fi
 
           # Only send if something actually changed today
           if [ "$DAY_PULL_DIFF" -eq 0 ] && [ "$DAY_STAR_DIFF" -eq 0 ] && [ "$DAY_FORK_DIFF" -eq 0 ]; then

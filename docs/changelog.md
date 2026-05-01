@@ -13,6 +13,25 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔔 Slack Notification — Bogus Delta Fix (2026-05-01)
+
+**Repo:** EDDI (`fix/slack-notification-deltas`)
+
+**What changed:** Fixed Slack daily/weekly digests showing deltas equal to the total value (e.g., `+391490` pulls, `+320` stars, `+107` forks) instead of the actual daily/weekly change.
+
+### Root Cause
+
+The `Validate baselines` step only checked whether `day_docker`/`week_docker` fields **existed** in the cached `metrics.json`, not whether they contained sensible values. When the GitHub Actions cache was evicted or rebuilt, the baseline fields were present but set to `0` (from the initial seeding), making `day_valid=true`. The daily digest then computed `delta = current - 0 = current`, producing absurd deltas.
+
+### Fix (two-layer defense)
+
+1. **Strengthened baseline validation** — baselines are now rejected if the Docker pulls baseline is `0`. Docker pulls only increase, so a zero baseline is always a cold-start artifact for an established project. Stars and forks can legitimately be 0 for new repos, but Docker pulls cannot.
+2. **Added sanity guards in digest steps** — both daily and weekly digest steps now detect when `delta == current` (baseline was 0) and skip sending the digest. This catches any future edge case where validation passes but the baseline is still bogus.
+
+**Files:** `.github/workflows/docker-pull-notify.yml`
+
+---
+
 ## 🔒 OpenSSF Scorecard: Pinned-Dependencies Remediation (2026-04-28)
 
 **Repo:** EDDI (`chore/openssf-pinned-dependencies`)
