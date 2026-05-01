@@ -50,9 +50,13 @@ jobs:
             echo "week_docker=$(jq -r '.week_docker // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "week_stars=$(jq -r '.week_stars // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "week_forks=$(jq -r '.week_forks // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "week_views=$(jq -r '.week_views // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "week_clones=$(jq -r '.week_clones // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "day_docker=$(jq -r '.day_docker // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "day_stars=$(jq -r '.day_stars // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "day_forks=$(jq -r '.day_forks // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "day_views=$(jq -r '.day_views // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "day_clones=$(jq -r '.day_clones // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "last_milestone=$(jq -r '.last_milestone // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "has_data=true" >> "$GITHUB_OUTPUT"
 
@@ -68,7 +72,7 @@ jobs:
             echo "has_data=false" >> "$GITHUB_OUTPUT"
             echo "day_fields_present=false" >> "$GITHUB_OUTPUT"
             echo "week_fields_present=false" >> "$GITHUB_OUTPUT"
-            for key in docker_pulls stars forks week_docker week_stars week_forks day_docker day_stars day_forks last_milestone; do
+            for key in docker_pulls stars forks week_docker week_stars week_forks week_views week_clones day_docker day_stars day_forks day_views day_clones last_milestone; do
               echo "${key}=0" >> "$GITHUB_OUTPUT"
             done
           fi
@@ -278,7 +282,7 @@ jobs:
               ]
             }"
 
-      # ── Weekly digest (Sunday or manual) ────────────────────
+      # ── Weekly digest (Monday or manual) ────────────────────
       - name: Weekly digest
         if: >-
           steps.schedule.outputs.type == 'weekly'
@@ -302,6 +306,8 @@ jobs:
           WEEK_PULL_DIFF=$(( PULLS - ${{ steps.prev.outputs.week_docker }} ))
           WEEK_STAR_DIFF=$(( STARS - ${{ steps.prev.outputs.week_stars }} ))
           WEEK_FORK_DIFF=$(( FORKS - ${{ steps.prev.outputs.week_forks }} ))
+          WEEK_VIEW_DIFF=$(( VIEWS - ${{ steps.prev.outputs.week_views }} ))
+          WEEK_CLONE_DIFF=$(( CLONES - ${{ steps.prev.outputs.week_clones }} ))
 
           # Sanity check: if delta equals current, baseline was 0 (cold-start artifact)
           if [ "$WEEK_PULL_DIFF" -eq "$PULLS" ] && [ "$PULLS" -gt 0 ]; then
@@ -311,10 +317,12 @@ jobs:
 
           PULLS_FMT=$(printf "%'d" "$PULLS")
 
-          # Build sign prefixes
+          # Build sign prefixes (pulls/stars/forks only increase; views/clones can decrease)
           pull_sign=""; [ "$WEEK_PULL_DIFF" -gt 0 ] && pull_sign="+"
           star_sign=""; [ "$WEEK_STAR_DIFF" -gt 0 ] && star_sign="+"
           fork_sign=""; [ "$WEEK_FORK_DIFF" -gt 0 ] && fork_sign="+"
+          view_sign=""; [ "$WEEK_VIEW_DIFF" -gt 0 ] && view_sign="+"
+          clone_sign=""; [ "$WEEK_CLONE_DIFF" -gt 0 ] && clone_sign="+"
 
           curl -sf -X POST "$SLACK_WEBHOOK" \
             -H 'Content-type: application/json' \
@@ -330,8 +338,8 @@ jobs:
                     { \"type\": \"mrkdwn\", \"text\": \"*🐳 Docker Pulls*\n${PULLS_FMT} (${pull_sign}${WEEK_PULL_DIFF})\" },
                     { \"type\": \"mrkdwn\", \"text\": \"*⭐ GitHub Stars*\n${STARS} (${star_sign}${WEEK_STAR_DIFF})\" },
                     { \"type\": \"mrkdwn\", \"text\": \"*🍴 Forks*\n${FORKS} (${fork_sign}${WEEK_FORK_DIFF})\" },
-                    { \"type\": \"mrkdwn\", \"text\": \"*👀 Repo Views (14d)*\n${VIEWS} (${UNIQUES} unique)\" },
-                    { \"type\": \"mrkdwn\", \"text\": \"*📥 Git Clones (14d)*\n${CLONES}\" }
+                    { \"type\": \"mrkdwn\", \"text\": \"*👀 Repo Views (14d)*\n${VIEWS} (${UNIQUES} unique, ${view_sign}${WEEK_VIEW_DIFF})\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"*📥 Git Clones (14d)*\n${CLONES} (${clone_sign}${WEEK_CLONE_DIFF})\" }
                   ]
                 },
                 {
@@ -366,6 +374,8 @@ jobs:
           DAY_PULL_DIFF=$(( PULLS - ${{ steps.prev.outputs.day_docker }} ))
           DAY_STAR_DIFF=$(( STARS - ${{ steps.prev.outputs.day_stars }} ))
           DAY_FORK_DIFF=$(( FORKS - ${{ steps.prev.outputs.day_forks }} ))
+          DAY_VIEW_DIFF=$(( VIEWS - ${{ steps.prev.outputs.day_views }} ))
+          DAY_CLONE_DIFF=$(( CLONES - ${{ steps.prev.outputs.day_clones }} ))
 
           # Sanity check: if delta equals current, baseline was 0 (cold-start artifact)
           if [ "$DAY_PULL_DIFF" -eq "$PULLS" ] && [ "$PULLS" -gt 0 ]; then
@@ -379,10 +389,12 @@ jobs:
             exit 0
           fi
 
-          # Build sign prefixes
+          # Build sign prefixes (pulls/stars/forks only increase; views/clones can decrease)
           pull_sign=""; [ "$DAY_PULL_DIFF" -gt 0 ] && pull_sign="+"
           star_sign=""; [ "$DAY_STAR_DIFF" -gt 0 ] && star_sign="+"
           fork_sign=""; [ "$DAY_FORK_DIFF" -gt 0 ] && fork_sign="+"
+          view_sign=""; [ "$DAY_VIEW_DIFF" -gt 0 ] && view_sign="+"
+          clone_sign=""; [ "$DAY_CLONE_DIFF" -gt 0 ] && clone_sign="+"
 
           PULLS_FMT=$(printf "%'d" "$PULLS")
 
@@ -404,7 +416,7 @@ jobs:
                 {
                   \"type\": \"context\",
                   \"elements\": [
-                    { \"type\": \"mrkdwn\", \"text\": \"👀 Views: ${VIEWS} · 📥 Clones: ${CLONES} · <https://github.com/labsai/EDDI|GitHub>\" }
+                    { \"type\": \"mrkdwn\", \"text\": \"👀 Views: ${VIEWS} (${view_sign}${DAY_VIEW_DIFF}) · 📥 Clones: ${CLONES} (${clone_sign}${DAY_CLONE_DIFF}) · <https://github.com/labsai/EDDI|GitHub>\" }
                   ]
                 }
               ]
@@ -422,6 +434,9 @@ jobs:
           WEEK_VALID="${{ steps.baselines.outputs.week_valid }}"
           DAY_VALID="${{ steps.baselines.outputs.day_valid }}"
 
+          CUR_VIEWS=${{ steps.traffic.outputs.views }}
+          CUR_CLONES=${{ steps.traffic.outputs.clones }}
+
           # ── Determine week baseline ──
           # Uses the same field-presence check as the Validate step
           if [ "$WEEK_VALID" != "true" ]; then
@@ -429,16 +444,22 @@ jobs:
             WEEK_DOCKER=$CUR_PULLS
             WEEK_STARS=$CUR_STARS
             WEEK_FORKS=$CUR_FORKS
+            WEEK_VIEWS=$CUR_VIEWS
+            WEEK_CLONES=$CUR_CLONES
           elif [ "$SCHED_TYPE" = "weekly" ]; then
             # Weekly digest just sent — reset baseline to now
             WEEK_DOCKER=$CUR_PULLS
             WEEK_STARS=$CUR_STARS
             WEEK_FORKS=$CUR_FORKS
+            WEEK_VIEWS=$CUR_VIEWS
+            WEEK_CLONES=$CUR_CLONES
           else
             # Preserve existing baseline
             WEEK_DOCKER=${{ steps.prev.outputs.week_docker }}
             WEEK_STARS=${{ steps.prev.outputs.week_stars }}
             WEEK_FORKS=${{ steps.prev.outputs.week_forks }}
+            WEEK_VIEWS=${{ steps.prev.outputs.week_views }}
+            WEEK_CLONES=${{ steps.prev.outputs.week_clones }}
           fi
 
           # ── Determine day baseline ──
@@ -448,16 +469,22 @@ jobs:
             DAY_DOCKER=$CUR_PULLS
             DAY_STARS=$CUR_STARS
             DAY_FORKS=$CUR_FORKS
-          elif [ "$SCHED_TYPE" = "daily" ] || [ "$SCHED_TYPE" = "weekly" ]; then
-            # Daily/weekly digest just sent — reset baseline to now
+            DAY_VIEWS=$CUR_VIEWS
+            DAY_CLONES=$CUR_CLONES
+          elif [ "$SCHED_TYPE" = "daily" ]; then
+            # Daily digest just sent — reset baseline to now
             DAY_DOCKER=$CUR_PULLS
             DAY_STARS=$CUR_STARS
             DAY_FORKS=$CUR_FORKS
+            DAY_VIEWS=$CUR_VIEWS
+            DAY_CLONES=$CUR_CLONES
           else
             # Preserve existing baseline
             DAY_DOCKER=${{ steps.prev.outputs.day_docker }}
             DAY_STARS=${{ steps.prev.outputs.day_stars }}
             DAY_FORKS=${{ steps.prev.outputs.day_forks }}
+            DAY_VIEWS=${{ steps.prev.outputs.day_views }}
+            DAY_CLONES=${{ steps.prev.outputs.day_clones }}
           fi
 
           # Current milestone marker
@@ -470,13 +497,19 @@ jobs:
             --argjson week_docker "$WEEK_DOCKER" \
             --argjson week_stars "$WEEK_STARS" \
             --argjson week_forks "$WEEK_FORKS" \
+            --argjson week_views "$WEEK_VIEWS" \
+            --argjson week_clones "$WEEK_CLONES" \
             --argjson day_docker "$DAY_DOCKER" \
             --argjson day_stars "$DAY_STARS" \
             --argjson day_forks "$DAY_FORKS" \
+            --argjson day_views "$DAY_VIEWS" \
+            --argjson day_clones "$DAY_CLONES" \
             --argjson last_milestone "$CURRENT_MS" \
             '{docker_pulls: $docker_pulls, stars: $stars, forks: $forks,
               week_docker: $week_docker, week_stars: $week_stars, week_forks: $week_forks,
+              week_views: $week_views, week_clones: $week_clones,
               day_docker: $day_docker, day_stars: $day_stars, day_forks: $day_forks,
+              day_views: $day_views, day_clones: $day_clones,
               last_milestone: $last_milestone}' > metrics.json
 
           echo "Saved metrics:"
