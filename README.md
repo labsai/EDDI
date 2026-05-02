@@ -31,6 +31,7 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
   - [Maven Command Reference](#maven-command-reference)
   - [Build & Docker](#build--docker)
   - [Kubernetes](#️-kubernetes)
+- [❓ FAQ](#-faq)
 - [🤝 Contributing](#-contributing)
 - [🔒 Security](#-security)
 - [📜 Code of Conduct](#-code-of-conduct)
@@ -621,3 +622,42 @@ For vulnerability reports, see our [Security Policy](SECURITY.md). For architect
 ## 📜 Code of Conduct
 
 This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md).
+
+## ❓ FAQ
+
+### What is EDDI?
+E.D.D.I (Enhanced Dialog Driven Interface) is a production-grade, config-driven multi-agent orchestration middleware for conversational AI. It coordinates users, AI agents, and business systems through intelligent routing, persistent memory, and API orchestration — without writing code.
+
+### How is EDDI different from other AI frameworks?
+EDDI is **config-driven** rather than code-driven. You define agent behaviors, routing rules, and integrations through YAML/JSON configurations rather than writing application code. It also provides built-in multi-agent orchestration, persistent conversation memory, and native MCP/A2A support.
+
+### What LLM providers does EDDI support?
+EDDI supports any LLM provider compatible with OpenAI API format, including OpenAI, Anthropic Claude, Azure OpenAI, Google Gemini, local models via Ollama, and any provider exposing an OpenAI-compatible endpoint.
+
+### Can I run EDDI locally?
+Yes! EDDI ships as a Red Hat-certified Docker image. The fastest way to get started is the one-command installer which sets up EDDI + database via Docker Compose. See the [Quick Start](#-quick-start) section for details.
+
+### Does EDDI support multi-agent conversations?
+Yes. EDDI is designed as a **multi-agent orchestration middleware**. It can route conversations to different specialized agents, maintain context across agent handoffs, and coordinate multi-agent workflows through its configuration-driven routing engine.
+
+### How does EDDI handle conversation memory?
+EDDI provides persistent conversation memory that tracks interaction history across sessions. This enables context-aware responses and seamless continuation of conversations even after interruptions.
+
+### Can EDDI integrate with existing business systems?
+Yes. EDDI has native support for OpenAPI (REST API orchestration), MCP (Model Context Protocol), A2A (Agent-to-Agent communication), Slack, and OAuth 2.0. You can connect it to virtually any system with an API.
+
+### Is EDDI production-ready?
+Yes. EDDI is designed as production-grade middleware with 5,100+ tests, >80% code coverage, OpenSSF Best Practices compliance, and ships as a Red Hat-certified Docker image. It is used in production environments.
+
+### How do I deploy EDDI in production?
+EDDI supports multiple deployment options:
+- **Docker Compose**: Quick start with the one-command installer
+- **Kubernetes**: Full Kubernetes manifests available in the repository
+- **Red Hat OpenShift**: Certified container image for enterprise deployments
+
+### Where can I get help?
+- [Official Documentation](https://docs.labs.ai/)
+- [Website](https://eddi.labs.ai/)
+- [GitHub Issues](https://github.com/labsai/EDDI/issues) for bug reports and feature requests
+- [GitHub Discussions](https://github.com/labsai/EDDI/discussions) for community questions
+
