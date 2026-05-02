@@ -30,6 +30,7 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 /**
  * Creates and caches {@link EmbeddingStore} instances based on
@@ -47,6 +48,8 @@ public class EmbeddingStoreFactory {
 
     private static final Logger LOGGER = Logger.getLogger(EmbeddingStoreFactory.class);
     private static final int MAX_PG_IDENTIFIER_LENGTH = 63;
+    private static final Pattern UNSAFE_IDENTIFIER_CHARS = Pattern.compile("[^a-z0-9_]");
+    private static final Pattern TRAILING_UNDERSCORES = Pattern.compile("_+$");
 
     private final Cache<String, EmbeddingStore<TextSegment>> cache = Caffeine.newBuilder().maximumSize(50).expireAfterAccess(Duration.ofMinutes(30))
             .build();
@@ -184,7 +187,7 @@ public class EmbeddingStoreFactory {
         Map<String, String> params = resolveParams(config);
 
         String serverUrl = params.getOrDefault("serverUrl", "http://localhost:9200");
-        String indexName = params.getOrDefault("indexName", "eddi_kb_" + kbId.toLowerCase().replaceAll("[^a-z0-9_]", "_"));
+        String indexName = params.getOrDefault("indexName", "eddi_kb_" + UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_"));
 
         var builder = ElasticsearchEmbeddingStore.builder().serverUrl(serverUrl).indexName(indexName);
 
@@ -333,7 +336,7 @@ public class EmbeddingStoreFactory {
     }
 
     static String sanitizeCollection(String kbId) {
-        return "eddi_kb_" + kbId.toLowerCase().replaceAll("[^a-z0-9_]", "_").replaceAll("_+$", "");
+        return TRAILING_UNDERSCORES.matcher("eddi_kb_" + UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_")).replaceAll("");
     }
 
     /**
@@ -343,7 +346,7 @@ public class EmbeddingStoreFactory {
      * chars).
      */
     static String sanitizeTableName(String kbId) {
-        String sanitized = kbId.toLowerCase().replaceAll("[^a-z0-9_]", "_");
+        String sanitized = UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_");
         String result = "eddi_kb_" + sanitized;
         if (result.length() > MAX_PG_IDENTIFIER_LENGTH) {
             result = result.substring(0, MAX_PG_IDENTIFIER_LENGTH);
