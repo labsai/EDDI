@@ -1,0 +1,283 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.configs.ingestion.rest;
+
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.ingestion.IRagIngestionSourceStore;
+import ai.labs.eddi.configs.ingestion.IRestRagIngestionSourceStore;
+import ai.labs.eddi.configs.ingestion.model.RagIngestionSource;
+import ai.labs.eddi.configs.rest.RestVersionInfo;
+import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
+import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.modules.ingestion.ContentHashTracker;
+import ai.labs.eddi.modules.ingestion.RagWebIngestionService;
+import ai.labs.eddi.utils.LogSanitizer;
+import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
+
+import java.net.URI;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+
+import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
+
+/**
+ * REST implementation for RAG ingestion source management.
+ * <p>
+ * Provides CRUD operations for ingestion sources, automatic schedule
+ * management, and manual triggering.
+ */
+@ApplicationScoped
+public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore {
+
+    private static final Logger LOGGER = Logger.getLogger(RestRagIngestionSourceStore.class);
+
+    private final IRagIngestionSourceStore sourceStore;
+    private final IScheduleStore scheduleStore;
+    private final IJsonSchemaCreator jsonSchemaCreator;
+    private final IDocumentDescriptorStore documentDescriptorStore;
+    private final RagWebIngestionService ingestionService;
+    private final ContentHashTracker contentHashTracker;
+    private final RestVersionInfo<RagIngestionSource> restVersionInfo;
+
+    private final String ingestionAgentId;
+
+    @Inject
+    public RestRagIngestionSourceStore(
+            IRagIngestionSourceStore sourceStore,
+            IScheduleStore scheduleStore,
+            IJsonSchemaCreator jsonSchemaCreator,
+            IDocumentDescriptorStore documentDescriptorStore,
+            RagWebIngestionService ingestionService,
+            ContentHashTracker contentHashTracker,
+            @ConfigProperty(name = "eddi.ingestion.agent-id", defaultValue = "ingestion-agent") String ingestionAgentId) {
+        this.sourceStore = sourceStore;
+        this.scheduleStore = scheduleStore;
+        this.jsonSchemaCreator = jsonSchemaCreator;
+        this.documentDescriptorStore = documentDescriptorStore;
+        this.ingestionService = ingestionService;
+        this.contentHashTracker = contentHashTracker;
+        this.ingestionAgentId = ingestionAgentId;
+        this.restVersionInfo = new RestVersionInfo<>(resourceURI, sourceStore, documentDescriptorStore);
+    }
+
+    @Override
+    public Response readJsonSchema() {
+        try {
+            return Response.ok(jsonSchemaCreator.generateSchema(RagIngestionSource.class)).build();
+        } catch (Exception e) {
+            throw sneakyThrow(e);
+        }
+    }
+
+    @Override
+    public List<DocumentDescriptor> readIngestionSourceDescriptors(String filter, Integer index, Integer limit) {
+        return restVersionInfo.readDescriptors("ai.labs.ingestion", filter, index, limit);
+    }
+
+    @Override
+    public RagIngestionSource readIngestionSource(String id, Integer version) {
+        return restVersionInfo.read(id, version);
+    }
+
+    @Override
+    public Response updateIngestionSource(String id, Integer version, RagIngestionSource source) {
+        Response response = restVersionInfo.update(id, version, source);
+
+        // Update associated schedule
+        if (response.getStatus() == Response.Status.OK.getStatusCode()) {
+            try {
+                updateScheduleForSource(id, source);
+            } catch (Exception e) {
+                LOGGER.warnf(e, "Failed to update schedule for source %s", LogSanitizer.sanitize(id));
+            }
+        }
+
+        return response;
+    }
+
+    @Override
+    public Response createIngestionSource(RagIngestionSource source) {
+        Response response = restVersionInfo.create(source);
+
+        // Create associated schedule
+        if (response.getStatus() == Response.Status.CREATED.getStatusCode()) {
+            try {
+                String location = response.getLocation().toString();
+                String id = extractIdFromLocation(location);
+                createScheduleForSource(id, source);
+            } catch (Exception e) {
+                LOGGER.warnf(e, "Failed to create schedule for new source");
+            }
+        }
+
+        return response;
+    }
+
+    @Override
+    public Response duplicateIngestionSource(String id, Integer version) {
+        restVersionInfo.validateParameters(id, version);
+        RagIngestionSource config = restVersionInfo.read(id, version);
+        return createIngestionSource(config);
+    }
+
+    @Override
+    public Response deleteIngestionSource(String id, Integer version, Boolean permanent) {
+        Response response = restVersionInfo.delete(id, version, permanent);
+
+        // Delete associated schedule
+        if (response.getStatus() == Response.Status.OK.getStatusCode()) {
+            try {
+                deleteScheduleForSource(id);
+                if (permanent) {
+                    contentHashTracker.clearSource(id);
+                }
+            } catch (Exception e) {
+                LOGGER.warnf(e, "Failed to delete schedule for source %s", LogSanitizer.sanitize(id));
+            }
+        }
+
+        return response;
+    }
+
+    @Override
+    public Response triggerIngestion(String id, Integer version) {
+        RagIngestionSource source = restVersionInfo.read(id, version);
+
+        // Run ingestion on a virtual thread (async)
+        Thread.startVirtualThread(() -> {
+            try {
+                RagWebIngestionService.IngestionResult result = ingestionService.ingest(id, source);
+                LOGGER.infof("Manual ingestion completed for source %s: success=%s, pages=%d, chunks=%d",
+                        LogSanitizer.sanitize(id), result.isSuccess(), result.pagesCrawled(), result.chunksStored());
+            } catch (Exception e) {
+                LOGGER.errorf(e, "Manual ingestion failed for source %s", LogSanitizer.sanitize(id));
+            }
+        });
+
+        // Return 202 Accepted immediately
+        return Response.accepted()
+                .entity(Map.of(
+                        "sourceId", id,
+                        "sourceName", source.getName(),
+                        "status", "started",
+                        "message", "Ingestion started asynchronously. Check logs for completion status."))
+                .build();
+    }
+
+    @Override
+    public String getResourceURI() {
+        return restVersionInfo.getResourceURI();
+    }
+
+    @Override
+    public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
+        return sourceStore.getCurrentResourceId(id);
+    }
+
+    // --- Schedule management ---
+
+    private void createScheduleForSource(String sourceId, RagIngestionSource source) throws Exception {
+        if (!source.getSchedule().isEnabled()) {
+            return;
+        }
+
+        ScheduleConfiguration schedule = new ScheduleConfiguration();
+        schedule.setName("ingestion:" + source.getName());
+        schedule.setTriggerType(ScheduleConfiguration.TriggerType.CRON);
+        schedule.setCronExpression(source.getSchedule().getCronExpression());
+        schedule.setAgentId(ingestionAgentId);
+        schedule.setAgentVersion(0);
+        schedule.setEnvironment("production");
+        schedule.setConversationStrategy("new");
+        schedule.setMessage("Crawl and ingest: " + source.getName());
+        schedule.setUserId("system:scheduler");
+        schedule.setTimeZone("UTC");
+        schedule.setEnabled(source.getSchedule().isEnabled());
+        schedule.setMaxCostPerFire(-1.0);
+        schedule.setMetadata(Map.of(
+                "sourceId", sourceId,
+                "sourceType", "rag-ingestion"));
+
+        // Compute next fire time
+        Instant nextFire = computeNextFire(schedule.getCronExpression());
+        schedule.setNextFire(nextFire);
+
+        String scheduleId = scheduleStore.createSchedule(schedule);
+        LOGGER.infof("Created schedule %s for ingestion source %s", LogSanitizer.sanitize(scheduleId), LogSanitizer.sanitize(sourceId));
+    }
+
+    private void updateScheduleForSource(String sourceId, RagIngestionSource source) {
+        // Find existing schedule by metadata
+        try {
+            List<ScheduleConfiguration> schedules = scheduleStore.readAllSchedules(1000);
+            for (ScheduleConfiguration schedule : schedules) {
+                Map<String, Object> metadata = schedule.getMetadata();
+                if (metadata != null && sourceId.equals(metadata.get("sourceId"))) {
+                    // Update schedule
+                    schedule.setName("ingestion:" + source.getName());
+                    schedule.setCronExpression(source.getSchedule().getCronExpression());
+                    schedule.setEnabled(source.getSchedule().isEnabled());
+
+                    if (source.getSchedule().isEnabled() && schedule.getNextFire() == null) {
+                        schedule.setNextFire(computeNextFire(schedule.getCronExpression()));
+                    }
+
+                    scheduleStore.updateSchedule(schedule.getId(), schedule);
+                    LOGGER.infof("Updated schedule %s for ingestion source %s", LogSanitizer.sanitize(schedule.getId()),
+                            LogSanitizer.sanitize(sourceId));
+                    return;
+                }
+            }
+
+            // No existing schedule found, create one if enabled
+            if (source.getSchedule().isEnabled()) {
+                createScheduleForSource(sourceId, source);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf(e, "Failed to update schedule for source %s", LogSanitizer.sanitize(sourceId));
+        }
+    }
+
+    private void deleteScheduleForSource(String sourceId) {
+        try {
+            List<ScheduleConfiguration> schedules = scheduleStore.readAllSchedules(1000);
+            for (ScheduleConfiguration schedule : schedules) {
+                Map<String, Object> metadata = schedule.getMetadata();
+                if (metadata != null && sourceId.equals(metadata.get("sourceId"))) {
+                    scheduleStore.deleteSchedule(schedule.getId());
+                    LOGGER.infof("Deleted schedule %s for ingestion source %s", LogSanitizer.sanitize(schedule.getId()),
+                            LogSanitizer.sanitize(sourceId));
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warnf(e, "Failed to delete schedule for source %s", LogSanitizer.sanitize(sourceId));
+        }
+    }
+
+    private Instant computeNextFire(String cronExpression) {
+        // Simple implementation: next fire is now + 1 minute (cron parsing is complex)
+        // In production, this should use a proper cron parser
+        return Instant.now().plusSeconds(60);
+    }
+
+    private String extractIdFromLocation(String location) {
+        // Extract ID from location URI like:
+        // http://host/ragstore/ingestion-sources/abc123
+        int lastSlash = location.lastIndexOf('/');
+        if (lastSlash >= 0 && lastSlash < location.length() - 1) {
+            return location.substring(lastSlash + 1);
+        }
+        return null;
+    }
+}
