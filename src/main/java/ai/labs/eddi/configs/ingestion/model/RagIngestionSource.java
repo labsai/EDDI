@@ -4,20 +4,24 @@
  */
 package ai.labs.eddi.configs.ingestion.model;
 
-import java.util.ArrayList;
-import java.util.List;
-
 /**
- * Configuration for a RAG ingestion source — defines a starting URL, a CSS
- * selector for table-of-contents links, scope constraints for the web crawler,
- * and references an existing
+ * Configuration for a RAG ingestion source — defines how to gather content from
+ * a source (web, file system, Git, etc.), and references an existing
  * {@link ai.labs.eddi.configs.rag.model.RagConfiguration} for embedding +
  * storage.
+ *
+ * <p>
+ * The configuration is polymorphic via {@link #sourceConfig()} which contains
+ * type-specific settings. The {@link #type()} field determines which
+ * implementation of {@link SourceConfig} is present.
+ * </p>
  *
  * <p>
  * Stored as a versioned MongoDB document (like {@code RagConfiguration}).
  * Managed via REST API at {@code /ragstore/ingestion-sources/}.
  * </p>
+ *
+ * @since 6.0.3
  */
 public record RagIngestionSource(
         /** Display name for this ingestion source */
@@ -27,22 +31,20 @@ public record RagIngestionSource(
         String description,
 
         /**
-         * Entry point URL for the crawler. The crawler fetches this page first, then
-         * extracts TOC links from it using the {@code tocSelector} CSS selector.
+         * Source type identifier. Determines which {@link SourceConfig} implementation
+         * is used.
+         * <p>
+         * Examples: "web" (default), "file", "git", "api".
          */
-        String startUrl,
+        String type,
 
         /**
-         * CSS selector for table-of-contents links on the start page. Example:
-         * {@code "nav.sidebar a[href]"} or {@code "#toc a"}.
+         * Type-specific source configuration.
+         * <p>
+         * For "web" type, this is a {@link WebSourceConfig} with startUrl, tocSelector,
+         * scope, and crawlSettings.
          */
-        String tocSelector,
-
-        /** Crawl scope constraints */
-        Scope scope,
-
-        /** Crawl behavior settings */
-        CrawlSettings crawlSettings,
+        SourceConfig sourceConfig,
 
         /**
          * URI pointing to the {@link ai.labs.eddi.configs.rag.model.RagConfiguration}
@@ -59,15 +61,20 @@ public record RagIngestionSource(
         Schedule schedule) {
 
     /**
-     * Compact constructor to provide default values for nullable fields.
+     * Compact constructor providing default values.
      */
     public RagIngestionSource {
-        if (scope == null) {
-            scope = new Scope();
+        // Set default type if null
+        if (type == null || type.isBlank()) {
+            type = "web";
         }
-        if (crawlSettings == null) {
-            crawlSettings = new CrawlSettings();
+
+        // Ensure sourceConfig is not null for web type
+        if (sourceConfig == null && "web".equals(type)) {
+            sourceConfig = new WebSourceConfig(null, null, null, null);
         }
+
+        // Set defaults for other nullable nested configs
         if (ingestionSettings == null) {
             ingestionSettings = new IngestionSettings();
         }
@@ -77,62 +84,23 @@ public record RagIngestionSource(
     }
 
     /**
-     * Scope constraints for the web crawler. Controls how far and where the crawler
-     * will follow links.
+     * Convenience accessor for web source configuration.
+     * <p>
+     * Returns the {@code sourceConfig} cast to {@link WebSourceConfig}. Only valid
+     * when {@code type().equals("web")}.
+     *
+     * @return the web source configuration
+     * @throws ClassCastException
+     *             if this is not a web source
      */
-    public record Scope(
-            /** Only follow links on the same domain as startUrl (default: true) */
-            boolean sameDomainOnly,
-
-            /** Only follow links under this path prefix (default: "/") */
-            String pathPrefix,
-
-            /** Maximum BFS depth from startUrl (default: 3) */
-            int maxDepth,
-
-            /** Stop crawling after this many pages (default: 200) */
-            int maxPages,
-
-            /**
-             * Glob patterns for URLs to skip. Example: [star]/api/[star], [star]/changelog.
-             */
-            List<String> excludePatterns) {
-
-        /**
-         * Default constructor providing standard defaults.
-         */
-        public Scope {
-            // Empty body - used to normalize nulls to defaults
+    public WebSourceConfig webConfig() {
+        if (sourceConfig instanceof WebSourceConfig web) {
+            return web;
         }
-
-        /**
-         * No-arg constructor for Jackson deserialization.
-         */
-        public Scope() {
-            this(true, "/", 3, 200, new ArrayList<>());
-        }
+        throw new ClassCastException("Source type is '" + type + "', not 'web'");
     }
 
-    /**
-     * Crawl behavior settings — request timing, timeouts, and user agent.
-     */
-    public record CrawlSettings(
-            /** Delay between HTTP requests in milliseconds (politeness, default: 500) */
-            int requestDelayMs,
-
-            /** HTTP request timeout in seconds (default: 15) */
-            int timeoutSeconds,
-
-            /** User-Agent header value (default: "EDDI-Crawler/1.0") */
-            String userAgent) {
-
-        /**
-         * No-arg constructor for Jackson deserialization.
-         */
-        public CrawlSettings() {
-            this(500, 15, "EDDI-Crawler/1.0");
-        }
-    }
+    // --- Inner records ---
 
     /**
      * Ingestion pipeline settings — chunking, dedup, and content limits.

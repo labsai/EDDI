@@ -15,7 +15,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.modules.ingestion.ContentHashTracker;
-import ai.labs.eddi.modules.ingestion.RagWebIngestionService;
+import ai.labs.eddi.modules.ingestion.RagIngestionService;
 import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -34,7 +34,8 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
  * REST implementation for RAG ingestion source management.
  * <p>
  * Provides CRUD operations for ingestion sources, automatic schedule
- * management, and manual triggering.
+ * management, and manual triggering. Supports multiple source types (web, file,
+ * Git, etc.) through the pluggable ingestion pipeline.
  */
 @ApplicationScoped
 public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore {
@@ -45,7 +46,7 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
     private final IScheduleStore scheduleStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final IDocumentDescriptorStore documentDescriptorStore;
-    private final RagWebIngestionService ingestionService;
+    private final RagIngestionService ingestionService;
     private final ContentHashTracker contentHashTracker;
     private final RestVersionInfo<RagIngestionSource> restVersionInfo;
 
@@ -57,7 +58,7 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
             IScheduleStore scheduleStore,
             IJsonSchemaCreator jsonSchemaCreator,
             IDocumentDescriptorStore documentDescriptorStore,
-            RagWebIngestionService ingestionService,
+            RagIngestionService ingestionService,
             ContentHashTracker contentHashTracker,
             @ConfigProperty(name = "eddi.ingestion.agent-id", defaultValue = "ingestion-agent") String ingestionAgentId) {
         this.sourceStore = sourceStore;
@@ -156,9 +157,10 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
         // Run ingestion on a virtual thread (async)
         Thread.startVirtualThread(() -> {
             try {
-                RagWebIngestionService.IngestionResult result = ingestionService.ingest(id, source);
-                LOGGER.infof("Manual ingestion completed for source %s: success=%s, pages=%d, chunks=%d",
-                        LogSanitizer.sanitize(id), result.isSuccess(), result.pagesCrawled(), result.chunksStored());
+                RagIngestionService.IngestionResult result = ingestionService.ingest(id, source);
+                LOGGER.infof("Manual ingestion completed for source %s (type=%s): success=%s, documents=%d, chunks=%d",
+                        LogSanitizer.sanitize(id), source.type(), result.isSuccess(),
+                        result.documentsProcessed(), result.chunksStored());
             } catch (Exception e) {
                 LOGGER.errorf(e, "Manual ingestion failed for source %s", LogSanitizer.sanitize(id));
             }
@@ -169,6 +171,7 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
                 .entity(Map.of(
                         "sourceId", id,
                         "sourceName", source.name(),
+                        "sourceType", source.type(),
                         "status", "started",
                         "message", "Ingestion started asynchronously. Check logs for completion status."))
                 .build();
@@ -199,21 +202,22 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
         schedule.setAgentVersion(0);
         schedule.setEnvironment("production");
         schedule.setConversationStrategy("new");
-        schedule.setMessage("Crawl and ingest: " + source.name());
+        schedule.setMessage("Ingest: " + source.name());
         schedule.setUserId("system:scheduler");
         schedule.setTimeZone("UTC");
         schedule.setEnabled(source.schedule().enabled());
         schedule.setMaxCostPerFire(-1.0);
         schedule.setMetadata(Map.of(
                 "sourceId", sourceId,
-                "sourceType", "rag-ingestion"));
+                "sourceType", source.type()));
 
         // Compute next fire time
         Instant nextFire = computeNextFire(schedule.getCronExpression());
         schedule.setNextFire(nextFire);
 
         String scheduleId = scheduleStore.createSchedule(schedule);
-        LOGGER.infof("Created schedule %s for ingestion source %s", LogSanitizer.sanitize(scheduleId), LogSanitizer.sanitize(sourceId));
+        LOGGER.infof("Created schedule %s for ingestion source %s (type=%s)",
+                LogSanitizer.sanitize(scheduleId), LogSanitizer.sanitize(sourceId), source.type());
     }
 
     private void updateScheduleForSource(String sourceId, RagIngestionSource source) {
@@ -227,14 +231,19 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
                     schedule.setName("ingestion:" + source.name());
                     schedule.setCronExpression(source.schedule().cronExpression());
                     schedule.setEnabled(source.schedule().enabled());
+                    // Update source type in case it changed
+                    schedule.setMetadata(Map.of(
+                            "sourceId", sourceId,
+                            "sourceType", source.type()));
 
                     if (source.schedule().enabled() && schedule.getNextFire() == null) {
                         schedule.setNextFire(computeNextFire(schedule.getCronExpression()));
                     }
 
                     scheduleStore.updateSchedule(schedule.getId(), schedule);
-                    LOGGER.infof("Updated schedule %s for ingestion source %s", LogSanitizer.sanitize(schedule.getId()),
-                            LogSanitizer.sanitize(sourceId));
+                    LOGGER.infof("Updated schedule %s for ingestion source %s (type=%s)",
+                            LogSanitizer.sanitize(schedule.getId()),
+                            LogSanitizer.sanitize(sourceId), source.type());
                     return;
                 }
             }

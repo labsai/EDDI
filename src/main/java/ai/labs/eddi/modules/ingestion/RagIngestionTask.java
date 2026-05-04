@@ -27,14 +27,14 @@ import java.util.Map;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
- * Lifecycle task for web-based RAG ingestion.
+ * Lifecycle task for RAG ingestion.
  * <p>
  * This task is triggered as part of an ingestion agent workflow. It:
  * <ol>
  * <li>Reads the ingestion source configuration from the workflow URI</li>
- * <li>Calls {@link RagWebIngestionService} to crawl, convert, and ingest
- * documents</li>
- * <li>Stores the {@link RagWebIngestionService.IngestionResult} in conversation
+ * <li>Calls {@link RagIngestionService} to fetch, convert, and ingest documents
+ * from any supported source type (web, file, Git, etc.)</li>
+ * <li>Stores the {@link RagIngestionService.IngestionResult} in conversation
  * memory</li>
  * </ol>
  * <p>
@@ -56,12 +56,12 @@ public class RagIngestionTask implements ILifecycleTask {
     public static final String KEY_INGESTION_RESULT = "ingestion:result";
     public static final String KEY_INGESTION_SOURCE = "ingestion:source";
 
-    private final RagWebIngestionService ingestionService;
+    private final RagIngestionService ingestionService;
     private final IResourceClientLibrary resourceClientLibrary;
     private final IDataFactory dataFactory;
 
     @Inject
-    public RagIngestionTask(RagWebIngestionService ingestionService,
+    public RagIngestionTask(RagIngestionService ingestionService,
             IResourceClientLibrary resourceClientLibrary,
             IDataFactory dataFactory) {
         this.ingestionService = ingestionService;
@@ -89,18 +89,30 @@ public class RagIngestionTask implements ILifecycleTask {
         String sourceId = config.sourceId();
         RagIngestionSource sourceConfig = config.sourceConfig();
 
-        LOGGER.infof("[INGESTION TASK] Executing ingestion for source: %s (%s)",
-                sanitize(sourceId), sanitize(sourceConfig.name()));
+        LOGGER.infof("[INGESTION TASK] Executing ingestion for source: %s (type=%s, name=%s)",
+                sanitize(sourceId), sanitize(sourceConfig.type()), sanitize(sourceConfig.name()));
 
         // Run ingestion (blocking call - runs on virtual thread if needed)
-        RagWebIngestionService.IngestionResult result = ingestionService.ingest(sourceId, sourceConfig);
+        RagIngestionService.IngestionResult result = ingestionService.ingest(sourceId, sourceConfig);
+
+        // Build source info for memory storage
+        Map<String, Object> sourceInfo = new HashMap<>();
+        sourceInfo.put("id", sourceId);
+        sourceInfo.put("name", sourceConfig.name());
+        sourceInfo.put("type", sourceConfig.type());
+
+        // Add type-specific identifier (startUrl for web, path for file, etc.)
+        if ("web".equals(sourceConfig.type())) {
+            try {
+                sourceInfo.put("sourceIdentifier", sourceConfig.webConfig().startUrl());
+            } catch (Exception e) {
+                LOGGER.debugf("Could not extract web startUrl for source %s", sanitize(sourceId));
+            }
+        }
 
         // Store result in conversation memory
         var resultData = dataFactory.createData(KEY_INGESTION_RESULT, result, true);
-        var sourceData = dataFactory.createData(KEY_INGESTION_SOURCE, Map.of(
-                "id", sourceId,
-                "name", sourceConfig.name(),
-                "startUrl", sourceConfig.startUrl()), true);
+        var sourceData = dataFactory.createData(KEY_INGESTION_SOURCE, sourceInfo, true);
 
         memory.getCurrentStep().storeData(resultData);
         memory.getCurrentStep().storeData(sourceData);
@@ -110,11 +122,12 @@ public class RagIngestionTask implements ILifecycleTask {
         output.put("type", "ingestion_result");
         output.put("sourceId", sourceId);
         output.put("sourceName", sourceConfig.name());
+        output.put("sourceType", sourceConfig.type());
         output.put("success", result.isSuccess());
-        output.put("pagesCrawled", result.pagesCrawled());
-        output.put("pagesNew", result.pagesNew());
-        output.put("pagesUnchanged", result.pagesUnchanged());
-        output.put("pagesStale", result.pagesStale());
+        output.put("documentsProcessed", result.documentsProcessed());
+        output.put("documentsNew", result.documentsNew());
+        output.put("documentsUnchanged", result.documentsUnchanged());
+        output.put("documentsStale", result.documentsStale());
         output.put("chunksStored", result.chunksStored());
         output.put("errors", result.errors());
         output.put("durationMs", result.durationMs());
@@ -125,8 +138,8 @@ public class RagIngestionTask implements ILifecycleTask {
 
         memory.getCurrentStep().addConversationOutputObject("ingestion", output);
 
-        LOGGER.infof("[INGESTION TASK] Completed for source: %s, success=%s, pages=%d, chunks=%d",
-                sanitize(sourceId), result.isSuccess(), result.pagesCrawled(), result.chunksStored());
+        LOGGER.infof("[INGESTION TASK] Completed for source: %s, success=%s, documents=%d, chunks=%d",
+                sanitize(sourceId), result.isSuccess(), result.documentsProcessed(), result.chunksStored());
     }
 
     @Override
@@ -147,8 +160,8 @@ public class RagIngestionTask implements ILifecycleTask {
             // Extract source ID from URI path
             String sourceId = extractSourceId(uriStr);
 
-            LOGGER.infof("[INGESTION TASK] Configured with source: %s (%s)",
-                    sanitize(sourceId), sanitize(sourceConfig.name()));
+            LOGGER.infof("[INGESTION TASK] Configured with source: %s (type=%s, name=%s)",
+                    sanitize(sourceId), sanitize(sourceConfig.type()), sanitize(sourceConfig.name()));
 
             return new IngestionTaskConfig(sourceId, sourceConfig);
 
@@ -178,7 +191,7 @@ public class RagIngestionTask implements ILifecycleTask {
     @Override
     public ExtensionDescriptor getExtensionDescriptor() {
         ExtensionDescriptor descriptor = new ExtensionDescriptor(ID);
-        descriptor.setDisplayName("RAG Web Ingestion");
+        descriptor.setDisplayName("RAG Ingestion");
 
         // URI config for the ingestion source
         var uriConfig = new ConfigValue(
