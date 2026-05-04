@@ -293,9 +293,13 @@ public class HtmlToMarkdownConverter implements ContentConverter {
 
     private void appendList(StringBuilder output, Element element, String baseUrl, boolean ordered) {
         output.append("\n");
-        Elements items = element.select(":scope > li");
+        // Use element.children() and filter for li elements (JSoup doesn't support
+        // :scope)
         int number = 1;
-        for (Element item : items) {
+        for (Element item : element.children()) {
+            if (!item.tagName().equalsIgnoreCase("li")) {
+                continue;
+            }
             String marker = ordered ? number + "." : "-";
             output.append(marker).append(" ");
 
