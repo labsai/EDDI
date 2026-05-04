@@ -4,7 +4,8 @@
  */
 package ai.labs.eddi.modules.ingestion;
 
-import ai.labs.eddi.configs.ingestion.model.RagIngestionSource;
+import ai.labs.eddi.configs.ingestion.model.SourceConfig;
+import ai.labs.eddi.configs.ingestion.model.WebSourceConfig;
 import ai.labs.eddi.engine.httpclient.SafeHttpClient;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,9 +26,10 @@ import java.util.*;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
- * TOC-driven BFS web crawler for ingesting documentation from websites.
+ * Web content fetcher implementing {@link ContentFetcher}.
  * <p>
- * The crawler:
+ * TOC-driven BFS web crawler for ingesting documentation from websites. The
+ * crawler:
  * <ol>
  * <li>Fetches the starting URL</li>
  * <li>Extracts table-of-contents links using a CSS selector</li>
@@ -39,38 +41,44 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * patterns. Uses {@link SafeHttpClient} for SSRF-safe HTTP fetching.
  *
  * @since 6.0.3
+ * @see ContentFetcher
  */
 @ApplicationScoped
-public class WebCrawler {
+public class WebContentFetcher implements ContentFetcher {
 
-    private static final Logger LOGGER = Logger.getLogger(WebCrawler.class);
+    private static final Logger LOGGER = Logger.getLogger(WebContentFetcher.class);
 
     private final SafeHttpClient httpClient;
 
     @Inject
-    public WebCrawler(SafeHttpClient httpClient) {
+    public WebContentFetcher(SafeHttpClient httpClient) {
         this.httpClient = httpClient;
     }
 
-    /**
-     * Crawls a website starting from the configured URL.
-     *
-     * @param source
-     *            the ingestion source configuration
-     * @return crawl result containing crawled pages and any errors
-     */
-    public CrawlResult crawl(RagIngestionSource source) {
+    @Override
+    public String getType() {
+        return "web";
+    }
+
+    @Override
+    public FetchResult fetch(String sourceId, SourceConfig config) {
+        if (!(config instanceof WebSourceConfig webConfig)) {
+            throw new IllegalArgumentException(
+                    "Expected WebSourceConfig but got: " + (config != null ? config.getClass().getName() : "null"));
+        }
+
         long startTime = System.currentTimeMillis();
 
-        String startUrl = source.startUrl();
-        String tocSelector = source.tocSelector();
-        RagIngestionSource.Scope scope = source.scope();
-        RagIngestionSource.CrawlSettings settings = source.crawlSettings();
+        String startUrl = webConfig.startUrl();
+        String tocSelector = webConfig.tocSelector();
+        WebSourceConfig.Scope scope = webConfig.scope();
+        WebSourceConfig.CrawlSettings settings = webConfig.crawlSettings();
 
-        LOGGER.infof("Starting crawl from %s with TOC selector: %s", sanitize(startUrl), sanitize(tocSelector));
+        LOGGER.infof("[web] Starting crawl for source '%s' from %s with TOC selector: %s",
+                sanitize(sourceId), sanitize(startUrl), sanitize(tocSelector));
 
-        List<CrawledPage> pages = new ArrayList<>();
-        List<CrawlError> errors = new ArrayList<>();
+        List<FetchedDocument> documents = new ArrayList<>();
+        List<FetchError> errors = new ArrayList<>();
         Set<String> visited = new HashSet<>();
         Queue<UrlDepth> queue = new LinkedList<>();
 
@@ -82,20 +90,20 @@ public class WebCrawler {
             startDomain = startUri.getHost();
             startPathPrefix = normalizePathPrefix(scope.pathPrefix());
         } catch (URISyntaxException e) {
-            errors.add(new CrawlError(startUrl, "Invalid start URL: " + e.getMessage()));
-            return new CrawlResult(pages, errors, System.currentTimeMillis() - startTime);
+            errors.add(new FetchError(startUrl, "Invalid start URL: " + e.getMessage()));
+            return new FetchResult(documents, errors, System.currentTimeMillis() - startTime);
         }
 
         // Start by fetching the start URL to extract TOC links
         try {
-            CrawledPage startPage = fetchPage(startUrl, settings);
-            if (startPage != null) {
-                pages.add(startPage);
+            FetchedDocument startDoc = fetchDocument(startUrl, settings);
+            if (startDoc != null) {
+                documents.add(startDoc);
                 visited.add(normalizeUrl(startUrl));
 
                 // Extract TOC links from start page
-                List<String> tocLinks = extractTocLinks(startPage.html(), tocSelector, startUrl);
-                LOGGER.infof("Found %d TOC links on start page", tocLinks.size());
+                List<String> tocLinks = extractTocLinks(startDoc.content(), tocSelector, startUrl);
+                LOGGER.infof("[web] Found %d TOC links on start page for source '%s'", tocLinks.size(), sanitize(sourceId));
 
                 // Add TOC links to queue at depth 1
                 for (String link : tocLinks) {
@@ -105,12 +113,12 @@ public class WebCrawler {
                 }
             }
         } catch (Exception e) {
-            errors.add(new CrawlError(startUrl, "Failed to fetch start URL: " + e.getMessage()));
-            LOGGER.errorf(e, "Failed to fetch start URL: %s", sanitize(startUrl));
+            errors.add(new FetchError(startUrl, "Failed to fetch start URL: " + e.getMessage()));
+            LOGGER.errorf(e, "[web] Failed to fetch start URL for source '%s': %s", sanitize(sourceId), sanitize(startUrl));
         }
 
         // BFS crawl
-        while (!queue.isEmpty() && pages.size() < scope.maxPages()) {
+        while (!queue.isEmpty() && documents.size() < scope.maxPages()) {
             UrlDepth current = queue.poll();
             String url = current.url;
             int depth = current.depth;
@@ -141,14 +149,15 @@ public class WebCrawler {
 
             // Fetch the page
             try {
-                CrawledPage page = fetchPage(url, settings);
-                if (page != null) {
-                    pages.add(page);
-                    LOGGER.debugf("Crawled: %s (depth %d, %d/%d pages)", sanitize(url), depth, pages.size(), scope.maxPages());
+                FetchedDocument doc = fetchDocument(url, settings);
+                if (doc != null) {
+                    documents.add(doc);
+                    LOGGER.debugf("[web] Crawled for source '%s': %s (depth %d, %d/%d pages)",
+                            sanitize(sourceId), sanitize(url), depth, documents.size(), scope.maxPages());
 
                     // Extract more links for further crawling (BFS)
                     if (depth < scope.maxDepth()) {
-                        List<String> links = extractLinks(page.html(), url);
+                        List<String> links = extractLinks(doc.content(), url);
                         for (String link : links) {
                             String normalizedLink = normalizeUrl(link);
                             if (!visited.contains(normalizedLink) && shouldCrawl(link, startDomain, startPathPrefix, scope)) {
@@ -158,18 +167,20 @@ public class WebCrawler {
                     }
                 }
             } catch (Exception e) {
-                errors.add(new CrawlError(url, e.getMessage()));
-                LOGGER.warnf("Failed to crawl %s: %s", sanitize(url), sanitize(e.getMessage()));
+                errors.add(new FetchError(url, e.getMessage()));
+                LOGGER.warnf("[web] Failed to crawl for source '%s': %s - %s",
+                        sanitize(sourceId), sanitize(url), sanitize(e.getMessage()));
             }
         }
 
         long duration = System.currentTimeMillis() - startTime;
-        LOGGER.infof("Crawl completed: %d pages, %d errors, %d ms", pages.size(), errors.size(), duration);
+        LOGGER.infof("[web] Crawl completed for source '%s': %d pages, %d errors, %d ms",
+                sanitize(sourceId), documents.size(), errors.size(), duration);
 
-        return new CrawlResult(pages, errors, duration);
+        return new FetchResult(documents, errors, duration);
     }
 
-    private CrawledPage fetchPage(String url, RagIngestionSource.CrawlSettings settings) throws Exception {
+    private FetchedDocument fetchDocument(String url, WebSourceConfig.CrawlSettings settings) throws Exception {
         // Validate URL for SSRF safety
         UrlValidationUtils.validateUrl(url);
 
@@ -198,7 +209,13 @@ public class WebCrawler {
         Document doc = Jsoup.parse(response.body());
         String title = doc.title();
 
-        return new CrawledPage(url, title, response.body(), response.statusCode());
+        // Build metadata
+        Map<String, String> metadata = new HashMap<>();
+        metadata.put("url", url);
+        metadata.put("httpStatus", String.valueOf(response.statusCode()));
+        metadata.put("contentType", contentType.isEmpty() ? "text/html" : contentType.split(";")[0].trim());
+
+        return new FetchedDocument(url, title, response.body(), "text/html", metadata);
     }
 
     private List<String> extractTocLinks(String html, String tocSelector, String baseUrl) {
@@ -231,7 +248,7 @@ public class WebCrawler {
         return result;
     }
 
-    private boolean shouldCrawl(String url, String startDomain, String startPathPrefix, RagIngestionSource.Scope scope) {
+    private boolean shouldCrawl(String url, String startDomain, String startPathPrefix, WebSourceConfig.Scope scope) {
         try {
             URI uri = new URI(url);
 
@@ -313,26 +330,6 @@ public class WebCrawler {
                 .replace("*", "[^/]*")
                 .replace("?", ".");
         return text.matches(regex);
-    }
-
-    // --- Records ---
-
-    /**
-     * Result of a crawl operation.
-     */
-    public record CrawlResult(List<CrawledPage> pages, List<CrawlError> errors, long durationMs) {
-    }
-
-    /**
-     * A single crawled page.
-     */
-    public record CrawledPage(String url, String title, String html, int httpStatus) {
-    }
-
-    /**
-     * An error that occurred during crawling.
-     */
-    public record CrawlError(String url, String error) {
     }
 
     // --- Helper classes ---

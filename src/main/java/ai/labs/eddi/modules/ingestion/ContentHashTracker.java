@@ -30,14 +30,14 @@ import java.util.Map;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
- * Content hash tracker for deduplication and stale marking in web crawling.
+ * Content hash tracker for deduplication and stale marking in ingestion.
  * <p>
  * Uses MongoDB collection {@code rag_ingestion_hashes} to track content hashes
- * per URL per ingestion source. When a page is re-crawled:
+ * per document per ingestion source. When content is re-ingested:
  * <ul>
- * <li>If hash unchanged → skip (unchanged page)</li>
+ * <li>If hash unchanged → skip (unchanged document)</li>
  * <li>If hash changed → re-ingest and update hash</li>
- * <li>If URL no longer present in crawl → mark as stale</li>
+ * <li>If document no longer present → mark as stale</li>
  * </ul>
  *
  * @since 6.0.3
@@ -63,11 +63,11 @@ public class ContentHashTracker {
     }
 
     private void createIndexes() {
-        // Compound index on sourceId + url for efficient lookups
+        // Compound index on sourceId + documentId for efficient lookups
         collection.createIndex(
                 Indexes.compoundIndex(
                         Indexes.ascending("sourceId"),
-                        Indexes.ascending("url")),
+                        Indexes.ascending("documentId")),
                 new IndexOptions().unique(true));
 
         // Index on sourceId for clearing operations
@@ -80,33 +80,33 @@ public class ContentHashTracker {
     }
 
     /**
-     * Checks if a page should be ingested (new or changed content).
+     * Checks if a document should be ingested (new or changed content).
      *
      * @param sourceId
      *            the ingestion source ID
-     * @param url
-     *            the page URL
+     * @param documentId
+     *            the document identifier (URL, path, etc.)
      * @param content
-     *            the page content (Markdown)
+     *            the document content (Markdown)
      * @return true if content is new or changed, false if unchanged
      */
-    public boolean shouldIngest(String sourceId, String url, String content) {
+    public boolean shouldIngest(String sourceId, String documentId, String content) {
         String hash = computeHash(content);
 
         Document existing = collection.find(
                 Filters.and(
                         Filters.eq("sourceId", sourceId),
-                        Filters.eq("url", url)))
+                        Filters.eq("documentId", documentId)))
                 .first();
 
         if (existing == null) {
-            // New page
+            // New document
             Document doc = new Document()
                     .append("sourceId", sourceId)
-                    .append("url", url)
+                    .append("documentId", documentId)
                     .append("hash", hash)
                     .append("stale", false)
-                    .append("crawledAt", Instant.now())
+                    .append("ingestedAt", Instant.now())
                     .append("updatedAt", Instant.now());
             collection.insertOne(doc);
             return true;
@@ -114,14 +114,14 @@ public class ContentHashTracker {
 
         String existingHash = existing.getString("hash");
         if (hash.equals(existingHash)) {
-            // Unchanged - update crawledAt but don't ingest
+            // Unchanged - update ingestedAt but don't ingest
             collection.updateOne(
                     Filters.and(
                             Filters.eq("sourceId", sourceId),
-                            Filters.eq("url", url)),
+                            Filters.eq("documentId", documentId)),
                     Updates.combine(
-                            Updates.set("crawledAt", Instant.now()),
-                            Updates.set("stale", false) // Clear stale flag if page reappears
+                            Updates.set("ingestedAt", Instant.now()),
+                            Updates.set("stale", false) // Clear stale flag if document reappears
                     ));
             return false;
         }
@@ -130,34 +130,34 @@ public class ContentHashTracker {
         collection.updateOne(
                 Filters.and(
                         Filters.eq("sourceId", sourceId),
-                        Filters.eq("url", url)),
+                        Filters.eq("documentId", documentId)),
                 Updates.combine(
                         Updates.set("hash", hash),
-                        Updates.set("crawledAt", Instant.now()),
+                        Updates.set("ingestedAt", Instant.now()),
                         Updates.set("updatedAt", Instant.now()),
                         Updates.set("stale", false)));
         return true;
     }
 
     /**
-     * Marks pages that were not in the current crawl as stale.
+     * Marks documents that were not in the current fetch as stale.
      *
      * @param sourceId
      *            the ingestion source ID
-     * @param crawledUrls
-     *            the URLs that were successfully crawled this run
-     * @return the number of pages marked stale
+     * @param documentIds
+     *            the document IDs that were successfully fetched this run
+     * @return the number of documents marked stale
      */
-    public int markStalePages(String sourceId, List<String> crawledUrls) {
-        // Find all non-stale entries for this source that are NOT in crawledUrls
-        List<String> normalizedUrls = crawledUrls.stream()
-                .map(this::normalizeUrl)
+    public int markStaleDocuments(String sourceId, List<String> documentIds) {
+        // Find all non-stale entries for this source that are NOT in documentIds
+        List<String> normalizedIds = documentIds.stream()
+                .map(this::normalizeId)
                 .toList();
 
         Bson filter = Filters.and(
                 Filters.eq("sourceId", sourceId),
                 Filters.eq("stale", false),
-                Filters.nin("url", normalizedUrls));
+                Filters.nin("documentId", normalizedIds));
 
         var result = collection.updateMany(
                 filter,
@@ -167,29 +167,29 @@ public class ContentHashTracker {
 
         int markedStale = (int) result.getModifiedCount();
         if (markedStale > 0) {
-            LOGGER.infof("Marked %d pages as stale for source '%s'", markedStale, sanitize(sourceId));
+            LOGGER.infof("Marked %d documents as stale for source '%s'", markedStale, sanitize(sourceId));
         }
         return markedStale;
     }
 
     /**
-     * Gets all tracked URLs for a source, including stale ones.
+     * Gets all tracked document IDs for a source, including stale ones.
      *
      * @param sourceId
      *            the ingestion source ID
-     * @return map of URL to hash entry
+     * @return map of documentId to hash entry
      */
-    public Map<String, HashEntry> getTrackedUrls(String sourceId) {
+    public Map<String, HashEntry> getTrackedDocuments(String sourceId) {
         Map<String, HashEntry> result = new HashMap<>();
 
         for (Document doc : collection.find(Filters.eq("sourceId", sourceId))) {
-            String url = doc.getString("url");
+            String documentId = doc.getString("documentId");
             String hash = doc.getString("hash");
             boolean stale = doc.getBoolean("stale", false);
-            Instant crawledAt = doc.getDate("crawledAt") != null
-                    ? doc.getDate("crawledAt").toInstant()
+            Instant ingestedAt = doc.getDate("ingestedAt") != null
+                    ? doc.getDate("ingestedAt").toInstant()
                     : null;
-            result.put(url, new HashEntry(url, hash, stale, crawledAt));
+            result.put(documentId, new HashEntry(documentId, hash, stale, ingestedAt));
         }
 
         return result;
@@ -232,18 +232,18 @@ public class ContentHashTracker {
         return sb.toString();
     }
 
-    private String normalizeUrl(String url) {
-        // Normalize URL for comparison (remove trailing slash, fragment)
-        if (url == null) {
+    private String normalizeId(String id) {
+        // Normalize ID for comparison (remove trailing slash for URLs, fragment)
+        if (id == null) {
             return "";
         }
-        String normalized = url;
-        // Remove fragment
+        String normalized = id;
+        // Remove fragment (for URLs)
         int hashIdx = normalized.indexOf('#');
         if (hashIdx >= 0) {
             normalized = normalized.substring(0, hashIdx);
         }
-        // Remove trailing slash
+        // Remove trailing slash (for URLs/paths)
         if (normalized.endsWith("/")) {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
@@ -252,23 +252,50 @@ public class ContentHashTracker {
 
     /**
      * A tracked hash entry.
+     *
+     * @param documentId
+     *            the document identifier
+     * @param hash
+     *            the content hash
+     * @param stale
+     *            whether the document is stale
+     * @param ingestedAt
+     *            when the document was last ingested
      */
-    public record HashEntry(String url, String hash, boolean stale, Instant crawledAt) {
+    public record HashEntry(String documentId, String hash, boolean stale, Instant ingestedAt) {
     }
 
     /**
      * Result of deduplication processing.
+     *
+     * @param newDocuments
+     *            newly discovered documents
+     * @param updatedDocuments
+     *            documents with changed content
+     * @param unchangedIds
+     *            documents with unchanged content
+     * @param staleDocumentsMarked
+     *            number of documents marked stale
      */
     public record DedupResult(
-            List<PageToProcess> newPages,
-            List<PageToProcess> updatedPages,
-            List<String> unchangedUrls,
-            int stalePagesMarked) {
+            List<DocumentToProcess> newDocuments,
+            List<DocumentToProcess> updatedDocuments,
+            List<String> unchangedIds,
+            int staleDocumentsMarked) {
     }
 
     /**
-     * A page that needs to be processed (new or updated).
+     * A document that needs to be processed (new or updated).
+     *
+     * @param id
+     *            the document identifier
+     * @param title
+     *            the document title
+     * @param markdown
+     *            the markdown content
+     * @param contentHash
+     *            the content hash
      */
-    public record PageToProcess(String url, String title, String markdown, String contentHash) {
+    public record DocumentToProcess(String id, String title, String markdown, String contentHash) {
     }
 }

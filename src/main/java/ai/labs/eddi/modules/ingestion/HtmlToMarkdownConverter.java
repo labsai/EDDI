@@ -62,7 +62,23 @@ import java.net.URL;
  * @since 6.0.3
  */
 @ApplicationScoped
-public class HtmlToMarkdownConverter {
+public class HtmlToMarkdownConverter implements ContentConverter {
+
+    /**
+     * Checks if this converter supports the given content type.
+     *
+     * @param contentType
+     *            the MIME type (e.g., "text/html", "application/xhtml+xml")
+     * @return true if this converter can handle the content type
+     */
+    @Override
+    public boolean supports(String contentType) {
+        if (contentType == null) {
+            return false;
+        }
+        String normalized = contentType.toLowerCase();
+        return normalized.contains("html") || normalized.contains("xhtml");
+    }
 
     /**
      * Converts raw HTML to clean Markdown format.
@@ -75,6 +91,7 @@ public class HtmlToMarkdownConverter {
      *            maximum content length (truncates if exceeded)
      * @return the Markdown-formatted content
      */
+    @Override
     public String convert(String html, String baseUrl, int maxLength) {
         if (html == null || html.isBlank()) {
             return "";
