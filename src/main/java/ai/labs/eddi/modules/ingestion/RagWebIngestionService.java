@@ -112,12 +112,12 @@ public class RagWebIngestionService {
      */
     public IngestionResult ingest(String sourceId, RagIngestionSource sourceConfig) {
         long totalStart = System.currentTimeMillis();
-        LOGGER.infof("Starting web ingestion for source '%s': %s", LogSanitizer.sanitize(sourceId), LogSanitizer.sanitize(sourceConfig.getName()));
+        LOGGER.infof("Starting web ingestion for source '%s': %s", LogSanitizer.sanitize(sourceId), LogSanitizer.sanitize(sourceConfig.name()));
 
         try {
             // 1. Resolve the associated RagConfiguration
-            RagConfiguration ragConfig = resolveRagConfiguration(sourceConfig.getRagConfigUri());
-            String kbId = sourceConfig.getName(); // Use source name as knowledge base ID
+            RagConfiguration ragConfig = resolveRagConfiguration(sourceConfig.ragConfigUri());
+            String kbId = sourceConfig.name(); // Use source name as knowledge base ID
 
             // 2. Crawl the website
             long crawlStart = System.currentTimeMillis();
@@ -140,10 +140,10 @@ public class RagWebIngestionService {
                     String markdown = markdownConverter.convert(
                             page.html(),
                             page.url(),
-                            sourceConfig.getIngestionSettings().getMaxContentLength());
+                            sourceConfig.ingestionSettings().maxContentLength());
 
                     // Check if we should ingest (dedup)
-                    boolean shouldIngest = !sourceConfig.getIngestionSettings().isContentHashDedup()
+                    boolean shouldIngest = !sourceConfig.ingestionSettings().contentHashDedup()
                             || contentHashTracker.shouldIngest(sourceId, page.url(), markdown);
 
                     if (shouldIngest) {

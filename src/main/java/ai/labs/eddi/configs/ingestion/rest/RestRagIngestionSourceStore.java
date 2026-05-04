@@ -168,7 +168,7 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
         return Response.accepted()
                 .entity(Map.of(
                         "sourceId", id,
-                        "sourceName", source.getName(),
+                        "sourceName", source.name(),
                         "status", "started",
                         "message", "Ingestion started asynchronously. Check logs for completion status."))
                 .build();
@@ -187,22 +187,22 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
     // --- Schedule management ---
 
     private void createScheduleForSource(String sourceId, RagIngestionSource source) throws Exception {
-        if (!source.getSchedule().isEnabled()) {
+        if (!source.schedule().enabled()) {
             return;
         }
 
         ScheduleConfiguration schedule = new ScheduleConfiguration();
-        schedule.setName("ingestion:" + source.getName());
+        schedule.setName("ingestion:" + source.name());
         schedule.setTriggerType(ScheduleConfiguration.TriggerType.CRON);
-        schedule.setCronExpression(source.getSchedule().getCronExpression());
+        schedule.setCronExpression(source.schedule().cronExpression());
         schedule.setAgentId(ingestionAgentId);
         schedule.setAgentVersion(0);
         schedule.setEnvironment("production");
         schedule.setConversationStrategy("new");
-        schedule.setMessage("Crawl and ingest: " + source.getName());
+        schedule.setMessage("Crawl and ingest: " + source.name());
         schedule.setUserId("system:scheduler");
         schedule.setTimeZone("UTC");
-        schedule.setEnabled(source.getSchedule().isEnabled());
+        schedule.setEnabled(source.schedule().enabled());
         schedule.setMaxCostPerFire(-1.0);
         schedule.setMetadata(Map.of(
                 "sourceId", sourceId,
@@ -224,11 +224,11 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
                 Map<String, Object> metadata = schedule.getMetadata();
                 if (metadata != null && sourceId.equals(metadata.get("sourceId"))) {
                     // Update schedule
-                    schedule.setName("ingestion:" + source.getName());
-                    schedule.setCronExpression(source.getSchedule().getCronExpression());
-                    schedule.setEnabled(source.getSchedule().isEnabled());
+                    schedule.setName("ingestion:" + source.name());
+                    schedule.setCronExpression(source.schedule().cronExpression());
+                    schedule.setEnabled(source.schedule().enabled());
 
-                    if (source.getSchedule().isEnabled() && schedule.getNextFire() == null) {
+                    if (source.schedule().enabled() && schedule.getNextFire() == null) {
                         schedule.setNextFire(computeNextFire(schedule.getCronExpression()));
                     }
 
@@ -240,7 +240,7 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
             }
 
             // No existing schedule found, create one if enabled
-            if (source.getSchedule().isEnabled()) {
+            if (source.schedule().enabled()) {
                 createScheduleForSource(sourceId, source);
             }
         } catch (Exception e) {

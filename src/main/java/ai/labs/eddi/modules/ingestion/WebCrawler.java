@@ -62,10 +62,10 @@ public class WebCrawler {
     public CrawlResult crawl(RagIngestionSource source) {
         long startTime = System.currentTimeMillis();
 
-        String startUrl = source.getStartUrl();
-        String tocSelector = source.getTocSelector();
-        RagIngestionSource.Scope scope = source.getScope();
-        RagIngestionSource.CrawlSettings settings = source.getCrawlSettings();
+        String startUrl = source.startUrl();
+        String tocSelector = source.tocSelector();
+        RagIngestionSource.Scope scope = source.scope();
+        RagIngestionSource.CrawlSettings settings = source.crawlSettings();
 
         LOGGER.infof("Starting crawl from %s with TOC selector: %s", sanitize(startUrl), sanitize(tocSelector));
 
@@ -80,7 +80,7 @@ public class WebCrawler {
         try {
             URI startUri = new URI(startUrl);
             startDomain = startUri.getHost();
-            startPathPrefix = normalizePathPrefix(scope.getPathPrefix());
+            startPathPrefix = normalizePathPrefix(scope.pathPrefix());
         } catch (URISyntaxException e) {
             errors.add(new CrawlError(startUrl, "Invalid start URL: " + e.getMessage()));
             return new CrawlResult(pages, errors, System.currentTimeMillis() - startTime);
@@ -110,7 +110,7 @@ public class WebCrawler {
         }
 
         // BFS crawl
-        while (!queue.isEmpty() && pages.size() < scope.getMaxPages()) {
+        while (!queue.isEmpty() && pages.size() < scope.maxPages()) {
             UrlDepth current = queue.poll();
             String url = current.url;
             int depth = current.depth;
@@ -122,7 +122,7 @@ public class WebCrawler {
             }
 
             // Check max depth
-            if (depth > scope.getMaxDepth()) {
+            if (depth > scope.maxDepth()) {
                 continue;
             }
 
@@ -130,9 +130,9 @@ public class WebCrawler {
             visited.add(normalizedUrl);
 
             // Apply request delay (politeness)
-            if (settings.getRequestDelayMs() > 0) {
+            if (settings.requestDelayMs() > 0) {
                 try {
-                    Thread.sleep(settings.getRequestDelayMs());
+                    Thread.sleep(settings.requestDelayMs());
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
@@ -144,10 +144,10 @@ public class WebCrawler {
                 CrawledPage page = fetchPage(url, settings);
                 if (page != null) {
                     pages.add(page);
-                    LOGGER.debugf("Crawled: %s (depth %d, %d/%d pages)", sanitize(url), depth, pages.size(), scope.getMaxPages());
+                    LOGGER.debugf("Crawled: %s (depth %d, %d/%d pages)", sanitize(url), depth, pages.size(), scope.maxPages());
 
                     // Extract more links for further crawling (BFS)
-                    if (depth < scope.getMaxDepth()) {
+                    if (depth < scope.maxDepth()) {
                         List<String> links = extractLinks(page.html(), url);
                         for (String link : links) {
                             String normalizedLink = normalizeUrl(link);
@@ -175,8 +175,8 @@ public class WebCrawler {
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(settings.getTimeoutSeconds()))
-                .header("User-Agent", settings.getUserAgent())
+                .timeout(Duration.ofSeconds(settings.timeoutSeconds()))
+                .header("User-Agent", settings.userAgent())
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .header("Accept-Language", "en-US,en;q=0.5")
                 .GET()
@@ -242,7 +242,7 @@ public class WebCrawler {
             }
 
             // Check same domain
-            if (scope.isSameDomainOnly()) {
+            if (scope.sameDomainOnly()) {
                 String host = uri.getHost();
                 if (host == null || !host.equalsIgnoreCase(startDomain)) {
                     return false;
@@ -260,7 +260,7 @@ public class WebCrawler {
 
             // Check exclude patterns
             String normalizedUrl = url.toLowerCase();
-            for (String pattern : scope.getExcludePatterns()) {
+            for (String pattern : scope.excludePatterns()) {
                 if (matchesGlob(normalizedUrl, pattern.toLowerCase())) {
                     return false;
                 }

@@ -90,7 +90,7 @@ public class RagIngestionTask implements ILifecycleTask {
         RagIngestionSource sourceConfig = config.sourceConfig();
 
         LOGGER.infof("[INGESTION TASK] Executing ingestion for source: %s (%s)",
-                sanitize(sourceId), sanitize(sourceConfig.getName()));
+                sanitize(sourceId), sanitize(sourceConfig.name()));
 
         // Run ingestion (blocking call - runs on virtual thread if needed)
         RagWebIngestionService.IngestionResult result = ingestionService.ingest(sourceId, sourceConfig);
@@ -99,8 +99,8 @@ public class RagIngestionTask implements ILifecycleTask {
         var resultData = dataFactory.createData(KEY_INGESTION_RESULT, result, true);
         var sourceData = dataFactory.createData(KEY_INGESTION_SOURCE, Map.of(
                 "id", sourceId,
-                "name", sourceConfig.getName(),
-                "startUrl", sourceConfig.getStartUrl()), true);
+                "name", sourceConfig.name(),
+                "startUrl", sourceConfig.startUrl()), true);
 
         memory.getCurrentStep().storeData(resultData);
         memory.getCurrentStep().storeData(sourceData);
@@ -109,7 +109,7 @@ public class RagIngestionTask implements ILifecycleTask {
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("type", "ingestion_result");
         output.put("sourceId", sourceId);
-        output.put("sourceName", sourceConfig.getName());
+        output.put("sourceName", sourceConfig.name());
         output.put("success", result.isSuccess());
         output.put("pagesCrawled", result.pagesCrawled());
         output.put("pagesNew", result.pagesNew());
@@ -148,7 +148,7 @@ public class RagIngestionTask implements ILifecycleTask {
             String sourceId = extractSourceId(uriStr);
 
             LOGGER.infof("[INGESTION TASK] Configured with source: %s (%s)",
-                    sanitize(sourceId), sanitize(sourceConfig.getName()));
+                    sanitize(sourceId), sanitize(sourceConfig.name()));
 
             return new IngestionTaskConfig(sourceId, sourceConfig);
 
