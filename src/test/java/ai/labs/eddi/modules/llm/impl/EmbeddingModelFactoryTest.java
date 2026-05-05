@@ -120,6 +120,43 @@ class EmbeddingModelFactoryTest {
             EmbeddingModel model = factory.getOrCreate(config);
             assertNotNull(model);
         }
+
+        @Test
+        @DisplayName("Gemini provider should create model with default task type")
+        void geminiProvider_shouldCreateModel() {
+            var config = createConfig("gemini", Map.of("apiKey", "test-key"));
+            EmbeddingModel model = factory.getOrCreate(config);
+            assertNotNull(model);
+        }
+
+        @Test
+        @DisplayName("Gemini provider with custom task type should create model")
+        void geminiProvider_customTaskType_shouldCreateModel() {
+            var config = createConfig("gemini", Map.of(
+                    "apiKey", "test-key",
+                    "taskType", "RETRIEVAL_QUERY"));
+            EmbeddingModel model = factory.getOrCreate(config);
+            assertNotNull(model);
+        }
+
+        @Test
+        @DisplayName("Gemini provider with invalid task type should throw")
+        void geminiProvider_invalidTaskType_shouldThrow() {
+            var config = createConfig("gemini", Map.of(
+                    "apiKey", "test-key",
+                    "taskType", "INVALID_TASK"));
+            assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config));
+        }
+
+        @Test
+        @DisplayName("Gemini provider with custom model should create model")
+        void geminiProvider_customModel_shouldCreateModel() {
+            var config = createConfig("gemini", Map.of(
+                    "apiKey", "test-key",
+                    "model", "gemini-embedding-002"));
+            EmbeddingModel model = factory.getOrCreate(config);
+            assertNotNull(model);
+        }
     }
 
     private RagConfiguration createConfig(String provider, Map<String, String> params) {
