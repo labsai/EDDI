@@ -1,4 +1,4 @@
-FROM gcr.io/oss-fuzz-base/base-builder-jvm@sha256:cdcdb84d44b34cece97828b19645532b3ba795aa6cbf3dd130a85c57a8c965dc
+FROM gcr.io/oss-fuzz-base/base-builder-jvm@sha256:bb13970c9d56f3adba4e8979a0e7de25db8e546889a34b533d27cddae5807505
 
 # No Maven or JDK 25 needed — build.sh compiles only the 3 vendored
 # utility classes with javac. JDK version is auto-detected (17 or 21).
