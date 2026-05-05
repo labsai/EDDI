@@ -88,8 +88,7 @@ public class EmbeddingModelFactory {
     // ──────────────────────────────────────────────────
 
     /**
-     * Builds an OpenAI-backed {@link EmbeddingModel} from configuration
-     * parameters.
+     * Builds an OpenAI-backed {@link EmbeddingModel} from configuration parameters.
      * <p>
      * Supported embeddingParameters:
      * <ul>
@@ -134,8 +133,7 @@ public class EmbeddingModelFactory {
     // ──────────────────────────────────────────────────
 
     /**
-     * Builds an Ollama-backed {@link EmbeddingModel} from configuration
-     * parameters.
+     * Builds an Ollama-backed {@link EmbeddingModel} from configuration parameters.
      * <p>
      * Supported embeddingParameters:
      * <ul>
@@ -207,8 +205,7 @@ public class EmbeddingModelFactory {
      * <p>
      * Supported embeddingParameters:
      * <ul>
-     * <li>{@code model} — model name (default:
-     * "amazon.titan-embed-text-v2:0")</li>
+     * <li>{@code model} — model name (default: "amazon.titan-embed-text-v2:0")</li>
      * <li>{@code region} — AWS region (default: "us-east-1")</li>
      * </ul>
      */
@@ -223,8 +220,7 @@ public class EmbeddingModelFactory {
     // ──────────────────────────────────────────────────
 
     /**
-     * Builds a Cohere-backed {@link EmbeddingModel} from configuration
-     * parameters.
+     * Builds a Cohere-backed {@link EmbeddingModel} from configuration parameters.
      * <p>
      * Supported embeddingParameters:
      * <ul>
