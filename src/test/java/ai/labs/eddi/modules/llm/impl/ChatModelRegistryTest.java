@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -73,11 +74,13 @@ class ChatModelRegistryTest {
             // Uses default buildStreaming — throws UnsupportedOperationException
         });
 
-        // Create a pass-through SecretResolver mock (vault not configured)
+        // Create pass-through mocks
         SecretResolver secretResolver = mock(SecretResolver.class);
         when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
+        when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        registry = new ChatModelRegistry(builders, secretResolver);
+        registry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
     }
 
     @Nested
@@ -276,18 +279,20 @@ class ChatModelRegistryTest {
 
             SecretResolver secretResolver = mock(SecretResolver.class);
             when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
-            invalidationRegistry = new ChatModelRegistry(builders, secretResolver);
+            GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
+            when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+            invalidationRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver);
         }
 
         @Test
         @DisplayName("invalidateForSecret evicts only models using the changed secret")
         void invalidateForSecret_evictsOnlyMatching() throws Exception {
             var targetParams = new HashMap<String, String>();
-            targetParams.put("apiKey", "${eddivault:openai-key}");
+            targetParams.put("apiKey", "${vault:openai-key}");
             ChatModel targetModel = invalidationRegistry.getOrCreate("openai", targetParams);
 
             var otherParams = new HashMap<String, String>();
-            otherParams.put("apiKey", "${eddivault:anthropic-key}");
+            otherParams.put("apiKey", "${vault:anthropic-key}");
             ChatModel otherModel = invalidationRegistry.getOrCreate("openai", otherParams);
 
             // Invalidate only the openai secret
@@ -306,7 +311,7 @@ class ChatModelRegistryTest {
         @DisplayName("invalidateForSecret matches full vault reference form")
         void invalidateForSecret_fullForm_evicts() throws Exception {
             var params = new HashMap<String, String>();
-            params.put("apiKey", "${eddivault:default/openai-key}");
+            params.put("apiKey", "${vault:default/openai-key}");
             ChatModel original = invalidationRegistry.getOrCreate("openai", params);
 
             invalidationRegistry.invalidateForSecret(new SecretReference("default", "openai-key"));
@@ -318,10 +323,10 @@ class ChatModelRegistryTest {
         @Test
         @DisplayName("invalidateForSecret with non-default tenant does NOT evict default tenant models")
         void invalidateForSecret_nonDefaultTenant_noFalsePositive() throws Exception {
-            // Bug regression: ${eddivault:openai-key} resolves to tenant "default".
+            // Bug regression: ${vault:openai-key} resolves to tenant "default".
             // Rotating acme's "openai-key" must NOT evict default-tenant models.
             var defaultParams = new HashMap<String, String>();
-            defaultParams.put("apiKey", "${eddivault:openai-key}");
+            defaultParams.put("apiKey", "${vault:openai-key}");
             ChatModel defaultModel = invalidationRegistry.getOrCreate("openai", defaultParams);
 
             // Invalidate acme tenant's secret with the same keyName
@@ -336,11 +341,11 @@ class ChatModelRegistryTest {
         @DisplayName("invalidateForSecret(null) clears all models")
         void invalidateForSecret_null_clearsAll() throws Exception {
             var params1 = new HashMap<String, String>();
-            params1.put("apiKey", "${eddivault:key1}");
+            params1.put("apiKey", "${vault:key1}");
             ChatModel model1 = invalidationRegistry.getOrCreate("openai", params1);
 
             var params2 = new HashMap<String, String>();
-            params2.put("apiKey", "${eddivault:key2}");
+            params2.put("apiKey", "${vault:key2}");
             ChatModel model2 = invalidationRegistry.getOrCreate("openai", params2);
 
             invalidationRegistry.invalidateForSecret(null);
@@ -355,7 +360,7 @@ class ChatModelRegistryTest {
         @DisplayName("invalidateForSecret with no matching models is a no-op")
         void invalidateForSecret_noMatch_leavesAllCached() throws Exception {
             var params = new HashMap<String, String>();
-            params.put("apiKey", "${eddivault:openai-key}");
+            params.put("apiKey", "${vault:openai-key}");
             ChatModel original = invalidationRegistry.getOrCreate("openai", params);
 
             invalidationRegistry.invalidateForSecret(new SecretReference("default", "unrelated-key"));
@@ -368,7 +373,7 @@ class ChatModelRegistryTest {
         @DisplayName("invalidateForSecret evicts from both sync and streaming caches")
         void invalidateForSecret_evictsBothCaches() throws Exception {
             var params = new HashMap<String, String>();
-            params.put("apiKey", "${eddivault:openai-key}");
+            params.put("apiKey", "${vault:openai-key}");
 
             ChatModel syncOriginal = invalidationRegistry.getOrCreate("openai", params);
             StreamingChatModel streamOriginal = invalidationRegistry.getOrCreateStreaming("openai", params);

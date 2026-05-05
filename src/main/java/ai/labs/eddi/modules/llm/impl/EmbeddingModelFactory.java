@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -45,10 +46,12 @@ public class EmbeddingModelFactory {
     private static final Logger LOGGER = Logger.getLogger(EmbeddingModelFactory.class);
 
     private final Cache<String, EmbeddingModel> cache = Caffeine.newBuilder().maximumSize(50).expireAfterAccess(Duration.ofMinutes(30)).build();
+    private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
 
     @Inject
-    public EmbeddingModelFactory(SecretResolver secretResolver) {
+    public EmbeddingModelFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
+        this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
     }
 
@@ -64,7 +67,8 @@ public class EmbeddingModelFactory {
 
     private EmbeddingModel build(RagConfiguration config) {
         Map<String, String> rawParams = config.getEmbeddingParameters() != null ? config.getEmbeddingParameters() : Map.of();
-        Map<String, String> params = secretResolver.resolveSecrets(rawParams);
+        Map<String, String> params = globalVariableResolver.resolveAll(rawParams);
+        params = secretResolver.resolveSecrets(params);
         String provider = config.getEmbeddingProvider();
         LOGGER.infof("Building embedding model for provider: %s", provider);
 

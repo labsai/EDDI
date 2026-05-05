@@ -243,13 +243,13 @@ class LlmConfigurationTest {
             cfg.setUrl("https://agent.example.com");
             cfg.setName("remote-agent");
             cfg.setSkillsFilter(List.of("skill-1", "skill-2"));
-            cfg.setApiKey("${eddivault:a2a-key}");
+            cfg.setApiKey("${vault:a2a-key}");
             cfg.setTimeoutMs(15000L);
 
             assertEquals("https://agent.example.com", cfg.getUrl());
             assertEquals("remote-agent", cfg.getName());
             assertEquals(2, cfg.getSkillsFilter().size());
-            assertEquals("${eddivault:a2a-key}", cfg.getApiKey());
+            assertEquals("${vault:a2a-key}", cfg.getApiKey());
             assertEquals(15000L, cfg.getTimeoutMs());
         }
     }

@@ -280,7 +280,7 @@ class McpSetupToolsTest {
         var lcCaptor = ArgumentCaptor.forClass(LlmConfiguration.class);
         verify(langchainStore).createLlm(lcCaptor.capture());
         String storedKey = lcCaptor.getValue().tasks().get(0).getParameters().get("apiKey");
-        assertTrue(storedKey.startsWith("${eddivault:"),
+        assertTrue(storedKey.startsWith("${vault:"),
                 "API key should be vault reference, got: " + storedKey);
         assertFalse(storedKey.contains("sk-live-secret"),
                 "Plaintext key must NOT appear in LLM config when vault is active");

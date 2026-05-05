@@ -141,7 +141,7 @@ class LlmConfigurationModelsTest {
             msc.setUrl("http://localhost:7070/mcp");
             msc.setName("local-mcp");
             msc.setTransport("sse");
-            msc.setApiKey("${eddivault:mcp-key}");
+            msc.setApiKey("${vault:mcp-key}");
             msc.setTimeoutMs(60000L);
             assertEquals("http://localhost:7070/mcp", msc.getUrl());
             assertEquals("sse", msc.getTransport());
@@ -169,7 +169,7 @@ class LlmConfigurationModelsTest {
             a2a.setUrl("https://remote-agent.example.com/a2a");
             a2a.setName("translator");
             a2a.setSkillsFilter(List.of("translate-en-de"));
-            a2a.setApiKey("${eddivault:a2a-key}");
+            a2a.setApiKey("${vault:a2a-key}");
             a2a.setTimeoutMs(10000L);
             assertEquals("translator", a2a.getName());
             assertEquals(1, a2a.getSkillsFilter().size());

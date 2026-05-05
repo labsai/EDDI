@@ -79,7 +79,7 @@ cd EDDI
 open http://localhost:7070
 ```
 
-> **💡 Secrets Vault:** If you plan to store API keys through the Manager UI or use `${eddivault:...}` references, set the vault master key first:
+> **💡 Secrets Vault:** If you plan to store API keys through the Manager UI or use `${vault:...}` references, set the vault master key first:
 >
 > ```bash
 > export EDDI_VAULT_MASTER_KEY=my-dev-passphrase   # Linux/macOS

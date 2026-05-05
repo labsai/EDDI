@@ -13,6 +13,43 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔧 PR #470 Review Remediation (2026-05-05)
+
+**Repo:** EDDI (`feat/global-variables`)
+
+**What changed:** Addressed all Copilot and CodeRabbit review feedback on the Global Variables PR.
+
+### Code Fixes
+
+| File | Issue | Fix |
+|------|-------|-----|
+| `GlobalVariableCrudIT` | Invalid key test accepted 500 (should only accept 400) | Assert `statusCode(400)` only — `IllegalArgumentExceptionMapper` guarantees 400 |
+| `DataStoreProducers` | Missing CDI producer for `IGlobalVariableStore` (ambiguous bean) | Added `globalVariableStore()` producer following established pattern |
+| `RestGlobalVariableStore` | Null `variable` body → NPE → 500 | Added null guard throwing `BadRequestException` + unit test |
+| `GlobalVariableResolver` | `getTemplateData(null)` didn't normalize to DEFAULT_TENANT | Added null → `"default"` fallback, matching `resolveValue()` |
+| `PostgresGlobalVariableStore` | All `SQLException`s silently swallowed, returning empty results | Re-throw as `RuntimeException` — DB outage now surfaces properly |
+| `A2AToolProviderManager` | `warnIfRawKey()` false-positive on `${vars:...}` references | Added `${vars:}` prefix recognition alongside vault prefixes |
+| `McpSetupTools` | API key `@ToolArg` description incorrectly said "required for cloud providers" | Clarified: bedrock uses IAM, oracle-genai uses OCI auth — not all cloud providers need `apiKey` |
+
+### Test Updates
+
+| File | Change |
+|------|--------|
+| `PostgresGlobalVariableStoreTest` | 4 error-handling tests now assert `RuntimeException` propagation instead of silent empty returns |
+| `RestGlobalVariableStoreTest` | +1 test: `upsertVariableNullBody` verifies `BadRequestException` on missing body |
+
+### Documentation Fixes
+
+| File | Fix |
+|------|-----|
+| `changelog.md` | Section title `eddivar` → `vars`; resolution order `eddivar/eddivault` → `vars/vault`; A2A Security typo (duplicate `${vault:}`); test count 48 → 75; composite key descriptions |
+| `global-variables.md` | Added `text` language tags to 4 bare fenced code blocks (MD040) |
+| `secrets-vault.md` | Added `text` language tags to 4 bare fenced code blocks (MD040) |
+
+**Files:** `DataStoreProducers.java`, `RestGlobalVariableStore.java`, `GlobalVariableResolver.java`, `PostgresGlobalVariableStore.java`, `A2AToolProviderManager.java`, `McpSetupTools.java`, `GlobalVariableCrudIT.java`, `PostgresGlobalVariableStoreTest.java`, `RestGlobalVariableStoreTest.java`, `changelog.md`, `global-variables.md`, `secrets-vault.md`
+
+---
+
 ## 🔒 CVE-2026-42198 — PostgreSQL JDBC DoS Fix (2026-05-02)
 
 **Repo:** EDDI (`fix/cve-2026-42198-postgresql`)
@@ -60,6 +97,105 @@ The `Validate baselines` step only checked whether the required day/week baselin
 - Views/clones baselines are NOT included in the field-presence check (`DAY_PRESENT`/`WEEK_PRESENT`). Adding them would skip the entire digest on first deploy (old cache lacks the new fields). Instead, view/clone deltas are conditionally hidden when the baseline is 0.
 
 **Files:** `.github/workflows/docker-pull-notify.yml`, `docs/changelog.md`
+
+---
+
+## 🏷️ Late-Binding Prefix Rename (2026-05-01)
+
+**Repo:** EDDI (`feat/global-variables`)
+
+**What changed:** Unified late-binding reference syntax to use short, clean prefixes:
+- `${eddivar:...}` → `${vars:...}` (clean rename — never shipped)
+- `${eddivault:...}` → `${vault:...}` (backward-compat alias retained via dual-pattern regex)
+
+**Why:** The `eddi` prefix was redundant (you're already inside the EDDI platform) and inconsistent with the template layer which already uses `{{vars.x}}`. Short names improve DX for agent designers.
+
+### Backward Compatibility
+
+- `${eddivault:...}` is still accepted everywhere (regex alternation: `(?:vault|eddivault)`)
+- Agent import auto-migrates: `${eddivault:...}` → `${vault:...}` on import
+- `toReferenceString()` now outputs the new canonical form `${vault:...}`
+
+### Files Changed
+
+| Area | Files | Change |
+|------|-------|--------|
+| Vault core | `SecretReference.java` | Dual-pattern regex, new canonical output |
+| Vault sanitization | `SecretScrubber.java`, `SecretRedactionFilter.java` | Dual-prefix detection |
+| Variable resolver | `GlobalVariableResolver.java` | `EDDIVAR_PATTERN` → `VARS_PATTERN` |
+| Callsites | `ApiCallExecutor`, `ChatModelRegistry`, `A2AToolProviderManager`, `VaultStartupBanner` | Dual-prefix checks, new log messages |
+| Import | `AbstractBackupService`, `RestImportService` | Auto-migrate `eddivault` → `vault` on import |
+| Javadoc | 10+ source files | Updated syntax examples |
+| Tests | 18 test files | Updated string literals + 4 backward-compat tests |
+| Docs | 12 markdown files + `AGENTS.md` | Updated all examples |
+
+---
+
+## ⚙️ Global Variable Store — `vars` (2026-05-01)
+
+**Repo:** EDDI (`feat/global-variables`)
+
+**What changed:** Added a non-encrypted, deployment-wide Global Variable Store for runtime configuration parameters. Enables changing operational values (LLM models, API endpoints, temperatures, feature flags) across all agents simultaneously without redeployment.
+
+### New Components
+
+| Component | Purpose |
+|-----------|---------|
+| `GlobalVariable` | Record model: `key`, `value`, `description`, `exportable` |
+| `IGlobalVariableStore` | Persistence interface (non-versioned, flat key-value) |
+| `GlobalVariableStore` | MongoDB adapter (`globalvariables` collection, composite `_id` = `tenantId/key`) |
+| `PostgresGlobalVariableStore` | PostgreSQL adapter (`global_variables` table, PK = `(tenant_id, key)`) |
+| `GlobalVariableResolver` | Regex-based `${vars:<key>}` resolution with Caffeine cache + invalidation listeners |
+| `IRestGlobalVariableStore` | JAX-RS REST API (`/variablestore/variables`) |
+| `RestGlobalVariableStore` | REST implementation with key validation and write-through cache invalidation |
+
+### Pipeline Integration (8 callsites)
+
+Resolution order: Jinja2/Qute templates → **vars** → vault. Integrated into:
+
+1. **LlmTask** — `{{vars.<key>}}` template injection + `${vars:...}` in `type` field (provider late-binding)
+2. **ChatModelRegistry** — `resolveAll` before `resolveSecrets`, registers invalidation listener
+3. **ApiCallExecutor** — URL, body, headers, query params
+4. **McpToolProviderManager** — API key/URL resolution
+5. **A2AToolProviderManager** — API key/URL resolution
+6. **EmbeddingModelFactory** — config params before model creation
+7. **EmbeddingStoreFactory** — config params before store creation
+8. **SlackChannelRouter** — channel config values
+
+### Design Decisions
+
+- **Two syntaxes**: `{{vars.<key>}}` for template layer (system prompts), `${vars:<key>}` for late-binding layer (everywhere). Same data, two access patterns for different resolution stages.
+- **Non-versioned**: Unlike agent configs, global variables are operational deployment config. No version history — upsert semantics with PUT.
+- **Non-encrypted**: Fully visible in UI and logs. Use the vault (`${vault:...}`) for sensitive values.
+- **Invalidation listeners**: Downstream caches (ChatModelRegistry) register `Runnable` callbacks. When variables change, all cached model instances are evicted so agents pick up new config on next request.
+- **`exportable` flag**: Variables marked `exportable: false` are excluded from agent exports (e.g., environment-specific URLs).
+
+### Bug Fixes
+
+- **BUG-1 (LlmTask)**: `task.getType()` was used raw (unresolved) in `tokenCounterFactory.getEstimator()` (line 288) and `chatModelRegistry.getOrCreateStreaming()` (line 411). Hoisted `resolvedType` above both branches so `${vars:default-provider}` works correctly for token-aware windowing and streaming mode.
+- **BUG-2 (Resolver Null Safety)**: Added guard in `GlobalVariableResolver.resolveValue(value, tenantId)` to default a `null` tenantId to `"default"` before hitting the store, preventing potential undefined behavior.
+- **BUG-3 (MongoDB Filter Parity)**: Extracted `compositeId()` helper and updated MongoDB `get()` and `delete()` methods to filter by `_id` (consistent with `upsert()`) instead of by fields. Added `Sorts.ascending` to MongoDB `getAll`/`listAll` for parity with Postgres.
+- **BUG-4 (Postgres Reserved Words)**: Quoted SQL reserved words `"key"` and `"value"` across all DDL and DML in `PostgresGlobalVariableStore` and updated the corresponding test matchers.
+
+### Documentation
+
+- New: `docs/global-variables.md` — comprehensive public docs with architecture, syntax, REST API, use cases, and comparison table
+- Updated: `AGENTS.md` — added `snippets` and `vars` to both template data model tables (sections 4.2 and 5.1)
+
+### Tests (75 total)
+
+| Test Class | Tests | Type |
+|-----------|-------|------|
+| `GlobalVariableTest` | 7 | Unit — model, defaults, JSON |
+| `GlobalVariableResolverTest` | 14 | Unit — resolution, cache, invalidation |
+| `RestGlobalVariableStoreTest` | 11 | Unit — CRUD, validation |
+| `GlobalVariableCrudIT` | 8 | Integration — MongoDB CRUD lifecycle |
+| `PostgresGlobalVariableCrudIT` | 8 | Integration — PostgreSQL CRUD lifecycle |
+| `GlobalVariableStoreTest` | 10 | Unit — MongoDB adapter with mocked MongoCollection |
+| `PostgresGlobalVariableStoreTest` | 15 | Unit — PostgreSQL adapter with mocked JDBC |
+| 9 modified test suites | — | Constructor dependency updates |
+
+**Files:** `src/main/java/ai/labs/eddi/configs/variables/` (6 new files), `src/main/java/ai/labs/eddi/modules/llm/impl/LlmTask.java`, `src/main/java/ai/labs/eddi/modules/llm/impl/ChatModelRegistry.java`, `docs/global-variables.md`, `AGENTS.md`
 
 ---
 
@@ -1306,16 +1442,16 @@ All Slack credentials (`botToken`, `signingSecret`) moved from `application.prop
 
 **Before:**
 ```properties
-eddi.slack.bot-token=${eddivault:slack-bot-token}       # one per EDDI instance
-eddi.slack.signing-secret=${eddivault:slack-signing-secret}
+eddi.slack.bot-token=${vault:slack-bot-token}       # one per EDDI instance
+eddi.slack.signing-secret=${vault:slack-signing-secret}
 ```
 
 **After:**
 ```json
 { "channels": [{ "type": "slack", "config": {
     "channelId": "C0123...",
-    "botToken": "${eddivault:slack-bot-token}",
-    "signingSecret": "${eddivault:slack-signing-secret}",
+    "botToken": "${vault:slack-bot-token}",
+    "signingSecret": "${vault:slack-signing-secret}",
     "groupId": "optional"
 }}]}
 ```
@@ -1328,7 +1464,7 @@ eddi.slack.signing-secret=${eddivault:slack-signing-secret}
 - New `SlackCredentials` record (agentId, botToken, signingSecret, groupId)
 - `resolveCredentials(channelId)` → returns full credentials for a channel
 - `getAllSigningSecrets()` → all unique signing secrets from all deployed agents
-- `SecretResolver` integration for `${eddivault:...}` references at cache refresh time (60s)
+- `SecretResolver` integration for `${vault:...}` references at cache refresh time (60s)
 - Removed dependency on `SlackIntegrationConfig` for credentials/defaults
 
 ### SlackSignatureVerifier — Multi-Secret Verification
@@ -1805,7 +1941,7 @@ Added log category suppressions in `src/test/resources/application.properties`:
 
 ### Security Fix: Auto-Vault API Keys
 
-`AgentSetupService.vaultApiKey()` — new method that automatically stores API keys in the Secrets Vault when available, persisting only the vault reference (`${eddivault:setup.<agent-name>.<timestamp>.apiKey}`) in the LLM config. Timestamp suffix prevents key collision when two agents share the same name. `ChatModelRegistry.resolveSecrets()` already resolves vault references at model-load time, so no downstream changes needed.
+`AgentSetupService.vaultApiKey()` — new method that automatically stores API keys in the Secrets Vault when available, persisting only the vault reference (`${vault:setup.<agent-name>.<timestamp>.apiKey}`) in the LLM config. Timestamp suffix prevents key collision when two agents share the same name. `ChatModelRegistry.resolveSecrets()` already resolves vault references at model-load time, so no downstream changes needed.
 
 **Degraded mode:** When vault is disabled (no `EDDI_VAULT_MASTER_KEY`), logs a warning and falls back to plaintext storage. This ensures the Agent Father wizard works in dev mode without requiring vault setup.
 
@@ -2013,7 +2149,7 @@ MCP tools default to unauthenticated (`authorization.enabled=false`). Added a pr
 
 - `SecretResolver` fires `Consumer<SecretReference>` listeners (not `Runnable`) — passes the specific changed reference, or `null` for bulk rotation
 - `ChatModelRegistry` registers via `@PostConstruct` and receives the reference
-- **Single secret change:** scans cache entries, evicts only models whose parameter values contain the matching vault reference (checks both `${eddivault:keyName}` and `${eddivault:tenantId/keyName}` forms)
+- **Single secret change:** scans cache entries, evicts only models whose parameter values contain the matching vault reference (checks both `${vault:keyName}` and `${vault:tenantId/keyName}` forms)
 - **DEK/KEK rotation (null reference):** clears all models (every secret is affected)
 
 **Design decision:** Surgical eviction (not full clear, not TTL) because: (a) most deployments have multiple agents with different API keys — rotating one key shouldn't rebuild models for all providers; (b) `ConcurrentHashMap` iterator is safe for concurrent removal; (c) `CopyOnWriteArrayList` listeners are lock-free for reads.
@@ -3363,11 +3499,11 @@ Complete re-architecture of the EDDI Secrets Vault from agent-scoped ephemeral s
 |---|---|
 | **Scope** | `tenant/agent/key` → `tenant/key` — secrets shared across all agents within a tenant |
 | **Persistence** | `DatabaseSecretProvider` (ephemeral) → `VaultSecretProvider` backed by `ISecretPersistence` (MongoDB + PostgreSQL) |
-| **Reference Syntax** | New `${eddivault:keyName}` (short-form, defaults to "default" tenant) and `${eddivault:tenantId/keyName}` (full-form) |
+| **Reference Syntax** | New `${vault:keyName}` (short-form, defaults to "default" tenant) and `${vault:tenantId/keyName}` (full-form) |
 | **Model** | `SecretReference` dual-format regex, `SecretMetadata` gains `description`, `lastRotatedAt`, `allowedAgents`, `@JsonFormat(STRING)` timestamps |
 | **REST API** | 3-segment → 2-segment paths (removed agentId), `SecretRequest` with description/allowedAgents |
 | **Auto-Vaulting** | `PropertySetterTask.autoVaultSecret()` namespaces keys with `agentId.keyName` to prevent cross-agent collision |
-| **A2A Security** | `A2AToolProviderManager` recognizes both `${vault:}` (legacy) and `${eddivault:}` prefixes |
+| **A2A Security** | `A2AToolProviderManager` recognizes both `${vault:}` (canonical) and `${eddivault:}` (legacy) prefixes |
 
 **Manager UI changes:**
 
@@ -3382,7 +3518,7 @@ Complete re-architecture of the EDDI Secrets Vault from agent-scoped ephemeral s
 
 **Design decisions:**
 - Access control by configuration authorship — admins control which vault references to embed in agent configs, not runtime enforcement
-- Short-form `${eddivault:keyName}` preferred for UX simplicity; full-form available for multi-tenant deployments
+- Short-form `${vault:keyName}` preferred for UX simplicity; full-form available for multi-tenant deployments
 - Auto-vaulted property keys prefixed with `agentId.` to prevent cross-agent collisions while keeping the short-form UX
 - `VaultStartupBanner` Javadoc updated from deleted `DatabaseSecretProvider` to `VaultSecretProvider`
 
@@ -4124,7 +4260,7 @@ Implemented the Agent2Agent (A2A) protocol for distributed peer-to-peer agent co
 | **A2A Client** | `A2AToolProviderManager.java` (mirrors `McpToolProviderManager` — discovers remote agents, wraps skills as `ToolSpecification`) |
 | **Config** | `AgentConfiguration` gains `a2aEnabled`, `a2aSkills`, `description` fields; `LlmConfiguration.Task` gains `a2aAgents` list with `A2AAgentConfig` |
 | **Integration** | `AgentOrchestrator` + `LlmTask` inject `A2AToolProviderManager`; A2A tools merge alongside built-in, MCP, and httpcall tools |
-| **Security** | Vault reference enforcement for API keys (`${eddivault:...}`), runtime warning on raw key usage |
+| **Security** | Vault reference enforcement for API keys (`${vault:...}`), runtime warning on raw key usage |
 | **Endpoints** | `GET /.well-known/agent.json`, `GET/POST /a2a/agents/{id}`, `GET /a2a/agents` |
 
 **Design decisions:**
@@ -4528,7 +4664,7 @@ Agents can now connect to external MCP servers and use their tools during conver
 | **AgentOrchestrator**      | MCP tool specs merged into tool-calling loop with budget/rate-limiting                  |
 | **McpSetupTools**          | `mcpServers` param on `setup_agent` — comma-separated URLs → `McpServerConfig` list     |
 
-**Design:** StreamableHttpMcpTransport (non-deprecated), graceful degradation (MCP failures never kill pipeline), port 7070, `${eddivault:key}` support.
+**Design:** StreamableHttpMcpTransport (non-deprecated), graceful degradation (MCP failures never kill pipeline), port 7070, `${vault:key}` support.
 
 **Tests:** `McpToolProviderManagerTest` (8 tests), updated `AgentOrchestratorTest` + `LangchainTaskTest` + `McpSetupToolsTest` (21 calls).
 
@@ -5016,7 +5152,7 @@ Security audit identified 5 critical/high issues in the vault implementation. Al
 
 **Additional fixes:**
 
-- Fixed `SecretRedactionFilter` — `$` in replacement string `${eddivault:<REDACTED>}` was interpreted as regex group reference
+- Fixed `SecretRedactionFilter` — `$` in replacement string `${vault:<REDACTED>}` was interpreted as regex group reference
 - Removed dead `secretResolver` field from `PropertySetterTask` (left over from R1 fix)
 - Fixed 8 pre-existing Lombok ghost-method bugs in OutputItem subclasses + `OutputConfiguration`
 - Cleaned unused imports in `HttpCallExecutorTest` and `PropertySetterTaskTest`

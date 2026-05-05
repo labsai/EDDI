@@ -17,7 +17,7 @@
 ### Vault & Encryption
 - **Per-deployment random KEK salt** — Each EDDI instance now generates a unique 16-byte salt for key derivation (was hardcoded). Backward-compatible: existing deployments auto-detect and use legacy salt
 - **KEK rotation salt migration** — `rotateKek()` now properly migrates from legacy to new salt during key rotation
-- **API key auto-vaulting** — Agent setup automatically stores API keys in the Secrets Vault, persisting only vault references (`${eddivault:...}`) in MongoDB
+- **API key auto-vaulting** — Agent setup automatically stores API keys in the Secrets Vault, persisting only vault references (`${vault:...}`) in MongoDB
 
 ### Authentication & Authorization
 - **AuthStartupGuard** — Fail-loud production auth check: EDDI refuses to start if OIDC is disabled in production (escape hatch: `eddi.security.allow-unauthenticated=true`)

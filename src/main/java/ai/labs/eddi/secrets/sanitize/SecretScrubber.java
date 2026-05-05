@@ -28,15 +28,15 @@ import java.util.regex.Pattern;
  * token, etc.)</li>
  * <li><b>Shannon entropy</b>: high-entropy strings (>3.5 bits/char) that look
  * like API keys</li>
- * <li><b>Vault references</b>: existing ${eddivault:...} references are left
- * untouched</li>
+ * <li><b>Vault references</b>: existing ${vault:...} or ${eddivault:...}
+ * references are left untouched</li>
  * </ol>
  */
 @ApplicationScoped
 public class SecretScrubber {
 
     private static final Logger LOGGER = Logger.getLogger(SecretScrubber.class);
-    private static final String REDACTED = "${eddivault:REDACTED}";
+    private static final String REDACTED = "${vault:REDACTED}";
 
     /**
      * Minimum length for entropy analysis (short strings are less likely to be
@@ -70,7 +70,7 @@ public class SecretScrubber {
      *
      * @param json
      *            the JSON string to scrub
-     * @return sanitized JSON with secrets replaced by ${eddivault:REDACTED}
+     * @return sanitized JSON with secrets replaced by ${vault:REDACTED}
      */
     public String scrubJson(String json) {
         if (json == null || json.isBlank()) {
@@ -99,8 +99,8 @@ public class SecretScrubber {
                 if (fieldValue.isTextual()) {
                     String textValue = fieldValue.asText();
 
-                    // Skip existing vault references
-                    if (textValue.contains("${eddivault:")) {
+                    // Skip existing vault references (both new and legacy prefix)
+                    if (textValue.contains("${vault:") || textValue.contains("${eddivault:")) {
                         continue;
                     }
 

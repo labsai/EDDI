@@ -409,6 +409,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                     // Normalize legacy eddi:// URIs from v5 ZIP exports to v6 canonical form
                     agentFileString = normalizeLegacyUris(agentFileString);
+                    // Normalize legacy ${eddivault:...} → ${vault:...}
+                    agentFileString = normalizeVaultReferences(agentFileString);
 
                     AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString, AgentConfiguration.class);
                     agentConfig.getWorkflows()
@@ -472,6 +474,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                         // Normalize legacy eddi:// URIs from v5 ZIP exports to v6 canonical form
                         workflowFileString = normalizeLegacyUris(workflowFileString);
+                        // Normalize legacy ${eddivault:...} → ${vault:...}
+                        workflowFileString = normalizeVaultReferences(workflowFileString);
 
                         // loading old resources, creating/updating them,
                         // updating document descriptor and replacing references in workflow config
@@ -1163,6 +1167,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         resourceContent = jsonSerialization.serialize(migratedOutputDocument);
                     }
                 }
+
+                // Normalize legacy ${eddivault:...} → ${vault:...}
+                resourceContent = normalizeVaultReferences(resourceContent);
 
                 // Final pass: migrate any remaining Thymeleaf template syntax to Qute
                 resourceContent = templateSyntaxMigrator.migrate(resourceContent);

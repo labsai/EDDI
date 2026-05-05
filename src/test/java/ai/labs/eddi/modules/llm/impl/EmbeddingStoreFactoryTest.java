@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.store.embedding.EmbeddingStore;
@@ -24,12 +25,15 @@ class EmbeddingStoreFactoryTest {
 
     private EmbeddingStoreFactory factory;
     private SecretResolver secretResolver;
+    private GlobalVariableResolver globalVariableResolver;
 
     @BeforeEach
     void setUp() {
         secretResolver = mock(SecretResolver.class);
         when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
-        factory = new EmbeddingStoreFactory(secretResolver);
+        globalVariableResolver = mock(GlobalVariableResolver.class);
+        when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        factory = new EmbeddingStoreFactory(globalVariableResolver, secretResolver);
     }
 
     @Test
@@ -166,7 +170,7 @@ class EmbeddingStoreFactoryTest {
 
             var ex = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, "kb"));
             assertTrue(ex.getMessage().contains("password"), "Error should mention missing password");
-            assertTrue(ex.getMessage().contains("eddivault"), "Error should mention vault reference");
+            assertTrue(ex.getMessage().contains("vault"), "Error should mention vault reference");
         }
 
         @Test

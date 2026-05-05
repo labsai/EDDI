@@ -198,6 +198,8 @@ When tasks process templates (system prompts, HTTP call bodies, property instruc
 | `context`          | `Map<String, Object>`                        | Input context variables set per turn                                       | `{{context.language}}`                           |
 | `properties`       | `Map<String, Object>`                        | Conversation properties — raw values from `ConversationProperties.toMap()` | `{properties.preferred_language}`                |
 | `memory`           | `Map` with `current`, `last`, `past`         | Conversation step data from the pipeline                                   | `{memory.current.output}`, `{memory.last.input}` |
+| `snippets`         | `Map<String, Object>`                        | Prompt Snippets — auto-injected from `PromptSnippetService`                | `{{snippets.cautious_mode}}`                     |
+| `vars`             | `Map<String, Object>`                        | Global Variables — deployment-wide config from `GlobalVariableResolver`    | `{{vars.default-model}}`                         |
 | `userInfo`         | `Map` with `userId`                          | Authenticated user identity                                                | `{{userInfo.userId}}`                            |
 | `conversationInfo` | `Map` with `conversationId`, `agentId`, etc. | Conversation metadata                                                      | `{{conversationInfo.agentId}}`                   |
 | `conversationLog`  | `String`                                     | Formatted conversation history                                             | `{{conversationLog}}`                            |
@@ -635,6 +637,8 @@ This is because `ConversationProperties.put()` stores `property.getValueString()
 | `{memory.current.output}`           | Output text for current step       |                                              |
 | `{memory.last.input}`               | Previous step's input              |                                              |
 | `{context.key}`                     | Context variable set by client     | `{context.language}`                         |
+| `{snippets.name}`                   | Prompt snippet content             | `{snippets.cautious_mode}`                   |
+| `{vars.key}`                        | Global variable value              | `{vars.default-model}`                       |
 | `{userInfo.userId}`                 | Authenticated user ID              |                                              |
 | `{conversationInfo.agentId}`        | Current agent ID                   |                                              |
 | `{conversationInfo.conversationId}` | Current conversation ID            |                                              |
@@ -740,7 +744,7 @@ Matcher:      "actions" : "ask_for_model"
 | `step`         | Cleared at end of turn                                                                                                                        |
 | `conversation` | Lives for the session (default for most agent-building properties)                                                                            |
 | `longTerm`     | Persisted to `usermemories` collection across conversations                                                                                   |
-| `secret`       | Auto-vaulted: plaintext stored in SecretsVault, raw input scrubbed from memory, vault reference (`${eddivault:...}`) stored as property value |
+| `secret`       | Auto-vaulted: plaintext stored in SecretsVault, raw input scrubbed from memory, vault reference (`${vault:...}`) stored as property value |
 
 > **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If vault is disabled (common in dev mode), `autoVaultSecret()` fails and falls back to storing plaintext — but logs an ERROR that may confuse users. For wizard-style agents that collect API keys and pass them to an endpoint (like the Agent Father), prefer `scope: "conversation"` and delegate vaulting to the receiving service.
 

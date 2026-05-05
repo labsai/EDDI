@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,7 +33,9 @@ class A2AToolProviderManagerExtendedTest {
     void setUp() {
         secretResolver = mock(SecretResolver.class);
         when(secretResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
-        manager = new A2AToolProviderManager(secretResolver);
+        GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
+        when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
+        manager = new A2AToolProviderManager(globalVariableResolver, secretResolver);
     }
 
     // ─── Discovery with unreachable agents ────────────────────────
@@ -155,7 +158,7 @@ class A2AToolProviderManagerExtendedTest {
         void eddiVaultRefKey() {
             var config = new A2AAgentConfig();
             config.setUrl("http://192.0.2.1:1");
-            config.setApiKey("${eddivault:my-key}");
+            config.setApiKey("${vault:my-key}");
             config.setTimeoutMs(100L);
 
             assertDoesNotThrow(() -> manager.discoverTools(List.of(config)));

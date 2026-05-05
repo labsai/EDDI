@@ -96,7 +96,7 @@ All string values in audit entries pass through the `SecretRedactionFilter` befo
 - Anthropic API keys (`sk-ant-...`)
 - Bearer tokens (JWTs and opaque tokens)
 - Generic API key patterns (`apikey=...`, `token=...`, etc.)
-- Vault references (`${eddivault:...}`)
+- Vault references (`${vault:...}`)
 
 Redaction is applied recursively to nested maps and lists.
 

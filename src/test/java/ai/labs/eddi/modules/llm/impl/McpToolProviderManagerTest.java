@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,12 +25,15 @@ class McpToolProviderManagerTest {
 
     private McpToolProviderManager manager;
     private SecretResolver secretResolver;
+    private GlobalVariableResolver globalVariableResolver;
 
     @BeforeEach
     void setUp() {
         secretResolver = mock(SecretResolver.class);
         when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        manager = new McpToolProviderManager(secretResolver);
+        globalVariableResolver = mock(GlobalVariableResolver.class);
+        when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        manager = new McpToolProviderManager(globalVariableResolver, secretResolver);
     }
 
     @Test
@@ -124,13 +128,13 @@ class McpToolProviderManagerTest {
     void testDiscoverTools_VaultRefResolution() {
         var config = new McpServerConfig();
         config.setUrl("http://localhost:99999/mcp-vault-test");
-        config.setApiKey("${eddivault:my-secret}");
+        config.setApiKey("${vault:my-secret}");
         config.setTimeoutMs(1000L);
 
         // The discoverTools call will fail to connect, but we can verify
         // the secret resolver was called
         manager.discoverTools(List.of(config));
 
-        verify(secretResolver).resolveValue("${eddivault:my-secret}");
+        verify(secretResolver).resolveValue("${vault:my-secret}");
     }
 }

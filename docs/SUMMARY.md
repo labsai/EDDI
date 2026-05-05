@@ -59,6 +59,7 @@
 
 - [Security](security.md)
 - [Secrets Vault](secrets-vault.md)
+- [Global Variables](global-variables.md)
 - [Audit Ledger](audit-ledger.md)
 - [GDPR / CCPA Compliance](gdpr-compliance.md)
 - [HIPAA Compliance](hipaa-compliance.md)

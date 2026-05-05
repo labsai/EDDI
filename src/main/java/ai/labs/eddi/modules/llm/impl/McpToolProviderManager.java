@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -46,6 +47,7 @@ public class McpToolProviderManager {
 
     private static final Logger LOGGER = Logger.getLogger(McpToolProviderManager.class);
 
+    private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
 
     /**
@@ -55,7 +57,8 @@ public class McpToolProviderManager {
     private final Map<String, McpClient> clientCache = new ConcurrentHashMap<>();
 
     @Inject
-    public McpToolProviderManager(SecretResolver secretResolver) {
+    public McpToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
+        this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
     }
 
@@ -146,9 +149,10 @@ public class McpToolProviderManager {
      * Create the appropriate MCP transport based on configuration.
      */
     private McpTransport createTransport(McpServerConfig config, Duration timeout) {
-        // Resolve API key if it's a vault reference
+        // Resolve API key if it's a global variable or vault reference
         String apiKey = config.getApiKey();
         if (!isNullOrEmpty(apiKey)) {
+            apiKey = globalVariableResolver.resolveValue(apiKey);
             apiKey = secretResolver.resolveValue(apiKey);
         }
 

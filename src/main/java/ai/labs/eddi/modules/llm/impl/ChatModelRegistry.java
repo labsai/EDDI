@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -46,13 +47,16 @@ public class ChatModelRegistry {
     private static final Logger LOGGER = Logger.getLogger(ChatModelRegistry.class);
 
     private final Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders;
+    private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
     private final Map<ModelCacheKey, ChatModel> modelCache = new ConcurrentHashMap<>(1);
     private final Map<ModelCacheKey, StreamingChatModel> streamingModelCache = new ConcurrentHashMap<>(1);
 
     @Inject
-    ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders, SecretResolver secretResolver) {
+    ChatModelRegistry(Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders,
+            GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
         this.languageModelApiConnectorBuilders = languageModelApiConnectorBuilders;
+        this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
     }
 
@@ -65,7 +69,15 @@ public class ChatModelRegistry {
     @PostConstruct
     void registerSecretInvalidation() {
         secretResolver.registerInvalidationListener(this::invalidateForSecret);
-        LOGGER.info("ChatModelRegistry registered for secret invalidation events");
+        globalVariableResolver.registerInvalidationListener(() -> {
+            int total = modelCache.size() + streamingModelCache.size();
+            modelCache.clear();
+            streamingModelCache.clear();
+            if (total > 0) {
+                LOGGER.infof("Invalidated all %d model(s) due to global variable change", total);
+            }
+        });
+        LOGGER.info("ChatModelRegistry registered for secret and global variable invalidation events");
     }
 
     /**
@@ -91,9 +103,10 @@ public class ChatModelRegistry {
             throw new UnsupportedLlmTaskException(String.format("Type \"%s\" is not supported", type));
         }
 
-        // Resolve vault references (late-binding: after Qute, before
-        // builder.build())
-        var resolvedParams = secretResolver.resolveSecrets(filteredParams);
+        // Resolve global variable references, then vault secrets (late-binding:
+        // after Qute, before builder.build())
+        var resolvedParams = globalVariableResolver.resolveAll(filteredParams);
+        resolvedParams = secretResolver.resolveSecrets(resolvedParams);
         var rawModel = languageModelApiConnectorBuilders.get(type).get().build(resolvedParams);
         var model = ObservableChatModel.wrapIfNeeded(rawModel, type, timeoutMs, logReq, logResp);
         modelCache.put(cacheKey, model);
@@ -119,9 +132,10 @@ public class ChatModelRegistry {
         }
 
         try {
-            // Resolve vault references (late-binding: after Qute, before
-            // builder.build())
-            var resolvedParams = secretResolver.resolveSecrets(filteredParams);
+            // Resolve global variable references, then vault secrets (late-binding:
+            // after Qute, before builder.build())
+            var resolvedParams = globalVariableResolver.resolveAll(filteredParams);
+            resolvedParams = secretResolver.resolveSecrets(resolvedParams);
             var model = languageModelApiConnectorBuilders.get(type).get().buildStreaming(resolvedParams);
             streamingModelCache.put(cacheKey, model);
             return model;
@@ -155,8 +169,9 @@ public class ChatModelRegistry {
      * <p>
      * When {@code reference} is non-null (single secret changed), scan cache
      * entries and evict only those whose parameter values contain a vault reference
-     * to the changed secret — either short form ({@code ${eddivault:keyName}}) or
-     * full form ({@code ${eddivault:tenantId/keyName}}).
+     * to the changed secret — either short form ({@code ${vault:keyName}}) or full
+     * form ({@code ${vault:tenantId/keyName}}). Also matches the legacy
+     * {@code ${eddivault:...}} prefix for backward compatibility.
      * <p>
      * When {@code reference} is null (DEK/KEK rotation — all secrets affected),
      * clear everything.
@@ -177,17 +192,22 @@ public class ChatModelRegistry {
         }
 
         // Build the vault reference forms to search for in cached parameters.
-        // Full form: ${eddivault:tenantId/keyName} — always valid
-        String fullRef = "${eddivault:" + reference.tenantId() + "/" + reference.keyName() + "}";
-        // Short form: ${eddivault:keyName} — only valid for the default tenant.
+        // New canonical form: ${vault:tenantId/keyName} — always valid
+        String fullRef = "${vault:" + reference.tenantId() + "/" + reference.keyName() + "}";
+        // Legacy form: ${eddivault:tenantId/keyName} — for backward compat
+        String legacyFullRef = "${eddivault:" + reference.tenantId() + "/" + reference.keyName() + "}";
+        // Short form: ${vault:keyName} — only valid for the default tenant.
         // The short form always resolves to "default", so a non-default tenant's
         // secret must NOT match short-form references (that would be a false positive).
         String shortRef = SecretReference.DEFAULT_TENANT.equals(reference.tenantId())
+                ? "${vault:" + reference.keyName() + "}"
+                : null;
+        String legacyShortRef = SecretReference.DEFAULT_TENANT.equals(reference.tenantId())
                 ? "${eddivault:" + reference.keyName() + "}"
                 : null;
 
-        int evicted = evictMatching(modelCache, fullRef, shortRef)
-                + evictMatching(streamingModelCache, fullRef, shortRef);
+        int evicted = evictMatching(modelCache, fullRef, legacyFullRef, shortRef, legacyShortRef)
+                + evictMatching(streamingModelCache, fullRef, legacyFullRef, shortRef, legacyShortRef);
 
         if (evicted > 0) {
             LOGGER.infof("Evicted %d model(s) using secret '%s/%s'",
@@ -196,15 +216,15 @@ public class ChatModelRegistry {
     }
 
     /**
-     * Scan a cache and remove entries whose parameter values contain either vault
-     * reference form.
+     * Scan a cache and remove entries whose parameter values contain any of the
+     * given vault reference forms (new and legacy prefixes).
      */
-    private <T> int evictMatching(Map<ModelCacheKey, T> cache, String ref1, String ref2) {
+    private <T> int evictMatching(Map<ModelCacheKey, T> cache, String... refs) {
         int count = 0;
         Iterator<ModelCacheKey> it = cache.keySet().iterator();
         while (it.hasNext()) {
             ModelCacheKey key = it.next();
-            if (parametersContainRef(key.parameters(), ref1, ref2)) {
+            if (parametersContainRef(key.parameters(), refs)) {
                 it.remove();
                 count++;
             }
@@ -212,10 +232,14 @@ public class ChatModelRegistry {
         return count;
     }
 
-    private static boolean parametersContainRef(Map<String, String> params, String ref1, String ref2) {
+    private static boolean parametersContainRef(Map<String, String> params, String... refs) {
         for (String value : params.values()) {
-            if (value != null && (value.contains(ref1) || (ref2 != null && value.contains(ref2)))) {
-                return true;
+            if (value == null)
+                continue;
+            for (String ref : refs) {
+                if (ref != null && value.contains(ref)) {
+                    return true;
+                }
             }
         }
         return false;

@@ -16,7 +16,7 @@ import java.util.List;
  * Secrets are scoped at the <b>tenant level</b>, identified by
  * {@code (tenantId, keyName)}. There is no agent-level scoping — access control
  * is via <b>configuration authorship</b>: the admin who writes the agent config
- * decides which vault references ({@code ${eddivault:keyName}}) to include.
+ * decides which vault references ({@code ${vault:keyName}}) to include.
  * <p>
  * All implementations MUST ensure:
  * <ul>

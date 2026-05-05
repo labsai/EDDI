@@ -25,8 +25,8 @@ import java.util.regex.Pattern;
 
 /**
  * Resolves vault references in parameter maps and strings. Supports both the
- * <b>short form</b> ({@code ${eddivault:keyName}}) and <b>full form</b>
- * ({@code ${eddivault:tenantId/keyName}}).
+ * <b>short form</b> ({@code ${vault:keyName}}) and <b>full form</b>
+ * ({@code ${vault:tenantId/keyName}}).
  * <p>
  * This is the central integration point between the vault and the execution
  * workflow. It is called <b>after</b> Qute template processing and
@@ -108,7 +108,7 @@ public class SecretResolver {
      * compatibility with plaintext configs).
      *
      * @param params
-     *            the parameter map (may contain ${eddivault:...} values)
+     *            the parameter map (may contain ${vault:...} values)
      * @return a new map with vault references replaced by plaintext values
      */
     public Map<String, String> resolveSecrets(Map<String, String> params) {
@@ -127,9 +127,9 @@ public class SecretResolver {
 
     /**
      * Resolve vault references in a single string value. Supports both the short
-     * form ({@code ${eddivault:keyName}}) and full form
-     * ({@code ${eddivault:tenantId/keyName}}), and multiple references within the
-     * same string.
+     * form ({@code ${vault:keyName}}) and full form
+     * ({@code ${vault:tenantId/keyName}}), and multiple references within the same
+     * string.
      * <p>
      * If the vault is not available, the value passes through unchanged.
      * <p>
@@ -139,7 +139,7 @@ public class SecretResolver {
      * cache expiry.
      *
      * @param value
-     *            the value that may contain ${eddivault:...} references
+     *            the value that may contain ${vault:...} references
      * @return the value with vault references replaced by plaintext
      */
     public String resolveValue(String value) {

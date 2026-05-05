@@ -56,9 +56,10 @@ public class McpSetupTools {
                                      + "'azure-openai', 'bedrock', or 'oracle-genai'") String provider,
                              @ToolArg(description = "Model name, e.g. 'claude-sonnet-4-6' (default), 'gpt-5.4', "
                                      + "'gemini-3.1-pro-preview', 'deepseek-chat', 'llama3.2:1b' (ollama)") String model,
-                             @ToolArg(description = "API key for the LLM provider. Required for cloud providers "
-                                     + "(anthropic, openai, gemini). Optional/unused for local LLMs (ollama, jlama). "
-                                     + "Can be a vault reference like '${eddivault:openai-key}'.") String apiKey,
+                             @ToolArg(description = "API key for the LLM provider. Required for most cloud providers "
+                                     + "(anthropic, openai, gemini, mistral). Not needed for bedrock (uses IAM), "
+                                     + "oracle-genai (uses OCI auth), or local LLMs (ollama, jlama). "
+                                     + "Can be a vault reference like '${vault:openai-key}'.") String apiKey,
                              @ToolArg(description = "Base URL for the LLM provider (optional). "
                                      + "Useful for ollama when running in Docker (e.g. 'http://host.docker.internal:11434')") String baseUrl,
                              @ToolArg(description = "Greeting message shown when a conversation starts (optional)") String introMessage,
@@ -105,11 +106,12 @@ public class McpSetupTools {
                                  @ToolArg(description = "LLM provider: 'anthropic' (default), 'openai', 'gemini', 'mistral', "
                                          + "'azure-openai', 'bedrock', 'oracle-genai', etc.") String provider,
                                  @ToolArg(description = "Model name (default: 'claude-sonnet-4-6')") String model,
-                                 @ToolArg(description = "LLM API key (required for cloud providers). "
-                                         + "Use vault reference: '${eddivault:key-name}'.") String apiKey,
+                                 @ToolArg(description = "LLM API key (required for most cloud providers: anthropic, openai, gemini, mistral). "
+                                         + "Not needed for bedrock (IAM) or oracle-genai (OCI auth). "
+                                         + "Use vault reference: '${vault:key-name}'.") String apiKey,
                                  @ToolArg(description = "Override the API base URL from the spec (optional)") String apiBaseUrl,
                                  @ToolArg(description = "Authorization header for API calls, e.g. 'Bearer token123' (optional). "
-                                         + "Use vault reference: '${eddivault:api-token}'.") String apiAuth,
+                                         + "Use vault reference: '${vault:api-token}'.") String apiAuth,
                                  @ToolArg(description = "Comma-separated endpoint filter, e.g. 'GET /users,POST /orders'. "
                                          + "If omitted, all non-deprecated endpoints are included.") String endpoints,
                                  @ToolArg(description = "Enable quick reply buttons in Agent responses? (default: false)") Boolean enableQuickReplies,

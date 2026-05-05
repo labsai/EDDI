@@ -81,4 +81,16 @@ abstract class AbstractBackupService {
         }
         return result;
     }
+
+    /**
+     * Normalize legacy vault references during import: {@code ${eddivault:...}} →
+     * {@code ${vault:...}}. This ensures imported configs use the canonical short
+     * prefix, converging all stored configs over time.
+     */
+    static String normalizeVaultReferences(String jsonString) {
+        if (jsonString == null || !jsonString.contains("${eddivault:")) {
+            return jsonString;
+        }
+        return jsonString.replace("${eddivault:", "${vault:");
+    }
 }

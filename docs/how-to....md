@@ -16,7 +16,7 @@
       "id": "openai_chat",
       "type": "openai",
       "parameters": {
-        "apiKey": "${eddivault:OPENAI_KEY}",
+        "apiKey": "${vault:OPENAI_KEY}",
         "modelName": "gpt-4o",
         "systemMessage": "You are a helpful assistant",
         "sendConversation": "true",
@@ -50,7 +50,7 @@ curl -X PUT http://localhost:7070/secretstore/secrets/MY_API_KEY \
 ```json
 {
   "parameters": {
-    "apiKey": "${eddivault:MY_API_KEY}"
+    "apiKey": "${vault:MY_API_KEY}"
   }
 }
 ```

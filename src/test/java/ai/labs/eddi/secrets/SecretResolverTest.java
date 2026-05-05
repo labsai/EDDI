@@ -48,7 +48,7 @@ class SecretResolverTest {
         var ref = new SecretReference("default", "openaiKey");
         when(secretProvider.resolve(ref)).thenReturn("sk-actual-secret-key");
 
-        String input = "Bearer ${eddivault:openaiKey}";
+        String input = "Bearer ${vault:openaiKey}";
         String result = resolver.resolveValue(input);
 
         assertEquals("Bearer sk-actual-secret-key", result);
@@ -59,7 +59,7 @@ class SecretResolverTest {
         var ref = new SecretReference("myTenant", "openaiKey");
         when(secretProvider.resolve(ref)).thenReturn("sk-tenant-key");
 
-        String input = "Bearer ${eddivault:myTenant/openaiKey}";
+        String input = "Bearer ${vault:myTenant/openaiKey}";
         String result = resolver.resolveValue(input);
 
         assertEquals("Bearer sk-tenant-key", result);
@@ -70,7 +70,7 @@ class SecretResolverTest {
         when(secretProvider.resolve(new SecretReference("default", "key1"))).thenReturn("val1");
         when(secretProvider.resolve(new SecretReference("default", "key2"))).thenReturn("val2");
 
-        String input = "${eddivault:key1}:${eddivault:key2}";
+        String input = "${vault:key1}:${vault:key2}";
         String result = resolver.resolveValue(input);
 
         assertEquals("val1:val2", result);
@@ -81,7 +81,7 @@ class SecretResolverTest {
         when(secretProvider.resolve(new SecretReference("default", "key1"))).thenReturn("val1");
         when(secretProvider.resolve(new SecretReference("acme", "key2"))).thenReturn("val2");
 
-        String input = "${eddivault:key1}:${eddivault:acme/key2}";
+        String input = "${vault:key1}:${vault:acme/key2}";
         String result = resolver.resolveValue(input);
 
         assertEquals("val1:val2", result);
@@ -91,7 +91,7 @@ class SecretResolverTest {
     void resolveValue_secretNotFound_keepsRef() throws ISecretProvider.SecretNotFoundException, ISecretProvider.SecretProviderException {
         when(secretProvider.resolve(any(SecretReference.class))).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
 
-        String input = "Bearer ${eddivault:missingKey}";
+        String input = "Bearer ${vault:missingKey}";
         String result = resolver.resolveValue(input);
 
         // When secret is not found, the reference should remain as-is
@@ -105,7 +105,7 @@ class SecretResolverTest {
         SecretResolver passthroughResolver = new SecretResolver(unavailable, meterRegistry, 5, 100);
         passthroughResolver.init();
 
-        String input = "Bearer ${eddivault:key}";
+        String input = "Bearer ${vault:key}";
         assertEquals(input, passthroughResolver.resolveValue(input));
     }
 
@@ -114,7 +114,7 @@ class SecretResolverTest {
         var ref = new SecretReference("default", "69c687.userApiKey");
         when(secretProvider.resolve(ref)).thenReturn("user-secret");
 
-        String result = resolver.resolveValue("${eddivault:69c687.userApiKey}");
+        String result = resolver.resolveValue("${vault:69c687.userApiKey}");
 
         assertEquals("user-secret", result);
     }

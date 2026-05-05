@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -54,10 +55,12 @@ public class EmbeddingStoreFactory {
     private final Cache<String, EmbeddingStore<TextSegment>> cache = Caffeine.newBuilder().maximumSize(50).expireAfterAccess(Duration.ofMinutes(30))
             .build();
     private final Map<String, MongoClient> mongoClientCache = new ConcurrentHashMap<>();
+    private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
 
     @Inject
-    public EmbeddingStoreFactory(SecretResolver secretResolver) {
+    public EmbeddingStoreFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
+        this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
     }
 
@@ -103,7 +106,7 @@ public class EmbeddingStoreFactory {
      * <li>{@code port} — PostgreSQL port (default: 5432)</li>
      * <li>{@code database} — database name (default: "eddi")</li>
      * <li>{@code user} — database user (default: "eddi")</li>
-     * <li>{@code password} — database password, supports {@code ${eddivault:...}}
+     * <li>{@code password} — database password, supports {@code ${vault:...}}
      * (required)</li>
      * <li>{@code table} — table name (default: auto-generated from kbId)</li>
      * <li>{@code dimension} — embedding vector dimension (default: 1536 for OpenAI
@@ -140,7 +143,7 @@ public class EmbeddingStoreFactory {
      * Supported storeParameters:
      * <ul>
      * <li>{@code connectionString} — MongoDB connection string (required, supports
-     * {@code ${eddivault:...}})</li>
+     * {@code ${vault:...}})</li>
      * <li>{@code databaseName} — database name (default: "eddi")</li>
      * <li>{@code collectionName} — collection name (default: auto-generated from
      * kbId)</li>
@@ -176,8 +179,7 @@ public class EmbeddingStoreFactory {
      * <ul>
      * <li>{@code serverUrl} — Elasticsearch URL (default:
      * "http://localhost:9200")</li>
-     * <li>{@code apiKey} — API key (optional, supports
-     * {@code ${eddivault:...}})</li>
+     * <li>{@code apiKey} — API key (optional, supports {@code ${vault:...}})</li>
      * <li>{@code indexName} — index name (default: auto-generated from kbId)</li>
      * </ul>
      */
@@ -218,7 +220,7 @@ public class EmbeddingStoreFactory {
      * <li>{@code collectionName} — collection name (default: auto-generated from
      * kbId)</li>
      * <li>{@code apiKey} — Qdrant API key (optional, supports
-     * {@code ${eddivault:...}})</li>
+     * {@code ${vault:...}})</li>
      * <li>{@code useTls} — use TLS (default: "false")</li>
      * </ul>
      */
@@ -285,11 +287,12 @@ public class EmbeddingStoreFactory {
     // ──────────────────────────────────────────────────
 
     /**
-     * Resolves vault references in store parameters.
+     * Resolves global variable and vault references in store parameters.
      */
     private Map<String, String> resolveParams(RagConfiguration config) {
         Map<String, String> rawParams = config.getStoreParameters() != null ? config.getStoreParameters() : Map.of();
-        return secretResolver.resolveSecrets(rawParams);
+        Map<String, String> resolved = globalVariableResolver.resolveAll(rawParams);
+        return secretResolver.resolveSecrets(resolved);
     }
 
     private ChromaApiVersion parseChromaApiVersion(String apiVersionStr) {
@@ -314,7 +317,7 @@ public class EmbeddingStoreFactory {
     private String requireParam(Map<String, String> params, String key, String storeType) {
         String value = params.get(key);
         if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(storeType + " requires '" + key + "' in storeParameters (use ${eddivault:...} for secrets)");
+            throw new IllegalArgumentException(storeType + " requires '" + key + "' in storeParameters (use ${vault:...} for secrets)");
         }
         return value;
     }

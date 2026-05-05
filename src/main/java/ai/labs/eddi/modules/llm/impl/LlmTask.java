@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -92,6 +93,7 @@ public class LlmTask implements ILifecycleTask {
     private final TokenCounterFactory tokenCounterFactory;
     private final ConversationSummarizer conversationSummarizer;
     private final PromptSnippetService promptSnippetService;
+    private final GlobalVariableResolver globalVariableResolver;
 
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
@@ -110,6 +112,7 @@ public class LlmTask implements ILifecycleTask {
             RagContextProvider ragContextProvider, IUserMemoryStore userMemoryStore, TokenCounterFactory tokenCounterFactory,
             ConversationSummarizer conversationSummarizer,
             PromptSnippetService promptSnippetService,
+            GlobalVariableResolver globalVariableResolver,
             ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
@@ -133,6 +136,7 @@ public class LlmTask implements ILifecycleTask {
         this.restWorkflowStore = restWorkflowStore;
         this.conversationSummarizer = conversationSummarizer;
         this.promptSnippetService = promptSnippetService;
+        this.globalVariableResolver = globalVariableResolver;
     }
 
     @Override
@@ -163,6 +167,13 @@ public class LlmTask implements ILifecycleTask {
             Map<String, Object> snippets = promptSnippetService.getAll();
             if (!snippets.isEmpty()) {
                 templateDataObjects.put("snippets", snippets);
+            }
+
+            // Inject global variables into template data — auto-available as
+            // {{vars.<key>}} in system prompts and parameters
+            Map<String, Object> globalVars = globalVariableResolver.getTemplateData();
+            if (!globalVars.isEmpty()) {
+                templateDataObjects.put("vars", globalVars);
             }
 
             var actions = latestData.getResult();
@@ -270,11 +281,15 @@ public class LlmTask implements ILifecycleTask {
             }
         }
 
+        // Resolve global variable references in task type BEFORE any model
+        // lookups — used by token estimator, sync model, and streaming model.
+        var resolvedType = globalVariableResolver.resolveValue(task.getType());
+
         List<ChatMessage> messages;
         if (maxContextTokens != null && maxContextTokens > 0) {
             // Resolve model name from provider-specific parameter keys
             String resolvedModelName = resolveModelName(processedParams);
-            var estimator = tokenCounterFactory.getEstimator(task.getType(), resolvedModelName);
+            var estimator = tokenCounterFactory.getEstimator(resolvedType, resolvedModelName);
             messages = conversationHistoryBuilder.buildTokenAwareMessages(memory, systemMessage, processedParams.get(KEY_PROMPT), maxContextTokens,
                     anchorFirstSteps, includeFirstAgentMessage, estimator, summaryPrefix, skipSteps);
         } else {
@@ -291,7 +306,7 @@ public class LlmTask implements ILifecycleTask {
             return;
         }
 
-        var chatModel = chatModelRegistry.getOrCreate(task.getType(), processedParams);
+        var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams);
         prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, task.getPreRequest());
 
         // Detect streaming mode — event sink is set when SSE endpoint is used
@@ -394,7 +409,7 @@ public class LlmTask implements ILifecycleTask {
                 }
             } else if (eventSink != null) {
                 // Legacy mode with streaming — try to get a streaming model
-                var streamingModel = chatModelRegistry.getOrCreateStreaming(task.getType(), processedParams);
+                var streamingModel = chatModelRegistry.getOrCreateStreaming(resolvedType, processedParams);
                 if (streamingModel != null) {
                     responseContent = streamingLegacyChatExecutor.execute(streamingModel, messages, eventSink);
                 } else {

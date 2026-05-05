@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,13 +26,17 @@ class EmbeddingModelFactoryTest {
     @Mock
     private SecretResolver secretResolver;
 
+    @Mock
+    private GlobalVariableResolver globalVariableResolver;
+
     private EmbeddingModelFactory factory;
 
     @BeforeEach
     void setUp() {
         openMocks(this);
         when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
-        factory = new EmbeddingModelFactory(secretResolver);
+        when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        factory = new EmbeddingModelFactory(globalVariableResolver, secretResolver);
     }
 
     @Test
