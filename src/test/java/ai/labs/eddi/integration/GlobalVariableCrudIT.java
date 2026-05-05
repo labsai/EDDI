@@ -141,7 +141,7 @@ public class GlobalVariableCrudIT extends BaseIntegrationIT {
                 .body(body)
                 .put(BASE_PATH + "/" + TENANT + "/bad key!")
                 .then().assertThat()
-                .statusCode(anyOf(equalTo(400), equalTo(500)));
+                .statusCode(400);
     }
 
     @Test

@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.variables.rest;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.variables.IGlobalVariableStore;
 import ai.labs.eddi.configs.variables.model.GlobalVariable;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -123,5 +124,11 @@ class RestGlobalVariableStoreTest {
         }
         assertThrows(Exception.class, () -> rest.upsertVariable(DEFAULT, null, new GlobalVariable(null, "v")),
                 "Null key should be invalid");
+    }
+
+    @Test
+    void upsertVariableNullBody() {
+        assertThrows(BadRequestException.class, () -> rest.upsertVariable(DEFAULT, "valid-key", null));
+        verifyNoInteractions(store);
     }
 }

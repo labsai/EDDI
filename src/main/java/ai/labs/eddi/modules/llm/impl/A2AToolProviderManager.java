@@ -316,7 +316,7 @@ public class A2AToolProviderManager {
     }
 
     private void warnIfRawKey(String apiKey, String url) {
-        if (!apiKey.startsWith("${vault:") && !apiKey.startsWith("${eddivault:")) {
+        if (!apiKey.startsWith("${vault:") && !apiKey.startsWith("${eddivault:") && !apiKey.startsWith("${vars:")) {
             LOGGER.warnf("A2A agent at %s uses a raw API key instead of a vault " + "reference (e.g., ${vault:my-key}). Raw keys risk secret "
                     + "leakage in config exports — migrate to vault references.", url);
         }

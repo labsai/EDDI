@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.variables.IGlobalVariableStore;
 import ai.labs.eddi.configs.variables.model.GlobalVariable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
@@ -63,6 +64,9 @@ public class RestGlobalVariableStore implements IRestGlobalVariableStore {
     public Response upsertVariable(String tenantId, String key, GlobalVariable variable) {
         validateId(tenantId, "tenantId");
         validateId(key, "key");
+        if (variable == null) {
+            throw new BadRequestException("Request body must not be empty");
+        }
 
         // Ensure the path params take precedence over anything in the body
         var toStore = new GlobalVariable(tenantId, key, variable.value(), variable.description(), variable.exportable());

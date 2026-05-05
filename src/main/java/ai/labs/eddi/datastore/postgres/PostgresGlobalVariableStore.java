@@ -70,7 +70,7 @@ public class PostgresGlobalVariableStore implements IGlobalVariableStore {
             schemaInitialized = true;
             LOGGER.info("PostgresGlobalVariableStore initialized (table=global_variables)");
         } catch (SQLException e) {
-            LOGGER.error("Failed to initialize global_variables table", e);
+            throw new RuntimeException("Failed to initialize global_variables table", e);
         }
     }
 
@@ -88,7 +88,7 @@ public class PostgresGlobalVariableStore implements IGlobalVariableStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.error("Failed to list all global variables for tenant: " + tenantId, e);
+            throw new RuntimeException("Failed to list all global variables for tenant: " + tenantId, e);
         }
         return result;
     }
@@ -107,7 +107,7 @@ public class PostgresGlobalVariableStore implements IGlobalVariableStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.error("Failed to get global variable: " + tenantId + "/" + key, e);
+            throw new RuntimeException("Failed to get global variable: " + tenantId + "/" + key, e);
         }
         return null;
     }
@@ -132,7 +132,7 @@ public class PostgresGlobalVariableStore implements IGlobalVariableStore {
             ps.setBoolean(5, variable.exportable());
             ps.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.error("Failed to upsert global variable: " + variable.tenantId() + "/" + variable.key(), e);
+            throw new RuntimeException("Failed to upsert global variable: " + variable.tenantId() + "/" + variable.key(), e);
         }
     }
 
@@ -146,7 +146,7 @@ public class PostgresGlobalVariableStore implements IGlobalVariableStore {
             ps.setString(2, key);
             ps.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.error("Failed to delete global variable: " + tenantId + "/" + key, e);
+            throw new RuntimeException("Failed to delete global variable: " + tenantId + "/" + key, e);
         }
     }
 
@@ -164,7 +164,7 @@ public class PostgresGlobalVariableStore implements IGlobalVariableStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.error("Failed to list all global variables for tenant: " + tenantId, e);
+            throw new RuntimeException("Failed to list all global variables for tenant: " + tenantId, e);
         }
         return result;
     }

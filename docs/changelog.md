@@ -13,6 +13,43 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔧 PR #470 Review Remediation (2026-05-05)
+
+**Repo:** EDDI (`feat/global-variables`)
+
+**What changed:** Addressed all Copilot and CodeRabbit review feedback on the Global Variables PR.
+
+### Code Fixes
+
+| File | Issue | Fix |
+|------|-------|-----|
+| `GlobalVariableCrudIT` | Invalid key test accepted 500 (should only accept 400) | Assert `statusCode(400)` only — `IllegalArgumentExceptionMapper` guarantees 400 |
+| `DataStoreProducers` | Missing CDI producer for `IGlobalVariableStore` (ambiguous bean) | Added `globalVariableStore()` producer following established pattern |
+| `RestGlobalVariableStore` | Null `variable` body → NPE → 500 | Added null guard throwing `BadRequestException` + unit test |
+| `GlobalVariableResolver` | `getTemplateData(null)` didn't normalize to DEFAULT_TENANT | Added null → `"default"` fallback, matching `resolveValue()` |
+| `PostgresGlobalVariableStore` | All `SQLException`s silently swallowed, returning empty results | Re-throw as `RuntimeException` — DB outage now surfaces properly |
+| `A2AToolProviderManager` | `warnIfRawKey()` false-positive on `${vars:...}` references | Added `${vars:}` prefix recognition alongside vault prefixes |
+| `McpSetupTools` | API key `@ToolArg` description incorrectly said "required for cloud providers" | Clarified: bedrock uses IAM, oracle-genai uses OCI auth — not all cloud providers need `apiKey` |
+
+### Test Updates
+
+| File | Change |
+|------|--------|
+| `PostgresGlobalVariableStoreTest` | 4 error-handling tests now assert `RuntimeException` propagation instead of silent empty returns |
+| `RestGlobalVariableStoreTest` | +1 test: `upsertVariableNullBody` verifies `BadRequestException` on missing body |
+
+### Documentation Fixes
+
+| File | Fix |
+|------|-----|
+| `changelog.md` | Section title `eddivar` → `vars`; resolution order `eddivar/eddivault` → `vars/vault`; A2A Security typo (duplicate `${vault:}`); test count 48 → 75; composite key descriptions |
+| `global-variables.md` | Added `text` language tags to 4 bare fenced code blocks (MD040) |
+| `secrets-vault.md` | Added `text` language tags to 4 bare fenced code blocks (MD040) |
+
+**Files:** `DataStoreProducers.java`, `RestGlobalVariableStore.java`, `GlobalVariableResolver.java`, `PostgresGlobalVariableStore.java`, `A2AToolProviderManager.java`, `McpSetupTools.java`, `GlobalVariableCrudIT.java`, `PostgresGlobalVariableStoreTest.java`, `RestGlobalVariableStoreTest.java`, `changelog.md`, `global-variables.md`, `secrets-vault.md`
+
+---
+
 ## 🏷️ Late-Binding Prefix Rename (2026-05-01)
 
 **Repo:** EDDI (`feat/global-variables`)
@@ -44,7 +81,7 @@ Each entry follows this format:
 
 ---
 
-## ⚙️ Global Variable Store — `eddivar` (2026-05-01)
+## ⚙️ Global Variable Store — `vars` (2026-05-01)
 
 **Repo:** EDDI (`feat/global-variables`)
 
@@ -56,15 +93,15 @@ Each entry follows this format:
 |-----------|---------|
 | `GlobalVariable` | Record model: `key`, `value`, `description`, `exportable` |
 | `IGlobalVariableStore` | Persistence interface (non-versioned, flat key-value) |
-| `GlobalVariableStore` | MongoDB adapter (`globalvariables` collection, `_id` = key) |
-| `PostgresGlobalVariableStore` | PostgreSQL adapter (`global_variables` table, `key` = PK) |
+| `GlobalVariableStore` | MongoDB adapter (`globalvariables` collection, composite `_id` = `tenantId/key`) |
+| `PostgresGlobalVariableStore` | PostgreSQL adapter (`global_variables` table, PK = `(tenant_id, key)`) |
 | `GlobalVariableResolver` | Regex-based `${vars:<key>}` resolution with Caffeine cache + invalidation listeners |
 | `IRestGlobalVariableStore` | JAX-RS REST API (`/variablestore/variables`) |
 | `RestGlobalVariableStore` | REST implementation with key validation and write-through cache invalidation |
 
 ### Pipeline Integration (8 callsites)
 
-Resolution order: Jinja2/Qute templates → **eddivar** → eddivault. Integrated into:
+Resolution order: Jinja2/Qute templates → **vars** → vault. Integrated into:
 
 1. **LlmTask** — `{{vars.<key>}}` template injection + `${vars:...}` in `type` field (provider late-binding)
 2. **ChatModelRegistry** — `resolveAll` before `resolveSecrets`, registers invalidation listener
@@ -95,7 +132,7 @@ Resolution order: Jinja2/Qute templates → **eddivar** → eddivault. Integrate
 - New: `docs/global-variables.md` — comprehensive public docs with architecture, syntax, REST API, use cases, and comparison table
 - Updated: `AGENTS.md` — added `snippets` and `vars` to both template data model tables (sections 4.2 and 5.1)
 
-### Tests (48 total)
+### Tests (75 total)
 
 | Test Class | Tests | Type |
 |-----------|-------|------|
@@ -3416,7 +3453,7 @@ Complete re-architecture of the EDDI Secrets Vault from agent-scoped ephemeral s
 | **Model** | `SecretReference` dual-format regex, `SecretMetadata` gains `description`, `lastRotatedAt`, `allowedAgents`, `@JsonFormat(STRING)` timestamps |
 | **REST API** | 3-segment → 2-segment paths (removed agentId), `SecretRequest` with description/allowedAgents |
 | **Auto-Vaulting** | `PropertySetterTask.autoVaultSecret()` namespaces keys with `agentId.keyName` to prevent cross-agent collision |
-| **A2A Security** | `A2AToolProviderManager` recognizes both `${vault:}` (legacy) and `${vault:}` prefixes |
+| **A2A Security** | `A2AToolProviderManager` recognizes both `${vault:}` (canonical) and `${eddivault:}` (legacy) prefixes |
 
 **Manager UI changes:**
 

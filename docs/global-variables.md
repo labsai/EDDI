@@ -4,7 +4,7 @@ EDDI includes a built-in global variable store for managing configuration values
 
 ## Architecture
 
-```
+```text
 ┌─────────────────┐     ┌──────────────────┐     ┌──────────────────┐
 │  Configuration   │────>│ GlobalVariable   │────>│  GlobalVariable  │
 │  (JSON configs)  │     │ Resolver         │     │  Store           │
@@ -39,7 +39,7 @@ Global variables are available through two complementary syntaxes:
 
 Available in LLM task system prompts and other template contexts. Resolved by the Jinja2/Qute template engine at template processing time.
 
-```
+```text
 You are an AI assistant powered by {{vars.default-model}}.
 Always respond at temperature {{vars.default-temperature}}.
 ```
@@ -86,7 +86,7 @@ Multi-tenant example:
 
 EDDI resolves configuration values in a strict three-step order:
 
-```
+```text
 1. Jinja2/Qute templates   →  {{vars.x}}, {{snippets.x}}, {{properties.x}}, etc.
 2. Global variables         →  ${vars:x}   ← this feature
 3. Vault secrets           →  ${vault:x}
@@ -273,7 +273,7 @@ Reference in agent config:
 
 ### System Prompt Injection
 
-```
+```text
 You are an AI assistant for {{vars.company-name}}.
 Your default language is {{vars.default-language}}.
 Current API version: {{vars.api-version}}.

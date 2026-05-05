@@ -4,7 +4,7 @@ EDDI includes a built-in secrets vault for managing sensitive values like API ke
 
 ## Architecture
 
-```
+```text
 ┌─────────────────┐     ┌──────────────┐     ┌───────────────────┐
 │  Configuration   │────>│ SecretResolver│────>│  VaultSecretProv.  │
 │  (JSON configs)  │     │  (resolves    │     │  (envelope crypto  │
@@ -37,12 +37,12 @@ EDDI includes a built-in secrets vault for managing sensitive values like API ke
 Secrets are referenced in configuration JSON using the vault URI syntax:
 
 **Short form** (uses `default` tenant):
-```
+```text
 ${vault:keyName}
 ```
 
 **Full form** (explicit tenant):
-```
+```text
 ${vault:tenantId/keyName}
 ```
 
@@ -75,7 +75,7 @@ Vault references are resolved **at runtime** when the task executes, never store
 
 EDDI uses **envelope encryption** — each tenant gets its own random Data Encryption Key (DEK), which is itself encrypted by a Key Encryption Key (KEK) derived from the master password.
 
-```
+```text
 Master Password → PBKDF2 (600,000 iterations) → KEK
                                                   │
 Secret → tenant DEK → AES-256-GCM encrypt → ciphertext

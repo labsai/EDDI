@@ -202,6 +202,9 @@ public class GlobalVariableResolver {
      * @return a map of key → value (cast to Object for template compatibility)
      */
     public Map<String, Object> getTemplateData(String tenantId) {
+        if (tenantId == null) {
+            tenantId = GlobalVariable.DEFAULT_TENANT;
+        }
         Map<String, String> variables = loadVariables(tenantId);
         return new HashMap<>(variables);
     }

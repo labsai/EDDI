@@ -205,44 +205,50 @@ class PostgresGlobalVariableStoreTest {
     // ==================== error handling ====================
 
     @Test
-    @DisplayName("getAll — returns empty map on SQLException")
+    @DisplayName("getAll — propagates SQLException as RuntimeException")
     void getAllSqlException() throws Exception {
         PreparedStatement ps = mock(PreparedStatement.class);
         when(connection.prepareStatement(anyString())).thenReturn(ps);
         when(ps.executeQuery()).thenThrow(new SQLException("test error"));
 
-        Map<String, String> result = store.getAll(DEFAULT);
-        assertTrue(result.isEmpty());
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> store.getAll(DEFAULT));
+        assertTrue(ex.getMessage().contains("Failed to list all global variables"));
+        assertInstanceOf(SQLException.class, ex.getCause());
     }
 
     @Test
-    @DisplayName("get — returns null on SQLException")
+    @DisplayName("get — propagates SQLException as RuntimeException")
     void getSqlException() throws Exception {
         PreparedStatement ps = mock(PreparedStatement.class);
         when(connection.prepareStatement(anyString())).thenReturn(ps);
         when(ps.executeQuery()).thenThrow(new SQLException("test error"));
 
-        assertNull(store.get(DEFAULT, "key"));
+        RuntimeException ex = assertThrows(RuntimeException.class, () -> store.get(DEFAULT, "key"));
+        assertTrue(ex.getMessage().contains("Failed to get global variable"));
     }
 
     @Test
-    @DisplayName("upsert — swallows SQLException gracefully")
+    @DisplayName("upsert — propagates SQLException as RuntimeException")
     void upsertSqlException() throws Exception {
         PreparedStatement ps = mock(PreparedStatement.class);
         when(connection.prepareStatement(anyString())).thenReturn(ps);
         when(ps.executeUpdate()).thenThrow(new SQLException("test error"));
 
-        assertDoesNotThrow(() -> store.upsert(new GlobalVariable("k", "v")));
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> store.upsert(new GlobalVariable("k", "v")));
+        assertTrue(ex.getMessage().contains("Failed to upsert global variable"));
     }
 
     @Test
-    @DisplayName("delete — swallows SQLException gracefully")
+    @DisplayName("delete — propagates SQLException as RuntimeException")
     void deleteSqlException() throws Exception {
         PreparedStatement ps = mock(PreparedStatement.class);
         when(connection.prepareStatement(anyString())).thenReturn(ps);
         when(ps.executeUpdate()).thenThrow(new SQLException("test error"));
 
-        assertDoesNotThrow(() -> store.delete(DEFAULT, "key"));
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> store.delete(DEFAULT, "key"));
+        assertTrue(ex.getMessage().contains("Failed to delete global variable"));
     }
 
     @Test
