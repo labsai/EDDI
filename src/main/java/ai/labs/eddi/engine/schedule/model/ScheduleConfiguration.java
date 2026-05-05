@@ -66,6 +66,9 @@ public class ScheduleConfiguration {
     private String conversationStrategy; // "new" | "persistent"
     private String persistentConversationId; // used when strategy = "persistent"
 
+    // -- Direct Execution (bypasses agent/conversation system) --
+    private String directExecutionType; // e.g. "ingestion" — null = use agent
+
     // -- State --
     private boolean enabled = true;
     private Instant nextFire;
@@ -213,6 +216,14 @@ public class ScheduleConfiguration {
 
     public void setPersistentConversationId(String persistentConversationId) {
         this.persistentConversationId = persistentConversationId;
+    }
+
+    public String getDirectExecutionType() {
+        return directExecutionType;
+    }
+
+    public void setDirectExecutionType(String directExecutionType) {
+        this.directExecutionType = directExecutionType;
     }
 
     public boolean isEnabled() {

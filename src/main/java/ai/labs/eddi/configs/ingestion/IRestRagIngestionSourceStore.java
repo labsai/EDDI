@@ -17,6 +17,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import java.util.List;
+import java.util.Map;
 
 import static jakarta.ws.rs.core.MediaType.APPLICATION_JSON;
 
@@ -54,6 +55,19 @@ public interface IRestRagIngestionSourceStore extends IRestVersionInfo {
                                                             @DefaultValue("0") Integer index,
                                                             @QueryParam("limit")
                                                             @DefaultValue("20") Integer limit);
+
+    @GET
+    @Path("/byRagConfig")
+    @Produces(APPLICATION_JSON)
+    @APIResponse(responseCode = "200", description = "List of ingestion sources for the given RAG config")
+    @Operation(summary = "Find by RAG config",
+               description = "Returns ingestion sources that reference a specific RAG configuration URI")
+    List<Map<String, Object>> findIngestionSourcesByRagConfig(
+                                                              @QueryParam("ragConfigUri") String ragConfigUri,
+                                                              @QueryParam("index")
+                                                              @DefaultValue("0") Integer index,
+                                                              @QueryParam("limit")
+                                                              @DefaultValue("20") Integer limit);
 
     @GET
     @Path("/{id}")
