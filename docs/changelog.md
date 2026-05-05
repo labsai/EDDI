@@ -50,6 +50,54 @@ Each entry follows this format:
 
 ---
 
+## 🔒 CVE-2026-42198 — PostgreSQL JDBC DoS Fix (2026-05-02)
+
+**Repo:** EDDI (`fix/cve-2026-42198-postgresql`)
+
+**What changed:** Pinned `org.postgresql:postgresql` to **42.7.11** in `<dependencyManagement>` to fix CVE-2026-42198 (CVSS 7.5 High — client-side DoS via SCRAM-SHA-256 iteration count abuse).
+
+### Vulnerability
+
+A malicious or compromised PostgreSQL server can send an excessively large PBKDF2 iteration count during SCRAM authentication. The JDBC driver (42.2.0–42.7.10) performs the computation without limits, exhausting client CPU and potentially wedging connection pools. `loginTimeout` does not mitigate it because the worker thread continues computing after timeout.
+
+### Investigation
+
+- **langchain4j-pgvector** hardcodes `postgresql.version=42.7.7` in its source POM (even on `main` / 1.15.0-SNAPSHOT). The 1.14.0-beta24 release ships 42.7.7 — *older* than our previous 42.7.10.
+- **Quarkus BOM** (3.34.6) manages `postgresql` via `quarkus-jdbc-postgresql` at 42.7.10 — also vulnerable.
+- Neither upstream has released a fix. The `<dependencyManagement>` override is the correct remediation.
+
+### Files
+
+- `pom.xml` — Added `<dependencyManagement>` override for `org.postgresql:postgresql:42.7.11`
+
+**Verification:** `mvnw compile` BUILD SUCCESS. `dependency:tree` confirms single resolved version `42.7.11`.
+
+---
+
+## 🔔 Slack Notification — Digest Improvements (2026-05-01)
+
+**Repo:** EDDI (`fix/slack-notification-deltas`)
+
+**What changed:** Fixed bogus Slack daily/weekly deltas, added views/clones delta tracking, rescheduled digests, and made daily/weekly baselines independent.
+
+### Root Cause (bogus deltas)
+
+The `Validate baselines` step only checked whether the required day/week baseline fields **existed** in the cached `metrics.json`, not whether they contained sensible values. When the GitHub Actions cache was evicted or rebuilt, those baseline fields were present, but the Docker baseline could still be set to `0` (from the initial seeding), making `day_valid=true`. The daily digest then computed `delta = current - 0 = current`, producing absurd deltas (e.g., `+391490` pulls).
+
+### Changes
+
+1. **Strengthened baseline validation** — baselines are now rejected if the Docker pulls baseline is `0`. Docker pulls only increase, so a zero baseline is always a cold-start artifact for an established project.
+2. **Added sanity guards in digest steps** — both daily and weekly digest steps detect when `delta == current` (baseline was 0) and skip the notification.
+3. **Views/clones delta tracking** — added `day_views`, `day_clones`, `week_views`, `week_clones` baselines to the metrics cache. Digests now show deltas for all 5 stats. Deltas are conditionally suppressed when the baseline field is missing from an older cache (avoids one-time bogus delta on first deploy).
+4. **Rescheduled digests** — daily moved from 6pm UTC (8pm CEST) to 7am UTC (9am CEST); weekly moved from Sunday 9am UTC to Monday 7am UTC (9am CEST).
+5. **Independent day/week baselines** — weekly runs no longer reset daily baselines. On Mondays both digests fire independently: daily shows yesterday's change, weekly shows the full week.
+
+### Decision
+
+- Views/clones baselines are NOT included in the field-presence check (`DAY_PRESENT`/`WEEK_PRESENT`). Adding them would skip the entire digest on first deploy (old cache lacks the new fields). Instead, view/clone deltas are conditionally hidden when the baseline is 0.
+
+**Files:** `.github/workflows/docker-pull-notify.yml`, `docs/changelog.md`
+
 ## 🏷️ Late-Binding Prefix Rename (2026-05-01)
 
 **Repo:** EDDI (`feat/global-variables`)

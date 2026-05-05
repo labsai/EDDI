@@ -36,6 +36,8 @@ public class RagConfiguration {
      * <li>{@code "bedrock"} — Amazon Bedrock Titan. Params: {@code model},
      * {@code region}</li>
      * <li>{@code "cohere"} — Cohere. Params: {@code model}, {@code apiKey}</li>
+     * <li>{@code "gemini"} — Google Gemini. Params: {@code model}, {@code apiKey},
+     * {@code taskType}</li>
      * <li>{@code "vertex"} — Google Vertex AI. Params: {@code project},
      * {@code location}, {@code model}</li>
      * </ul>
@@ -55,6 +57,8 @@ public class RagConfiguration {
      * <li>Bedrock: {"model": "amazon.titan-embed-text-v2:0", "region":
      * "us-east-1"}</li>
      * <li>Cohere: {"model": "embed-english-v3.0", "apiKey": "${vault:...}"}</li>
+     * <li>Gemini: {"model": "gemini-embedding-001", "apiKey": "${vault:...}",
+     * "taskType": "RETRIEVAL_DOCUMENT"}</li>
      * <li>Vertex: {"project": "my-project", "location": "us-central1", "model":
      * "text-embedding-005"}</li>
      * </ul>
@@ -71,6 +75,7 @@ public class RagConfiguration {
      * <li>{@code "mongodb-atlas"} — MongoDB Atlas Vector Search</li>
      * <li>{@code "elasticsearch"} — Elasticsearch vector search</li>
      * <li>{@code "qdrant"} — Qdrant vector database</li>
+     * <li>{@code "chroma"} — ChromaDB vector database</li>
      * </ul>
      */
     private String storeType = "in-memory";
@@ -85,6 +90,7 @@ public class RagConfiguration {
      * <li>elasticsearch: {"serverUrl", "indexName", "apiKey", "userName",
      * "password"}</li>
      * <li>qdrant: {"host", "port", "collectionName", "apiKey", "useTls"}</li>
+     * <li>chroma: {"baseUrl", "tenantName", "databaseName", "collectionName"}</li>
      * <li>in-memory: {} (no params needed)</li>
      * </ul>
      */

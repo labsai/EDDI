@@ -16,10 +16,10 @@
         <quarkus.microprofile.version>3.0.0.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.34.6</quarkus.platform.version>
-        <langchain4j-beta.version>1.13.0-beta23</langchain4j-beta.version>
-        <langchain4j.version>1.13.0</langchain4j.version>
-        <langchain4j-libs.version>1.13.0</langchain4j-libs.version>
+        <quarkus.platform.version>3.35.2</quarkus.platform.version>
+        <langchain4j-beta.version>1.14.0-beta24</langchain4j-beta.version>
+        <langchain4j.version>1.14.0</langchain4j.version>
+        <langchain4j-libs.version>1.14.0</langchain4j-libs.version>
         <jandex-maven-plugin.version>3.5.3</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.5.5</surefire-plugin.version>
@@ -54,6 +54,13 @@
                 <groupId>io.projectreactor.netty</groupId>
                 <artifactId>reactor-netty-http</artifactId>
                 <version>1.2.8</version>
+            </dependency>
+            <!-- Override postgresql to fix CVE-2026-42198 (client-side DoS via SCRAM iteration count).
+                 Vulnerable: 42.2.0–42.7.10. Pulled by langchain4j-pgvector (42.7.7) and Quarkus BOM. -->
+            <dependency>
+                <groupId>org.postgresql</groupId>
+                <artifactId>postgresql</artifactId>
+                <version>42.7.11</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -238,6 +245,11 @@
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-qdrant</artifactId>
+            <version>${langchain4j-beta.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-chroma</artifactId>
             <version>${langchain4j-beta.version}</version>
         </dependency>
         <dependency>

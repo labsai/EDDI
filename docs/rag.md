@@ -208,7 +208,7 @@ These are visible in the conversation memory snapshot and the audit ledger.
 - ✅ **Phase 8c**: RAG Foundation — config-driven knowledge base retrieval
 - ✅ **Phase 8c-0**: httpCall-based RAG (zero infrastructure)
 - ✅ **Phase 8c-β**: Persistent vector stores (pgvector)
-- ✅ **Phase 8c-γ**: RAG provider expansion (7 embedding models + 5 vector stores)
+- ✅ **Phase 8c-γ**: RAG provider expansion (8 embedding models + 6 vector stores)
 - ✅ **Phase 8c-M**: Manager UI — RAG editor with full provider parity + document ingestion
 - ✅ **REST ingestion endpoint**: `POST /ragstore/rags/{id}/ingest`
 
