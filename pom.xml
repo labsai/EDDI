@@ -55,6 +55,13 @@
                 <artifactId>reactor-netty-http</artifactId>
                 <version>1.2.8</version>
             </dependency>
+            <!-- Override postgresql to fix CVE-2026-42198 (client-side DoS via SCRAM iteration count).
+                 Vulnerable: 42.2.0–42.7.10. Pulled by langchain4j-pgvector (42.7.7) and Quarkus BOM. -->
+            <dependency>
+                <groupId>org.postgresql</groupId>
+                <artifactId>postgresql</artifactId>
+                <version>42.7.11</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
     <dependencies>

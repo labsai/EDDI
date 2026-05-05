@@ -13,6 +13,30 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔒 CVE-2026-42198 — PostgreSQL JDBC DoS Fix (2026-05-02)
+
+**Repo:** EDDI (`fix/cve-2026-42198-postgresql`)
+
+**What changed:** Pinned `org.postgresql:postgresql` to **42.7.11** in `<dependencyManagement>` to fix CVE-2026-42198 (CVSS 7.5 High — client-side DoS via SCRAM-SHA-256 iteration count abuse).
+
+### Vulnerability
+
+A malicious or compromised PostgreSQL server can send an excessively large PBKDF2 iteration count during SCRAM authentication. The JDBC driver (42.2.0–42.7.10) performs the computation without limits, exhausting client CPU and potentially wedging connection pools. `loginTimeout` does not mitigate it because the worker thread continues computing after timeout.
+
+### Investigation
+
+- **langchain4j-pgvector** hardcodes `postgresql.version=42.7.7` in its source POM (even on `main` / 1.15.0-SNAPSHOT). The 1.14.0-beta24 release ships 42.7.7 — *older* than our previous 42.7.10.
+- **Quarkus BOM** (3.34.6) manages `postgresql` via `quarkus-jdbc-postgresql` at 42.7.10 — also vulnerable.
+- Neither upstream has released a fix. The `<dependencyManagement>` override is the correct remediation.
+
+### Files
+
+- `pom.xml` — Added `<dependencyManagement>` override for `org.postgresql:postgresql:42.7.11`
+
+**Verification:** `mvnw compile` BUILD SUCCESS. `dependency:tree` confirms single resolved version `42.7.11`.
+
+---
+
 ## 🔔 Slack Notification — Digest Improvements (2026-05-01)
 
 **Repo:** EDDI (`fix/slack-notification-deltas`)
