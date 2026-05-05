@@ -98,6 +98,8 @@ The `Validate baselines` step only checked whether the required day/week baselin
 
 **Files:** `.github/workflows/docker-pull-notify.yml`, `docs/changelog.md`
 
+---
+
 ## 🏷️ Late-Binding Prefix Rename (2026-05-01)
 
 **Repo:** EDDI (`feat/global-variables`)
