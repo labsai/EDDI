@@ -107,6 +107,7 @@ public class WebContentFetcher implements ContentFetcher {
 
                 // Add TOC links to queue at depth 1
                 for (String link : tocLinks) {
+                    link = stripFragment(link);
                     if (shouldCrawl(link, startDomain, startPathPrefix, scope)) {
                         queue.offer(new UrlDepth(link, 1));
                     }
@@ -159,6 +160,7 @@ public class WebContentFetcher implements ContentFetcher {
                     if (depth < scope.maxDepth()) {
                         List<String> links = extractLinks(doc.content(), url);
                         for (String link : links) {
+                            link = stripFragment(link);
                             String normalizedLink = normalizeUrl(link);
                             if (!visited.contains(normalizedLink) && shouldCrawl(link, startDomain, startPathPrefix, scope)) {
                                 queue.offer(new UrlDepth(link, depth + 1));
@@ -181,6 +183,10 @@ public class WebContentFetcher implements ContentFetcher {
     }
 
     private FetchedDocument fetchDocument(String url, WebSourceConfig.CrawlSettings settings) throws Exception {
+        // Strip fragment — fragments are client-side only and never sent in HTTP
+        // requests
+        url = stripFragment(url);
+
         // Validate URL for SSRF safety
         UrlValidationUtils.validateUrl(url);
 
@@ -311,15 +317,24 @@ public class WebContentFetcher implements ContentFetcher {
 
     private String normalizeUrl(String url) {
         try {
+            url = stripFragment(url);
             URI uri = new URI(url);
             String normalized = uri.normalize().toString();
-            // Remove trailing slash and fragment for comparison
-            normalized = normalized.replaceAll("#$", "");
-            normalized = normalized.replaceAll("/$", "");
+            // Remove trailing slash for comparison
+            if (normalized.endsWith("/")) {
+                normalized = normalized.substring(0, normalized.length() - 1);
+            }
             return normalized.toLowerCase();
         } catch (URISyntaxException e) {
             return url.toLowerCase();
         }
+    }
+
+    private static String stripFragment(String url) {
+        if (url == null)
+            return null;
+        int idx = url.indexOf('#');
+        return idx >= 0 ? url.substring(0, idx) : url;
     }
 
     private boolean matchesGlob(String text, String pattern) {

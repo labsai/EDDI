@@ -20,11 +20,11 @@ import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -50,8 +50,6 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
     private final ContentHashTracker contentHashTracker;
     private final RestVersionInfo<RagIngestionSource> restVersionInfo;
 
-    private final String ingestionAgentId;
-
     @Inject
     public RestRagIngestionSourceStore(
             IRagIngestionSourceStore sourceStore,
@@ -59,15 +57,13 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
             IJsonSchemaCreator jsonSchemaCreator,
             IDocumentDescriptorStore documentDescriptorStore,
             RagIngestionService ingestionService,
-            ContentHashTracker contentHashTracker,
-            @ConfigProperty(name = "eddi.ingestion.agent-id", defaultValue = "ingestion-agent") String ingestionAgentId) {
+            ContentHashTracker contentHashTracker) {
         this.sourceStore = sourceStore;
         this.scheduleStore = scheduleStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
         this.documentDescriptorStore = documentDescriptorStore;
         this.ingestionService = ingestionService;
         this.contentHashTracker = contentHashTracker;
-        this.ingestionAgentId = ingestionAgentId;
         this.restVersionInfo = new RestVersionInfo<>(resourceURI, sourceStore, documentDescriptorStore);
     }
 
@@ -83,6 +79,15 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
     @Override
     public List<DocumentDescriptor> readIngestionSourceDescriptors(String filter, Integer index, Integer limit) {
         return restVersionInfo.readDescriptors("ai.labs.ingestion", filter, index, limit);
+    }
+
+    @Override
+    public List<Map<String, Object>> findIngestionSourcesByRagConfig(String ragConfigUri, Integer index, Integer limit) {
+        try {
+            return sourceStore.findByRagConfigUri(ragConfigUri, index, limit);
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw sneakyThrow(e);
+        }
     }
 
     @Override
@@ -198,25 +203,22 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
         schedule.setName("ingestion:" + source.name());
         schedule.setTriggerType(ScheduleConfiguration.TriggerType.CRON);
         schedule.setCronExpression(source.schedule().cronExpression());
-        schedule.setAgentId(ingestionAgentId);
-        schedule.setAgentVersion(0);
-        schedule.setEnvironment("production");
-        schedule.setConversationStrategy("new");
-        schedule.setMessage("Ingest: " + source.name());
-        schedule.setUserId("system:scheduler");
+        schedule.setDirectExecutionType("ingestion");
         schedule.setTimeZone("UTC");
         schedule.setEnabled(source.schedule().enabled());
         schedule.setMaxCostPerFire(-1.0);
-        schedule.setMetadata(Map.of(
-                "sourceId", sourceId,
-                "sourceType", source.type()));
+
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("sourceId", sourceId);
+        metadata.put("sourceType", source.type());
+        schedule.setMetadata(metadata);
 
         // Compute next fire time
         Instant nextFire = computeNextFire(schedule.getCronExpression());
         schedule.setNextFire(nextFire);
 
         String scheduleId = scheduleStore.createSchedule(schedule);
-        LOGGER.infof("Created schedule %s for ingestion source %s (type=%s)",
+        LOGGER.infof("Created schedule %s for ingestion source %s (type=%s, direct execution)",
                 LogSanitizer.sanitize(scheduleId), LogSanitizer.sanitize(sourceId), source.type());
     }
 
@@ -231,17 +233,18 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
                     schedule.setName("ingestion:" + source.name());
                     schedule.setCronExpression(source.schedule().cronExpression());
                     schedule.setEnabled(source.schedule().enabled());
-                    // Update source type in case it changed
-                    schedule.setMetadata(Map.of(
-                            "sourceId", sourceId,
-                            "sourceType", source.type()));
+                    schedule.setDirectExecutionType("ingestion");
+
+                    Map<String, Object> updatedMetadata = new HashMap<>(metadata);
+                    updatedMetadata.put("sourceType", source.type());
+                    schedule.setMetadata(updatedMetadata);
 
                     if (source.schedule().enabled() && schedule.getNextFire() == null) {
                         schedule.setNextFire(computeNextFire(schedule.getCronExpression()));
                     }
 
                     scheduleStore.updateSchedule(schedule.getId(), schedule);
-                    LOGGER.infof("Updated schedule %s for ingestion source %s (type=%s)",
+                    LOGGER.infof("Updated schedule %s for ingestion source %s (type=%s, direct execution)",
                             LogSanitizer.sanitize(schedule.getId()),
                             LogSanitizer.sanitize(sourceId), source.type());
                     return;
@@ -283,9 +286,20 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
     private String extractIdFromLocation(String location) {
         // Extract ID from location URI like:
         // http://host/ragstore/ingestion-sources/abc123
+        // http://host/ragstore/ingestion-sources/abc123?version=1
         int lastSlash = location.lastIndexOf('/');
         if (lastSlash >= 0 && lastSlash < location.length() - 1) {
-            return location.substring(lastSlash + 1);
+            String idAndParams = location.substring(lastSlash + 1);
+            // Strip query parameters (?version=1) and fragments
+            int queryStart = idAndParams.indexOf('?');
+            if (queryStart > 0) {
+                return idAndParams.substring(0, queryStart);
+            }
+            int fragmentStart = idAndParams.indexOf('#');
+            if (fragmentStart > 0) {
+                return idAndParams.substring(0, fragmentStart);
+            }
+            return idAndParams;
         }
         return null;
     }

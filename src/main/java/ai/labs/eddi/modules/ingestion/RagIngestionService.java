@@ -191,8 +191,15 @@ public class RagIngestionService {
                             sourceConfig.ingestionSettings().maxContentLength());
 
                     // Check if we should ingest (dedup)
-                    boolean shouldIngest = !sourceConfig.ingestionSettings().contentHashDedup()
-                            || contentHashTracker.shouldIngest(sourceId, doc.id(), markdown);
+                    boolean shouldIngest;
+                    try {
+                        shouldIngest = !sourceConfig.ingestionSettings().contentHashDedup()
+                                || contentHashTracker.shouldIngest(sourceId, doc.id(), markdown);
+                    } catch (Exception dedupEx) {
+                        LOGGER.warnf(dedupEx, "Dedup check failed for document '%s', will ingest fresh: %s",
+                                LogSanitizer.sanitize(doc.id()), dedupEx.getMessage());
+                        shouldIngest = true;
+                    }
 
                     if (shouldIngest) {
                         String hash = contentHashTracker.computeHash(markdown);
@@ -204,7 +211,7 @@ public class RagIngestionService {
                         LOGGER.debugf("Skipping unchanged document: %s", LogSanitizer.sanitize(doc.id()));
                     }
                 } catch (Exception e) {
-                    LOGGER.warnf(e, "Failed to convert document to Markdown: %s", LogSanitizer.sanitize(doc.id()));
+                    LOGGER.warnf(e, "Failed to process document '%s': %s", LogSanitizer.sanitize(doc.id()), e.getMessage());
                     errorsCounter.increment();
                 }
             }
