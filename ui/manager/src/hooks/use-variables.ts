@@ -8,6 +8,8 @@ import type { GlobalVariable } from "@/lib/api/variables";
 
 /* ─── Query Keys ─── */
 
+// TODO: When multi-tenant support is added, include tenantId in queryKey
+// and scope invalidation per tenant to prevent cross-tenant cache collisions.
 const variableKeys = {
   all: ["variables"] as const,
   list: ["variables", "list"] as const,

@@ -18,7 +18,7 @@ EDDI Manager is a modern React SPA that ships **inside** the EDDI Docker image. 
 - **LLM Configuration** — Connect to 12 providers (OpenAI, Anthropic, Gemini, Ollama, etc.)
 - **Resource Editors** — Form-based editors for rules, API calls, LLM configs, dictionaries, RAG, MCP, and more
 - **Secrets Vault** — Manage encrypted API keys with vault references
-- **Global Variables** — Deploy-wide configuration values for all agents (`eddivar`)
+- **Global Variables** — Deploy-wide configuration values for all agents (`${vars:<key>}` / `{{vars.<key>}}`)
 - **Audit Trail** — Timeline-based compliance and debugging viewer
 - **11 Languages** — English, German, French, Spanish, Portuguese, Chinese, Japanese, Korean, Arabic (RTL), Hindi, Thai
 

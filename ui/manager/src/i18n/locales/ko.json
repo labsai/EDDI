@@ -45,7 +45,7 @@
     "sync": "동기화",
     "userConversations": "사용자 대화",
     "userData": "사용자 데이터",
-    "variables": "Variables"
+    "variables": "변수"
   },
   "theme": {
     "light": "라이트",
@@ -1607,42 +1607,5 @@
       "conAdvocate1": "Con Advocate 1",
       "conAdvocate2": "Con Advocate 2"
     }
-  },
-  "variables": {
-    "title": "Global Variables",
-    "description": "Deployment-wide configuration values available in all agents.",
-    "create": "Add Variable",
-    "createTitle": "Add Global Variable",
-    "editTitle": "Edit Variable",
-    "keyLabel": "Key",
-    "keyPlaceholder": "e.g., default-model",
-    "keyError": "Letters, digits, dots, underscores, hyphens only.",
-    "valueLabel": "Value",
-    "valuePlaceholder": "e.g., gpt-4.1",
-    "valueWarning": "Values are visible in UI and logs. Use the Secrets Vault for sensitive data.",
-    "descriptionLabel": "Description (optional)",
-    "descriptionPlaceholder": "Optional description…",
-    "exportableLabel": "Include in agent exports",
-    "save": "Save Variable",
-    "saveSuccess": "Variable \"{{key}}\" saved",
-    "deleteSuccess": "Variable \"{{key}}\" deleted",
-    "confirmDeleteTitle": "Delete Variable",
-    "confirmDeleteMessage": "Are you sure you want to delete \"{{key}}\"? Agents using ${vars:{{key}}} will see unresolved references.",
-    "empty": "No global variables defined",
-    "emptyHint": "Click \"Add Variable\" to create your first deployment-wide configuration value.",
-    "searchPlaceholder": "Filter variables…",
-    "tableTitle": "{{count}} variable(s)",
-    "colKey": "Key",
-    "colValue": "Value",
-    "colDescription": "Description",
-    "colExportable": "Export",
-    "colReference": "Reference",
-    "colActions": "Actions",
-    "exportYes": "Included in exports",
-    "exportNo": "Excluded from exports",
-    "copyVars": "Copy ${vars:…} reference",
-    "refCopied": "Copied: {{ref}}",
-    "infoLine1": "Use {{vars.<key>}} in system prompts or ${vars:<key>} anywhere in agent configurations.",
-    "infoLine2": "Changes take effect within 2 minutes (cache TTL). For sensitive values, use the Secrets Vault instead."
   }
 }
