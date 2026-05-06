@@ -935,7 +935,7 @@ Critical architectural fixes from thorough v6 feature review. 12 files modified,
 
 ### One-Command Install & Onboarding Wizard ✅
 
-New users can set up EDDI with `curl ... | bash` (Linux/macOS/WSL) or `iwr ... | iex` (Windows). Interactive 5-step wizard.
+New users can set up EDDI with `curl ... | bash` (Linux/macOS/WSL) or `& ([scriptblock]::Create((iwr ...).Content))` (Windows). Interactive 5-step wizard.
 
 | File                               | Description                                                                                                       |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |

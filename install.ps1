@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     E.D.D.I -- One-Command Install & Onboarding Wizard
 
@@ -50,7 +50,7 @@
     Install with PostgreSQL and Keycloak authentication.
 
 .EXAMPLE
-    iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1 | iex
+    & ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1).Content))
     One-line remote install (uses defaults).
 
 .LINK
@@ -81,7 +81,7 @@ if ($Help) {
     exit 0
 }
 
-# Detect piped execution (iwr | iex) -- disable interactive prompts
+# Detect non-interactive execution (remote invoke or CI) -- disable prompts
 if (-not [Environment]::UserInteractive -or $Host.Name -eq 'Default Host') {
     $Defaults = $true
 }
