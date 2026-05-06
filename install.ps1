@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     E.D.D.I -- One-Command Install & Onboarding Wizard
 
@@ -50,7 +50,7 @@
     Install with PostgreSQL and Keycloak authentication.
 
 .EXAMPLE
-    Invoke-WebRequest -Uri "https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1" -OutFile "install.ps1"
+    Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1" -OutFile "install.ps1"
     Unblock-File .\install.ps1
     .\install.ps1
     Remote install: download, unblock, run.

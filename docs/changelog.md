@@ -15,9 +15,9 @@ Each entry follows this format:
 
 ## 🐛 Fix: Windows PowerShell install command (2026-05-06)
 
-**Repo:** EDDI (`fix/install-ps1-download-execute`)
+**Repo:** EDDI (`docs/windows-install-command`)
 
-**What changed:** Replaced the broken `scriptblock::Create` one-liner (and its predecessor `iwr | iex`) with a download-and-execute approach that works on all PowerShell versions and past AMSI.
+**What changed:** Replaced the broken `scriptblock::Create` one-liner (and its predecessor `iwr | iex`) with a download-and-execute approach that works on PowerShell 5.1+ and avoids expression-parser limitations.
 
 ### Root Cause
 
@@ -28,7 +28,7 @@ Each entry follows this format:
 Download-and-execute — the only pattern that uses the script-file parser:
 
 ```powershell
-Invoke-WebRequest -Uri "https://...install.ps1" -OutFile "install.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri "https://...install.ps1" -OutFile "install.ps1"
 Unblock-File .\install.ps1
 .\install.ps1
 ```
