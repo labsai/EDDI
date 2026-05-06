@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     E.D.D.I -- One-Command Install & Onboarding Wizard
 
@@ -51,7 +51,7 @@
 
 .EXAMPLE
     & ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1).Content))
-    One-line remote install (uses defaults).
+    One-line remote install (interactive wizard). Add -Defaults to skip prompts.
 
 .LINK
     https://eddi.labs.ai
@@ -81,7 +81,7 @@ if ($Help) {
     exit 0
 }
 
-# Detect non-interactive execution (remote invoke or CI) -- disable prompts
+# Detect non-interactive host (CI runners, scheduled tasks, services) -- disable prompts
 if (-not [Environment]::UserInteractive -or $Host.Name -eq 'Default Host') {
     $Defaults = $true
 }
