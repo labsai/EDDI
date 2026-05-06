@@ -13,6 +13,36 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🐛 Fix: `install.ps1` fails when invoked via `iwr | iex` (2026-05-06)
+
+**Repo:** EDDI (`fix/install-ps1-iwr-iex-compat`)
+
+**What changed:** Replaced the documented `iwr -useb ... | iex` one-liner with `& ([scriptblock]::Create((iwr -useb ...).Content))` across all docs.
+
+### Root Cause
+
+When PowerShell pipes content to `Invoke-Expression` (`iex`), it processes the text as a raw expression string — not as a script file. This means:
+- `<# ... #>` block comments containing `&` are parsed as code (the `&` call operator is reserved)
+- `[CmdletBinding()]` and `param()` blocks are only valid at the top of a script file, not inside an expression
+- The `[ValidateSet]` workaround from the previous fix (2026-04-01) addressed one symptom but the fundamental parsing issue remained
+
+The German error message confirms this: *"Das kaufmännische Und-Zeichen (&) ist nicht zulässig"* — the `&` in the ASCII art comment `One-Command Install & Onboarding Wizard` is being treated as a PowerShell operator.
+
+### Fix
+
+The `[scriptblock]::Create()` pattern downloads the entire script text via `.Content`, parses it as a complete script block (honoring block comments, `param()`, etc.), then executes it. This is the standard pattern used by major installers (Scoop, Chocolatey) for scripts with advanced PowerShell syntax.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `install.ps1` | Updated `.EXAMPLE` comment to use new pattern |
+| `README.md` | Updated Quick Start PowerShell command |
+| `docs/getting-started.md` | Updated Option 0 PowerShell command |
+| `HANDOFF.md` | Updated installer reference |
+
+---
+
 ## 🔧 PR #470 Review Remediation (2026-05-05)
 
 **Repo:** EDDI (`feat/global-variables`)
