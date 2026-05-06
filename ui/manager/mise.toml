@@ -1,0 +1,19 @@
+[tools]
+node = "v25.9.0"
+prettier = "latest"
+
+[tasks.install]
+description = "Install dependencies"
+run = "npm install"
+
+[tasks.dev]
+description = "Start Vite dev server on http://localhost:5173"
+run = "npm run dev"
+
+[tasks.test]
+description = "Run Vitest unit/component tests"
+run = "npm run test"
+
+[tasks.build]
+description = "Production build"
+run = "npm run build"
