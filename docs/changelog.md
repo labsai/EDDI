@@ -13,6 +13,30 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🐛 Fix: Windows PowerShell install command (2026-05-06)
+
+**Repo:** EDDI (`fix/install-ps1-download-execute`)
+
+**What changed:** Replaced the broken `scriptblock::Create` one-liner (and its predecessor `iwr | iex`) with a download-and-execute approach that works on all PowerShell versions and past AMSI.
+
+### Root Cause
+
+`install.ps1` uses `<# #>` block comments with `&`, `[CmdletBinding()]`, and `param()` — syntax only valid in the **script-file parser**. Both `iex` and `[scriptblock]::Create()` use the expression parser, which rejects these constructs. Behavior was also environment-dependent (passed on some PS 5.1 builds, failed on others).
+
+### Fix
+
+Download-and-execute — the only pattern that uses the script-file parser:
+
+```powershell
+Invoke-WebRequest -Uri "https://...install.ps1" -OutFile "install.ps1"
+Unblock-File .\install.ps1
+.\install.ps1
+```
+
+**Files:** `install.ps1` (`.EXAMPLE` comment), `README.md`, `docs/getting-started.md`, `HANDOFF.md`
+
+---
+
 ## 🐛 Improved Template Error Messages (2026-05-06)
 
 **Repo:** EDDI (`fix/template-error-message`)

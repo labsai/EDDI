@@ -50,16 +50,10 @@ curl -fsSL https://raw.githubusercontent.com/labsai/EDDI/main/install.sh | bash
 **Windows (PowerShell):**
 
 ```powershell
-& ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1).Content))
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1" -OutFile "install.ps1"
+Unblock-File .\install.ps1
+.\install.ps1
 ```
-
-> **Note:** If your Antivirus blocks this command or you prefer to inspect the script first:
->
-> ```powershell
-> Invoke-WebRequest -Uri "https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1" -OutFile "install.ps1"
-> Unblock-File .\install.ps1
-> .\install.ps1
-> ```
 
 Requires [Docker](https://docs.docker.com/get-docker/). The wizard auto-generates a unique vault encryption key for secret management.
 
