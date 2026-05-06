@@ -57,8 +57,10 @@ public class TemplatingEngine implements ITemplatingEngine {
                 return template;
             }
         } catch (Exception e) {
-            String message = "Error trying to insert context information into template. "
-                    + "Either context is missing or reference in template is wrong!";
+            String preview = template.length() > 200 ? template.substring(0, 200) + "…" : template;
+            String cause = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            String message = "Template rendering failed: " + cause
+                    + " | Template preview: " + preview;
             throw new TemplateEngineException(message, e);
         }
     }

@@ -143,7 +143,7 @@ public class OutputTemplateTask implements ILifecycleTask {
                         currentStep.replaceConversationOutputObject(KEY_OUTPUT, preTemplated, postTemplated);
                     }
                 } catch (ITemplatingEngine.TemplateEngineException e) {
-                    log.error(e.getLocalizedMessage(), e);
+                    log.errorf(e, "Template processing failed for output '%s': %s", outputKey, e.getLocalizedMessage());
                 }
             }
         });
@@ -169,7 +169,8 @@ public class OutputTemplateTask implements ILifecycleTask {
                     quickReply.setExpressions(postTemplatedExpressions);
                     return quickReply;
                 } catch (ITemplatingEngine.TemplateEngineException e) {
-                    log.error(e.getLocalizedMessage(), e);
+                    log.errorf(e, "Template processing failed for quick reply '%s': %s",
+                            quickReply.getValue(), e.getLocalizedMessage());
                     return null;
                 }
             }).collect(Collectors.toList());

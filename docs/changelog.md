@@ -13,6 +13,44 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🐛 Improved Template Error Messages (2026-05-06)
+
+**Repo:** EDDI (`fix/template-error-message`)
+
+**What changed:** Made template rendering error messages actionable instead of generic.
+
+### Problem
+
+When a system prompt or output template referenced a missing variable (e.g., `{context.language}` when no context is set), the error message was:
+
+```
+Error trying to insert context information into template. Either context is missing or reference in template is wrong!
+```
+
+This gave no indication of **which** variable was missing or **which** template failed, making it hard for agent designers to debug their configurations.
+
+### Fix
+
+- **TemplatingEngine**: Error now includes the Qute engine's specific cause (which expression failed) and a preview of the first 200 chars of the failing template
+- **LlmTask**: Error now includes the parameter key (e.g., `systemMessage`, `prompt`) so designers know which LLM config parameter has the broken reference
+- **OutputTemplateTask**: Error now includes the output key or quick reply value for the failing template
+
+### Example (before vs after)
+
+**Before:**
+```
+ERROR [LlmTask] Error trying to insert context information into template. Either context is missing or reference in template is wrong!
+```
+
+**After:**
+```
+ERROR [LlmTask] Template processing failed for LLM parameter 'systemMessage': Template rendering failed: Rendering error in template ... | Template preview: You are a helpful assistant. The user speaks {context.language}...
+```
+
+**Files:** `TemplatingEngine.java`, `LlmTask.java`, `OutputTemplateTask.java`
+
+---
+
 ## 🐛 Fix: `install.ps1` fails when invoked via `iwr | iex` (2026-05-06)
 
 **Repo:** EDDI (`fix/install-ps1-iwr-iex-compat`)
