@@ -50,8 +50,8 @@
     Install with PostgreSQL and Keycloak authentication.
 
 .EXAMPLE
-    iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1 | iex
-    One-line remote install (uses defaults).
+    & ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1).Content))
+    One-line remote install (interactive wizard). Add -Defaults to skip prompts.
 
 .LINK
     https://eddi.labs.ai
@@ -81,7 +81,7 @@ if ($Help) {
     exit 0
 }
 
-# Detect piped execution (iwr | iex) -- disable interactive prompts
+# Detect non-interactive host (CI runners, scheduled tasks, services) -- disable prompts
 if (-not [Environment]::UserInteractive -or $Host.Name -eq 'Default Host') {
     $Defaults = $true
 }

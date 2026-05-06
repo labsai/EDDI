@@ -50,10 +50,10 @@ curl -fsSL https://raw.githubusercontent.com/labsai/EDDI/main/install.sh | bash
 **Windows (PowerShell):**
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1 | iex
+& ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1).Content))
 ```
 
-> **Note:** If your Antivirus blocks this command as "malicious content", securely download and run it instead:
+> **Note:** If your Antivirus blocks this command or you prefer to inspect the script first:
 >
 > ```powershell
 > Invoke-WebRequest -Uri "https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1" -OutFile "install.ps1"
