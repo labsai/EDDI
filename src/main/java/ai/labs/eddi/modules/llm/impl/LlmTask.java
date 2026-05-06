@@ -532,7 +532,7 @@ public class LlmTask implements ILifecycleTask {
                     processedParams.put(key, templatingEngine.processTemplate(value, templateDataObjects));
                 }
             } catch (ITemplatingEngine.TemplateEngineException e) {
-                LOGGER.error(e.getLocalizedMessage(), e);
+                LOGGER.errorf(e, "Template processing failed for LLM parameter '%s': %s", key, e.getLocalizedMessage());
             }
         });
         return processedParams;
