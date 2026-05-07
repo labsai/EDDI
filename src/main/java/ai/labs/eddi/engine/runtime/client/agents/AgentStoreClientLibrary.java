@@ -61,6 +61,11 @@ public class AgentStoreClientLibrary implements IAgentStoreClientLibrary {
             ((Agent) agent).setMemoryPolicy(agentConfig.getMemoryPolicy());
         }
 
+        // Identity Masking (Wave 1: Behavioral Counterweights)
+        if (agentConfig.getIdentityMasking() != null) {
+            ((Agent) agent).setIdentityMaskingConfig(agentConfig.getIdentityMasking());
+        }
+
         return agent;
     }
 }

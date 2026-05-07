@@ -94,6 +94,8 @@ public class LlmTask implements ILifecycleTask {
     private final ConversationSummarizer conversationSummarizer;
     private final PromptSnippetService promptSnippetService;
     private final GlobalVariableResolver globalVariableResolver;
+    private final CounterweightService counterweightService;
+    private final IdentityMaskingService identityMaskingService;
 
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
@@ -113,6 +115,8 @@ public class LlmTask implements ILifecycleTask {
             ConversationSummarizer conversationSummarizer,
             PromptSnippetService promptSnippetService,
             GlobalVariableResolver globalVariableResolver,
+            CounterweightService counterweightService,
+            IdentityMaskingService identityMaskingService,
             ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
@@ -137,6 +141,8 @@ public class LlmTask implements ILifecycleTask {
         this.conversationSummarizer = conversationSummarizer;
         this.promptSnippetService = promptSnippetService;
         this.globalVariableResolver = globalVariableResolver;
+        this.counterweightService = counterweightService;
+        this.identityMaskingService = identityMaskingService;
     }
 
     @Override
@@ -243,6 +249,20 @@ public class LlmTask implements ILifecycleTask {
                 LOGGER.warnf(e, "RAG context retrieval failed for task '%s': %s", taskId, e.getMessage());
             }
         }
+
+        // === Behavioral Counterweight & Identity Masking (Wave 1) ===
+        // Identity masking is prepended first (if enabled), then counterweight
+        // is applied. Order matters: masking is agent-level, counterweight is
+        // per-task.
+        systemMessage = identityMaskingService.apply(systemMessage, memory.getIdentityMaskingConfig());
+
+        // Resolve channel tag for strict→cautious downgrade on scheduled agents
+        String channelTag = null;
+        IData<String> channelData = currentStep.getLatestData("channel:tag");
+        if (channelData != null && channelData.getResult() != null) {
+            channelTag = channelData.getResult();
+        }
+        systemMessage = counterweightService.apply(systemMessage, task.getCounterweight(), channelTag);
 
         // When structured JSON output is expected, reinforce the format instruction.
         // If a responseSchema is provided, include it explicitly so the LLM knows the

@@ -105,6 +105,11 @@ class LlmTaskTest {
 
         var toolResponseTruncator = new ToolResponseTruncator(new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
 
+        var counterweightService = new CounterweightService(new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+        counterweightService.initMetrics();
+        var identityMaskingService = new IdentityMaskingService(new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+        identityMaskingService.initMetrics();
+
         langChainTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter, templatingEngine, jsonSerialization, prePostUtils,
                 chatModelRegistry, calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool,
                 weatherTool, apiCallExecutor, toolExecutionService, mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
@@ -112,6 +117,8 @@ class LlmTaskTest {
                 new TokenCounterFactory(), mock(ConversationSummarizer.class),
                 mock(PromptSnippetService.class),
                 globalVariableResolver,
+                counterweightService,
+                identityMaskingService,
                 toolResponseTruncator, mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
     }
 

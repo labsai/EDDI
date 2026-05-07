@@ -13,6 +13,45 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🛡️ Wave 1 — Behavioral Counterweights & Identity Masking (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Implemented Wave 1 of the agentic improvements plan — config-driven behavioral counterweights and identity masking.
+
+### New Components
+- **`CounterweightService`** — Engine-level safety injection into LLM system prompts. Level presets: `normal` (no-op), `cautious`, `strict`. Strict auto-downgrades to cautious for scheduled/batch agents. Custom instructions override presets.
+- **`IdentityMaskingService`** — Prepends identity concealment rules to system prompts. Independent of counterweights; agent-level config.
+- **`DeploymentContextCondition`** — Behavior rule condition matching on `EDDI_DEPLOYMENT_ENV` and agent tags. Enables environment-aware routing (e.g., force cautious in production).
+- **`CounterweightConfig`** — Inner class in `LlmConfiguration.Task` for per-task counterweight configuration (level, placement, customInstructions).
+- **`IdentityMaskingConfig`** — Inner class in `AgentConfiguration` for identity masking rules.
+
+### Modified Files
+- `LlmTask.java` — Injected both services; calls identity masking → counterweight after system prompt compilation, before message building.
+- `LlmConfiguration.java` — Added `CounterweightConfig` inner class and field to `Task`.
+- `AgentConfiguration.java` — Added `IdentityMaskingConfig` inner class and field.
+- `RuleDeserialization.java` — Registered `DeploymentContextCondition` in condition factory.
+- `IConversationMemory.java` / `ConversationMemory.java` — Added `getIdentityMaskingConfig()` / `setIdentityMaskingConfig()`.
+- `Agent.java` / `AgentStoreClientLibrary.java` — Threading identity masking config from agent factory to conversation memory.
+
+### Design Decisions
+- Counterweights are **system prompt injections**, not a separate pipeline task — they are a pre-LLM-call concern.
+- Identity masking is prepended **before** counterweight injection. Order: masking (agent-level) → counterweight (task-level).
+- Channel tag `"scheduled"` triggers strict→cautious downgrade to prevent one-step-at-a-time being destructive for batch agents.
+- All new config fields are `@JsonInclude(NON_NULL)` with safe defaults for backward compatibility.
+
+### Tests (33 new)
+- `CounterweightServiceTest` (14 tests) — all levels, placements, custom instructions, scheduled downgrade, metrics, case sensitivity.
+- `IdentityMaskingServiceTest` (7 tests) — enabled/disabled, empty/null rules, metrics, formatting.
+- `DeploymentContextConditionTest` (12 tests) — env matching, tag matching, case insensitivity, null configs, clone.
+- `LlmTaskTest` (55 existing tests) — all pass, no regressions.
+
+### Metrics
+- `eddi.counterweight.activation.count{level}` — counter per activation level
+- `eddi.counterweight.strict.downgraded` — counter for strict→cautious downgrades
+- `eddi.identity.masking.applied` — counter for masking activations
+
+---
+
 ## 🔧 Wave 3 — A2A Capability Registry Gap Closure (2026-05-07)
 
 **Repo:** EDDI (`feature/agentic-wave3-capabilities`)

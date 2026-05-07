@@ -255,6 +255,17 @@ public record LlmConfiguration(List<Task> tasks) {
          */
         private ToolResponseLimits toolResponseLimits;
 
+        // === Behavioral Counterweight (Wave 1) ===
+
+        /**
+         * Behavioral counterweight configuration. When enabled, safety instructions are
+         * injected into the system prompt to temper agent behavior. See
+         * {@link CounterweightConfig}.
+         *
+         * @since 6.0.0
+         */
+        private CounterweightConfig counterweight;
+
         // === Helper Methods ===
 
         /**
@@ -553,6 +564,14 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setConversationSummary(ConversationSummaryConfig conversationSummary) {
             this.conversationSummary = conversationSummary;
+        }
+
+        public CounterweightConfig getCounterweight() {
+            return counterweight;
+        }
+
+        public void setCounterweight(CounterweightConfig counterweight) {
+            this.counterweight = counterweight;
         }
     }
 
@@ -1111,6 +1130,60 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setSummarizationPrompt(String summarizationPrompt) {
             this.summarizationPrompt = summarizationPrompt;
+        }
+    }
+
+    /**
+     * Behavioral counterweight configuration. Controls engine-level safety
+     * injection into LLM system prompts.
+     * <p>
+     * Level presets:
+     * <ul>
+     * <li>{@code normal} — no injection (default when absent)</li>
+     * <li>{@code cautious} — declare intent, prefer clarification, verify
+     * assumptions</li>
+     * <li>{@code strict} — all of cautious plus one-step-at-a-time, flag state
+     * changes</li>
+     * </ul>
+     *
+     * @since 6.0.0
+     */
+    public static class CounterweightConfig {
+        private boolean enabled = false;
+        private String level = "normal";
+        private String placement = "suffix";
+        private java.util.List<String> customInstructions;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getLevel() {
+            return level;
+        }
+
+        public void setLevel(String level) {
+            this.level = level;
+        }
+
+        public String getPlacement() {
+            return placement;
+        }
+
+        public void setPlacement(String placement) {
+            this.placement = placement;
+        }
+
+        public java.util.List<String> getCustomInstructions() {
+            return customInstructions;
+        }
+
+        public void setCustomInstructions(java.util.List<String> customInstructions) {
+            this.customInstructions = customInstructions;
         }
     }
 }

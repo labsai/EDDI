@@ -30,6 +30,7 @@ public class Agent implements IAgent {
     private Deployment.Status deploymentStatus;
     private AgentConfiguration.UserMemoryConfig userMemoryConfig;
     private AgentConfiguration.MemoryPolicy memoryPolicy;
+    private AgentConfiguration.IdentityMaskingConfig identityMaskingConfig;
 
     public Agent(String agentId, Integer agentVersion) {
         this.agentId = agentId;
@@ -50,6 +51,9 @@ public class Agent implements IAgent {
         if (memoryPolicy != null) {
             conversationMemory.setMemoryPolicy(memoryPolicy);
         }
+        if (identityMaskingConfig != null) {
+            conversationMemory.setIdentityMaskingConfig(identityMaskingConfig);
+        }
         Conversation conversation = new Conversation(executableWorkflows, conversationMemory, propertiesHandler,
                 outputProvider);
         conversation.init(context);
@@ -62,6 +66,9 @@ public class Agent implements IAgent {
             throws IllegalAccessException {
         if (memoryPolicy != null) {
             conversationMemory.setMemoryPolicy(memoryPolicy);
+        }
+        if (identityMaskingConfig != null) {
+            conversationMemory.setIdentityMaskingConfig(identityMaskingConfig);
         }
         return new Conversation(executableWorkflows, conversationMemory, propertiesHandler, outputProvider);
     }
@@ -98,5 +105,13 @@ public class Agent implements IAgent {
 
     public void setMemoryPolicy(AgentConfiguration.MemoryPolicy memoryPolicy) {
         this.memoryPolicy = memoryPolicy;
+    }
+
+    public AgentConfiguration.IdentityMaskingConfig getIdentityMaskingConfig() {
+        return identityMaskingConfig;
+    }
+
+    public void setIdentityMaskingConfig(AgentConfiguration.IdentityMaskingConfig identityMaskingConfig) {
+        this.identityMaskingConfig = identityMaskingConfig;
     }
 }
