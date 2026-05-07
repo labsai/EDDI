@@ -73,6 +73,7 @@ class AgentOrchestrator {
     private final TextSummarizerTool textSummarizerTool;
     private final PdfReaderTool pdfReaderTool;
     private final WeatherTool weatherTool;
+    private final FetchToolResponsePageTool fetchToolResponsePageTool;
     private final ToolExecutionService toolExecutionService;
     private final McpToolProviderManager mcpToolProviderManager;
     private final A2AToolProviderManager a2aToolProviderManager;
@@ -90,6 +91,7 @@ class AgentOrchestrator {
 
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
+            FetchToolResponsePageTool fetchToolResponsePageTool,
             ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager, A2AToolProviderManager a2aToolProviderManager,
             IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore, IResourceClientLibrary resourceClientLibrary,
             IApiCallExecutor apiCallExecutor, IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter,
@@ -105,6 +107,7 @@ class AgentOrchestrator {
         this.toolExecutionService = toolExecutionService;
         this.mcpToolProviderManager = mcpToolProviderManager;
         this.a2aToolProviderManager = a2aToolProviderManager;
+        this.fetchToolResponsePageTool = fetchToolResponsePageTool;
         this.restAgentStore = restAgentStore;
         this.restWorkflowStore = restWorkflowStore;
         this.resourceClientLibrary = resourceClientLibrary;
@@ -370,6 +373,8 @@ class AgentOrchestrator {
                 tools.add(pdfReaderTool);
             if (whitelist.contains("weather"))
                 tools.add(weatherTool);
+            if (whitelist.contains("fetch_page") || whitelist.contains("fetch_tool_response_page"))
+                tools.add(fetchToolResponsePageTool);
             if (whitelist.contains("usermemory"))
                 addUserMemoryToolIfEnabled(tools, memory);
             if (whitelist.contains("conversationRecall"))
@@ -384,6 +389,7 @@ class AgentOrchestrator {
             tools.add(textSummarizerTool);
             tools.add(pdfReaderTool);
             tools.add(weatherTool);
+            tools.add(fetchToolResponsePageTool);
             // Auto-add user memory tool if agent has it enabled
             addUserMemoryToolIfEnabled(tools, memory);
             // Auto-add conversation recall tool if rolling summary is active

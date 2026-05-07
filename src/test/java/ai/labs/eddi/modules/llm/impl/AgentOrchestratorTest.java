@@ -59,7 +59,8 @@ class AgentOrchestratorTest {
         weatherTool = mock(WeatherTool.class);
 
         orchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool, textSummarizerTool,
-                pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
+                pdfReaderTool, weatherTool, mock(FetchToolResponsePageTool.class), mock(ToolExecutionService.class),
+                mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
                 mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class),
                 mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class), mock(ToolResponseTruncator.class),
                 mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
@@ -103,7 +104,7 @@ class AgentOrchestratorTest {
 
         List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
 
-        assertEquals(8, tools.size(), "Should return all 8 tools");
+        assertEquals(9, tools.size(), "Should return all 9 tools");
         assertTrue(tools.contains(calculatorTool));
         assertTrue(tools.contains(dateTimeTool));
         assertTrue(tools.contains(webSearchTool));
@@ -123,7 +124,7 @@ class AgentOrchestratorTest {
 
         List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
 
-        assertEquals(8, tools.size(), "Should return all tools when whitelist is empty");
+        assertEquals(9, tools.size(), "Should return all tools when whitelist is empty");
     }
 
     @Test
@@ -165,7 +166,7 @@ class AgentOrchestratorTest {
 
         List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
 
-        assertEquals(8, tools.size(), "Should return all 8 tools");
+        assertEquals(8, tools.size(), "Should return all 8 whitelisted tools");
     }
 
     @Test
@@ -435,7 +436,8 @@ class AgentOrchestratorTest {
         var resourceClientLibrary = mock(IResourceClientLibrary.class);
 
         var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                textSummarizerTool, pdfReaderTool, weatherTool, mock(FetchToolResponsePageTool.class), mock(ToolExecutionService.class),
+                mock(McpToolProviderManager.class),
                 mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
                 mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class), mock(ToolResponseTruncator.class),
                 mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
@@ -462,7 +464,8 @@ class AgentOrchestratorTest {
         var resourceClientLibrary = mock(IResourceClientLibrary.class);
 
         var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                textSummarizerTool, pdfReaderTool, weatherTool, mock(FetchToolResponsePageTool.class), mock(ToolExecutionService.class),
+                mock(McpToolProviderManager.class),
                 mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
                 mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class), mock(ToolResponseTruncator.class),
                 mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
@@ -513,7 +516,8 @@ class AgentOrchestratorTest {
         var resourceClientLibrary = mock(IResourceClientLibrary.class);
 
         var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                textSummarizerTool, pdfReaderTool, weatherTool, mock(FetchToolResponsePageTool.class), mock(ToolExecutionService.class),
+                mock(McpToolProviderManager.class),
                 mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
                 mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class), mock(ToolResponseTruncator.class),
                 mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
@@ -558,7 +562,8 @@ class AgentOrchestratorTest {
         var restAgentStore = mock(IRestAgentStore.class);
 
         var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                textSummarizerTool, pdfReaderTool, weatherTool, mock(FetchToolResponsePageTool.class), mock(ToolExecutionService.class),
+                mock(McpToolProviderManager.class),
                 mock(A2AToolProviderManager.class), restAgentStore, mock(IRestWorkflowStore.class), mock(IResourceClientLibrary.class),
                 mock(IApiCallExecutor.class), mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class),
                 mock(ToolResponseTruncator.class), mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
@@ -587,7 +592,8 @@ class AgentOrchestratorTest {
         var resourceClientLibrary = mock(IResourceClientLibrary.class);
 
         var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, mock(ToolExecutionService.class), mock(McpToolProviderManager.class),
+                textSummarizerTool, pdfReaderTool, weatherTool, mock(FetchToolResponsePageTool.class), mock(ToolExecutionService.class),
+                mock(McpToolProviderManager.class),
                 mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
                 mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class), mock(ToolResponseTruncator.class),
                 mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));

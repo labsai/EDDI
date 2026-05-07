@@ -13,6 +13,45 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔧 Wave 2 — MCP Governance & Token-Efficient Tool Loading (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Implemented Wave 2 of the agentic improvements — paginated tool responses, lazy/dynamic tool loading, and enhanced truncation strategies.
+
+### New Components
+- **`PaginatedResponseStore`** — Caffeine-backed store for paginated tool responses (15min TTL). Splits oversized tool output into retrievable pages.
+- **`FetchToolResponsePageTool`** — Built-in LLM tool (`fetch_tool_response_page`) that retrieves pages from the store by responseId.
+- **`DiscoverToolsTool`** — Meta-tool for lazy/dynamic tool loading. LLM discovers available tools by category/keyword instead of receiving all tool schemas upfront.
+- **`ToolLoadingStrategy`** config class — Controls tool presentation: `eager` (all upfront), `lazy` (only discover_tools first), `dynamic` (action-filtered).
+
+### Enhanced Components
+- **`ToolResponseTruncator`** — Now supports three strategies via `truncationStrategy` config:
+  - `truncate` (default) — hard cut with original behavior
+  - `paginate` — stores pages in PaginatedResponseStore, returns first page + responseId
+  - `summarize` — routes through cheap model (`summarizerModel` config), falls back to truncate on failure or cost ceiling (>200k chars)
+- **`ToolResponseLimits`** — Added `truncationStrategy` and `summarizerModel` fields
+- **`AgentOrchestrator`** — Added FetchToolResponsePageTool as built-in tool
+
+### Design Decisions
+- **Paginate as opt-in** — `truncate` remains default for backward compatibility
+- **Summarize stub** — Summarizer model integration is stubbed with proper fallback chain; actual model call wiring deferred until ChatModelRegistry supports secondary model lookups
+- **DiscoverToolsTool not CDI-managed** — Constructed per-invocation with available tool specs since it needs runtime context
+- **FetchToolResponsePageTool is CDI** — Singleton since it only reads from PaginatedResponseStore
+
+### Tests (42 new)
+- `PaginatedResponseStoreTest` — 10 tests: store/page/count/edge cases
+- `FetchToolResponsePageToolTest` — 7 tests: validation/expired/success/escaping
+- `DiscoverToolsToolTest` — 12 tests: category/keyword/cap/edge cases
+- `ToolResponseTruncatorExtendedTest` — 13 tests: all strategies/fallbacks/selection
+
+### Files Modified
+- `LlmConfiguration.java` — Added ToolLoadingStrategy, enhanced ToolResponseLimits
+- `ToolResponseTruncator.java` — Three strategies with fallback chain
+- `AgentOrchestrator.java` — FetchToolResponsePageTool wiring
+- `LlmTask.java` — Constructor updated for FetchToolResponsePageTool
+- `AgentOrchestratorTest.java` — Updated for new constructor parameter
+- `LlmTaskTest.java` — Updated for new constructor parameter
+
 ## 🛡️ Wave 1 — Behavioral Counterweights & Identity Masking (2026-05-07)
 
 **Repo:** EDDI (`feature/agentic-wave3-capabilities`)
