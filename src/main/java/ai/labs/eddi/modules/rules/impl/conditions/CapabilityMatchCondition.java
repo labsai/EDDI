@@ -6,15 +6,18 @@ package ai.labs.eddi.modules.rules.impl.conditions;
 
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService.CapabilityMatch;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.modules.rules.impl.Rule;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Behavior rule condition that matches agents with a required capability skill.
@@ -151,10 +154,53 @@ public class CapabilityMatchCondition implements IRuleCondition {
             var data = new ai.labs.eddi.engine.memory.model.Data<>(MEMORY_KEY, matchedAgentIds);
             memory.getCurrentStep().storeData(data);
 
+            // Audit: log capability selection decision for compliance traceability
+            emitAuditEvent(memory, resolvedSkill, resolvedStrategy, matchedAgentIds);
+
             return ExecutionState.SUCCESS;
         }
 
         return ExecutionState.FAIL;
+    }
+
+    /**
+     * Emit a CAPABILITY_SELECTION audit event with skill, strategy, candidate agent
+     * IDs, and the selected (first) agent ID. The audit collector may be null if
+     * auditing is disabled — fail silently.
+     */
+    private void emitAuditEvent(IConversationMemory memory, String resolvedSkill,
+                                String resolvedStrategy, List<String> matchedAgentIds) {
+        try {
+            var auditCollector = memory.getAuditCollector();
+            if (auditCollector == null) {
+                return;
+            }
+
+            var entry = new AuditEntry(
+                    UUID.randomUUID().toString(),
+                    memory.getConversationId(),
+                    memory.getAgentId(),
+                    memory.getAgentVersion(),
+                    memory.getUserId(),
+                    null, // environment — enriched by ConversationService
+                    memory.getAllSteps().size(),
+                    "capabilityMatch",
+                    "CAPABILITY_SELECTION",
+                    0,
+                    0L,
+                    Map.of(
+                            "skill", resolvedSkill,
+                            "strategy", resolvedStrategy,
+                            "candidateAgentIds", matchedAgentIds),
+                    Map.of(
+                            "selectedAgentId", matchedAgentIds.get(0)),
+                    null, null, null, 0.0,
+                    Instant.now(), null, null);
+
+            auditCollector.collect(entry);
+        } catch (Exception e) {
+            LOGGER.debugf("Failed to emit CAPABILITY_SELECTION audit event: %s", e.getMessage());
+        }
     }
 
     /**

@@ -13,6 +13,35 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔧 Wave 3 — A2A Capability Registry Gap Closure (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Closed all five outstanding gaps from Wave 3 of the agentic improvements plan.
+
+### Changes
+
+1. **Fix `round_robin` strategy bug** (`CapabilityRegistryService.java`): Replaced `Collections.shuffle()` with deterministic `AtomicInteger`-based per-skill rotation. Added explicit `"random"` strategy for when shuffling is actually desired. Counters reset on agent register/unregister to avoid drift on topology changes.
+
+2. **Reject inert security flags** (`RestAgentStore.java`): Agent create/update now returns HTTP 400 if `signInterAgentMessages`, `signMcpInvocations`, or `requirePeerVerification` is set to `true`. These cryptographic identity features are not yet implemented (Wave 6). Prevents silent misconfiguration.
+
+3. **Public capability discovery endpoint** (`RestA2AEndpoint.java`):
+   - `GET /.well-known/capabilities?skill=X&strategy=highest_confidence` — queries registry, returns sanitized matches
+   - `GET /.well-known/capabilities/skills` — lists all registered skill names
+   - Gated behind `eddi.a2a.capabilities.public` config property (default `false`)
+   - Same auth model as `/.well-known/agent.json`
+
+4. **Audit capability selections** (`CapabilityMatchCondition.java`): After a successful match, emits `CAPABILITY_SELECTION` audit event via `memory.getAuditCollector()` with `skill`, `strategy`, `candidateAgentIds`, and `selectedAgentId`. Provides immutable audit trail for compliance.
+
+5. **Missing metrics** (`CapabilityRegistryService.java`):
+   - `eddi.capability.miss.count` (tagged by skill) — counts queries with no results
+   - `eddi.capability.strategy.applied` (tagged by strategy) — tracks which strategy is used
+
+### Design Decisions
+
+- **No new abstractions**: The existing `Capability` model on `AgentConfiguration` is sufficient. Workflows are already the implementation unit; capabilities are the declaration layer. No "Skill Pack" resource type needed.
+- **Backward compatible**: All changes are additive. Existing configs work unchanged.
+- **Public endpoint defaults to off**: `eddi.a2a.capabilities.public=false` — admin must explicitly opt in.
+
 ## 🐛 Improved Template Error Messages (2026-05-06)
 
 **Repo:** EDDI (`fix/template-error-message`)

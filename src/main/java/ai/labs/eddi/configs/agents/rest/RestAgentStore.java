@@ -127,6 +127,7 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public Response updateAgent(String id, Integer version, AgentConfiguration agentConfiguration) {
+        rejectInertSecurityFlags(agentConfiguration);
         Response response = restVersionInfo.update(id, version, agentConfiguration);
         capabilityRegistryService.register(id, agentConfiguration);
         return response;
@@ -158,6 +159,8 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public Response createAgent(AgentConfiguration agentConfiguration) {
+        rejectInertSecurityFlags(agentConfiguration);
+
         // Use createDocument() to get IResourceId directly — Response.getLocation()
         // returns null for eddi:// scheme URIs in CDI direct calls
         IResourceId resourceId = restVersionInfo.createDocument(agentConfiguration);
@@ -178,6 +181,7 @@ public class RestAgentStore implements IRestAgentStore {
         restVersionInfo.validateParameters(id, version);
         try {
             AgentConfiguration agentConfig = agentStore.read(id, version);
+            rejectInertSecurityFlags(agentConfig);
             if (deepCopy) {
                 List<URI> packages = agentConfig.getWorkflows();
                 for (int i = 0; i < packages.size(); i++) {
@@ -284,5 +288,27 @@ public class RestAgentStore implements IRestAgentStore {
     @Override
     public IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return agentStore.getCurrentResourceId(id);
+    }
+
+    /**
+     * Reject agent configurations that enable cryptographic identity features not
+     * yet implemented (Wave 6). Prevents silent misconfiguration where admins
+     * believe signing is active but nothing actually happens.
+     *
+     * @throws jakarta.ws.rs.BadRequestException
+     *             if any signing flag is set to true
+     */
+    private void rejectInertSecurityFlags(AgentConfiguration config) {
+        if (config.getSecurity() == null) {
+            return;
+        }
+        var security = config.getSecurity();
+        if (security.isSignInterAgentMessages() || security.isSignMcpInvocations()
+                || security.isRequirePeerVerification()) {
+            throw new jakarta.ws.rs.BadRequestException(
+                    "Cryptographic identity features are not yet available in this version. "
+                            + "Set signInterAgentMessages, signMcpInvocations, and requirePeerVerification "
+                            + "to false, or remove the security block entirely.");
+        }
     }
 }
