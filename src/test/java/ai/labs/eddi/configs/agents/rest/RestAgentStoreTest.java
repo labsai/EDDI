@@ -159,4 +159,104 @@ class RestAgentStoreTest {
             verify(AgentStore).deleteAllPermanently(AGENT_ID);
         }
     }
+
+    // --- Wave 3: Security flag validation ---
+
+    @Nested
+    @DisplayName("rejectInertSecurityFlags")
+    class SecurityFlagValidationTests {
+
+        @Test
+        @DisplayName("createAgent should reject signInterAgentMessages=true with HTTP 400")
+        void createAgent_rejectsSignInterAgentMessages() {
+            var config = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            security.setSignInterAgentMessages(true);
+            config.setSecurity(security);
+
+            assertThrows(jakarta.ws.rs.BadRequestException.class,
+                    () -> restAgentStore.createAgent(config));
+        }
+
+        @Test
+        @DisplayName("createAgent should reject signMcpInvocations=true with HTTP 400")
+        void createAgent_rejectsSignMcpInvocations() {
+            var config = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            security.setSignMcpInvocations(true);
+            config.setSecurity(security);
+
+            assertThrows(jakarta.ws.rs.BadRequestException.class,
+                    () -> restAgentStore.createAgent(config));
+        }
+
+        @Test
+        @DisplayName("createAgent should reject requirePeerVerification=true with HTTP 400")
+        void createAgent_rejectsRequirePeerVerification() {
+            var config = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            security.setRequirePeerVerification(true);
+            config.setSecurity(security);
+
+            assertThrows(jakarta.ws.rs.BadRequestException.class,
+                    () -> restAgentStore.createAgent(config));
+        }
+
+        @Test
+        @DisplayName("createAgent should allow null security block")
+        void createAgent_allowsNullSecurity() {
+            var config = new AgentConfiguration();
+            config.setSecurity(null);
+            config.setWorkflows(new ArrayList<>());
+
+            // Validation passes (no BadRequestException), but downstream createDocument
+            // is not mocked — NPE is expected. We only test the validation guard.
+            var thrown = assertThrows(NullPointerException.class,
+                    () -> restAgentStore.createAgent(config));
+            // If we got here, the security validation did NOT throw BadRequestException
+            assertNotNull(thrown);
+        }
+
+        @Test
+        @DisplayName("createAgent should allow security block with all flags false")
+        void createAgent_allowsAllFlagsFalse() {
+            var config = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            // all default to false
+            config.setSecurity(security);
+            config.setWorkflows(new ArrayList<>());
+
+            // Validation passes — downstream NPE expected (unmocked createDocument)
+            var thrown = assertThrows(NullPointerException.class,
+                    () -> restAgentStore.createAgent(config));
+            assertNotNull(thrown);
+        }
+
+        @Test
+        @DisplayName("updateAgent should reject signInterAgentMessages=true")
+        void updateAgent_rejectsSecurityFlags() {
+            var config = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            security.setSignInterAgentMessages(true);
+            config.setSecurity(security);
+
+            assertThrows(jakarta.ws.rs.BadRequestException.class,
+                    () -> restAgentStore.updateAgent(AGENT_ID, 1, config));
+        }
+
+        @Test
+        @DisplayName("duplicateAgent should reject security flags from source config")
+        void duplicateAgent_rejectsSecurityFlags() throws Exception {
+            var sourceConfig = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            security.setSignMcpInvocations(true);
+            sourceConfig.setSecurity(security);
+            sourceConfig.setWorkflows(new ArrayList<>());
+
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(sourceConfig);
+
+            assertThrows(jakarta.ws.rs.BadRequestException.class,
+                    () -> restAgentStore.duplicateAgent(AGENT_ID, 1, false));
+        }
+    }
 }

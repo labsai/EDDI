@@ -195,4 +195,104 @@ class CapabilityMatchConditionTest {
         condition.setConfigs(Map.of("skill", "test", "minResults", "abc"));
         assertEquals("1", condition.getConfigs().get("minResults"));
     }
+
+    // --- Wave 3: audit event emission ---
+
+    @Test
+    void execute_emitsAuditEventOnSuccess() {
+        condition.setConfigs(Map.of("skill", "coding", "strategy", "all"));
+
+        var auditCollector = mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class);
+        when(memory.getAuditCollector()).thenReturn(auditCollector);
+        when(memory.getConversationId()).thenReturn("conv-123");
+        when(memory.getAgentId()).thenReturn("agent-owner");
+        when(memory.getAgentVersion()).thenReturn(2);
+        when(memory.getUserId()).thenReturn("user-456");
+
+        var allSteps = mock(IConversationMemory.IConversationStepStack.class);
+        when(allSteps.size()).thenReturn(3);
+        when(memory.getAllSteps()).thenReturn(allSteps);
+
+        when(registryService.findBySkill("coding", "all"))
+                .thenReturn(List.of(new CapabilityMatch("agent-1", "coding", "high", Map.of())));
+
+        assertEquals(SUCCESS, condition.execute(memory, List.of()));
+
+        // Verify audit event was emitted
+        verify(auditCollector).collect(argThat(entry -> {
+            assertEquals("conv-123", entry.conversationId());
+            assertEquals("agent-owner", entry.agentId());
+            assertEquals(2, entry.agentVersion());
+            assertEquals("user-456", entry.userId());
+            assertEquals("capabilityMatch", entry.taskId());
+            assertEquals("CAPABILITY_SELECTION", entry.taskType());
+            assertEquals(3, entry.stepIndex());
+
+            // Check input contains skill and strategy
+            assertNotNull(entry.input());
+            assertEquals("coding", entry.input().get("skill"));
+            assertEquals("all", entry.input().get("strategy"));
+
+            // Check output contains selectedAgentId
+            assertNotNull(entry.output());
+            assertEquals("agent-1", entry.output().get("selectedAgentId"));
+
+            return true;
+        }));
+    }
+
+    @Test
+    void execute_noAuditWhenCollectorIsNull() {
+        condition.setConfigs(Map.of("skill", "coding"));
+
+        when(memory.getAuditCollector()).thenReturn(null);
+
+        when(registryService.findBySkill("coding", "highest_confidence"))
+                .thenReturn(List.of(new CapabilityMatch("agent-1", "coding", "high", Map.of())));
+
+        // Should still succeed — just skip audit
+        assertEquals(SUCCESS, condition.execute(memory, List.of()));
+    }
+
+    @Test
+    void execute_auditFailureDoesNotBreakExecution() {
+        condition.setConfigs(Map.of("skill", "coding"));
+
+        var auditCollector = mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class);
+        when(memory.getAuditCollector()).thenReturn(auditCollector);
+        when(memory.getConversationId()).thenReturn("conv-123");
+        when(memory.getAgentId()).thenReturn("agent-owner");
+        when(memory.getAgentVersion()).thenReturn(1);
+        when(memory.getUserId()).thenReturn("user-456");
+
+        var allSteps = mock(IConversationMemory.IConversationStepStack.class);
+        when(allSteps.size()).thenReturn(1);
+        when(memory.getAllSteps()).thenReturn(allSteps);
+
+        // Audit collector throws — should not affect condition result
+        doThrow(new RuntimeException("audit storage failed"))
+                .when(auditCollector).collect(any());
+
+        when(registryService.findBySkill("coding", "highest_confidence"))
+                .thenReturn(List.of(new CapabilityMatch("agent-1", "coding", "high", Map.of())));
+
+        // Should still return SUCCESS despite audit failure
+        assertEquals(SUCCESS, condition.execute(memory, List.of()));
+    }
+
+    @Test
+    void execute_noAuditEventOnFailure() {
+        condition.setConfigs(Map.of("skill", "nonexistent"));
+
+        var auditCollector = mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class);
+        when(memory.getAuditCollector()).thenReturn(auditCollector);
+
+        when(registryService.findBySkill("nonexistent", "highest_confidence"))
+                .thenReturn(List.of());
+
+        assertEquals(FAIL, condition.execute(memory, List.of()));
+
+        // Audit should NOT be emitted on failure
+        verifyNoInteractions(auditCollector);
+    }
 }
