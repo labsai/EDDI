@@ -242,6 +242,10 @@ public class AgentConfiguration {
     public static class AgentIdentity {
         private String agentDid;
         private String publicKey;
+        /**
+         * Versioned key list for rotation. If empty, falls back to {@code publicKey}.
+         */
+        private List<ai.labs.eddi.configs.agents.crypto.AgentPublicKey> keys = new ArrayList<>();
 
         public AgentIdentity() {
         }
@@ -265,6 +269,52 @@ public class AgentConfiguration {
 
         public void setPublicKey(String publicKey) {
             this.publicKey = publicKey;
+        }
+
+        public List<ai.labs.eddi.configs.agents.crypto.AgentPublicKey> getKeys() {
+            return keys;
+        }
+
+        public void setKeys(List<ai.labs.eddi.configs.agents.crypto.AgentPublicKey> keys) {
+            this.keys = keys != null ? keys : new ArrayList<>();
+        }
+
+        /**
+         * Get the key for a specific version. Falls back to {@code publicKey} if no
+         * versioned keys exist.
+         *
+         * @param version
+         *            the key version to find
+         * @return the public key string, or null if not found
+         */
+        public String getKeyForVersion(int version) {
+            if (keys == null || keys.isEmpty()) {
+                return version == 0 ? publicKey : null;
+            }
+            return keys.stream()
+                    .filter(k -> k.version() == version)
+                    .map(ai.labs.eddi.configs.agents.crypto.AgentPublicKey::publicKeyB64)
+                    .findFirst()
+                    .orElse(null);
+        }
+
+        /**
+         * Get the key that is valid at a given epoch millisecond. Returns the
+         * highest-version valid key.
+         *
+         * @param epochMs
+         *            the point in time
+         * @return the public key string, or falls back to {@code publicKey}
+         */
+        public String getKeyValidAt(long epochMs) {
+            if (keys == null || keys.isEmpty()) {
+                return publicKey;
+            }
+            return keys.stream()
+                    .filter(k -> k.isValidAt(epochMs))
+                    .reduce((a, b) -> a.version() > b.version() ? a : b)
+                    .map(ai.labs.eddi.configs.agents.crypto.AgentPublicKey::publicKeyB64)
+                    .orElse(publicKey);
         }
     }
 

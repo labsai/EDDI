@@ -13,6 +13,33 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔐 Wave 6 — Cryptographic Agent Identity (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Implemented Wave 6 — Ed25519 cryptographic identity with key rotation, signed envelopes, and nonce-based replay protection.
+
+### New Components
+- **`JacksonCanonicalizer`** — RFC 8785 JSON canonicalization using pure Jackson tree model (recursive key sorting, no external dep).
+- **`SignedEnvelope`** — Immutable record with `forSigning()`/`withSignature()` factories and `canonicalForm()` for deterministic signing.
+- **`NonceCacheService`** — Caffeine-backed replay protection: freshness (5min default), clock-skew (30s), and duplicate detection with Micrometer counters.
+- **`AgentPublicKey`** — Versioned key record with `isValidAt(epochMs)`, `createCurrent()`, and `withExpiry()` for rotation windows.
+
+### Modified Components
+- **`AgentIdentity`** — Added `List<AgentPublicKey> keys` with `getKeyForVersion(int)` and `getKeyValidAt(long)` for multi-key rotation.
+- **`AgentSigningService`** — Added `signEnvelope()`, `verifyEnvelope()`, `rotateKey()`, `generateKeyPairVersioned()`. Versioned vault keys stored as `agent-signing-key:{id}:v{n}`.
+
+### Design Decisions
+- **Pure Jackson canonicalization** — No JCS library dep. Uses `TreeMap` + recursive `sortKeys()` for RFC 8785 compliance.
+- **Envelope canonical form excludes signature** — Prevents circular dependency: the canonical form is the data being signed.
+- **Versioned vault key naming** — Pattern `agent-signing-key:{agentId}:v{version}` allows parallel old/new keys during rotation.
+- **Feature flag** — `eddi.a2a.signing.enabled` (default false) guards all signing at call sites.
+
+### Tests (30 new)
+- `JacksonCanonicalizerTest` — 11 tests: key sorting, data types, determinism, error handling
+- `SignedEnvelopeTest` — 5 tests: forSigning, withSignature, canonicalForm
+- `NonceCacheServiceTest` — 7 tests: freshness, clock skew, replay detection
+- `AgentPublicKeyTest` — 7 tests: validity windows, factory methods, equality
+
 ## 📎 Wave 5 — Multimodal Attachments (2026-05-07)
 
 **Repo:** EDDI (`feature/agentic-wave3-capabilities`)
