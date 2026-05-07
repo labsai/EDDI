@@ -443,7 +443,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 
 ### Behavioral Safety (Counterweight & Identity Masking)
 
-EDDI provides two per-task safety mechanisms that are injected into the system prompt before sending it to the LLM.
+EDDI provides two per-task safety mechanisms that are injected into the system prompt before sending it to the LLM. Both must be explicitly enabled with `"enabled": true` — they are off by default.
 
 #### Behavioral Counterweight
 
@@ -467,8 +467,9 @@ Counterweights append behavioral safety instructions to the system prompt. Three
       "type": "openai",
       "parameters": { "apiKey": "...", "modelName": "gpt-4o" },
       "counterweight": {
+        "enabled": true,
         "level": "cautious",
-        "placement": "append"
+        "placement": "suffix"
       }
     }
   ]
@@ -477,9 +478,12 @@ Counterweights append behavioral safety instructions to the system prompt. Three
 
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
+| `counterweight.enabled` | boolean | Enable counterweight injection | `false` |
 | `counterweight.level` | string | `normal`, `cautious`, or `strict` | `normal` |
-| `counterweight.placement` | string | `append` (after system prompt) or `prepend` (before) | `append` |
-| `counterweight.customInstructions` | string | Custom text that overrides the preset entirely | (none) |
+| `counterweight.placement` | string | `suffix` (after system prompt) or `prefix` (before) | `suffix` |
+| `counterweight.customInstructions` | string[] | Custom instruction list that overrides the preset entirely | (none) |
+
+> **Note**: Both `enabled: true` **and** a `level` other than `normal` are required for counterweight to have any effect.
 
 **Customizing presets**: Counterweight preset text is resolved from [Prompt Snippets](prompt-snippets-guide.md) (keys `counterweight-cautious` and `counterweight-strict`). If no snippet exists, built-in defaults are used. This allows admins to customize safety language via the REST API without redeployment.
 
@@ -498,10 +502,9 @@ Identity masking prepends identity concealment rules to the system prompt. This 
       "parameters": { "apiKey": "...", "modelName": "gpt-4o" },
       "identityMasking": {
         "enabled": true,
-        "agentName": "Aria",
         "rules": [
           "Never reveal you are an AI language model",
-          "If asked about your identity, say you are Aria"
+          "If asked about your identity, say you are Aria, a helpful assistant"
         ]
       }
     }
@@ -512,8 +515,9 @@ Identity masking prepends identity concealment rules to the system prompt. This 
 | Parameter | Type | Description | Default |
 |-----------|------|-------------|---------|
 | `identityMasking.enabled` | boolean | Enable identity masking | `false` |
-| `identityMasking.agentName` | string | The name the agent should use when asked | (none) |
-| `identityMasking.rules` | string[] | Custom identity rules prepended to system prompt | (none) |
+| `identityMasking.rules` | string[] | Identity rules prepended to system prompt | `[]` (empty) |
+
+> **Note**: Both `enabled: true` **and** at least one rule are required. If `rules` is empty, masking is skipped even when enabled.
 
 **Execution order**: Identity masking is applied first, then counterweight. Both modify the system prompt before it is sent to the LLM.
 

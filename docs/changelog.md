@@ -13,6 +13,29 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 📝 Documentation Corrections & Postgres Verification (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Fixed 3 documentation bugs found during multi-perspective audit, improved usability notes, verified PostgreSQL compatibility.
+
+### Documentation Fixes
+- **`langchain.md`:** Removed non-existent `agentName` field from `identityMasking` examples and parameter table (field was never implemented in `IdentityMaskingConfig`).
+- **`langchain.md`:** Corrected placement values from `append`/`prepend` to `suffix`/`prefix` to match the actual `CounterweightService` code. Corrected default from `append` to `suffix`.
+- **`langchain.md`:** Added explicit `enabled: true` to counterweight JSON example and added usability notes explaining that both `enabled: true` AND a non-`normal` level (or at least one rule for masking) are required for activation.
+- **`langchain.md`:** Added `counterweight.enabled` row to parameter table (was missing), fixed `customInstructions` type from `string` to `string[]`.
+
+### Migration Note
+- `identityMasking` was moved from `AgentConfiguration` (agent-level) to `LlmConfiguration.Task` (task-level). Old agent configs with `identityMasking` at the agent level will have this field silently ignored (Jackson `FAIL_ON_UNKNOWN_PROPERTIES=false`). Since this is a new feature on this branch, no production configs are affected.
+
+### PostgreSQL Verification
+- Confirmed all modified components work identically on both MongoDB and PostgreSQL:
+  - `IAttachmentStore` → `PostgresAttachmentStore` uses correct `engine.attachments` import
+  - `IConversationCheckpointStore` → `PostgresConversationCheckpointStore` has full CRUD + prune
+  - `IPromptSnippetStore` → `AbstractResourceStore` via `PostgresResourceStorageFactory` (no Postgres-specific snippet store needed)
+  - `ISecretPersistence` → `PostgresSecretPersistence` (for `AgentSigningService` key storage)
+  - `DataStoreProducers` correctly wires all stores for both backends
+  - Jackson `SerializationCustomizer` applies to both backends (shared `ObjectMapper`)
+
 ## 📊 Test Coverage Audit & Documentation Enrichment (2026-05-07)
 
 **Repo:** EDDI (`feature/agentic-wave3-capabilities`)
