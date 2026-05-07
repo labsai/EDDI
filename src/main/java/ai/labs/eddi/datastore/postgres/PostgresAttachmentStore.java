@@ -142,9 +142,9 @@ public class PostgresAttachmentStore implements IAttachmentStore {
         String sql = "DELETE FROM attachments WHERE conversation_id = ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, conversationId);
-            long deleted = ps.executeUpdate();
+            int deleted = ps.executeUpdate();
             if (deleted > 0) {
-                LOGGER.debugf("Deleted %d attachments for conversation '%s'", deleted, conversationId);
+                LOGGER.debugf("Deleted %d attachments for conversation '%s'", (Object) deleted, conversationId);
             }
             return deleted;
         } catch (SQLException e) {

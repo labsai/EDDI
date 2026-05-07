@@ -88,15 +88,16 @@ public record SignedEnvelope(
     /**
      * Get the canonical form of this envelope for signing/verification.
      * <p>
-     * The canonical form includes all fields except {@code signature} and
-     * {@code keyVersion} to prevent circular dependency.
+     * The canonical form nullifies {@code signature} and resets {@code keyVersion}
+     * to 0 so the same canonical string is produced regardless of whether the
+     * envelope is signed or not.
      *
      * @return canonical JSON string
      * @throws JsonProcessingException
      *             if canonicalization fails
      */
     public String canonicalForm() throws JsonProcessingException {
-        // Create a copy without signature fields for canonical form
+        // Create a copy with signature=null and keyVersion=0 for deterministic signing
         var forCanon = new SignedEnvelope(senderId, recipientId, payload, nonce, timestampMs, null, 0);
         return JacksonCanonicalizer.canonicalize(forCanon);
     }

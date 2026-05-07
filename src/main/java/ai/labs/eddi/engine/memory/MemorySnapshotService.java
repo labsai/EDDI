@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.memory;
+
 import ai.labs.eddi.engine.memory.model.MemoryCheckpoint;
 import ai.labs.eddi.configs.properties.model.Property;
 import io.micrometer.core.instrument.Counter;

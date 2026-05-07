@@ -6,7 +6,7 @@ package ai.labs.eddi.engine.memory;
 
 import org.jboss.logging.Logger;
 
-import java.util.Map;
+import java.util.Set;
 
 /**
  * Magic-byte based MIME type detection. Used to validate that the declared MIME
@@ -129,7 +129,7 @@ public final class MimeValidator {
 
         // ZIP family (docx, xlsx, etc. are ZIP-based)
         if ("application/zip".equals(detected)) {
-            return MIME_ZIP_SUBTYPES.containsKey(declared);
+            return MIME_ZIP_SUBTYPES.contains(declared);
         }
 
         LOGGER.debugf("MIME mismatch: declared='%s', detected='%s'", declared, detected);
@@ -149,11 +149,11 @@ public final class MimeValidator {
     }
 
     /** ZIP-based MIME types that share the PK\x03\x04 signature */
-    private static final Map<String, Boolean> MIME_ZIP_SUBTYPES = Map.of(
-            "application/zip", true,
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document", true,
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", true,
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation", true,
-            "application/java-archive", true,
-            "application/epub+zip", true);
+    private static final Set<String> MIME_ZIP_SUBTYPES = Set.of(
+            "application/zip",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/java-archive",
+            "application/epub+zip");
 }

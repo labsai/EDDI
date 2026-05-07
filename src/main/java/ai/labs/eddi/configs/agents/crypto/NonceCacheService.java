@@ -14,6 +14,7 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.time.Instant;
 
 /**
@@ -58,9 +59,9 @@ public class NonceCacheService {
 
     @PostConstruct
     void init() {
-        // TTL should be at least maxAge + clockSkew to catch all replay windows
-        long ttlMs = maxAgeMs + clockSkewMs + 10_000; // 10s buffer
-        this.nonceCache = cacheFactory.getCache(CACHE_NAME);
+        // TTL must cover the full replay window: maxAge + clockSkew + buffer
+        Duration ttl = Duration.ofMillis(maxAgeMs + clockSkewMs + 10_000);
+        this.nonceCache = cacheFactory.getCache(CACHE_NAME, ttl);
 
         replayRejections = meterRegistry.counter("eddi.agent.nonce.replay.rejected");
         freshnessRejections = meterRegistry.counter("eddi.agent.nonce.freshness.rejected");
