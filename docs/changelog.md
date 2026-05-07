@@ -13,6 +13,34 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔒 Wave 4 — Session Safety (Snapshot + Fork) (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Implemented Wave 4 of the agentic improvements — memory checkpoints, snapshot/rollback, and session management configuration.
+
+### New Components
+- **`MemoryCheckpoint`** (record) — Immutable snapshot of conversation state (step index, properties copy, triggered-by metadata). Supports `create()` factory and `withParent()` for forking.
+- **`IConversationCheckpointStore`** (interface) — DB-agnostic CRUD + pruning + GDPR erasure for checkpoints.
+- **`MongoConversationCheckpointStore`** — MongoDB implementation with compound index on (conversationId, createdAt).
+- **`PostgresConversationCheckpointStore`** — PostgreSQL implementation with JSONB storage and indexed columns.
+- **`MemorySnapshotService`** — Creates/restores checkpoints with auto-pruning, type-aware property restoration, and Micrometer metrics.
+- **`SessionManagement`** config — Inner class in `AgentConfiguration` with `AutoSnapshot`, `forkingEnabled`, `maxForksPerConversation`, `maxCheckpointsPerConversation`.
+
+### Design Decisions
+- **DB-agnostic from day one** — Both MongoDB and PostgreSQL implementations created simultaneously, wired via `DataStoreProducers`.
+- **Type-aware property restore** — Properties restored using Java pattern matching (`instanceof`) to route to correct `Property` constructor (String, Map, List, Integer, Float, Boolean).
+- **JBoss Logger debugf ambiguity** — Cast numeric args to `(Object)` to resolve overloaded method ambiguity with `int`/`long` parameter variants.
+- **No ConversationForkService yet** — Deep-copy logic deferred to integration wave when ToolExecutionService is wired.
+
+### Tests (22 new)
+- `MemoryCheckpointTest` — 7 tests: create/immutability/withParent/uniqueIds/equality
+- `MemorySnapshotServiceTest` — 10 tests: create/rollback/CRUD/null-safety/metrics
+- `SessionManagementTest` — 5 tests: defaults/AutoSnapshot/getters/integration
+
+### Files Modified
+- `AgentConfiguration.java` — Added `SessionManagement` field and inner class
+- `DataStoreProducers.java` — Added `IConversationCheckpointStore` producer
+
 ## 🔧 Wave 2 — MCP Governance & Token-Efficient Tool Loading (2026-05-07)
 
 **Repo:** EDDI (`feature/agentic-wave3-capabilities`)

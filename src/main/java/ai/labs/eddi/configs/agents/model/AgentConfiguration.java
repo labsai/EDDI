@@ -70,6 +70,14 @@ public class AgentConfiguration {
      */
     private MemoryPolicy memoryPolicy;
 
+    /**
+     * Session management configuration. Controls automatic checkpointing before
+     * state-changing tool executions and conversation forking.
+     *
+     * @since 6.0.0
+     */
+    private SessionManagement sessionManagement;
+
     public static class ChannelConnector {
         private URI type;
         private Map<String, String> config = new HashMap<>();
@@ -215,6 +223,14 @@ public class AgentConfiguration {
 
     public void setMemoryPolicy(MemoryPolicy memoryPolicy) {
         this.memoryPolicy = memoryPolicy;
+    }
+
+    public SessionManagement getSessionManagement() {
+        return sessionManagement;
+    }
+
+    public void setSessionManagement(SessionManagement sessionManagement) {
+        this.sessionManagement = sessionManagement;
     }
 
     /**
@@ -654,6 +670,77 @@ public class AgentConfiguration {
 
         public void setRules(List<String> rules) {
             this.rules = rules;
+        }
+    }
+
+    /**
+     * Session management configuration. Controls automatic checkpointing and
+     * conversation forking.
+     *
+     * @since 6.0.0
+     */
+    public static class SessionManagement {
+        private AutoSnapshot autoSnapshot;
+        private boolean forkingEnabled = false;
+        private int maxForksPerConversation = 5;
+        private int maxCheckpointsPerConversation = 10;
+
+        public AutoSnapshot getAutoSnapshot() {
+            return autoSnapshot;
+        }
+
+        public void setAutoSnapshot(AutoSnapshot autoSnapshot) {
+            this.autoSnapshot = autoSnapshot;
+        }
+
+        public boolean isForkingEnabled() {
+            return forkingEnabled;
+        }
+
+        public void setForkingEnabled(boolean forkingEnabled) {
+            this.forkingEnabled = forkingEnabled;
+        }
+
+        public int getMaxForksPerConversation() {
+            return maxForksPerConversation;
+        }
+
+        public void setMaxForksPerConversation(int maxForksPerConversation) {
+            this.maxForksPerConversation = maxForksPerConversation;
+        }
+
+        public int getMaxCheckpointsPerConversation() {
+            return maxCheckpointsPerConversation;
+        }
+
+        public void setMaxCheckpointsPerConversation(int maxCheckpointsPerConversation) {
+            this.maxCheckpointsPerConversation = maxCheckpointsPerConversation;
+        }
+
+        /**
+         * Auto-snapshot configuration. When enabled, checkpoints are created
+         * automatically before state-changing tool executions.
+         */
+        public static class AutoSnapshot {
+            private boolean enabled = false;
+            /** Events that trigger auto-snapshots: "before_tool", "before_action" */
+            private List<String> triggerOn = new ArrayList<>();
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public List<String> getTriggerOn() {
+                return triggerOn;
+            }
+
+            public void setTriggerOn(List<String> triggerOn) {
+                this.triggerOn = triggerOn;
+            }
         }
     }
 }

@@ -16,6 +16,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.mongo.MongoUserMemoryStore;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorageFactory;
 import ai.labs.eddi.datastore.postgres.PostgresAuditStore;
+import ai.labs.eddi.datastore.postgres.PostgresConversationCheckpointStore;
 import ai.labs.eddi.datastore.postgres.PostgresConversationMemoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresDatabaseLogs;
 import ai.labs.eddi.datastore.postgres.PostgresDeploymentStorage;
@@ -30,6 +31,7 @@ import ai.labs.eddi.datastore.postgres.PostgresAgentTriggerStore;
 import ai.labs.eddi.engine.audit.AuditStore;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
+import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.runtime.DatabaseLogs;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
@@ -150,6 +152,14 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IGlobalVariableStore globalVariableStore(Instance<GlobalVariableStore> mongo, Instance<PostgresGlobalVariableStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IConversationCheckpointStore conversationCheckpointStore(
+                                                                    Instance<ai.labs.eddi.engine.memory.MongoConversationCheckpointStore> mongo,
+                                                                    Instance<PostgresConversationCheckpointStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 }
