@@ -1152,7 +1152,7 @@ public record LlmConfiguration(List<Task> tasks) {
         private boolean enabled = false;
         private String level = "normal";
         private String placement = "suffix";
-        private java.util.List<String> customInstructions;
+        private List<String> customInstructions;
 
         public boolean isEnabled() {
             return enabled;
@@ -1178,11 +1178,11 @@ public record LlmConfiguration(List<Task> tasks) {
             this.placement = placement;
         }
 
-        public java.util.List<String> getCustomInstructions() {
+        public List<String> getCustomInstructions() {
             return customInstructions;
         }
 
-        public void setCustomInstructions(java.util.List<String> customInstructions) {
+        public void setCustomInstructions(List<String> customInstructions) {
             this.customInstructions = customInstructions;
         }
     }

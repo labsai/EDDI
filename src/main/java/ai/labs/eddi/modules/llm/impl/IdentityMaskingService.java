@@ -62,6 +62,12 @@ public class IdentityMaskingService {
             return systemMessage;
         }
 
+        // Defensive null coalescing — callers typically pass "" but this
+        // is a public API
+        if (systemMessage == null) {
+            systemMessage = "";
+        }
+
         StringBuilder sb = new StringBuilder(DEFAULT_MASKING_HEADER).append("\n");
         for (String rule : rules) {
             sb.append("- ").append(rule).append("\n");

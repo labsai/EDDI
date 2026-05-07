@@ -86,6 +86,12 @@ public class CounterweightService {
             return systemMessage;
         }
 
+        // Defensive null coalescing — callers typically pass "" but this
+        // is a public API so we protect against null
+        if (systemMessage == null) {
+            systemMessage = "";
+        }
+
         String level = config.getLevel() != null ? config.getLevel() : "normal";
 
         // Strict downgrade for scheduled/batch agents
