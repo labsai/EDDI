@@ -123,26 +123,6 @@ public interface IConversationMemory extends Serializable {
         // no-op by default
     }
 
-    /**
-     * Get the identity masking configuration for this conversation. Returns
-     * {@code null} when identity masking is not configured on the agent.
-     *
-     * @since 6.0.0
-     */
-    default AgentConfiguration.IdentityMaskingConfig getIdentityMaskingConfig() {
-        return null;
-    }
-
-    /**
-     * Set the identity masking configuration. Called from
-     * {@code Conversation.init()} when the agent has identity masking configured.
-     *
-     * @since 6.0.0
-     */
-    default void setIdentityMaskingConfig(AgentConfiguration.IdentityMaskingConfig config) {
-        // no-op by default
-    }
-
     interface IConversationStepStack {
         <T> IData<T> getLatestData(String key);
 

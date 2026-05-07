@@ -4,8 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.engine.memory.IAttachmentStore;
-import ai.labs.eddi.engine.memory.IAttachmentStore.Attachment;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.attachments.IAttachmentStore.Attachment;
 import dev.langchain4j.data.message.Content;
 import dev.langchain4j.data.message.ImageContent;
 import dev.langchain4j.data.message.TextContent;

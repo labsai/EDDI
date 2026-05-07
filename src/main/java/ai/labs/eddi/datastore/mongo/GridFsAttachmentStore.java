@@ -4,8 +4,8 @@
  */
 package ai.labs.eddi.datastore.mongo;
 
-import ai.labs.eddi.engine.memory.IAttachmentStore;
-import ai.labs.eddi.engine.memory.MimeValidator;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.attachments.MimeValidator;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.gridfs.GridFSBucket;
 import com.mongodb.client.gridfs.GridFSBuckets;

@@ -12,16 +12,22 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.Map;
+
 /**
  * Engine-level safety injection into LLM system prompts. Counterweights temper
  * agent behavior (overconfident refactors, false claims, identity leakage)
  * without editing prompt templates.
  * <p>
- * Level presets are hardcoded strings; users override via
- * {@code customInstructions}. When the conversation was started via
- * {@code ScheduleFireExecutor} (channel tag {@code "scheduled"}),
- * {@code strict} is auto-downgraded to {@code cautious} because
- * "one-step-at-a-time" is destructive for batch/cron agents.
+ * Preset text is resolved from {@link PromptSnippetService} first (snippet
+ * names: {@code counterweight-cautious}, {@code counterweight-strict}). If no
+ * snippet is configured, built-in defaults are used as fallback. Users override
+ * presets entirely via {@code customInstructions}.
+ * <p>
+ * When the conversation was started via {@code ScheduleFireExecutor} (channel
+ * tag {@code "scheduled"}), {@code strict} is auto-downgraded to
+ * {@code cautious} because "one-step-at-a-time" is destructive for batch/cron
+ * agents.
  *
  * @since 6.0.0
  */
@@ -30,15 +36,19 @@ public class CounterweightService {
 
     private static final Logger LOGGER = Logger.getLogger(CounterweightService.class);
 
-    // === Level presets ===
-    static final String CAUTIOUS_PRESET = """
+    // === Snippet keys for Prompt Snippet resolution ===
+    static final String SNIPPET_KEY_CAUTIOUS = "counterweight-cautious";
+    static final String SNIPPET_KEY_STRICT = "counterweight-strict";
+
+    // === Fallback presets (used when no Prompt Snippet is configured) ===
+    static final String CAUTIOUS_FALLBACK = """
             ## BEHAVIORAL GUIDELINES (engine-injected)
             - Declare your intended actions before executing them.
             - Prefer asking for clarification over guessing.
             - Verify assumptions explicitly before proceeding.
             - When uncertain, state your uncertainty rather than fabricating an answer.""";
 
-    static final String STRICT_PRESET = """
+    static final String STRICT_FALLBACK = """
             ## BEHAVIORAL GUIDELINES — STRICT MODE (engine-injected)
             - Declare your intended actions before executing them.
             - Prefer asking for clarification over guessing.
@@ -51,6 +61,7 @@ public class CounterweightService {
 
     static final String SCHEDULED_CHANNEL_TAG = "scheduled";
 
+    private final PromptSnippetService promptSnippetService;
     private final MeterRegistry meterRegistry;
     private Counter activationNormalCounter;
     private Counter activationCautiousCounter;
@@ -58,7 +69,8 @@ public class CounterweightService {
     private Counter strictDowngradedCounter;
 
     @Inject
-    public CounterweightService(MeterRegistry meterRegistry) {
+    public CounterweightService(PromptSnippetService promptSnippetService, MeterRegistry meterRegistry) {
+        this.promptSnippetService = promptSnippetService;
         this.meterRegistry = meterRegistry;
     }
 
@@ -124,8 +136,13 @@ public class CounterweightService {
     }
 
     /**
-     * Resolve the injection text: custom instructions take precedence over level
-     * presets.
+     * Resolve the injection text. Priority order:
+     * <ol>
+     * <li>Custom instructions (override everything)</li>
+     * <li>Prompt Snippet ({@code counterweight-cautious} /
+     * {@code counterweight-strict})</li>
+     * <li>Built-in fallback preset</li>
+     * </ol>
      */
     private String resolveInjection(CounterweightConfig config, String level) {
         // Custom instructions override presets entirely
@@ -138,9 +155,23 @@ public class CounterweightService {
         }
 
         return switch (level.toLowerCase()) {
-            case "cautious" -> CAUTIOUS_PRESET;
-            case "strict" -> STRICT_PRESET;
+            case "cautious" -> resolveFromSnippetsOrFallback(SNIPPET_KEY_CAUTIOUS, CAUTIOUS_FALLBACK);
+            case "strict" -> resolveFromSnippetsOrFallback(SNIPPET_KEY_STRICT, STRICT_FALLBACK);
             default -> null; // normal = no injection
         };
+    }
+
+    /**
+     * Try to resolve preset text from Prompt Snippets; fall back to built-in
+     * default if the snippet does not exist.
+     */
+    private String resolveFromSnippetsOrFallback(String snippetKey, String fallback) {
+        Map<String, Object> snippets = promptSnippetService.getAll();
+        Object snippetValue = snippets.get(snippetKey);
+        if (snippetValue instanceof String text && !text.isBlank()) {
+            LOGGER.debugf("Counterweight preset resolved from Prompt Snippet '%s'", snippetKey);
+            return text;
+        }
+        return fallback;
     }
 }

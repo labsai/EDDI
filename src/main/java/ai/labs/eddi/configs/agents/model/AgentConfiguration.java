@@ -678,51 +678,6 @@ public class AgentConfiguration {
         }
     }
 
-    // === Identity Masking (Wave 1) ===
-
-    /**
-     * Identity masking configuration. When enabled, masking rules are prepended to
-     * the system prompt regardless of counterweight settings.
-     *
-     * @since 6.0.0
-     */
-    private IdentityMaskingConfig identityMasking;
-
-    public IdentityMaskingConfig getIdentityMasking() {
-        return identityMasking;
-    }
-
-    public void setIdentityMasking(IdentityMaskingConfig identityMasking) {
-        this.identityMasking = identityMasking;
-    }
-
-    /**
-     * Identity masking rules. Prepended to the system prompt to prevent the agent
-     * from revealing its nature, model names, or internal infrastructure.
-     *
-     * @since 6.0.0
-     */
-    public static class IdentityMaskingConfig {
-        private boolean enabled = false;
-        private List<String> rules = new ArrayList<>();
-
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
-
-        public List<String> getRules() {
-            return rules;
-        }
-
-        public void setRules(List<String> rules) {
-            this.rules = rules;
-        }
-    }
-
     /**
      * Session management configuration. Controls automatic checkpointing and
      * conversation forking.

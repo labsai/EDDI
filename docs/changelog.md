@@ -13,6 +13,34 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🏗️ Architectural Fixes — Pillar Compliance (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Fixed 3 architectural concerns identified during deep audit against the 9 Pillars.
+
+### Concern 1: CounterweightService → Prompt Snippets (Pillar 1)
+- **Before:** Preset text (`CAUTIOUS_PRESET`, `STRICT_PRESET`) was hardcoded as Java constants — agent behavior baked into code.
+- **After:** `CounterweightService` now injects `PromptSnippetService` and resolves presets from snippets (`counterweight-cautious`, `counterweight-strict`) first, falling back to built-in defaults.
+- **Impact:** Admins can customize counterweight presets via the Prompt Snippets REST API without recompilation.
+- **Files:** `CounterweightService.java`, `CounterweightServiceTest.java`, `LlmTaskTest.java`
+
+### Concern 2: IdentityMaskingConfig → LlmConfiguration.Task (Pillar 8)
+- **Before:** `IdentityMaskingConfig` was on `AgentConfiguration` and smuggled through `IConversationMemory` via bespoke getter/setter. This mixed configuration passthrough with conversational state.
+- **After:** `IdentityMaskingConfig` class moved to `LlmConfiguration` alongside `CounterweightConfig`. Config read from `task.getIdentityMasking()` — consistent with `task.getCounterweight()`.
+- **Impact:** Removed 2 methods from `IConversationMemory`, 1 transient field from `ConversationMemory`, wiring from `Agent.java` and `AgentStoreClientLibrary`. Memory interface is cleaner.
+- **Files:** `LlmConfiguration.java`, `AgentConfiguration.java`, `IConversationMemory.java`, `ConversationMemory.java`, `Agent.java`, `AgentStoreClientLibrary.java`, `LlmTask.java`, `IdentityMaskingService.java`, `IdentityMaskingServiceTest.java`
+
+### Concern 3: IAttachmentStore/MimeValidator → engine.attachments (Package Organization)
+- **Before:** `IAttachmentStore` and `MimeValidator` in `engine.memory` package despite having nothing to do with conversation memory.
+- **After:** Moved to new `ai.labs.eddi.engine.attachments` package. All imports updated across source and test files.
+- **Files:** `IAttachmentStore.java`, `MimeValidator.java`, `MimeValidatorTest.java`, `GridFsAttachmentStore.java`, `PostgresAttachmentStore.java`, `DataStoreProducers.java`, `AttachmentForwarder.java`, `AttachmentForwarderTest.java`
+
+### Verification
+- Clean compile: BUILD SUCCESS
+- All 111 affected tests pass (0 failures, 0 errors)
+
+---
+
 ## 🔐 Wave 6 — Cryptographic Agent Identity (2026-05-07)
 
 **Repo:** EDDI (`feature/agentic-wave3-capabilities`)

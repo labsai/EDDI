@@ -255,7 +255,7 @@ public record LlmConfiguration(List<Task> tasks) {
          */
         private ToolResponseLimits toolResponseLimits;
 
-        // === Behavioral Counterweight (Wave 1) ===
+        // === Behavioral Counterweight & Identity Masking (Wave 1) ===
 
         /**
          * Behavioral counterweight configuration. When enabled, safety instructions are
@@ -265,6 +265,15 @@ public record LlmConfiguration(List<Task> tasks) {
          * @since 6.0.0
          */
         private CounterweightConfig counterweight;
+
+        /**
+         * Identity masking configuration. When enabled, masking rules are prepended to
+         * the system prompt to prevent the agent from revealing its nature, model
+         * names, or internal infrastructure. See {@link IdentityMaskingConfig}.
+         *
+         * @since 6.0.0
+         */
+        private IdentityMaskingConfig identityMasking;
 
         // === Tool Loading Strategy (Wave 2) ===
 
@@ -583,6 +592,14 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setCounterweight(CounterweightConfig counterweight) {
             this.counterweight = counterweight;
+        }
+
+        public IdentityMaskingConfig getIdentityMasking() {
+            return identityMasking;
+        }
+
+        public void setIdentityMasking(IdentityMaskingConfig identityMasking) {
+            this.identityMasking = identityMasking;
         }
 
         public ToolLoadingStrategy getToolLoadingStrategy() {
@@ -1293,6 +1310,33 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setCustomInstructions(List<String> customInstructions) {
             this.customInstructions = customInstructions;
+        }
+    }
+
+    /**
+     * Identity masking rules. Prepended to the system prompt to prevent the agent
+     * from revealing its nature, model names, or internal infrastructure.
+     *
+     * @since 6.0.0
+     */
+    public static class IdentityMaskingConfig {
+        private boolean enabled = false;
+        private List<String> rules = new java.util.ArrayList<>();
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public List<String> getRules() {
+            return rules;
+        }
+
+        public void setRules(List<String> rules) {
+            this.rules = rules;
         }
     }
 }

@@ -219,21 +219,6 @@ public class ConversationMemory implements IConversationMemory {
         this.memoryPolicy = memoryPolicy;
     }
 
-    /**
-     * Transient — never serialized to MongoDB. Set once during Agent init.
-     */
-    private transient AgentConfiguration.IdentityMaskingConfig identityMaskingConfig;
-
-    @Override
-    public AgentConfiguration.IdentityMaskingConfig getIdentityMaskingConfig() {
-        return identityMaskingConfig;
-    }
-
-    @Override
-    public void setIdentityMaskingConfig(AgentConfiguration.IdentityMaskingConfig config) {
-        this.identityMaskingConfig = config;
-    }
-
     public static final class ConversationStepStack implements IConversationStepStack {
         private final List<IConversationStep> conversationSteps = new ArrayList<>();
 

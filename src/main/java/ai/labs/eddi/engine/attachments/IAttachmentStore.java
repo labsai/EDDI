@@ -2,7 +2,7 @@
  * Copyright EDDI contributors
  * SPDX-License-Identifier: Apache-2.0
  */
-package ai.labs.eddi.engine.memory;
+package ai.labs.eddi.engine.attachments;
 
 import java.util.List;
 

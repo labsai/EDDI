@@ -4,8 +4,8 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
-import ai.labs.eddi.engine.memory.IAttachmentStore;
-import ai.labs.eddi.engine.memory.MimeValidator;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.attachments.MimeValidator;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;

@@ -10,9 +10,12 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for {@link CounterweightService}.
@@ -21,11 +24,14 @@ class CounterweightServiceTest {
 
     private CounterweightService service;
     private MeterRegistry meterRegistry;
+    private PromptSnippetService promptSnippetService;
 
     @BeforeEach
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
-        service = new CounterweightService(meterRegistry);
+        promptSnippetService = mock(PromptSnippetService.class);
+        when(promptSnippetService.getAll()).thenReturn(Collections.emptyMap());
+        service = new CounterweightService(promptSnippetService, meterRegistry);
         service.initMetrics();
     }
 
@@ -186,5 +192,35 @@ class CounterweightServiceTest {
         String result = service.apply("Base prompt", config, "SCHEDULED");
         assertFalse(result.contains("STRICT MODE"));
         assertEquals(1.0, meterRegistry.counter("eddi.counterweight.strict.downgraded").count());
+    }
+
+    @Test
+    void apply_cautiousLevel_resolvesFromSnippetWhenConfigured() {
+        when(promptSnippetService.getAll()).thenReturn(
+                Map.of("counterweight-cautious", "## CUSTOM CAUTIOUS FROM SNIPPET\n- Be very careful."));
+
+        var config = new CounterweightConfig();
+        config.setEnabled(true);
+        config.setLevel("cautious");
+
+        String result = service.apply("Base prompt", config, null);
+        assertTrue(result.contains("CUSTOM CAUTIOUS FROM SNIPPET"));
+        assertTrue(result.contains("Be very careful."));
+        // Should NOT contain the fallback text
+        assertFalse(result.contains("Verify assumptions"));
+    }
+
+    @Test
+    void apply_strictLevel_fallsBackWhenSnippetMissing() {
+        // No snippets configured — should use fallback
+        when(promptSnippetService.getAll()).thenReturn(Collections.emptyMap());
+
+        var config = new CounterweightConfig();
+        config.setEnabled(true);
+        config.setLevel("strict");
+
+        String result = service.apply("Base prompt", config, null);
+        assertTrue(result.contains("STRICT MODE"));
+        assertTrue(result.contains("one step at a time"));
     }
 }

@@ -105,7 +105,9 @@ class LlmTaskTest {
 
         var toolResponseTruncator = new ToolResponseTruncator(new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
 
-        var counterweightService = new CounterweightService(new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+        var mockSnippetService = mock(PromptSnippetService.class);
+        when(mockSnippetService.getAll()).thenReturn(java.util.Collections.emptyMap());
+        var counterweightService = new CounterweightService(mockSnippetService, new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
         counterweightService.initMetrics();
         var identityMaskingService = new IdentityMaskingService(new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
         identityMaskingService.initMetrics();

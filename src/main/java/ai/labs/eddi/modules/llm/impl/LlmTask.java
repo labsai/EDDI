@@ -254,9 +254,9 @@ public class LlmTask implements ILifecycleTask {
 
         // === Behavioral Counterweight & Identity Masking (Wave 1) ===
         // Identity masking is prepended first (if enabled), then counterweight
-        // is applied. Order matters: masking is agent-level, counterweight is
-        // per-task.
-        systemMessage = identityMaskingService.apply(systemMessage, memory.getIdentityMaskingConfig());
+        // is applied. Order matters: masking defines identity policy,
+        // counterweight defines behavioral safety level.
+        systemMessage = identityMaskingService.apply(systemMessage, task.getIdentityMasking());
 
         // Resolve channel tag for strict→cautious downgrade on scheduled agents
         String channelTag = null;

@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.agents.model.AgentConfiguration.IdentityMaskingConfig;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.IdentityMaskingConfig;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
