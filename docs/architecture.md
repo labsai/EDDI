@@ -501,7 +501,37 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute ──�
 
 See the [Security documentation](security.md) for details.
 
+### System Prompt Modifiers
+
+**Location**: `ai.labs.eddi.modules.llm.impl`
+
+Two services modify the system prompt before it is sent to the LLM. Both are configured per-task in the LLM configuration (`langchain.json`).
+
+| Service | Purpose | Config Key |
+|---------|---------|------------|
+| **`IdentityMaskingService`** | Prepends identity concealment rules (agent name, refusal patterns) | `task.identityMasking` |
+| **`CounterweightService`** | Appends behavioral safety instructions (cautious/strict presets) | `task.counterweight` |
+
+**Execution order**: Identity masking → Counterweight → LLM call.
+
+Counterweight presets are resolved from [Prompt Snippets](prompt-snippets-guide.md) first (`counterweight-cautious`, `counterweight-strict`), falling back to built-in defaults. This ensures admins can customize safety language without code changes.
+
+See [LLM Integration — Behavioral Safety](langchain.md#behavioral-safety-counterweight--identity-masking) for configuration details.
+
+### Attachment Storage
+
+**Location**: `ai.labs.eddi.engine.attachments`
+
+The attachment subsystem handles binary file storage for multimodal conversations:
+
+| Component | Purpose |
+|-----------|---------|
+| **`IAttachmentStore`** | Interface for storing/loading binary attachments (GridFS for MongoDB, BLOB for PostgreSQL) |
+| **`MimeValidator`** | Magic-byte detection (16+ formats) and declared-vs-detected MIME compatibility checking |
+| **`AttachmentForwarder`** | Converts stored attachments into langchain4j `Content` objects (images → `ImageContent`, others → text markers) |
+
 ---
+
 
 ## Technology Stack
 

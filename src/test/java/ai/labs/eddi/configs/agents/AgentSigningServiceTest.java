@@ -73,6 +73,77 @@ class AgentSigningServiceTest {
                 () -> signingService.sign("tenant-1", "agent-1", "payload"));
     }
 
+    @Test
+    void deleteKeyPair_nonExistent_doesNotThrow() {
+        // Should log a warning but not throw
+        assertDoesNotThrow(() -> signingService.deleteKeyPair("tenant-1", "nonexistent"));
+    }
+
+    @Test
+    void generateKeyPairVersioned_returnsPublicKey() throws Exception {
+        String publicKey = signingService.generateKeyPairVersioned("tenant-1", "agent-1", 2);
+        assertNotNull(publicKey);
+        assertFalse(publicKey.isBlank());
+    }
+
+    @Test
+    void rotateKey_createsNewVersion() throws Exception {
+        signingService.generateKeyPair("tenant-1", "agent-1");
+        String rotatedKey = signingService.rotateKey("tenant-1", "agent-1", 2);
+        assertNotNull(rotatedKey);
+        assertFalse(rotatedKey.isBlank());
+    }
+
+    @Test
+    void signEnvelope_and_verifyEnvelope_roundTrip() throws Exception {
+        String publicKey = signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
+
+        var envelope = ai.labs.eddi.configs.agents.crypto.SignedEnvelope.forSigning(
+                "agent-1", "target-1", java.util.Map.of("message", "Hello"));
+
+        var signed = signingService.signEnvelope("tenant-1", "agent-1", envelope, 1);
+        assertNotNull(signed.signature());
+        assertFalse(signed.signature().isBlank());
+
+        assertTrue(signingService.verifyEnvelope(signed, publicKey));
+    }
+
+    @Test
+    void signEnvelope_usingUnversionedKey() throws Exception {
+        String publicKey = signingService.generateKeyPair("tenant-1", "agent-1");
+
+        var envelope = ai.labs.eddi.configs.agents.crypto.SignedEnvelope.forSigning(
+                "agent-1", "target-1", java.util.Map.of("message", "Hello"));
+
+        // keyVersion=0 should use the unversioned key
+        var signed = signingService.signEnvelope("tenant-1", "agent-1", envelope, 0);
+        assertNotNull(signed.signature());
+
+        assertTrue(signingService.verifyEnvelope(signed, publicKey));
+    }
+
+    @Test
+    void verifyEnvelope_failsOnTamperedPayload() throws Exception {
+        String publicKey = signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
+
+        var envelope = ai.labs.eddi.configs.agents.crypto.SignedEnvelope.forSigning(
+                "agent-1", "target-1", java.util.Map.of("message", "original"));
+
+        var signed = signingService.signEnvelope("tenant-1", "agent-1", envelope, 1);
+
+        // Create a tampered envelope with different payload but same signature
+        var tampered = ai.labs.eddi.configs.agents.crypto.SignedEnvelope.forSigning(
+                "agent-1", "target-1", java.util.Map.of("message", "tampered"))
+                .withSignature(signed.signature(), 1);
+
+        assertFalse(signingService.verifyEnvelope(tampered, publicKey));
+    }
+
+    @Test
+    void verify_returnsFalseOnInvalidBase64() {
+        assertFalse(signingService.verify("not-a-key", "payload", "not-a-sig"));
+    }
+
     /**
      * Simple in-memory secret provider for testing.
      */

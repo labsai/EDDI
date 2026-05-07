@@ -169,6 +169,40 @@ class MemorySnapshotServiceTest {
 
             assertTrue(result);
         }
+
+        @Test
+        @DisplayName("Should restore all property types correctly")
+        void testRollbackAllPropertyTypes() {
+            Map<String, Object> savedProps = new LinkedHashMap<>();
+            savedProps.put("strProp", "hello");
+            savedProps.put("intProp", 42);
+            savedProps.put("floatProp", 3.14f);
+            savedProps.put("boolProp", true);
+            savedProps.put("listProp", List.of("a", "b"));
+            savedProps.put("mapProp", Map.of("k", "v"));
+            savedProps.put("otherProp", 99L); // Long — hits fallback
+
+            MemoryCheckpoint checkpoint = new MemoryCheckpoint(
+                    "ckpt-2", "conv-123", null, 3, savedProps, Instant.now(), "test", "TestClass");
+
+            when(checkpointStore.findById("ckpt-2")).thenReturn(checkpoint);
+            when(memory.getConversationId()).thenReturn("conv-123");
+
+            // Track restored properties
+            List<Property> restored = new ArrayList<>();
+            IConversationMemory.IConversationProperties props = mock(IConversationMemory.IConversationProperties.class);
+            when(memory.getConversationProperties()).thenReturn(props);
+            doNothing().when(props).clear();
+            doAnswer(inv -> {
+                restored.add(inv.getArgument(1));
+                return null;
+            }).when(props).put(anyString(), any(Property.class));
+
+            boolean result = snapshotService.rollbackToCheckpoint(memory, "ckpt-2");
+
+            assertTrue(result);
+            assertEquals(7, restored.size()); // all 7 types restored
+        }
     }
 
     @Nested

@@ -13,6 +13,21 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 📊 Test Coverage Audit & Documentation Enrichment (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Boosted test coverage across all Wave 1–6 components to >86% (11/13 at ≥97%), and enriched architecture and LLM configuration docs.
+
+### Test Coverage Improvements
+- **MimeValidatorTest:** Added 11 tests for previously uncovered magic-byte branches (BMP, WebP, TIFF LE/BE, MP4, WAV, MP3 frame-sync variants) and `isCompatible` edge cases (null handling, ZIP subtypes, case insensitivity). Coverage: 72.8% → 99.6%.
+- **AgentSigningServiceTest:** Added 7 tests for versioned key generation, envelope sign/verify roundtrip, unversioned key path, tampered payload detection, invalid base64 handling, and delete-nonexistent path. Coverage: 48.5% → 86.7%.
+- **MemorySnapshotServiceTest:** Added test exercising all type branches in `restoreProperties` (String, Integer, Float, Boolean, List, Map, Long fallback). Coverage: 77.9% → 100%.
+
+### Documentation Enrichment
+- **`langchain.md`:** Added "Behavioral Safety (Counterweight & Identity Masking)" section with configuration examples, parameter tables, and execution order documentation.
+- **`architecture.md`:** Added "System Prompt Modifiers" and "Attachment Storage" subsections under Key Components, documenting the new `engine.attachments` package organization.
+
+
 ## 🏗️ Architectural Fixes — Pillar Compliance (2026-05-07)
 
 **Repo:** EDDI (`feature/agentic-wave3-capabilities`)
