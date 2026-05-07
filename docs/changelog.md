@@ -13,6 +13,28 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 📎 Wave 5 — Multimodal Attachments (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Implemented Wave 5 — multimodal attachment support with dual-backend storage and magic-byte MIME validation.
+
+### New Components
+- **`IAttachmentStore`** (interface) — Store/load/delete/list with conversation-scoped access control and GDPR erasure.
+- **`PostgresAttachmentStore`** — PostgreSQL impl using BYTEA columns with size cap config.
+- **`GridFsAttachmentStore`** — MongoDB GridFS impl with metadata-based conversation scoping.
+- **`MimeValidator`** — Magic-byte MIME detection for 14 file types (no external dep). Compatibility checking with ZIP subtype support.
+- **`AttachmentForwarder`** — Converts attachments to langchain4j `ImageContent` (images) or `TextContent` markers (other files).
+
+### Design Decisions
+- **No Apache Tika** — Not in transitive deps; magic-byte header check is sufficient and avoids 20MB+ dep.
+- **BYTEA over large objects** — Simpler for PostgreSQL with 20MB cap. Large objects add complexity without benefit.
+- **Cross-conversation access denied** — Every `load()` validates conversation ownership. Defense in depth.
+- **Base64 data URIs** — Images forwarded to LLM as data URIs for maximum provider compatibility.
+
+### Tests (26 new)
+- `MimeValidatorTest` — 17 tests: detection for 8 types + compatibility + edge cases
+- `AttachmentForwarderTest` — 9 tests: image/non-image/error handling/isImageType
+
 ## 🔒 Wave 4 — Session Safety (Snapshot + Fork) (2026-05-07)
 
 **Repo:** EDDI (`feature/agentic-wave3-capabilities`)
