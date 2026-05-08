@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -39,7 +39,13 @@ const STATE_COLORS: Record<string, string> = {
 export function GroupDetailPage() {
   const { id: groupId } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
-  const version = searchParams.get("version") ? Number(searchParams.get("version")) : undefined;
+  // Backend requires version — default to 1 if missing from URL (e.g. wizard link).
+  // To update after a save: pull setSearchParams from useSearchParams() and call
+  // setSearchParams(p => { p.set("version", String(newVersion)); return p }, { replace: true })
+  const version = useMemo(
+    () => (searchParams.get("version") ? Number(searchParams.get("version")) : 1),
+    [searchParams],
+  );
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
