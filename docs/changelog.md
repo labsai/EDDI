@@ -13,9 +13,34 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔧 PR Review Remediation — 11 Issues (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+**What changed:** Fixed all 11 issues flagged by GitHub code-quality bot (CodeQL) and Copilot during PR review.
+
+### Code Quality Fixes
+- **JacksonCanonicalizer:** Renamed `canonicalize(Object)` to `canonicalizeObject(Object)` to eliminate overload dispatch ambiguity (CodeQL finding).
+- **DiscoverToolsTool:** Replaced partial `String.replace()` escaping with full `escapeJson()` utility for all interpolated fields (name, description). Prevents invalid JSON from tool names containing backslashes/newlines.
+- **FetchToolResponsePageTool:** Applied `escapeJson()` to `error` and `toolName` fields (previously unescaped).
+- **DeploymentContextCondition:** `setConfigs(null)` now explicitly clears `when` and `tagMatches` fields to prevent stale config on condition reuse.
+- **CapabilityMatchCondition:** Fixed stepIndex off-by-one (`.size()` → `.size() - 1`) for 0-based consistency with audit ledger.
+- **CapabilityRegistryService:** Extracted `lookupBySkill()` internal method to prevent `findBySkillAndAttributes()` from double-counting strategy metrics via `findBySkill("all")`.
+
+### Javadoc Accuracy
+- **LlmConfiguration.summarizerModel:** Removed phantom claim about `eddi.mcp.summarizer.model` config-property defaulting (no such binding exists; null means fallback to truncation).
+- **MemorySnapshotService.rollbackToCheckpoint:** Doc now accurately states only properties are restored, not step index or step stack.
+- **MemoryCheckpoint:** Class-level doc updated from "full step stack" to "stepIndex + properties snapshot".
+
+### Documentation
+- **langchain.md:** Auto-downgrade now correctly says "scheduled channel" only, not "scheduled or batch mode".
+
+### Test Improvements
+- **RestAgentStoreTest:** Replaced 2 brittle NPE-based assertions with proper `agentStore.create()` mocking + `assertDoesNotThrow()`.
+- **CapabilityMatchConditionTest:** Updated stepIndex assertion from 3 to 2 to match 0-based fix.
+
 ## 📝 Documentation Corrections & Postgres Verification (2026-05-07)
 
-**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**Repo:** EDDI (`feature/agentic-improvements`)
 **What changed:** Fixed 3 documentation bugs found during multi-perspective audit, improved usability notes, verified PostgreSQL compatibility.
 
 ### Documentation Fixes

@@ -72,9 +72,10 @@ public class MemorySnapshotService {
     /**
      * Restore the conversation memory to a specific checkpoint.
      * <p>
-     * <strong>Important:</strong> This restores only the in-memory conversation
-     * state (properties, step index). External side-effects (API calls, tool
-     * results already sent) are NOT reversed.
+     * <strong>Important:</strong> This restores only the conversation properties
+     * captured in the checkpoint. It does not restore the step index or any
+     * execution/step-stack state. External side-effects (API calls, tool results
+     * already sent) are NOT reversed.
      *
      * @param memory
      *            the live conversation memory to restore

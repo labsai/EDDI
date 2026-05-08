@@ -99,6 +99,6 @@ public record SignedEnvelope(
     public String canonicalForm() throws JsonProcessingException {
         // Create a copy with signature=null and keyVersion=0 for deterministic signing
         var forCanon = new SignedEnvelope(senderId, recipientId, payload, nonce, timestampMs, null, 0);
-        return JacksonCanonicalizer.canonicalize(forCanon);
+        return JacksonCanonicalizer.canonicalizeObject(forCanon);
     }
 }

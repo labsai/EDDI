@@ -76,9 +76,9 @@ public class DiscoverToolsTool {
             ToolSpecification spec = matches.get(i);
             if (i > 0)
                 sb.append(", ");
-            sb.append("{\"name\": \"").append(spec.name()).append("\"");
+            sb.append("{\"name\": ").append(escapeJson(spec.name()));
             if (spec.description() != null) {
-                sb.append(", \"description\": \"").append(spec.description().replace("\"", "\\\"")).append("\"");
+                sb.append(", \"description\": ").append(escapeJson(spec.description()));
             }
             sb.append("}");
         }
@@ -86,6 +86,17 @@ public class DiscoverToolsTool {
         sb.append(", \"totalAvailable\": ").append(allToolSpecs.size()).append("}");
 
         return sb.toString();
+    }
+
+    private static String escapeJson(String value) {
+        if (value == null)
+            return "null";
+        return "\"" + value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t") + "\"";
     }
 
     private boolean matchesCategory(ToolSpecification spec, String category) {

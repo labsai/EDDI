@@ -128,25 +128,37 @@ public class CapabilityRegistryService {
             String resolvedStrategy = strategy != null ? strategy.toLowerCase(Locale.ROOT) : "all";
             meterRegistry.counter("eddi.capability.strategy.applied", "strategy", resolvedStrategy).increment();
 
-            if (skill == null || skill.isBlank()) {
-                return Collections.emptyList();
+            List<CapabilityMatch> matches = lookupBySkill(skill);
+            if (matches.isEmpty()) {
+                return matches;
             }
 
             String normalizedSkill = skill.toLowerCase(Locale.ROOT).trim();
-            List<AgentCapabilityEntry> entries = skillIndex.getOrDefault(normalizedSkill, Collections.emptyList());
-
-            if (entries.isEmpty()) {
-                meterRegistry.counter("eddi.capability.miss.count", "skill", normalizedSkill).increment();
-                return Collections.emptyList();
-            }
-
-            List<CapabilityMatch> matches = entries.stream()
-                    .map(e -> new CapabilityMatch(e.agentId(), e.capability().getSkill(),
-                            e.capability().getConfidence(), e.capability().getAttributes()))
-                    .collect(Collectors.toList());
-
             return applyStrategy(matches, resolvedStrategy, normalizedSkill);
         });
+    }
+
+    /**
+     * Internal lookup — returns all matches for a skill without emitting strategy
+     * metrics. Used by {@link #findBySkillAndAttributes} to avoid double-counting.
+     */
+    private List<CapabilityMatch> lookupBySkill(String skill) {
+        if (skill == null || skill.isBlank()) {
+            return Collections.emptyList();
+        }
+
+        String normalizedSkill = skill.toLowerCase(Locale.ROOT).trim();
+        List<AgentCapabilityEntry> entries = skillIndex.getOrDefault(normalizedSkill, Collections.emptyList());
+
+        if (entries.isEmpty()) {
+            meterRegistry.counter("eddi.capability.miss.count", "skill", normalizedSkill).increment();
+            return Collections.emptyList();
+        }
+
+        return entries.stream()
+                .map(e -> new CapabilityMatch(e.agentId(), e.capability().getSkill(),
+                        e.capability().getConfidence(), e.capability().getAttributes()))
+                .collect(Collectors.toList());
     }
 
     /**
@@ -162,7 +174,7 @@ public class CapabilityRegistryService {
      */
     public List<CapabilityMatch> findBySkillAndAttributes(String skill,
                                                           Map<String, String> requiredAttributes, String strategy) {
-        List<CapabilityMatch> matches = findBySkill(skill, "all");
+        List<CapabilityMatch> matches = lookupBySkill(skill);
         String normalizedSkill = skill != null ? skill.toLowerCase(Locale.ROOT).trim() : "";
         String resolvedStrategy = strategy != null ? strategy.toLowerCase(Locale.ROOT) : "all";
 

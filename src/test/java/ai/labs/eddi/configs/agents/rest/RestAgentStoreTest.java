@@ -204,32 +204,48 @@ class RestAgentStoreTest {
 
         @Test
         @DisplayName("createAgent should allow null security block")
-        void createAgent_allowsNullSecurity() {
+        void createAgent_allowsNullSecurity() throws Exception {
             var config = new AgentConfiguration();
             config.setSecurity(null);
             config.setWorkflows(new ArrayList<>());
 
-            // Validation passes (no BadRequestException), but downstream createDocument
-            // is not mocked — NPE is expected. We only test the validation guard.
-            var thrown = assertThrows(NullPointerException.class,
-                    () -> restAgentStore.createAgent(config));
-            // If we got here, the security validation did NOT throw BadRequestException
-            assertNotNull(thrown);
+            when(AgentStore.create(any())).thenReturn(new IResourceStore.IResourceId() {
+                @Override
+                public String getId() {
+                    return AGENT_ID;
+                }
+                @Override
+                public Integer getVersion() {
+                    return 1;
+                }
+            });
+
+            // Validation passes — no BadRequestException thrown
+            assertDoesNotThrow(() -> restAgentStore.createAgent(config));
         }
 
         @Test
         @DisplayName("createAgent should allow security block with all flags false")
-        void createAgent_allowsAllFlagsFalse() {
+        void createAgent_allowsAllFlagsFalse() throws Exception {
             var config = new AgentConfiguration();
             var security = new AgentConfiguration.SecurityConfig();
             // all default to false
             config.setSecurity(security);
             config.setWorkflows(new ArrayList<>());
 
-            // Validation passes — downstream NPE expected (unmocked createDocument)
-            var thrown = assertThrows(NullPointerException.class,
-                    () -> restAgentStore.createAgent(config));
-            assertNotNull(thrown);
+            when(AgentStore.create(any())).thenReturn(new IResourceStore.IResourceId() {
+                @Override
+                public String getId() {
+                    return AGENT_ID;
+                }
+                @Override
+                public Integer getVersion() {
+                    return 1;
+                }
+            });
+
+            // Validation passes — no BadRequestException thrown
+            assertDoesNotThrow(() -> restAgentStore.createAgent(config));
         }
 
         @Test

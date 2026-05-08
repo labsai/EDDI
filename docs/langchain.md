@@ -455,7 +455,7 @@ Counterweights append behavioral safety instructions to the system prompt. Three
 | `cautious` | Adds guidelines for careful responses, hedging on uncertain topics, and suggesting professional consultation |
 | `strict` | Adds stronger instructions: refuse harmful content, flag uncertainty, always suggest human oversight |
 
-**Auto-downgrade**: When an agent runs in `scheduled` or `batch` mode, `strict` is automatically downgraded to `cautious` to prevent overly rigid responses in automated pipelines.
+**Auto-downgrade**: When an agent runs via the `scheduled` channel (e.g., `ScheduleFireExecutor`), `strict` is automatically downgraded to `cautious` to prevent overly rigid responses in automated pipelines.
 
 **Configuration**:
 

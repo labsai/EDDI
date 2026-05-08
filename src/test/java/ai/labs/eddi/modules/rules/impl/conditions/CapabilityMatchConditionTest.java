@@ -226,7 +226,7 @@ class CapabilityMatchConditionTest {
             assertEquals("user-456", entry.userId());
             assertEquals("capabilityMatch", entry.taskId());
             assertEquals("CAPABILITY_SELECTION", entry.taskType());
-            assertEquals(3, entry.stepIndex());
+            assertEquals(2, entry.stepIndex()); // 0-based: allSteps.size() - 1
 
             // Check input contains skill and strategy
             assertNotNull(entry.input());

@@ -11,8 +11,9 @@ import java.util.Map;
  * Immutable snapshot of conversation state at a specific point in time. Used
  * for rollback after failed tool executions and for conversation forking.
  * <p>
- * Each checkpoint captures the full conversation step stack and property state
- * so that the conversation can be restored exactly to this point.
+ * Each checkpoint captures the current {@code stepIndex} and a snapshot of
+ * conversation properties stored in {@code propertiesCopy}. This allows the
+ * conversation to be restored to the recorded property state at this point.
  *
  * @param checkpointId
  *            unique identifier for this checkpoint

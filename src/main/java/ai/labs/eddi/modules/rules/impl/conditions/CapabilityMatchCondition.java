@@ -183,7 +183,7 @@ public class CapabilityMatchCondition implements IRuleCondition {
                     memory.getAgentVersion(),
                     memory.getUserId(),
                     null, // environment — enriched by ConversationService
-                    memory.getAllSteps().size(),
+                    Math.max(0, memory.getAllSteps().size() - 1),
                     "capabilityMatch",
                     "CAPABILITY_SELECTION",
                     0,

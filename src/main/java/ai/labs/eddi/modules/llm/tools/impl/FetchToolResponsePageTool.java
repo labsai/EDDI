@@ -46,12 +46,12 @@ public class FetchToolResponsePageTool {
         }
 
         if (!result.isSuccess()) {
-            return "{\"error\": \"" + result.error() + "\", \"totalPages\": " + result.totalPages() + "}";
+            return "{\"error\": " + escapeJson(result.error()) + ", \"totalPages\": " + result.totalPages() + "}";
         }
 
         return "{\"page\": " + pageNumber +
                 ", \"totalPages\": " + result.totalPages() +
-                ", \"toolName\": \"" + result.toolName() + "\"" +
+                ", \"toolName\": " + escapeJson(result.toolName()) +
                 ", \"content\": " + escapeJson(result.content()) + "}";
     }
 

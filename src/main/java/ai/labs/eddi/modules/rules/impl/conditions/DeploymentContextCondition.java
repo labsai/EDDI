@@ -71,6 +71,9 @@ public class DeploymentContextCondition implements IRuleCondition {
         if (configs != null) {
             this.when = configs.get(CONFIG_WHEN);
             this.tagMatches = configs.get(CONFIG_TAG_MATCHES);
+        } else {
+            this.when = null;
+            this.tagMatches = null;
         }
     }
 

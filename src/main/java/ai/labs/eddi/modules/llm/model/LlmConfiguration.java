@@ -636,9 +636,8 @@ public record LlmConfiguration(List<Task> tasks) {
         private String truncationStrategy;
 
         /**
-         * Model to use for the "summarize" strategy. Defaults to
-         * {@code claude-haiku-4.6} via config property
-         * {@code eddi.mcp.summarizer.model}.
+         * Model to use for the "summarize" truncation strategy. When null, the
+         * summarize strategy falls back to simple truncation.
          *
          * @since 6.0.0
          */
