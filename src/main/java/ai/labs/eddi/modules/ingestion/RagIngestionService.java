@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -257,7 +258,7 @@ public class RagIngestionService {
             long totalDuration = System.currentTimeMillis() - totalStart;
             errorsCounter.increment();
             LOGGER.errorf(e, "Ingestion failed for source '%s'", LogSanitizer.sanitize(sourceId));
-            return new IngestionResult(sourceId, 0, 0, 0, 0, 0, 1, totalDuration, e.getMessage());
+            return new IngestionResult(sourceId, 0, 0, 0, 0, 0, 1, totalDuration, Optional.of(e.getMessage()));
         }
     }
 
@@ -342,9 +343,9 @@ public class RagIngestionService {
             int chunksStored,
             int errors,
             long durationMs,
-            String error) {
+            Optional<String> error) {
         public boolean isSuccess() {
-            return error == null;
+            return error.isEmpty();
         }
     }
 }
