@@ -345,7 +345,7 @@ public class RagIngestionService {
             long durationMs,
             Optional<String> error) {
         public boolean isSuccess() {
-            return error.isEmpty();
+            return error == null || error.isEmpty();
         }
     }
 }

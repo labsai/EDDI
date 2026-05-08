@@ -4,12 +4,11 @@
  */
 package ai.labs.eddi.modules.ingestion;
 
-import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
-import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
@@ -42,17 +41,11 @@ public class ContentHashTracker {
     private static final Logger LOGGER = Logger.getLogger(ContentHashTracker.class);
     private static final String COLLECTION_NAME = "rag_ingestion_hashes";
 
-    private final MongoClient mongoClient;
     private MongoCollection<Document> collection;
 
     @Inject
-    public ContentHashTracker(MongoClient mongoClient) {
-        this.mongoClient = mongoClient;
-    }
-
-    @PostConstruct
-    void init() {
-        this.collection = mongoClient.getDatabase("eddi").getCollection(COLLECTION_NAME);
+    public ContentHashTracker(MongoDatabase database) {
+        this.collection = database.getCollection(COLLECTION_NAME);
         createIndexes();
     }
 

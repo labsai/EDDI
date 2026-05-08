@@ -132,8 +132,8 @@ public class RagIngestionTask implements ILifecycleTask {
         output.put("errors", result.errors());
         output.put("durationMs", result.durationMs());
 
-        if (result.error() != null) {
-            output.put("error", result.error());
+        if (result.error().isPresent()) {
+            output.put("error", result.error().get());
         }
 
         memory.getCurrentStep().addConversationOutputObject("ingestion", output);
