@@ -105,6 +105,7 @@ export default defineConfig({
       "/snippetstore": p(),
       "/admin": p(),
       "/capabilities": p(),
+      "/.well-known": p(),
       // The /agents path includes the /agents/{id}/stream SSE endpoint.
       // We must disable http-proxy buffering so the stream closes cleanly.
       "/agents": pSSE(),

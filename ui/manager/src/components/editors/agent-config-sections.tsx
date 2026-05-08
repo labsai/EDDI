@@ -15,9 +15,13 @@ import {
   Check,
   Lightbulb,
   Trash2,
+  AlertTriangle,
+  Search,
 } from "lucide-react";
 import { useUpdateAgent } from "@/hooks/use-agents";
+import { useSkills } from "@/hooks/use-capabilities";
 import type { Agent, ChannelConnector } from "@/lib/api/agents";
+import { isApiError } from "@/lib/api-client";
 import { EditorSection } from "./editor-section";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -110,6 +114,9 @@ function DebouncedNumberInput({
 
 // ─── Security & Identity ────────────────────────────────────────────────────
 
+/** Security flags that the backend rejects (cryptographic signing not yet available). */
+const INERT_SECURITY_FLAGS = ["signInterAgentMessages", "signMcpInvocations", "requirePeerVerification"] as const;
+
 export const SecurityIdentitySection = memo(function SecurityIdentitySection({
   agent,
   agentId,
@@ -121,17 +128,60 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
 }) {
   const { t } = useTranslation();
   const updateAgent = useUpdateAgent();
+  const [pendingFlag, setPendingFlag] = useState<typeof INERT_SECURITY_FLAGS[number] | null>(null);
+  const [securityError, setSecurityError] = useState<string | null>(null);
 
-  function toggle(field: "signInterAgentMessages" | "signMcpInvocations" | "requirePeerVerification") {
+  // Clear error after 8 seconds
+  useEffect(() => {
+    if (securityError) {
+      const timer = setTimeout(() => setSecurityError(null), 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [securityError]);
+
+  const hasAnyFlagEnabled = INERT_SECURITY_FLAGS.some((f) => agent.security?.[f]);
+
+  function handleToggle(field: typeof INERT_SECURITY_FLAGS[number]) {
     const current = agent.security?.[field] ?? false;
-    updateAgent.mutate({
-      id: agentId,
-      version,
-      agent: {
-        ...agent,
-        security: { ...agent.security, [field]: !current },
+    if (!current) {
+      // Toggling ON → show confirmation dialog first
+      setPendingFlag(field);
+      return;
+    }
+    // Toggling OFF → safe, no confirmation needed
+    doToggle(field, true);
+  }
+
+  function doToggle(field: typeof INERT_SECURITY_FLAGS[number], currentValue: boolean) {
+    setSecurityError(null);
+    updateAgent.mutate(
+      {
+        id: agentId,
+        version,
+        agent: {
+          ...agent,
+          security: { ...agent.security, [field]: !currentValue },
+        },
       },
-    });
+      {
+        onError: (err) => {
+          if (isApiError(err) && err.status === 400) {
+            setSecurityError(err.message);
+          } else {
+            setSecurityError(
+              err instanceof Error ? err.message : String(err),
+            );
+          }
+        },
+      },
+    );
+  }
+
+  function confirmPendingFlag() {
+    if (pendingFlag) {
+      doToggle(pendingFlag, false);
+      setPendingFlag(null);
+    }
   }
 
   return (
@@ -192,6 +242,34 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           {t("agentDetail.securityFlags", "Signing & Verification")}
         </h3>
 
+        {/* Inline warning when any flag is enabled */}
+        {hasAnyFlagEnabled && (
+          <div
+            className="flex items-start gap-2 rounded-lg border border-amber-400/30 bg-amber-50 px-3 py-2.5 dark:bg-amber-900/15 dark:border-amber-700/30"
+            data-testid="security-flag-warning"
+            role="alert"
+          >
+            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+            <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+              {t("agentDetail.securityFlagWarning", "Cryptographic signing is not yet available in this version. The backend will reject saves with these flags enabled (HTTP 400).")}
+            </p>
+          </div>
+        )}
+
+        {/* HTTP 400 error display */}
+        {securityError && (
+          <div
+            className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5"
+            data-testid="security-flag-error"
+            role="alert"
+          >
+            <AlertTriangle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+            <p className="text-[11px] text-destructive leading-relaxed">
+              {securityError}
+            </p>
+          </div>
+        )}
+
         {([
           ["signInterAgentMessages", t("agentDetail.signA2A", "Sign inter-agent (A2A) messages"), t("agentDetail.signA2ADesc", "Cryptographically sign outbound A2A messages for tamper-proofing")],
           ["signMcpInvocations", t("agentDetail.signMcp", "Sign MCP invocations"), t("agentDetail.signMcpDesc", "Attach signatures to MCP tool calls for secure server verification")],
@@ -201,7 +279,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
             <input
               type="checkbox"
               checked={agent.security?.[field] ?? false}
-              onChange={() => toggle(field)}
+              onChange={() => handleToggle(field)}
               disabled={updateAgent.isPending}
               className="mt-0.5 h-3.5 w-3.5 rounded border-input accent-primary"
             />
@@ -212,11 +290,268 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
           </label>
         ))}
       </div>
+
+      {/* Confirmation dialog for enabling a security flag */}
+      <AlertDialog
+        open={!!pendingFlag}
+        onOpenChange={(open) => { if (!open) setPendingFlag(null); }}
+        title={t("agentDetail.securityFlagConfirmTitle", "Enable security flag?")}
+        description={t("agentDetail.securityFlagConfirmDesc", "Cryptographic signing is not yet available in this version. Enabling this flag will cause the backend to reject saves with HTTP 400. Are you sure you want to proceed?")}
+        confirmLabel={t("agentDetail.securityFlagConfirmBtn", "Enable anyway")}
+        cancelLabel={t("common.cancel", "Cancel")}
+        onConfirm={confirmPendingFlag}
+      />
     </EditorSection>
   );
 });
 
 // ─── Capabilities ───────────────────────────────────────────────────────────
+
+const confidenceColors: Record<string, string> = {
+  high: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+  medium: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+  low: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
+};
+
+/** Autocomplete input for selecting a skill from the registry or typing a custom one. */
+function SkillAutocomplete({
+  value,
+  onChange,
+  onSelect,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSelect: (skill: string) => void;
+  placeholder?: string;
+}) {
+  const { data: allSkills } = useSkills();
+  const [open, setOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(-1);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const suggestions = useMemo(() => {
+    if (!allSkills || !value.trim()) return [];
+    const q = value.trim().toLowerCase();
+    return allSkills.filter((s) => s.toLowerCase().includes(q));
+  }, [allSkills, value]);
+
+  // Close on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlighted((h) => Math.min(h + 1, suggestions.length - 1));
+      setOpen(true);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlighted((h) => Math.max(h - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (highlighted >= 0 && highlighted < suggestions.length) {
+        onSelect(suggestions[highlighted]!);
+        setOpen(false);
+        setHighlighted(-1);
+      } else if (value.trim()) {
+        onSelect(value.trim());
+        setOpen(false);
+      }
+    } else if (e.key === "Escape") {
+      setOpen(false);
+    }
+  }
+
+  return (
+    <div ref={wrapperRef} className="relative flex-1">
+      <Search className="absolute start-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setOpen(true); setHighlighted(-1); }}
+        onFocus={() => { if (value.trim()) setOpen(true); }}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        className="h-8 w-full rounded-md border border-input bg-background ps-7 pe-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        data-testid="skill-autocomplete-input"
+        autoComplete="off"
+      />
+      {open && suggestions.length > 0 && (
+        <div
+          className="absolute z-50 mt-1 max-h-40 w-full overflow-auto rounded-lg border border-border bg-card shadow-lg"
+          data-testid="skill-autocomplete-dropdown"
+        >
+          {suggestions.map((skill, i) => (
+            <button
+              key={skill}
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); onSelect(skill); setOpen(false); }}
+              onMouseEnter={() => setHighlighted(i)}
+              className={`w-full px-3 py-1.5 text-start text-xs transition-colors ${
+                i === highlighted
+                  ? "bg-primary/10 text-primary"
+                  : "text-foreground hover:bg-secondary"
+              }`}
+            >
+              {skill}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Inline key-value editor for capability attributes. */
+function CapabilityAttributesEditor({
+  attributes,
+  onChange,
+  disabled,
+}: {
+  attributes: Record<string, string>;
+  onChange: (attrs: Record<string, string>) => void;
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  const entries = Object.entries(attributes);
+  const [newKey, setNewKey] = useState("");
+  const [newValue, setNewValue] = useState("");
+
+  // Keep a ref to the latest attributes so debounced callbacks don't use stale state
+  const attrsRef = useRef(attributes);
+  useEffect(() => { attrsRef.current = attributes; }, [attributes]);
+
+  // Debounce timer for value edits
+  const valueTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (valueTimer.current) clearTimeout(valueTimer.current); }, []);
+
+  function addAttribute() {
+    if (!newKey.trim()) return;
+    onChange({ ...attrsRef.current, [newKey.trim()]: newValue.trim() });
+    setNewKey("");
+    setNewValue("");
+  }
+
+  function removeAttribute(key: string) {
+    const next = { ...attrsRef.current };
+    delete next[key];
+    onChange(next);
+  }
+
+  function commitValue(key: string, val: string) {
+    if (valueTimer.current) clearTimeout(valueTimer.current);
+    valueTimer.current = setTimeout(() => {
+      onChange({ ...attrsRef.current, [key]: val });
+    }, 600);
+  }
+
+  return (
+    <div className="space-y-1.5 ps-3 border-s-2 border-violet-500/20">
+      {entries.map(([k, v]) => (
+        <DebouncedAttrRow
+          key={k}
+          attrKey={k}
+          attrValue={v}
+          onCommit={(val) => commitValue(k, val)}
+          onRemove={() => removeAttribute(k)}
+          disabled={disabled}
+        />
+      ))}
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          value={newKey}
+          onChange={(e) => setNewKey(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addAttribute(); } }}
+          placeholder={t("agentDetail.attributeKey", "key")}
+          disabled={disabled}
+          className="h-6 w-20 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+          data-testid="attribute-key-input"
+        />
+        <input
+          type="text"
+          value={newValue}
+          onChange={(e) => setNewValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addAttribute(); } }}
+          placeholder={t("agentDetail.attributeValue", "value")}
+          disabled={disabled}
+          className="h-6 flex-1 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+          data-testid="attribute-value-input"
+        />
+        <button
+          type="button"
+          onClick={addAttribute}
+          disabled={!newKey.trim() || disabled}
+          className="rounded p-0.5 text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+          title={t("agentDetail.addAttribute", "Add attribute")}
+        >
+          <Plus className="h-3 w-3" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Single attribute row that buffers its value locally to avoid per-keystroke PUTs. */
+function DebouncedAttrRow({
+  attrKey,
+  attrValue,
+  onCommit,
+  onRemove,
+  disabled,
+}: {
+  attrKey: string;
+  attrValue: string;
+  onCommit: (val: string) => void;
+  onRemove: () => void;
+  disabled?: boolean;
+}) {
+  const [local, setLocal] = useState(attrValue);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sync from parent on external changes (version bump etc.)
+  useEffect(() => setLocal(attrValue), [attrValue]);
+
+  // Cleanup timer on unmount
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  function handleChange(val: string) {
+    setLocal(val);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => onCommit(val), 600);
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="shrink-0 rounded bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-600 dark:text-violet-400">
+        {attrKey}
+      </span>
+      <input
+        type="text"
+        value={local}
+        onChange={(e) => handleChange(e.target.value)}
+        disabled={disabled}
+        className="h-6 flex-1 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+      />
+      <button
+        type="button"
+        onClick={onRemove}
+        disabled={disabled}
+        className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-50"
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
 
 export const CapabilitiesSection = memo(function CapabilitiesSection({
   agent,
@@ -230,12 +565,18 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
   const { t } = useTranslation();
   const updateAgent = useUpdateAgent();
   const [newSkill, setNewSkill] = useState("");
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
   const caps = agent.capabilities ?? [];
 
-  function addCapability() {
-    if (!newSkill.trim()) return;
-    const updated = [...caps, { skill: newSkill.trim(), confidence: "medium" }];
+  function addCapability(skill: string) {
+    if (!skill.trim()) return;
+    // Avoid duplicates
+    if (caps.some((c) => c.skill === skill.trim())) {
+      toast.error(t("agentDetail.skillAlreadyExists", "This skill is already declared"));
+      return;
+    }
+    const updated = [...caps, { skill: skill.trim(), confidence: "medium", attributes: {} }];
     updateAgent.mutate({ id: agentId, version, agent: { ...agent, capabilities: updated } });
     setNewSkill("");
   }
@@ -243,10 +584,16 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
   function removeCapability(idx: number) {
     const updated = caps.filter((_, i) => i !== idx);
     updateAgent.mutate({ id: agentId, version, agent: { ...agent, capabilities: updated } });
+    if (expandedIdx === idx) setExpandedIdx(null);
   }
 
   function updateConfidence(idx: number, confidence: string) {
     const updated = caps.map((c, i) => (i === idx ? { ...c, confidence } : c));
+    updateAgent.mutate({ id: agentId, version, agent: { ...agent, capabilities: updated } });
+  }
+
+  function updateAttributes(idx: number, attributes: Record<string, string>) {
+    const updated = caps.map((c, i) => (i === idx ? { ...c, attributes } : c));
     updateAgent.mutate({ id: agentId, version, agent: { ...agent, capabilities: updated } });
   }
 
@@ -264,46 +611,86 @@ export const CapabilitiesSection = memo(function CapabilitiesSection({
         </p>
 
         {caps.length > 0 && (
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {caps.map((cap, i) => (
-              <div key={i} className="flex items-center gap-2 rounded-lg border border-border bg-background p-2">
-                <span className="flex-1 text-xs font-medium text-foreground">{cap.skill}</span>
-                <select
-                  value={cap.confidence ?? "medium"}
-                  onChange={(e) => updateConfidence(i, e.target.value)}
-                  className="h-7 rounded border border-input bg-background px-1.5 text-[10px] text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  <option value="low">{t("agentDetail.confidenceLow", "Low")}</option>
-                  <option value="medium">{t("agentDetail.confidenceMedium", "Medium")}</option>
-                  <option value="high">{t("agentDetail.confidenceHigh", "High")}</option>
-                </select>
-                <button
-                  type="button"
-                  onClick={() => removeCapability(i)}
-                  disabled={updateAgent.isPending}
-                  className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
+              <div
+                key={`${cap.skill}-${i}`}
+                className="rounded-lg border border-border bg-background overflow-hidden"
+                data-testid={`capability-entry-${i}`}
+              >
+                {/* Capability row */}
+                <div className="flex items-center gap-2 p-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedIdx(expandedIdx === i ? null : i)}
+                    className="text-muted-foreground hover:text-foreground transition-colors"
+                    title={t("agentDetail.toggleAttributes", "Toggle attributes")}
+                  >
+                    <Sparkles className="h-3.5 w-3.5 text-violet-500" />
+                  </button>
+                  <span className="flex-1 text-xs font-medium text-foreground">{cap.skill}</span>
+                  {/* Confidence badge */}
+                  <select
+                    value={cap.confidence ?? "medium"}
+                    onChange={(e) => updateConfidence(i, e.target.value)}
+                    className={`h-7 rounded-full border px-2 text-[10px] font-semibold focus:outline-none focus:ring-1 focus:ring-ring ${confidenceColors[cap.confidence ?? "medium"] ?? ""}`}
+                    data-testid={`confidence-select-${i}`}
+                  >
+                    <option value="low">{t("agentDetail.confidenceLow", "Low")}</option>
+                    <option value="medium">{t("agentDetail.confidenceMedium", "Medium")}</option>
+                    <option value="high">{t("agentDetail.confidenceHigh", "High")}</option>
+                  </select>
+                  {/* Attribute count pill */}
+                  {cap.attributes && Object.keys(cap.attributes).length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setExpandedIdx(expandedIdx === i ? null : i)}
+                      className="rounded-full bg-violet-500/10 px-1.5 py-0.5 text-[9px] font-medium text-violet-600 dark:text-violet-400 hover:bg-violet-500/20 transition-colors"
+                    >
+                      {Object.keys(cap.attributes).length} {t("agentDetail.attrs", "attrs")}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removeCapability(i)}
+                    disabled={updateAgent.isPending}
+                    className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                {/* Expanded attributes editor */}
+                {expandedIdx === i && (
+                  <div className="border-t border-border bg-violet-500/[0.02] px-3 py-2.5">
+                    <p className="mb-1.5 text-[10px] font-medium text-muted-foreground">
+                      {t("agentDetail.attributesLabel", "Attributes")}
+                    </p>
+                    <CapabilityAttributesEditor
+                      attributes={cap.attributes ?? {}}
+                      onChange={(attrs) => updateAttributes(i, attrs)}
+                      disabled={updateAgent.isPending}
+                    />
+                  </div>
+                )}
               </div>
             ))}
           </div>
         )}
 
+        {/* Add new skill — autocomplete */}
         <div className="flex gap-1.5">
-          <input
-            type="text"
+          <SkillAutocomplete
             value={newSkill}
-            onChange={(e) => setNewSkill(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCapability(); } }}
-            placeholder={t("agentDetail.capabilityPlaceholder", "e.g. customer-support, code-review")}
-            className="h-8 flex-1 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            onChange={setNewSkill}
+            onSelect={addCapability}
+            placeholder={t("agentDetail.capabilityPlaceholder", "Search or type a skill name...")}
           />
           <button
             type="button"
-            onClick={addCapability}
+            onClick={() => addCapability(newSkill)}
             disabled={!newSkill.trim() || updateAgent.isPending}
             className="inline-flex h-8 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
+            data-testid="add-capability-btn"
           >
             <Plus className="h-3 w-3" />
           </button>
