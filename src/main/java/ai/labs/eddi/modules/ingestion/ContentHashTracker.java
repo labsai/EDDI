@@ -9,8 +9,6 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
-import com.mongodb.client.model.UpdateOptions;
-import com.mongodb.client.model.Updates;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -22,12 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
@@ -92,21 +85,27 @@ public class ContentHashTracker {
      * @return true if content is new or changed, false if unchanged
      */
     public boolean shouldIngest(String sourceId, String documentId, String content) {
-        // Sanitize IDs — strip null bytes and control chars that break BSON encoding
-        String safeId = sanitizeForBson(documentId);
+        if (documentId == null || documentId.isEmpty()) {
+            LOGGER.warn("Skipping document with null/empty ID");
+            return false;
+        }
+        if (content == null || content.isEmpty()) {
+            LOGGER.warnf("Skipping document with null/empty content: %s", sanitize(documentId));
+            return false;
+        }
         String hash = computeHash(content);
 
         Document existing = collection.find(
                 Filters.and(
                         Filters.eq("sourceId", sourceId),
-                        Filters.eq("documentId", safeId)))
+                        Filters.eq("documentId", documentId)))
                 .first();
 
         if (existing == null) {
             // New document
             Document doc = new Document()
                     .append("sourceId", sourceId)
-                    .append("documentId", safeId)
+                    .append("documentId", documentId)
                     .append("hash", hash)
                     .append("stale", false)
                     .append("ingestedAt", Instant.now())
@@ -121,11 +120,10 @@ public class ContentHashTracker {
             collection.updateOne(
                     Filters.and(
                             Filters.eq("sourceId", sourceId),
-                            Filters.eq("documentId", safeId)),
-                    Updates.combine(
-                            Updates.set("ingestedAt", new Date()),
-                            Updates.set("stale", false) // Clear stale flag if document reappears
-                    ));
+                            Filters.eq("documentId", documentId)),
+                    new Document("$set", new Document()
+                            .append("ingestedAt", Instant.now())
+                            .append("stale", false)));
             return false;
         }
 
@@ -133,12 +131,12 @@ public class ContentHashTracker {
         collection.updateOne(
                 Filters.and(
                         Filters.eq("sourceId", sourceId),
-                        Filters.eq("documentId", safeId)),
-                Updates.combine(
-                        Updates.set("hash", hash),
-                        Updates.set("ingestedAt", new Date()),
-                        Updates.set("updatedAt", new Date()),
-                        Updates.set("stale", false)));
+                        Filters.eq("documentId", documentId)),
+                new Document("$set", new Document()
+                        .append("hash", hash)
+                        .append("ingestedAt", Instant.now())
+                        .append("updatedAt", Instant.now())
+                        .append("stale", false)));
         return true;
     }
 
@@ -152,11 +150,15 @@ public class ContentHashTracker {
      * @return the number of documents marked stale
      */
     public int markStaleDocuments(String sourceId, List<String> documentIds) {
-        // Find all non-stale entries for this source that are NOT in documentIds
         List<String> normalizedIds = documentIds.stream()
-                .map(id -> sanitizeForBson(id))
                 .map(this::normalizeId)
+                .filter(id -> !id.isEmpty())
                 .toList();
+
+        if (normalizedIds.isEmpty()) {
+            LOGGER.debugf("All document IDs were empty after normalization for source '%s' — skipping stale marking", sanitize(sourceId));
+            return 0;
+        }
 
         Bson filter = Filters.and(
                 Filters.eq("sourceId", sourceId),
@@ -165,38 +167,15 @@ public class ContentHashTracker {
 
         var result = collection.updateMany(
                 filter,
-                Updates.combine(
-                        Updates.set("stale", true),
-                        Updates.set("staleAt", new Date())));
+                new Document("$set", new Document()
+                        .append("stale", true)
+                        .append("staleAt", Instant.now().toString())));
 
         int markedStale = (int) result.getModifiedCount();
         if (markedStale > 0) {
             LOGGER.infof("Marked %d documents as stale for source '%s'", markedStale, sanitize(sourceId));
         }
         return markedStale;
-    }
-
-    /**
-     * Gets all tracked document IDs for a source, including stale ones.
-     *
-     * @param sourceId
-     *            the ingestion source ID
-     * @return map of documentId to hash entry
-     */
-    public Map<String, HashEntry> getTrackedDocuments(String sourceId) {
-        Map<String, HashEntry> result = new HashMap<>();
-
-        for (Document doc : collection.find(Filters.eq("sourceId", sourceId))) {
-            String documentId = doc.getString("documentId");
-            String hash = doc.getString("hash");
-            boolean stale = doc.getBoolean("stale", false);
-            Instant ingestedAt = doc.getDate("ingestedAt") != null
-                    ? doc.getDate("ingestedAt").toInstant()
-                    : null;
-            result.put(documentId, new HashEntry(documentId, hash, stale, ingestedAt));
-        }
-
-        return result;
     }
 
     /**
@@ -252,37 +231,6 @@ public class ContentHashTracker {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
         return normalized;
-    }
-
-    /**
-     * Strips characters from a string that would break BSON encoding.
-     * <p>
-     * BSON strings are null-terminated in the binary format, so null bytes (U+0000)
-     * and other control characters can corrupt the BSON document. URLs and document
-     * IDs should never contain these characters, but malformed web pages or scraped
-     * URLs sometimes do.
-     *
-     * @param value
-     *            the raw string value
-     * @return a BSON-safe string (null bytes and control chars removed)
-     */
-    static String sanitizeForBson(String value) {
-        if (value == null || value.isEmpty()) {
-            return value;
-        }
-        if (value.indexOf('\0') < 0 && value.chars().noneMatch(c -> c < 0x20 && c != '\t')) {
-            return value; // fast path: nothing to sanitize
-        }
-        StringBuilder sb = new StringBuilder(value.length());
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            // Keep ASCII printable chars, tab, newline, carriage return
-            if (c >= 0x20 || c == '\t' || c == '\n' || c == '\r') {
-                sb.append(c);
-            }
-            // Strip everything else (null bytes, control chars)
-        }
-        return sb.toString();
     }
 
     /**

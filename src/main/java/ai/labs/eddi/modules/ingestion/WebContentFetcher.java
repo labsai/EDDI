@@ -190,9 +190,11 @@ public class WebContentFetcher implements ContentFetcher {
         // Validate URL for SSRF safety
         UrlValidationUtils.validateUrl(url);
 
+        int timeoutSec = settings.timeoutSeconds() > 0 ? settings.timeoutSeconds() : 15;
+
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(settings.timeoutSeconds()))
+                .timeout(Duration.ofSeconds(timeoutSec))
                 .header("User-Agent", settings.userAgent())
                 .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .header("Accept-Language", "en-US,en;q=0.5")
