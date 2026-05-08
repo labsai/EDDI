@@ -66,7 +66,7 @@ class GroupConversationServiceTest {
         jsonSerialization = mock(IJsonSerialization.class);
 
         service = new GroupConversationService(groupStore, conversationStore, conversationService, agentFactory, templatingEngine, jsonSerialization,
-                new SimpleMeterRegistry(), 3);
+                new SimpleMeterRegistry(), null, null, 3);
 
         when(conversationStore.create(any())).thenReturn("gc-1");
 
@@ -301,7 +301,7 @@ class GroupConversationServiceTest {
         @Test
         void groupMember_depthExceeded_skipsGracefully() throws Exception {
             var shallow = new GroupConversationService(groupStore, conversationStore, conversationService, agentFactory, templatingEngine,
-                    jsonSerialization, new SimpleMeterRegistry(), 0);
+                    jsonSerialization, new SimpleMeterRegistry(), null, null, 0);
 
             var parent = config(DiscussionStyle.ROUND_TABLE, 1, new GroupMember("sub-g1", "Team A", 1, null, MemberType.GROUP));
             parent.setModeratorAgentId("mod");

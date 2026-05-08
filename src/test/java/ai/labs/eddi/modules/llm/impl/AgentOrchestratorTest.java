@@ -63,7 +63,7 @@ class AgentOrchestratorTest {
                 mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
                 mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class),
                 mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class), mock(ToolResponseTruncator.class),
-                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
+                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class), null);
 
         // Mock memory for collectEnabledTools (no user memory config = no
         // UserMemoryTool added)
@@ -440,7 +440,7 @@ class AgentOrchestratorTest {
                 mock(McpToolProviderManager.class),
                 mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
                 mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class), mock(ToolResponseTruncator.class),
-                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
+                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class), null);
 
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");
@@ -468,7 +468,7 @@ class AgentOrchestratorTest {
                 mock(McpToolProviderManager.class),
                 mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
                 mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class), mock(ToolResponseTruncator.class),
-                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
+                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class), null);
 
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");
@@ -520,7 +520,7 @@ class AgentOrchestratorTest {
                 mock(McpToolProviderManager.class),
                 mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
                 mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class), mock(ToolResponseTruncator.class),
-                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
+                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class), null);
 
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");
@@ -566,7 +566,7 @@ class AgentOrchestratorTest {
                 mock(McpToolProviderManager.class),
                 mock(A2AToolProviderManager.class), restAgentStore, mock(IRestWorkflowStore.class), mock(IResourceClientLibrary.class),
                 mock(IApiCallExecutor.class), mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class),
-                mock(ToolResponseTruncator.class), mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
+                mock(ToolResponseTruncator.class), mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class), null);
 
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");
@@ -596,7 +596,7 @@ class AgentOrchestratorTest {
                 mock(McpToolProviderManager.class),
                 mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
                 mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class), mock(ToolResponseTruncator.class),
-                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
+                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class), null);
 
         var memory = mock(IConversationMemory.class);
         when(memory.getAgentId()).thenReturn("agent-1");

@@ -122,7 +122,8 @@ class LlmTaskTest {
                 globalVariableResolver,
                 counterweightService,
                 identityMaskingService,
-                toolResponseTruncator, mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
+                toolResponseTruncator, mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
+                null, null);
     }
 
     static Stream<Arguments> provideParameters() {

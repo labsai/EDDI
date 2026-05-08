@@ -13,6 +13,30 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔧 Test Stabilization & Integration Wiring (2026-05-08)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+**What changed:** Fixed all compilation and test failures caused by constructor signature changes from cryptographic signing, memory snapshot, and attachment store integrations.
+
+### Test Constructor Fixes
+- **`LlmTaskTest`** — Added `null, null` for `MemorySnapshotService` and `IAttachmentStore` params.
+- **`AgentOrchestratorTest`** — Added `null` for `MemorySnapshotService` param.
+- **`MultimodalMessageEnhancerTest` / `MultimodalMessageEnhancerExtendedTest`** — Added `null` for `IAttachmentStore` param.
+- **`GroupConversationServiceTest`** — Added `null, null` for `AgentSigningService` and `IAgentStore` params at both constructor sites.
+- **`RestAttachmentUploadTest`** — Complete rewrite from `IAttachmentStorage`/`Instance<>` pattern to new `IAttachmentStore`-based API. Now tests upload (success, rejection, tenant ID, MIME defaulting), list, and delete endpoints (10 tests).
+
+### Production Code Fixes
+- **`RestAttachmentUpload.java`** — Fixed `attachment.fileName()` → `attachment.filename()` to match `Attachment` record field name.
+- **`MultimodalMessageEnhancerExtendedTest`** — Updated `storedImageProducesTextFallback` assertion from "not yet implemented" to "no attachment store configured" to match implemented STORED path behavior.
+
+### JSON Serialization Test Updates
+- **`DiscoverToolsToolTest`** — Updated 5 JSON substring assertions to accept both manual (`"tools": []`) and Jackson compact (`"tools":[]`) formats after Jackson migration.
+- **`FetchToolResponsePageToolTest`** — Updated 3 JSON assertions for Jackson compact format.
+
+### Verification
+- Clean compile: BUILD SUCCESS, 0 checkstyle violations
+- 264 targeted tests: 0 failures, 0 errors
+
 ## 🔧 PR Review Remediation — 11 Issues (2026-05-07)
 
 **Repo:** EDDI (`feature/agentic-improvements`)

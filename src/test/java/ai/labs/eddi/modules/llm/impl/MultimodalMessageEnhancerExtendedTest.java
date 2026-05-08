@@ -43,7 +43,7 @@ class MultimodalMessageEnhancerExtendedTest {
     class StoredContentSource {
 
         @Test
-        @DisplayName("should produce text description for STORED image attachment")
+        @DisplayName("should produce text description for STORED image when no store available")
         void storedImageProducesTextFallback() {
             Attachment att = new Attachment();
             att.setMimeType("image/png");
@@ -54,13 +54,13 @@ class MultimodalMessageEnhancerExtendedTest {
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(UserMessage.from("What is this?"));
 
-            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, null);
 
             UserMessage enhanced = (UserMessage) messages.get(0);
             assertEquals(2, enhanced.contents().size());
             TextContent fallback = (TextContent) enhanced.contents().get(1);
             assertTrue(fallback.text().contains("stored-img.png"));
-            assertTrue(fallback.text().contains("not yet implemented"));
+            assertTrue(fallback.text().contains("no attachment store configured"));
         }
 
         @Test
@@ -75,7 +75,7 @@ class MultimodalMessageEnhancerExtendedTest {
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(UserMessage.from("Describe"));
 
-            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, null);
 
             UserMessage enhanced = (UserMessage) messages.get(0);
             assertEquals(2, enhanced.contents().size());
@@ -99,7 +99,7 @@ class MultimodalMessageEnhancerExtendedTest {
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(UserMessage.from("Describe"));
 
-            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, null);
 
             // Invalid URL → null → not added → original text only
             UserMessage enhanced = (UserMessage) messages.get(0);
@@ -117,7 +117,7 @@ class MultimodalMessageEnhancerExtendedTest {
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(UserMessage.from("Hello"));
 
-            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, null);
 
             UserMessage enhanced = (UserMessage) messages.get(0);
             assertEquals(1, enhanced.contents().size());
@@ -134,7 +134,7 @@ class MultimodalMessageEnhancerExtendedTest {
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(UserMessage.from("Hello"));
 
-            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, null);
 
             assertEquals(1, messages.size());
         }
@@ -158,7 +158,7 @@ class MultimodalMessageEnhancerExtendedTest {
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(UserMessage.from("Hello"));
 
-            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, null);
 
             // No valid Attachment → message unchanged
             UserMessage msg = (UserMessage) messages.get(0);
@@ -182,7 +182,7 @@ class MultimodalMessageEnhancerExtendedTest {
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(UserMessage.from("Process"));
 
-            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, null);
 
             UserMessage enhanced = (UserMessage) messages.get(0);
             assertEquals(2, enhanced.contents().size());

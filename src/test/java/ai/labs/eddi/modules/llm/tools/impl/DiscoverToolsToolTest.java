@@ -98,7 +98,7 @@ class DiscoverToolsToolTest {
             var tool = new DiscoverToolsTool(testSpecs, 20);
             String result = tool.discoverTools(null, "nonexistent_feature_xyz");
 
-            assertTrue(result.contains("\"tools\": []"));
+            assertTrue(result.contains("\"tools\":[]") || result.contains("\"tools\": []"));
             assertTrue(result.contains("No tools found"));
         }
     }
@@ -114,7 +114,7 @@ class DiscoverToolsToolTest {
             String result = tool.discoverTools(null, null);
 
             // Count matches
-            assertTrue(result.contains("\"count\": 2"));
+            assertTrue(result.contains("\"count\":2") || result.contains("\"count\": 2"));
         }
 
         @Test
@@ -124,7 +124,7 @@ class DiscoverToolsToolTest {
             String result = tool.discoverTools(null, null);
 
             // All 5 non-meta tools returned (5 < 20)
-            assertTrue(result.contains("\"count\": 5"));
+            assertTrue(result.contains("\"count\":5") || result.contains("\"count\": 5"));
         }
     }
 
@@ -138,7 +138,7 @@ class DiscoverToolsToolTest {
             var tool = new DiscoverToolsTool(null, 20);
             String result = tool.discoverTools(null, null);
 
-            assertTrue(result.contains("\"tools\": []"));
+            assertTrue(result.contains("\"tools\":[]") || result.contains("\"tools\": []"));
         }
 
         @Test
@@ -147,7 +147,7 @@ class DiscoverToolsToolTest {
             var tool = new DiscoverToolsTool(List.of(), 20);
             String result = tool.discoverTools(null, null);
 
-            assertTrue(result.contains("\"tools\": []"));
+            assertTrue(result.contains("\"tools\":[]") || result.contains("\"tools\": []"));
         }
 
         @Test

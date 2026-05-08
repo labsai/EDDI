@@ -89,9 +89,9 @@ class FetchToolResponsePageToolTest {
         when(paginatedResponseStore.getPage("valid-id", 2)).thenReturn(pageResult);
 
         String result = tool.fetchPage("valid-id", 2);
-        assertTrue(result.contains("\"page\": 2"));
-        assertTrue(result.contains("\"totalPages\": 3"));
-        assertTrue(result.contains("\"toolName\": \"testTool\""));
+        assertTrue(result.contains("\"page\":2") || result.contains("\"page\": 2"));
+        assertTrue(result.contains("\"totalPages\":3") || result.contains("\"totalPages\": 3"));
+        assertTrue(result.contains("\"toolName\":\"testTool\"") || result.contains("\"toolName\": \"testTool\""));
         assertTrue(result.contains("Page 2 content here"));
     }
 
