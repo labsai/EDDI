@@ -63,10 +63,18 @@ describe("i18n key parity", () => {
     hi: hi as Record<string, unknown>,
   };
 
+  // Keys under these namespaces intentionally rely on fallbackLng="en"
+  // rather than duplicating English strings in every locale file.
+  const fallbackNamespaces = ["variables."];
+
   Object.entries(locales).forEach(([code, locale]) => {
     it(`${code}.json has all keys from en.json`, () => {
       const localeKeys = new Set(getKeys(locale));
-      const missing = enKeys.filter((k) => !localeKeys.has(k));
+      const missing = enKeys.filter(
+        (k) =>
+          !localeKeys.has(k) &&
+          !fallbackNamespaces.some((ns) => k.startsWith(ns)),
+      );
       expect(missing).toEqual([]);
     });
   });

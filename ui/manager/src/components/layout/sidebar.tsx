@@ -30,6 +30,7 @@ import {
   RefreshCw,
   ChevronRight,
   Users,
+  Variable,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -72,6 +73,7 @@ const navSections = [
     labelKey: "nav.sectionAdmin",
     items: [
       { path: "/manage/secrets", icon: KeyRound, labelKey: "nav.secrets" },
+      { path: "/manage/variables", icon: Variable, labelKey: "nav.variables" },
       { path: "/manage/quotas", icon: SlidersHorizontal, labelKey: "nav.quotas" },
       { path: "/manage/schedules", icon: CalendarClock, labelKey: "nav.schedules" },
       { path: "/manage/userdata", icon: Users, labelKey: "nav.userData" },

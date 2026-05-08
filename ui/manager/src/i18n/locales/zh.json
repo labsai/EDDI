@@ -44,7 +44,8 @@
     "capabilities": "能力",
     "sync": "同步",
     "userConversations": "用户对话",
-    "userData": "用户数据"
+    "userData": "用户数据",
+    "variables": "变量"
   },
   "theme": {
     "light": "浅色",

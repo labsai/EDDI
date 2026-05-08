@@ -44,7 +44,8 @@
     "capabilities": "Fähigkeiten",
     "sync": "Synchronisierung",
     "userConversations": "Nutzer-Konversationen",
-    "userData": "Nutzerdaten"
+    "userData": "Nutzerdaten",
+    "variables": "Variablen"
   },
   "theme": {
     "light": "Hell",
@@ -206,7 +207,7 @@
     "slackChannel": "Slack-Kanal",
     "removeChannel": "Kanal entfernen",
     "removeChannelConfirm": "Diesen Slack-Kanalverbinder entfernen?",
-      "removeChannelDesc": "This action will permanently disconnect this channel.",
+    "removeChannelDesc": "This action will permanently disconnect this channel.",
     "channelId": "Kanal-ID",
     "channelIdHint": "Kanal-IDs beginnen mit C gefolgt von alphanumerischen Großbuchstaben",
     "botToken": "Bot-Token",

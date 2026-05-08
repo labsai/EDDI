@@ -44,7 +44,8 @@
     "capabilities": "Capacidades",
     "sync": "Sincronização",
     "userConversations": "Conversas do usuário",
-    "userData": "Dados do utilizador"
+    "userData": "Dados do utilizador",
+    "variables": "Variáveis"
   },
   "theme": {
     "light": "Claro",

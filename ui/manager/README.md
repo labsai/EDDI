@@ -18,6 +18,7 @@ EDDI Manager is a modern React SPA that ships **inside** the EDDI Docker image. 
 - **LLM Configuration** — Connect to 12 providers (OpenAI, Anthropic, Gemini, Ollama, etc.)
 - **Resource Editors** — Form-based editors for rules, API calls, LLM configs, dictionaries, RAG, MCP, and more
 - **Secrets Vault** — Manage encrypted API keys with vault references
+- **Global Variables** — Deploy-wide configuration values for all agents (`${vars:<key>}` / `{{vars.<key>}}`)
 - **Audit Trail** — Timeline-based compliance and debugging viewer
 - **11 Languages** — English, German, French, Spanish, Portuguese, Chinese, Japanese, Korean, Arabic (RTL), Hindi, Thai
 
@@ -47,7 +48,7 @@ npm run dev          # Vite dev server on http://localhost:5173
 The Vite dev proxy forwards API calls to the EDDI backend. If no backend is available, the Manager auto-starts in **standalone mode** with mock data (via [MSW](https://mswjs.io/)).
 
 ```bash
-npm run test         # 540+ Vitest unit/component tests
+npm run test         # 720+ Vitest unit/component tests
 npm run build        # Production build
 ```
 

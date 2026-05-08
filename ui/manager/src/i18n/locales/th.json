@@ -44,7 +44,8 @@
     "capabilities": "ขีดความสามารถ",
     "sync": "ซิงค์",
     "userConversations": "การสนทนาของผู้ใช้",
-    "userData": "ข้อมูลผู้ใช้"
+    "userData": "ข้อมูลผู้ใช้",
+    "variables": "ตัวแปร"
   },
   "theme": {
     "light": "สว่าง",

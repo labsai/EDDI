@@ -44,7 +44,8 @@
     "capabilities": "क्षमताएं",
     "sync": "सिंक",
     "userConversations": "उपयोगकर्ता वार्तालाप",
-    "userData": "उपयोगकर्ता डेटा"
+    "userData": "उपयोगकर्ता डेटा",
+    "variables": "चर"
   },
   "theme": {
     "light": "लाइट",

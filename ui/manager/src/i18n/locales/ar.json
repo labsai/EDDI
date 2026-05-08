@@ -44,7 +44,8 @@
     "capabilities": "القدرات",
     "sync": "المزامنة",
     "userConversations": "محادثات المستخدم",
-    "userData": "بيانات المستخدم"
+    "userData": "بيانات المستخدم",
+    "variables": "المتغيرات"
   },
   "theme": {
     "light": "فاتح",
