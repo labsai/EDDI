@@ -112,6 +112,8 @@ public final class MimeValidator {
      */
     public static boolean isCompatible(String declaredMime, String detectedMime) {
         if (declaredMime == null || detectedMime == null) {
+            LOGGER.warnf("MIME validation skipped — declared='%s', detected='%s'. " +
+                    "This is lenient but may mask upload issues.", declaredMime, detectedMime);
             return true; // lenient when detection fails
         }
         if ("application/octet-stream".equals(detectedMime)) {

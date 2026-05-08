@@ -13,7 +13,6 @@ import com.mongodb.client.model.Sorts;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.bson.Document;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;

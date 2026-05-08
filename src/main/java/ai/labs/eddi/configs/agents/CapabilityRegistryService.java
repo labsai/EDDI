@@ -188,8 +188,11 @@ public class CapabilityRegistryService {
                 if (attrValue == null) {
                     return false;
                 }
-                // Support comma-separated lists: "en,de,fr" contains "de"
-                if (!attrValue.contains(req.getValue())) {
+                // Support comma-separated lists: "en,de,fr" matches "de"
+                var items = java.util.Arrays.stream(attrValue.split(","))
+                        .map(String::trim)
+                        .collect(java.util.stream.Collectors.toSet());
+                if (!items.contains(req.getValue())) {
                     return false;
                 }
             }

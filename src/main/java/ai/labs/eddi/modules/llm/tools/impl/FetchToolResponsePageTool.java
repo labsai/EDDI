@@ -5,10 +5,15 @@
 package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.modules.llm.tools.PaginatedResponseStore;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Built-in tool that allows the LLM to retrieve subsequent pages of a paginated
@@ -22,6 +27,8 @@ import jakarta.inject.Inject;
 @ApplicationScoped
 public class FetchToolResponsePageTool {
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     @Inject
     PaginatedResponseStore paginatedResponseStore;
 
@@ -32,37 +39,39 @@ public class FetchToolResponsePageTool {
                             @P("The page number to retrieve (1-indexed)") int pageNumber) {
 
         if (responseId == null || responseId.isBlank()) {
-            return "{\"error\": \"responseId is required\"}";
+            return toJson(Map.of("error", "responseId is required"));
         }
 
         if (pageNumber < 1) {
-            return "{\"error\": \"pageNumber must be >= 1\"}";
+            return toJson(Map.of("error", "pageNumber must be >= 1"));
         }
 
         PaginatedResponseStore.PageResult result = paginatedResponseStore.getPage(responseId, pageNumber);
 
         if (result == null) {
-            return "{\"error\": \"Response not found. It may have expired (15 minute TTL).\"}";
+            return toJson(Map.of("error", "Response not found. It may have expired (15 minute TTL)."));
         }
 
         if (!result.isSuccess()) {
-            return "{\"error\": " + escapeJson(result.error()) + ", \"totalPages\": " + result.totalPages() + "}";
+            Map<String, Object> errorResponse = new LinkedHashMap<>();
+            errorResponse.put("error", result.error());
+            errorResponse.put("totalPages", result.totalPages());
+            return toJson(errorResponse);
         }
 
-        return "{\"page\": " + pageNumber +
-                ", \"totalPages\": " + result.totalPages() +
-                ", \"toolName\": " + escapeJson(result.toolName()) +
-                ", \"content\": " + escapeJson(result.content()) + "}";
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("page", pageNumber);
+        response.put("totalPages", result.totalPages());
+        response.put("toolName", result.toolName());
+        response.put("content", result.content());
+        return toJson(response);
     }
 
-    private static String escapeJson(String value) {
-        if (value == null)
-            return "null";
-        return "\"" + value
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t") + "\"";
+    private static String toJson(Map<String, ?> map) {
+        try {
+            return MAPPER.writeValueAsString(map);
+        } catch (JsonProcessingException e) {
+            return "{\"error\": \"Failed to serialize response\"}";
+        }
     }
 }

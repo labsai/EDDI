@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -96,6 +97,7 @@ public class LlmTask implements ILifecycleTask {
     private final GlobalVariableResolver globalVariableResolver;
     private final CounterweightService counterweightService;
     private final IdentityMaskingService identityMaskingService;
+    private final IAttachmentStore attachmentStore;
 
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
@@ -118,7 +120,8 @@ public class LlmTask implements ILifecycleTask {
             GlobalVariableResolver globalVariableResolver,
             CounterweightService counterweightService,
             IdentityMaskingService identityMaskingService,
-            ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService) {
+            ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService,
+            MemorySnapshotService memorySnapshotService, IAttachmentStore attachmentStore) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -134,7 +137,7 @@ public class LlmTask implements ILifecycleTask {
                 textSummarizerTool, pdfReaderTool, weatherTool, fetchToolResponsePageTool,
                 toolExecutionService, mcpToolProviderManager, a2aToolProviderManager, restAgentStore,
                 restWorkflowStore, resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter, userMemoryStore,
-                toolResponseTruncator, tenantQuotaService);
+                toolResponseTruncator, tenantQuotaService, memorySnapshotService);
         this.ragContextProvider = ragContextProvider;
         this.tokenCounterFactory = tokenCounterFactory;
         this.apiCallExecutor = apiCallExecutor;
@@ -145,6 +148,7 @@ public class LlmTask implements ILifecycleTask {
         this.globalVariableResolver = globalVariableResolver;
         this.counterweightService = counterweightService;
         this.identityMaskingService = identityMaskingService;
+        this.attachmentStore = attachmentStore;
     }
 
     @Override
@@ -322,7 +326,7 @@ public class LlmTask implements ILifecycleTask {
 
         // Enhance the last user message with multimodal attachment content (images,
         // etc.)
-        MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+        MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, attachmentStore);
 
         if (messages.isEmpty()) {
             return;

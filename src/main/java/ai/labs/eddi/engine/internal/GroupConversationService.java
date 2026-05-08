@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.agents.AgentSigningService;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
@@ -70,6 +72,8 @@ public class GroupConversationService implements IGroupConversationService {
     private final IJsonSerialization jsonSerialization;
     private final int maxDepth;
     private final ExecutorService executorService;
+    private final AgentSigningService agentSigningService;
+    private final IAgentStore agentStore;
 
     // Metrics
     private final Timer timerGroupDiscussion;
@@ -79,6 +83,7 @@ public class GroupConversationService implements IGroupConversationService {
     @Inject
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
             IAgentFactory agentFactory, ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, MeterRegistry meterRegistry,
+            AgentSigningService agentSigningService, IAgentStore agentStore,
             @ConfigProperty(name = "eddi.groups.max-depth", defaultValue = "3") int maxDepth) {
         this.groupStore = groupStore;
         this.conversationStore = conversationStore;
@@ -87,6 +92,8 @@ public class GroupConversationService implements IGroupConversationService {
         this.templatingEngine = templatingEngine;
         this.jsonSerialization = jsonSerialization;
         this.maxDepth = maxDepth;
+        this.agentSigningService = agentSigningService;
+        this.agentStore = agentStore;
         // Virtual threads — lightweight, no pool sizing, ideal for parallel agent calls
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -583,8 +590,28 @@ public class GroupConversationService implements IGroupConversationService {
 
                 String response = responseFuture.get(timeout, TimeUnit.SECONDS);
 
-                return new TranscriptEntry(member.agentId(), member.displayName(), response, phaseIdx, phase.name(), entryType, Instant.now(), null,
-                        targetAgentId);
+                // Wave 6: Sign inter-agent messages if configured
+                String signature = null;
+                try {
+                    var resourceId = agentStore.getCurrentResourceId(member.agentId());
+                    var agentConfig = agentStore.read(member.agentId(), resourceId.getVersion());
+                    if (agentConfig.getSecurity() != null
+                            && agentConfig.getSecurity().isSignInterAgentMessages()
+                            && response != null) {
+                        signature = agentSigningService.sign(
+                                gc.getUserId(), member.agentId(), response);
+                        LOGGER.debugf("Signed inter-agent message from '%s' (sig=%s...)",
+                                member.agentId(),
+                                signature.length() > 16 ? signature.substring(0, 16) : signature);
+                    }
+                } catch (Exception sigEx) {
+                    LOGGER.warnf("Failed to sign message from agent '%s': %s",
+                            member.agentId(), sigEx.getMessage());
+                }
+
+                var entry = new TranscriptEntry(member.agentId(), member.displayName(), response, phaseIdx, phase.name(), entryType, Instant.now(),
+                        null, targetAgentId, signature);
+                return entry;
 
             } catch (TimeoutException e) {
                 if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY && retries < maxRetries) {

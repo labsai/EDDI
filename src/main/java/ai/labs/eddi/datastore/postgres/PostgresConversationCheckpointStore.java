@@ -46,7 +46,8 @@ public class PostgresConversationCheckpointStore implements IConversationCheckpo
             )
             """;
 
-    private static final String CREATE_INDEX_CONV = "CREATE INDEX IF NOT EXISTS idx_ckpt_conv ON conversation_checkpoints (conversation_id, created_at DESC)";
+    private static final String CREATE_INDEX_CONV = "CREATE INDEX IF NOT EXISTS idx_ckpt_conv "
+            + "ON conversation_checkpoints (conversation_id, created_at DESC)";
 
     private final Instance<DataSource> dataSourceInstance;
     private final IJsonSerialization jsonSerialization;

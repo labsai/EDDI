@@ -12,7 +12,6 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -128,8 +127,8 @@ public class MemorySnapshotService {
         if (props == null) {
             return Map.of();
         }
-        // Create a shallow copy of the properties map
-        return new LinkedHashMap<>(props.toMap());
+        // Create a deep copy of the properties map to isolate checkpoint state
+        return DeepCopyUtil.deepCopy(props.toMap());
     }
 
     @SuppressWarnings("unchecked")

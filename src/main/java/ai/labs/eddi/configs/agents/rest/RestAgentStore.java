@@ -127,7 +127,7 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public Response updateAgent(String id, Integer version, AgentConfiguration agentConfiguration) {
-        rejectInertSecurityFlags(agentConfiguration);
+        validateSecurityFlags(agentConfiguration);
         Response response = restVersionInfo.update(id, version, agentConfiguration);
         capabilityRegistryService.register(id, agentConfiguration);
         return response;
@@ -159,7 +159,7 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public Response createAgent(AgentConfiguration agentConfiguration) {
-        rejectInertSecurityFlags(agentConfiguration);
+        validateSecurityFlags(agentConfiguration);
 
         // Use createDocument() to get IResourceId directly — Response.getLocation()
         // returns null for eddi:// scheme URIs in CDI direct calls
@@ -181,7 +181,7 @@ public class RestAgentStore implements IRestAgentStore {
         restVersionInfo.validateParameters(id, version);
         try {
             AgentConfiguration agentConfig = agentStore.read(id, version);
-            rejectInertSecurityFlags(agentConfig);
+            validateSecurityFlags(agentConfig);
             if (deepCopy) {
                 List<URI> packages = agentConfig.getWorkflows();
                 for (int i = 0; i < packages.size(); i++) {
@@ -291,24 +291,35 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     /**
-     * Reject agent configurations that enable cryptographic identity features not
-     * yet implemented (Wave 6). Prevents silent misconfiguration where admins
-     * believe signing is active but nothing actually happens.
+     * Validate that an agent's cryptographic security flags are backed by actual
+     * signing infrastructure. If any signing flag is enabled, the agent must have a
+     * signing key registered via {@code AgentSigningService.generateKeyPair()}.
      *
      * @throws jakarta.ws.rs.BadRequestException
-     *             if any signing flag is set to true
+     *             if signing is enabled but no key exists
      */
-    private void rejectInertSecurityFlags(AgentConfiguration config) {
+    private void validateSecurityFlags(AgentConfiguration config) {
         if (config.getSecurity() == null) {
             return;
         }
         var security = config.getSecurity();
-        if (security.isSignInterAgentMessages() || security.isSignMcpInvocations()
-                || security.isRequirePeerVerification()) {
+        boolean anyCryptoEnabled = security.isSignInterAgentMessages()
+                || security.isSignMcpInvocations()
+                || security.isRequirePeerVerification();
+        if (!anyCryptoEnabled) {
+            return;
+        }
+        // Crypto is enabled — validate that a public key exists on the agent identity.
+        // Key generation is done via POST /agentstore/{id}/signing/keys, which sets
+        // the public key on the agent's identity block.
+        var identity = config.getIdentity();
+        if (identity == null || identity.getPublicKey() == null
+                || identity.getPublicKey().isBlank()) {
             throw new jakarta.ws.rs.BadRequestException(
-                    "Cryptographic identity features are not yet available in this version. "
-                            + "Set signInterAgentMessages, signMcpInvocations, and requirePeerVerification "
-                            + "to false, or remove the security block entirely.");
+                    "Cryptographic identity features require a signing key. "
+                            + "Generate one via POST /agentstore/{agentId}/signing/keys "
+                            + "before enabling signInterAgentMessages, signMcpInvocations, "
+                            + "or requirePeerVerification.");
         }
     }
 }

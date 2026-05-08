@@ -65,7 +65,7 @@ public record MemoryCheckpoint(
                 conversationId,
                 null,
                 stepIndex,
-                properties != null ? Map.copyOf(properties) : Map.of(),
+                ai.labs.eddi.engine.memory.DeepCopyUtil.deepCopy(properties),
                 Instant.now(),
                 triggeredBy,
                 triggeredByClass);

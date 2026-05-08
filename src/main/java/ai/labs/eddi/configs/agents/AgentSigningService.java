@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.util.Base64;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Ed25519-based signing and verification service for agent identity.
@@ -52,6 +53,7 @@ public class AgentSigningService {
 
     private final ISecretProvider secretProvider;
     private final MeterRegistry meterRegistry;
+    private final ConcurrentHashMap<String, PrivateKey> privateKeyCache = new ConcurrentHashMap<>();
     private Counter signCounter;
     private Counter verifySuccessCounter;
     private Counter verifyFailCounter;
@@ -118,13 +120,19 @@ public class AgentSigningService {
      */
     public String sign(String tenantId, String agentId, String payload) throws AgentSigningException {
         try {
-            SecretReference ref = new SecretReference(tenantId, vaultKeyName(agentId));
-            String privateKeyB64 = secretProvider.resolve(ref);
-
-            byte[] privateKeyBytes = Base64.getDecoder().decode(privateKeyB64);
-            KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
-            PrivateKey privateKey = keyFactory.generatePrivate(
-                    new java.security.spec.PKCS8EncodedKeySpec(privateKeyBytes));
+            String cacheKey = tenantId + ":" + agentId;
+            PrivateKey privateKey = privateKeyCache.computeIfAbsent(cacheKey, k -> {
+                try {
+                    SecretReference ref = new SecretReference(tenantId, vaultKeyName(agentId));
+                    String privateKeyB64 = secretProvider.resolve(ref);
+                    byte[] privateKeyBytes = Base64.getDecoder().decode(privateKeyB64);
+                    KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
+                    return keyFactory.generatePrivate(
+                            new java.security.spec.PKCS8EncodedKeySpec(privateKeyBytes));
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to load private key for agent " + agentId, e);
+                }
+            });
 
             Signature sig = Signature.getInstance(ALGORITHM);
             sig.initSign(privateKey);
@@ -133,8 +141,12 @@ public class AgentSigningService {
 
             signCounter.increment();
             return Base64.getEncoder().encodeToString(signatureBytes);
-        } catch (ISecretProvider.SecretNotFoundException e) {
-            throw new AgentSigningException("No signing key found for agent " + agentId, e);
+        } catch (RuntimeException e) {
+            // Unwrap the RuntimeException from computeIfAbsent
+            if (e.getCause() instanceof ISecretProvider.SecretNotFoundException) {
+                throw new AgentSigningException("No signing key found for agent " + agentId, e.getCause());
+            }
+            throw new AgentSigningException("Signing failed for agent " + agentId, e);
         } catch (Exception e) {
             throw new AgentSigningException("Signing failed for agent " + agentId, e);
         }
@@ -183,7 +195,8 @@ public class AgentSigningService {
         try {
             SecretReference ref = new SecretReference(tenantId, vaultKeyName(agentId));
             secretProvider.delete(ref);
-            LOGGER.infof("Deleted signing key for agent '%s' in tenant '%s'", agentId, tenantId);
+            privateKeyCache.remove(tenantId + ":" + agentId);
+            LOGGER.infof("Deleted signing key for agent '%s' in tenant '%s' (cache evicted)", agentId, tenantId);
         } catch (Exception e) {
             LOGGER.warnf("Failed to delete signing key for agent '%s': %s", agentId, e.getMessage());
         }
@@ -317,7 +330,9 @@ public class AgentSigningService {
      */
     public String rotateKey(String tenantId, String agentId, int newVersion) throws AgentSigningException {
         String publicKeyB64 = generateKeyPairVersioned(tenantId, agentId, newVersion);
-        LOGGER.infof("Rotated signing key for agent '%s' to version %d", agentId, newVersion);
+        // Evict cached private key so next sign() loads the new one
+        privateKeyCache.remove(tenantId + ":" + agentId);
+        LOGGER.infof("Rotated signing key for agent '%s' to version %d (cache evicted)", agentId, newVersion);
         return publicKeyB64;
     }
 

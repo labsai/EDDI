@@ -15,9 +15,14 @@ import org.jboss.logging.Logger;
 import java.util.Map;
 
 /**
- * Engine-level safety injection into LLM system prompts. Counterweights temper
+ * Prompt safety presets injected into LLM system prompts. Counterweights temper
  * agent behavior (overconfident refactors, false claims, identity leakage)
  * without editing prompt templates.
+ * <p>
+ * <strong>Important:</strong> These are prompt-level presets, not engine-level
+ * guarantees. The LLM may or may not follow the injected instructions. For
+ * engine-enforced controls (tool iteration caps), see {@code AgentOrchestrator}
+ * strict-mode handling.
  * <p>
  * Preset text is resolved from {@link PromptSnippetService} first (snippet
  * names: {@code counterweight-cautious}, {@code counterweight-strict}). If no
@@ -66,6 +71,7 @@ public class CounterweightService {
     private Counter activationNormalCounter;
     private Counter activationCautiousCounter;
     private Counter activationStrictCounter;
+    private Counter activationUnknownCounter;
     private Counter strictDowngradedCounter;
 
     @Inject
@@ -79,6 +85,7 @@ public class CounterweightService {
         activationNormalCounter = meterRegistry.counter("eddi.counterweight.activation.count", "level", "normal");
         activationCautiousCounter = meterRegistry.counter("eddi.counterweight.activation.count", "level", "cautious");
         activationStrictCounter = meterRegistry.counter("eddi.counterweight.activation.count", "level", "strict");
+        activationUnknownCounter = meterRegistry.counter("eddi.counterweight.activation.count", "level", "unknown");
         strictDowngradedCounter = meterRegistry.counter("eddi.counterweight.strict.downgraded");
     }
 
@@ -123,7 +130,10 @@ public class CounterweightService {
         switch (level.toLowerCase()) {
             case "cautious" -> activationCautiousCounter.increment();
             case "strict" -> activationStrictCounter.increment();
-            default -> activationNormalCounter.increment();
+            default -> {
+                LOGGER.warnf("Unknown counterweight level '%s' — treating as normal (no injection)", level);
+                activationUnknownCounter.increment();
+            }
         }
 
         // Apply placement

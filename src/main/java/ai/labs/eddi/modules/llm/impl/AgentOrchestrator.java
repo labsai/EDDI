@@ -16,6 +16,7 @@ import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
@@ -88,6 +89,7 @@ class AgentOrchestrator {
     private final IUserMemoryStore userMemoryStore;
     private final ToolResponseTruncator toolResponseTruncator;
     private final TenantQuotaService tenantQuotaService;
+    private final MemorySnapshotService memorySnapshotService;
 
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
@@ -95,7 +97,8 @@ class AgentOrchestrator {
             ToolExecutionService toolExecutionService, McpToolProviderManager mcpToolProviderManager, A2AToolProviderManager a2aToolProviderManager,
             IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore, IResourceClientLibrary resourceClientLibrary,
             IApiCallExecutor apiCallExecutor, IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter,
-            IUserMemoryStore userMemoryStore, ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService) {
+            IUserMemoryStore userMemoryStore, ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService,
+            MemorySnapshotService memorySnapshotService) {
         this.calculatorTool = calculatorTool;
         this.dateTimeTool = dateTimeTool;
         this.webSearchTool = webSearchTool;
@@ -117,6 +120,7 @@ class AgentOrchestrator {
         this.userMemoryStore = userMemoryStore;
         this.toolResponseTruncator = toolResponseTruncator;
         this.tenantQuotaService = tenantQuotaService;
+        this.memorySnapshotService = memorySnapshotService;
     }
 
     /**
@@ -250,6 +254,18 @@ class AgentOrchestrator {
             List<ChatMessage> currentMessages = new ArrayList<>(messages);
             int maxIterations = task.getMaxToolIterations() != null ? task.getMaxToolIterations() : 10;
 
+            // Engine-enforced counterweight: strict mode caps iterations
+            var counterweight = task.getCounterweight();
+            if (counterweight != null && counterweight.isEnabled()
+                    && "strict".equalsIgnoreCase(counterweight.getLevel())) {
+                int strictCap = 5;
+                if (maxIterations > strictCap) {
+                    LOGGER.infof("Counterweight strict mode: capping tool iterations from %d to %d",
+                            maxIterations, strictCap);
+                    maxIterations = strictCap;
+                }
+            }
+
             for (int i = 0; i < maxIterations; i++) {
                 ChatRequest.Builder requestBuilder = ChatRequest.builder().messages(currentMessages);
 
@@ -265,6 +281,18 @@ class AgentOrchestrator {
 
                 if (aiMessage.hasToolExecutionRequests()) {
                     for (ToolExecutionRequest toolRequest : aiMessage.toolExecutionRequests()) {
+                        // Auto-checkpoint before tool execution (Wave 4)
+                        if (memorySnapshotService != null) {
+                            try {
+                                memorySnapshotService.createCheckpoint(
+                                        memory, "before_tool:" + toolRequest.name(),
+                                        AgentOrchestrator.class.getSimpleName());
+                            } catch (Exception cpEx) {
+                                LOGGER.warnf("Auto-checkpoint failed before tool '%s': %s",
+                                        toolRequest.name(), cpEx.getMessage());
+                            }
+                        }
+
                         Map<String, Object> callStep = new HashMap<>();
                         callStep.put("type", "tool_call");
                         callStep.put("tool", toolRequest.name());

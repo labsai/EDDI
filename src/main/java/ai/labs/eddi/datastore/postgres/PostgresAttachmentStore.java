@@ -38,6 +38,7 @@ public class PostgresAttachmentStore implements IAttachmentStore {
             CREATE TABLE IF NOT EXISTS attachments (
                 storage_ref TEXT PRIMARY KEY,
                 conversation_id TEXT NOT NULL,
+                tenant_id TEXT,
                 filename TEXT,
                 mime_type TEXT NOT NULL,
                 size_bytes BIGINT NOT NULL,
@@ -46,6 +47,7 @@ public class PostgresAttachmentStore implements IAttachmentStore {
             )
             """;
     private static final String CREATE_INDEX_CONV = "CREATE INDEX IF NOT EXISTS idx_attach_conv ON attachments (conversation_id)";
+    private static final String CREATE_INDEX_TENANT = "CREATE INDEX IF NOT EXISTS idx_attach_tenant ON attachments (tenant_id)";
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
@@ -64,6 +66,7 @@ public class PostgresAttachmentStore implements IAttachmentStore {
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
             stmt.execute(CREATE_INDEX_CONV);
+            stmt.execute(CREATE_INDEX_TENANT);
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize attachments table", e);
@@ -94,14 +97,18 @@ public class PostgresAttachmentStore implements IAttachmentStore {
         String storageRef = UUID.randomUUID().toString();
 
         ensureSchema();
-        String sql = "INSERT INTO attachments (storage_ref, conversation_id, filename, mime_type, size_bytes, data) VALUES (?, ?, ?, ?, ?, ?)";
-        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        String sql = "INSERT INTO attachments "
+                + "(storage_ref, conversation_id, tenant_id, filename, mime_type, size_bytes, data) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?)";
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, storageRef);
             ps.setString(2, conversationId);
-            ps.setString(3, filename);
-            ps.setString(4, resolvedMime);
-            ps.setLong(5, bytes.length);
-            ps.setBytes(6, bytes);
+            ps.setString(3, tenantId);
+            ps.setString(4, filename);
+            ps.setString(5, resolvedMime);
+            ps.setLong(6, bytes.length);
+            ps.setBytes(7, bytes);
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new AttachmentStoreException("Failed to store attachment", e);
@@ -155,8 +162,10 @@ public class PostgresAttachmentStore implements IAttachmentStore {
     @Override
     public List<Attachment> listByConversation(String conversationId) {
         ensureSchema();
-        String sql = "SELECT storage_ref, filename, mime_type, size_bytes, conversation_id FROM attachments WHERE conversation_id = ? ORDER BY created_at";
-        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+        String sql = "SELECT storage_ref, filename, mime_type, size_bytes, conversation_id "
+                + "FROM attachments WHERE conversation_id = ? ORDER BY created_at";
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, conversationId);
             try (ResultSet rs = ps.executeQuery()) {
                 List<Attachment> results = new ArrayList<>();
