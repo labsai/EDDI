@@ -275,17 +275,6 @@ public record LlmConfiguration(List<Task> tasks) {
          */
         private IdentityMaskingConfig identityMasking;
 
-        // === Tool Loading Strategy (Wave 2) ===
-
-        /**
-         * Tool loading strategy configuration. Controls how tools are presented to the
-         * LLM — all at once ({@code eager}), on-demand via a discovery meta-tool
-         * ({@code lazy}), or dynamically filtered per action ({@code dynamic}).
-         *
-         * @since 6.0.0
-         */
-        private ToolLoadingStrategy toolLoadingStrategy;
-
         // === Helper Methods ===
 
         /**
@@ -602,13 +591,6 @@ public record LlmConfiguration(List<Task> tasks) {
             this.identityMasking = identityMasking;
         }
 
-        public ToolLoadingStrategy getToolLoadingStrategy() {
-            return toolLoadingStrategy;
-        }
-
-        public void setToolLoadingStrategy(ToolLoadingStrategy toolLoadingStrategy) {
-            this.toolLoadingStrategy = toolLoadingStrategy;
-        }
     }
 
     /**
@@ -1202,59 +1184,6 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setSummarizationPrompt(String summarizationPrompt) {
             this.summarizationPrompt = summarizationPrompt;
-        }
-    }
-
-    /**
-     * Tool loading strategy configuration. Controls when and how tools are
-     * presented to the LLM.
-     * <p>
-     * Types:
-     * <ul>
-     * <li>{@code eager} — all tools loaded at conversation start (default)</li>
-     * <li>{@code lazy} — only {@code discover_tools} meta-tool provided initially;
-     * LLM discovers others on demand</li>
-     * <li>{@code dynamic} — tools filtered per action based on category
-     * matching</li>
-     * </ul>
-     *
-     * @since 6.0.0
-     */
-    public static class ToolLoadingStrategy {
-        /** Loading type: "eager" (default), "lazy", or "dynamic" */
-        private String type = "eager";
-
-        /** Maximum number of tools to present in context at once (default: 20) */
-        private int maxToolsInContext = 20;
-
-        /**
-         * Whether to enable the discover_tools meta-tool (default: true for
-         * lazy/dynamic)
-         */
-        private boolean discoveryToolEnabled = true;
-
-        public String getType() {
-            return type;
-        }
-
-        public void setType(String type) {
-            this.type = type;
-        }
-
-        public int getMaxToolsInContext() {
-            return maxToolsInContext;
-        }
-
-        public void setMaxToolsInContext(int maxToolsInContext) {
-            this.maxToolsInContext = maxToolsInContext;
-        }
-
-        public boolean isDiscoveryToolEnabled() {
-            return discoveryToolEnabled;
-        }
-
-        public void setDiscoveryToolEnabled(boolean discoveryToolEnabled) {
-            this.discoveryToolEnabled = discoveryToolEnabled;
         }
     }
 

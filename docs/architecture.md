@@ -528,7 +528,7 @@ The attachment subsystem handles binary file storage for multimodal conversation
 |-----------|---------|
 | **`IAttachmentStore`** | Interface for storing/loading binary attachments (GridFS for MongoDB, BLOB for PostgreSQL) |
 | **`MimeValidator`** | Magic-byte detection (16+ formats) and declared-vs-detected MIME compatibility checking |
-| **`AttachmentForwarder`** | Converts stored attachments into langchain4j `Content` objects (images → `ImageContent`, others → text markers) |
+| **`MultimodalMessageEnhancer`** | Converts stored attachments into langchain4j `Content` objects (images → `ImageContent` via base64 data URI, others → text markers) |
 
 ---
 

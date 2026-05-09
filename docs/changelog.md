@@ -13,6 +13,39 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🧹 Dead Code Removal & Immutability Fix (2026-05-08)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+**What changed:** Removed all dead code identified during critical branch audit, fixed failing test, improved coverage.
+
+### Dead Code Removed (10 files deleted)
+- **`AttachmentForwarder` + test** — `@ApplicationScoped` but never injected. `MultimodalMessageEnhancer` handles the actual attachment→Content conversion
+- **`NonceCacheService` + test** — Caffeine-based replay protection, never injected by any endpoint
+- **`SignedEnvelope` + test** — Envelope signing record, never used (basic `sign()`/`verify()` on `AgentSigningService` is the live API)
+- **`JacksonCanonicalizer` + test** — RFC 8785 canonicalization, only consumer was dead `SignedEnvelope`
+- **`DiscoverToolsTool` + test** — Meta-tool for lazy tool loading, never instantiated by `AgentOrchestrator`
+
+### Dead Code Removed (from live files)
+- **`AgentSigningService`** — Removed `signEnvelope()`, `verifyEnvelope()`, `rotateKey()` (never called)
+- **`LlmConfiguration`** — Removed `ToolLoadingStrategy` inner class + field + getter/setter (never read by any pipeline component)
+- **`AgentSigningServiceTest`** — Removed 5 tests for deleted methods
+
+### Bug Fix
+- **`DeepCopyUtil.deepCopy()`** — Wrapped return value in `Collections.unmodifiableMap()`. `MemoryCheckpoint` properties are contractually immutable; the test correctly asserted this but the implementation returned a mutable `LinkedHashMap`
+- **`DeepCopyUtil.java`** — Was present in working tree but never committed to Git. Now tracked
+
+### Documentation
+- **`architecture.md`** — Replaced deleted `AttachmentForwarder` reference with `MultimodalMessageEnhancer`
+- **`ToolResponseTruncator`** — Summarize strategy log upgraded from DEBUG to WARN with clear "not yet implemented" message. Removed misleading TODO
+
+### Coverage Improvements
+- **`DeepCopyUtilTest`** (NEW) — 8 tests covering null/empty, primitives, nested maps/lists/sets, immutability
+- **`DeploymentContextConditionTest`** — 4 new edge case tests: `setConditions` no-op, `setContainingRuleSet` no-op, uninitialized getConfigs, blank `when`
+
+### Verification
+- Clean compile: BUILD SUCCESS
+- 350 targeted tests: 0 failures, 0 errors
+
 ## 🔧 Test Stabilization & Integration Wiring (2026-05-08)
 
 **Repo:** EDDI (`feature/agentic-improvements`)

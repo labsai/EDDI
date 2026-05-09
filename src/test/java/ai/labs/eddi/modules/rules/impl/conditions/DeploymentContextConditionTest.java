@@ -143,4 +143,33 @@ class DeploymentContextConditionTest {
 
         assertEquals(SUCCESS, condition.execute(memory, Collections.emptyList()));
     }
+
+    @Test
+    void setConditions_noOp() {
+        // leaf condition — should accept without error
+        condition.setConditions(List.of());
+        condition.setConditions(null);
+    }
+
+    @Test
+    void setContainingRuleSet_noOp() {
+        condition.setContainingRuleSet(null);
+    }
+
+    @Test
+    void getConfigs_emptyWhenNoConfigSet() {
+        // Brand-new condition with no setConfigs called
+        var fresh = new DeploymentContextCondition();
+        var configs = fresh.getConfigs();
+        assertNotNull(configs);
+        assertTrue(configs.isEmpty());
+    }
+
+    @Test
+    void execute_blankWhen_matchesAnyEnv() {
+        doReturn("production").when(condition).resolveDeploymentEnv();
+        condition.setConfigs(Map.of("when", "   "));
+
+        assertEquals(SUCCESS, condition.execute(memory, Collections.emptyList()));
+    }
 }

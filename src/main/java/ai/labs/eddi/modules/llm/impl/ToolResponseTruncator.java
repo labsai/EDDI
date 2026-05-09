@@ -123,13 +123,11 @@ public class ToolResponseTruncator {
     }
 
     /**
-     * Summarize: attempt to summarize the response using a cheap model. On failure,
-     * falls back to truncation.
+     * Summarize: falls back to truncation. Actual model-based summarization is not
+     * yet implemented — this method provides the cost-ceiling guard and fallback
+     * chain so that the "summarize" strategy degrades safely.
      */
     private String summarizeResponse(String toolName, String result, int maxChars, ToolResponseLimits limits) {
-        // Summarization requires a model call — for now, we implement the fallback
-        // chain. The actual summarizer integration would use ConversationSummarizer
-        // or a dedicated lightweight model call.
         String summarizerModel = limits.getSummarizerModel();
 
         if (summarizerModel == null || summarizerModel.isBlank()) {
@@ -146,11 +144,9 @@ public class ToolResponseTruncator {
             return truncateResponse(toolName, result, maxChars);
         }
 
-        // TODO: Wire actual summarizer model call (ConversationSummarizer or
-        // ChatModelRegistry). For now, fall back to truncation with a note that
-        // summarization was attempted.
-        LOGGER.debugf("Summarizer model '%s' configured but not yet wired for tool '%s', falling back to truncation",
-                summarizerModel, toolName);
+        // Model-based summarization not yet wired — degrade to truncation
+        LOGGER.warnf("Summarize strategy requested for tool '%s' (model='%s') but summarization "
+                + "is not yet implemented. Falling back to truncation.", toolName, summarizerModel);
         incrementCounter(toolName, "summarize_fallback");
         return truncateResponse(toolName, result, maxChars);
     }
