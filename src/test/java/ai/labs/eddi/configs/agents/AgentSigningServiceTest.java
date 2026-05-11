@@ -91,6 +91,50 @@ class AgentSigningServiceTest {
         assertFalse(signingService.verify("not-a-key", "payload", "not-a-sig"));
     }
 
+    @Test
+    void generateKeyPair_throwsWhenVaultStoreFailsOnGenerate() {
+        // Use a provider whose store() always throws
+        var failingProvider = new InMemorySecretProvider() {
+            @Override
+            public void store(SecretReference reference, String plaintext,
+                              String description, List<String> allowedAgents)
+                    throws SecretProviderException {
+                throw new SecretProviderException("Vault unavailable");
+            }
+        };
+        var failService = new AgentSigningService(failingProvider,
+                new SimpleMeterRegistry());
+        failService.initMetrics();
+
+        assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> failService.generateKeyPair("t1", "a1"));
+    }
+
+    @Test
+    void generateKeyPairVersioned_throwsWhenVaultFails() {
+        var failingProvider = new InMemorySecretProvider() {
+            @Override
+            public void store(SecretReference reference, String plaintext,
+                              String description, List<String> allowedAgents)
+                    throws SecretProviderException {
+                throw new SecretProviderException("Vault unavailable");
+            }
+        };
+        var failService = new AgentSigningService(failingProvider,
+                new SimpleMeterRegistry());
+        failService.initMetrics();
+
+        assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> failService.generateKeyPairVersioned("t1", "a1", 3));
+    }
+
+    @Test
+    void sign_throwsAgentSigningExceptionWhenKeyNotFound() {
+        // Agent was never generated, so vault has no key
+        assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> signingService.sign("t1", "nonexistent-agent", "payload"));
+    }
+
     /**
      * Simple in-memory secret provider for testing.
      */
@@ -108,7 +152,8 @@ class AgentSigningServiceTest {
         }
 
         @Override
-        public void store(SecretReference reference, String plaintext, String description, List<String> allowedAgents) {
+        public void store(SecretReference reference, String plaintext, String description, List<String> allowedAgents)
+                throws SecretProviderException {
             store.put(reference.tenantId() + ":" + reference.keyName(), plaintext);
         }
 

@@ -168,6 +168,24 @@ class RestAttachmentUploadTest {
 
             Files.deleteIfExists(tempFile);
         }
+
+        @Test
+        void shouldReturn500WhenFileReadFails() {
+            FileUpload file = mock(FileUpload.class);
+            when(file.fileName()).thenReturn("broken.dat");
+            when(file.contentType()).thenReturn("application/octet-stream");
+            // Return a path that does not exist → IOException
+            when(file.uploadedFile()).thenReturn(
+                    Path.of("nonexistent-path-" + System.nanoTime()));
+
+            Response response = endpoint.uploadAttachment(
+                    "conv-1", file, null);
+
+            assertEquals(500, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (java.util.Map<String, Object>) response.getEntity();
+            assertEquals("ATTACHMENT_UPLOAD_FAILED", body.get("code"));
+        }
     }
 
     // ==================== List Tests ====================
