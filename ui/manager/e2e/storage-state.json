@@ -3,7 +3,8 @@
     {
       "origin": "http://localhost:3000",
       "localStorage": [
-        { "name": "eddi-onboarding-welcomed", "value": "true" }
+        { "name": "eddi-onboarding-welcomed", "value": "true" },
+        { "name": "eddi-tour-dashboard", "value": "done" }
       ]
     }
   ]
