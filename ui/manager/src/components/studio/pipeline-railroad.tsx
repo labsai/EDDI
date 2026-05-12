@@ -21,31 +21,31 @@ import {
 // ==================== Extension Type Icons ====================
 
 const TYPE_ICONS: Record<string, LucideIcon> = {
-  "ai.labs.parser": FileCode,
-  "ai.labs.rules": BookOpen,
-  "ai.labs.property": Settings,
-  "ai.labs.apicalls": Zap,
-  "ai.labs.llm": MessageSquareCode,
-  "ai.labs.output": Bot,
-  "ai.labs.output.template": Bot,
-  "ai.labs.mcpcalls": Wrench,
-  "ai.labs.dictionary": BookText,
-  "ai.labs.rag": Brain,
+  "eddi://ai.labs.parser": FileCode,
+  "eddi://ai.labs.rules": BookOpen,
+  "eddi://ai.labs.property": Settings,
+  "eddi://ai.labs.apicalls": Zap,
+  "eddi://ai.labs.llm": MessageSquareCode,
+  "eddi://ai.labs.output": Bot,
+  "eddi://ai.labs.output.template": Bot,
+  "eddi://ai.labs.mcpcalls": Wrench,
+  "eddi://ai.labs.dictionary": BookText,
+  "eddi://ai.labs.rag": Brain,
 };
 
 // Labels are provided via i18n in the component below
 
 const TYPE_COLORS: Record<string, string> = {
-  "ai.labs.parser": "text-blue-500",
-  "ai.labs.rules": "text-violet-500",
-  "ai.labs.property": "text-cyan-500",
-  "ai.labs.apicalls": "text-amber-500",
-  "ai.labs.llm": "text-emerald-500",
-  "ai.labs.output": "text-rose-500",
-  "ai.labs.output.template": "text-rose-400",
-  "ai.labs.mcpcalls": "text-orange-500",
-  "ai.labs.dictionary": "text-teal-500",
-  "ai.labs.rag": "text-purple-500",
+  "eddi://ai.labs.parser": "text-blue-500",
+  "eddi://ai.labs.rules": "text-violet-500",
+  "eddi://ai.labs.property": "text-cyan-500",
+  "eddi://ai.labs.apicalls": "text-amber-500",
+  "eddi://ai.labs.llm": "text-emerald-500",
+  "eddi://ai.labs.output": "text-rose-500",
+  "eddi://ai.labs.output.template": "text-rose-400",
+  "eddi://ai.labs.mcpcalls": "text-orange-500",
+  "eddi://ai.labs.dictionary": "text-teal-500",
+  "eddi://ai.labs.rag": "text-purple-500",
 };
 
 // ==================== Types ====================
@@ -89,7 +89,7 @@ export function PipelineRailroad({
     <div className="flex flex-col gap-0 py-4 px-3" data-testid="pipeline-railroad">
       {workflowSteps.map((step, idx) => {
         const Icon = TYPE_ICONS[step.type] ?? Workflow;
-        const typeKey = step.type.replace("ai.labs.", "");
+        const typeKey = step.type.replace("eddi://ai.labs.", "");
         const label = t(`studio.type.${typeKey}`, typeKey.charAt(0).toUpperCase() + typeKey.slice(1));
         const color = TYPE_COLORS[step.type] ?? "text-muted-foreground";
         const status = stageStatuses.get(idx) ?? "idle";

@@ -47,7 +47,7 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
 };
 
 function getIcon(type: string): React.ComponentType<{ className?: string }> {
-  const info = EXTENSION_TYPE_INFO[type];
+  const info = EXTENSION_TYPE_INFO["eddi://" + type];
   if (info && iconMap[info.icon]) return iconMap[info.icon]!;
   return Puzzle;
 }
@@ -225,8 +225,8 @@ export function AddExtensionDialog({
 
   // Sort by pipeline order
   const sorted = [...(extensionTypes ?? [])].sort((a, b) => {
-    const orderA = EXTENSION_TYPE_INFO[a.type]?.order ?? 99;
-    const orderB = EXTENSION_TYPE_INFO[b.type]?.order ?? 99;
+    const orderA = EXTENSION_TYPE_INFO["eddi://" + a.type]?.order ?? 99;
+    const orderB = EXTENSION_TYPE_INFO["eddi://" + b.type]?.order ?? 99;
     return orderA - orderB;
   });
 
@@ -323,7 +323,7 @@ export function AddExtensionDialog({
 
               {filtered.map((ext) => {
                 const Icon = getIcon(ext.type);
-                const info = EXTENSION_TYPE_INFO[ext.type];
+                const info = EXTENSION_TYPE_INFO["eddi://" + ext.type];
                 const hasStore = !!getResourceSlugForExtension(ext.type);
                 return (
                   <button
@@ -377,7 +377,7 @@ export function AddExtensionDialog({
                   return <SelIcon className="h-4 w-4 text-primary" />;
                 })()}
                 <span className="text-sm font-medium text-foreground">
-                  {EXTENSION_TYPE_INFO[selectedType.type]?.label ||
+                  {EXTENSION_TYPE_INFO["eddi://" + selectedType.type]?.label ||
                     selectedType.displayName ||
                     selectedType.type}
                 </span>

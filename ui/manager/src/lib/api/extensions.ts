@@ -36,16 +36,17 @@ export const EXTENSION_TYPE_INFO: Record<
   string,
   { label: string; icon: string; order: number }
 > = {
-  "ai.labs.parser": { label: "Input Parser", icon: "FileText", order: 1 },
-  "ai.labs.rules": { label: "Rules", icon: "GitBranch", order: 2 },
-  "ai.labs.property": { label: "Property Setter", icon: "Settings", order: 3 },
-  "ai.labs.httpcalls": { label: "HTTP Calls", icon: "Globe", order: 4 },
-  "ai.labs.apicalls": { label: "HTTP Calls", icon: "Globe", order: 4 },
-  "ai.labs.llm": { label: "LLM", icon: "Brain", order: 5 },
-  "ai.labs.output": { label: "Output", icon: "MessageSquareText", order: 6 },
-  "ai.labs.templating": { label: "Templating", icon: "FileCode", order: 7 },
-  "ai.labs.output.template": { label: "Templating", icon: "FileCode", order: 7 },
-  "ai.labs.mcpcalls": { label: "MCP Calls", icon: "Plug", order: 8 },
+  "eddi://ai.labs.parser": { label: "Input Parser", icon: "FileText", order: 1 },
+  "eddi://ai.labs.behavior": { label: "Behavior", icon: "FileText", order: 2 },
+  "eddi://ai.labs.rules": { label: "Rules", icon: "GitBranch", order: 3 },
+  "eddi://ai.labs.property": { label: "Property Setter", icon: "Settings", order: 4 },
+  "eddi://ai.labs.httpcalls": { label: "HTTP Calls", icon: "Globe", order: 5 },
+  "eddi://ai.labs.apicalls": { label: "HTTP Calls", icon: "Globe", order: 6 },
+  "eddi://ai.labs.llm": { label: "LLM", icon: "Brain", order: 7 },
+  "eddi://ai.labs.output": { label: "Output", icon: "MessageSquareText", order: 8 },
+  "eddi://ai.labs.templating": { label: "Templating", icon: "FileCode", order: 9 },
+  "eddi://ai.labs.output.template": { label: "Templating", icon: "FileCode", order: 10 },
+  "eddi://ai.labs.mcpcalls": { label: "MCP Calls", icon: "Plug", order: 11 },
 };
 
 /** Get a human-readable label for an extension type */

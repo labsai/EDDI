@@ -42,7 +42,7 @@ describe("findResourceUsage", () => {
     vi.mocked(getAgentDescriptors).mockResolvedValue([]);
     vi.mocked(getWorkflow).mockResolvedValue({
       workflowSteps: [
-        { type: "ai.labs.output", extensions: {}, config: { uri: "eddi://ai.labs.output/outputstore/outputsets/out1?version=1" } },
+        { type: "eddi://ai.labs.output", extensions: {}, config: { uri: "eddi://ai.labs.output/outputstore/outputsets/out1?version=1" } },
       ],
     });
 
@@ -59,7 +59,7 @@ describe("findResourceUsage", () => {
     ]);
     vi.mocked(getWorkflow).mockResolvedValue({
       workflowSteps: [
-        { type: "ai.labs.rules", extensions: {}, config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=3" } },
+        { type: "eddi://ai.labs.rules", extensions: {}, config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=3" } },
       ],
     });
     vi.mocked(getAgent).mockResolvedValue({
@@ -88,7 +88,7 @@ describe("findResourceUsage", () => {
     ]);
     vi.mocked(getWorkflow).mockResolvedValue({
       workflowSteps: [
-        { type: "ai.labs.rules", extensions: {}, config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=1" } },
+        { type: "eddi://ai.labs.rules", extensions: {}, config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=1" } },
       ],
     });
     vi.mocked(getAgent).mockResolvedValue({
@@ -111,7 +111,7 @@ describe("findResourceUsage", () => {
 
     vi.mocked(getWorkflow).mockResolvedValue({
       workflowSteps: [
-        { type: "ai.labs.rules", extensions: {}, config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=1" } },
+        { type: "eddi://ai.labs.rules", extensions: {}, config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=1" } },
       ],
     });
 
@@ -146,7 +146,7 @@ describe("findResourceUsage", () => {
     ]);
     vi.mocked(getWorkflow).mockResolvedValue({
       workflowSteps: [
-        { type: "ai.labs.rules", extensions: {}, config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=1" } },
+        { type: "eddi://ai.labs.rules", extensions: {}, config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=1" } },
       ],
     });
     vi.mocked(getAgent).mockResolvedValue({
@@ -174,7 +174,7 @@ describe("findResourceUsage", () => {
       if (id === "bad") throw new Error("Not found");
       return {
         workflowSteps: [
-          { type: "ai.labs.rules", extensions: {}, config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=1" } },
+          { type: "eddi://ai.labs.rules", extensions: {}, config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=1" } },
         ],
       };
     });
@@ -197,7 +197,7 @@ describe("findResourceUsage", () => {
     ]);
     vi.mocked(getWorkflow).mockResolvedValue({
       workflowSteps: [
-        { type: "ai.labs.rules", extensions: {}, config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=1" } },
+        { type: "eddi://ai.labs.rules", extensions: {}, config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=1" } },
       ],
     });
     vi.mocked(getAgent).mockResolvedValue({

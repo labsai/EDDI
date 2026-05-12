@@ -8,9 +8,9 @@ import { PipelineRailroad } from "@/components/studio/pipeline-railroad";
 import { useDebugStore } from "@/hooks/use-debug-events";
 
 const mockSteps = [
-  { type: "ai.labs.parser", extensions: {}, config: { uri: "eddi://ai.labs.parser/parsers/p1?version=1" } },
-  { type: "ai.labs.llm", extensions: {}, config: { uri: "eddi://ai.labs.langchain/langchains/lc1?version=1" } },
-  { type: "ai.labs.output", extensions: {}, config: { uri: "eddi://ai.labs.output/outputsets/o1?version=1" } },
+  { type: "eddi://ai.labs.parser", extensions: {}, config: { uri: "eddi://ai.labs.parser/parsers/p1?version=1" } },
+  { type: "eddi://ai.labs.llm", extensions: {}, config: { uri: "eddi://ai.labs.langchain/langchains/lc1?version=1" } },
+  { type: "eddi://ai.labs.output", extensions: {}, config: { uri: "eddi://ai.labs.output/outputsets/o1?version=1" } },
 ];
 
 function renderRailroad(

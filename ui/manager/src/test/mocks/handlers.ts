@@ -855,27 +855,27 @@ export const handlers = [
     return HttpResponse.json({
       workflowSteps: [
         {
-          type: "ai.labs.parser",
+          type: "eddi://ai.labs.parser",
           extensions: {},
           config: { uri: "eddi://ai.labs.parser/parserstore/parsers/parser1?version=1" },
         },
         {
-          type: "ai.labs.rules",
+          type: "eddi://ai.labs.rules",
           extensions: {},
           config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1" },
         },
         {
-          type: "ai.labs.property",
+          type: "eddi://ai.labs.property",
           extensions: {},
           config: { uri: "eddi://ai.labs.property/propertysetterstore/propertysetters/ps1?version=1" },
         },
         {
-          type: "ai.labs.llm",
+          type: "eddi://ai.labs.llm",
           extensions: {},
           config: { uri: "eddi://ai.labs.llm/llmstore/llms/llm1?version=1" },
         },
         {
-          type: "ai.labs.output",
+          type: "eddi://ai.labs.output",
           extensions: {},
           config: { uri: "eddi://ai.labs.output/outputstore/outputsets/out1?version=1" },
         },
@@ -2400,31 +2400,31 @@ const ORPHAN_REPORT_MOCK = {
   orphans: [
     {
       resourceUri: "eddi://ai.labs.workflow/workflowstore/workflows/orphan1?version=1",
-      type: "ai.labs.workflow",
+      type: "eddi://ai.labs.workflow",
       name: "Legacy Support Workflow (v1)",
       deleted: false,
     },
     {
       resourceUri: "eddi://ai.labs.rules/rulestore/rulesets/orphan2?version=1",
-      type: "ai.labs.rules",
+      type: "eddi://ai.labs.rules",
       name: "Deprecated Greeting Rules",
       deleted: true,
     },
     {
       resourceUri: "eddi://ai.labs.output/outputstore/outputsets/orphan3?version=2",
-      type: "ai.labs.output",
+      type: "eddi://ai.labs.output",
       name: "Archived French Responses",
       deleted: false,
     },
     {
       resourceUri: "eddi://ai.labs.parser/parserstore/parsers/orphan4?version=1",
-      type: "ai.labs.parser",
+      type: "eddi://ai.labs.parser",
       name: "Test Intent Dictionary",
       deleted: false,
     },
     {
       resourceUri: "eddi://ai.labs.langchain/llmstore/llms/orphan5?version=1",
-      type: "ai.labs.langchain",
+      type: "eddi://ai.labs.langchain",
       name: "Old GPT-3.5 Config",
       deleted: true,
     },

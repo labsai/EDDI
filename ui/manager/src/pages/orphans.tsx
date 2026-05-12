@@ -33,14 +33,14 @@ interface TypeConfig {
 }
 
 const TYPE_CONFIG: Record<string, TypeConfig> = {
-  "ai.labs.workflow": { label: "Workflow", icon: Workflow, color: "text-indigo-400" },
-  "ai.labs.rules": { label: "Rule Set", icon: Zap, color: "text-blue-400" },
-  "ai.labs.apicalls": { label: "API Calls", icon: Globe, color: "text-orange-400" },
-  "ai.labs.output": { label: "Output Set", icon: FileOutput, color: "text-emerald-400" },
-  "ai.labs.llm": { label: "LLM", icon: Brain, color: "text-purple-400" },
-  "ai.labs.property": { label: "Property Setter", icon: Settings, color: "text-teal-400" },
-  "ai.labs.dictionary": { label: "Dictionary", icon: BookOpen, color: "text-amber-400" },
-  "ai.labs.parser": { label: "Parser", icon: Cpu, color: "text-sky-400" },
+  "eddi://ai.labs.workflow": { label: "Workflow", icon: Workflow, color: "text-indigo-400" },
+  "eddi://ai.labs.rules": { label: "Rule Set", icon: Zap, color: "text-blue-400" },
+  "eddi://ai.labs.apicalls": { label: "API Calls", icon: Globe, color: "text-orange-400" },
+  "eddi://ai.labs.output": { label: "Output Set", icon: FileOutput, color: "text-emerald-400" },
+  "eddi://ai.labs.llm": { label: "LLM", icon: Brain, color: "text-purple-400" },
+  "eddi://ai.labs.property": { label: "Property Setter", icon: Settings, color: "text-teal-400" },
+  "eddi://ai.labs.dictionary": { label: "Dictionary", icon: BookOpen, color: "text-amber-400" },
+  "eddi://ai.labs.parser": { label: "Parser", icon: Cpu, color: "text-sky-400" },
 };
 
 const DEFAULT_CONFIG: TypeConfig = {
