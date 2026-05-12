@@ -1,0 +1,10 @@
+{
+  "origins": [
+    {
+      "origin": "http://localhost:3000",
+      "localStorage": [
+        { "name": "eddi-onboarding-welcomed", "value": "true" }
+      ]
+    }
+  ]
+}

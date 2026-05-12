@@ -14,6 +14,10 @@ run = "npm run dev"
 description = "Run Vitest unit/component tests"
 run = "npm run test"
 
+[tasks.e2e]
+description = "Run Playwright e2e tests"
+run = "npm run test:e2e"
+
 [tasks.build]
 description = "Production build"
 run = "npm run build"
