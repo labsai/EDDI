@@ -9,49 +9,12 @@ import {
   CheckCircle,
   Loader2,
   ScanSearch,
-  Zap,
-  Globe,
-  FileOutput,
-  Brain,
-  BookOpen,
-  Settings,
-  Cpu,
-  Workflow,
   Copy,
   Link2Off,
-  type LucideIcon,
 } from "lucide-react";
 import { useOrphanScan, usePurgeOrphans } from "@/hooks/use-orphans";
 import type { OrphanInfo } from "@/lib/api/orphans";
-
-// ─── Type config ─────────────────────────────────────────────────────────────
-
-interface TypeConfig {
-  label: string;
-  icon: LucideIcon;
-  color: string;
-}
-
-const TYPE_CONFIG: Record<string, TypeConfig> = {
-  "eddi://ai.labs.workflow": { label: "Workflow", icon: Workflow, color: "text-indigo-400" },
-  "eddi://ai.labs.rules": { label: "Rule Set", icon: Zap, color: "text-blue-400" },
-  "eddi://ai.labs.apicalls": { label: "API Calls", icon: Globe, color: "text-orange-400" },
-  "eddi://ai.labs.output": { label: "Output Set", icon: FileOutput, color: "text-emerald-400" },
-  "eddi://ai.labs.llm": { label: "LLM", icon: Brain, color: "text-purple-400" },
-  "eddi://ai.labs.property": { label: "Property Setter", icon: Settings, color: "text-teal-400" },
-  "eddi://ai.labs.dictionary": { label: "Dictionary", icon: BookOpen, color: "text-amber-400" },
-  "eddi://ai.labs.parser": { label: "Parser", icon: Cpu, color: "text-sky-400" },
-};
-
-const DEFAULT_CONFIG: TypeConfig = {
-  label: "Resource",
-  icon: Link2Off,
-  color: "text-gray-400",
-};
-
-function getTypeConfig(type: string): TypeConfig {
-  return TYPE_CONFIG[type] ?? { ...DEFAULT_CONFIG, label: type.split(".").pop() ?? type };
-}
+import { getExtensionTypeConfig } from "@/lib/api/extensions";
 
 /** Extract resource ID from a URI like eddi://ai.labs.rules/rulestore/rulesets/abc123?version=1 */
 function extractIdFromUri(uri: string): string {
@@ -360,7 +323,7 @@ export function OrphansPage() {
           {/* Orphan list grouped by type */}
           {orphansByType &&
             Object.entries(orphansByType).map(([type, orphans]) => {
-              const config = getTypeConfig(type);
+              const config = getExtensionTypeConfig(type);
               const TypeIcon = config.icon;
               const groupAllSelected = orphans.every((o) => selected.has(o.resourceUri));
 

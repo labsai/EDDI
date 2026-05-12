@@ -1,6 +1,17 @@
 import { describe, it, expect } from "vitest";
+import { Puzzle } from "lucide-react";
 import { RESOURCE_TYPES } from "../resources";
-import { EXTENSION_TO_RESOURCE_SLUG, hasResourceStore } from "../extensions";
+import {
+  EXTENSION_TYPE_INFO,
+  EXTENSION_TO_RESOURCE_SLUG,
+  hasResourceStore,
+  getExtensionLabel,
+  getExtensionIcon,
+  getExtensionColor,
+  getExtensionTypeConfig,
+  getExtensionSortOrder,
+  sortExtensionTypes,
+} from "../extensions";
 
 /**
  * These tests validate that the frontend extension registry and RESOURCE_TYPES
@@ -112,5 +123,94 @@ describe("EXTENSION_TO_RESOURCE_SLUG — completeness", () => {
 
   it("hasResourceStore returns false for parser", () => {
     expect(hasResourceStore("ai.labs.parser")).toBe(false);
+  });
+});
+
+describe("EXTENSION_TYPE_INFO — data integrity", () => {
+  const iconMapKeys = ["FileText", "GitBranch", "Globe", "Brain", "MessageSquareText", "Settings", "FileCode", "Plug"];
+
+  it("every entry has valid fields, unique order, eddi:// key, and known icon", () => {
+    const orders = new Set<number>();
+    for (const [key, config] of Object.entries(EXTENSION_TYPE_INFO)) {
+      expect(key).toMatch(/^eddi:\/\//);
+      expect(config.label.length).toBeGreaterThan(0);
+      expect(config.order).toBeGreaterThanOrEqual(1);
+
+      // Ensure uniqueness of orders
+      expect(orders).not.toContain(config.order);
+      orders.add(config.order);
+
+      expect(iconMapKeys).toContain(config.icon);
+    }
+  });
+});
+
+describe("Fallbacks for unknown / bare-prefix inputs", () => {
+  const knownPrefixed = Object.keys(EXTENSION_TYPE_INFO)[0]!;
+  const knownBare = knownPrefixed.replace("eddi://", "");
+
+  it("getExtensionLabel returns raw type for unknown", () => {
+    expect(getExtensionLabel("eddi://unknown")).toBe("eddi://unknown");
+  });
+
+  it("getExtensionIcon returns Puzzle for unknown, resolves for known", () => {
+    expect(getExtensionIcon("eddi://unknown")).toBe(Puzzle);
+    expect(getExtensionIcon(knownPrefixed)).not.toBe(Puzzle);
+    expect(getExtensionIcon(knownBare)).not.toBe(Puzzle);
+  });
+
+  it("getExtensionColor returns text-gray-400 for unknown, colored for known", () => {
+    expect(getExtensionColor("eddi://unknown")).toBe("text-gray-400");
+    expect(getExtensionColor(knownPrefixed)).not.toBe("text-gray-400");
+    expect(getExtensionColor(knownBare)).not.toBe("text-gray-400");
+  });
+
+  it("getExtensionTypeConfig returns Puzzle + gray for unknown", () => {
+    const fb = getExtensionTypeConfig("eddi://unknown");
+    expect(fb.icon).toBe(Puzzle);
+    expect(fb.color).toBe("text-gray-400");
+  });
+
+  it("getExtensionTypeConfig extracts last segment as label for unknown", () => {
+    expect(getExtensionTypeConfig("some.random.Foo").label).toBe("Foo");
+  });
+
+  it("getExtensionSortOrder returns 99 for unknown", () => {
+    expect(getExtensionSortOrder("eddi://unknown")).toBe(99);
+    expect(getExtensionSortOrder("ai.labs.unknown")).toBe(99);
+  });
+
+  it("getExtensionSortOrder works with bare prefix", () => {
+    expect(getExtensionSortOrder(knownBare)).toBe(getExtensionSortOrder(knownPrefixed));
+  });
+});
+
+describe("sortExtensionTypes", () => {
+  it("does not mutate and places unknown last", () => {
+    const items = [
+      { type: "eddi://ai.labs.llm" },
+      { type: "eddi://ai.labs.unknown" },
+    ];
+    const snapshot = [...items];
+    const sorted = sortExtensionTypes(items);
+    expect(items).toEqual(snapshot);
+    expect(sorted[0]!.type).toBe("eddi://ai.labs.llm");
+    expect(sorted[1]!.type).toBe("eddi://ai.labs.unknown");
+  });
+});
+
+describe("EXTENSION_TO_RESOURCE_SLUG — cross-reference with EXTENSION_TYPE_INFO", () => {
+  // snippet/snippets has no EXTENSION_TYPE_INFO entry (no pipeline editor for snippets)
+  const SKIP = new Set(["ai.labs.snippet", "ai.labs.snippets"]);
+
+  it("all resource-slug extensions (except snippets) have matching EXTENSION_TYPE_INFO entries", () => {
+    for (const [ext, slug] of Object.entries(EXTENSION_TO_RESOURCE_SLUG)) {
+      if (SKIP.has(ext)) continue;
+      const prefixed = "eddi://" + ext;
+      expect(
+        EXTENSION_TYPE_INFO[prefixed],
+        `${ext} → ${slug} has no matching EXTENSION_TYPE_INFO entry (expected key "${prefixed}")`,
+      ).toBeDefined();
+    }
   });
 });

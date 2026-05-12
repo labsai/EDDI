@@ -12,44 +12,8 @@ import {
   AlertTriangle,
   Wrench,
   Copy,
-  type LucideIcon,
-  FileCode,
-  Bot,
-  Workflow,
-  MessageSquareCode,
-  Settings,
-  BookOpen,
-  BookText,
-  Brain,
 } from "lucide-react";
-
-// ==================== Task Type Icons & Colors ====================
-
-const TYPE_ICONS: Record<string, LucideIcon> = {
-  "ai.labs.parser": FileCode,
-  "ai.labs.rules": BookOpen,
-  "ai.labs.property": Settings,
-  "ai.labs.apicalls": Zap,
-  "ai.labs.llm": MessageSquareCode,
-  "ai.labs.output": Bot,
-  "ai.labs.output.template": Bot,
-  "ai.labs.mcpcalls": Wrench,
-  "ai.labs.dictionary": BookText,
-  "ai.labs.rag": Brain,
-};
-
-const TYPE_COLORS: Record<string, string> = {
-  "ai.labs.parser": "text-blue-500",
-  "ai.labs.rules": "text-violet-500",
-  "ai.labs.property": "text-cyan-500",
-  "ai.labs.apicalls": "text-amber-500",
-  "ai.labs.llm": "text-emerald-500",
-  "ai.labs.output": "text-rose-500",
-  "ai.labs.output.template": "text-rose-400",
-  "ai.labs.mcpcalls": "text-orange-500",
-  "ai.labs.dictionary": "text-teal-500",
-  "ai.labs.rag": "text-purple-500",
-};
+import { getExtensionIcon, getExtensionColor } from "@/lib/api/extensions";
 
 // ==================== Types ====================
 
@@ -247,8 +211,8 @@ export function ChatActivity({ events, isLive, totalSteps }: ChatActivityProps) 
 
 function TaskRow({ task }: { task: TaskSummary }) {
   const [toolsExpanded, setToolsExpanded] = useState(false);
-  const Icon = TYPE_ICONS[task.taskType] ?? Workflow;
-  const color = TYPE_COLORS[task.taskType] ?? "text-muted-foreground";
+  const Icon = getExtensionIcon(task.taskType);
+  const color = getExtensionColor(task.taskType);
   const label = getTaskLabel(task.taskType);
 
   const toolCalls = task.toolTrace?.filter((e) => e.type === "tool_call") ?? [];
