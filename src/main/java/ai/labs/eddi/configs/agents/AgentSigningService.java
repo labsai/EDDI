@@ -206,46 +206,6 @@ public class AgentSigningService {
         return VAULT_KEY_PREFIX + agentId;
     }
 
-    private String vaultKeyNameVersioned(String agentId, int version) {
-        return VAULT_KEY_PREFIX + agentId + ":v" + version;
-    }
-
-    /**
-     * Generate a versioned keypair for key rotation.
-     *
-     * @param tenantId
-     *            the tenant identifier
-     * @param agentId
-     *            the agent identifier
-     * @param version
-     *            the key version number
-     * @return the Base64-encoded public key
-     * @throws AgentSigningException
-     *             if key generation fails
-     */
-    public String generateKeyPairVersioned(String tenantId, String agentId, int version) throws AgentSigningException {
-        try {
-            KeyPairGenerator keyGen = KeyPairGenerator.getInstance(ALGORITHM);
-            KeyPair keyPair = keyGen.generateKeyPair();
-
-            String publicKeyB64 = Base64.getEncoder().encodeToString(keyPair.getPublic().getEncoded());
-            String privateKeyB64 = Base64.getEncoder().encodeToString(keyPair.getPrivate().getEncoded());
-
-            // Store versioned private key in vault
-            SecretReference ref = new SecretReference(tenantId, vaultKeyNameVersioned(agentId, version));
-            secretProvider.store(ref, privateKeyB64,
-                    "Ed25519 signing key v" + version + " for agent " + agentId,
-                    List.of(agentId));
-
-            LOGGER.infof("Generated Ed25519 keypair v%d for agent '%s' in tenant '%s'", version, agentId, tenantId);
-            return publicKeyB64;
-        } catch (NoSuchAlgorithmException e) {
-            throw new AgentSigningException("Ed25519 not available in JVM", e);
-        } catch (ISecretProvider.SecretProviderException e) {
-            throw new AgentSigningException("Failed to store private key in vault", e);
-        }
-    }
-
     public static class AgentSigningException extends Exception {
         public AgentSigningException(String message, Throwable cause) {
             super(message, cause);

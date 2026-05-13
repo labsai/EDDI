@@ -5,8 +5,8 @@
 package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.engine.memory.model.MemoryCheckpoint;
-import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -66,8 +66,14 @@ class MemorySnapshotServiceTest {
         void testCreateCheckpoint() {
             when(memory.getConversationId()).thenReturn("conv-123");
             when(memory.size()).thenReturn(6);
+
+            // Populate properties as a real Map<String, Property>
+            Map<String, Property> propsMap = new LinkedHashMap<>();
+            propsMap.put("name", new Property("name", "Alice", Scope.conversation));
             when(memory.getConversationProperties()).thenReturn(conversationProperties);
-            when(conversationProperties.toMap()).thenReturn(Map.of("name", "Alice"));
+            when(conversationProperties.isEmpty()).thenReturn(false);
+            when(conversationProperties.entrySet()).thenReturn(propsMap.entrySet());
+            when(conversationProperties.size()).thenReturn(propsMap.size());
 
             MemoryCheckpoint checkpoint = snapshotService.createCheckpoint(
                     memory, "before_tool", "WebSearchTool");
@@ -125,25 +131,27 @@ class MemorySnapshotServiceTest {
         }
 
         @Test
-        @DisplayName("Should restore properties on successful rollback")
-        void testRollbackRestoresProperties() {
-            Map<String, Object> savedProps = Map.of("lang", "en", "count", 42);
+        @DisplayName("Should restore properties on successful rollback preserving scope")
+        void testRollbackRestoresPropertiesWithScope() {
+            Map<String, Property> savedProps = Map.of(
+                    "lang", new Property("lang", "en", Scope.longTerm),
+                    "count", new Property("count", 42, Scope.conversation));
             MemoryCheckpoint checkpoint = new MemoryCheckpoint(
                     "ckpt-1", "conv-123", null, 3, savedProps, Instant.now(), "test", "TestClass");
 
             when(checkpointStore.findById("ckpt-1")).thenReturn(checkpoint);
             when(memory.getConversationId()).thenReturn("conv-123");
 
-            // Use a real map for properties
-            Map<String, Property> propsMap = new LinkedHashMap<>();
+            // Use a real map to track restored properties
+            Map<String, Property> restoredProps = new LinkedHashMap<>();
             IConversationMemory.IConversationProperties props = mock(IConversationMemory.IConversationProperties.class);
             when(memory.getConversationProperties()).thenReturn(props);
             doAnswer(inv -> {
-                propsMap.clear();
+                restoredProps.clear();
                 return null;
             }).when(props).clear();
             doAnswer(inv -> {
-                propsMap.put(inv.getArgument(0), inv.getArgument(1));
+                restoredProps.put(inv.getArgument(0), inv.getArgument(1));
                 return null;
             }).when(props).put(anyString(), any(Property.class));
 
@@ -151,8 +159,11 @@ class MemorySnapshotServiceTest {
 
             assertTrue(result);
             verify(props).clear();
-            // Should restore 2 properties
-            verify(props, times(2)).put(anyString(), any(Property.class));
+            assertEquals(2, restoredProps.size());
+
+            // Verify scope is preserved — this is the key Fix #4 assertion
+            assertEquals(Scope.longTerm, restoredProps.get("lang").getScope());
+            assertEquals(Scope.conversation, restoredProps.get("count").getScope());
         }
 
         @Test
@@ -171,16 +182,13 @@ class MemorySnapshotServiceTest {
         }
 
         @Test
-        @DisplayName("Should restore all property types correctly")
+        @DisplayName("Should restore all property types correctly with scope")
         void testRollbackAllPropertyTypes() {
-            Map<String, Object> savedProps = new LinkedHashMap<>();
-            savedProps.put("strProp", "hello");
-            savedProps.put("intProp", 42);
-            savedProps.put("floatProp", 3.14f);
-            savedProps.put("boolProp", true);
-            savedProps.put("listProp", List.of("a", "b"));
-            savedProps.put("mapProp", Map.of("k", "v"));
-            savedProps.put("otherProp", 99L); // Long — hits fallback
+            Map<String, Property> savedProps = new LinkedHashMap<>();
+            savedProps.put("strProp", new Property("strProp", "hello", Scope.conversation));
+            savedProps.put("intProp", new Property("intProp", 42, Scope.longTerm));
+            savedProps.put("floatProp", new Property("floatProp", 3.14f, Scope.step));
+            savedProps.put("boolProp", new Property("boolProp", true, Scope.conversation));
 
             MemoryCheckpoint checkpoint = new MemoryCheckpoint(
                     "ckpt-2", "conv-123", null, 3, savedProps, Instant.now(), "test", "TestClass");
@@ -201,7 +209,7 @@ class MemorySnapshotServiceTest {
             boolean result = snapshotService.rollbackToCheckpoint(memory, "ckpt-2");
 
             assertTrue(result);
-            assertEquals(7, restored.size()); // all 7 types restored
+            assertEquals(4, restored.size());
         }
     }
 

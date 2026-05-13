@@ -4,16 +4,20 @@
  */
 package ai.labs.eddi.engine.memory.model;
 
+import ai.labs.eddi.configs.properties.model.Property;
+
 import java.time.Instant;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * Immutable snapshot of conversation state at a specific point in time. Used
  * for rollback after failed tool executions and for conversation forking.
  * <p>
- * Each checkpoint captures the current {@code stepIndex} and a snapshot of
- * conversation properties stored in {@code propertiesCopy}. This allows the
- * conversation to be restored to the recorded property state at this point.
+ * Each checkpoint captures the current {@code stepIndex} and a deep copy of the
+ * full {@link Property} objects (including scope and visibility) so that
+ * rollback restores properties with their original metadata intact.
  *
  * @param checkpointId
  *            unique identifier for this checkpoint
@@ -24,7 +28,8 @@ import java.util.Map;
  * @param stepIndex
  *            the step index at the time of snapshot (0-based)
  * @param propertiesCopy
- *            snapshot of conversation properties at checkpoint time
+ *            snapshot of conversation properties at checkpoint time (preserves
+ *            scope and visibility)
  * @param createdAt
  *            when the checkpoint was created
  * @param triggeredBy
@@ -38,7 +43,7 @@ public record MemoryCheckpoint(
         String conversationId,
         String parentConversationId,
         int stepIndex,
-        Map<String, Object> propertiesCopy,
+        Map<String, Property> propertiesCopy,
         Instant createdAt,
         String triggeredBy,
         String triggeredByClass) {
@@ -59,13 +64,13 @@ public record MemoryCheckpoint(
      * @return a new MemoryCheckpoint
      */
     public static MemoryCheckpoint create(String conversationId, int stepIndex,
-                                          Map<String, Object> properties, String triggeredBy, String triggeredByClass) {
+                                          Map<String, Property> properties, String triggeredBy, String triggeredByClass) {
         return new MemoryCheckpoint(
                 java.util.UUID.randomUUID().toString(),
                 conversationId,
                 null,
                 stepIndex,
-                ai.labs.eddi.engine.memory.DeepCopyUtil.deepCopy(properties),
+                copyProperties(properties),
                 Instant.now(),
                 triggeredBy,
                 triggeredByClass);
@@ -77,5 +82,25 @@ public record MemoryCheckpoint(
     public MemoryCheckpoint withParent(String parentId) {
         return new MemoryCheckpoint(checkpointId, conversationId, parentId, stepIndex,
                 propertiesCopy, createdAt, triggeredBy, triggeredByClass);
+    }
+
+    /**
+     * Deep-copy the properties map. Each {@link Property} is cloned via its
+     * all-args constructor to isolate checkpoint state from live memory.
+     */
+    private static Map<String, Property> copyProperties(Map<String, Property> original) {
+        if (original == null || original.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<String, Property> copy = new LinkedHashMap<>(original.size());
+        for (Map.Entry<String, Property> entry : original.entrySet()) {
+            Property p = entry.getValue();
+            Property cloned = new Property(
+                    p.getName(), p.getValueString(), p.getValueObject(),
+                    p.getValueList(), p.getValueInt(), p.getValueFloat(),
+                    p.getValueBoolean(), p.getScope(), p.getVisibility());
+            copy.put(entry.getKey(), cloned);
+        }
+        return Collections.unmodifiableMap(copy);
     }
 }

@@ -80,13 +80,6 @@ class AgentSigningServiceTest {
     }
 
     @Test
-    void generateKeyPairVersioned_returnsPublicKey() throws Exception {
-        String publicKey = signingService.generateKeyPairVersioned("tenant-1", "agent-1", 2);
-        assertNotNull(publicKey);
-        assertFalse(publicKey.isBlank());
-    }
-
-    @Test
     void verify_returnsFalseOnInvalidBase64() {
         assertFalse(signingService.verify("not-a-key", "payload", "not-a-sig"));
     }
@@ -108,24 +101,6 @@ class AgentSigningServiceTest {
 
         assertThrows(AgentSigningService.AgentSigningException.class,
                 () -> failService.generateKeyPair("t1", "a1"));
-    }
-
-    @Test
-    void generateKeyPairVersioned_throwsWhenVaultFails() {
-        var failingProvider = new InMemorySecretProvider() {
-            @Override
-            public void store(SecretReference reference, String plaintext,
-                              String description, List<String> allowedAgents)
-                    throws SecretProviderException {
-                throw new SecretProviderException("Vault unavailable");
-            }
-        };
-        var failService = new AgentSigningService(failingProvider,
-                new SimpleMeterRegistry());
-        failService.initMetrics();
-
-        assertThrows(AgentSigningService.AgentSigningException.class,
-                () -> failService.generateKeyPairVersioned("t1", "a1", 3));
     }
 
     @Test

@@ -13,6 +13,35 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔧 Checkpoint Integrity & Dead Code Cleanup (2026-05-12)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+**What changed:** Fixed 4 findings from final code review — performance bug, dead code, redundant import, and a design bug in property scope preservation.
+
+### Bug Fix: Double Deep-Copy (Finding 1)
+- **`MemorySnapshotService.extractProperties()`** was calling `DeepCopyUtil.deepCopy()`, then **`MemoryCheckpoint.create()`** deep-copied again — wasting CPU on every checkpoint
+- **Fix:** `extractProperties()` now returns a shallow `LinkedHashMap` copy; `MemoryCheckpoint.create()` handles the single deep-copy via `copyProperties()`
+
+### Bug Fix: Property Scope Loss on Rollback (Finding 4)
+- **`MemoryCheckpoint.propertiesCopy`** was `Map<String, Object>` (flattened values) — scope, visibility, and type metadata were stripped at checkpoint time
+- **`restoreProperties()`** reconstructed all properties with hardcoded `Scope.conversation`, losing `longTerm`/`step`/`secret` scope
+- **Fix:** Changed `propertiesCopy` to `Map<String, Property>`, which preserves the full `Property` object (scope, visibility, all value types). `copyProperties()` clones each `Property` via its all-args constructor. `restoreProperties()` now simply puts back the original `Property` objects
+
+### Dead Code Removed (Finding 2)
+- **`AgentSigningService`** — Removed `generateKeyPairVersioned()` + `vaultKeyNameVersioned()` (38 lines). Only caller was deleted `rotateKey()`. Tests removed too
+- **`AgentSigningServiceTest`** — Removed 2 dead test methods exercising the deleted methods
+
+### Minor Cleanup (Finding 3)
+- **`DeepCopyUtil`** — Removed redundant `import java.util.Collections` (already covered by `import java.util.*`)
+
+### Test Improvements
+- **`MemoryCheckpointTest`** — Added 3 new tests: scope preservation, visibility preservation, deep-copy mutation isolation
+- **`MemorySnapshotServiceTest`** — Updated rollback test to assert scope preservation (`longTerm` properties survive rollback)
+
+### Verification
+- Clean compile: BUILD SUCCESS, 0 Checkstyle violations
+- 5,041 unit tests: 0 failures, 0 errors (21 Docker-dependent infra test errors = pre-existing)
+
 ## 🧹 Dead Code Removal & Immutability Fix (2026-05-08)
 
 **Repo:** EDDI (`feature/agentic-improvements`)

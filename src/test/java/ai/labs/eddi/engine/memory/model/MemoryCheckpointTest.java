@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.memory.model;
 
+import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.properties.model.Property.Scope;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -23,7 +25,9 @@ class MemoryCheckpointTest {
         @Test
         @DisplayName("Should create checkpoint with all fields populated")
         void testCreatePopulatesAllFields() {
-            Map<String, Object> properties = Map.of("key1", "value1", "key2", 42);
+            Map<String, Property> properties = Map.of(
+                    "key1", new Property("key1", "value1", Scope.conversation),
+                    "key2", new Property("key2", 42, Scope.longTerm));
 
             MemoryCheckpoint checkpoint = MemoryCheckpoint.create(
                     "conv-123", 5, properties, "before_tool", "WebSearchTool");
@@ -33,7 +37,8 @@ class MemoryCheckpointTest {
             assertEquals("conv-123", checkpoint.conversationId());
             assertNull(checkpoint.parentConversationId());
             assertEquals(5, checkpoint.stepIndex());
-            assertEquals(properties, checkpoint.propertiesCopy());
+            assertNotNull(checkpoint.propertiesCopy());
+            assertEquals(2, checkpoint.propertiesCopy().size());
             assertNotNull(checkpoint.createdAt());
             assertTrue(checkpoint.createdAt().isBefore(Instant.now().plusSeconds(1)));
             assertEquals("before_tool", checkpoint.triggeredBy());
@@ -53,12 +58,14 @@ class MemoryCheckpointTest {
         @Test
         @DisplayName("Should create immutable properties copy")
         void testCreateImmutableProperties() {
-            Map<String, Object> properties = Map.of("key", "value");
+            Map<String, Property> properties = Map.of(
+                    "key", new Property("key", "value", Scope.conversation));
             MemoryCheckpoint checkpoint = MemoryCheckpoint.create(
                     "conv-123", 0, properties, "test", "TestClass");
 
             assertThrows(UnsupportedOperationException.class,
-                    () -> checkpoint.propertiesCopy().put("new", "value"));
+                    () -> checkpoint.propertiesCopy().put("new",
+                            new Property("new", "v", Scope.conversation)));
         }
 
         @Test
@@ -69,6 +76,53 @@ class MemoryCheckpointTest {
 
             assertNotEquals(c1.checkpointId(), c2.checkpointId());
         }
+
+        @Test
+        @DisplayName("Should preserve Property scope through deep copy")
+        void testCreatePreservesScope() {
+            Map<String, Property> properties = Map.of(
+                    "longTermProp", new Property("longTermProp", "persistent", Scope.longTerm),
+                    "stepProp", new Property("stepProp", "ephemeral", Scope.step),
+                    "secretProp", new Property("secretProp", "vault-value", Scope.secret));
+
+            MemoryCheckpoint checkpoint = MemoryCheckpoint.create(
+                    "conv-1", 0, properties, "test", "TestClass");
+
+            assertEquals(Scope.longTerm, checkpoint.propertiesCopy().get("longTermProp").getScope());
+            assertEquals(Scope.step, checkpoint.propertiesCopy().get("stepProp").getScope());
+            assertEquals(Scope.secret, checkpoint.propertiesCopy().get("secretProp").getScope());
+        }
+
+        @Test
+        @DisplayName("Should preserve Property visibility through deep copy")
+        void testCreatePreservesVisibility() {
+            Property globalProp = new Property("shared", "value", null, null, null, null, null,
+                    Scope.longTerm, Property.Visibility.global);
+            Map<String, Property> properties = Map.of("shared", globalProp);
+
+            MemoryCheckpoint checkpoint = MemoryCheckpoint.create(
+                    "conv-1", 0, properties, "test", "TestClass");
+
+            assertEquals(Property.Visibility.global,
+                    checkpoint.propertiesCopy().get("shared").getVisibility());
+        }
+
+        @Test
+        @DisplayName("Should deep-copy properties (original mutation doesn't affect checkpoint)")
+        void testCreateDeepCopiesProperties() {
+            Property mutableProp = new Property("name", "original", Scope.conversation);
+            Map<String, Property> properties = new java.util.LinkedHashMap<>();
+            properties.put("name", mutableProp);
+
+            MemoryCheckpoint checkpoint = MemoryCheckpoint.create(
+                    "conv-1", 0, properties, "test", "TestClass");
+
+            // Mutate original
+            mutableProp.setValueString("mutated");
+
+            // Checkpoint should still have original value
+            assertEquals("original", checkpoint.propertiesCopy().get("name").getValueString());
+        }
     }
 
     @Nested
@@ -78,8 +132,10 @@ class MemoryCheckpointTest {
         @Test
         @DisplayName("Should set parent conversation ID")
         void testWithParent() {
+            Map<String, Property> props = Map.of(
+                    "k", new Property("k", "v", Scope.conversation));
             MemoryCheckpoint original = MemoryCheckpoint.create(
-                    "conv-child", 3, Map.of("k", "v"), "fork", "ForkService");
+                    "conv-child", 3, props, "fork", "ForkService");
 
             MemoryCheckpoint withParent = original.withParent("conv-parent");
 

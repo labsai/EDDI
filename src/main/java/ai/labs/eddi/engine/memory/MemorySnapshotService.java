@@ -12,6 +12,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -51,7 +52,7 @@ public class MemorySnapshotService {
     public MemoryCheckpoint createCheckpoint(IConversationMemory memory, String triggeredBy, String triggeredByClass) {
         String conversationId = memory.getConversationId();
         int stepIndex = memory.size() - 1; // 0-based step index
-        Map<String, Object> properties = extractProperties(memory);
+        Map<String, Property> properties = extractProperties(memory);
 
         MemoryCheckpoint checkpoint = MemoryCheckpoint.create(
                 conversationId, stepIndex, properties, triggeredBy, triggeredByClass);
@@ -122,43 +123,25 @@ public class MemorySnapshotService {
         return checkpointStore.deleteByConversationId(conversationId);
     }
 
-    private Map<String, Object> extractProperties(IConversationMemory memory) {
+    private Map<String, Property> extractProperties(IConversationMemory memory) {
         var props = memory.getConversationProperties();
-        if (props == null) {
+        if (props == null || props.isEmpty()) {
             return Map.of();
         }
-        // Create a deep copy of the properties map to isolate checkpoint state
-        return DeepCopyUtil.deepCopy(props.toMap());
+        // Shallow copy — MemoryCheckpoint.create() deep-copies each Property
+        return new LinkedHashMap<>(props);
     }
 
-    @SuppressWarnings("unchecked")
-    private void restoreProperties(IConversationMemory memory, Map<String, Object> propertiesCopy) {
+    private void restoreProperties(IConversationMemory memory, Map<String, Property> propertiesCopy) {
         var props = memory.getConversationProperties();
         if (props == null) {
             return;
         }
-        // Clear current properties and restore from checkpoint
+        // Clear current properties and restore from checkpoint.
+        // Property objects in the checkpoint already have their original scope
+        // and visibility preserved — no reconstruction needed.
         props.clear();
-        propertiesCopy.forEach((key, value) -> {
-            Property property;
-            if (value instanceof String s) {
-                property = new Property(key, s, Property.Scope.conversation);
-            } else if (value instanceof Map<?, ?> m) {
-                property = new Property(key, (Map<String, Object>) m, Property.Scope.conversation);
-            } else if (value instanceof List<?> l) {
-                property = new Property(key, (List<Object>) l, Property.Scope.conversation);
-            } else if (value instanceof Integer i) {
-                property = new Property(key, i, Property.Scope.conversation);
-            } else if (value instanceof Float f) {
-                property = new Property(key, f, Property.Scope.conversation);
-            } else if (value instanceof Boolean b) {
-                property = new Property(key, b, Property.Scope.conversation);
-            } else {
-                // Fallback: convert to string
-                property = new Property(key, String.valueOf(value), Property.Scope.conversation);
-            }
-            props.put(key, property);
-        });
+        propertiesCopy.forEach(props::put);
     }
 
     private void incrementCounter(String action) {
