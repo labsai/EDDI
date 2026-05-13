@@ -670,6 +670,23 @@ export const handlers = [
         description: "24/7 customer support with order tracking, returns processing, and escalation handling",
         a2aSkills: ["order-tracking", "return-processing", "escalation"],
         memory: { memoryType: "longTerm", maxConversationSteps: 100 },
+        // Agentic improvements — identity, session management
+        identity: {
+          agentDid: "did:eddi:agent-1",
+          publicKey: "MCowBQYDK2VwAyEAexampleKey1234567890abcdef",
+          keys: [
+            { version: 1, publicKeyB64: "MCowBQYDK2VwAyEAexampleKey1234567890abcdef", validFromMs: 1700000000000, validUntilMs: 0 },
+          ],
+        },
+        sessionManagement: {
+          autoSnapshot: {
+            enabled: true,
+            triggerOn: ["before_tool"],
+          },
+          forkingEnabled: false,
+          maxCheckpointsPerConversation: 10,
+          maxForksPerConversation: 5,
+        },
       },
       agent3: {
         workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf3?version=1"],
@@ -1486,6 +1503,22 @@ export const handlers = [
                 httpCodeValidator: {},
               },
             ],
+          },
+          // Agentic improvements
+          counterweight: {
+            enabled: true,
+            level: "cautious",
+            placement: "suffix",
+            customInstructions: [],
+          },
+          identityMasking: {
+            enabled: false,
+            rules: [],
+          },
+          toolResponseLimits: {
+            defaultMaxChars: 50000,
+            truncationStrategy: "truncate",
+            perToolLimits: { webscraper: 2000 },
           },
         },
       ],
