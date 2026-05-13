@@ -233,6 +233,35 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
             />
           </div>
         </div>
+
+        {/* Versioned keys (if any exist from multi-key rotation) */}
+        {(agent.identity?.keys?.length ?? 0) > 0 && (
+          <div className="space-y-1.5">
+            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {t("agentDetail.publicKeys", "Public Keys")}
+            </label>
+            <div className="space-y-1">
+              {agent.identity!.keys!.map((k, ki) => (
+                <div
+                  key={ki}
+                  className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5"
+                >
+                  <span className="inline-flex items-center rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                    {t("agentDetail.keyVersion", "Key v{{version}}", { version: k.version ?? ki })}
+                  </span>
+                  <span className="flex-1 truncate font-mono text-[10px] text-muted-foreground" dir="ltr">
+                    {k.publicKeyB64 ? `${k.publicKeyB64.slice(0, 24)}…` : "—"}
+                  </span>
+                  {k.revokedAt && (
+                    <span className="text-[9px] text-destructive font-medium">
+                      {t("agentDetail.keyRevoked", "Revoked")}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Security toggles */}
@@ -996,6 +1025,170 @@ export const MemoryPolicySection = memo(function MemoryPolicySection({
             </div>
           </div>
         )}
+      </div>
+    </EditorSection>
+  );
+});
+
+// ─── Session Management ────────────────────────────────────────────────────
+
+const SNAPSHOT_TRIGGERS = ["before_tool", "before_action"] as const;
+
+export const SessionManagementSection = memo(function SessionManagementSection({
+  agent,
+  agentId,
+  version,
+}: {
+  agent: Agent;
+  agentId: string;
+  version: number;
+}) {
+  const { t } = useTranslation();
+  const updateAgent = useUpdateAgent();
+
+  const sm = agent.sessionManagement ?? {};
+  const snap = sm.autoSnapshot ?? {};
+
+  function patchSm(updates: Record<string, unknown>) {
+    updateAgent.mutate({
+      id: agentId,
+      version,
+      agent: {
+        ...agent,
+        sessionManagement: { ...sm, ...updates },
+      },
+    });
+  }
+
+  function patchSnap(updates: Record<string, unknown>) {
+    patchSm({ autoSnapshot: { ...snap, ...updates } });
+  }
+
+  return (
+    <EditorSection
+      label={t("agentDetail.sessionManagement", "Session Management")}
+      icon={Fingerprint}
+      accent="text-teal-500"
+      variant="card"
+      defaultOpen={snap.enabled ?? false}
+    >
+      <div className="space-y-4" data-testid="session-management-section">
+        <p className="text-[10px] text-muted-foreground leading-relaxed">
+          {t(
+            "agentDetail.sessionManagementDesc",
+            "Memory checkpoints capture conversation state before risky operations, enabling clean rollback on failure."
+          )}
+        </p>
+
+        {/* Auto-Snapshot */}
+        <div className="space-y-3">
+          <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+            <input
+              type="checkbox"
+              checked={snap.enabled ?? false}
+              onChange={() => patchSnap({ enabled: !(snap.enabled ?? false) })}
+              disabled={updateAgent.isPending}
+              className="h-3.5 w-3.5 rounded border-input accent-primary"
+              data-testid="auto-snapshot-enabled"
+            />
+            {t("agentDetail.autoSnapshotEnable", "Enable automatic checkpoints")}
+          </label>
+
+          {snap.enabled && (
+            <div className="space-y-3 ps-5">
+              {/* Trigger events */}
+              <div>
+                <label className="mb-1.5 block text-[10px] text-muted-foreground">
+                  {t("agentDetail.triggerOn", "Trigger On")}
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {SNAPSHOT_TRIGGERS.map((trigger) => {
+                    const active = (snap.triggerOn ?? []).includes(trigger);
+                    return (
+                      <button
+                        key={trigger}
+                        type="button"
+                        onClick={() => {
+                          const current = snap.triggerOn ?? [];
+                          const next = active
+                            ? current.filter((t) => t !== trigger)
+                            : [...current, trigger];
+                          patchSnap({ triggerOn: next.length > 0 ? next : undefined });
+                        }}
+                        disabled={updateAgent.isPending}
+                        className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                          active
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+                        }`}
+                      >
+                        {trigger === "before_tool"
+                          ? t("agentDetail.triggerBeforeTool", "Before tool execution")
+                          : t("agentDetail.triggerBeforeAction", "Before action")}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Max checkpoints */}
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-foreground whitespace-nowrap">
+                  {t("agentDetail.maxCheckpoints", "Max Checkpoints")}
+                </label>
+                <DebouncedNumberInput
+                  value={sm.maxCheckpointsPerConversation ?? 10}
+                  onCommit={(v) => patchSm({ maxCheckpointsPerConversation: v })}
+                  min={1}
+                  max={100}
+                  className="h-7 w-20 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+                <span className="text-[10px] text-muted-foreground">
+                  {t("agentDetail.maxCheckpointsHint", "per conversation")}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Forking */}
+        <div className="border-t border-border pt-3 space-y-2">
+          <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+            <input
+              type="checkbox"
+              checked={sm.forkingEnabled ?? false}
+              onChange={() => patchSm({ forkingEnabled: !(sm.forkingEnabled ?? false) })}
+              disabled={updateAgent.isPending}
+              className="h-3.5 w-3.5 rounded border-input accent-primary"
+              data-testid="forking-enabled"
+            />
+            {t("agentDetail.forkingEnabled", "Session Forking")}
+          </label>
+          <p className="text-[10px] text-muted-foreground ps-5">
+            {t(
+              "agentDetail.forkingNote",
+              "Session forking endpoint (POST /v6/conversations/{id}/fork) is experimental."
+            )}
+          </p>
+
+          {sm.forkingEnabled && (
+            <div className="flex items-center gap-2 ps-5">
+              <label className="text-xs text-foreground whitespace-nowrap">
+                {t("agentDetail.maxForks", "Max Forks")}
+              </label>
+              <DebouncedNumberInput
+                value={sm.maxForksPerConversation ?? 5}
+                onCommit={(v) => patchSm({ maxForksPerConversation: v })}
+                min={1}
+                max={50}
+                className="h-7 w-20 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              <span className="text-[10px] text-muted-foreground">
+                {t("agentDetail.maxForksHint", "per conversation")}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
     </EditorSection>
   );
