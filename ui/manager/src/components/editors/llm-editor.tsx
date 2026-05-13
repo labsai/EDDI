@@ -1583,15 +1583,18 @@ function TaskEditor({
                   </label>
                   <select
                     value={task.toolResponseLimits?.truncationStrategy ?? "truncate"}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const strategy = e.target.value;
                       onChange({
                         ...task,
                         toolResponseLimits: {
                           ...task.toolResponseLimits,
-                          truncationStrategy: e.target.value === "truncate" ? undefined : e.target.value,
+                          truncationStrategy: strategy === "truncate" ? undefined : strategy,
+                          // Clear summarizer model when switching away from summarize
+                          ...(strategy !== "summarize" ? { summarizerModel: undefined } : {}),
                         },
-                      })
-                    }
+                      });
+                    }}
                     disabled={readOnly}
                     className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                     data-testid="tool-response-strategy"

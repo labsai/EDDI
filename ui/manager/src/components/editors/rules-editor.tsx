@@ -241,18 +241,26 @@ function ConditionEditor({
 
   /** Provide sensible default configs when switching condition type */
   const handleTypeChange = (newType: string) => {
-    let configs: Record<string, string> = {};
+    let configs: Record<string, string>;
     switch (newType) {
+      case "inputmatcher":
+        configs = { expressions: "", occurrence: "currentStep" };
+        break;
+      case "actionmatcher":
+        configs = { actions: "", occurrence: "currentStep" };
+        break;
+      case "occurrence":
+        configs = { maxTimesOccurred: "1", behaviorRuleName: "" };
+        break;
       case "deploymentContext":
         configs = { when: "production", tagMatches: "" };
         break;
       case "capabilityMatch":
         configs = { skill: "", strategy: "highest_confidence", attributes: "" };
         break;
-      case "inputmatcher":
-        configs = { expressions: "", occurrence: "currentStep" };
-        break;
       default:
+        // negation, connector, dynamicValueMatcher — no preset configs
+        configs = {};
         break;
     }
     onChange({ ...condition, type: newType, configs });

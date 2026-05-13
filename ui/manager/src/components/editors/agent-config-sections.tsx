@@ -1125,7 +1125,7 @@ export const SessionManagementSection = memo(function SessionManagementSection({
                         onClick={() => {
                           const current = snap.triggerOn ?? [];
                           const next = active
-                            ? current.filter((t) => t !== trigger)
+                            ? current.filter((v) => v !== trigger)
                             : [...current, trigger];
                           patchSnap({ triggerOn: next.length > 0 ? next : undefined });
                         }}
