@@ -56,8 +56,8 @@ export interface AgentIdentity {
 export interface AgentPublicKey {
   version?: number;
   publicKeyB64?: string;
-  createdAt?: number;
-  revokedAt?: number;
+  validFromMs?: number;
+  validUntilMs?: number;
 }
 
 export interface SecurityConfig {

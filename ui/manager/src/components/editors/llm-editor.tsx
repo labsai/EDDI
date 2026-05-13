@@ -1065,12 +1065,25 @@ function TaskEditor({
                       <label className="mb-1 flex items-center gap-1 text-[10px] text-muted-foreground">
                         {t("llmEditor.counterweightCustom", "Custom Instructions")}
                       </label>
-                      <p className="mb-1.5 text-[10px] text-muted-foreground">
-                        {t(
-                          "llmEditor.counterweightCustomHint",
-                          "Override preset text entirely with custom safety rules. Leave empty to use the built-in preset for the selected level."
-                        )}
-                      </p>
+                      {(task.counterweight?.customInstructions ?? []).length > 0 && (
+                        <div className="mb-1.5 flex items-start gap-1.5 rounded-md border border-amber-400/30 bg-amber-50 px-2 py-1.5 dark:bg-amber-900/15 dark:border-amber-700/30">
+                          <Info className="h-3 w-3 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                          <p className="text-[10px] text-amber-800 dark:text-amber-300">
+                            {t(
+                              "llmEditor.counterweightCustomOverride",
+                              "Custom instructions override the preset level text entirely."
+                            )}
+                          </p>
+                        </div>
+                      )}
+                      {(task.counterweight?.customInstructions ?? []).length === 0 && (
+                        <p className="mb-1.5 text-[10px] text-muted-foreground">
+                          {t(
+                            "llmEditor.counterweightCustomHint",
+                            "Leave empty to use the built-in preset for the selected level."
+                          )}
+                        </p>
+                      )}
                       <div className="space-y-1.5">
                         {(task.counterweight?.customInstructions ?? []).map(
                           (rule, ri) => (
@@ -1179,6 +1192,18 @@ function TaskEditor({
 
                 {task.identityMasking?.enabled && (
                   <div className="space-y-2 ps-5">
+                    {/* Validation warning: enabled but no rules */}
+                    {(task.identityMasking?.rules ?? []).filter(r => r.trim()).length === 0 && (
+                      <div className="flex items-start gap-2 rounded-md border border-amber-400/30 bg-amber-50 p-2 dark:bg-amber-900/15 dark:border-amber-700/30">
+                        <Info className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                        <p className="text-[10px] text-amber-800 dark:text-amber-300">
+                          {t(
+                            "llmEditor.identityMaskingEmptyWarning",
+                            "Masking is enabled but has no rules. Add at least one rule for masking to take effect."
+                          )}
+                        </p>
+                      </div>
+                    )}
                     <label className="mb-1 block text-[10px] text-muted-foreground">
                       {t("llmEditor.identityMaskingRules", "Masking Rules")}
                     </label>
@@ -1585,30 +1610,41 @@ function TaskEditor({
 
                 {/* Summarizer model — only shown for summarize strategy */}
                 {task.toolResponseLimits?.truncationStrategy === "summarize" && (
-                  <div className="flex items-center gap-2">
-                    <label className="text-xs text-foreground whitespace-nowrap">
-                      {t("llmEditor.summarizerModel", "Summarizer Model")}
-                    </label>
-                    <input
-                      type="text"
-                      value={task.toolResponseLimits?.summarizerModel ?? ""}
-                      onChange={(e) =>
-                        onChange({
-                          ...task,
-                          toolResponseLimits: {
-                            ...task.toolResponseLimits,
-                            summarizerModel: e.target.value || undefined,
-                          },
-                        })
-                      }
-                      readOnly={readOnly}
-                      placeholder={t("llmEditor.summarizerModelPlaceholder", "e.g. gpt-4o-mini")}
-                      className="h-7 w-48 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                    />
-                    <span className="text-[10px] text-muted-foreground">
-                      {t("llmEditor.summarizerModelHint", "(falls back to truncate if empty)")}
-                    </span>
-                  </div>
+                  <>
+                    <div className="flex items-start gap-2 rounded-md border border-sky-400/30 bg-sky-50 px-2.5 py-2 dark:bg-sky-900/15 dark:border-sky-700/30">
+                      <Info className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400 mt-0.5 shrink-0" />
+                      <p className="text-[10px] text-sky-800 dark:text-sky-300 leading-relaxed">
+                        {t(
+                          "llmEditor.summarizeInfoBanner",
+                          "The summarizer uses the same provider and API key as this task. Only the model name is swapped to a cheaper variant (e.g., gpt-4o-mini)."
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-foreground whitespace-nowrap">
+                        {t("llmEditor.summarizerModel", "Summarizer Model")}
+                      </label>
+                      <input
+                        type="text"
+                        value={task.toolResponseLimits?.summarizerModel ?? ""}
+                        onChange={(e) =>
+                          onChange({
+                            ...task,
+                            toolResponseLimits: {
+                              ...task.toolResponseLimits,
+                              summarizerModel: e.target.value || undefined,
+                            },
+                          })
+                        }
+                        readOnly={readOnly}
+                        placeholder={t("llmEditor.summarizerModelPlaceholder", "e.g. gpt-4o-mini")}
+                        className="h-7 w-48 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      />
+                      <span className="text-[10px] text-muted-foreground">
+                        {t("llmEditor.summarizerModelHint", "(falls back to truncate if empty)")}
+                      </span>
+                    </div>
+                  </>
                 )}
 
                 {/* Per-tool limits */}

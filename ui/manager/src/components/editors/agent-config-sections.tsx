@@ -235,7 +235,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
         </div>
 
         {/* Versioned keys (if any exist from multi-key rotation) */}
-        {(agent.identity?.keys?.length ?? 0) > 0 && (
+        {(agent.identity?.keys?.length ?? 0) > 0 ? (
           <div className="space-y-1.5">
             <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               {t("agentDetail.publicKeys", "Public Keys")}
@@ -252,16 +252,30 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
                   <span className="flex-1 truncate font-mono text-[10px] text-muted-foreground" dir="ltr">
                     {k.publicKeyB64 ? `${k.publicKeyB64.slice(0, 24)}…` : "—"}
                   </span>
-                  {k.revokedAt && (
+                  {k.validUntilMs != null && k.validUntilMs > 0 && k.validUntilMs < Date.now() && (
                     <span className="text-[9px] text-destructive font-medium">
-                      {t("agentDetail.keyRevoked", "Revoked")}
+                      {t("agentDetail.keyExpired", "Expired")}
                     </span>
                   )}
                 </div>
               ))}
             </div>
           </div>
-        )}
+        ) : agent.identity?.publicKey ? (
+          <div className="space-y-1.5">
+            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {t("agentDetail.publicKeys", "Public Keys")}
+            </label>
+            <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2.5 py-1.5">
+              <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                {t("agentDetail.legacyKey", "Legacy key (v0)")}
+              </span>
+              <span className="flex-1 truncate font-mono text-[10px] text-muted-foreground" dir="ltr">
+                {agent.identity.publicKey.slice(0, 24)}…
+              </span>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {/* Security toggles */}
@@ -1151,43 +1165,46 @@ export const SessionManagementSection = memo(function SessionManagementSection({
           )}
         </div>
 
-        {/* Forking */}
+        {/* Forking (not yet wired) */}
         <div className="border-t border-border pt-3 space-y-2">
-          <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+          <label
+            className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground cursor-not-allowed"
+            title={t("agentDetail.forkingDisabledTooltip", "Available in a future release")}
+          >
             <input
               type="checkbox"
               checked={sm.forkingEnabled ?? false}
-              onChange={() => patchSm({ forkingEnabled: !(sm.forkingEnabled ?? false) })}
-              disabled={updateAgent.isPending}
-              className="h-3.5 w-3.5 rounded border-input accent-primary"
+              disabled
+              className="h-3.5 w-3.5 rounded border-input accent-primary opacity-50"
               data-testid="forking-enabled"
             />
             {t("agentDetail.forkingEnabled", "Session Forking")}
+            <span className="text-[9px] font-normal text-muted-foreground/70">
+              ({t("agentDetail.comingSoon", "coming soon")})
+            </span>
           </label>
           <p className="text-[10px] text-muted-foreground ps-5">
             {t(
               "agentDetail.forkingNote",
-              "Session forking endpoint (POST /v6/conversations/{id}/fork) is experimental."
+              "Session forking endpoint (POST /v6/conversations/{id}/fork) is not yet available."
             )}
           </p>
 
-          {sm.forkingEnabled && (
-            <div className="flex items-center gap-2 ps-5">
-              <label className="text-xs text-foreground whitespace-nowrap">
-                {t("agentDetail.maxForks", "Max Forks")}
-              </label>
-              <DebouncedNumberInput
-                value={sm.maxForksPerConversation ?? 5}
-                onCommit={(v) => patchSm({ maxForksPerConversation: v })}
-                min={1}
-                max={50}
-                className="h-7 w-20 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              />
-              <span className="text-[10px] text-muted-foreground">
-                {t("agentDetail.maxForksHint", "per conversation")}
-              </span>
-            </div>
-          )}
+          <div className="flex items-center gap-2 ps-5 opacity-50 cursor-not-allowed">
+            <label className="text-xs text-foreground whitespace-nowrap">
+              {t("agentDetail.maxForks", "Max Forks")}
+            </label>
+            <input
+              type="number"
+              value={sm.maxForksPerConversation ?? 5}
+              disabled
+              className="h-7 w-20 rounded border border-input bg-muted/50 px-2 text-xs text-muted-foreground"
+              title={t("agentDetail.forkingDisabledTooltip", "Available in a future release")}
+            />
+            <span className="text-[10px] text-muted-foreground">
+              {t("agentDetail.maxForksHint", "per conversation")}
+            </span>
+          </div>
         </div>
       </div>
     </EditorSection>
