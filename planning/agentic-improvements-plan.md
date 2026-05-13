@@ -44,7 +44,7 @@ This plan is split into six **Waves** (delivery order) that map to six **Improve
 - `CounterweightService`, `DeploymentContextCondition`, `IdentityMaskingService` — entire Wave 1 block.
 - Session forking endpoint (`POST /v6/conversations/{id}/fork`); `MemorySnapshotService.createCheckpoint` / `rollbackToCheckpoint`.
 - Multipart REST upload for attachments; GridFS-backed attachment store; `LlmTask` multimodal forwarding of conversation-memory attachments.
-- Token-efficient tool loading (`lazy`, `dynamic`; `discover_tools` meta-tool); `summarize` and `paginate` truncation strategies; MCP tenant-quota integration; per-tool cost weights.
+- Token-efficient tool loading (`lazy`, `dynamic`; `discover_tools` meta-tool); MCP tenant-quota integration; per-tool cost weights. (**Note:** `summarize` and `paginate` truncation strategies are now fully implemented — see changelog 2026-05-13.)
 - Signing envelope canonicalization, replay protection (nonce / `signedAt`), key rotation, call sites for `AgentSigningService`.
 - Trust scoring / `agentTrustScore` integration.
 - ~~External A2A / capability discovery REST endpoint~~ — **Done (Wave 3).** Public endpoints at `GET /.well-known/capabilities` and `GET /.well-known/capabilities/skills`, gated behind `eddi.a2a.capabilities.public`.
