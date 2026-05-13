@@ -103,7 +103,7 @@ class LlmTaskTest {
         when(globalVariableResolver.getTemplateData()).thenReturn(java.util.Map.of());
         var chatModelRegistry = new ChatModelRegistry(languageModelApiConnectorBuilders, globalVariableResolver, secretResolver);
 
-        var toolResponseTruncator = new ToolResponseTruncator(new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+        var toolResponseTruncator = new ToolResponseTruncator(new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), chatModelRegistry);
 
         var mockSnippetService = mock(PromptSnippetService.class);
         when(mockSnippetService.getAll()).thenReturn(java.util.Collections.emptyMap());

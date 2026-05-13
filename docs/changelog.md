@@ -13,6 +13,38 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🧠 Summarize Truncation Strategy — Production Implementation (2026-05-13)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+**What changed:** Activated the `summarize` tool-response truncation strategy, replacing the WARN stub with a fully functional LLM summarization pipeline.
+
+### Architecture: Inherit from Parent Task
+- **Problem:** `SummarizationService` only passes `modelName` to `ChatModelRegistry` — no API key. This works for `ConversationSummarizer` only because langchain4j falls back to env vars, which is a fragile implicit dependency.
+- **Solution:** The truncator now receives the parent task's `type` + `parameters` (which include `apiKey`, `baseUrl`, etc.) and calls `ChatModelRegistry.getOrCreate()` directly. Only `modelName` is overridden with `summarizerModel`. This inherits the full provider context automatically.
+
+### Changes
+- **`ToolResponseTruncator.java`** — Injected `ChatModelRegistry`. Implemented `summarizeResponse()` with 6-point fallback chain: no model → no task context → cost ceiling (200K chars) → model/LLM failure → empty summary → summary-longer-than-limit → all degrade to `truncate`. Response prefixed with `[SUMMARY — original: N chars, tool: name]` header.
+- **`AgentOrchestrator.java`** — Updated `truncateIfNeeded()` call to pass `task.getType()` and `task.getParameters()`.
+- **`ToolResponseTruncatorTest.java`** — Updated to new 5-arg API signature and 2-arg constructor.
+- **`ToolResponseTruncatorExtendedTest.java`** — 28 tests covering all strategies, all fallback paths, API key inheritance verification, parameter immutability, and case-insensitive strategy selection.
+- **`LlmTaskTest.java`** — Updated constructor call to match new signature.
+
+### Config Example
+```json
+{
+  "type": "openai",
+  "parameters": { "apiKey": "${vault:openai-key}", "modelName": "gpt-4o" },
+  "toolResponseLimits": {
+    "defaultMaxChars": 5000,
+    "truncationStrategy": "summarize",
+    "summarizerModel": "gpt-4o-mini"
+  }
+}
+```
+
+### Decision: No New Config Fields
+`summarizerModel` already existed on `ToolResponseLimits`. No `summarizerProvider` or `summarizerApiKey` needed — the summarizer inherits everything from the parent task, making the 95% use case (same provider, cheaper model) zero-config beyond setting the model name.
+
 ## 🔧 Checkpoint Integrity & Dead Code Cleanup (2026-05-12)
 
 **Repo:** EDDI (`feature/agentic-improvements`)

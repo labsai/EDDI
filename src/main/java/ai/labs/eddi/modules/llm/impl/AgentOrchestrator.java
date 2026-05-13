@@ -349,7 +349,8 @@ class AgentOrchestrator {
 
                         // Apply response truncation (MCP governance)
                         toolResult = toolResponseTruncator.truncateIfNeeded(
-                                toolRequest.name(), toolResult, task.getToolResponseLimits());
+                                toolRequest.name(), toolResult, task.getToolResponseLimits(),
+                                task.getType(), task.getParameters());
 
                         Map<String, Object> resultStep = new HashMap<>();
                         resultStep.put("type", "tool_result");
