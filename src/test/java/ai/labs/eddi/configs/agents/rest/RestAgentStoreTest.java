@@ -274,5 +274,61 @@ class RestAgentStoreTest {
             assertThrows(jakarta.ws.rs.BadRequestException.class,
                     () -> restAgentStore.duplicateAgent(AGENT_ID, 1, false));
         }
+
+        @Test
+        @DisplayName("createAgent should accept crypto flags when rotated keys exist")
+        void createAgent_acceptsCryptoWithRotatedKeys() throws Exception {
+            var config = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            security.setSignInterAgentMessages(true);
+            config.setSecurity(security);
+            config.setWorkflows(new ArrayList<>());
+
+            var identity = new AgentConfiguration.AgentIdentity();
+            // No legacy publicKey, but rotated keys list is populated
+            identity.setKeys(List.of(
+                    ai.labs.eddi.configs.agents.crypto.AgentPublicKey.createCurrent(1, "base64key==")));
+            config.setIdentity(identity);
+
+            when(AgentStore.create(any())).thenReturn(new IResourceStore.IResourceId() {
+                @Override
+                public String getId() {
+                    return AGENT_ID;
+                }
+                @Override
+                public Integer getVersion() {
+                    return 1;
+                }
+            });
+
+            assertDoesNotThrow(() -> restAgentStore.createAgent(config));
+        }
+
+        @Test
+        @DisplayName("createAgent should accept crypto flags when legacy publicKey exists")
+        void createAgent_acceptsCryptoWithLegacyKey() throws Exception {
+            var config = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            security.setSignInterAgentMessages(true);
+            config.setSecurity(security);
+            config.setWorkflows(new ArrayList<>());
+
+            var identity = new AgentConfiguration.AgentIdentity();
+            identity.setPublicKey("legacyBase64Key==");
+            config.setIdentity(identity);
+
+            when(AgentStore.create(any())).thenReturn(new IResourceStore.IResourceId() {
+                @Override
+                public String getId() {
+                    return AGENT_ID;
+                }
+                @Override
+                public Integer getVersion() {
+                    return 1;
+                }
+            });
+
+            assertDoesNotThrow(() -> restAgentStore.createAgent(config));
+        }
     }
 }

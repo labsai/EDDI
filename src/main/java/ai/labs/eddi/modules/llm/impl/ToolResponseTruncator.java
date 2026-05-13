@@ -229,10 +229,11 @@ public class ToolResponseTruncator {
                 return truncateResponse(toolName, result, maxChars);
             }
 
-            // Guard 5: summary is longer than the limit (pathological LLM response)
-            if (summary.length() > maxChars) {
-                LOGGER.debugf("Summary for tool '%s' exceeded limit (%d > %d), falling back to truncation",
-                        sanitize(toolName), summary.length(), maxChars);
+            // Guard 5: summary + header combined must fit within maxChars
+            String header = SUMMARY_HEADER.formatted(result.length(), toolName);
+            if (summary.length() + header.length() > maxChars) {
+                LOGGER.debugf("Summary for tool '%s' exceeded limit (%d + %d header > %d), falling back to truncation",
+                        sanitize(toolName), summary.length(), header.length(), maxChars);
                 incrementCounter(toolName, "summarize_fallback");
                 return truncateResponse(toolName, result, maxChars);
             }
@@ -241,7 +242,7 @@ public class ToolResponseTruncator {
                     sanitize(toolName), result.length(), summary.length(), sanitize(summarizerModel));
             incrementCounter(toolName, "summarize");
 
-            return SUMMARY_HEADER.formatted(result.length(), toolName) + summary;
+            return header + summary;
 
         } catch (Exception e) {
             LOGGER.warnf("Summarization failed for tool '%s': %s. Falling back to truncation.",

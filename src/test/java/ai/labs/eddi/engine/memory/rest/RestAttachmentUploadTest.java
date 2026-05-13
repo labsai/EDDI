@@ -7,16 +7,20 @@ package ai.labs.eddi.engine.memory.rest;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.Attachment;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentStoreException;
+import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.Response;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -27,13 +31,38 @@ import static org.mockito.Mockito.*;
  */
 class RestAttachmentUploadTest {
 
+    private static final long MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20MB
+
     private IAttachmentStore attachmentStore;
     private RestAttachmentUpload endpoint;
 
     @BeforeEach
     void setUp() {
         attachmentStore = mock(IAttachmentStore.class);
-        endpoint = new RestAttachmentUpload(attachmentStore);
+        endpoint = new RestAttachmentUpload(attachmentStore, MAX_UPLOAD_BYTES);
+    }
+
+    /**
+     * Helper: calls an async endpoint and captures the resumed Response.
+     */
+    private Response captureAsync(AsyncEndpointCall call) throws Exception {
+        AsyncResponse asyncResponse = mock(AsyncResponse.class);
+        ArgumentCaptor<Response> captor = ArgumentCaptor.forClass(Response.class);
+        CountDownLatch latch = new CountDownLatch(1);
+
+        doAnswer(inv -> {
+            latch.countDown();
+            return null;
+        }).when(asyncResponse).resume(captor.capture());
+
+        call.invoke(asyncResponse);
+        assertTrue(latch.await(5, TimeUnit.SECONDS), "Async response not resumed within timeout");
+        return captor.getValue();
+    }
+
+    @FunctionalInterface
+    interface AsyncEndpointCall {
+        void invoke(AsyncResponse asyncResponse) throws Exception;
     }
 
     // ==================== Upload Tests ====================
@@ -42,17 +71,17 @@ class RestAttachmentUploadTest {
     class UploadTests {
 
         @Test
-        void shouldReturn400WhenNoFileProvided() {
-            Response response = endpoint.uploadAttachment("conv-1", null, null);
+        void shouldReturn400WhenNoFileProvided() throws Exception {
+            Response response = captureAsync(ar -> endpoint.uploadAttachment("conv-1", null, null, ar));
             assertEquals(400, response.getStatus());
         }
 
         @Test
-        void shouldReturn400WhenFileNameIsNull() {
+        void shouldReturn400WhenFileNameIsNull() throws Exception {
             FileUpload file = mock(FileUpload.class);
             when(file.fileName()).thenReturn(null);
 
-            Response response = endpoint.uploadAttachment("conv-1", file, null);
+            Response response = captureAsync(ar -> endpoint.uploadAttachment("conv-1", file, null, ar));
             assertEquals(400, response.getStatus());
         }
 
@@ -72,11 +101,11 @@ class RestAttachmentUploadTest {
             when(file.contentType()).thenReturn("image/png");
             when(file.uploadedFile()).thenReturn(tempFile);
 
-            Response response = endpoint.uploadAttachment("conv-1", file, null);
+            Response response = captureAsync(ar -> endpoint.uploadAttachment("conv-1", file, null, ar));
 
             assertEquals(201, response.getStatus());
             @SuppressWarnings("unchecked")
-            var body = (java.util.Map<String, Object>) response.getEntity();
+            var body = (Map<String, Object>) response.getEntity();
             assertEquals("ref-123", body.get("storageRef"));
             assertEquals("photo.png", body.get("fileName"));
             assertEquals("image/png", body.get("mimeType"));
@@ -104,7 +133,7 @@ class RestAttachmentUploadTest {
             when(file.contentType()).thenReturn(null); // no content type
             when(file.uploadedFile()).thenReturn(tempFile);
 
-            Response response = endpoint.uploadAttachment("conv-1", file, null);
+            Response response = captureAsync(ar -> endpoint.uploadAttachment("conv-1", file, null, ar));
 
             assertEquals(201, response.getStatus());
             verify(attachmentStore).store(any(byte[].class),
@@ -129,12 +158,11 @@ class RestAttachmentUploadTest {
             when(file.contentType()).thenReturn("application/x-executable");
             when(file.uploadedFile()).thenReturn(tempFile);
 
-            Response response = endpoint.uploadAttachment(
-                    "conv-1", file, null);
+            Response response = captureAsync(ar -> endpoint.uploadAttachment("conv-1", file, null, ar));
 
             assertEquals(400, response.getStatus());
             @SuppressWarnings("unchecked")
-            var body = (java.util.Map<String, Object>) response.getEntity();
+            var body = (Map<String, Object>) response.getEntity();
             assertEquals("ATTACHMENT_REJECTED", body.get("code"));
 
             Files.deleteIfExists(tempFile);
@@ -158,8 +186,7 @@ class RestAttachmentUploadTest {
             when(file.contentType()).thenReturn("application/pdf");
             when(file.uploadedFile()).thenReturn(tempFile);
 
-            Response response = endpoint.uploadAttachment(
-                    "conv-1", file, "tenant-42");
+            Response response = captureAsync(ar -> endpoint.uploadAttachment("conv-1", file, "tenant-42", ar));
 
             assertEquals(201, response.getStatus());
             verify(attachmentStore).store(any(byte[].class),
@@ -170,7 +197,7 @@ class RestAttachmentUploadTest {
         }
 
         @Test
-        void shouldReturn500WhenFileReadFails() {
+        void shouldReturn500WhenFileReadFails() throws Exception {
             FileUpload file = mock(FileUpload.class);
             when(file.fileName()).thenReturn("broken.dat");
             when(file.contentType()).thenReturn("application/octet-stream");
@@ -178,13 +205,38 @@ class RestAttachmentUploadTest {
             when(file.uploadedFile()).thenReturn(
                     Path.of("nonexistent-path-" + System.nanoTime()));
 
-            Response response = endpoint.uploadAttachment(
-                    "conv-1", file, null);
+            Response response = captureAsync(ar -> endpoint.uploadAttachment("conv-1", file, null, ar));
 
             assertEquals(500, response.getStatus());
             @SuppressWarnings("unchecked")
-            var body = (java.util.Map<String, Object>) response.getEntity();
+            var body = (Map<String, Object>) response.getEntity();
             assertEquals("ATTACHMENT_UPLOAD_FAILED", body.get("code"));
+        }
+
+        @Test
+        void shouldReturn400WhenFileTooLarge() throws Exception {
+            // Create endpoint with very small max size
+            var smallEndpoint = new RestAttachmentUpload(attachmentStore, 100);
+
+            Path tempFile = Files.createTempFile("test-large", ".bin");
+            Files.write(tempFile, new byte[200]); // Exceeds 100 byte limit
+
+            FileUpload file = mock(FileUpload.class);
+            when(file.fileName()).thenReturn("large.bin");
+            when(file.contentType()).thenReturn("application/octet-stream");
+            when(file.uploadedFile()).thenReturn(tempFile);
+
+            Response response = captureAsync(ar -> smallEndpoint.uploadAttachment("conv-1", file, null, ar));
+
+            assertEquals(400, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals("ATTACHMENT_TOO_LARGE", body.get("code"));
+
+            // Verify store was never called
+            verifyNoInteractions(attachmentStore);
+
+            Files.deleteIfExists(tempFile);
         }
     }
 
@@ -194,7 +246,7 @@ class RestAttachmentUploadTest {
     class ListTests {
 
         @Test
-        void shouldReturnAttachmentList() {
+        void shouldReturnAttachmentList() throws Exception {
             var att1 = new Attachment(
                     "ref-1", "a.png", "image/png", 100, "conv-1");
             var att2 = new Attachment(
@@ -202,7 +254,7 @@ class RestAttachmentUploadTest {
             when(attachmentStore.listByConversation("conv-1"))
                     .thenReturn(List.of(att1, att2));
 
-            Response response = endpoint.listAttachments("conv-1");
+            Response response = captureAsync(ar -> endpoint.listAttachments("conv-1", ar));
 
             assertEquals(200, response.getStatus());
             @SuppressWarnings("unchecked")
@@ -211,11 +263,11 @@ class RestAttachmentUploadTest {
         }
 
         @Test
-        void shouldReturnEmptyListWhenNoAttachments() {
+        void shouldReturnEmptyListWhenNoAttachments() throws Exception {
             when(attachmentStore.listByConversation("conv-empty"))
                     .thenReturn(List.of());
 
-            Response response = endpoint.listAttachments("conv-empty");
+            Response response = captureAsync(ar -> endpoint.listAttachments("conv-empty", ar));
 
             assertEquals(200, response.getStatus());
             @SuppressWarnings("unchecked")
@@ -230,29 +282,29 @@ class RestAttachmentUploadTest {
     class DeleteTests {
 
         @Test
-        void shouldDeleteAttachmentsAndReturnCount() {
+        void shouldDeleteAttachmentsAndReturnCount() throws Exception {
             when(attachmentStore.deleteByConversation("conv-1"))
                     .thenReturn(3L);
 
-            Response response = endpoint.deleteAttachments("conv-1");
+            Response response = captureAsync(ar -> endpoint.deleteAttachments("conv-1", ar));
 
             assertEquals(200, response.getStatus());
             @SuppressWarnings("unchecked")
-            var body = (java.util.Map<String, Object>) response.getEntity();
+            var body = (Map<String, Object>) response.getEntity();
             assertEquals("conv-1", body.get("conversationId"));
             assertEquals(3L, body.get("deletedCount"));
         }
 
         @Test
-        void shouldReturnZeroWhenNoAttachmentsToDelete() {
+        void shouldReturnZeroWhenNoAttachmentsToDelete() throws Exception {
             when(attachmentStore.deleteByConversation("conv-none"))
                     .thenReturn(0L);
 
-            Response response = endpoint.deleteAttachments("conv-none");
+            Response response = captureAsync(ar -> endpoint.deleteAttachments("conv-none", ar));
 
             assertEquals(200, response.getStatus());
             @SuppressWarnings("unchecked")
-            var body = (java.util.Map<String, Object>) response.getEntity();
+            var body = (Map<String, Object>) response.getEntity();
             assertEquals(0L, body.get("deletedCount"));
         }
     }

@@ -74,6 +74,7 @@ public class GroupConversationService implements IGroupConversationService {
     private final ExecutorService executorService;
     private final AgentSigningService agentSigningService;
     private final IAgentStore agentStore;
+    private final String defaultTenantId;
 
     // Metrics
     private final Timer timerGroupDiscussion;
@@ -84,6 +85,7 @@ public class GroupConversationService implements IGroupConversationService {
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
             IAgentFactory agentFactory, ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, MeterRegistry meterRegistry,
             AgentSigningService agentSigningService, IAgentStore agentStore,
+            @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.groups.max-depth", defaultValue = "3") int maxDepth) {
         this.groupStore = groupStore;
         this.conversationStore = conversationStore;
@@ -94,6 +96,7 @@ public class GroupConversationService implements IGroupConversationService {
         this.maxDepth = maxDepth;
         this.agentSigningService = agentSigningService;
         this.agentStore = agentStore;
+        this.defaultTenantId = defaultTenantId;
         // Virtual threads — lightweight, no pool sizing, ideal for parallel agent calls
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
 
@@ -599,7 +602,7 @@ public class GroupConversationService implements IGroupConversationService {
                             && agentConfig.getSecurity().isSignInterAgentMessages()
                             && response != null) {
                         signature = agentSigningService.sign(
-                                gc.getUserId(), member.agentId(), response);
+                                defaultTenantId, member.agentId(), response);
                         LOGGER.debugf("Signed inter-agent message from '%s' (sig=%s...)",
                                 member.agentId(),
                                 signature.length() > 16 ? signature.substring(0, 16) : signature);

@@ -313,8 +313,11 @@ public class RestAgentStore implements IRestAgentStore {
         // Key generation is done via POST /agentstore/{id}/signing/keys, which sets
         // the public key on the agent's identity block.
         var identity = config.getIdentity();
-        if (identity == null || identity.getPublicKey() == null
-                || identity.getPublicKey().isBlank()) {
+        boolean hasLegacyKey = identity != null && identity.getPublicKey() != null
+                && !identity.getPublicKey().isBlank();
+        boolean hasRotatedKeys = identity != null && identity.getKeys() != null
+                && !identity.getKeys().isEmpty();
+        if (!hasLegacyKey && !hasRotatedKeys) {
             throw new jakarta.ws.rs.BadRequestException(
                     "Cryptographic identity features require a signing key. "
                             + "Generate one via POST /agentstore/{agentId}/signing/keys "

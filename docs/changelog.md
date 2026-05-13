@@ -13,6 +13,28 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔧 PR Review Remediation — 10 Findings Resolved (2026-05-13)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+**What changed:** Addressed all PR review findings from Copilot and CodeRabbit.
+
+### Bug Fixes
+- **GroupConversationService** — `sign()` was called with `gc.getUserId()` but private keys are stored under tenant ID. Fixed to use `defaultTenantId` (from `eddi.tenant.default-id` config property), matching the `AuditLedgerService` pattern.
+- **RestAgentStore** — `validateSecurityFlags()` only checked `identity.publicKey` but ignored `identity.keys` list. Key-rotated configs were incorrectly rejected. Now accepts either legacy key or rotated keys list.
+- **ToolResponseTruncator** — `SUMMARY_HEADER` prepended to summary could push total output past `maxChars`. Guard 5 now checks `summary.length() + header.length() > maxChars`.
+
+### Architecture Compliance
+- **RestAttachmentUpload** — All 3 endpoints (`upload`, `list`, `delete`) converted from synchronous `Response` to `AsyncResponse` with `CompletableFuture.runAsync()`.
+- **RestAttachmentUpload** — Added early file size guard (`Files.size()` before `readAllBytes`) to prevent OOM. Configurable via `eddi.attachments.max-size-bytes` (default: 20MB).
+- **RestAttachmentUpload** — Added `LogSanitizer.sanitize()` on user-provided file names in log statements.
+
+### Documentation
+- **changelog.md** — Fixed "scheduled/batch" → "scheduled" wording to match code behavior.
+
+### Tests Updated
+- `RestAttachmentUploadTest` — Rewritten for `AsyncResponse` pattern with `CountDownLatch`-based capture helper. Added test for OOM size guard.
+- `GroupConversationServiceTest` — Constructor calls updated for new `defaultTenantId` parameter.
+
 ## 🧠 Summarize Truncation Strategy — Production Implementation (2026-05-13)
 
 **Repo:** EDDI (`feature/agentic-improvements`)
@@ -344,7 +366,7 @@ Each entry follows this format:
 **What changed:** Implemented Wave 1 of the agentic improvements plan — config-driven behavioral counterweights and identity masking.
 
 ### New Components
-- **`CounterweightService`** — Engine-level safety injection into LLM system prompts. Level presets: `normal` (no-op), `cautious`, `strict`. Strict auto-downgrades to cautious for scheduled/batch agents. Custom instructions override presets.
+- **`CounterweightService`** — Engine-level safety injection into LLM system prompts. Level presets: `normal` (no-op), `cautious`, `strict`. Strict auto-downgrades to cautious for scheduled agents. Custom instructions override presets.
 - **`IdentityMaskingService`** — Prepends identity concealment rules to system prompts. Independent of counterweights; agent-level config.
 - **`DeploymentContextCondition`** — Behavior rule condition matching on `EDDI_DEPLOYMENT_ENV` and agent tags. Enables environment-aware routing (e.g., force cautious in production).
 - **`CounterweightConfig`** — Inner class in `LlmConfiguration.Task` for per-task counterweight configuration (level, placement, customInstructions).
