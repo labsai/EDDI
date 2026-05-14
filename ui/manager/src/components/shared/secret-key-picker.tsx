@@ -52,7 +52,11 @@ function isVaultRef(value: string): boolean {
   );
 }
 
-/** Extract the key name from a vault reference (handles both canonical and legacy) */
+/**
+ * Extract the inner content from a vault reference (handles both canonical and legacy).
+ * For `${vault:keyName}` → returns `"keyName"`.
+ * For `${vault:tenantId/keyName}` → returns `"tenantId/keyName"`.
+ */
 function extractVaultKey(value: string): string {
   if (value.startsWith(VAULT_EXPR_PREFIX)) {
     return value.slice(
@@ -73,6 +77,16 @@ function extractVaultKey(value: string): string {
     return value.slice(LEGACY_VAULT_PREFIX.length);
   }
   return value;
+}
+
+/**
+ * Extract just the bare key name, stripping any tenant prefix.
+ * `"openaiKey"` → `"openaiKey"`, `"myTenant/openaiKey"` → `"openaiKey"`.
+ * Used to match against the vault key list (which stores bare key names).
+ */
+function bareKeyName(vaultKey: string): string {
+  const slashIdx = vaultKey.indexOf("/");
+  return slashIdx >= 0 ? vaultKey.slice(slashIdx + 1) : vaultKey;
 }
 
 /** Create a vault reference string in the canonical `${vault:...}` format */
@@ -462,9 +476,11 @@ export function SecretKeyPicker({
   // Derived state
   const hasVaultRef = isVaultRef(value);
   const currentVaultKey = hasVaultRef ? extractVaultKey(value) : "";
-  const currentKeyExists = secretKeyNames.has(currentVaultKey);
+  // Strip tenant prefix (e.g. "myTenant/openaiKey" → "openaiKey") for vault lookups
+  const currentBareKey = bareKeyName(currentVaultKey);
+  const currentKeyExists = secretKeyNames.has(currentBareKey);
   const currentDescription = hasVaultRef
-    ? secretList.find((s) => s.keyName === currentVaultKey)?.description ?? null
+    ? secretList.find((s) => s.keyName === currentBareKey)?.description ?? null
     : null;
 
   // Filtered list for keyboard nav count

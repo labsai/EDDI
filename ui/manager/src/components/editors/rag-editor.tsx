@@ -37,6 +37,10 @@ export interface RagConfig {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
+/** Check if a placeholder or value looks like a vault reference (canonical or legacy) */
+const isVaultPlaceholder = (v: string) =>
+  v.startsWith("${vault:") || v.startsWith("${eddivault:");
+
 const EMBEDDING_PROVIDERS = [
   { value: "openai", label: "OpenAI", hint: "text-embedding-3-small" },
   { value: "azure-openai", label: "Azure OpenAI", hint: "text-embedding-3-small" },
@@ -229,7 +233,7 @@ function KeyValueEditor({
     onChange({ ...entries, [key]: value });
   };
 
-  const isVaultRef = (value: string) => value.startsWith("${vault:") || value.startsWith("${eddivault:");
+  const isVaultRef = isVaultPlaceholder;
 
   return (
     <div className="space-y-1.5">
@@ -300,7 +304,7 @@ function KeyValueEditor({
               <button
                 key={h.key}
                 type="button"
-                onClick={() => onChange({ ...entries, [h.key]: h.placeholder.startsWith("${vault:") ? h.placeholder : "" })}
+                onClick={() => onChange({ ...entries, [h.key]: isVaultPlaceholder(h.placeholder) ? h.placeholder : "" })}
                 className="rounded-full border border-dashed border-muted-foreground/30 px-2 py-0.5 text-[10px] text-muted-foreground hover:border-primary hover:text-primary transition-colors"
               >
                 + {h.key}
@@ -662,7 +666,7 @@ export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }:
                 const newParams = cached ?? Object.fromEntries(
                   hints.map((h) => [
                     h.key,
-                    h.placeholder.startsWith("${vault:") ? h.placeholder : "",
+                    isVaultPlaceholder(h.placeholder) ? h.placeholder : "",
                   ]),
                 );
                 onChange({
@@ -731,7 +735,7 @@ export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }:
                     const newParams = cached ?? Object.fromEntries(
                       (STORE_PARAM_HINTS[st.value] ?? []).map((h) => [
                         h.key,
-                        h.placeholder.startsWith("${vault:") ? h.placeholder : "",
+                        isVaultPlaceholder(h.placeholder) ? h.placeholder : "",
                       ]),
                     );
                     onChange({
