@@ -51,11 +51,11 @@ const EMBEDDING_PROVIDERS = [
 const EMBEDDING_PARAM_HINTS: Record<string, { key: string; placeholder: string }[]> = {
   openai: [
     { key: "model", placeholder: "text-embedding-3-small" },
-    { key: "apiKey", placeholder: "${eddivault:openai-key}" },
+    { key: "apiKey", placeholder: "${vault:openai-key}" },
   ],
   "azure-openai": [
     { key: "endpoint", placeholder: "https://my.openai.azure.com/" },
-    { key: "apiKey", placeholder: "${eddivault:azure-key}" },
+    { key: "apiKey", placeholder: "${vault:azure-key}" },
     { key: "deploymentName", placeholder: "text-embedding-3-small" },
   ],
   ollama: [
@@ -64,7 +64,7 @@ const EMBEDDING_PARAM_HINTS: Record<string, { key: string; placeholder: string }
   ],
   mistral: [
     { key: "model", placeholder: "mistral-embed" },
-    { key: "apiKey", placeholder: "${eddivault:mistral-key}" },
+    { key: "apiKey", placeholder: "${vault:mistral-key}" },
   ],
   bedrock: [
     { key: "model", placeholder: "amazon.titan-embed-text-v2:0" },
@@ -72,7 +72,7 @@ const EMBEDDING_PARAM_HINTS: Record<string, { key: string; placeholder: string }
   ],
   cohere: [
     { key: "model", placeholder: "embed-english-v3.0" },
-    { key: "apiKey", placeholder: "${eddivault:cohere-key}" },
+    { key: "apiKey", placeholder: "${vault:cohere-key}" },
   ],
   vertex: [
     { key: "project", placeholder: "my-gcp-project" },
@@ -97,11 +97,11 @@ const STORE_PARAM_HINTS: Record<string, { key: string; placeholder: string }[]> 
     { key: "database", placeholder: "eddi" },
     { key: "table", placeholder: "embeddings" },
     { key: "dimension", placeholder: "1536" },
-    { key: "user", placeholder: "${eddivault:pg-user}" },
-    { key: "password", placeholder: "${eddivault:pg-password}" },
+    { key: "user", placeholder: "${vault:pg-user}" },
+    { key: "password", placeholder: "${vault:pg-password}" },
   ],
   "mongodb-atlas": [
-    { key: "connectionString", placeholder: "${eddivault:mongo-uri}" },
+    { key: "connectionString", placeholder: "${vault:mongo-uri}" },
     { key: "databaseName", placeholder: "eddi" },
     { key: "collectionName", placeholder: "eddi_kb_product-docs" },
     { key: "indexName", placeholder: "vector_index" },
@@ -109,15 +109,15 @@ const STORE_PARAM_HINTS: Record<string, { key: string; placeholder: string }[]> 
   elasticsearch: [
     { key: "serverUrl", placeholder: "http://localhost:9200" },
     { key: "indexName", placeholder: "eddi_kb_product-docs" },
-    { key: "apiKey", placeholder: "${eddivault:es-key}" },
+    { key: "apiKey", placeholder: "${vault:es-key}" },
     { key: "userName", placeholder: "elastic" },
-    { key: "password", placeholder: "${eddivault:es-password}" },
+    { key: "password", placeholder: "${vault:es-password}" },
   ],
   qdrant: [
     { key: "host", placeholder: "localhost" },
     { key: "port", placeholder: "6334" },
     { key: "collectionName", placeholder: "kb-product-docs" },
-    { key: "apiKey", placeholder: "${eddivault:qdrant-key}" },
+    { key: "apiKey", placeholder: "${vault:qdrant-key}" },
     { key: "useTls", placeholder: "false" },
   ],
 };
@@ -229,7 +229,7 @@ function KeyValueEditor({
     onChange({ ...entries, [key]: value });
   };
 
-  const isVaultRef = (value: string) => value.startsWith("${eddivault:");
+  const isVaultRef = (value: string) => value.startsWith("${vault:") || value.startsWith("${eddivault:");
 
   return (
     <div className="space-y-1.5">
@@ -257,7 +257,7 @@ function KeyValueEditor({
                   value={value}
                   onChange={(v) => updateValue(key, v)}
                   readOnly={readOnly}
-                  placeholder={hint?.placeholder || "${eddivault:...}"}
+                  placeholder={hint?.placeholder || "${vault:...}"}
                   testId={`${testIdPrefix}-${key}`}
                 />
               </div>
@@ -300,7 +300,7 @@ function KeyValueEditor({
               <button
                 key={h.key}
                 type="button"
-                onClick={() => onChange({ ...entries, [h.key]: h.placeholder.startsWith("${eddivault:") ? h.placeholder : "" })}
+                onClick={() => onChange({ ...entries, [h.key]: h.placeholder.startsWith("${vault:") ? h.placeholder : "" })}
                 className="rounded-full border border-dashed border-muted-foreground/30 px-2 py-0.5 text-[10px] text-muted-foreground hover:border-primary hover:text-primary transition-colors"
               >
                 + {h.key}
@@ -662,7 +662,7 @@ export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }:
                 const newParams = cached ?? Object.fromEntries(
                   hints.map((h) => [
                     h.key,
-                    h.placeholder.startsWith("${eddivault:") ? h.placeholder : "",
+                    h.placeholder.startsWith("${vault:") ? h.placeholder : "",
                   ]),
                 );
                 onChange({
@@ -689,7 +689,7 @@ export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }:
               {t("ragEditor.embeddingParams", "Provider Parameters")}
             </label>
             <p className="mb-1 text-[10px] text-muted-foreground">
-              {t("ragEditor.embeddingParamsHint", "Model name, API key (use ${eddivault:...} for secrets), base URL, etc.")}
+              {t("ragEditor.embeddingParamsHint", "Model name, API key (use ${vault:...} for secrets), base URL, etc.")}
             </p>
             <KeyValueEditor
               entries={data.embeddingParameters ?? {}}
@@ -731,7 +731,7 @@ export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }:
                     const newParams = cached ?? Object.fromEntries(
                       (STORE_PARAM_HINTS[st.value] ?? []).map((h) => [
                         h.key,
-                        h.placeholder.startsWith("${eddivault:") ? h.placeholder : "",
+                        h.placeholder.startsWith("${vault:") ? h.placeholder : "",
                       ]),
                     );
                     onChange({

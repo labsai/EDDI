@@ -594,7 +594,7 @@ export function McpCallsEditor({
               value={data.apiKey ?? ""}
               onChange={(v) => update({ apiKey: v })}
               readOnly={readOnly}
-              placeholder="${eddivault:my-mcp-key}"
+              placeholder="${vault:my-mcp-key}"
               testId="mcp-apikey-input"
             />
           </div>

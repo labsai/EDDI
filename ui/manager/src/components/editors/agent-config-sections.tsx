@@ -1448,7 +1448,7 @@ function SlackChannelCard({
             value={cfg.botToken ?? ""}
             onChange={(v) => handleSecretChange("botToken", v)}
             readOnly={disabled}
-            placeholder={t("agentDetail.botTokenPlaceholder", "xoxb-… or ${eddivault:slack-bot-token}")}
+            placeholder={t("agentDetail.botTokenPlaceholder", "xoxb-… or ${vault:slack-bot-token}")}
             testId={`bot-token-${index}`}
           />
           <p className="mt-0.5 text-[10px] text-muted-foreground/70">
@@ -1465,7 +1465,7 @@ function SlackChannelCard({
             value={cfg.signingSecret ?? ""}
             onChange={(v) => handleSecretChange("signingSecret", v)}
             readOnly={disabled}
-            placeholder={t("agentDetail.signingSecretPlaceholder", "Hex string or ${eddivault:slack-signing-secret}")}
+            placeholder={t("agentDetail.signingSecretPlaceholder", "Hex string or ${vault:slack-signing-secret}")}
             testId={`signing-secret-${index}`}
           />
           <p className="mt-0.5 text-[10px] text-muted-foreground/70">

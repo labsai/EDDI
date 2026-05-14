@@ -66,8 +66,8 @@ export function SecretsPage() {
     (keyName: string) => {
       const ref =
         tenantId === DEFAULT_TENANT
-          ? `\${eddivault:${keyName}}`
-          : `\${eddivault:${tenantId}/${keyName}}`;
+          ? `\${vault:${keyName}}`
+          : `\${vault:${tenantId}/${keyName}}`;
       navigator.clipboard.writeText(ref).then(() => {
         toast.success(
           t("secrets.refCopied", {
@@ -151,8 +151,8 @@ export function SecretsPage() {
   const refString = useMemo(
     () => (keyName: string) =>
       tenantId === DEFAULT_TENANT
-        ? `\${eddivault:${keyName}}`
-        : `\${eddivault:${tenantId}/${keyName}}`,
+        ? `\${vault:${keyName}}`
+        : `\${vault:${tenantId}/${keyName}}`,
     [tenantId],
   );
 
@@ -239,7 +239,7 @@ export function SecretsPage() {
             <p className="text-xs text-muted-foreground">
               {t(
                 "secrets.scopeExplanation",
-                "Secrets are scoped per tenant and shared across all agents. Reference them in configs with ${eddivault:keyName}. Access is controlled by configuration authorship — only admins who write the config decide which secrets to use.",
+                "Secrets are scoped per tenant and shared across all agents. Reference them in configs with ${vault:keyName}. Access is controlled by configuration authorship — only admins who write the config decide which secrets to use.",
               )}
             </p>
           </div>
