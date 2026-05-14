@@ -460,6 +460,30 @@ Each entry follows this format:
 - **Backward compatible**: All changes are additive. Existing configs work unchanged.
 - **Public endpoint defaults to off**: `eddi.a2a.capabilities.public=false` — admin must explicitly opt in.
 
+## 🐛 Fix: Windows PowerShell install command (2026-05-06)
+
+**Repo:** EDDI (`docs/windows-install-command`)
+
+**What changed:** Replaced the broken `scriptblock::Create` one-liner (and its predecessor `iwr | iex`) with a download-and-execute approach that works on PowerShell 5.1+ and avoids expression-parser limitations.
+
+### Root Cause
+
+`install.ps1` uses `<# #>` block comments with `&`, `[CmdletBinding()]`, and `param()` — syntax only valid in the **script-file parser**. Both `iex` and `[scriptblock]::Create()` use the expression parser, which rejects these constructs. Behavior was also environment-dependent (passed on some PS 5.1 builds, failed on others).
+
+### Fix
+
+Download-and-execute — the only pattern that uses the script-file parser:
+
+```powershell
+Invoke-WebRequest -UseBasicParsing -Uri "https://...install.ps1" -OutFile "install.ps1"
+Unblock-File .\install.ps1
+.\install.ps1
+```
+
+**Files:** `install.ps1` (`.EXAMPLE` comment), `README.md`, `docs/getting-started.md`, `HANDOFF.md`
+
+---
+
 ## 🐛 Improved Template Error Messages (2026-05-06)
 
 **Repo:** EDDI (`fix/template-error-message`)

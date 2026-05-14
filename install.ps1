@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     E.D.D.I -- One-Command Install & Onboarding Wizard
 
@@ -50,8 +50,10 @@
     Install with PostgreSQL and Keycloak authentication.
 
 .EXAMPLE
-    & ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1).Content))
-    One-line remote install (interactive wizard). Add -Defaults to skip prompts.
+    Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/labsai/EDDI/main/install.ps1" -OutFile "install.ps1"
+    Unblock-File .\install.ps1
+    .\install.ps1
+    Remote install: download, unblock, run.
 
 .LINK
     https://eddi.labs.ai
