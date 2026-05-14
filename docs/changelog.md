@@ -15,6 +15,23 @@ Each entry follows this format:
 
 
 
+## Channel Integration — Second-Pass Review Fixes (2026-05-14)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+**What changed:** Second critical review pass, 6 additional findings fixed.
+
+- **M5**: Fixed stale `${eddivault:...}` → `${vault:...}` in `ChannelTargetRouter.deepCopyConfig()` Javadoc
+- **M6**: Added SPDX headers to `IRestChannelIntegrationStore`, `RestChannelIntegrationStore` (missed in first pass)
+- **L3**: Applied `LogSanitizer.sanitize()` to all Slack-sourced log parameters in `SlackEventHandler` (CodeQL compliance)
+- **L4**: `ChannelTarget.getTriggers()` now returns a defensive copy (consistent with `getTargets()`/`getPlatformConfig()`)
+- **L5**: Added null guard to `postMessageChunked()` to prevent NPE on null text
+- **L6**: Added `ObserveConfig` bounds validation (`cooldownSeconds`, `maxDailyResponses`, `maxCostPerDay` ≥ 0)
+
+**Files:** `ChannelTargetRouter.java`, `IRestChannelIntegrationStore.java`, `RestChannelIntegrationStore.java`, `ChannelTarget.java`, `SlackEventHandler.java`
+
+---
+
 ## Channel Integration — Pre-Merge Review Fixes (2026-05-14)
 
 **Repo:** EDDI (`feature/channel-integrations`)
