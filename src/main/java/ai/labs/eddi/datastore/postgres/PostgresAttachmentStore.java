@@ -93,7 +93,7 @@ public class PostgresAttachmentStore implements IAttachmentStore {
                     "MIME type mismatch: declared='%s', detected='%s'".formatted(declaredMime, detectedMime));
         }
 
-        String resolvedMime = declaredMime != null ? declaredMime : detectedMime;
+        String resolvedMime = MimeValidator.normalize(declaredMime != null ? declaredMime : detectedMime);
         String storageRef = UUID.randomUUID().toString();
 
         ensureSchema();

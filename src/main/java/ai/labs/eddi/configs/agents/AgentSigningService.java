@@ -96,7 +96,11 @@ public class AgentSigningService {
                     "Ed25519 signing key for agent " + agentId,
                     List.of(agentId));
 
-            LOGGER.infof("Generated Ed25519 keypair for agent '%s' in tenant '%s'", agentId, tenantId);
+            // Evict cached private key so the new key is used immediately
+            // (prevents stale key on re-generation / rotation)
+            privateKeyCache.remove(tenantId + ":" + agentId);
+
+            LOGGER.infof("Generated Ed25519 keypair for agent '%s' in tenant '%s' (cache evicted)", agentId, tenantId);
             return publicKeyB64;
         } catch (NoSuchAlgorithmException e) {
             throw new AgentSigningException("Ed25519 not available in JVM", e);

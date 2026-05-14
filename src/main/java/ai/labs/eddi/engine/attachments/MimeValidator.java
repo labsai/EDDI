@@ -102,6 +102,22 @@ public final class MimeValidator {
     }
 
     /**
+     * Normalize a MIME type to its canonical form: strip parameters (e.g.,
+     * {@code ; charset=utf-8}), trim whitespace, and lowercase.
+     *
+     * @param mime
+     *            the MIME type string (may include parameters)
+     * @return the normalized base MIME type, or {@code "application/octet-stream"}
+     *         if null/blank
+     */
+    public static String normalize(String mime) {
+        if (mime == null || mime.isBlank()) {
+            return "application/octet-stream";
+        }
+        return mime.split(";")[0].trim().toLowerCase();
+    }
+
+    /**
      * Validate that the declared MIME type is compatible with the detected one.
      *
      * @param declaredMime

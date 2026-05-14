@@ -110,6 +110,29 @@ class AgentSigningServiceTest {
                 () -> signingService.sign("t1", "nonexistent-agent", "payload"));
     }
 
+    @Test
+    void generateKeyPair_evictsCacheOnRegeneration() throws Exception {
+        // Generate initial keypair and sign to populate the cache
+        String publicKey1 = signingService.generateKeyPair("tenant-1", "agent-1");
+        String sig1 = signingService.sign("tenant-1", "agent-1", "message");
+        assertTrue(signingService.verify(publicKey1, "message", sig1));
+
+        // Re-generate keypair (key rotation)
+        String publicKey2 = signingService.generateKeyPair("tenant-1", "agent-1");
+
+        // The new public key should be different
+        assertNotEquals(publicKey1, publicKey2);
+
+        // Signing should now use the NEW key (cache was evicted)
+        String sig2 = signingService.sign("tenant-1", "agent-1", "message");
+
+        // Verify with new public key should succeed
+        assertTrue(signingService.verify(publicKey2, "message", sig2));
+
+        // Verify with OLD public key should fail (proving new key is in use)
+        assertFalse(signingService.verify(publicKey1, "message", sig2));
+    }
+
     /**
      * Simple in-memory secret provider for testing.
      */

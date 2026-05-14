@@ -70,7 +70,7 @@ public class GridFsAttachmentStore implements IAttachmentStore {
                     "MIME type mismatch: declared='%s', detected='%s'".formatted(declaredMime, detectedMime));
         }
 
-        String resolvedMime = declaredMime != null ? declaredMime : detectedMime;
+        String resolvedMime = MimeValidator.normalize(declaredMime != null ? declaredMime : detectedMime);
 
         Document metadata = new Document()
                 .append("conversationId", conversationId)

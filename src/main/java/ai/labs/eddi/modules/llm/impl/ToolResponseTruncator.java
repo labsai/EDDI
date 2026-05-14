@@ -137,9 +137,23 @@ public class ToolResponseTruncator {
     /**
      * Paginate: split into pages, store in PaginatedResponseStore, return first
      * page with responseId.
+     * <p>
+     * Responses exceeding {@link #PAGINATE_MAX_STORABLE_CHARS} fall back to
+     * truncation to prevent excessive memory usage from materializing all page
+     * substrings in the Caffeine cache.
      */
+    static final int PAGINATE_MAX_STORABLE_CHARS = 500_000;
+
     private String paginateResponse(String toolName, String result, int maxChars) {
         int originalLength = result.length();
+
+        // Memory guard — refuse to materialize very large responses as pages
+        if (originalLength > PAGINATE_MAX_STORABLE_CHARS) {
+            LOGGER.warnf("Response too large for pagination (%d chars > %d ceiling), " +
+                    "falling back to truncation for tool '%s'",
+                    originalLength, PAGINATE_MAX_STORABLE_CHARS, sanitize(toolName));
+            return truncateResponse(toolName, result, maxChars);
+        }
 
         if (paginatedResponseStore == null) {
             LOGGER.warnf("PaginatedResponseStore not available, falling back to truncation for tool '%s'", sanitize(toolName));

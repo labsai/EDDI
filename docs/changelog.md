@@ -13,6 +13,38 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔧 PR Review Remediation — 8 Findings Resolved (2026-05-14)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+**What changed:** Addressed all PR review findings from Copilot (7) and CodeRabbit (1), round 2.
+
+### Security & Safety Guards
+- **RestAttachmentUpload** — `tenantId` query param now sanitized (regex: alphanumeric + dash/underscore, max 64 chars). Invalid values silently discarded to null. Security note documents trust boundary.
+- **RestAttachmentUpload** — `CompletableFuture.runAsync()` now uses injected `ManagedExecutor` (matches `BaseRuntime` pattern) instead of default `ForkJoinPool`. Preserves request context (security, MDC).
+- **MultimodalMessageEnhancer** — Added `MAX_MULTIMODAL_FORWARD_BYTES` (10MB) guard on STORED image attachments. Files exceeding this limit get a `TextContent` placeholder instead of a ~13MB base64 data URI, preventing OOM and LLM API request bloat.
+- **ToolResponseTruncator** — Added `PAGINATE_MAX_STORABLE_CHARS` (500K) ceiling. Responses exceeding this fall back to truncation instead of materializing all page substrings in the Caffeine cache.
+
+### Bug Fixes
+- **AgentSigningService** — `generateKeyPair()` now evicts `privateKeyCache` entry for the tenant:agentId. Previously, key rotation via re-generation would silently keep using the stale cached private key, producing signatures that don't match the new public key.
+- **PostgresAttachmentStore / GridFsAttachmentStore** — `resolvedMime` now uses `MimeValidator.normalize()` (strip `;` params, trim, lowercase) before persisting. Prevents non-canonical values like `image/png; charset=utf-8` in the database.
+
+### Observability
+- **RestAttachmentUpload** — All upload log messages now include `conversationId` for correlation (was missing from rejection and success logs, only present in list/delete error logs).
+
+### New Utility
+- **MimeValidator.normalize()** — Static method to produce canonical MIME types. Used by both attachment stores.
+
+### Tests (12 new/updated)
+- `RestAttachmentUploadTest` — Updated for `ManagedExecutor` constructor. Added `shouldRejectInvalidTenantId` test (SQL injection → sanitized to null).
+- `AgentSigningServiceTest` — Added `generateKeyPair_evictsCacheOnRegeneration` (sign-verify roundtrip proves new key is in use after re-gen).
+- `MultimodalMessageEnhancerExtendedTest` — Added `oversizedStoredImageProducesTextFallback` (10MB+1 byte → text placeholder).
+- `ToolResponseTruncatorExtendedTest` — Added `testPaginateCeilingFallback` (500K+1 chars → truncation, store never called).
+- `MimeValidatorTest` — Added 7 `NormalizeTests` (params, case, trim, null, blank, combined, passthrough).
+
+### Verification
+- Clean compile: BUILD SUCCESS, 0 Checkstyle violations
+- 104 targeted tests: 0 failures, 0 errors
+
 ## 🔧 PR Review Remediation — 10 Findings Resolved (2026-05-13)
 
 **Repo:** EDDI (`feature/agentic-improvements`)

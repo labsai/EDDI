@@ -82,6 +82,33 @@ class MultimodalMessageEnhancerExtendedTest {
             TextContent fallback = (TextContent) enhanced.contents().get(1);
             assertTrue(fallback.text().contains("unnamed"));
         }
+
+        @Test
+        @DisplayName("should reject oversized stored image with text placeholder")
+        void oversizedStoredImageProducesTextFallback() throws Exception {
+            Attachment att = new Attachment();
+            att.setMimeType("image/png");
+            att.setFileName("huge-photo.png");
+            att.setStorageRef("store://large-ref");
+            mockAttachments(att);
+
+            // Create a mock store that returns bytes exceeding the forwarding limit
+            var mockStore = mock(ai.labs.eddi.engine.attachments.IAttachmentStore.class);
+            byte[] oversizedBytes = new byte[(int) (MultimodalMessageEnhancer.MAX_MULTIMODAL_FORWARD_BYTES + 1)];
+            when(mockStore.load("store://large-ref", "conv-test")).thenReturn(oversizedBytes);
+            when(memory.getConversationId()).thenReturn("conv-test");
+
+            List<ChatMessage> messages = new ArrayList<>();
+            messages.add(UserMessage.from("What is in this image?"));
+
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, mockStore);
+
+            UserMessage enhanced = (UserMessage) messages.get(0);
+            assertEquals(2, enhanced.contents().size());
+            TextContent fallback = (TextContent) enhanced.contents().get(1);
+            assertTrue(fallback.text().contains("too large for multimodal forwarding"));
+            assertTrue(fallback.text().contains("huge-photo.png"));
+        }
     }
 
     @Nested

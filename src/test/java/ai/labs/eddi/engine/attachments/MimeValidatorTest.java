@@ -266,4 +266,51 @@ class MimeValidatorTest {
             assertTrue(MimeValidator.isCompatible("IMAGE/PNG", "image/png"));
         }
     }
+
+    @Nested
+    @DisplayName("Normalize")
+    class NormalizeTests {
+
+        @Test
+        @DisplayName("Should strip MIME parameters")
+        void testStripParams() {
+            assertEquals("image/png", MimeValidator.normalize("image/png; charset=utf-8"));
+        }
+
+        @Test
+        @DisplayName("Should lowercase")
+        void testLowercase() {
+            assertEquals("image/jpeg", MimeValidator.normalize("IMAGE/JPEG"));
+        }
+
+        @Test
+        @DisplayName("Should trim whitespace")
+        void testTrim() {
+            assertEquals("text/plain", MimeValidator.normalize("  text/plain  "));
+        }
+
+        @Test
+        @DisplayName("Should strip params and lowercase combined")
+        void testCombined() {
+            assertEquals("text/html", MimeValidator.normalize("TEXT/HTML; charset=UTF-8"));
+        }
+
+        @Test
+        @DisplayName("Should return octet-stream for null")
+        void testNull() {
+            assertEquals("application/octet-stream", MimeValidator.normalize(null));
+        }
+
+        @Test
+        @DisplayName("Should return octet-stream for blank")
+        void testBlank() {
+            assertEquals("application/octet-stream", MimeValidator.normalize("   "));
+        }
+
+        @Test
+        @DisplayName("Should pass through canonical MIME unchanged")
+        void testPassthrough() {
+            assertEquals("application/json", MimeValidator.normalize("application/json"));
+        }
+    }
 }

@@ -161,6 +161,23 @@ class ToolResponseTruncatorExtendedTest {
             String result = truncatorNoStore.truncateIfNeeded("testTool", "A".repeat(200), limits, TASK_TYPE, TASK_PARAMS);
             assertTrue(result.contains("[TRUNCATED:"));
         }
+
+        @Test
+        @DisplayName("Should fallback to truncate when response exceeds pagination ceiling")
+        void testPaginateCeilingFallback() {
+            var limits = new ToolResponseLimits();
+            limits.setDefaultMaxChars(50);
+            limits.setTruncationStrategy("paginate");
+
+            // Response exceeding PAGINATE_MAX_STORABLE_CHARS (500K)
+            String hugeResponse = "X".repeat(ToolResponseTruncator.PAGINATE_MAX_STORABLE_CHARS + 1);
+
+            String result = truncator.truncateIfNeeded("testTool", hugeResponse, limits, TASK_TYPE, TASK_PARAMS);
+
+            // Should fall back to truncation — store should NOT be called
+            assertTrue(result.contains("[TRUNCATED:"));
+            verifyNoInteractions(paginatedResponseStore);
+        }
     }
 
     @Nested

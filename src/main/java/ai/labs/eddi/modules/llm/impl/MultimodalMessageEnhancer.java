@@ -43,6 +43,15 @@ final class MultimodalMessageEnhancer {
 
     private static final Logger LOGGER = Logger.getLogger(MultimodalMessageEnhancer.class);
 
+    /**
+     * Maximum byte size for stored images forwarded to the LLM as base64. Larger
+     * files get a text placeholder instead of being inlined.
+     * <p>
+     * 10 MB raw → ~13 MB base64 — keeps LLM requests within typical provider limits
+     * while being generous enough for high-res images.
+     */
+    static final long MAX_MULTIMODAL_FORWARD_BYTES = 10L * 1024 * 1024; // 10 MB
+
     private MultimodalMessageEnhancer() {
         // non-instantiable utility
     }
@@ -183,6 +192,19 @@ final class MultimodalMessageEnhancer {
                 try {
                     byte[] bytes = attachmentStore.load(
                             attachment.getStorageRef(), conversationId);
+
+                    // Size guard — prevent blowing up the LLM request with
+                    // very large base64 payloads (raw 10 MB → ~13 MB base64)
+                    if (bytes.length > MAX_MULTIMODAL_FORWARD_BYTES) {
+                        LOGGER.warnf("Stored attachment '%s' too large for multimodal forwarding " +
+                                "(%d bytes exceeds %d byte limit)",
+                                attachment.getFileName(), bytes.length, MAX_MULTIMODAL_FORWARD_BYTES);
+                        yield TextContent.from(String.format(
+                                "[Stored attachment: %s (%s, %d bytes) — too large for multimodal forwarding (limit: %d bytes)]",
+                                attachment.getFileName() != null ? attachment.getFileName() : "unnamed",
+                                attachment.getMimeType(), bytes.length, MAX_MULTIMODAL_FORWARD_BYTES));
+                    }
+
                     String base64 = java.util.Base64.getEncoder().encodeToString(bytes);
                     String dataUri = "data:" + attachment.getMimeType() + ";base64," + base64;
                     LOGGER.debugf("Loaded stored attachment '%s' (%d bytes) for multimodal forwarding",

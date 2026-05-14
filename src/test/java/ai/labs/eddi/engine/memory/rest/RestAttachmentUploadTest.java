@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore.Attachment;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentStoreException;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.context.ManagedExecutor;
 import org.jboss.resteasy.reactive.multipart.FileUpload;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -34,12 +35,14 @@ class RestAttachmentUploadTest {
     private static final long MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20MB
 
     private IAttachmentStore attachmentStore;
+    private ManagedExecutor managedExecutor;
     private RestAttachmentUpload endpoint;
 
     @BeforeEach
     void setUp() {
         attachmentStore = mock(IAttachmentStore.class);
-        endpoint = new RestAttachmentUpload(attachmentStore, MAX_UPLOAD_BYTES);
+        managedExecutor = ManagedExecutor.builder().build();
+        endpoint = new RestAttachmentUpload(attachmentStore, managedExecutor, MAX_UPLOAD_BYTES);
     }
 
     /**
@@ -169,7 +172,7 @@ class RestAttachmentUploadTest {
         }
 
         @Test
-        void shouldPassTenantIdToStore() throws Exception {
+        void shouldPassSanitizedTenantIdToStore() throws Exception {
             var attachment = new Attachment(
                     "ref-789", "doc.pdf",
                     "application/pdf", 50, "conv-1");
@@ -197,6 +200,38 @@ class RestAttachmentUploadTest {
         }
 
         @Test
+        void shouldRejectInvalidTenantId() throws Exception {
+            var attachment = new Attachment(
+                    "ref-999", "file.txt",
+                    "text/plain", 5, "conv-1");
+            // Expect null tenantId (sanitized away)
+            when(attachmentStore.store(any(byte[].class),
+                    eq("text/plain"), eq("file.txt"),
+                    eq("conv-1"), isNull()))
+                    .thenReturn(attachment);
+
+            Path tempFile = Files.createTempFile("test-upload", ".txt");
+            Files.write(tempFile, new byte[5]);
+
+            FileUpload file = mock(FileUpload.class);
+            when(file.fileName()).thenReturn("file.txt");
+            when(file.contentType()).thenReturn("text/plain");
+            when(file.uploadedFile()).thenReturn(tempFile);
+
+            // Invalid tenantId (contains injection characters)
+            Response response = captureAsync(ar -> endpoint.uploadAttachment(
+                    "conv-1", file, "'; DROP TABLE--", ar));
+
+            assertEquals(201, response.getStatus());
+            // tenantId should have been sanitized to null
+            verify(attachmentStore).store(any(byte[].class),
+                    eq("text/plain"), eq("file.txt"),
+                    eq("conv-1"), isNull());
+
+            Files.deleteIfExists(tempFile);
+        }
+
+        @Test
         void shouldReturn500WhenFileReadFails() throws Exception {
             FileUpload file = mock(FileUpload.class);
             when(file.fileName()).thenReturn("broken.dat");
@@ -216,7 +251,7 @@ class RestAttachmentUploadTest {
         @Test
         void shouldReturn400WhenFileTooLarge() throws Exception {
             // Create endpoint with very small max size
-            var smallEndpoint = new RestAttachmentUpload(attachmentStore, 100);
+            var smallEndpoint = new RestAttachmentUpload(attachmentStore, managedExecutor, 100);
 
             Path tempFile = Files.createTempFile("test-large", ".bin");
             Files.write(tempFile, new byte[200]); // Exceeds 100 byte limit
