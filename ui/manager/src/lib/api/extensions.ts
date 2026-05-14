@@ -85,14 +85,14 @@ export function getExtensionLabel(type: string): string {
  * @param type - Full eddi:// extension type (e.g. "eddi://ai.labs.llm")
  */
 export function getExtensionIcon(type: string): React.ComponentType<{ className?: string }> {
-  const info = EXTENSION_TYPE_INFO[type] ?? EXTENSION_TYPE_INFO["eddi://" + type];
+  const info = EXTENSION_TYPE_INFO[type];
   if (info && iconMap[info.icon]) return iconMap[info.icon]!;
   return Puzzle;
 }
 
 /** Get the display colour for an extension type */
 export function getExtensionColor(type: string): string {
-  return EXTENSION_TYPE_INFO[type]?.color ?? EXTENSION_TYPE_INFO["eddi://" + type]?.color ?? "text-gray-400";
+  return EXTENSION_TYPE_INFO[type]?.color ?? "text-gray-400";
 }
 
 /** Full display config for an extension type — label, icon component, and colour */
@@ -116,17 +116,17 @@ export function getExtensionTypeConfig(
  * are not included — they use embedded config or have no separate store.
  */
 export const EXTENSION_TO_RESOURCE_SLUG: Record<string, string> = {
-  "ai.labs.dictionary": "dictionary",
-  "ai.labs.rules": "rules",
-  "ai.labs.httpcalls": "apicalls",
-  "ai.labs.apicalls": "apicalls",
-  "ai.labs.llm": "llm",
-  "ai.labs.output": "output",
-  "ai.labs.property": "propertysetter",
-  "ai.labs.mcpcalls": "mcpcalls",
-  "ai.labs.rag": "rag",
-  "ai.labs.snippet": "snippets",
-  "ai.labs.snippets": "snippets",
+  "eddi://ai.labs.dictionary": "dictionary",
+  "eddi://ai.labs.rules": "rules",
+  "eddi://ai.labs.httpcalls": "apicalls",
+  "eddi://ai.labs.apicalls": "apicalls",
+  "eddi://ai.labs.llm": "llm",
+  "eddi://ai.labs.output": "output",
+  "eddi://ai.labs.property": "propertysetter",
+  "eddi://ai.labs.mcpcalls": "mcpcalls",
+  "eddi://ai.labs.rag": "rag",
+  "eddi://ai.labs.snippet": "snippets",
+  "eddi://ai.labs.snippets": "snippets",
 };
 
 /** Check if an extension type has a standalone resource config store */
@@ -141,7 +141,7 @@ export function getResourceSlugForExtension(extensionType: string): string | und
 
 /** Get the sort order for an extension type (99 for unknown types) */
 export function getExtensionSortOrder(type: string): number {
-  return EXTENSION_TYPE_INFO[type]?.order ?? EXTENSION_TYPE_INFO["eddi://" + type]?.order ?? 99;
+  return EXTENSION_TYPE_INFO[type]?.order ?? 99;
 }
 
 /** Sort extension descriptors by their pipeline order */
