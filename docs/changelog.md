@@ -15,6 +15,31 @@ Each entry follows this format:
 
 
 
+## Channel Integration — Pre-Merge Review Fixes (2026-05-14)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+**What changed:** Addressed findings from thorough code review before merge.
+
+### Critical fixes
+- **C1 — Removed `ThreadLocal<ResolvedTarget>`:** Virtual threads and `ThreadLocal` are a known Loom footgun — carrier thread reuse can leak stale values. Replaced with explicit `botToken` parameter passing through `postMessage()`, `postMessageChunked()`, and `postHelp()`. All callers now pass `botToken` (or `null` for router fallback) directly.
+- **C2 — Intent key format change documented:** The conversation mapping intent key changed from `slack:<channelId>:<threadKey>` to `channel:slack:<channelId>:<agentId>:<threadKey>`. This is intentional (adds agent specificity for multi-target channels) but means existing Slack conversation mappings from pre-6.1 will be orphaned — new conversations will be created. This is acceptable for a pre-GA feature with very few users.
+
+### Medium fixes
+- **M1 — `eddivault` → `vault` Javadoc:** Updated stale `${eddivault:key-name}` reference in `ChannelIntegrationConfiguration` to `${vault:key-name}` (prefix was renamed on main in `1b884109`).
+- **M4 — Trigger backtick formatting:** Fixed `postHelp()` to render triggers as `` `architect`: `` instead of `` `architect:` `` — the colon is part of the user syntax, not the keyword.
+
+### Low fixes
+- **L2 — SPDX headers:** Added `Copyright EDDI contributors / Apache-2.0` headers to all 12 new files.
+
+### Merge conflicts resolved
+- `docs/changelog.md` — both branches added entries; kept both sets.
+- `SlackChannelRouter.java` / `SlackChannelRouterTest.java` — deleted on this branch, modified on main (CodeQL fixes). Resolved by keeping deletion (replaced by `ChannelTargetRouter`).
+
+**Files:** `SlackEventHandler.java`, `ChannelIntegrationConfiguration.java`, `docs/changelog.md`, 12 new files (SPDX headers)
+
+---
+
 ## Fix: Postgres Integration Tests — MigrationLogStore Injection (2026-04-26)
 
 **Repo:** EDDI (`feature/channel-integrations`)

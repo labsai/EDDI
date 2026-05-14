@@ -1,3 +1,7 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
 package ai.labs.eddi.configs.channels.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -69,7 +73,7 @@ public class ChannelIntegrationConfiguration {
      * <li><b>discord:</b> {@code guildId}, {@code channelId}, {@code botToken},
      * {@code publicKey}</li>
      * </ul>
-     * Secret values should use vault references: {@code ${eddivault:key-name}}.
+     * Secret values should use vault references: {@code ${vault:key-name}}.
      */
     public Map<String, String> getPlatformConfig() {
         return new HashMap<>(platformConfig);

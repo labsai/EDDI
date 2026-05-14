@@ -155,7 +155,8 @@ public class SlackEventHandler {
                 if (channelId != null) {
                     try {
                         postMessage(channelId, threadTs,
-                                "⚠️ Sorry, I encountered an error processing your message. Please try again.");
+                                "⚠️ Sorry, I encountered an error processing your message. Please try again.",
+                                null);
                     } catch (Exception ignored) {
                         // Can't post error — nothing more we can do
                     }
@@ -186,7 +187,7 @@ public class SlackEventHandler {
         String threadTs = getThreadTs(event);
 
         if (text.isBlank()) {
-            postHelp(channelId, threadTs);
+            postHelp(channelId, threadTs, null);
             return;
         }
 
@@ -210,7 +211,7 @@ public class SlackEventHandler {
         }
 
         if (resolved == null) {
-            postHelp(channelId, threadTs);
+            postHelp(channelId, threadTs, null);
             return;
         }
 
@@ -219,15 +220,11 @@ public class SlackEventHandler {
             channelTargetRouter.lockThreadTarget("slack", channelId, threadTs, resolved.target());
         }
 
-        // Store resolved target for credential resolution in postMessage
-        currentResolvedTarget.set(resolved);
-        try {
-            switch (resolved.target().getType()) {
-                case AGENT -> handleAgentConversation(resolved, channelId, userId, threadTs, text);
-                case GROUP -> handleGroupDiscussion(resolved, channelId, userId, threadTs, text);
-            }
-        } finally {
-            currentResolvedTarget.remove();
+        // Resolve bot token once — passed explicitly to all post methods
+        String botToken = resolved.botToken();
+        switch (resolved.target().getType()) {
+            case AGENT -> handleAgentConversation(resolved, channelId, userId, threadTs, text, botToken);
+            case GROUP -> handleGroupDiscussion(resolved, channelId, userId, threadTs, text, botToken);
         }
     }
 
@@ -235,7 +232,8 @@ public class SlackEventHandler {
      * Handle a standard 1:1 agent conversation routed via ChannelTargetRouter.
      */
     private void handleAgentConversation(ResolvedTarget resolved, String channelId,
-                                         String userId, String threadTs, String originalText)
+                                         String userId, String threadTs, String originalText,
+                                         String botToken)
             throws Exception {
         String agentId = resolved.target().getTargetId();
         String threadKey = threadTs != null ? threadTs : "main";
@@ -252,7 +250,7 @@ public class SlackEventHandler {
 
         String conversationId = getOrCreateConversation(agentId, userId, intent);
         String response = sendAndWait(conversationId, message);
-        postMessageChunked(channelId, threadTs, response);
+        postMessageChunked(channelId, threadTs, response, botToken);
     }
 
     // ─── Group Discussion ───
@@ -261,9 +259,9 @@ public class SlackEventHandler {
      * Handle a group discussion trigger routed via ChannelTargetRouter.
      */
     private void handleGroupDiscussion(ResolvedTarget resolved, String channelId,
-                                       String userId, String threadTs, String originalText) {
+                                       String userId, String threadTs, String originalText,
+                                       String botToken) {
         String groupId = resolved.target().getTargetId();
-        String botToken = resolved.botToken();
 
         if (botToken == null || botToken.isEmpty()) {
             LOGGER.errorf("No bot token configured for Slack channel %s — cannot run group discussion.", channelId);
@@ -291,7 +289,8 @@ public class SlackEventHandler {
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to start group discussion: %s", e.getMessage());
             postMessage(channelId, threadTs,
-                    "⚠️ Failed to start group discussion. Please try again.");
+                    "⚠️ Sorry, I couldn't start the group discussion. Please try again.",
+                    botToken);
         }
     }
 
@@ -349,7 +348,7 @@ public class SlackEventHandler {
         String intent = "channel:followup:" + channelId + ":" + parentTs;
         String conversationId = getOrCreateConversation(agentId, userId, intent);
         String response = sendAndWait(conversationId, enrichedInput);
-        postMessageChunked(channelId, threadTs, response);
+        postMessageChunked(channelId, threadTs, response, null);
 
         return true;
     }
@@ -459,10 +458,14 @@ public class SlackEventHandler {
 
     /**
      * Post a message to Slack, chunking if it exceeds Slack's 4000-char limit.
+     *
+     * @param botToken
+     *            explicit bot token (if {@code null}, falls back to router lookup)
      */
-    private void postMessageChunked(String channelId, String threadTs, String text) {
+    private void postMessageChunked(String channelId, String threadTs, String text,
+                                    String botToken) {
         if (text.length() <= MAX_SLACK_MESSAGE_LENGTH) {
-            postMessage(channelId, threadTs, text);
+            postMessage(channelId, threadTs, text, botToken);
             return;
         }
 
@@ -481,38 +484,32 @@ public class SlackEventHandler {
             if (end <= offset) {
                 end = Math.min(offset + MAX_SLACK_MESSAGE_LENGTH, text.length());
             }
-            postMessage(channelId, threadTs, text.substring(offset, end));
+            postMessage(channelId, threadTs, text.substring(offset, end), botToken);
             offset = end;
         }
     }
 
     /**
-     * Thread-local storage for the current resolved target. Used by postMessage to
-     * resolve the bot token without passing it through every method.
+     * Post a single message to Slack via the Web API.
+     *
+     * @param botToken
+     *            explicit bot token; if {@code null}, falls back to
+     *            {@link ChannelTargetRouter#getBotToken}
      */
-    private final ThreadLocal<ResolvedTarget> currentResolvedTarget = new ThreadLocal<>();
-
-    /**
-     * Post a single message to Slack via the Web API, using the bot token from the
-     * current resolved target or from the channel target router.
-     */
-    private void postMessage(String channelId, String threadTs, String text) {
-        // Resolve bot token: prefer current resolved target, fallback to router
-        String botToken = null;
-        ResolvedTarget resolved = currentResolvedTarget.get();
-        if (resolved != null) {
-            botToken = resolved.botToken();
-        }
-        if (botToken == null || botToken.isEmpty()) {
-            botToken = channelTargetRouter.getBotToken("slack", channelId);
+    private void postMessage(String channelId, String threadTs, String text,
+                             String botToken) {
+        // Resolve bot token: prefer explicit parameter, fallback to router
+        String resolvedToken = botToken;
+        if (resolvedToken == null || resolvedToken.isEmpty()) {
+            resolvedToken = channelTargetRouter.getBotToken("slack", channelId);
         }
 
-        if (botToken == null || botToken.isEmpty()) {
+        if (resolvedToken == null || resolvedToken.isEmpty()) {
             LOGGER.warnf("No bot token configured for Slack channel %s — cannot post message", channelId);
             return;
         }
 
-        String auth = "Bearer " + botToken;
+        String auth = "Bearer " + resolvedToken;
 
         for (int attempt = 1; attempt <= SLACK_API_MAX_RETRIES; attempt++) {
             try {
@@ -540,12 +537,15 @@ public class SlackEventHandler {
 
     /**
      * Post a help message listing available targets for this channel.
+     *
+     * @param botToken
+     *            explicit bot token (if {@code null}, falls back to router lookup)
      */
-    private void postHelp(String channelId, String threadTs) {
+    private void postHelp(String channelId, String threadTs, String botToken) {
         var integration = channelTargetRouter.getIntegration("slack", channelId);
         if (integration.isEmpty()) {
             postMessage(channelId, threadTs,
-                    "👋 Hi! Send me a message and I'll respond.");
+                    "👋 Hi! Send me a message and I'll respond.", botToken);
             return;
         }
 
@@ -565,14 +565,14 @@ public class SlackEventHandler {
             if (target.getTriggers() != null && !target.getTriggers().isEmpty()) {
                 sb.append("  Triggers: ");
                 sb.append(String.join(", ", target.getTriggers().stream()
-                        .map(t -> "`" + t + ":`")
+                        .map(t -> "`" + t + "`" + ":")
                         .toList()));
                 sb.append("\n");
             }
         }
 
         sb.append("\n_Type a message to talk to the default target, or use a trigger keyword._");
-        postMessage(channelId, threadTs, sb.toString());
+        postMessage(channelId, threadTs, sb.toString(), botToken);
     }
 
     /**
