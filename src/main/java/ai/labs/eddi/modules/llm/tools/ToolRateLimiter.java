@@ -10,6 +10,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -132,7 +134,7 @@ public class ToolRateLimiter {
 
             long resetTime = bucket.getResetTimeMs();
             long waitTimeMs = resetTime - System.currentTimeMillis();
-            LOGGER.warn(String.format("Rate limit exceeded for tool '%s'. Reset in %d seconds.", toolName, waitTimeMs / 1000));
+            LOGGER.warn(String.format("Rate limit exceeded for tool '%s'. Reset in %d seconds.", sanitize(toolName), waitTimeMs / 1000));
         }
 
         // Update gauge for current usage
@@ -162,7 +164,7 @@ public class ToolRateLimiter {
      */
     public void reset(String toolName) {
         buckets.remove(toolName);
-        LOGGER.info("Reset rate limit for tool: " + toolName);
+        LOGGER.info("Reset rate limit for tool: " + sanitize(toolName));
     }
 
     /**

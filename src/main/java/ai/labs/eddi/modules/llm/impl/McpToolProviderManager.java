@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -18,6 +19,8 @@ import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.time.Duration;
 import java.util.*;
@@ -44,6 +47,7 @@ public class McpToolProviderManager {
 
     private static final Logger LOGGER = Logger.getLogger(McpToolProviderManager.class);
 
+    private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
 
     /**
@@ -53,7 +57,8 @@ public class McpToolProviderManager {
     private final Map<String, McpClient> clientCache = new ConcurrentHashMap<>();
 
     @Inject
-    public McpToolProviderManager(SecretResolver secretResolver) {
+    public McpToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
+        this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
     }
 
@@ -111,12 +116,12 @@ public class McpToolProviderManager {
                         allSpecs.add(spec);
                         allExecutors.put(spec.name(), executor);
                     }
-                    LOGGER.infof("Discovered %d tools from MCP server '%s'", result.tools().size(), serverName);
+                    LOGGER.infof("Discovered %d tools from MCP server '%s'", result.tools().size(), sanitize(serverName));
                 }
 
             } catch (Exception e) {
                 String serverName = serverConfig.getName() != null ? serverConfig.getName() : serverConfig.getUrl();
-                LOGGER.warnf(e, "Failed to connect to MCP server '%s': %s", serverName, e.getMessage());
+                LOGGER.warnf(e, "Failed to connect to MCP server '%s': %s", sanitize(serverName), e.getMessage());
             }
         }
 
@@ -129,7 +134,8 @@ public class McpToolProviderManager {
      */
     private McpClient getOrCreateClient(McpServerConfig config) {
         return clientCache.computeIfAbsent(config.getUrl(), url -> {
-            LOGGER.infof("Creating MCP client for '%s' (%s transport)", config.getName() != null ? config.getName() : url, config.getTransport());
+            LOGGER.infof("Creating MCP client for '%s' (%s transport)", sanitize(config.getName() != null ? config.getName() : url),
+                    sanitize(config.getTransport()));
 
             Duration timeout = Duration.ofMillis(config.getTimeoutMs() != null ? config.getTimeoutMs() : 30000L);
 
@@ -143,9 +149,10 @@ public class McpToolProviderManager {
      * Create the appropriate MCP transport based on configuration.
      */
     private McpTransport createTransport(McpServerConfig config, Duration timeout) {
-        // Resolve API key if it's a vault reference
+        // Resolve API key if it's a global variable or vault reference
         String apiKey = config.getApiKey();
         if (!isNullOrEmpty(apiKey)) {
+            apiKey = globalVariableResolver.resolveValue(apiKey);
             apiKey = secretResolver.resolveValue(apiKey);
         }
 
@@ -170,9 +177,9 @@ public class McpToolProviderManager {
         if (client != null) {
             try {
                 client.close();
-                LOGGER.infof("Closed MCP client for '%s'", url);
+                LOGGER.infof("Closed MCP client for '%s'", sanitize(url));
             } catch (Exception e) {
-                LOGGER.warnf(e, "Error closing MCP client for '%s'", url);
+                LOGGER.warnf(e, "Error closing MCP client for '%s'", sanitize(url));
             }
         }
     }
@@ -187,7 +194,7 @@ public class McpToolProviderManager {
             try {
                 entry.getValue().close();
             } catch (Exception e) {
-                LOGGER.warnf(e, "Error closing MCP client for '%s'", entry.getKey());
+                LOGGER.warnf(e, "Error closing MCP client for '%s'", sanitize(entry.getKey()));
             }
         }
         clientCache.clear();

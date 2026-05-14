@@ -5,11 +5,14 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.store.embedding.EmbeddingStore;
+import dev.langchain4j.store.embedding.chroma.ChromaEmbeddingStore;
+import dev.langchain4j.store.embedding.chroma.ChromaApiVersion;
 import dev.langchain4j.store.embedding.elasticsearch.ElasticsearchEmbeddingStore;
 import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 import dev.langchain4j.store.embedding.mongodb.MongoDbEmbeddingStore;
@@ -21,10 +24,14 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 /**
  * Creates and caches {@link EmbeddingStore} instances based on
@@ -32,7 +39,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>
  * Each knowledge base gets its own store instance (collection-per-KB
  * isolation). Supported store types: {@code in-memory}, {@code pgvector},
- * {@code mongodb-atlas}, {@code elasticsearch}, {@code qdrant}.
+ * {@code mongodb-atlas}, {@code elasticsearch}, {@code qdrant}, {@code chroma}.
  * <p>
  * Cache is bounded (max 50 entries, 30-minute idle TTL) to prevent memory leaks
  * in multi-tenant or dynamic-config environments.
@@ -42,14 +49,18 @@ public class EmbeddingStoreFactory {
 
     private static final Logger LOGGER = Logger.getLogger(EmbeddingStoreFactory.class);
     private static final int MAX_PG_IDENTIFIER_LENGTH = 63;
+    private static final Pattern UNSAFE_IDENTIFIER_CHARS = Pattern.compile("[^a-z0-9_]");
+    private static final Pattern TRAILING_UNDERSCORES = Pattern.compile("_+$");
 
     private final Cache<String, EmbeddingStore<TextSegment>> cache = Caffeine.newBuilder().maximumSize(50).expireAfterAccess(Duration.ofMinutes(30))
             .build();
     private final Map<String, MongoClient> mongoClientCache = new ConcurrentHashMap<>();
+    private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
 
     @Inject
-    public EmbeddingStoreFactory(SecretResolver secretResolver) {
+    public EmbeddingStoreFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
+        this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
     }
 
@@ -67,7 +78,7 @@ public class EmbeddingStoreFactory {
 
     private EmbeddingStore<TextSegment> build(RagConfiguration config, String kbId) {
         String storeType = config.getStoreType();
-        LOGGER.infof("Building embedding store: type=%s, kbId=%s", storeType, kbId);
+        LOGGER.infof("Building embedding store: type=%s, kbId=%s", sanitize(storeType), sanitize(kbId));
 
         return switch (storeType) {
             case "in-memory" -> new InMemoryEmbeddingStore<>();
@@ -75,8 +86,9 @@ public class EmbeddingStoreFactory {
             case "mongodb-atlas" -> buildMongoDbAtlas(config, kbId);
             case "elasticsearch" -> buildElasticsearch(config, kbId);
             case "qdrant" -> buildQdrant(config, kbId);
+            case "chroma" -> buildChroma(config, kbId);
             default -> throw new IllegalArgumentException(
-                    "Unsupported store type: " + storeType + ". Supported: in-memory, pgvector, mongodb-atlas, elasticsearch, qdrant");
+                    "Unsupported store type: " + storeType + ". Supported: in-memory, pgvector, mongodb-atlas, elasticsearch, qdrant, chroma");
         };
     }
 
@@ -94,7 +106,7 @@ public class EmbeddingStoreFactory {
      * <li>{@code port} — PostgreSQL port (default: 5432)</li>
      * <li>{@code database} — database name (default: "eddi")</li>
      * <li>{@code user} — database user (default: "eddi")</li>
-     * <li>{@code password} — database password, supports {@code ${eddivault:...}}
+     * <li>{@code password} — database password, supports {@code ${vault:...}}
      * (required)</li>
      * <li>{@code table} — table name (default: auto-generated from kbId)</li>
      * <li>{@code dimension} — embedding vector dimension (default: 1536 for OpenAI
@@ -114,7 +126,8 @@ public class EmbeddingStoreFactory {
         // Table name: use explicit param, or derive a safe name from kbId
         String table = params.getOrDefault("table", sanitizeTableName(kbId));
 
-        LOGGER.infof("Building pgvector store: host=%s, port=%d, database=%s, table=%s, dimension=%d", host, port, database, table, dimension);
+        LOGGER.infof("Building pgvector store: host=%s, port=%d, database=%s, table=%s, dimension=%d", sanitize(host), port, sanitize(database),
+                sanitize(table), dimension);
 
         return PgVectorEmbeddingStore.builder().host(host).port(port).database(database).user(user).password(password).table(table)
                 .dimension(dimension).createTable(true).build();
@@ -130,7 +143,7 @@ public class EmbeddingStoreFactory {
      * Supported storeParameters:
      * <ul>
      * <li>{@code connectionString} — MongoDB connection string (required, supports
-     * {@code ${eddivault:...}})</li>
+     * {@code ${vault:...}})</li>
      * <li>{@code databaseName} — database name (default: "eddi")</li>
      * <li>{@code collectionName} — collection name (default: auto-generated from
      * kbId)</li>
@@ -146,7 +159,8 @@ public class EmbeddingStoreFactory {
         String collectionName = params.getOrDefault("collectionName", "eddi_kb_" + kbId);
         String indexName = params.getOrDefault("indexName", "vector_index");
 
-        LOGGER.infof("Building MongoDB Atlas store: database=%s, collection=%s, index=%s", databaseName, collectionName, indexName);
+        LOGGER.infof("Building MongoDB Atlas store: database=%s, collection=%s, index=%s", sanitize(databaseName), sanitize(collectionName),
+                sanitize(indexName));
 
         MongoClient mongoClient = mongoClientCache.computeIfAbsent(connectionString, MongoClients::create);
 
@@ -165,8 +179,7 @@ public class EmbeddingStoreFactory {
      * <ul>
      * <li>{@code serverUrl} — Elasticsearch URL (default:
      * "http://localhost:9200")</li>
-     * <li>{@code apiKey} — API key (optional, supports
-     * {@code ${eddivault:...}})</li>
+     * <li>{@code apiKey} — API key (optional, supports {@code ${vault:...}})</li>
      * <li>{@code indexName} — index name (default: auto-generated from kbId)</li>
      * </ul>
      */
@@ -176,7 +189,7 @@ public class EmbeddingStoreFactory {
         Map<String, String> params = resolveParams(config);
 
         String serverUrl = params.getOrDefault("serverUrl", "http://localhost:9200");
-        String indexName = params.getOrDefault("indexName", "eddi_kb_" + kbId.toLowerCase().replaceAll("[^a-z0-9_]", "_"));
+        String indexName = params.getOrDefault("indexName", "eddi_kb_" + UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_"));
 
         var builder = ElasticsearchEmbeddingStore.builder().serverUrl(serverUrl).indexName(indexName);
 
@@ -188,7 +201,7 @@ public class EmbeddingStoreFactory {
             builder.password(params.get("password"));
         }
 
-        LOGGER.infof("Building Elasticsearch store: serverUrl=%s, index=%s", serverUrl, indexName);
+        LOGGER.infof("Building Elasticsearch store: serverUrl=%s, index=%s", sanitize(serverUrl), sanitize(indexName));
 
         return builder.build();
     }
@@ -207,7 +220,7 @@ public class EmbeddingStoreFactory {
      * <li>{@code collectionName} — collection name (default: auto-generated from
      * kbId)</li>
      * <li>{@code apiKey} — Qdrant API key (optional, supports
-     * {@code ${eddivault:...}})</li>
+     * {@code ${vault:...}})</li>
      * <li>{@code useTls} — use TLS (default: "false")</li>
      * </ul>
      */
@@ -216,10 +229,10 @@ public class EmbeddingStoreFactory {
 
         String host = params.getOrDefault("host", "localhost");
         int port = parseIntParam(params, "port", 6334);
-        String collectionName = params.getOrDefault("collectionName", "eddi_kb_" + kbId.toLowerCase().replaceAll("[^a-z0-9_]", "_"));
+        String collectionName = params.getOrDefault("collectionName", sanitizeCollection(kbId));
         boolean useTls = Boolean.parseBoolean(params.getOrDefault("useTls", "false"));
 
-        LOGGER.infof("Building Qdrant store: host=%s, port=%d, collection=%s, tls=%b", host, port, collectionName, useTls);
+        LOGGER.infof("Building Qdrant store: host=%s, port=%d, collection=%s, tls=%b", sanitize(host), port, sanitize(collectionName), useTls);
 
         var builder = QdrantEmbeddingStore.builder().host(host).port(port).collectionName(collectionName).useTls(useTls);
 
@@ -231,15 +244,70 @@ public class EmbeddingStoreFactory {
     }
 
     // ──────────────────────────────────────────────────
+    // Chroma
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Builds a Chroma-backed embedding store.
+     * <p>
+     * Supported storeParameters:
+     * <ul>
+     * <li>{@code baseUrl} — Chroma server URL (default:
+     * "http://localhost:8000")</li>
+     * <li>{@code tenantName} — tenant name (default: "default_tenant")</li>
+     * <li>{@code databaseName} — database name (default: "default_database")</li>
+     * <li>{@code collectionName} — collection name (default: auto-generated from
+     * kbId)</li>
+     * </ul>
+     */
+    private EmbeddingStore<TextSegment> buildChroma(RagConfiguration config, String kbId) {
+        Map<String, String> params = resolveParams(config);
+
+        String baseUrl = params.getOrDefault("baseUrl", "http://localhost:8000");
+        String tenantName = params.getOrDefault("tenantName", "default_tenant");
+        String databaseName = params.getOrDefault("databaseName", "default_database");
+        String collectionName = params.getOrDefault("collectionName", sanitizeCollection(kbId));
+
+        ChromaApiVersion version = parseChromaApiVersion(params.getOrDefault("apiVersion", "V2"));
+
+        LOGGER.infof("Building Chroma store: baseUrl=%s, tenant=%s, database=%s, collection=%s, apiVersion=%s", baseUrl, tenantName, databaseName,
+                collectionName, version.toString());
+
+        return ChromaEmbeddingStore.builder()
+                .baseUrl(baseUrl)
+                .tenantName(tenantName)
+                .databaseName(databaseName)
+                .collectionName(collectionName)
+                .apiVersion(version)
+                .build();
+    }
+
+    // ──────────────────────────────────────────────────
     // Utility methods
     // ──────────────────────────────────────────────────
 
     /**
-     * Resolves vault references in store parameters.
+     * Resolves global variable and vault references in store parameters.
      */
     private Map<String, String> resolveParams(RagConfiguration config) {
         Map<String, String> rawParams = config.getStoreParameters() != null ? config.getStoreParameters() : Map.of();
-        return secretResolver.resolveSecrets(rawParams);
+        Map<String, String> resolved = globalVariableResolver.resolveAll(rawParams);
+        return secretResolver.resolveSecrets(resolved);
+    }
+
+    private ChromaApiVersion parseChromaApiVersion(String apiVersionStr) {
+        try {
+            ChromaApiVersion chromaApiVersion = (apiVersionStr == null || apiVersionStr.isBlank())
+                    ? ChromaApiVersion.V2
+                    : ChromaApiVersion.valueOf(apiVersionStr);
+            return chromaApiVersion;
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    String.format("Invalid '%s' ChromaApiVersion. Valid ChromaApiVersion '%s'",
+                            apiVersionStr,
+                            Arrays.toString(ChromaApiVersion.values())),
+                    e);
+        }
     }
 
     /**
@@ -249,7 +317,7 @@ public class EmbeddingStoreFactory {
     private String requireParam(Map<String, String> params, String key, String storeType) {
         String value = params.get(key);
         if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException(storeType + " requires '" + key + "' in storeParameters (use ${eddivault:...} for secrets)");
+            throw new IllegalArgumentException(storeType + " requires '" + key + "' in storeParameters (use ${vault:...} for secrets)");
         }
         return value;
     }
@@ -270,6 +338,10 @@ public class EmbeddingStoreFactory {
         }
     }
 
+    static String sanitizeCollection(String kbId) {
+        return TRAILING_UNDERSCORES.matcher("eddi_kb_" + UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_")).replaceAll("");
+    }
+
     /**
      * Converts a knowledge base ID into a safe PostgreSQL table name. Replaces
      * non-alphanumeric characters with underscores, lowercases, prefixes with
@@ -277,7 +349,7 @@ public class EmbeddingStoreFactory {
      * chars).
      */
     static String sanitizeTableName(String kbId) {
-        String sanitized = kbId.toLowerCase().replaceAll("[^a-z0-9_]", "_");
+        String sanitized = UNSAFE_IDENTIFIER_CHARS.matcher(kbId.toLowerCase()).replaceAll("_");
         String result = "eddi_kb_" + sanitized;
         if (result.length() > MAX_PG_IDENTIFIER_LENGTH) {
             result = result.substring(0, MAX_PG_IDENTIFIER_LENGTH);

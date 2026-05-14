@@ -11,11 +11,14 @@ import java.util.regex.Pattern;
  * Immutable reference to a secret stored in the vault. Supports two syntax
  * forms:
  * <ul>
- * <li><b>Short form:</b> {@code ${eddivault:keyName}} — tenant defaults to
+ * <li><b>Short form:</b> {@code ${vault:keyName}} — tenant defaults to
  * {@code "default"}</li>
- * <li><b>Full form:</b> {@code ${eddivault:tenantId/keyName}} — explicit tenant
- * for multi-tenant</li>
+ * <li><b>Full form:</b> {@code ${vault:tenantId/keyName}} — explicit tenant for
+ * multi-tenant</li>
  * </ul>
+ * <p>
+ * <b>Backward compatibility:</b> The older {@code ${eddivault:...}} prefix is
+ * also accepted for configs stored before the v6.0.2 rename.
  * <p>
  * This follows the Docker image tag convention where {@code nginx} implicitly
  * means {@code docker.io/library/nginx}. Single-tenant deployments (the common
@@ -39,21 +42,24 @@ public record SecretReference(String tenantId, String keyName) {
     public static final String DEFAULT_TENANT = "default";
 
     /**
-     * Dual-format regex pattern that matches both vault reference forms:
+     * Dual-format regex pattern that matches both vault reference forms and both
+     * prefixes ({@code vault} and legacy {@code eddivault}):
      * <ul>
-     * <li>{@code ${eddivault:keyName}} — group(1) is null, group(2) is keyName</li>
-     * <li>{@code ${eddivault:tenantId/keyName}} — group(1) is tenantId, group(2) is
+     * <li>{@code ${vault:keyName}} — group(1) is null, group(2) is keyName</li>
+     * <li>{@code ${vault:tenantId/keyName}} — group(1) is tenantId, group(2) is
      * keyName</li>
+     * <li>{@code ${eddivault:keyName}} — legacy, same groups</li>
      * </ul>
      */
-    public static final String VAULT_PATTERN = "\\$\\{eddivault:(?:([^/}]+)/)?([^}]+)\\}";
+    public static final String VAULT_PATTERN = "\\$\\{(?:vault|eddivault):(?:([^/}]+)/)?([^}]+)\\}";
 
     private static final Pattern COMPILED_PATTERN = Pattern.compile(VAULT_PATTERN);
 
     /**
      * Parse a vault reference string into a SecretReference. Supports both short
-     * form ({@code ${eddivault:openaiKey}}) and full form
-     * ({@code ${eddivault:myTenant/openaiKey}}).
+     * form ({@code ${vault:openaiKey}}) and full form
+     * ({@code ${vault:myTenant/openaiKey}}). Also accepts the legacy
+     * {@code ${eddivault:...}} prefix.
      *
      * @param reference
      *            the full reference string
@@ -65,7 +71,7 @@ public record SecretReference(String tenantId, String keyName) {
         Matcher matcher = COMPILED_PATTERN.matcher(reference);
         if (!matcher.find()) {
             throw new IllegalArgumentException(
-                    "Invalid vault reference: " + reference + ". Expected: ${eddivault:keyName} or ${eddivault:tenantId/keyName}");
+                    "Invalid vault reference: " + reference + ". Expected: ${vault:keyName} or ${vault:tenantId/keyName}");
         }
         String tenant = matcher.group(1) != null ? matcher.group(1) : DEFAULT_TENANT;
         String key = matcher.group(2);
@@ -75,19 +81,19 @@ public record SecretReference(String tenantId, String keyName) {
     /**
      * Construct the vault reference string. Uses the shortest valid form:
      * <ul>
-     * <li>Default tenant → {@code ${eddivault:keyName}}</li>
-     * <li>Custom tenant → {@code ${eddivault:tenantId/keyName}}</li>
+     * <li>Default tenant → {@code ${vault:keyName}}</li>
+     * <li>Custom tenant → {@code ${vault:tenantId/keyName}}</li>
      * </ul>
      */
     public String toReferenceString() {
-        return DEFAULT_TENANT.equals(tenantId) ? "${eddivault:" + keyName + "}" : "${eddivault:" + tenantId + "/" + keyName + "}";
+        return DEFAULT_TENANT.equals(tenantId) ? "${vault:" + keyName + "}" : "${vault:" + tenantId + "/" + keyName + "}";
     }
 
     /**
-     * Check if a string contains a vault reference.
+     * Check if a string contains a vault reference (either new or legacy prefix).
      */
     public static boolean isVaultReference(String value) {
-        return value != null && value.contains("${eddivault:");
+        return value != null && (value.contains("${vault:") || value.contains("${eddivault:"));
     }
 
     /**

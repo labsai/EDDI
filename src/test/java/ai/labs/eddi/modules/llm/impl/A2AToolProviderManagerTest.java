@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,7 +29,8 @@ class A2AToolProviderManagerTest {
     @BeforeEach
     void setUp() {
         SecretResolver secretResolver = mock(SecretResolver.class);
-        manager = new A2AToolProviderManager(secretResolver);
+        GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
+        manager = new A2AToolProviderManager(globalVariableResolver, secretResolver);
     }
 
     // ─── discoverTools empty/null ─────────────────────────────────

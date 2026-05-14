@@ -14,6 +14,8 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -115,7 +117,7 @@ public class RestSecretStore implements IRestSecretStore {
                 return Response.status(Response.Status.CREATED).entity(responseRef).build();
             }
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorf("Failed to store secret: %s/%s — %s", tenantId, keyName, e.getMessage());
+            LOGGER.errorf("Failed to store secret: %s/%s — %s", sanitize(tenantId), sanitize(keyName), e.getMessage());
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to store secret")).build();
         }
     }
@@ -140,7 +142,7 @@ public class RestSecretStore implements IRestSecretStore {
         } catch (ISecretProvider.SecretNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "Secret not found")).build();
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorf("Failed to delete secret: %s/%s — %s", tenantId, keyName, e.getMessage());
+            LOGGER.errorf("Failed to delete secret: %s/%s — %s", sanitize(tenantId), sanitize(keyName), e.getMessage());
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to delete secret")).build();
         }
     }
@@ -163,7 +165,7 @@ public class RestSecretStore implements IRestSecretStore {
         } catch (ISecretProvider.SecretNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "Secret not found")).build();
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorf("Failed to get secret metadata: %s/%s — %s", tenantId, keyName, e.getMessage());
+            LOGGER.errorf("Failed to get secret metadata: %s/%s — %s", sanitize(tenantId), sanitize(keyName), e.getMessage());
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to get metadata")).build();
         }
     }
@@ -182,7 +184,7 @@ public class RestSecretStore implements IRestSecretStore {
         try {
             return Response.ok(secretProvider.listKeys(tenantId)).build();
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorf("Failed to list secrets: %s — %s", tenantId, e.getMessage());
+            LOGGER.errorf("Failed to list secrets: %s — %s", sanitize(tenantId), e.getMessage());
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to list secrets")).build();
         }
     }
@@ -216,7 +218,7 @@ public class RestSecretStore implements IRestSecretStore {
             return Response.ok(Map.of("tenantId", tenantId, "secretsReEncrypted", count, "message",
                     "DEK rotated successfully. " + count + " secrets re-encrypted.")).build();
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorf("Failed to rotate DEK for tenant %s: %s", tenantId, e.getMessage());
+            LOGGER.errorf("Failed to rotate DEK for tenant %s: %s", sanitize(tenantId), e.getMessage());
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "DEK rotation failed: " + e.getMessage())).build();
         }
     }

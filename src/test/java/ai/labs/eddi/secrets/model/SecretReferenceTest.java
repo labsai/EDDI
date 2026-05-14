@@ -14,7 +14,7 @@ class SecretReferenceTest {
 
     @Test
     void parse_shortForm_defaultTenant() {
-        var ref = SecretReference.parse("${eddivault:openaiKey}");
+        var ref = SecretReference.parse("${vault:openaiKey}");
 
         assertEquals("default", ref.tenantId());
         assertEquals("openaiKey", ref.keyName());
@@ -22,7 +22,7 @@ class SecretReferenceTest {
 
     @Test
     void parse_fullForm_explicitTenant() {
-        var ref = SecretReference.parse("${eddivault:myTenant/openaiKey}");
+        var ref = SecretReference.parse("${vault:myTenant/openaiKey}");
 
         assertEquals("myTenant", ref.tenantId());
         assertEquals("openaiKey", ref.keyName());
@@ -31,20 +31,20 @@ class SecretReferenceTest {
     @Test
     void toReferenceString_defaultTenant_shortForm() {
         var ref = new SecretReference("default", "apiKey");
-        assertEquals("${eddivault:apiKey}", ref.toReferenceString());
+        assertEquals("${vault:apiKey}", ref.toReferenceString());
     }
 
     @Test
     void toReferenceString_customTenant_fullForm() {
         var ref = new SecretReference("acmeCorp", "apiKey");
-        assertEquals("${eddivault:acmeCorp/apiKey}", ref.toReferenceString());
+        assertEquals("${vault:acmeCorp/apiKey}", ref.toReferenceString());
     }
 
     @Test
     void roundtrip_shortForm() {
         var ref = new SecretReference("default", "myKey");
         String refStr = ref.toReferenceString();
-        assertEquals("${eddivault:myKey}", refStr);
+        assertEquals("${vault:myKey}", refStr);
 
         var parsed = SecretReference.parse(refStr);
         assertEquals(ref, parsed);
@@ -54,7 +54,7 @@ class SecretReferenceTest {
     void roundtrip_fullForm() {
         var ref = new SecretReference("tenant1", "apiKey");
         String refStr = ref.toReferenceString();
-        assertEquals("${eddivault:tenant1/apiKey}", refStr);
+        assertEquals("${vault:tenant1/apiKey}", refStr);
 
         var parsed = SecretReference.parse(refStr);
         assertEquals(ref, parsed);
@@ -63,23 +63,23 @@ class SecretReferenceTest {
     @Test
     void parse_autoVaultedKey_withAgentPrefix() {
         // Auto-vaulted keys have agentId.keyName format
-        var ref = SecretReference.parse("${eddivault:69c687.userApiKey}");
+        var ref = SecretReference.parse("${vault:69c687.userApiKey}");
 
         assertEquals("default", ref.tenantId());
         assertEquals("69c687.userApiKey", ref.keyName());
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"not-a-vault-ref", "${vault:foo/bar}", "${eddivault:}"})
+    @ValueSource(strings = {"not-a-vault-ref", "${vault:}"})
     void parse_invalidReference_throws(String input) {
         assertThrows(IllegalArgumentException.class, () -> SecretReference.parse(input));
     }
 
     @Test
     void isVaultReference_positive() {
-        assertTrue(SecretReference.isVaultReference("${eddivault:key}"));
-        assertTrue(SecretReference.isVaultReference("${eddivault:t/k}"));
-        assertTrue(SecretReference.isVaultReference("Bearer ${eddivault:openaiKey} extra"));
+        assertTrue(SecretReference.isVaultReference("${vault:key}"));
+        assertTrue(SecretReference.isVaultReference("${vault:t/k}"));
+        assertTrue(SecretReference.isVaultReference("Bearer ${vault:openaiKey} extra"));
     }
 
     @Test
@@ -87,6 +87,34 @@ class SecretReferenceTest {
         assertFalse(SecretReference.isVaultReference("plain text"));
         assertFalse(SecretReference.isVaultReference(""));
         assertFalse(SecretReference.isVaultReference(null));
-        assertFalse(SecretReference.isVaultReference("${vault:different}"));
+    }
+
+    // ==================== Backward Compatibility ====================
+
+    @Test
+    void parse_legacyPrefix_shortForm() {
+        var ref = SecretReference.parse("${eddivault:openaiKey}");
+        assertEquals("default", ref.tenantId());
+        assertEquals("openaiKey", ref.keyName());
+    }
+
+    @Test
+    void parse_legacyPrefix_fullForm() {
+        var ref = SecretReference.parse("${eddivault:myTenant/openaiKey}");
+        assertEquals("myTenant", ref.tenantId());
+        assertEquals("openaiKey", ref.keyName());
+    }
+
+    @Test
+    void isVaultReference_legacyPrefix_positive() {
+        assertTrue(SecretReference.isVaultReference("${eddivault:key}"));
+        assertTrue(SecretReference.isVaultReference("${eddivault:t/k}"));
+    }
+
+    @Test
+    void toReferenceString_usesNewPrefix() {
+        // Even when parsed from legacy prefix, output uses the new canonical form
+        var ref = SecretReference.parse("${eddivault:openaiKey}");
+        assertEquals("${vault:openaiKey}", ref.toReferenceString());
     }
 }

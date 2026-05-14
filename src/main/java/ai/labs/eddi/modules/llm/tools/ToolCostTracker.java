@@ -10,6 +10,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -137,7 +139,9 @@ public class ToolCostTracker {
 
         if (cost > 0) {
             meterRegistry.counter("eddi.tool.costs", "tool", toolName).increment(cost);
-            LOGGER.debug(String.format("Tool '%s' cost: $%.4f", toolName, cost));
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debugf("Tool '%s' cost: $%.4f", sanitize(toolName), cost);
+            }
         }
 
         return cost;
@@ -179,7 +183,7 @@ public class ToolCostTracker {
             // Record budget exceeded event
             meterRegistry.counter("eddi.tool.budget.exceeded").increment();
 
-            LOGGER.warn(String.format("Conversation %s exceeded budget: $%.4f > $%.4f", conversationId, metrics.getTotalCost(), maxBudget));
+            LOGGER.warn(String.format("Conversation %s exceeded budget: $%.4f > $%.4f", sanitize(conversationId), metrics.getTotalCost(), maxBudget));
         }
 
         return withinBudget;

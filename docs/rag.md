@@ -42,7 +42,7 @@ A `RagConfiguration` is a versioned resource at `/ragstore/rags/`. It defines:
   "embeddingProvider": "openai",
   "embeddingParameters": {
     "model": "text-embedding-3-small",
-    "apiKey": "${eddivault:tenant/agent/openai-key}"
+    "apiKey": "${vault:tenant/agent/openai-key}"
   },
   "storeType": "in-memory",
   "storeParameters": {},
@@ -185,7 +185,7 @@ These are visible in the conversation memory snapshot and the audit ledger.
 
 | Provider | Default Model | Required Parameters | Notes |
 |---|---|---|---|
-| `openai` | `text-embedding-3-small` | `apiKey` | Use `${eddivault:...}` for keys |
+| `openai` | `text-embedding-3-small` | `apiKey` | Use `${vault:...}` for keys |
 | `azure-openai` | `text-embedding-3-small` | `endpoint`, `apiKey`, `deploymentName` | Azure-hosted OpenAI models |
 | `ollama` | `nomic-embed-text` | — | `baseUrl` (default: `localhost:11434`) |
 | `mistral` | `mistral-embed` | `apiKey` | Mistral AI embedding model |
@@ -208,7 +208,7 @@ These are visible in the conversation memory snapshot and the audit ledger.
 - ✅ **Phase 8c**: RAG Foundation — config-driven knowledge base retrieval
 - ✅ **Phase 8c-0**: httpCall-based RAG (zero infrastructure)
 - ✅ **Phase 8c-β**: Persistent vector stores (pgvector)
-- ✅ **Phase 8c-γ**: RAG provider expansion (7 embedding models + 5 vector stores)
+- ✅ **Phase 8c-γ**: RAG provider expansion (8 embedding models + 6 vector stores)
 - ✅ **Phase 8c-M**: Manager UI — RAG editor with full provider parity + document ingestion
 - ✅ **REST ingestion endpoint**: `POST /ragstore/rags/{id}/ingest`
 

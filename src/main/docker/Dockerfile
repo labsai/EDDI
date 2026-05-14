@@ -78,7 +78,7 @@
 #   accessed directly. (example: "foo.example.com,bar.example.com")
 #
 ###
-FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24@sha256:0b80559a680229acf2d61b2f7f23087f61d729627c768d5f31528d69fc58ae70
+FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24@sha256:120194aa887ae544ca492fb14f443121bcf4ee85fd26053055381ac9064272d3
 
 ### Red Hat Container Certification — required labels
 ARG EDDI_VERSION=6.0.2

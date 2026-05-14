@@ -37,18 +37,16 @@ class RestAgentEngineStreamingTest {
     }
 
     @Nested
-    @DisplayName("sanitizeForLog (private)")
+    @DisplayName("LogSanitizer.sanitize (centralized utility)")
     class SanitizeForLog {
 
         @Test
-        @DisplayName("should replace newlines and carriage returns")
-        void replacesNewlines() throws Exception {
-            Method method = RestAgentEngineStreaming.class.getDeclaredMethod("sanitizeForLog", String.class);
-            method.setAccessible(true);
-
-            assertEquals("hello_world", method.invoke(null, "hello\nworld"));
-            assertEquals("hello_world", method.invoke(null, "hello\rworld"));
-            assertEquals("null", method.invoke(null, (String) null));
+        @DisplayName("should replace newlines, carriage returns, and tabs")
+        void replacesControlChars() {
+            assertEquals("hello_world", ai.labs.eddi.utils.LogSanitizer.sanitize("hello\nworld"));
+            assertEquals("hello_world", ai.labs.eddi.utils.LogSanitizer.sanitize("hello\rworld"));
+            assertEquals("hello_world", ai.labs.eddi.utils.LogSanitizer.sanitize("hello\tworld"));
+            assertEquals("null", ai.labs.eddi.utils.LogSanitizer.sanitize(null));
         }
     }
 

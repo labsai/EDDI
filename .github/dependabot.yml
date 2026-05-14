@@ -49,6 +49,19 @@ updates:
     commit-message:
       prefix: "chore(docker)"
 
+  # ClusterFuzzLite base image digest
+  - package-ecosystem: docker
+    directory: /.clusterfuzzlite
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - security
+    commit-message:
+      prefix: "chore(docker)"
+
   # GitHub Actions versions
   - package-ecosystem: github-actions
     directory: /

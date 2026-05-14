@@ -13,6 +13,8 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -171,15 +173,8 @@ public class InMemoryTenantQuotaStore implements ITenantQuotaStore {
             synchronized (counters) {
                 counters.resetAll();
             }
-            LOGGER.infof("Usage counters reset for tenant '%s'", sanitizeForLog(tenantId));
+            LOGGER.infof("Usage counters reset for tenant '%s'", sanitize(tenantId));
         }
-    }
-
-    private static String sanitizeForLog(String value) {
-        if (value == null) {
-            return "null";
-        }
-        return value.replace('\n', '_').replace('\r', '_');
     }
 
     private TenantUsageCounters getOrCreateCounters(String tenantId) {

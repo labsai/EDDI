@@ -2,10 +2,10 @@ name: Project Metrics Tracker
 
 on:
   schedule:
-    # Offset to :05 to avoid overlapping with daily (18:00) and weekly (09:00)
+    # Offset to :05 to avoid overlapping with daily (07:00) and weekly (07:00)
     - cron: '5,20,35,50 * * * *' # every 15 min — collect metrics + push to analytics
-    - cron: '0 18 * * *'          # daily — 6pm UTC, digest (only if activity)
-    - cron: '0 9 * * 0'           # weekly — Sunday 9am UTC, Slack digest
+    - cron: '0 7 * * *'           # daily — 7am UTC (9am CEST), digest (only if activity)
+    - cron: '0 7 * * 1'           # weekly — Monday 7am UTC (9am CEST), Slack digest
   workflow_dispatch:
     inputs:
       force_digest:
@@ -25,16 +25,19 @@ jobs:
   track:
     runs-on: ubuntu-latest
     permissions:
-      actions: write   # cache delete (job-level for least privilege)
       contents: read
     steps:
       # ── Restore cached metrics ──────────────────────────────
+      # Uses run_id-based key rotation to avoid needing actions:write for cache delete.
+      # Save always creates a new key; restore-keys finds the latest.
       - name: Restore metrics cache
         id: cache-restore
         uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:
           path: metrics.json
-          key: project-metrics-data
+          key: project-metrics-${{ github.run_id }}
+          restore-keys: |
+            project-metrics-
 
       - name: Load previous metrics
         id: prev
@@ -47,9 +50,13 @@ jobs:
             echo "week_docker=$(jq -r '.week_docker // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "week_stars=$(jq -r '.week_stars // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "week_forks=$(jq -r '.week_forks // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "week_views=$(jq -r '.week_views // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "week_clones=$(jq -r '.week_clones // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "day_docker=$(jq -r '.day_docker // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "day_stars=$(jq -r '.day_stars // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "day_forks=$(jq -r '.day_forks // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "day_views=$(jq -r '.day_views // 0' metrics.json)" >> "$GITHUB_OUTPUT"
+            echo "day_clones=$(jq -r '.day_clones // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "last_milestone=$(jq -r '.last_milestone // 0' metrics.json)" >> "$GITHUB_OUTPUT"
             echo "has_data=true" >> "$GITHUB_OUTPUT"
 
@@ -65,7 +72,7 @@ jobs:
             echo "has_data=false" >> "$GITHUB_OUTPUT"
             echo "day_fields_present=false" >> "$GITHUB_OUTPUT"
             echo "week_fields_present=false" >> "$GITHUB_OUTPUT"
-            for key in docker_pulls stars forks week_docker week_stars week_forks day_docker day_stars day_forks last_milestone; do
+            for key in docker_pulls stars forks week_docker week_stars week_forks week_views week_clones day_docker day_stars day_forks day_views day_clones last_milestone; do
               echo "${key}=0" >> "$GITHUB_OUTPUT"
             done
           fi
@@ -128,9 +135,9 @@ jobs:
           FORCE="${{ github.event.inputs.force_digest }}"
 
           # Determine which schedule triggered this run
-          if [ "$SCHEDULE" = "0 18 * * *" ]; then
+          if [ "$SCHEDULE" = "0 7 * * *" ]; then
             TYPE="daily"
-          elif [ "$SCHEDULE" = "0 9 * * 0" ] || [ "$FORCE" = "true" ]; then
+          elif [ "$SCHEDULE" = "0 7 * * 1" ] || [ "$FORCE" = "true" ]; then
             TYPE="weekly"
           else
             TYPE="collect"
@@ -167,29 +174,34 @@ jobs:
           fi
 
       # ── Validate baselines ──────────────────────────────────
-      # Use field-presence (not > 0) to distinguish "missing from legacy cache"
-      # from "legitimately zero". A repo with 0 forks should still get digests.
+      # A baseline is valid when: (1) the cache existed, (2) the fields are present,
+      # AND (3) the Docker pulls baseline is non-zero. Docker pulls only ever increase,
+      # so a zero baseline is always a cold-start artifact (cache eviction/rebuild).
+      # Stars and forks CAN legitimately be 0 for new repos, but Docker pulls cannot
+      # be 0 for an established project with 300k+ pulls.
       - name: Validate baselines
         id: baselines
         run: |
           HAS_DATA="${{ steps.prev.outputs.has_data }}"
           DAY_PRESENT="${{ steps.prev.outputs.day_fields_present }}"
           WEEK_PRESENT="${{ steps.prev.outputs.week_fields_present }}"
+          DAY_DOCKER="${{ steps.prev.outputs.day_docker }}"
+          WEEK_DOCKER="${{ steps.prev.outputs.week_docker }}"
 
-          # Day baselines are valid only if cache existed AND the fields were present
-          if [ "$HAS_DATA" = "true" ] && [ "$DAY_PRESENT" = "true" ]; then
+          # Day baselines: fields must exist AND docker baseline must be non-zero
+          if [ "$HAS_DATA" = "true" ] && [ "$DAY_PRESENT" = "true" ] && [ "$DAY_DOCKER" -gt 0 ]; then
             echo "day_valid=true" >> "$GITHUB_OUTPUT"
           else
             echo "day_valid=false" >> "$GITHUB_OUTPUT"
-            echo "⚠️  Day baselines invalid (has_data=$HAS_DATA, day_fields_present=$DAY_PRESENT)"
+            echo "⚠️  Day baselines invalid (has_data=$HAS_DATA, day_present=$DAY_PRESENT, day_docker=$DAY_DOCKER)"
           fi
 
-          # Week baselines are valid only if cache existed AND the fields were present
-          if [ "$HAS_DATA" = "true" ] && [ "$WEEK_PRESENT" = "true" ]; then
+          # Week baselines: fields must exist AND docker baseline must be non-zero
+          if [ "$HAS_DATA" = "true" ] && [ "$WEEK_PRESENT" = "true" ] && [ "$WEEK_DOCKER" -gt 0 ]; then
             echo "week_valid=true" >> "$GITHUB_OUTPUT"
           else
             echo "week_valid=false" >> "$GITHUB_OUTPUT"
-            echo "⚠️  Week baselines invalid (has_data=$HAS_DATA, week_fields_present=$WEEK_PRESENT)"
+            echo "⚠️  Week baselines invalid (has_data=$HAS_DATA, week_present=$WEEK_PRESENT, week_docker=$WEEK_DOCKER)"
           fi
 
       # ── Push to analytics (always, if data changed) ─────────
@@ -270,7 +282,7 @@ jobs:
               ]
             }"
 
-      # ── Weekly digest (Sunday or manual) ────────────────────
+      # ── Weekly digest (Monday or manual) ────────────────────
       - name: Weekly digest
         if: >-
           steps.schedule.outputs.type == 'weekly'
@@ -294,13 +306,29 @@ jobs:
           WEEK_PULL_DIFF=$(( PULLS - ${{ steps.prev.outputs.week_docker }} ))
           WEEK_STAR_DIFF=$(( STARS - ${{ steps.prev.outputs.week_stars }} ))
           WEEK_FORK_DIFF=$(( FORKS - ${{ steps.prev.outputs.week_forks }} ))
+          WEEK_VIEW_DIFF=$(( VIEWS - ${{ steps.prev.outputs.week_views }} ))
+          WEEK_CLONE_DIFF=$(( CLONES - ${{ steps.prev.outputs.week_clones }} ))
+
+          # Sanity check: if delta equals current, baseline was 0 (cold-start artifact)
+          if [ "$WEEK_PULL_DIFF" -eq "$PULLS" ] && [ "$PULLS" -gt 0 ]; then
+            echo "⚠️  Weekly deltas are bogus (baseline was 0) — skipping digest"
+            exit 0
+          fi
 
           PULLS_FMT=$(printf "%'d" "$PULLS")
 
-          # Build sign prefixes
+          # Build sign prefixes (pulls/stars/forks only increase; views/clones can decrease)
           pull_sign=""; [ "$WEEK_PULL_DIFF" -gt 0 ] && pull_sign="+"
           star_sign=""; [ "$WEEK_STAR_DIFF" -gt 0 ] && star_sign="+"
           fork_sign=""; [ "$WEEK_FORK_DIFF" -gt 0 ] && fork_sign="+"
+
+          # Views/clones: suppress delta when baseline was 0 (field missing from old cache)
+          view_delta=""; if [ "${{ steps.prev.outputs.week_views }}" -ne 0 ] || [ "$VIEWS" -eq 0 ]; then
+            vs=""; [ "$WEEK_VIEW_DIFF" -gt 0 ] && vs="+"; view_delta=", ${vs}${WEEK_VIEW_DIFF}"
+          fi
+          clone_delta=""; if [ "${{ steps.prev.outputs.week_clones }}" -ne 0 ] || [ "$CLONES" -eq 0 ]; then
+            cs=""; [ "$WEEK_CLONE_DIFF" -gt 0 ] && cs="+"; clone_delta=" (${cs}${WEEK_CLONE_DIFF})"
+          fi
 
           curl -sf -X POST "$SLACK_WEBHOOK" \
             -H 'Content-type: application/json' \
@@ -316,8 +344,8 @@ jobs:
                     { \"type\": \"mrkdwn\", \"text\": \"*🐳 Docker Pulls*\n${PULLS_FMT} (${pull_sign}${WEEK_PULL_DIFF})\" },
                     { \"type\": \"mrkdwn\", \"text\": \"*⭐ GitHub Stars*\n${STARS} (${star_sign}${WEEK_STAR_DIFF})\" },
                     { \"type\": \"mrkdwn\", \"text\": \"*🍴 Forks*\n${FORKS} (${fork_sign}${WEEK_FORK_DIFF})\" },
-                    { \"type\": \"mrkdwn\", \"text\": \"*👀 Repo Views (14d)*\n${VIEWS} (${UNIQUES} unique)\" },
-                    { \"type\": \"mrkdwn\", \"text\": \"*📥 Git Clones (14d)*\n${CLONES}\" }
+                    { \"type\": \"mrkdwn\", \"text\": \"*👀 Repo Views (14d)*\n${VIEWS} (${UNIQUES} unique${view_delta})\" },
+                    { \"type\": \"mrkdwn\", \"text\": \"*📥 Git Clones (14d)*\n${CLONES}${clone_delta}\" }
                   ]
                 },
                 {
@@ -352,6 +380,14 @@ jobs:
           DAY_PULL_DIFF=$(( PULLS - ${{ steps.prev.outputs.day_docker }} ))
           DAY_STAR_DIFF=$(( STARS - ${{ steps.prev.outputs.day_stars }} ))
           DAY_FORK_DIFF=$(( FORKS - ${{ steps.prev.outputs.day_forks }} ))
+          DAY_VIEW_DIFF=$(( VIEWS - ${{ steps.prev.outputs.day_views }} ))
+          DAY_CLONE_DIFF=$(( CLONES - ${{ steps.prev.outputs.day_clones }} ))
+
+          # Sanity check: if delta equals current, baseline was 0 (cold-start artifact)
+          if [ "$DAY_PULL_DIFF" -eq "$PULLS" ] && [ "$PULLS" -gt 0 ]; then
+            echo "⚠️  Daily deltas are bogus (baseline was 0) — skipping digest"
+            exit 0
+          fi
 
           # Only send if something actually changed today
           if [ "$DAY_PULL_DIFF" -eq 0 ] && [ "$DAY_STAR_DIFF" -eq 0 ] && [ "$DAY_FORK_DIFF" -eq 0 ]; then
@@ -359,10 +395,18 @@ jobs:
             exit 0
           fi
 
-          # Build sign prefixes
+          # Build sign prefixes (pulls/stars/forks only increase; views/clones can decrease)
           pull_sign=""; [ "$DAY_PULL_DIFF" -gt 0 ] && pull_sign="+"
           star_sign=""; [ "$DAY_STAR_DIFF" -gt 0 ] && star_sign="+"
           fork_sign=""; [ "$DAY_FORK_DIFF" -gt 0 ] && fork_sign="+"
+
+          # Views/clones: suppress delta when baseline was 0 (field missing from old cache)
+          view_delta=""; if [ "${{ steps.prev.outputs.day_views }}" -ne 0 ] || [ "$VIEWS" -eq 0 ]; then
+            vs=""; [ "$DAY_VIEW_DIFF" -gt 0 ] && vs="+"; view_delta=" (${vs}${DAY_VIEW_DIFF})"
+          fi
+          clone_delta=""; if [ "${{ steps.prev.outputs.day_clones }}" -ne 0 ] || [ "$CLONES" -eq 0 ]; then
+            cs=""; [ "$DAY_CLONE_DIFF" -gt 0 ] && cs="+"; clone_delta=" (${cs}${DAY_CLONE_DIFF})"
+          fi
 
           PULLS_FMT=$(printf "%'d" "$PULLS")
 
@@ -384,7 +428,7 @@ jobs:
                 {
                   \"type\": \"context\",
                   \"elements\": [
-                    { \"type\": \"mrkdwn\", \"text\": \"👀 Views: ${VIEWS} · 📥 Clones: ${CLONES} · <https://github.com/labsai/EDDI|GitHub>\" }
+                    { \"type\": \"mrkdwn\", \"text\": \"👀 Views (14d): ${VIEWS}${view_delta} · 📥 Clones (14d): ${CLONES}${clone_delta} · <https://github.com/labsai/EDDI|GitHub>\" }
                   ]
                 }
               ]
@@ -402,6 +446,9 @@ jobs:
           WEEK_VALID="${{ steps.baselines.outputs.week_valid }}"
           DAY_VALID="${{ steps.baselines.outputs.day_valid }}"
 
+          CUR_VIEWS=${{ steps.traffic.outputs.views }}
+          CUR_CLONES=${{ steps.traffic.outputs.clones }}
+
           # ── Determine week baseline ──
           # Uses the same field-presence check as the Validate step
           if [ "$WEEK_VALID" != "true" ]; then
@@ -409,16 +456,22 @@ jobs:
             WEEK_DOCKER=$CUR_PULLS
             WEEK_STARS=$CUR_STARS
             WEEK_FORKS=$CUR_FORKS
+            WEEK_VIEWS=$CUR_VIEWS
+            WEEK_CLONES=$CUR_CLONES
           elif [ "$SCHED_TYPE" = "weekly" ]; then
             # Weekly digest just sent — reset baseline to now
             WEEK_DOCKER=$CUR_PULLS
             WEEK_STARS=$CUR_STARS
             WEEK_FORKS=$CUR_FORKS
+            WEEK_VIEWS=$CUR_VIEWS
+            WEEK_CLONES=$CUR_CLONES
           else
             # Preserve existing baseline
             WEEK_DOCKER=${{ steps.prev.outputs.week_docker }}
             WEEK_STARS=${{ steps.prev.outputs.week_stars }}
             WEEK_FORKS=${{ steps.prev.outputs.week_forks }}
+            WEEK_VIEWS=${{ steps.prev.outputs.week_views }}
+            WEEK_CLONES=${{ steps.prev.outputs.week_clones }}
           fi
 
           # ── Determine day baseline ──
@@ -428,16 +481,22 @@ jobs:
             DAY_DOCKER=$CUR_PULLS
             DAY_STARS=$CUR_STARS
             DAY_FORKS=$CUR_FORKS
-          elif [ "$SCHED_TYPE" = "daily" ] || [ "$SCHED_TYPE" = "weekly" ]; then
-            # Daily/weekly digest just sent — reset baseline to now
+            DAY_VIEWS=$CUR_VIEWS
+            DAY_CLONES=$CUR_CLONES
+          elif [ "$SCHED_TYPE" = "daily" ]; then
+            # Daily digest just sent — reset baseline to now
             DAY_DOCKER=$CUR_PULLS
             DAY_STARS=$CUR_STARS
             DAY_FORKS=$CUR_FORKS
+            DAY_VIEWS=$CUR_VIEWS
+            DAY_CLONES=$CUR_CLONES
           else
             # Preserve existing baseline
             DAY_DOCKER=${{ steps.prev.outputs.day_docker }}
             DAY_STARS=${{ steps.prev.outputs.day_stars }}
             DAY_FORKS=${{ steps.prev.outputs.day_forks }}
+            DAY_VIEWS=${{ steps.prev.outputs.day_views }}
+            DAY_CLONES=${{ steps.prev.outputs.day_clones }}
           fi
 
           # Current milestone marker
@@ -450,25 +509,26 @@ jobs:
             --argjson week_docker "$WEEK_DOCKER" \
             --argjson week_stars "$WEEK_STARS" \
             --argjson week_forks "$WEEK_FORKS" \
+            --argjson week_views "$WEEK_VIEWS" \
+            --argjson week_clones "$WEEK_CLONES" \
             --argjson day_docker "$DAY_DOCKER" \
             --argjson day_stars "$DAY_STARS" \
             --argjson day_forks "$DAY_FORKS" \
+            --argjson day_views "$DAY_VIEWS" \
+            --argjson day_clones "$DAY_CLONES" \
             --argjson last_milestone "$CURRENT_MS" \
             '{docker_pulls: $docker_pulls, stars: $stars, forks: $forks,
               week_docker: $week_docker, week_stars: $week_stars, week_forks: $week_forks,
+              week_views: $week_views, week_clones: $week_clones,
               day_docker: $day_docker, day_stars: $day_stars, day_forks: $day_forks,
+              day_views: $day_views, day_clones: $day_clones,
               last_milestone: $last_milestone}' > metrics.json
 
           echo "Saved metrics:"
           cat metrics.json
 
-      - name: Delete old cache
-        run: gh cache delete project-metrics-data || true
-        env:
-          GH_TOKEN: ${{ github.token }}
-
       - name: Save metrics cache
         uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:
           path: metrics.json
-          key: project-metrics-data
+          key: project-metrics-${{ github.run_id }}

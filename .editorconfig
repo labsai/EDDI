@@ -1,0 +1,36 @@
+root = true
+
+[*]
+indent_style = space
+indent_size = 4
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.ps1]
+charset = utf-8-bom
+end_of_line = crlf
+
+[*.cmd]
+charset = utf-8
+end_of_line = crlf
+
+[*.sh]
+charset = utf-8
+end_of_line = lf
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.json]
+indent_size = 2
+
+[*.java]
+charset = utf-8
+
+[*.xml]
+indent_size = 4
+
+[Makefile]
+indent_style = tab

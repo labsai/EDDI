@@ -10,6 +10,8 @@ import ai.labs.eddi.configs.migration.IMigrationLogStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.MigrationLogStore;
 import ai.labs.eddi.configs.migration.MigrationManager;
+import ai.labs.eddi.configs.variables.IGlobalVariableStore;
+import ai.labs.eddi.configs.variables.mongo.GlobalVariableStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.mongo.MongoUserMemoryStore;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorageFactory;
@@ -17,6 +19,7 @@ import ai.labs.eddi.datastore.postgres.PostgresAuditStore;
 import ai.labs.eddi.datastore.postgres.PostgresConversationMemoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresDatabaseLogs;
 import ai.labs.eddi.datastore.postgres.PostgresDeploymentStorage;
+import ai.labs.eddi.datastore.postgres.PostgresGlobalVariableStore;
 import ai.labs.eddi.datastore.postgres.PostgresMigrationLogStore;
 import ai.labs.eddi.datastore.postgres.PostgresMigrationManager;
 import ai.labs.eddi.datastore.postgres.PostgresResourceStorageFactory;
@@ -141,6 +144,12 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IMigrationManager migrationManager(Instance<MigrationManager> mongo, Instance<PostgresMigrationManager> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IGlobalVariableStore globalVariableStore(Instance<GlobalVariableStore> mongo, Instance<PostgresGlobalVariableStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 }

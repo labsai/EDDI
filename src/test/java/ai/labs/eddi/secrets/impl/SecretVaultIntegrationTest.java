@@ -145,7 +145,7 @@ class SecretVaultIntegrationTest {
             var ref = new SecretReference(TENANT, KEY_NAME);
             provider.store(ref, SECRET_VALUE, "Test API key", List.of("*"));
 
-            String resolved = resolver.resolveValue("${eddivault:" + KEY_NAME + "}");
+            String resolved = resolver.resolveValue("${vault:" + KEY_NAME + "}");
             assertEquals(SECRET_VALUE, resolved);
         }
 
@@ -158,7 +158,7 @@ class SecretVaultIntegrationTest {
             var ref = new SecretReference("production", KEY_NAME);
             provider.store(ref, SECRET_VALUE, "Prod key", null);
 
-            String resolved = resolver.resolveValue("${eddivault:production/" + KEY_NAME + "}");
+            String resolved = resolver.resolveValue("${vault:production/" + KEY_NAME + "}");
             assertEquals(SECRET_VALUE, resolved);
         }
 
@@ -171,7 +171,7 @@ class SecretVaultIntegrationTest {
             provider.store(new SecretReference(TENANT, "apiKey"), "key-123", null, null);
             provider.store(new SecretReference(TENANT, "apiSecret"), "secret-456", null, null);
 
-            String input = "key=${eddivault:apiKey}&secret=${eddivault:apiSecret}";
+            String input = "key=${vault:apiKey}&secret=${vault:apiSecret}";
             String resolved = resolver.resolveValue(input);
             assertEquals("key=key-123&secret=secret-456", resolved);
         }
@@ -190,9 +190,9 @@ class SecretVaultIntegrationTest {
             setupSecretMocking();
 
             // First attempt — secret doesn't exist yet
-            String result1 = resolver.resolveValue("${eddivault:" + KEY_NAME + "}");
+            String result1 = resolver.resolveValue("${vault:" + KEY_NAME + "}");
             // Should pass through unchanged (not found)
-            assertEquals("${eddivault:" + KEY_NAME + "}", result1);
+            assertEquals("${vault:" + KEY_NAME + "}", result1);
 
             // Now store the secret
             provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null);
@@ -200,7 +200,7 @@ class SecretVaultIntegrationTest {
             // Second attempt — should now resolve successfully
             // The POINT of this test: we DON'T call invalidateAll()
             // because failed resolutions should NEVER be cached.
-            String result2 = resolver.resolveValue("${eddivault:" + KEY_NAME + "}");
+            String result2 = resolver.resolveValue("${vault:" + KEY_NAME + "}");
             assertEquals(SECRET_VALUE, result2);
         }
 
@@ -213,8 +213,8 @@ class SecretVaultIntegrationTest {
             provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null);
 
             // Resolve twice
-            resolver.resolveValue("${eddivault:" + KEY_NAME + "}");
-            resolver.resolveValue("${eddivault:" + KEY_NAME + "}");
+            resolver.resolveValue("${vault:" + KEY_NAME + "}");
+            resolver.resolveValue("${vault:" + KEY_NAME + "}");
 
             // Second resolve should use cache — verify cache hit counter
             assertEquals(1.0, meterRegistry.counter("eddi.vault.cache.hits").count());
@@ -237,8 +237,8 @@ class SecretVaultIntegrationTest {
             provider.store(new SecretReference(TENANT, "key2"), "value2", null, null);
 
             // Verify pre-rotation
-            assertEquals("value1", resolver.resolveValue("${eddivault:key1}"));
-            assertEquals("value2", resolver.resolveValue("${eddivault:key2}"));
+            assertEquals("value1", resolver.resolveValue("${vault:key1}"));
+            assertEquals("value2", resolver.resolveValue("${vault:key2}"));
 
             // Clear cache and rotate DEK
             resolver.invalidateAll();
@@ -249,8 +249,8 @@ class SecretVaultIntegrationTest {
             resolver.invalidateAll();
 
             // Verify post-rotation — secrets should still resolve to same values
-            assertEquals("value1", resolver.resolveValue("${eddivault:key1}"));
-            assertEquals("value2", resolver.resolveValue("${eddivault:key2}"));
+            assertEquals("value1", resolver.resolveValue("${vault:key1}"));
+            assertEquals("value2", resolver.resolveValue("${vault:key2}"));
         }
 
         @Test
@@ -315,7 +315,7 @@ class SecretVaultIntegrationTest {
             resolver.invalidateAll();
 
             // The in-memory provider now uses the new KEK — secrets should still resolve
-            assertEquals(SECRET_VALUE, resolver.resolveValue("${eddivault:" + KEY_NAME + "}"));
+            assertEquals(SECRET_VALUE, resolver.resolveValue("${vault:" + KEY_NAME + "}"));
         }
 
         @Test
@@ -380,11 +380,11 @@ class SecretVaultIntegrationTest {
             provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, null);
 
             // First resolve — cache miss
-            resolver.resolveValue("${eddivault:" + KEY_NAME + "}");
+            resolver.resolveValue("${vault:" + KEY_NAME + "}");
             assertEquals(1.0, meterRegistry.counter("eddi.vault.cache.misses").count());
 
             // Second resolve — cache hit
-            resolver.resolveValue("${eddivault:" + KEY_NAME + "}");
+            resolver.resolveValue("${vault:" + KEY_NAME + "}");
             assertEquals(1.0, meterRegistry.counter("eddi.vault.cache.hits").count());
         }
 
@@ -452,13 +452,13 @@ class SecretVaultIntegrationTest {
 
             provider.store(new SecretReference(TENANT, KEY_NAME), "old-value", null, null);
 
-            String v1 = resolver.resolveValue("${eddivault:" + KEY_NAME + "}");
+            String v1 = resolver.resolveValue("${vault:" + KEY_NAME + "}");
             assertEquals("old-value", v1);
 
             provider.store(new SecretReference(TENANT, KEY_NAME), "new-value", null, null);
             resolver.invalidateCache(new SecretReference(TENANT, KEY_NAME));
 
-            String v2 = resolver.resolveValue("${eddivault:" + KEY_NAME + "}");
+            String v2 = resolver.resolveValue("${vault:" + KEY_NAME + "}");
             assertEquals("new-value", v2);
         }
 
@@ -471,15 +471,15 @@ class SecretVaultIntegrationTest {
             provider.store(new SecretReference(TENANT, "k1"), "v1", null, null);
             provider.store(new SecretReference(TENANT, "k2"), "v2", null, null);
 
-            resolver.resolveValue("${eddivault:k1}");
-            resolver.resolveValue("${eddivault:k2}");
+            resolver.resolveValue("${vault:k1}");
+            resolver.resolveValue("${vault:k2}");
 
             resolver.invalidateAll();
             provider.store(new SecretReference(TENANT, "k1"), "v1-updated", null, null);
             provider.store(new SecretReference(TENANT, "k2"), "v2-updated", null, null);
 
-            assertEquals("v1-updated", resolver.resolveValue("${eddivault:k1}"));
-            assertEquals("v2-updated", resolver.resolveValue("${eddivault:k2}"));
+            assertEquals("v1-updated", resolver.resolveValue("${vault:k1}"));
+            assertEquals("v2-updated", resolver.resolveValue("${vault:k2}"));
         }
     }
 }

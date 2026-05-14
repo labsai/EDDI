@@ -253,6 +253,13 @@ detect_platform() {
 }
 
 install_docker_linux() {
+  # Pinned Docker convenience install script (OpenSSF: pin downloads by hash)
+  # Source: https://github.com/docker/docker-install
+  # To update: pick a new commit, download, compute sha256sum, update both values.
+  local DOCKER_INSTALL_COMMIT="f2b0ef96e1f2a34340caf3c72a0a727aa0c48ec7"
+  local DOCKER_INSTALL_SHA256="93f04ab7de485fb08498d8d0257f11a1ffee145ebcc2074dc21937eacc706a2b"
+  local DOCKER_INSTALL_URL="https://raw.githubusercontent.com/docker/docker-install/${DOCKER_INSTALL_COMMIT}/install.sh"
+
   echo ""
   echo -e "  ${BOLD}Docker is required but not installed.${RESET}"
   echo ""
@@ -268,17 +275,33 @@ install_docker_linux() {
   reply="${reply:-y}"
 
   if [[ "$reply" =~ ^[Yy]$ ]]; then
-    echo -e "  Installing Docker via ${CYAN}get.docker.com${RESET}..."
-    if curl -fsSL https://get.docker.com | sh; then
-      info "Docker installed!"
-      # Add current user to docker group (takes effect on next login)
-      if ! groups | grep -q docker; then
-        sudo usermod -aG docker "$USER" 2>/dev/null || true
-        echo -e "  ${YELLOW}Note: You may need to log out/in for Docker group to take effect.${RESET}"
-        echo -e "  ${YELLOW}      If docker commands fail, run: newgrp docker${RESET}"
+    echo -e "  Installing Docker via ${CYAN}docker/docker-install${RESET}..."
+    local docker_install_script
+    docker_install_script=$(mktemp "${TMPDIR:-/tmp}/get-docker.XXXXXX")
+    if curl -fsSL "$DOCKER_INSTALL_URL" -o "$docker_install_script"; then
+      # Verify integrity before execution (OpenSSF pinned-dependencies requirement)
+      local actual_hash
+      actual_hash=$(sha256sum "$docker_install_script" | cut -d' ' -f1)
+      if [[ "$actual_hash" != "$DOCKER_INSTALL_SHA256" ]]; then
+        rm -f "$docker_install_script"
+        fail "Docker install script hash mismatch!\n     Expected: ${DOCKER_INSTALL_SHA256}\n     Got:      ${actual_hash}\n     The pinned script may need updating. Install Docker manually: https://docs.docker.com/get-docker/"
+      fi
+      if sh "$docker_install_script"; then
+        rm -f "$docker_install_script"
+        info "Docker installed!"
+        # Add current user to docker group (takes effect on next login)
+        if ! groups | grep -q docker; then
+          sudo usermod -aG docker "$USER" 2>/dev/null || true
+          echo -e "  ${YELLOW}Note: You may need to log out/in for Docker group to take effect.${RESET}"
+          echo -e "  ${YELLOW}      If docker commands fail, run: newgrp docker${RESET}"
+        fi
+      else
+        rm -f "$docker_install_script"
+        fail "Docker installation failed. Try manually: https://docs.docker.com/get-docker/"
       fi
     else
-      fail "Docker installation failed. Try manually: https://docs.docker.com/get-docker/"
+      rm -f "$docker_install_script"
+      fail "Failed to download Docker install script.\n     Try manually: https://docs.docker.com/get-docker/"
     fi
   else
     echo "  Install Docker first, then re-run this script."

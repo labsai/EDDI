@@ -21,6 +21,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.time.Duration;
 import java.util.UUID;
 
@@ -72,7 +74,7 @@ public class RagIngestionService {
     private void processIngestion(String kbId, String ingestionId, String documentContent, String documentName, RagConfiguration ragConfig) {
         try {
             ingestionStatus.put(ingestionId, "processing");
-            LOGGER.infof("Starting ingestion %s for KB '%s', document '%s'", ingestionId, kbId, documentName);
+            LOGGER.infof("Starting ingestion %s for KB '%s', document '%s'", ingestionId, sanitize(kbId), sanitize(documentName));
 
             // 1. Parse document
             Document document = Document.from(documentContent, Metadata.from("source", documentName).put("kbId", kbId));
@@ -90,11 +92,11 @@ public class RagIngestionService {
             ingestor.ingest(document);
 
             ingestionStatus.put(ingestionId, "completed");
-            LOGGER.infof("Ingestion %s completed for KB '%s'", ingestionId, kbId);
+            LOGGER.infof("Ingestion %s completed for KB '%s'", ingestionId, sanitize(kbId));
 
         } catch (Exception e) {
             ingestionStatus.put(ingestionId, "failed: " + e.getMessage());
-            LOGGER.errorf(e, "Ingestion %s failed for KB '%s': %s", ingestionId, kbId, e.getMessage());
+            LOGGER.errorf(e, "Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), e.getMessage());
         }
     }
 

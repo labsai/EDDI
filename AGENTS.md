@@ -43,21 +43,32 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 ### During Work
 
 3. **Branching**: Check `git branch --show-current` and `git log -5 --oneline` to understand the current branch context. **Do NOT commit directly to `main`.** If unsure which branch to use, ask the user.
+   - **Always branch from `origin/main`**, never from another feature branch. Run `git fetch origin main` then `git checkout -b my-branch origin/main` to guarantee a clean base.
 4. **Never force-push**: `git push --force` and `git push --force-with-lease` are **forbidden**. To avoid ever needing them, follow these sub-rules:
    - **Never `git commit --amend` after pushing.** Amend only works on unpushed commits. If you already pushed, make a new commit instead.
    - **Never `git rebase -i` on a pushed branch.** Interactive rebase rewrites history. If the branch is pushed, history is immutable.
    - **Never `git reset` on a pushed branch.** Use `git revert` to undo pushed commits (it creates a new forward commit).
    - **Always `git pull --rebase` before pushing** if the remote has new commits.
    - A `.githooks/pre-push` hook will block non-fast-forward pushes as a safety net.
-5. **Commit often**: Every working unit gets a commit. Use conventional commits:
+5. **Commit often and selectively**: Every working unit gets a commit. Use conventional commits:
    ```
    feat(scope): description
    fix(scope): description
    chore(scope): description
    refactor(scope): description
    ```
+   **Only stage files you actually worked on.** Never use `git add .` or `git add -A`. The working tree may contain changes from other people, other branches, or other tools — those are not yours to commit. Always:
+   - Stage files individually: `git add path/to/file1 path/to/file2`
+   - Run `git status` before committing — if any staged file is not part of your task, unstage it
+   - Run `git log --stat -1` after committing to confirm the commit only contains your files
 6. **Each commit must build**: Run `./mvnw compile` (or `./mvnw test` for backend) before committing. Never commit broken code.
 7. **Verify factual claims against authoritative sources**: When writing documentation about the project's technology stack, dependencies, or CI configuration, **always verify against the canonical source** (`pom.xml` for dependencies, `ci.yml` for CI behavior, `Dockerfile` for container config). **Never infer from codebase grep results** — migration code, comments about "previous implementations," and backward-compatibility references describe what the project *used to* use, not what it currently uses. If a term appears 40 times in the codebase but zero times in `pom.xml`, the project does not use it.
+8. **Update the changelog immediately before committing**: Edit [`docs/changelog.md`](docs/changelog.md) and include it in the commit that contains the changes being documented. The changelog must land on the **same branch** as the work it documents — never on a different branch after the fact. Each entry should include:
+   - Date and short title
+   - Repo and branch
+   - What changed (files + reasoning)
+   - Design decisions made
+   - What's in progress / what's next (if interrupted mid-task)
 
 #### Git Recovery — What To Do Instead of Force-Push
 
@@ -71,12 +82,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 ### After Completing Work (or if interrupted/switching sessions)
 
-8. **Update the changelog**: Edit [`docs/changelog.md`](docs/changelog.md) and add an entry with:
-   - Date and short title
-   - Repo and branch
-   - What changed (files + reasoning)
-   - Design decisions made
-   - What's in progress / what's next (if interrupted mid-task)
+9. **Verify branch hygiene**: Before switching branches, run `git status` and `git stash` any uncommitted work. When returning to a branch, run `git stash pop` and verify the restored changes belong to that branch.
 
 ---
 
@@ -192,6 +198,8 @@ When tasks process templates (system prompts, HTTP call bodies, property instruc
 | `context`          | `Map<String, Object>`                        | Input context variables set per turn                                       | `{{context.language}}`                           |
 | `properties`       | `Map<String, Object>`                        | Conversation properties — raw values from `ConversationProperties.toMap()` | `{properties.preferred_language}`                |
 | `memory`           | `Map` with `current`, `last`, `past`         | Conversation step data from the pipeline                                   | `{memory.current.output}`, `{memory.last.input}` |
+| `snippets`         | `Map<String, Object>`                        | Prompt Snippets — auto-injected from `PromptSnippetService`                | `{{snippets.cautious_mode}}`                     |
+| `vars`             | `Map<String, Object>`                        | Global Variables — deployment-wide config from `GlobalVariableResolver`    | `{{vars.default-model}}`                         |
 | `userInfo`         | `Map` with `userId`                          | Authenticated user identity                                                | `{{userInfo.userId}}`                            |
 | `conversationInfo` | `Map` with `conversationId`, `agentId`, etc. | Conversation metadata                                                      | `{{conversationInfo.agentId}}`                   |
 | `conversationLog`  | `String`                                     | Formatted conversation history                                             | `{{conversationLog}}`                            |
@@ -629,6 +637,8 @@ This is because `ConversationProperties.put()` stores `property.getValueString()
 | `{memory.current.output}`           | Output text for current step       |                                              |
 | `{memory.last.input}`               | Previous step's input              |                                              |
 | `{context.key}`                     | Context variable set by client     | `{context.language}`                         |
+| `{snippets.name}`                   | Prompt snippet content             | `{snippets.cautious_mode}`                   |
+| `{vars.key}`                        | Global variable value              | `{vars.default-model}`                       |
 | `{userInfo.userId}`                 | Authenticated user ID              |                                              |
 | `{conversationInfo.agentId}`        | Current agent ID                   |                                              |
 | `{conversationInfo.conversationId}` | Current conversation ID            |                                              |
@@ -734,7 +744,7 @@ Matcher:      "actions" : "ask_for_model"
 | `step`         | Cleared at end of turn                                                                                                                        |
 | `conversation` | Lives for the session (default for most agent-building properties)                                                                            |
 | `longTerm`     | Persisted to `usermemories` collection across conversations                                                                                   |
-| `secret`       | Auto-vaulted: plaintext stored in SecretsVault, raw input scrubbed from memory, vault reference (`${eddivault:...}`) stored as property value |
+| `secret`       | Auto-vaulted: plaintext stored in SecretsVault, raw input scrubbed from memory, vault reference (`${vault:...}`) stored as property value |
 
 > **Warning**: `scope: "secret"` requires the vault to be active (`EDDI_VAULT_MASTER_KEY` env var set). If vault is disabled (common in dev mode), `autoVaultSecret()` fails and falls back to storing plaintext — but logs an ERROR that may confuse users. For wizard-style agents that collect API keys and pass them to an endpoint (like the Agent Father), prefer `scope: "conversation"` and delegate vaulting to the receiving service.
 

@@ -246,7 +246,7 @@ class RestSecretStoreTest {
 
         assertEquals(201, resp.getStatus());
         Map<String, Object> body = (Map<String, Object>) resp.getEntity();
-        assertEquals("${eddivault:openaiKey}", body.get("reference"));
+        assertEquals("${vault:openaiKey}", body.get("reference"));
     }
 
     @Test
@@ -258,6 +258,6 @@ class RestSecretStoreTest {
 
         assertEquals(201, resp.getStatus());
         Map<String, Object> body = (Map<String, Object>) resp.getEntity();
-        assertEquals("${eddivault:acme-corp/dbPassword}", body.get("reference"));
+        assertEquals("${vault:acme-corp/dbPassword}", body.get("reference"));
     }
 }

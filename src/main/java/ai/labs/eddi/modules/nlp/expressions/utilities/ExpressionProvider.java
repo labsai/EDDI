@@ -10,6 +10,8 @@ import ai.labs.eddi.modules.nlp.expressions.IExpressionFactory;
 import ai.labs.eddi.modules.nlp.expressions.value.Value;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.ArrayList;
@@ -114,7 +116,7 @@ public class ExpressionProvider implements IExpressionProvider {
                 Expressions expressions = parseExpressions(subExpressions);
                 exp.setSubExpressions(expressions);
             } catch (Exception e) {
-                log.error(format("Error while parsing Expression: %s, indexOfOpening: %s, indexOfClosing: %s, message: %s", expression,
+                log.error(format("Error while parsing Expression: %s, indexOfOpening: %s, indexOfClosing: %s, message: %s", sanitize(expression),
                         indexOfOpening, indexOfClosing, e.getLocalizedMessage()));
             }
         } else {
