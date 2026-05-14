@@ -69,7 +69,7 @@ class InputParserTaskTest {
         @Test
         @DisplayName("getId returns correct identifier")
         void testGetId() {
-            assertEquals("ai.labs.parser", task.getId());
+            assertEquals("ai.labs.parser", task.getId().name());
         }
 
         @Test
@@ -348,7 +348,7 @@ class InputParserTaskTest {
             var descriptor = task.getExtensionDescriptor();
 
             assertNotNull(descriptor);
-            assertEquals("ai.labs.parser", descriptor.getType());
+            assertEquals("ai.labs.parser", descriptor.getType().name());
             assertEquals("Input Parser", descriptor.getDisplayName());
         }
 

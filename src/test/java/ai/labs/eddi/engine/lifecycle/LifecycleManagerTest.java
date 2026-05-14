@@ -40,6 +40,8 @@ public class LifecycleManagerTest {
     public void testExecuteLifecycle() throws Exception {
         // setup
         ILifecycleTask lifecycleTask = mock(ILifecycleTask.class);
+        when(lifecycleTask.getId()).thenReturn(new TaskId("test"));
+        when(lifecycleTask.getType()).thenReturn("test");
         lifecycleManager.addLifecycleTask(lifecycleTask);
 
         // test
@@ -71,11 +73,11 @@ public class LifecycleManagerTest {
         // Setup: tasks with types "behavior_rules" and "langchain"
         ILifecycleTask behaviorTask = mock(ILifecycleTask.class);
         when(behaviorTask.getType()).thenReturn("behavior_rules");
-        when(behaviorTask.getId()).thenReturn("behavior_rules");
+        when(behaviorTask.getId()).thenReturn(new TaskId("behavior_rules"));
 
         ILifecycleTask langchainTask = mock(ILifecycleTask.class);
         when(langchainTask.getType()).thenReturn("langchain");
-        when(langchainTask.getId()).thenReturn("langchain");
+        when(langchainTask.getId()).thenReturn(new TaskId("langchain"));
 
         lifecycleManager.addLifecycleTask(behaviorTask);
         lifecycleManager.addLifecycleTask(langchainTask);
@@ -93,11 +95,11 @@ public class LifecycleManagerTest {
         // Setup: task with type "behavior_rules"
         ILifecycleTask behaviorTask = mock(ILifecycleTask.class);
         when(behaviorTask.getType()).thenReturn("behavior_rules");
-        when(behaviorTask.getId()).thenReturn("behavior_rules");
+        when(behaviorTask.getId()).thenReturn(new TaskId("behavior_rules"));
 
         ILifecycleTask outputTask = mock(ILifecycleTask.class);
         when(outputTask.getType()).thenReturn("output");
-        when(outputTask.getId()).thenReturn("output");
+        when(outputTask.getId()).thenReturn(new TaskId("output"));
 
         lifecycleManager.addLifecycleTask(behaviorTask);
         lifecycleManager.addLifecycleTask(outputTask);
@@ -117,7 +119,7 @@ public class LifecycleManagerTest {
         // because "behavior_rules".startsWith("behavior_rules_extended") is false
         ILifecycleTask behaviorTask = mock(ILifecycleTask.class);
         when(behaviorTask.getType()).thenReturn("behavior_rules");
-        when(behaviorTask.getId()).thenReturn("behavior_rules");
+        when(behaviorTask.getId()).thenReturn(new TaskId("behavior_rules"));
 
         lifecycleManager.addLifecycleTask(behaviorTask);
 
@@ -132,11 +134,11 @@ public class LifecycleManagerTest {
     public void testExecuteLifecycle_NoFilter_ExecutesAll() throws Exception {
         ILifecycleTask task1 = mock(ILifecycleTask.class);
         when(task1.getType()).thenReturn("parser");
-        when(task1.getId()).thenReturn("parser");
+        when(task1.getId()).thenReturn(new TaskId("parser"));
 
         ILifecycleTask task2 = mock(ILifecycleTask.class);
         when(task2.getType()).thenReturn("output");
-        when(task2.getId()).thenReturn("output");
+        when(task2.getId()).thenReturn(new TaskId("output"));
 
         lifecycleManager.addLifecycleTask(task1);
         lifecycleManager.addLifecycleTask(task2);
@@ -152,7 +154,7 @@ public class LifecycleManagerTest {
     public void testExecuteLifecycle_EmptyFilter_ExecutesAll() throws Exception {
         ILifecycleTask task = mock(ILifecycleTask.class);
         when(task.getType()).thenReturn("parser");
-        when(task.getId()).thenReturn("parser");
+        when(task.getId()).thenReturn(new TaskId("parser"));
 
         lifecycleManager.addLifecycleTask(task);
 

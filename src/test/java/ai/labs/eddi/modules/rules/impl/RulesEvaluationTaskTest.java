@@ -60,7 +60,7 @@ class RulesEvaluationTaskTest {
         @Test
         @DisplayName("getId should return correct identifier")
         void testGetId() {
-            assertEquals("ai.labs.behavior", task.getId());
+            assertEquals("ai.labs.behavior", task.getId().name());
         }
 
         @Test
@@ -247,7 +247,7 @@ class RulesEvaluationTaskTest {
             ExtensionDescriptor descriptor = task.getExtensionDescriptor();
 
             assertNotNull(descriptor);
-            assertEquals("ai.labs.behavior", descriptor.getType());
+            assertEquals("ai.labs.behavior", descriptor.getType().name());
             assertEquals("Behavior Rules", descriptor.getDisplayName());
 
             assertTrue(descriptor.getConfigs().containsKey("uri"));

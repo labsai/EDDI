@@ -99,7 +99,7 @@ public interface ILifecycleTask {
      * @return unique identifier of this task (e.g., "ai.labs.parser",
      *         "ai.labs.behavior")
      */
-    String getId();
+    TaskId getId();
 
     /**
      * Returns the type identifier for this lifecycle task.

@@ -62,7 +62,7 @@ class ApiCallsTaskTest {
     @Test
     @DisplayName("returns correct ID")
     void getId() {
-        assertEquals("ai.labs.httpcalls", task.getId());
+        assertEquals("ai.labs.httpcalls", task.getId().name());
     }
 
     @Test
@@ -315,7 +315,7 @@ class ApiCallsTaskTest {
     @DisplayName("extension descriptor has correct ID and display name")
     void extensionDescriptor() {
         ExtensionDescriptor descriptor = task.getExtensionDescriptor();
-        assertEquals("ai.labs.httpcalls", descriptor.getType());
+        assertEquals("ai.labs.httpcalls", descriptor.getType().name());
         assertEquals("Http Calls", descriptor.getDisplayName());
         assertTrue(descriptor.getConfigs().containsKey("uri"));
     }

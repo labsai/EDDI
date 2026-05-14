@@ -236,7 +236,7 @@ public class LifecycleManager implements ILifecycleManager {
 
             // === OpenTelemetry: create span per task ===
             Span taskSpan = getTracer().spanBuilder("eddi.pipeline.task")
-                    .setAttribute("eddi.task.id", Objects.requireNonNullElse(task.getId(), "unknown"))
+                    .setAttribute("eddi.task.id", Objects.requireNonNullElse(task.getId().name(), "unknown"))
                     .setAttribute("eddi.task.type", Objects.requireNonNullElse(task.getType(), "unknown"))
                     .setAttribute("eddi.task.index", (long) index)
                     .setAttribute("eddi.conversation.id",
@@ -251,7 +251,7 @@ public class LifecycleManager implements ILifecycleManager {
                 // Retrieve task's component from cache
                 // Component contains task-specific configuration loaded during agent
                 // initialization
-                var components = componentCache.getComponentMap(task.getId());
+                var components = componentCache.getComponentMap(task.getId().name());
                 var componentKey = createComponentKey(workflowId.getId(), workflowId.getVersion(), index);
                 var component = components.getOrDefault(componentKey, null);
 
@@ -286,7 +286,7 @@ public class LifecycleManager implements ILifecycleManager {
                 taskSpan.recordException(e);
 
                 // Record error counter for dashboards & alerting
-                String errTaskId = task.getId() != null ? task.getId() : "unknown";
+                String errTaskId = task.getId() != null ? task.getId().name() : "unknown";
                 String errTaskType = task.getType() != null ? task.getType() : "unknown";
                 String errMeterKey = errTaskId + "|" + errTaskType;
                 TASK_ERROR_COUNTERS.computeIfAbsent(errMeterKey, k -> Counter.builder("eddi.pipeline.task.errors")
@@ -315,7 +315,7 @@ public class LifecycleManager implements ILifecycleManager {
                 // duration histogram (failing tasks with long timeouts are especially
                 // important for latency monitoring during incidents).
                 long durationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
-                String taskId = task.getId() != null ? task.getId() : "unknown";
+                String taskId = task.getId() != null ? task.getId().name() : "unknown";
                 String taskType = task.getType() != null ? task.getType() : "unknown";
                 String meterKey = taskId + "|" + taskType;
                 TASK_TIMERS.computeIfAbsent(meterKey, k -> Timer.builder("eddi.pipeline.task.duration")
@@ -342,7 +342,7 @@ public class LifecycleManager implements ILifecycleManager {
             summary.put("actions", actionData.getResult());
         }
         // Tool execution trace (for LLM tasks) — enables live tool call display in UI
-        IData<?> traceData = conversationMemory.getCurrentStep().getLatestData("langchain:trace:" + task.getId());
+        IData<?> traceData = conversationMemory.getCurrentStep().getLatestData("langchain:trace:" + task.getId().name());
         if (traceData != null && traceData.getResult() != null) {
             summary.put("toolTrace", traceData.getResult());
         }
@@ -397,9 +397,11 @@ public class LifecycleManager implements ILifecycleManager {
         @SuppressWarnings("unchecked")
         List<String> actions = summary.containsKey("actions") ? (List<String>) summary.get("actions") : null;
 
-        return new AuditEntry(UUID.randomUUID().toString(), memory.getConversationId(), memory.getAgentId(), memory.getAgentVersion(),
+        return new AuditEntry(UUID.randomUUID().toString(), memory.getConversationId(), memory.getAgentId(),
+                memory.getAgentVersion(),
                 memory.getUserId(), null, // environment is set by ConversationService
-                stepIndex, task.getId(), task.getType(), taskIndex, durationMs, input.isEmpty() ? null : input, output.isEmpty() ? null : output,
+                stepIndex, task.getId().name(), task.getType(), taskIndex, durationMs, input.isEmpty() ? null : input,
+                output.isEmpty() ? null : output,
                 llmDetail, null, // toolCalls — set by LlmTask in memory
                 actions, 0.0, // cost — set by ToolCostTracker integration
                 Instant.now(), null // HMAC computed by AuditLedgerService
@@ -583,7 +585,7 @@ public class LifecycleManager implements ILifecycleManager {
         // Store under separate "taskErrors" key — never mixed into "output"
         var errorOutput = new LinkedHashMap<String, Object>();
         errorOutput.put("type", "errorDigest");
-        errorOutput.put("taskId", task.getId());
+        errorOutput.put("taskId", task.getId().name());
         errorOutput.put("taskType", task.getType());
         errorOutput.put("text", digestText);
         step.addConversationOutputList("taskErrors", List.of(errorOutput));
@@ -605,7 +607,7 @@ public class LifecycleManager implements ILifecycleManager {
      */
     private void injectFailureAction(ConversationStep step, ILifecycleTask task,
                                      List<String> actionsBefore) {
-        String failureAction = "task_failed_" + task.getId();
+        String failureAction = "task_failed_" + task.getId().name();
 
         // Rebuild from pre-failure state + failure action
         List<String> actions = new ArrayList<>(actionsBefore);

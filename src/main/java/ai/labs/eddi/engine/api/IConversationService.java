@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
@@ -105,9 +106,9 @@ public interface IConversationService {
      * Callback for streaming conversation responses via SSE.
      */
     interface StreamingResponseHandler {
-        void onTaskStart(String taskId, String taskType, int index);
+        void onTaskStart(TaskId taskId, String taskType, int index);
 
-        void onTaskComplete(String taskId, String taskType, long durationMs, Map<String, Object> summary);
+        void onTaskComplete(TaskId taskId, String taskType, long durationMs, Map<String, Object> summary);
 
         void onToken(String token);
 

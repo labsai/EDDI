@@ -327,9 +327,9 @@ Changes required:
    } catch (Exception e) {
        // Failure → mark all NEW data written by this task as uncommitted
        markNewDataUncommitted(memory.getCurrentStep(), preTaskData);
-       auditLedger.logTaskFailure(task.getId(), e, conversationId);
-       // Inject error action, NOT the exception, into the pipeline
-       memory.getCurrentStep().storeData(new Data<>("actions", List.of("task_failed_" + task.getId())));
+        auditLedger.logTaskFailure(task.getId().type(), e, conversationId);
+        // Inject error action, NOT the exception, into the pipeline
+        memory.getCurrentStep().storeData(new Data<>("actions", List.of("task_failed_" + task.getId().type())));
    }
    ```
 

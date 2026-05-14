@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IRestAgentEngineStreaming;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.model.InputData;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -55,15 +56,16 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             conversationService.sayStreaming(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
                     new IConversationService.StreamingResponseHandler() {
                         @Override
-                        public void onTaskStart(String taskId, String taskType, int index) {
+                        public void onTaskStart(TaskId taskId, String taskType, int index) {
                             sendEvent(eventSink, sse, "task_start",
-                                    String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"index\":%d}", taskId, taskType, index));
+                                    String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"index\":%d}", taskId.getIdentifier(), taskType, index));
                         }
 
                         @Override
-                        public void onTaskComplete(String taskId, String taskType, long durationMs, Map<String, Object> summary) {
+                        public void onTaskComplete(TaskId taskId, String taskType, long durationMs, Map<String, Object> summary) {
                             var sb = new StringBuilder();
-                            sb.append(String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"durationMs\":%d", taskId, taskType, durationMs));
+                            sb.append(String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"durationMs\":%d", taskId.getIdentifier(), taskType,
+                                    durationMs));
                             if (summary.containsKey("actions")) {
                                 sb.append(",\"actions\":").append(toJsonArray(summary.get("actions")));
                             }

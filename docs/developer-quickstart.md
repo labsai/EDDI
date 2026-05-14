@@ -547,8 +547,8 @@ Create a custom lifecycle task:
 @ApplicationScoped
 public class MyCustomTask implements ILifecycleTask {
     @Override
-    public String getId() {
-        return "ai.labs.mycompany.customtask";
+    public TaskId getId() {
+        return new TaskId("ai.labs.mycompany.customtask");
     }
 
     @Override

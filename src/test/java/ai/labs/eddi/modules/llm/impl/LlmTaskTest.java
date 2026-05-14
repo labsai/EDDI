@@ -300,7 +300,7 @@ class LlmTaskTest {
         assertNotNull(descriptor, "The returned ExtensionDescriptor should not be null.");
 
         // Assuming ID and Display Name are known and static for the LangChainTask
-        assertEquals(LlmTask.ID, descriptor.getType(), "The ID should match the expected value.");
+        assertEquals(LlmTask.ID, descriptor.getType().name(), "The ID should match the expected value.");
         assertEquals("Lang Chain", descriptor.getDisplayName(), "The display name should match 'Lang Chain'.");
 
         assertFalse(descriptor.getConfigs().isEmpty(), "Expected configs to be defined.");
@@ -595,7 +595,7 @@ class LlmTaskTest {
         @Test
         @DisplayName("getId should return correct identifier")
         void testGetId() {
-            assertEquals("ai.labs.llm", langChainTask.getId());
+            assertEquals("ai.labs.llm", langChainTask.getId().name());
         }
 
         @Test

@@ -144,7 +144,7 @@ A typical agent lifecycle includes these task types:
 
 ```java
 public interface ILifecycleTask {
-    String getId();
+    TaskId getId();
     String getType();
     void execute(IConversationMemory memory, Object component)
         throws LifecycleException;

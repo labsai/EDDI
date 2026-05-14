@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.lifecycle.internal;
 
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -52,11 +53,11 @@ class LifecycleManagerStreamingTest {
         eventSink = mock(ConversationEventSink.class);
 
         task1 = mock(ILifecycleTask.class);
-        when(task1.getId()).thenReturn("ai.labs.parser");
+        when(task1.getId()).thenReturn(new TaskId("ai.labs.parser"));
         when(task1.getType()).thenReturn("expressions");
 
         task2 = mock(ILifecycleTask.class);
-        when(task2.getId()).thenReturn("ai.labs.behavior");
+        when(task2.getId()).thenReturn(new TaskId("ai.labs.behavior"));
         when(task2.getType()).thenReturn("behavior_rules");
 
         lifecycleManager.addLifecycleTask(task1);
@@ -71,12 +72,12 @@ class LifecycleManagerStreamingTest {
         lifecycleManager.executeLifecycle(memory, null);
 
         // task_start for each task
-        verify(eventSink).onTaskStart("ai.labs.parser", "expressions", 0);
-        verify(eventSink).onTaskStart("ai.labs.behavior", "behavior_rules", 1);
+        verify(eventSink).onTaskStart(new TaskId("ai.labs.parser"), "expressions", 0);
+        verify(eventSink).onTaskStart(new TaskId("ai.labs.behavior"), "behavior_rules", 1);
 
         // task_complete for each task
-        verify(eventSink).onTaskComplete(eq("ai.labs.parser"), eq("expressions"), anyLong(), any());
-        verify(eventSink).onTaskComplete(eq("ai.labs.behavior"), eq("behavior_rules"), anyLong(), any());
+        verify(eventSink).onTaskComplete(eq(new TaskId("ai.labs.parser")), eq("expressions"), anyLong(), any());
+        verify(eventSink).onTaskComplete(eq(new TaskId("ai.labs.behavior")), eq("behavior_rules"), anyLong(), any());
 
         // Tasks are still executed
         verify(task1).execute(eq(memory), any());
@@ -108,14 +109,14 @@ class LifecycleManagerStreamingTest {
         lifecycleManager.executeLifecycle(memory, null);
 
         // Task 1: start → execute → complete
-        inOrder.verify(eventSink).onTaskStart("ai.labs.parser", "expressions", 0);
+        inOrder.verify(eventSink).onTaskStart(new TaskId("ai.labs.parser"), "expressions", 0);
         inOrder.verify(task1).execute(eq(memory), any());
-        inOrder.verify(eventSink).onTaskComplete(eq("ai.labs.parser"), eq("expressions"), anyLong(), any());
+        inOrder.verify(eventSink).onTaskComplete(eq(new TaskId("ai.labs.parser")), eq("expressions"), anyLong(), any());
 
         // Task 2: start → execute → complete
-        inOrder.verify(eventSink).onTaskStart("ai.labs.behavior", "behavior_rules", 1);
+        inOrder.verify(eventSink).onTaskStart(new TaskId("ai.labs.behavior"), "behavior_rules", 1);
         inOrder.verify(task2).execute(eq(memory), any());
-        inOrder.verify(eventSink).onTaskComplete(eq("ai.labs.behavior"), eq("behavior_rules"), anyLong(), any());
+        inOrder.verify(eventSink).onTaskComplete(eq(new TaskId("ai.labs.behavior")), eq("behavior_rules"), anyLong(), any());
     }
 
     @Test
@@ -125,7 +126,7 @@ class LifecycleManagerStreamingTest {
 
         lifecycleManager.executeLifecycle(memory, null);
 
-        verify(eventSink, times(2)).onTaskComplete(anyString(), anyString(), longThat(duration -> duration >= 0), any());
+        verify(eventSink, times(2)).onTaskComplete(any(TaskId.class), anyString(), longThat(duration -> duration >= 0), any());
     }
 
     @Test
@@ -137,8 +138,8 @@ class LifecycleManagerStreamingTest {
         assertThrows(LifecycleException.class, () -> lifecycleManager.executeLifecycle(memory, null));
 
         // task_start should have been emitted before the error
-        verify(eventSink).onTaskStart("ai.labs.parser", "expressions", 0);
+        verify(eventSink).onTaskStart(new TaskId("ai.labs.parser"), "expressions", 0);
         // task_complete should NOT have been emitted for the failed task
-        verify(eventSink, never()).onTaskComplete(eq("ai.labs.parser"), anyString(), anyLong(), any());
+        verify(eventSink, never()).onTaskComplete(eq(new TaskId("ai.labs.parser")), anyString(), anyLong(), any());
     }
 }

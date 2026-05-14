@@ -64,7 +64,7 @@ class OutputGenerationTaskTest {
     @Test
     @DisplayName("getId returns correct identifier")
     void testGetId() {
-        assertEquals("ai.labs.output", task.getId());
+        assertEquals("ai.labs.output", task.getId().name());
     }
 
     @Test
@@ -201,7 +201,7 @@ class OutputGenerationTaskTest {
         var descriptor = task.getExtensionDescriptor();
 
         assertNotNull(descriptor);
-        assertEquals("ai.labs.output", descriptor.getType());
+        assertEquals("ai.labs.output", descriptor.getType().name());
         assertEquals("Output Generation", descriptor.getDisplayName());
         assertTrue(descriptor.getConfigs().containsKey("uri"));
     }

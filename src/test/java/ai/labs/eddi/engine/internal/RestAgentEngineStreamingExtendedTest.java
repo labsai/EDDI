@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -77,7 +78,7 @@ class RestAgentEngineStreamingExtendedTest {
             invokeSayStreaming();
             var handler = captureHandler();
 
-            handler.onTaskStart("task-1", "LlmTask", 0);
+            handler.onTaskStart(new TaskId("task-1"), "LlmTask", 0);
 
             verify(eventBuilder).name("task_start");
             verify(eventBuilder).data(eq(String.class), contains("task-1"));
@@ -90,7 +91,7 @@ class RestAgentEngineStreamingExtendedTest {
             invokeSayStreaming();
             var handler = captureHandler();
 
-            handler.onTaskComplete("task-1", "LlmTask", 150L, Map.of());
+            handler.onTaskComplete(new TaskId("task-1"), "LlmTask", 150L, Map.of());
 
             verify(eventBuilder).name("task_complete");
             verify(eventBuilder).data(eq(String.class), contains("task-1"));
@@ -102,7 +103,7 @@ class RestAgentEngineStreamingExtendedTest {
             invokeSayStreaming();
             var handler = captureHandler();
 
-            handler.onTaskComplete("task-1", "RulesEvaluation", 50L,
+            handler.onTaskComplete(new TaskId("task-1"), "RulesEvaluation", 50L,
                     Map.of("actions", List.of("greet", "respond")));
 
             var dataCaptor = ArgumentCaptor.forClass(String.class);
@@ -118,7 +119,7 @@ class RestAgentEngineStreamingExtendedTest {
             invokeSayStreaming();
             var handler = captureHandler();
 
-            handler.onTaskComplete("task-1", "LlmTask", 200L,
+            handler.onTaskComplete(new TaskId("task-1"), "LlmTask", 200L,
                     Map.of("toolTrace", List.of(Map.of("tool", "weather", "duration", 100))));
 
             var dataCaptor = ArgumentCaptor.forClass(String.class);
@@ -133,7 +134,7 @@ class RestAgentEngineStreamingExtendedTest {
             invokeSayStreaming();
             var handler = captureHandler();
 
-            handler.onTaskComplete("task-1", "LlmTask", 100L,
+            handler.onTaskComplete(new TaskId("task-1"), "LlmTask", 100L,
                     Map.of("confidence", 0.95));
 
             var dataCaptor = ArgumentCaptor.forClass(String.class);
@@ -262,7 +263,7 @@ class RestAgentEngineStreamingExtendedTest {
             };
 
             // Should not throw — handled gracefully
-            assertDoesNotThrow(() -> handler.onTaskComplete("t1", "LlmTask", 100L,
+            assertDoesNotThrow(() -> handler.onTaskComplete(new TaskId("ai.test.failure"), "LlmTask", 100L,
                     Map.of("toolTrace", circular)));
         }
     }
