@@ -450,8 +450,8 @@ public class ChannelTargetRouter {
 
     /**
      * Deep-copy a config so that secret resolution does not mutate the store's
-     * cached instance (which must retain {@code ${eddivault:...}} references for
-     * the REST API).
+     * cached instance (which must retain {@code ${vault:...}} references for the
+     * REST API).
      * <p>
      * <b>Invariant:</b> {@code ChannelTarget} instances are shared by reference
      * between the copy and the original. The router must never mutate target

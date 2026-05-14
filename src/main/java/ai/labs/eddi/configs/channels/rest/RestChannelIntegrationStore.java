@@ -1,3 +1,7 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
 package ai.labs.eddi.configs.channels.rest;
 
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
@@ -193,6 +197,22 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                         "Target '" + target.getName()
                                 + "': observeMode is not yet implemented. "
                                 + "Set observeMode to false or omit it.");
+            }
+            // Future-proofing: validate ObserveConfig bounds even while rejected
+            if (target.getObserveConfig() != null) {
+                var oc = target.getObserveConfig();
+                if (oc.getCooldownSeconds() < 0) {
+                    throw new BadRequestException(
+                            "Target '" + target.getName() + "': cooldownSeconds must be >= 0.");
+                }
+                if (oc.getMaxDailyResponses() < 0) {
+                    throw new BadRequestException(
+                            "Target '" + target.getName() + "': maxDailyResponses must be >= 0.");
+                }
+                if (oc.getMaxCostPerDay() < 0) {
+                    throw new BadRequestException(
+                            "Target '" + target.getName() + "': maxCostPerDay must be >= 0.");
+                }
             }
             if (target.getTriggers() != null) {
                 for (String trigger : target.getTriggers()) {

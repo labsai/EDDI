@@ -23,6 +23,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
@@ -138,7 +140,7 @@ public class SlackEventHandler {
 
         // De-duplicate: Slack retries events up to 3 times
         if (eventDedup.get(eventId) != null) {
-            LOGGER.debugf("Duplicate Slack event %s — skipping", eventId);
+            LOGGER.debugf("Duplicate Slack event %s — skipping", sanitize(eventId));
             return;
         }
         eventDedup.put(eventId, Boolean.TRUE);
@@ -147,7 +149,7 @@ public class SlackEventHandler {
             try {
                 handleEvent(event);
             } catch (Exception e) {
-                LOGGER.errorf(e, "Error handling Slack event %s", eventId);
+                LOGGER.errorf(e, "Error handling Slack event %s", sanitize(eventId));
 
                 // Best-effort error response to user (never leak internal details)
                 String channelId = (String) event.get("channel");
@@ -168,7 +170,7 @@ public class SlackEventHandler {
     private void handleEvent(Map<String, Object> event) throws Exception {
         // Filter bot's own messages (prevent infinite loop)
         if (event.containsKey("bot_id") || "bot_message".equals(event.get("subtype"))) {
-            LOGGER.debugf("Ignoring bot message in channel %s", event.get("channel"));
+            LOGGER.debugf("Ignoring bot message in channel %s", sanitize(String.valueOf(event.get("channel"))));
             return;
         }
 
@@ -264,7 +266,7 @@ public class SlackEventHandler {
         String groupId = resolved.target().getTargetId();
 
         if (botToken == null || botToken.isEmpty()) {
-            LOGGER.errorf("No bot token configured for Slack channel %s — cannot run group discussion.", channelId);
+            LOGGER.errorf("No bot token configured for Slack channel %s — cannot run group discussion.", sanitize(channelId));
             return;
         }
 
@@ -276,7 +278,7 @@ public class SlackEventHandler {
         String question = resolved.strippedMessage() != null ? resolved.strippedMessage() : originalText;
         try {
             LOGGER.infof("Starting group discussion in channel %s, group %s, question: %s",
-                    channelId, groupId, question.substring(0, Math.min(80, question.length())));
+                    sanitize(channelId), sanitize(groupId), sanitize(question.substring(0, Math.min(80, question.length()))));
 
             groupConversationService.startAndDiscussAsync(groupId, question, userId, listener);
 
@@ -339,7 +341,7 @@ public class SlackEventHandler {
         }
 
         LOGGER.infof("Follow-up in agent %s thread from user %s: %s",
-                ctx.displayName(), userId, text.substring(0, Math.min(60, text.length())));
+                sanitize(ctx.displayName()), sanitize(userId), sanitize(text.substring(0, Math.min(60, text.length()))));
 
         // Build context-enriched input
         String enrichedInput = buildFollowUpInput(ctx, text);
@@ -402,7 +404,7 @@ public class SlackEventHandler {
         try {
             userConversationStore.createUserConversation(mapping);
         } catch (IResourceStore.ResourceAlreadyExistsException e) {
-            LOGGER.debugf("Race condition: conversation mapping already exists for %s/%s", intent, slackUserId);
+            LOGGER.debugf("Race condition: conversation mapping already exists for %s/%s", sanitize(intent), sanitize(slackUserId));
         }
 
         return result.conversationId();
@@ -464,6 +466,8 @@ public class SlackEventHandler {
      */
     private void postMessageChunked(String channelId, String threadTs, String text,
                                     String botToken) {
+        if (text == null || text.isEmpty())
+            return;
         if (text.length() <= MAX_SLACK_MESSAGE_LENGTH) {
             postMessage(channelId, threadTs, text, botToken);
             return;
@@ -505,7 +509,7 @@ public class SlackEventHandler {
         }
 
         if (resolvedToken == null || resolvedToken.isEmpty()) {
-            LOGGER.warnf("No bot token configured for Slack channel %s — cannot post message", channelId);
+            LOGGER.warnf("No bot token configured for Slack channel %s — cannot post message", sanitize(channelId));
             return;
         }
 
@@ -528,7 +532,7 @@ public class SlackEventHandler {
                     }
                 } else {
                     LOGGER.errorf("SLACK_DELIVERY_FAILED | channel=%s | threadTs=%s | textLength=%d | attempts=%d | error=%s",
-                            channelId, threadTs, text != null ? text.length() : 0,
+                            sanitize(channelId), sanitize(threadTs), text != null ? text.length() : 0,
                             SLACK_API_MAX_RETRIES, e.getMessage());
                 }
             }

@@ -57,7 +57,7 @@ public class ChannelTarget {
      * followed by a colon to address this target: {@code architect: question}.
      */
     public List<String> getTriggers() {
-        return triggers;
+        return triggers != null ? new ArrayList<>(triggers) : null;
     }
 
     public void setTriggers(List<String> triggers) {
