@@ -25,6 +25,8 @@ import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * MongoDB GridFS implementation of {@link IAttachmentStore}.
  * <p>
@@ -88,7 +90,7 @@ public class GridFsAttachmentStore implements IAttachmentStore {
 
         String storageRef = fileId.toHexString();
         LOGGER.debugf("Stored attachment '%s' (%s, %d bytes) for conversation '%s' → GridFS %s",
-                filename, resolvedMime, bytes.length, conversationId, storageRef);
+                sanitize(filename), resolvedMime, bytes.length, sanitize(conversationId), storageRef);
 
         return new Attachment(storageRef, filename, resolvedMime, bytes.length, conversationId);
     }
@@ -130,7 +132,7 @@ public class GridFsAttachmentStore implements IAttachmentStore {
             count++;
         }
         if (count > 0) {
-            LOGGER.debugf("Deleted %d attachments for conversation '%s'", count, conversationId);
+            LOGGER.debugf("Deleted %d attachments for conversation '%s'", count, sanitize(conversationId));
         }
         return count;
     }

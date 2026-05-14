@@ -19,6 +19,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * PostgreSQL implementation of {@link IAttachmentStore}.
  * <p>
@@ -115,7 +117,7 @@ public class PostgresAttachmentStore implements IAttachmentStore {
         }
 
         LOGGER.debugf("Stored attachment '%s' (%s, %d bytes) for conversation '%s'",
-                filename, resolvedMime, bytes.length, conversationId);
+                sanitize(filename), resolvedMime, bytes.length, sanitize(conversationId));
 
         return new Attachment(storageRef, filename, resolvedMime, bytes.length, conversationId);
     }
@@ -151,7 +153,7 @@ public class PostgresAttachmentStore implements IAttachmentStore {
             ps.setString(1, conversationId);
             int deleted = ps.executeUpdate();
             if (deleted > 0) {
-                LOGGER.debugf("Deleted %d attachments for conversation '%s'", (Object) deleted, conversationId);
+                LOGGER.debugf("Deleted %d attachments for conversation '%s'", (Object) deleted, sanitize(conversationId));
             }
             return deleted;
         } catch (SQLException e) {

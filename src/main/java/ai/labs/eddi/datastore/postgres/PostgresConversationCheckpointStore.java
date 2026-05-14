@@ -19,6 +19,8 @@ import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * PostgreSQL implementation of {@link IConversationCheckpointStore}.
  * <p>
@@ -162,7 +164,7 @@ public class PostgresConversationCheckpointStore implements IConversationCheckpo
             ps.setInt(3, keepCount);
             int deleted = ps.executeUpdate();
             if (deleted > 0) {
-                LOGGER.debugf("Pruned %d checkpoints for conversation '%s' (keeping %d)", (Object) deleted, conversationId, keepCount);
+                LOGGER.debugf("Pruned %d checkpoints for conversation '%s' (keeping %d)", (Object) deleted, sanitize(conversationId), keepCount);
             }
             return deleted;
         } catch (SQLException e) {

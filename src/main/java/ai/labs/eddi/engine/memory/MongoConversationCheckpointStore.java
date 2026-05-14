@@ -18,6 +18,8 @@ import org.jboss.logging.Logger;
 import java.util.ArrayList;
 import java.util.List;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * MongoDB implementation of {@link IConversationCheckpointStore}.
  * <p>
@@ -92,7 +94,7 @@ public class MongoConversationCheckpointStore implements IConversationCheckpoint
                 .getDeletedCount();
 
         if (deleted > 0) {
-            LOGGER.debugf("Pruned %d checkpoints for conversation '%s' (keeping %d)", (Object) deleted, conversationId, keepCount);
+            LOGGER.debugf("Pruned %d checkpoints for conversation '%s' (keeping %d)", (Object) deleted, sanitize(conversationId), keepCount);
         }
 
         return (int) deleted;

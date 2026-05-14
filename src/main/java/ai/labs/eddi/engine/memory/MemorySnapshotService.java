@@ -16,6 +16,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Service for creating and restoring memory snapshots. Provides automatic
  * checkpointing before state-changing tool executions and rollback on failure.
@@ -64,7 +66,7 @@ public class MemorySnapshotService {
 
         incrementCounter("create");
         LOGGER.debugf("Created checkpoint '%s' for conversation '%s' at step %d (triggeredBy=%s)",
-                checkpoint.checkpointId(), conversationId, stepIndex, triggeredBy);
+                checkpoint.checkpointId(), sanitize(conversationId), stepIndex, sanitize(triggeredBy));
 
         return checkpoint;
     }
