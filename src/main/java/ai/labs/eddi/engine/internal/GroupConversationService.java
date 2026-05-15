@@ -606,64 +606,81 @@ public class GroupConversationService implements IGroupConversationService {
                 String signatureNonce = null;
                 Long signatureTimestampMs = null;
                 Integer signatureKeyVersion = null;
-                try {
-                    var resourceId = agentStore.getCurrentResourceId(member.agentId());
-                    var agentConfig = agentStore.read(member.agentId(), resourceId.getVersion());
-                    if (agentConfig.getSecurity() != null
-                            && agentConfig.getSecurity().isSignInterAgentMessages()
-                            && response != null) {
-                        // Create SignedEnvelope with nonce for replay protection
-                        var envelope = ai.labs.eddi.configs.agents.crypto.SignedEnvelope.forSigning(
-                                member.agentId(), gc.getGroupId(),
-                                Map.of("content", response, "phase", phase.name()));
-                        int keyVersion = 0;
-                        if (agentConfig.getIdentity() != null
-                                && agentConfig.getIdentity().getKeys() != null
-                                && !agentConfig.getIdentity().getKeys().isEmpty()) {
-                            keyVersion = agentConfig.getIdentity().getKeys().stream()
-                                    .mapToInt(ai.labs.eddi.configs.agents.crypto.AgentPublicKey::version)
-                                    .max().orElse(0);
-                        }
-                        var signedEnvelope = agentSigningService.signEnvelope(
-                                defaultTenantId, member.agentId(), envelope, keyVersion);
+                // Skip signing if crypto infrastructure is not injected
+                if (agentStore != null && agentSigningService != null && nonceCacheService != null) {
+                    try {
+                        var resourceId = agentStore.getCurrentResourceId(member.agentId());
+                        var agentConfig = agentStore.read(member.agentId(), resourceId.getVersion());
+                        if (agentConfig.getSecurity() != null
+                                && agentConfig.getSecurity().isSignInterAgentMessages()
+                                && response != null) {
+                            // Create SignedEnvelope with nonce for replay protection
+                            var envelope = ai.labs.eddi.configs.agents.crypto.SignedEnvelope.forSigning(
+                                    member.agentId(), gc.getGroupId(),
+                                    Map.of("content", response, "phase", phase.name()));
+                            int keyVersion = 0;
+                            if (agentConfig.getIdentity() != null
+                                    && agentConfig.getIdentity().getKeys() != null
+                                    && !agentConfig.getIdentity().getKeys().isEmpty()) {
+                                keyVersion = agentConfig.getIdentity().getKeys().stream()
+                                        .mapToInt(ai.labs.eddi.configs.agents.crypto.AgentPublicKey::version)
+                                        .max().orElse(0);
+                            }
+                            var signedEnvelope = agentSigningService.signEnvelope(
+                                    defaultTenantId, member.agentId(), envelope, keyVersion);
 
-                        // Immediate verification: sanity-check the signature
-                        String publicKey = agentConfig.getIdentity()
-                                .getKeyValidAt(signedEnvelope.timestampMs());
-                        if (publicKey != null) {
-                            boolean valid = agentSigningService.verifyEnvelope(
-                                    signedEnvelope, publicKey);
-                            if (!valid) {
-                                LOGGER.errorf("SELF-VERIFY FAILED for agent '%s' "
-                                        + "— key mismatch or signing error",
-                                        member.agentId());
+                            // Immediate self-verification: sanity-check the signature.
+                            // If this fails, the signature is broken — do NOT store it.
+                            String publicKey = agentConfig.getIdentity() != null
+                                    ? agentConfig.getIdentity()
+                                            .getKeyValidAt(signedEnvelope.timestampMs())
+                                    : null;
+                            if (publicKey != null) {
+                                boolean valid = agentSigningService.verifyEnvelope(
+                                        signedEnvelope, publicKey);
+                                if (!valid) {
+                                    LOGGER.errorf("SELF-VERIFY FAILED for agent '%s' "
+                                            + "— key mismatch or signing error. "
+                                            + "Falling back to unsigned entry.",
+                                            member.agentId());
+                                    // Fall back to unsigned: do NOT store broken signature
+                                    signedEnvelope = null;
+                                }
+                            }
+
+                            // Nonce validation: register nonce to prevent replay.
+                            // If validation fails (stale/skewed), discard the signature.
+                            if (signedEnvelope != null) {
+                                var nonceResult = nonceCacheService.validate(
+                                        signedEnvelope.nonce(), signedEnvelope.timestampMs());
+                                if (nonceResult != ai.labs.eddi.configs.agents.crypto.NonceCacheService.NonceValidation.VALID) {
+                                    LOGGER.warnf("Nonce validation failed for agent '%s': %s "
+                                            + "— falling back to unsigned entry",
+                                            member.agentId(), nonceResult);
+                                    signedEnvelope = null;
+                                }
+                            }
+
+                            // Store full envelope data for peer verification
+                            if (signedEnvelope != null) {
+                                signature = signedEnvelope.signature();
+                                signatureNonce = signedEnvelope.nonce();
+                                signatureTimestampMs = signedEnvelope.timestampMs();
+                                signatureKeyVersion = signedEnvelope.keyVersion();
+
+                                LOGGER.debugf("Signed inter-agent envelope from '%s' "
+                                        + "(nonce=%s, keyV=%d, sig=%s...)",
+                                        member.agentId(), signatureNonce,
+                                        signatureKeyVersion,
+                                        signature.length() > 16
+                                                ? signature.substring(0, 16)
+                                                : signature);
                             }
                         }
-
-                        // Nonce validation: register nonce to prevent replay
-                        var nonceResult = nonceCacheService.validate(
-                                signedEnvelope.nonce(), signedEnvelope.timestampMs());
-                        if (nonceResult != ai.labs.eddi.configs.agents.crypto.NonceCacheService.NonceValidation.VALID) {
-                            LOGGER.warnf("Nonce validation warning for agent '%s': %s",
-                                    member.agentId(), nonceResult);
-                        }
-
-                        // Store full envelope data for peer verification
-                        signature = signedEnvelope.signature();
-                        signatureNonce = signedEnvelope.nonce();
-                        signatureTimestampMs = signedEnvelope.timestampMs();
-                        signatureKeyVersion = signedEnvelope.keyVersion();
-
-                        LOGGER.debugf("Signed inter-agent envelope from '%s' "
-                                + "(nonce=%s, keyV=%d, sig=%s...)",
-                                member.agentId(), signatureNonce, signatureKeyVersion,
-                                signature.length() > 16
-                                        ? signature.substring(0, 16)
-                                        : signature);
+                    } catch (Exception sigEx) {
+                        LOGGER.warnf("Failed to sign message from agent '%s': %s",
+                                member.agentId(), sigEx.getMessage());
                     }
-                } catch (Exception sigEx) {
-                    LOGGER.warnf("Failed to sign message from agent '%s': %s",
-                            member.agentId(), sigEx.getMessage());
                 }
 
                 var entry = new TranscriptEntry(

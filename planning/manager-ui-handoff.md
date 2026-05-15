@@ -179,7 +179,6 @@ These fields live on the **agent** object itself.
 {
   "security": {
     "signInterAgentMessages": false,
-    "signMcpInvocations": false,
     "requirePeerVerification": false
   }
 }
@@ -187,12 +186,11 @@ These fields live on the **agent** object itself.
 
 | Field | Type | Default | UI Widget |
 |-------|------|---------|-----------|
-| `signInterAgentMessages` | `boolean` | `false` | Toggle (disabled) |
-| `signMcpInvocations` | `boolean` | `false` | Toggle (disabled) |
-| `requirePeerVerification` | `boolean` | `false` | Toggle (disabled) |
+| `signInterAgentMessages` | `boolean` | `false` | Toggle |
+| `requirePeerVerification` | `boolean` | `false` | Toggle |
 
-> [!WARNING]
-> These flags are **validated but not yet wired**. The backend rejects `true` with HTTP 400 until the full signing pipeline is activated. The Manager should render them as **disabled toggles** with a tooltip: *"Available in a future release"*.
+> [!IMPORTANT]
+> Both flags are **fully wired** and operational as of v6.0.2. Enabling either requires a valid Ed25519 keypair on the agent's identity block (the backend validates on save). The Manager should show a validation error if the toggle is enabled but no keypair exists.
 
 ---
 
@@ -236,9 +234,7 @@ These fields live on the **agent** object itself.
       "enabled": false,
       "triggerOn": ["before_tool"]
     },
-    "forkingEnabled": false,
-    "maxCheckpointsPerConversation": 10,
-    "maxForksPerConversation": 5
+    "maxCheckpointsPerConversation": 10
   }
 }
 ```
@@ -247,12 +243,10 @@ These fields live on the **agent** object itself.
 |-------|------|---------|--------|-----------|
 | `autoSnapshot.enabled` | `boolean` | `false` | — | Toggle switch |
 | `autoSnapshot.triggerOn` | `string[]` | `[]` | `before_tool`, `before_action` | Multi-select checkboxes |
-| `forkingEnabled` | `boolean` | `false` | — | Toggle (disabled — future feature) |
 | `maxCheckpointsPerConversation` | `int` | `10` | 1–100 | Number input |
-| `maxForksPerConversation` | `int` | `5` | 1–50 | Number input (disabled — future feature) |
 
 **UX Notes:**
-- `forkingEnabled` and `maxForksPerConversation` should be rendered as **disabled** with tooltip *"Available in a future release"*
+- Session forking (`forkingEnabled`, `maxForksPerConversation`) has been **removed** from the config — it will be re-added when the forking service is implemented
 - When `autoSnapshot.enabled` is `false`, collapse sub-fields
 
 ---
@@ -369,11 +363,11 @@ Two new condition types are available in the behavior rule editor.
 │ Identity: did:eddi:agent-1  [Generate Keypair]      │
 │ Public Key: MCowBQYDK2Vw... (read-only)             │
 │                                                     │
-│ ┌ Signing Flags (not yet wired) ───────────────────┐│
-│ │ ○ Sign inter-agent messages    (disabled)        ││
-│ │ ○ Sign MCP invocations         (disabled)        ││
-│ │ ○ Require peer verification    (disabled)        ││
-│ └──────────────────────────────────────────────────┘│
+│ ┌ Signing Flags ─────────────────────────────────┐  │
+│ │ ✓ Sign inter-agent messages    [ON/OFF]        │  │
+│ │ ✓ Require peer verification    [ON/OFF]        │  │
+│ │ ⚠ Requires keypair to enable                   │  │
+│ └────────────────────────────────────────────────┘  │
 │                                                     │
 │ ── Memory Tab ──────────────────────────────────────│
 │ Strict Write Discipline: [OFF]                      │
@@ -383,7 +377,7 @@ Two new condition types are available in the behavior rule editor.
 │ Auto Snapshot: [OFF]                                │
 │   Trigger On: ☑ before_tool  ☐ before_action       │
 │ Max Checkpoints: [10]                               │
-│ Forking: (disabled — future release)                │
+│                                                     │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -442,9 +436,8 @@ interface AgentConfiguration {
   };
 
   security?: {
-    signInterAgentMessages: boolean;      // default: false, NOT YET WIRED
-    signMcpInvocations: boolean;          // default: false, NOT YET WIRED
-    requirePeerVerification: boolean;     // default: false, NOT YET WIRED
+    signInterAgentMessages: boolean;      // default: false, requires keypair
+    requirePeerVerification: boolean;     // default: false, requires keypair
   };
 
   memoryPolicy?: {
@@ -459,9 +452,7 @@ interface AgentConfiguration {
       enabled: boolean;                   // default: false
       triggerOn: string[];                // 'before_tool', 'before_action'
     };
-    forkingEnabled: boolean;              // default: false, NOT YET WIRED
     maxCheckpointsPerConversation: number; // default: 10
-    maxForksPerConversation: number;       // default: 5, NOT YET WIRED
   };
 }
 ```
@@ -508,4 +499,4 @@ interface CapabilityMatchConfigs {
 | 🟢 P2 | Session Management | Small | Toggle + checkboxes, but forking is deferred |
 | 🟢 P2 | Behavior Conditions | Medium | Extends existing condition editor with 2 new types |
 | ⚪ P3 | Cryptographic Identity | Small | Mostly read-only display + one button |
-| ⚪ P3 | Security Flags | Trivial | 3 disabled toggles with "coming soon" tooltip |
+| ⚪ P3 | Security Flags | Small | 2 toggles (active), require keypair validation |

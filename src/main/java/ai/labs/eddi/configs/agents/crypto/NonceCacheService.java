@@ -58,8 +58,10 @@ public class NonceCacheService {
 
     @PostConstruct
     void init() {
-        // TTL should be at least maxAge + clockSkew to catch all replay windows
-        long ttlMs = maxAgeMs + clockSkewMs + 10_000; // 10s buffer
+        // The cache TTL must be >= maxAge + clockSkew to cover the full replay window.
+        // Minimum required TTL: maxAge + clockSkew + buffer = ~340s with defaults.
+        // This is configured externally via the ICacheFactory cache configuration
+        // (e.g., Caffeine expireAfterWrite in application.properties).
         this.nonceCache = cacheFactory.getCache(CACHE_NAME);
 
         replayRejections = meterRegistry.counter("eddi.agent.nonce.replay.rejected");
