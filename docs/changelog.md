@@ -4,6 +4,46 @@
 
 ---
 
+## 🔐 Cryptographic Agent Identity — End-to-End Hardening (2026-05-15)
+
+**Repo:** EDDI (`feature/feature-gap-remediation`)
+**What changed:** Evolved the partial SignedEnvelope infrastructure into a fully-wired, production-standard cryptographic identity system. Removed dead config fields, added peer verification, and made all security features functional.
+
+### Config Cleanup — Remove Dead Fields
+- **Removed:** `signMcpInvocations` from `SecurityConfig` (no MCP signing implementation exists)
+- **Removed:** `forkingEnabled` + `maxForksPerConversation` from `SessionManagement` (no forking service exists)
+- **Rationale:** "Configs without functionality" creates false confidence. Features are added alongside their implementation, not before.
+- **Files:** `AgentConfiguration.java`, `RestAgentStore.java` (removed `validateSessionFlags()`), tests updated
+
+### TranscriptEntry — Full Envelope Storage
+- **Added:** `signatureNonce`, `signatureTimestampMs`, `signatureKeyVersion` fields to `TranscriptEntry` record
+- **Added:** `hasEnvelopeData()` convenience method for verification checks
+- **Backward-compatible:** Two compact constructors for unsigned and signature-only entries
+- **Files:** `GroupConversation.java`
+
+### GroupConversationService — End-to-End Crypto Wiring
+- **Injected:** `NonceCacheService` for replay protection
+- **Signing block:** Now creates full `SignedEnvelope` with nonce, immediately self-verifies, registers nonce, and stores all envelope fields in `TranscriptEntry`
+- **Added:** `verifyPriorEntriesIfRequired()` — when receiving agent has `requirePeerVerification=true`, reconstructs envelopes from stored fields and verifies each speaker's signature against their public key
+- **Defense-in-depth:** Signing self-verifies at creation time; peer verification at consumption time catches key rotation issues or data corruption
+- **Files:** `GroupConversationService.java`
+
+### LlmConfiguration — Configurable maxToolsInContext
+- **Added:** `maxToolsInContext` field (default: 20) to `LlmConfiguration.Task` for LAZY tool loading
+- **Previously:** Hardcoded `int maxToolsInContext = 20` in `AgentOrchestrator`
+- **Files:** `LlmConfiguration.java`, `AgentOrchestrator.java`
+
+### MongoTenantQuotaStore — TOCTOU Documentation
+- **Added:** Comment documenting the minor TOCTOU race at window boundaries in multi-instance deployments
+- **Files:** `MongoTenantQuotaStore.java`
+
+### Test Fixes
+- Updated `SessionManagementTest`, `AgentConfigurationTest`, `RestAgentStoreTest` — removed references to deleted fields
+- Updated `GroupConversationServiceTest` — added `NonceCacheService` constructor parameter
+- All 69 affected tests pass (0 failures, 0 errors)
+
+---
+
 ## 🔧 Feature Gap Remediation — 6 Items Resolved (2026-05-15)
 
 **Repo:** EDDI (`feature/feature-gap-remediation`)

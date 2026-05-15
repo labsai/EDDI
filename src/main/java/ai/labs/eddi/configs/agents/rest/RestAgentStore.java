@@ -128,7 +128,6 @@ public class RestAgentStore implements IRestAgentStore {
     @Override
     public Response updateAgent(String id, Integer version, AgentConfiguration agentConfiguration) {
         validateSecurityFlags(agentConfiguration);
-        validateSessionFlags(agentConfiguration);
         Response response = restVersionInfo.update(id, version, agentConfiguration);
         capabilityRegistryService.register(id, agentConfiguration);
         return response;
@@ -161,7 +160,6 @@ public class RestAgentStore implements IRestAgentStore {
     @Override
     public Response createAgent(AgentConfiguration agentConfiguration) {
         validateSecurityFlags(agentConfiguration);
-        validateSessionFlags(agentConfiguration);
 
         // Use createDocument() to get IResourceId directly — Response.getLocation()
         // returns null for eddi:// scheme URIs in CDI direct calls
@@ -293,12 +291,14 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     /**
-     * Validate that an agent's cryptographic security flags are backed by actual
-     * signing infrastructure, and reject config flags for features that are not yet
-     * implemented.
+     * Validate that cryptographic security flags are backed by a signing keypair.
+     * <p>
+     * Both {@code signInterAgentMessages} and {@code requirePeerVerification}
+     * require an Ed25519 keypair on the agent's identity block. This validation
+     * prevents enabling signing without the necessary infrastructure.
      *
      * @throws jakarta.ws.rs.BadRequestException
-     *             if validation fails
+     *             if crypto is enabled without a keypair
      */
     private void validateSecurityFlags(AgentConfiguration config) {
         if (config.getSecurity() == null) {
@@ -306,14 +306,6 @@ public class RestAgentStore implements IRestAgentStore {
         }
         var security = config.getSecurity();
 
-        // --- Reject unimplemented signing features ---
-        if (security.isSignMcpInvocations()) {
-            throw new jakarta.ws.rs.BadRequestException(
-                    "signMcpInvocations is not yet implemented. "
-                            + "MCP invocation signing will be available in a future release.");
-        }
-
-        // --- Validate implemented signing features ---
         boolean anyCryptoEnabled = security.isSignInterAgentMessages()
                 || security.isRequirePeerVerification();
         if (!anyCryptoEnabled) {
@@ -333,26 +325,6 @@ public class RestAgentStore implements IRestAgentStore {
                             + "Generate one via POST /agentstore/{agentId}/signing/keys "
                             + "before enabling signInterAgentMessages "
                             + "or requirePeerVerification.");
-        }
-    }
-
-    /**
-     * Validate session management configuration. Rejects config flags for features
-     * that are not yet implemented to prevent silent misconfiguration.
-     *
-     * @throws jakarta.ws.rs.BadRequestException
-     *             if forking is enabled (not yet implemented)
-     */
-    private void validateSessionFlags(AgentConfiguration config) {
-        if (config.getSessionManagement() == null) {
-            return;
-        }
-        var session = config.getSessionManagement();
-        if (session.isForkingEnabled()) {
-            throw new jakarta.ws.rs.BadRequestException(
-                    "Session forking is not yet implemented. "
-                            + "Conversation forking will be available in a future release. "
-                            + "Checkpointing and rollback are available now via autoSnapshot.");
         }
     }
 }

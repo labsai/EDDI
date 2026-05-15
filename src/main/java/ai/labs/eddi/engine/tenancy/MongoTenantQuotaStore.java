@@ -94,6 +94,15 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
     }
 
     // ─── Atomic Usage Operations ───
+    //
+    // Note: The increment methods use two sequential findOneAndUpdate calls
+    // (1: increment if in window + under limit, 2: reset if stale window).
+    // There is a minor TOCTOU race at window boundaries in multi-instance
+    // deployments: between call 1 and call 2, another instance may reset the
+    // window. This can cause a single false denial per window transition.
+    // This is acceptable for quota enforcement — the consequence is one
+    // request getting a "limit reached" response at a boundary that would
+    // succeed on retry. Not a data corruption risk.
 
     @Override
     public QuotaCheckResult tryIncrementConversations(String tenantId, int limit) {

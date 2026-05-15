@@ -147,6 +147,15 @@ public record LlmConfiguration(List<Task> tasks) {
         private ToolLoadingStrategy toolLoadingStrategy = ToolLoadingStrategy.EAGER;
 
         /**
+         * Maximum number of tool specifications returned per discovery call when using
+         * {@link ToolLoadingStrategy#LAZY}. Limits context window usage for agents with
+         * many tools. Default: 20.
+         *
+         * @since 6.0.0
+         */
+        private int maxToolsInContext = 20;
+
+        /**
          * Maximum conversation turns to include in context. -1 = unlimited, 0 = none,
          * default = 10
          */
@@ -434,6 +443,14 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setToolLoadingStrategy(ToolLoadingStrategy toolLoadingStrategy) {
             this.toolLoadingStrategy = toolLoadingStrategy;
+        }
+
+        public int getMaxToolsInContext() {
+            return maxToolsInContext;
+        }
+
+        public void setMaxToolsInContext(int maxToolsInContext) {
+            this.maxToolsInContext = maxToolsInContext;
         }
 
         public Integer getConversationHistoryLimit() {

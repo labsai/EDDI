@@ -401,7 +401,7 @@ class AgentOrchestrator {
                 }
                 allSpecs.addAll(ToolSpecifications.toolSpecificationsFrom(toolClass));
             }
-            int maxToolsInContext = 20; // sensible default
+            int maxToolsInContext = task.getMaxToolsInContext();
             tools.add(new DiscoverToolsTool(allSpecs, maxToolsInContext));
             LOGGER.infof("LAZY tool loading: presenting discover_tools meta-tool (%d tools available)", allSpecs.size());
             return tools;
