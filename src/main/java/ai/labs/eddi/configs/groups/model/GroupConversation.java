@@ -53,9 +53,21 @@ public class GroupConversation {
      *            error detail if type is ERROR or SKIPPED
      * @param targetAgentId
      *            who this entry addresses (for CRITIQUE), null if broadcast
+     * @param signature
+     *            Base64-encoded Ed25519 signature if the agent has
+     *            {@code signInterAgentMessages=true}, null otherwise
      */
     public record TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int phaseIndex, String phaseName,
-            TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId) {
+            TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId, String signature) {
+
+        /**
+         * Backward-compatible constructor without signature (defaults to null).
+         */
+        public TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int phaseIndex, String phaseName,
+                TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId) {
+            this(speakerAgentId, speakerDisplayName, content, phaseIndex, phaseName,
+                    type, timestamp, errorReason, targetAgentId, null);
+        }
     }
 
     public enum TranscriptEntryType {

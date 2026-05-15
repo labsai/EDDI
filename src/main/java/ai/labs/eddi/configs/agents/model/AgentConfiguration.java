@@ -70,6 +70,14 @@ public class AgentConfiguration {
      */
     private MemoryPolicy memoryPolicy;
 
+    /**
+     * Session management configuration. Controls automatic checkpointing before
+     * state-changing tool executions and conversation forking.
+     *
+     * @since 6.0.0
+     */
+    private SessionManagement sessionManagement;
+
     public static class ChannelConnector {
         private URI type;
         private Map<String, String> config = new HashMap<>();
@@ -217,6 +225,14 @@ public class AgentConfiguration {
         this.memoryPolicy = memoryPolicy;
     }
 
+    public SessionManagement getSessionManagement() {
+        return sessionManagement;
+    }
+
+    public void setSessionManagement(SessionManagement sessionManagement) {
+        this.sessionManagement = sessionManagement;
+    }
+
     /**
      * Cryptographic identity for an agent. The public key is stored in the agent
      * configuration; the private key is in SecretsVault.
@@ -226,6 +242,10 @@ public class AgentConfiguration {
     public static class AgentIdentity {
         private String agentDid;
         private String publicKey;
+        /**
+         * Versioned key list for rotation. If empty, falls back to {@code publicKey}.
+         */
+        private List<ai.labs.eddi.configs.agents.crypto.AgentPublicKey> keys = new ArrayList<>();
 
         public AgentIdentity() {
         }
@@ -249,6 +269,52 @@ public class AgentConfiguration {
 
         public void setPublicKey(String publicKey) {
             this.publicKey = publicKey;
+        }
+
+        public List<ai.labs.eddi.configs.agents.crypto.AgentPublicKey> getKeys() {
+            return keys;
+        }
+
+        public void setKeys(List<ai.labs.eddi.configs.agents.crypto.AgentPublicKey> keys) {
+            this.keys = keys != null ? keys : new ArrayList<>();
+        }
+
+        /**
+         * Get the key for a specific version. Falls back to {@code publicKey} if no
+         * versioned keys exist.
+         *
+         * @param version
+         *            the key version to find
+         * @return the public key string, or null if not found
+         */
+        public String getKeyForVersion(int version) {
+            if (keys == null || keys.isEmpty()) {
+                return version == 0 ? publicKey : null;
+            }
+            return keys.stream()
+                    .filter(k -> k.version() == version)
+                    .map(ai.labs.eddi.configs.agents.crypto.AgentPublicKey::publicKeyB64)
+                    .findFirst()
+                    .orElse(null);
+        }
+
+        /**
+         * Get the key that is valid at a given epoch millisecond. Returns the
+         * highest-version valid key.
+         *
+         * @param epochMs
+         *            the point in time
+         * @return the public key string, or falls back to {@code publicKey}
+         */
+        public String getKeyValidAt(long epochMs) {
+            if (keys == null || keys.isEmpty()) {
+                return publicKey;
+            }
+            return keys.stream()
+                    .filter(k -> k.isValidAt(epochMs))
+                    .reduce((a, b) -> a.version() > b.version() ? a : b)
+                    .map(ai.labs.eddi.configs.agents.crypto.AgentPublicKey::publicKeyB64)
+                    .orElse(publicKey);
         }
     }
 
@@ -609,6 +675,77 @@ public class AgentConfiguration {
 
         public void setOnFailure(String onFailure) {
             this.onFailure = onFailure;
+        }
+    }
+
+    /**
+     * Session management configuration. Controls automatic checkpointing and
+     * conversation forking.
+     *
+     * @since 6.0.0
+     */
+    public static class SessionManagement {
+        private AutoSnapshot autoSnapshot;
+        private boolean forkingEnabled = false;
+        private int maxForksPerConversation = 5;
+        private int maxCheckpointsPerConversation = 10;
+
+        public AutoSnapshot getAutoSnapshot() {
+            return autoSnapshot;
+        }
+
+        public void setAutoSnapshot(AutoSnapshot autoSnapshot) {
+            this.autoSnapshot = autoSnapshot;
+        }
+
+        public boolean isForkingEnabled() {
+            return forkingEnabled;
+        }
+
+        public void setForkingEnabled(boolean forkingEnabled) {
+            this.forkingEnabled = forkingEnabled;
+        }
+
+        public int getMaxForksPerConversation() {
+            return maxForksPerConversation;
+        }
+
+        public void setMaxForksPerConversation(int maxForksPerConversation) {
+            this.maxForksPerConversation = maxForksPerConversation;
+        }
+
+        public int getMaxCheckpointsPerConversation() {
+            return maxCheckpointsPerConversation;
+        }
+
+        public void setMaxCheckpointsPerConversation(int maxCheckpointsPerConversation) {
+            this.maxCheckpointsPerConversation = maxCheckpointsPerConversation;
+        }
+
+        /**
+         * Auto-snapshot configuration. When enabled, checkpoints are created
+         * automatically before state-changing tool executions.
+         */
+        public static class AutoSnapshot {
+            private boolean enabled = false;
+            /** Events that trigger auto-snapshots: "before_tool", "before_action" */
+            private List<String> triggerOn = new ArrayList<>();
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public List<String> getTriggerOn() {
+                return triggerOn;
+            }
+
+            public void setTriggerOn(List<String> triggerOn) {
+                this.triggerOn = triggerOn;
+            }
         }
     }
 }

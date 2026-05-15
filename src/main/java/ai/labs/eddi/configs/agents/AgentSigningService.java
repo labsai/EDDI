@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.util.Base64;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Ed25519-based signing and verification service for agent identity.
@@ -52,6 +53,7 @@ public class AgentSigningService {
 
     private final ISecretProvider secretProvider;
     private final MeterRegistry meterRegistry;
+    private final ConcurrentHashMap<String, PrivateKey> privateKeyCache = new ConcurrentHashMap<>();
     private Counter signCounter;
     private Counter verifySuccessCounter;
     private Counter verifyFailCounter;
@@ -94,7 +96,11 @@ public class AgentSigningService {
                     "Ed25519 signing key for agent " + agentId,
                     List.of(agentId));
 
-            LOGGER.infof("Generated Ed25519 keypair for agent '%s' in tenant '%s'", agentId, tenantId);
+            // Evict cached private key so the new key is used immediately
+            // (prevents stale key on re-generation / rotation)
+            privateKeyCache.remove(cacheKey(tenantId, agentId));
+
+            LOGGER.infof("Generated Ed25519 keypair for agent '%s' in tenant '%s' (cache evicted)", agentId, tenantId);
             return publicKeyB64;
         } catch (NoSuchAlgorithmException e) {
             throw new AgentSigningException("Ed25519 not available in JVM", e);
@@ -118,13 +124,18 @@ public class AgentSigningService {
      */
     public String sign(String tenantId, String agentId, String payload) throws AgentSigningException {
         try {
-            SecretReference ref = new SecretReference(tenantId, vaultKeyName(agentId));
-            String privateKeyB64 = secretProvider.resolve(ref);
-
-            byte[] privateKeyBytes = Base64.getDecoder().decode(privateKeyB64);
-            KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
-            PrivateKey privateKey = keyFactory.generatePrivate(
-                    new java.security.spec.PKCS8EncodedKeySpec(privateKeyBytes));
+            PrivateKey privateKey = privateKeyCache.computeIfAbsent(cacheKey(tenantId, agentId), k -> {
+                try {
+                    SecretReference ref = new SecretReference(tenantId, vaultKeyName(agentId));
+                    String privateKeyB64 = secretProvider.resolve(ref);
+                    byte[] privateKeyBytes = Base64.getDecoder().decode(privateKeyB64);
+                    KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
+                    return keyFactory.generatePrivate(
+                            new java.security.spec.PKCS8EncodedKeySpec(privateKeyBytes));
+                } catch (Exception e) {
+                    throw new PrivateKeyLoadException(agentId, e);
+                }
+            });
 
             Signature sig = Signature.getInstance(ALGORITHM);
             sig.initSign(privateKey);
@@ -133,8 +144,16 @@ public class AgentSigningService {
 
             signCounter.increment();
             return Base64.getEncoder().encodeToString(signatureBytes);
-        } catch (ISecretProvider.SecretNotFoundException e) {
-            throw new AgentSigningException("No signing key found for agent " + agentId, e);
+        } catch (PrivateKeyLoadException e) {
+            // Unwrap typed exception from computeIfAbsent — preserves
+            // original cause type (SecretNotFound, InvalidKeySpec, etc.)
+            Throwable cause = e.getCause();
+            if (cause instanceof ISecretProvider.SecretNotFoundException) {
+                throw new AgentSigningException("No signing key found for agent " + agentId, cause);
+            }
+            throw new AgentSigningException(
+                    "Failed to load private key for agent " + agentId + ": " + cause.getClass().getSimpleName(),
+                    cause);
         } catch (Exception e) {
             throw new AgentSigningException("Signing failed for agent " + agentId, e);
         }
@@ -183,7 +202,8 @@ public class AgentSigningService {
         try {
             SecretReference ref = new SecretReference(tenantId, vaultKeyName(agentId));
             secretProvider.delete(ref);
-            LOGGER.infof("Deleted signing key for agent '%s' in tenant '%s'", agentId, tenantId);
+            privateKeyCache.remove(cacheKey(tenantId, agentId));
+            LOGGER.infof("Deleted signing key for agent '%s' in tenant '%s' (cache evicted)", agentId, tenantId);
         } catch (Exception e) {
             LOGGER.warnf("Failed to delete signing key for agent '%s': %s", agentId, e.getMessage());
         }
@@ -193,9 +213,29 @@ public class AgentSigningService {
         return VAULT_KEY_PREFIX + agentId;
     }
 
+    /**
+     * Collision-resistant cache key: uses a structured format so that
+     * tenantId="a:b", agentId="c" cannot collide with tenantId="a", agentId="b:c".
+     */
+    private static String cacheKey(String tenantId, String agentId) {
+        return "tenant=" + tenantId + ";agent=" + agentId;
+    }
+
     public static class AgentSigningException extends Exception {
         public AgentSigningException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    /**
+     * Typed unchecked exception for the cache loader lambda. Preserves the original
+     * cause type (SecretNotFoundException, InvalidKeySpecException,
+     * IllegalArgumentException from bad Base64, etc.) so the unwrapping logic in
+     * {@link #sign} can produce precise diagnostic messages.
+     */
+    private static class PrivateKeyLoadException extends RuntimeException {
+        PrivateKeyLoadException(String agentId, Throwable cause) {
+            super("Failed to load private key for agent " + agentId, cause);
         }
     }
 }

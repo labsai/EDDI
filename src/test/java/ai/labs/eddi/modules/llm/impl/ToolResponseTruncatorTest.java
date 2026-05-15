@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
 
 /**
  * Unit tests for {@link ToolResponseTruncator}.
@@ -21,22 +22,26 @@ class ToolResponseTruncatorTest {
     private ToolResponseTruncator truncator;
     private SimpleMeterRegistry meterRegistry;
 
+    private static final String TASK_TYPE = "openai";
+    private static final Map<String, String> TASK_PARAMS = Map.of(
+            "apiKey", "sk-test", "modelName", "gpt-4o");
+
     @BeforeEach
     void setUp() {
         meterRegistry = new SimpleMeterRegistry();
-        truncator = new ToolResponseTruncator(meterRegistry);
+        truncator = new ToolResponseTruncator(meterRegistry, mock(ChatModelRegistry.class));
     }
 
     @Test
     void truncateIfNeeded_nullLimits_returnsOriginal() {
-        String result = truncator.truncateIfNeeded("myTool", "some response", null);
+        String result = truncator.truncateIfNeeded("myTool", "some response", null, TASK_TYPE, TASK_PARAMS);
         assertEquals("some response", result);
     }
 
     @Test
     void truncateIfNeeded_nullResult_returnsNull() {
         var limits = new ToolResponseLimits();
-        assertNull(truncator.truncateIfNeeded("myTool", null, limits));
+        assertNull(truncator.truncateIfNeeded("myTool", null, limits, TASK_TYPE, TASK_PARAMS));
     }
 
     @Test
@@ -44,7 +49,7 @@ class ToolResponseTruncatorTest {
         var limits = new ToolResponseLimits();
         limits.setDefaultMaxChars(100);
         String input = "short response";
-        assertEquals(input, truncator.truncateIfNeeded("myTool", input, limits));
+        assertEquals(input, truncator.truncateIfNeeded("myTool", input, limits, TASK_TYPE, TASK_PARAMS));
     }
 
     @Test
@@ -53,7 +58,7 @@ class ToolResponseTruncatorTest {
         limits.setDefaultMaxChars(10);
         String input = "a".repeat(100);
 
-        String result = truncator.truncateIfNeeded("myTool", input, limits);
+        String result = truncator.truncateIfNeeded("myTool", input, limits, TASK_TYPE, TASK_PARAMS);
 
         assertTrue(result.startsWith("a".repeat(10)));
         assertTrue(result.contains("[TRUNCATED"));
@@ -69,11 +74,11 @@ class ToolResponseTruncatorTest {
         String input = "a".repeat(50);
 
         // Tool with override
-        String result = truncator.truncateIfNeeded("verboseTool", input, limits);
+        String result = truncator.truncateIfNeeded("verboseTool", input, limits, TASK_TYPE, TASK_PARAMS);
         assertTrue(result.contains("[TRUNCATED"));
 
         // Tool without override uses default (1000) — not truncated
-        String result2 = truncator.truncateIfNeeded("otherTool", input, limits);
+        String result2 = truncator.truncateIfNeeded("otherTool", input, limits, TASK_TYPE, TASK_PARAMS);
         assertEquals(input, result2);
     }
 
@@ -82,7 +87,7 @@ class ToolResponseTruncatorTest {
         var limits = new ToolResponseLimits();
         limits.setDefaultMaxChars(10);
         String input = "a".repeat(10);
-        assertEquals(input, truncator.truncateIfNeeded("myTool", input, limits));
+        assertEquals(input, truncator.truncateIfNeeded("myTool", input, limits, TASK_TYPE, TASK_PARAMS));
     }
 
     @Test
@@ -91,7 +96,7 @@ class ToolResponseTruncatorTest {
         limits.setDefaultMaxChars(5);
         String input = "a".repeat(100);
 
-        truncator.truncateIfNeeded("webscraper", input, limits);
+        truncator.truncateIfNeeded("webscraper", input, limits, TASK_TYPE, TASK_PARAMS);
 
         var counter = meterRegistry.find("eddi.mcp.response.truncation.count").tag("tool", "webscraper").counter();
         assertNotNull(counter);

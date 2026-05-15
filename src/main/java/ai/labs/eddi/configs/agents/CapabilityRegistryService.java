@@ -17,6 +17,7 @@ import org.jboss.logging.Logger;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -42,6 +43,12 @@ public class CapabilityRegistryService {
      * configuration changes.
      */
     private final Map<String, List<AgentCapabilityEntry>> skillIndex = new ConcurrentHashMap<>();
+
+    /**
+     * Per-skill round-robin counters. Reset when agents are registered or
+     * unregistered to avoid drift on topology changes.
+     */
+    private final Map<String, AtomicInteger> roundRobinCounters = new ConcurrentHashMap<>();
 
     private final MeterRegistry meterRegistry;
     private Counter queryCounter;
@@ -81,6 +88,8 @@ public class CapabilityRegistryService {
             String skill = cap.getSkill().toLowerCase(Locale.ROOT).trim();
             skillIndex.computeIfAbsent(skill, k -> new CopyOnWriteArrayList<>())
                     .add(new AgentCapabilityEntry(agentId, cap));
+            // Reset round-robin counter on topology change
+            roundRobinCounters.put(skill, new AtomicInteger(0));
         }
 
         LOGGER.debugf("Registered %d capabilities for agent '%s'",
@@ -92,8 +101,16 @@ public class CapabilityRegistryService {
      */
     public void unregister(String agentId) {
         skillIndex.values().forEach(entries -> entries.removeIf(e -> e.agentId().equals(agentId)));
-        // Clean up empty skill entries
-        skillIndex.entrySet().removeIf(e -> e.getValue().isEmpty());
+        // Clean up empty skill entries and reset round-robin counters
+        skillIndex.entrySet().removeIf(entry -> {
+            if (entry.getValue().isEmpty()) {
+                roundRobinCounters.remove(entry.getKey());
+                return true;
+            }
+            // Reset counter on topology change even if skill still has entries
+            roundRobinCounters.put(entry.getKey(), new AtomicInteger(0));
+            return false;
+        });
     }
 
     /**
@@ -108,25 +125,40 @@ public class CapabilityRegistryService {
     public List<CapabilityMatch> findBySkill(String skill, String strategy) {
         return queryTimer.record(() -> {
             queryCounter.increment();
+            String resolvedStrategy = strategy != null ? strategy.toLowerCase(Locale.ROOT) : "all";
+            meterRegistry.counter("eddi.capability.strategy.applied", "strategy", resolvedStrategy).increment();
 
-            if (skill == null || skill.isBlank()) {
-                return Collections.emptyList();
+            List<CapabilityMatch> matches = lookupBySkill(skill);
+            if (matches.isEmpty()) {
+                return matches;
             }
 
             String normalizedSkill = skill.toLowerCase(Locale.ROOT).trim();
-            List<AgentCapabilityEntry> entries = skillIndex.getOrDefault(normalizedSkill, Collections.emptyList());
-
-            if (entries.isEmpty()) {
-                return Collections.emptyList();
-            }
-
-            List<CapabilityMatch> matches = entries.stream()
-                    .map(e -> new CapabilityMatch(e.agentId(), e.capability().getSkill(),
-                            e.capability().getConfidence(), e.capability().getAttributes()))
-                    .collect(Collectors.toList());
-
-            return applyStrategy(matches, strategy);
+            return applyStrategy(matches, resolvedStrategy, normalizedSkill);
         });
+    }
+
+    /**
+     * Internal lookup — returns all matches for a skill without emitting strategy
+     * metrics. Used by {@link #findBySkillAndAttributes} to avoid double-counting.
+     */
+    private List<CapabilityMatch> lookupBySkill(String skill) {
+        if (skill == null || skill.isBlank()) {
+            return Collections.emptyList();
+        }
+
+        String normalizedSkill = skill.toLowerCase(Locale.ROOT).trim();
+        List<AgentCapabilityEntry> entries = skillIndex.getOrDefault(normalizedSkill, Collections.emptyList());
+
+        if (entries.isEmpty()) {
+            meterRegistry.counter("eddi.capability.miss.count", "skill", normalizedSkill).increment();
+            return Collections.emptyList();
+        }
+
+        return entries.stream()
+                .map(e -> new CapabilityMatch(e.agentId(), e.capability().getSkill(),
+                        e.capability().getConfidence(), e.capability().getAttributes()))
+                .collect(Collectors.toList());
     }
 
     /**
@@ -142,10 +174,12 @@ public class CapabilityRegistryService {
      */
     public List<CapabilityMatch> findBySkillAndAttributes(String skill,
                                                           Map<String, String> requiredAttributes, String strategy) {
-        List<CapabilityMatch> matches = findBySkill(skill, "all");
+        List<CapabilityMatch> matches = lookupBySkill(skill);
+        String normalizedSkill = skill != null ? skill.toLowerCase(Locale.ROOT).trim() : "";
+        String resolvedStrategy = strategy != null ? strategy.toLowerCase(Locale.ROOT) : "all";
 
         if (requiredAttributes == null || requiredAttributes.isEmpty()) {
-            return applyStrategy(matches, strategy);
+            return applyStrategy(matches, resolvedStrategy, normalizedSkill);
         }
 
         List<CapabilityMatch> filtered = matches.stream().filter(m -> {
@@ -154,15 +188,18 @@ public class CapabilityRegistryService {
                 if (attrValue == null) {
                     return false;
                 }
-                // Support comma-separated lists: "en,de,fr" contains "de"
-                if (!attrValue.contains(req.getValue())) {
+                // Support comma-separated lists: "en,de,fr" matches "de"
+                var items = java.util.Arrays.stream(attrValue.split(","))
+                        .map(String::trim)
+                        .collect(java.util.stream.Collectors.toSet());
+                if (!items.contains(req.getValue())) {
                     return false;
                 }
             }
             return true;
         }).collect(Collectors.toList());
 
-        return applyStrategy(filtered, strategy);
+        return applyStrategy(filtered, resolvedStrategy, normalizedSkill);
     }
 
     /**
@@ -172,18 +209,27 @@ public class CapabilityRegistryService {
         return Collections.unmodifiableSet(skillIndex.keySet());
     }
 
-    private List<CapabilityMatch> applyStrategy(List<CapabilityMatch> matches, String strategy) {
+    private List<CapabilityMatch> applyStrategy(List<CapabilityMatch> matches, String strategy, String skill) {
         if (matches.isEmpty()) {
             return matches;
         }
 
-        return switch (strategy != null ? strategy.toLowerCase(Locale.ROOT) : "all") {
+        return switch (strategy) {
             case "highest_confidence" -> {
                 matches.sort(Comparator.comparingInt(m -> confidenceOrder(m.confidence())));
                 yield matches;
             }
             case "round_robin" -> {
-                // Simple shuffle — for true round-robin, state tracking would be needed
+                // Deterministic rotation: per-skill AtomicInteger counter
+                AtomicInteger counter = roundRobinCounters.computeIfAbsent(skill, k -> new AtomicInteger(0));
+                int index = Math.floorMod(counter.getAndIncrement(), matches.size());
+                List<CapabilityMatch> rotated = new ArrayList<>(matches.size());
+                for (int i = 0; i < matches.size(); i++) {
+                    rotated.add(matches.get((index + i) % matches.size()));
+                }
+                yield rotated;
+            }
+            case "random" -> {
                 List<CapabilityMatch> shuffled = new ArrayList<>(matches);
                 Collections.shuffle(shuffled);
                 yield shuffled;

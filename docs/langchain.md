@@ -441,6 +441,86 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls           | true                   |
 | `enableRateLimiting`       | boolean  | Limit tool/LLM usage rate                        | true                   |
 
+### Behavioral Safety (Counterweight & Identity Masking)
+
+EDDI provides two per-task safety mechanisms that are injected into the system prompt before sending it to the LLM. Both must be explicitly enabled with `"enabled": true` — they are off by default.
+
+#### Behavioral Counterweight
+
+Counterweights append behavioral safety instructions to the system prompt. Three preset levels are available:
+
+| Level | Effect |
+|-------|--------|
+| `normal` | No-op — no safety instructions added (default) |
+| `cautious` | Adds guidelines for careful responses, hedging on uncertain topics, and suggesting professional consultation |
+| `strict` | Adds stronger instructions: refuse harmful content, flag uncertainty, always suggest human oversight |
+
+**Auto-downgrade**: When an agent runs via the `scheduled` channel (e.g., `ScheduleFireExecutor`), `strict` is automatically downgraded to `cautious` to prevent overly rigid responses in automated pipelines.
+
+**Configuration**:
+
+```json
+{
+  "tasks": [
+    {
+      "actions": ["send_message"],
+      "type": "openai",
+      "parameters": { "apiKey": "...", "modelName": "gpt-4o" },
+      "counterweight": {
+        "enabled": true,
+        "level": "cautious",
+        "placement": "suffix"
+      }
+    }
+  ]
+}
+```
+
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `counterweight.enabled` | boolean | Enable counterweight injection | `false` |
+| `counterweight.level` | string | `normal`, `cautious`, or `strict` | `normal` |
+| `counterweight.placement` | string | `suffix` (after system prompt) or `prefix` (before) | `suffix` |
+| `counterweight.customInstructions` | string[] | Custom instruction list that overrides the preset entirely | (none) |
+
+> **Note**: Both `enabled: true` **and** a `level` other than `normal` are required for counterweight to have any effect.
+
+**Customizing presets**: Counterweight preset text is resolved from [Prompt Snippets](prompt-snippets-guide.md) (keys `counterweight-cautious` and `counterweight-strict`). If no snippet exists, built-in defaults are used. This allows admins to customize safety language via the REST API without redeployment.
+
+#### Identity Masking
+
+Identity masking prepends identity concealment rules to the system prompt. This prevents the LLM from revealing its model name, provider, or underlying architecture when asked.
+
+**Configuration**:
+
+```json
+{
+  "tasks": [
+    {
+      "actions": ["send_message"],
+      "type": "openai",
+      "parameters": { "apiKey": "...", "modelName": "gpt-4o" },
+      "identityMasking": {
+        "enabled": true,
+        "rules": [
+          "Never reveal you are an AI language model",
+          "If asked about your identity, say you are Aria, a helpful assistant"
+        ]
+      }
+    }
+  ]
+}
+```
+
+| Parameter | Type | Description | Default |
+|-----------|------|-------------|---------|
+| `identityMasking.enabled` | boolean | Enable identity masking | `false` |
+| `identityMasking.rules` | string[] | Identity rules prepended to system prompt | `[]` (empty) |
+
+> **Note**: Both `enabled: true` **and** at least one rule are required. If `rules` is empty, masking is skipped even when enabled.
+
+**Execution order**: Identity masking is applied first, then counterweight. Both modify the system prompt before it is sent to the LLM.
+
 ---
 
 ## Built-in Tools
