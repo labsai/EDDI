@@ -213,12 +213,142 @@ public class AgentSigningService {
         return VAULT_KEY_PREFIX + agentId;
     }
 
+    private String vaultKeyNameVersioned(String agentId, int version) {
+        return VAULT_KEY_PREFIX + agentId + ":v" + version;
+    }
+
     /**
      * Collision-resistant cache key: uses a structured format so that
      * tenantId="a:b", agentId="c" cannot collide with tenantId="a", agentId="b:c".
      */
     private static String cacheKey(String tenantId, String agentId) {
         return "tenant=" + tenantId + ";agent=" + agentId;
+    }
+
+    /**
+     * Generate a versioned keypair for key rotation.
+     *
+     * @param tenantId
+     *            the tenant identifier
+     * @param agentId
+     *            the agent identifier
+     * @param version
+     *            the key version number
+     * @return the Base64-encoded public key
+     * @throws AgentSigningException
+     *             if key generation fails
+     */
+    public String generateKeyPairVersioned(String tenantId, String agentId, int version) throws AgentSigningException {
+        try {
+            KeyPairGenerator keyGen = KeyPairGenerator.getInstance(ALGORITHM);
+            KeyPair keyPair = keyGen.generateKeyPair();
+
+            String publicKeyB64 = Base64.getEncoder().encodeToString(keyPair.getPublic().getEncoded());
+            String privateKeyB64 = Base64.getEncoder().encodeToString(keyPair.getPrivate().getEncoded());
+
+            // Store versioned private key in vault
+            SecretReference ref = new SecretReference(tenantId, vaultKeyNameVersioned(agentId, version));
+            secretProvider.store(ref, privateKeyB64,
+                    "Ed25519 signing key v" + version + " for agent " + agentId,
+                    List.of(agentId));
+
+            // Evict cached private key so the new key is used immediately
+            privateKeyCache.remove(cacheKey(tenantId, agentId));
+
+            LOGGER.infof("Generated Ed25519 keypair v%d for agent '%s' in tenant '%s'", version, agentId, tenantId);
+            return publicKeyB64;
+        } catch (NoSuchAlgorithmException e) {
+            throw new AgentSigningException("Ed25519 not available in JVM", e);
+        } catch (ISecretProvider.SecretProviderException e) {
+            throw new AgentSigningException("Failed to store private key in vault", e);
+        }
+    }
+
+    /**
+     * Sign a {@link ai.labs.eddi.configs.agents.crypto.SignedEnvelope} using the
+     * agent's versioned key.
+     *
+     * @param tenantId
+     *            the tenant identifier
+     * @param agentId
+     *            the agent identifier
+     * @param envelope
+     *            the unsigned envelope
+     * @param keyVersion
+     *            the key version to use for signing
+     * @return the signed envelope
+     * @throws AgentSigningException
+     *             if signing fails
+     */
+    public ai.labs.eddi.configs.agents.crypto.SignedEnvelope signEnvelope(
+                                                                          String tenantId, String agentId,
+                                                                          ai.labs.eddi.configs.agents.crypto.SignedEnvelope envelope,
+                                                                          int keyVersion)
+            throws AgentSigningException {
+        try {
+            String canonicalForm = envelope.canonicalForm();
+            String vaultKey = keyVersion > 0
+                    ? vaultKeyNameVersioned(agentId, keyVersion)
+                    : vaultKeyName(agentId);
+
+            SecretReference ref = new SecretReference(tenantId, vaultKey);
+            String privateKeyB64 = secretProvider.resolve(ref);
+
+            byte[] privateKeyBytes = Base64.getDecoder().decode(privateKeyB64);
+            KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
+            PrivateKey privateKey = keyFactory.generatePrivate(
+                    new java.security.spec.PKCS8EncodedKeySpec(privateKeyBytes));
+
+            Signature sig = Signature.getInstance(ALGORITHM);
+            sig.initSign(privateKey);
+            sig.update(canonicalForm.getBytes(StandardCharsets.UTF_8));
+            String signatureB64 = Base64.getEncoder().encodeToString(sig.sign());
+
+            signCounter.increment();
+            return envelope.withSignature(signatureB64, keyVersion);
+        } catch (Exception e) {
+            throw new AgentSigningException("Envelope signing failed for agent " + agentId, e);
+        }
+    }
+
+    /**
+     * Verify a signed envelope against a public key.
+     *
+     * @param envelope
+     *            the signed envelope to verify
+     * @param publicKeyB64
+     *            the Base64-encoded public key
+     * @return true if the signature is valid
+     */
+    public boolean verifyEnvelope(ai.labs.eddi.configs.agents.crypto.SignedEnvelope envelope, String publicKeyB64) {
+        try {
+            String canonicalForm = envelope.canonicalForm();
+            return verify(publicKeyB64, canonicalForm, envelope.signature());
+        } catch (Exception e) {
+            LOGGER.warnf("Envelope verification failed: %s", e.getMessage());
+            verifyFailCounter.increment();
+            return false;
+        }
+    }
+
+    /**
+     * Rotate the signing key for an agent. Creates a new versioned key and returns
+     * the public key for it.
+     *
+     * @param tenantId
+     *            the tenant identifier
+     * @param agentId
+     *            the agent identifier
+     * @param newVersion
+     *            the new key version number
+     * @return the Base64-encoded new public key
+     * @throws AgentSigningException
+     *             if rotation fails
+     */
+    public String rotateKey(String tenantId, String agentId, int newVersion) throws AgentSigningException {
+        String publicKeyB64 = generateKeyPairVersioned(tenantId, agentId, newVersion);
+        LOGGER.infof("Rotated signing key for agent '%s' to version %d", agentId, newVersion);
+        return publicKeyB64;
     }
 
     public static class AgentSigningException extends Exception {

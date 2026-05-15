@@ -593,7 +593,7 @@ public class GroupConversationService implements IGroupConversationService {
 
                 String response = responseFuture.get(timeout, TimeUnit.SECONDS);
 
-                // Wave 6: Sign inter-agent messages if configured
+                // Wave 6: Sign inter-agent messages with full envelope if configured
                 String signature = null;
                 try {
                     var resourceId = agentStore.getCurrentResourceId(member.agentId());
@@ -601,10 +601,23 @@ public class GroupConversationService implements IGroupConversationService {
                     if (agentConfig.getSecurity() != null
                             && agentConfig.getSecurity().isSignInterAgentMessages()
                             && response != null) {
-                        signature = agentSigningService.sign(
-                                defaultTenantId, member.agentId(), response);
-                        LOGGER.debugf("Signed inter-agent message from '%s' (sig=%s...)",
-                                member.agentId(),
+                        // Create a SignedEnvelope with nonce for replay protection
+                        var envelope = ai.labs.eddi.configs.agents.crypto.SignedEnvelope.forSigning(
+                                member.agentId(), gc.getGroupId(),
+                                Map.of("content", response, "phase", phase.name()));
+                        int keyVersion = 0; // use default key
+                        if (agentConfig.getIdentity() != null
+                                && agentConfig.getIdentity().getKeys() != null
+                                && !agentConfig.getIdentity().getKeys().isEmpty()) {
+                            keyVersion = agentConfig.getIdentity().getKeys().stream()
+                                    .mapToInt(ai.labs.eddi.configs.agents.crypto.AgentPublicKey::version)
+                                    .max().orElse(0);
+                        }
+                        var signedEnvelope = agentSigningService.signEnvelope(
+                                defaultTenantId, member.agentId(), envelope, keyVersion);
+                        signature = signedEnvelope.signature();
+                        LOGGER.debugf("Signed inter-agent envelope from '%s' (nonce=%s, sig=%s...)",
+                                member.agentId(), signedEnvelope.nonce(),
                                 signature.length() > 16 ? signature.substring(0, 16) : signature);
                     }
                 } catch (Exception sigEx) {

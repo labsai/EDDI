@@ -374,6 +374,11 @@ class AgentOrchestrator {
 
     /**
      * Collects enabled built-in tools based on task configuration.
+     * <p>
+     * When {@link LlmConfiguration.ToolLoadingStrategy#LAZY} is set, only a
+     * {@link DiscoverToolsTool} meta-tool is returned. The LLM calls it to discover
+     * available tools, and matching specs are injected by the caller on subsequent
+     * tool-calling iterations.
      */
     List<Object> collectEnabledTools(LlmConfiguration.Task task, IConversationMemory memory) {
         List<Object> tools = new ArrayList<>();
@@ -382,6 +387,36 @@ class AgentOrchestrator {
             return tools;
         }
 
+        // Collect the full set of tools first (needed for both EAGER and LAZY)
+        List<Object> allTools = collectAllBuiltInTools(task, memory);
+
+        // LAZY strategy: return only DiscoverToolsTool with the full spec list
+        if (task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY) {
+            // Build tool specs from all available tools for discovery
+            List<ToolSpecification> allSpecs = new ArrayList<>();
+            for (Object tool : allTools) {
+                Class<?> toolClass = tool.getClass();
+                if (toolClass.getName().contains("_ClientProxy") || toolClass.getName().contains("$$")) {
+                    toolClass = toolClass.getSuperclass();
+                }
+                allSpecs.addAll(ToolSpecifications.toolSpecificationsFrom(toolClass));
+            }
+            int maxToolsInContext = 20; // sensible default
+            tools.add(new DiscoverToolsTool(allSpecs, maxToolsInContext));
+            LOGGER.infof("LAZY tool loading: presenting discover_tools meta-tool (%d tools available)", allSpecs.size());
+            return tools;
+        }
+
+        // EAGER strategy (default): return all tools directly
+        LOGGER.info("Enabled " + allTools.size() + " built-in tools for agent");
+        return allTools;
+    }
+
+    /**
+     * Collects all built-in tools without considering loading strategy.
+     */
+    private List<Object> collectAllBuiltInTools(LlmConfiguration.Task task, IConversationMemory memory) {
+        List<Object> tools = new ArrayList<>();
         List<String> whitelist = task.getBuiltInToolsWhitelist();
 
         if (whitelist != null && !whitelist.isEmpty()) {
@@ -425,7 +460,6 @@ class AgentOrchestrator {
             addConversationRecallToolIfEnabled(tools, task, memory);
         }
 
-        LOGGER.info("Enabled " + tools.size() + " built-in tools for agent");
         return tools;
     }
 

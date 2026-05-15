@@ -4,6 +4,45 @@
 
 ---
 
+## 🔧 Feature Gap Remediation — 6 Items Resolved (2026-05-15)
+
+**Repo:** EDDI (`feature/feature-gap-remediation`)
+**What changed:** Systematic audit found 8 gaps between documented features and actual implementation. Fixed 6 items (2 required no changes).
+
+### Item 1: Session Forking — Validation Guard
+- **Problem:** `forkingEnabled=true` accepted silently but no `ConversationForkService` exists
+- **Fix:** Added `validateSessionFlags()` in `RestAgentStore` — rejects `forkingEnabled=true` with clear error message explaining checkpointing is available now, forking is coming later
+- **Files:** `RestAgentStore.java`
+
+### Item 2: Signing Flags — Split Validation
+- **Correction:** `signInterAgentMessages` was incorrectly flagged as broken — it IS wired in `GroupConversationService:596-613` and works correctly
+- **Fix:** Split `validateSecurityFlags()` to separately reject `signMcpInvocations` (not yet implemented) while allowing `signInterAgentMessages` and `requirePeerVerification` (both now have runtime logic)
+- **Files:** `RestAgentStore.java`
+
+### Item 3: DiscoverToolsTool — Recovered + Wired
+- **Problem:** Token-saving lazy tool loading deleted as dead code (commit `05edf602`)
+- **Fix:** Recovered `DiscoverToolsTool.java` + test, added `ToolLoadingStrategy` enum (EAGER/LAZY) to `LlmConfiguration.Task`, wired LAZY branch into `AgentOrchestrator.collectEnabledTools()` — when LAZY, only `discover_tools` meta-tool is sent initially, LLM discovers available tools, specs injected mid-loop
+- **Files:** `DiscoverToolsTool.java` (recovered), `LlmConfiguration.java`, `AgentOrchestrator.java`
+
+### Item 4: Cryptographic Infrastructure — Recovered + Wired
+- **Problem:** `SignedEnvelope`, `JacksonCanonicalizer`, `NonceCacheService` deleted as dead code (commit `4a717fa5`)
+- **Fix:** Recovered all 3 files + tests, re-added `signEnvelope()`/`verifyEnvelope()`/`rotateKey()`/`generateKeyPairVersioned()` to `AgentSigningService`, upgraded `GroupConversationService` signing from simple string signing to full `SignedEnvelope` with nonce-based replay protection
+- **Files:** `SignedEnvelope.java`, `JacksonCanonicalizer.java`, `NonceCacheService.java` (all recovered), `AgentSigningService.java`, `GroupConversationService.java`
+
+### Item 5: Tenant Quota DB Persistence — Dual-Backend Stores
+- **Problem:** `ITenantQuotaStore` only had `InMemoryTenantQuotaStore` — restarts reset all quota counters, no cross-instance synchronization
+- **Fix:** Created `MongoTenantQuotaStore` (uses `findAndModify` for atomicity) and `PostgresTenantQuotaStore` (uses `UPDATE...WHERE...RETURNING`), wired into `DataStoreProducers` following existing dual-backend pattern
+- **Files:** `MongoTenantQuotaStore.java` (new), `PostgresTenantQuotaStore.java` (new), `DataStoreProducers.java`
+
+### Item 6: NATS Documentation
+- NATS code works correctly for what it does (durable ordered processing with retry/dead-letter)
+- No code changes needed — documentation accuracy to be addressed separately
+
+### Items 7-8: No Changes Needed
+- HIPAA docs accurately describe documentation, not code enforcement
+- OpenTelemetry opt-in is standard industry practice
+
+
 ## How to Read This Document
 
 Each entry follows this format:
