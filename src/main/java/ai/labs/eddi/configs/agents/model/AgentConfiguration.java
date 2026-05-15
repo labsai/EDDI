@@ -526,6 +526,39 @@ public class AgentConfiguration {
         private int batchSize = 50;
         private int maxUsersPerRun = 1000;
 
+        /** Minimum entries in a group before summarization triggers. */
+        private int summarizeMinEntries = 5;
+
+        /** Target number of entries per group after consolidation. */
+        private int summarizeTargetEntries = 2;
+
+        /**
+         * Grouping strategy: "category" (group by fact/preference/context) or "all"
+         * (single group).
+         */
+        private String summarizeGroupBy = "category";
+
+        /**
+         * Whether to sub-group by sourceAgentId before consolidating. true = entries
+         * from different agents stay separate (preserves provenance). false = entries
+         * from all agents consolidated together (better compression).
+         */
+        private boolean preserveAgentProvenance = false;
+
+        /** Maximum LLM calls per dream cycle per user. Bounds cost. */
+        private int maxSummarizationCalls = 10;
+
+        /**
+         * LLM instructions for memory consolidation. Customizable by the agent
+         * designer. Entries are appended as JSON after this prompt.
+         */
+        private String summarizationPrompt = "You are a memory consolidation assistant. Given a list of remembered facts "
+                + "about a user, distill them into fewer, non-redundant entries. Preserve all "
+                + "important details. Remove duplicates and merge related facts. Each entry "
+                + "should be a single, clear statement.\n\n"
+                + "Respond ONLY with a JSON array: [{\"key\": \"...\", \"value\": \"...\"}]\n"
+                + "Do not add any text outside the JSON array.";
+
         public boolean isEnabled() {
             return enabled;
         }
@@ -612,6 +645,54 @@ public class AgentConfiguration {
 
         public void setMaxUsersPerRun(int maxUsersPerRun) {
             this.maxUsersPerRun = maxUsersPerRun;
+        }
+
+        public int getSummarizeMinEntries() {
+            return summarizeMinEntries;
+        }
+
+        public void setSummarizeMinEntries(int summarizeMinEntries) {
+            this.summarizeMinEntries = summarizeMinEntries;
+        }
+
+        public int getSummarizeTargetEntries() {
+            return summarizeTargetEntries;
+        }
+
+        public void setSummarizeTargetEntries(int summarizeTargetEntries) {
+            this.summarizeTargetEntries = summarizeTargetEntries;
+        }
+
+        public String getSummarizeGroupBy() {
+            return summarizeGroupBy;
+        }
+
+        public void setSummarizeGroupBy(String summarizeGroupBy) {
+            this.summarizeGroupBy = summarizeGroupBy;
+        }
+
+        public boolean isPreserveAgentProvenance() {
+            return preserveAgentProvenance;
+        }
+
+        public void setPreserveAgentProvenance(boolean preserveAgentProvenance) {
+            this.preserveAgentProvenance = preserveAgentProvenance;
+        }
+
+        public int getMaxSummarizationCalls() {
+            return maxSummarizationCalls;
+        }
+
+        public void setMaxSummarizationCalls(int maxSummarizationCalls) {
+            this.maxSummarizationCalls = maxSummarizationCalls;
+        }
+
+        public String getSummarizationPrompt() {
+            return summarizationPrompt;
+        }
+
+        public void setSummarizationPrompt(String summarizationPrompt) {
+            this.summarizationPrompt = summarizationPrompt;
         }
     }
 

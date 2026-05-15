@@ -13,7 +13,40 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🧠 DreamService: LLM-Driven Memory Summarization (2026-05-15)
+
+**Repo:** EDDI (`feature/dream-summarization`)
+**What changed:** Implemented `summarizeInteractions()` in `DreamService` — config-driven LLM memory consolidation that compresses related user memory entries via SummarizationService.
+
+### DreamConfig (AgentConfiguration.java)
+- Added 6 new config fields: `summarizeMinEntries` (5), `summarizeTargetEntries` (2), `summarizeGroupBy` ("category"/"all"), `preserveAgentProvenance` (false), `maxSummarizationCalls` (10), `summarizationPrompt` (customizable default)
+- All fields have sensible defaults; existing configs with `summarizeInteractions=false` are unaffected
+
+### DreamService
+- Added `SummarizationService` as constructor dependency (CDI injection)
+- Added `entriesSummarizedCounter` metric
+- Refactored `process()` to reload entries after pruning/contradiction before summarization
+- Implemented `summarizeInteractions()` with insert-before-delete safety pattern
+- Helpers: `buildGroups()` (category/all grouping + agent provenance sub-grouping), `parseConsolidatedEntries()` (markdown fence stripping, JSON array extraction), `mostRestrictiveVisibility()`, `buildEntriesJson()`, `escapeJson()`
+
+### Safety Guarantees
+- LLM returns empty/garbage → group skipped, originals untouched
+- LLM returns ≥ original count → group skipped
+- Insert fails → originals never deleted
+- Delete partially fails → duplicates resolved by contradiction detector next cycle
+- Cost bounded by `maxSummarizationCalls`
+
+### Tests (26 total: 8 existing + 18 new)
+- Updated `setUp()` for new constructor signature
+- 12 summarization behavior tests: threshold, consolidation, empty/garbage LLM, markdown fences, count validation, insert failure, call limit, groupBy all, agent provenance, custom prompt, visibility merge
+- 6 unit tests: `parseConsolidatedEntries` (valid/null/blank/fences), `mostRestrictiveVisibility` (self wins, all global)
+
+### Verification
+- `./mvnw compile` → BUILD SUCCESS
+- `./mvnw test -Dtest=DreamServiceTest` → 26 tests, 0 failures, 0 errors
+
 ## 🔧 PR Review Remediation — 8 Findings Resolved (2026-05-14)
+
 
 **Repo:** EDDI (`feature/agentic-improvements`)
 **What changed:** Addressed all PR review findings from Copilot (7) and CodeRabbit (1), round 2.
