@@ -4,6 +4,33 @@
 
 ---
 
+## 🛡️ Crypto Security Review — Fail-Safe Remediations (2026-05-15)
+
+**Repo:** EDDI (`feature/feature-gap-remediation`)
+**What changed:** Security-focused code review identified 7 findings (2 high, 3 medium, 2 low). All remediated. Key principle: signing failures are **fail-safe** — discard the broken signature and fall back to unsigned, rather than storing broken data.
+
+### S1+S2 (HIGH): Signing failures now fail-safe to unsigned
+- Self-verify failure (`verifyEnvelope` returns false) → discard signature, fall back to unsigned entry
+- Nonce validation failure → discard signature, fall back to unsigned entry
+- Previously: logged warning/error but continued with broken signature stored permanently
+
+### S3+S4 (MEDIUM): Null guards for crypto infrastructure
+- Signing block: `agentStore`, `agentSigningService`, `nonceCacheService` all guarded for null
+- `agentConfig.getIdentity()` guarded before `getKeyValidAt()` call
+
+### S7 (LOW): NonceCacheService unused `ttlMs` variable
+- Removed computed `ttlMs` that was never passed to cache factory
+- Added documentation comment explaining the cache TTL configuration requirement
+
+### Tests: 15 new tests (84 total affected)
+- `TranscriptEntry`: full 13-param constructor, `hasEnvelopeData()` (4 edge cases), signature-only constructor
+
+### Docs updated
+- `docs/architecture.md`: added Cryptographic Agent Identity section
+- `planning/manager-ui-handoff.md`: removed `signMcpInvocations`, `forkingEnabled`, `maxForksPerConversation`, updated Security section to show active signing flags
+
+---
+
 ## 🔐 Cryptographic Agent Identity — End-to-End Hardening (2026-05-15)
 
 **Repo:** EDDI (`feature/feature-gap-remediation`)
