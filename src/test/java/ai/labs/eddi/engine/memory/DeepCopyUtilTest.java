@@ -148,4 +148,44 @@ class DeepCopyUtilTest {
             assertThrows(UnsupportedOperationException.class, () -> copy.put("new", "entry"));
         }
     }
+
+    @Nested
+    @DisplayName("Depth Guard")
+    class DepthGuardTests {
+
+        @Test
+        @DisplayName("Should throw on nesting exceeding MAX_DEPTH")
+        void testExceedsMaxDepth() {
+            // Build a structure deeper than MAX_DEPTH
+            Map<String, Object> nested = new LinkedHashMap<>();
+            nested.put("leaf", "value");
+            for (int i = 0; i < DeepCopyUtil.MAX_DEPTH + 5; i++) {
+                Map<String, Object> wrapper = new LinkedHashMap<>();
+                wrapper.put("child", nested);
+                nested = wrapper;
+            }
+
+            Map<String, Object> tooDeep = nested;
+            IllegalStateException ex = assertThrows(IllegalStateException.class,
+                    () -> DeepCopyUtil.deepCopy(tooDeep));
+            assertTrue(ex.getMessage().contains("maximum nesting depth"));
+        }
+
+        @Test
+        @DisplayName("Should succeed at exactly MAX_DEPTH nesting")
+        void testAtMaxDepth() {
+            // Build a structure at exactly MAX_DEPTH levels (deepCopy starts at 1)
+            Map<String, Object> nested = new LinkedHashMap<>();
+            nested.put("leaf", "value");
+            for (int i = 0; i < DeepCopyUtil.MAX_DEPTH - 1; i++) {
+                Map<String, Object> wrapper = new LinkedHashMap<>();
+                wrapper.put("child", nested);
+                nested = wrapper;
+            }
+
+            // Should not throw
+            Map<String, Object> result = DeepCopyUtil.deepCopy(nested);
+            assertNotNull(result);
+        }
+    }
 }
