@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
+import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
@@ -118,7 +119,9 @@ public class DreamService {
 
             // 3. Summarize interactions (LLM-driven consolidation)
             if (dreamConfig.isSummarizeInteractions()) {
-                List<UserMemoryEntry> currentEntries = (pruned > 0 || contradictions > 0)
+                // Reload only if pruning modified the data set; contradiction detection is
+                // read-only
+                List<UserMemoryEntry> currentEntries = pruned > 0
                         ? userMemoryStore.getAllEntries(userId)
                         : allEntries;
                 summarized = summarizeInteractions(userId, currentEntries, dreamConfig);
@@ -233,10 +236,18 @@ public class DreamService {
             // 2. Build content: JSON array of entries
             String content = buildEntriesJson(groupEntries);
 
-            // 3. Call LLM
-            String result = summarizationService.summarize(
-                    content, config.getSummarizationPrompt(),
-                    config.getLlmProvider(), config.getLlmModel());
+            // 3. Call LLM (isolated — failure skips this group only)
+            String result;
+            try {
+                result = summarizationService.summarize(
+                        content, config.getSummarizationPrompt(),
+                        config.getLlmProvider(), config.getLlmModel());
+            } catch (Exception e) {
+                LOGGER.warnf("[DREAM] LLM call failed for user='%s', group='%s': %s. " +
+                        "Preserving original entries.", userId, group.getKey(), e.getMessage());
+                llmCallsMade++;
+                continue;
+            }
             llmCallsMade++;
 
             // 4. Parse response (handles markdown fences, validates output)
@@ -411,16 +422,14 @@ public class DreamService {
     }
 
     /**
-     * Escape a string for inclusion in a JSON value.
+     * Escape a string for safe inclusion in a JSON value. Uses Jackson's
+     * {@link JsonStringEncoder} for complete RFC 8259 compliance (handles all
+     * control characters, unicode, etc.).
      */
-    private static String escapeJson(String text) {
+    static String escapeJson(String text) {
         if (text == null)
             return "";
-        return text.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
+        return new String(JsonStringEncoder.getInstance().quoteAsString(text));
     }
 
     /**

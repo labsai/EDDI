@@ -482,4 +482,184 @@ class DreamServiceTest {
                 new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.global, "a", List.of(), "c", false, 0, now, now));
         assertEquals(Visibility.global, DreamService.mostRestrictiveVisibility(entries));
     }
+
+    @Test
+    void mostRestrictiveVisibility_groupOnly() {
+        Instant now = Instant.now();
+        var entries = List.of(
+                new UserMemoryEntry("1", "u", "k", "v", "fact", Visibility.global, "a", List.of(), "c", false, 0, now, now),
+                new UserMemoryEntry("2", "u", "k", "v", "fact", Visibility.group, "a", List.of(), "c", false, 0, now, now));
+        assertEquals(Visibility.group, DreamService.mostRestrictiveVisibility(entries));
+    }
+
+    @Test
+    void prune_nullUpdatedAt_skipped() throws Exception {
+        Instant stale = Instant.now().minus(Duration.ofDays(60));
+        var entries = List.of(
+                new UserMemoryEntry("1", "user-1", "no_date", "v", "fact", Visibility.self, "agent-1", List.of(), "conv-1", false, 0, stale, null),
+                new UserMemoryEntry("2", "user-1", "has_date", "v", "fact", Visibility.self, "agent-1", List.of(), "conv-1", false, 0, stale, stale));
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+
+        dreamConfig.setDetectContradictions(false);
+        var result = dreamService.process("user-1", dreamConfig);
+
+        assertTrue(result.isSuccess());
+        assertEquals(1, result.entriesPruned()); // only "2" pruned, "1" skipped (null updatedAt)
+        verify(store).deleteEntry("2");
+        verify(store, never()).deleteEntry("1");
+    }
+
+    @Test
+    void prune_deleteFails_continues() throws Exception {
+        Instant stale = Instant.now().minus(Duration.ofDays(60));
+        var entries = List.of(
+                new UserMemoryEntry("1", "user-1", "k1", "v", "fact", Visibility.self, "agent-1", List.of(), "conv-1", false, 0, stale, stale),
+                new UserMemoryEntry("2", "user-1", "k2", "v", "fact", Visibility.self, "agent-1", List.of(), "conv-1", false, 0, stale, stale));
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+        doThrow(new RuntimeException("DB error")).when(store).deleteEntry("1");
+
+        dreamConfig.setDetectContradictions(false);
+        var result = dreamService.process("user-1", dreamConfig);
+
+        assertTrue(result.isSuccess());
+        assertEquals(1, result.entriesPruned()); // "1" failed, "2" succeeded
+        verify(store).deleteEntry("1");
+        verify(store).deleteEntry("2");
+    }
+
+    @Test
+    void contradictions_sameKeyAndValue_noDuplicate() throws Exception {
+        Instant now = Instant.now();
+        var entries = List.of(
+                new UserMemoryEntry("1", "user-1", "language", "English", "preference", Visibility.self, "agent-1", List.of(), "conv-1", false, 0,
+                        now, now),
+                new UserMemoryEntry("2", "user-1", "language", "English", "preference", Visibility.self, "agent-2", List.of(), "conv-2", false, 0,
+                        now, now));
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+        dreamConfig.setPruneStaleAfterDays(0);
+
+        var result = dreamService.process("user-1", dreamConfig);
+
+        assertTrue(result.isSuccess());
+        assertEquals(0, result.contradictionsFound()); // same value → not a contradiction
+    }
+
+    @Test
+    void summarize_llmReturnsTooMany_cappedToTarget() throws Exception {
+        enableSummarization();
+        dreamConfig.setSummarizeTargetEntries(2);
+        var entries = makeEntries(8, "fact", "agent-1");
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+
+        // LLM returns 4 (< 8 originals, but > 2 target) → capped to 2
+        String llmResponse = "[{\"key\":\"a\",\"value\":\"1\"},{\"key\":\"b\",\"value\":\"2\"}," +
+                "{\"key\":\"c\",\"value\":\"3\"},{\"key\":\"d\",\"value\":\"4\"}]";
+        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResponse);
+
+        var result = dreamService.process("user-1", dreamConfig);
+
+        assertTrue(result.isSuccess());
+        assertEquals(6, result.entriesSummarized()); // 8 - 2 (capped) = 6
+        verify(store, times(2)).upsert(any(UserMemoryEntry.class)); // only 2 inserted
+        verify(store, times(8)).deleteEntry(anyString());
+    }
+
+    @Test
+    void summarize_deletePartiallyFails_logsAndContinues() throws Exception {
+        enableSummarization();
+        var entries = makeEntries(6, "fact", "agent-1");
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+
+        String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}]";
+        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResponse);
+        // First 3 deletes succeed, last 3 fail
+        doNothing().doNothing().doNothing()
+                .doThrow(new RuntimeException("DB")).doThrow(new RuntimeException("DB")).doThrow(new RuntimeException("DB"))
+                .when(store).deleteEntry(anyString());
+
+        var result = dreamService.process("user-1", dreamConfig);
+
+        assertTrue(result.isSuccess());
+        // Consolidated count reflects the intent (6 - 1 = 5), even if some deletes
+        // failed
+        assertEquals(5, result.entriesSummarized());
+        verify(store, times(6)).deleteEntry(anyString());
+    }
+
+    @Test
+    void summarize_llmThrows_preservesEntriesAndContinues() throws Exception {
+        enableSummarization();
+        var entries = makeEntries(6, "fact", "agent-1");
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
+                .thenThrow(new RuntimeException("LLM provider down"));
+
+        var result = dreamService.process("user-1", dreamConfig);
+
+        assertTrue(result.isSuccess()); // dream cycle succeeds even though LLM failed
+        assertEquals(0, result.entriesSummarized());
+        verify(store, never()).upsert(any(UserMemoryEntry.class));
+        verify(store, never()).deleteEntry(anyString());
+    }
+
+    @Test
+    void summarize_afterPruning_reloadsEntries() throws Exception {
+        enableSummarization();
+        dreamConfig.setPruneStaleAfterDays(30);
+
+        Instant stale = Instant.now().minus(Duration.ofDays(60));
+        Instant fresh = Instant.now();
+        // First call returns stale + fresh entries; second call (after prune) returns
+        // only fresh
+        var initialEntries = new java.util.ArrayList<UserMemoryEntry>();
+        initialEntries.add(new UserMemoryEntry("stale-1", "user-1", "old", "v", "fact", Visibility.self, "agent-1", List.of(), "conv-1", false, 0,
+                stale, stale));
+        for (int i = 0; i < 6; i++) {
+            initialEntries.add(new UserMemoryEntry("fresh-" + i, "user-1", "k-" + i, "v-" + i, "fact", Visibility.self, "agent-1", List.of(),
+                    "conv-1", false, 0, fresh, fresh));
+        }
+
+        var afterPruneEntries = initialEntries.subList(1, 7); // only the 6 fresh ones
+        when(store.getAllEntries("user-1")).thenReturn(initialEntries).thenReturn(afterPruneEntries);
+
+        String llmResponse = "[{\"key\": \"s\", \"value\": \"v\"}]";
+        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResponse);
+
+        var result = dreamService.process("user-1", dreamConfig);
+
+        assertTrue(result.isSuccess());
+        assertEquals(1, result.entriesPruned());
+        assertEquals(5, result.entriesSummarized()); // 6 fresh - 1 consolidated = 5
+        // 1st call = initial load, 2nd call = reload for summarization (pruned > 0)
+        verify(store, times(2)).getAllEntries("user-1");
+    }
+
+    @Test
+    void parseConsolidatedEntries_missingKeyField_filtered() {
+        // Entry with "name" instead of "key" should be filtered out
+        var result = dreamService.parseConsolidatedEntries(
+                "[{\"name\": \"k1\", \"value\": \"v1\"}, {\"key\": \"k2\", \"value\": \"v2\"}]");
+        assertEquals(1, result.size());
+        assertEquals("k2", result.getFirst().key());
+    }
+
+    @Test
+    void escapeJson_handlesControlCharacters() {
+        // Verify Jackson's encoder handles chars beyond basic \n\r\t
+        String result = DreamService.escapeJson("tab\there\nnewline\rcarriage\bback\\slash\"quote");
+        assertFalse(result.contains("\t"));
+        assertFalse(result.contains("\n"));
+        assertFalse(result.contains("\r"));
+        assertFalse(result.contains("\b"));
+        assertTrue(result.contains("\\t"));
+        assertTrue(result.contains("\\n"));
+    }
+
+    @Test
+    void escapeJson_nullReturnsEmpty() {
+        assertEquals("", DreamService.escapeJson(null));
+    }
 }

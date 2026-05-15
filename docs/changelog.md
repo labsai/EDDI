@@ -25,25 +25,35 @@ Each entry follows this format:
 ### DreamService
 - Added `SummarizationService` as constructor dependency (CDI injection)
 - Added `entriesSummarizedCounter` metric
-- Refactored `process()` to reload entries after pruning/contradiction before summarization
+- Refactored `process()` to reload entries only after pruning (contradiction detection is read-only)
 - Implemented `summarizeInteractions()` with insert-before-delete safety pattern
-- Helpers: `buildGroups()` (category/all grouping + agent provenance sub-grouping), `parseConsolidatedEntries()` (markdown fence stripping, JSON array extraction), `mostRestrictiveVisibility()`, `buildEntriesJson()`, `escapeJson()`
+- LLM call wrapped in try-catch — failure skips the group, does not kill the dream cycle
+- `escapeJson()` now uses Jackson's `JsonStringEncoder` for complete RFC 8259 compliance
+- Helpers: `buildGroups()` (category/all grouping + agent provenance sub-grouping), `parseConsolidatedEntries()` (markdown fence stripping, JSON array extraction), `mostRestrictiveVisibility()`, `buildEntriesJson()`
 
 ### Safety Guarantees
 - LLM returns empty/garbage → group skipped, originals untouched
+- LLM throws exception → group skipped, originals untouched, dream cycle continues
 - LLM returns ≥ original count → group skipped
+- LLM returns > target count → result capped to `summarizeTargetEntries`
 - Insert fails → originals never deleted
 - Delete partially fails → duplicates resolved by contradiction detector next cycle
 - Cost bounded by `maxSummarizationCalls`
 
-### Tests (26 total: 8 existing + 18 new)
+### Tests (37 total: 8 existing + 29 new)
 - Updated `setUp()` for new constructor signature
 - 12 summarization behavior tests: threshold, consolidation, empty/garbage LLM, markdown fences, count validation, insert failure, call limit, groupBy all, agent provenance, custom prompt, visibility merge
-- 6 unit tests: `parseConsolidatedEntries` (valid/null/blank/fences), `mostRestrictiveVisibility` (self wins, all global)
+- 9 coverage-hardening tests: null updatedAt, prune delete failure, same-key-same-value no contradiction, LLM result capping, delete partial failure, LLM exception isolation, summarize-after-pruning reload, missing key field filtering, escapeJson control chars/null
+- 8 unit tests: `parseConsolidatedEntries` (valid/null/blank/fences/missing-key), `mostRestrictiveVisibility` (self/global/group), `escapeJson` (control chars/null)
+
+### Documentation Updates
+- `docs/user-memory.md` — Dream config table expanded (6 new fields), config example updated, removed "V2, not yet active" label, added `dream.entries.summarized` metric
+- `docs/scheduling.md` — Dream config example updated with new fields
+- `HANDOFF.md` — Dream description and test count updated
 
 ### Verification
 - `./mvnw compile` → BUILD SUCCESS
-- `./mvnw test -Dtest=DreamServiceTest` → 26 tests, 0 failures, 0 errors
+- `./mvnw test -Dtest=DreamServiceTest` → 37 tests, 0 failures, 0 errors
 
 ## 🔧 PR Review Remediation — 8 Findings Resolved (2026-05-14)
 
