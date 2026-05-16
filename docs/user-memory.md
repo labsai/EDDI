@@ -51,7 +51,7 @@ Enable advanced memory features (LLM tools, Dream consolidation, guardrails, rec
       "maxWritesPerTurn": 10,
       "allowedCategories": ["preference", "fact", "context"]
     },
-    "dreamConfig": {
+    "dream": {
       "enabled": true,
       "pruneStaleAfterDays": 90,
       "detectContradictions": true,

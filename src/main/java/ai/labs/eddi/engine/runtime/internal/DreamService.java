@@ -57,7 +57,7 @@ public class DreamService {
     private final IUserMemoryStore userMemoryStore;
     private final SummarizationService summarizationService;
     private final MeterRegistry meterRegistry;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
 
     private Counter usersProcessedCounter;
     private Counter entriesPrunedCounter;
@@ -68,10 +68,12 @@ public class DreamService {
     @Inject
     public DreamService(IUserMemoryStore userMemoryStore,
             SummarizationService summarizationService,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry,
+            ObjectMapper objectMapper) {
         this.userMemoryStore = userMemoryStore;
         this.summarizationService = summarizationService;
         this.meterRegistry = meterRegistry;
+        this.objectMapper = objectMapper;
     }
 
     @PostConstruct
@@ -206,7 +208,8 @@ public class DreamService {
      * <li>If insert fails, originals are preserved</li>
      * <li>If LLM returns empty/garbage, the group is skipped</li>
      * <li>If LLM returns more entries than input, the group is skipped</li>
-     * <li>Cost is bounded by {@code maxSummarizationCalls}</li>
+     * <li>Call count bounded by {@code maxSummarizationCalls}</li>
+     * <li>Cost bounded by {@code maxCostPerRun} (estimated from token usage)</li>
      * </ul>
      */
     private int summarizeInteractions(String userId,
@@ -214,6 +217,7 @@ public class DreamService {
                                       AgentConfiguration.DreamConfig config) {
         int totalConsolidated = 0;
         int llmCallsMade = 0;
+        double estimatedCostAccumulated = 0.0;
 
         // 1. Build groups
         Map<String, List<UserMemoryEntry>> groups = buildGroups(entries, config);
@@ -233,13 +237,20 @@ public class DreamService {
                 break;
             }
 
+            // Respect cost ceiling
+            if (estimatedCostAccumulated >= config.getMaxCostPerRun()) {
+                LOGGER.infof("[DREAM] Cost ceiling ($%.4f >= $%.2f) reached for user='%s' " +
+                        "after %d calls", estimatedCostAccumulated, config.getMaxCostPerRun(), userId, llmCallsMade);
+                break;
+            }
+
             // 2. Build content: JSON array of entries
             String content = buildEntriesJson(groupEntries);
 
             // 3. Call LLM (isolated — failure skips this group only)
-            String result;
+            SummarizationService.SummarizationResult llmResult;
             try {
-                result = summarizationService.summarize(
+                llmResult = summarizationService.summarizeWithUsage(
                         content, config.getSummarizationPrompt(),
                         config.getLlmProvider(), config.getLlmModel());
             } catch (Exception e) {
@@ -249,9 +260,10 @@ public class DreamService {
                 continue;
             }
             llmCallsMade++;
+            estimatedCostAccumulated += estimateCost(llmResult);
 
             // 4. Parse response (handles markdown fences, validates output)
-            List<ConsolidatedEntry> consolidated = parseConsolidatedEntries(result);
+            List<ConsolidatedEntry> consolidated = parseConsolidatedEntries(llmResult.summary());
 
             if (consolidated.isEmpty()) {
                 LOGGER.warnf("[DREAM] Summarization returned empty/invalid result for " +
@@ -301,7 +313,7 @@ public class DreamService {
                     userMemoryStore.deleteEntry(original.id());
                 } catch (Exception e) {
                     LOGGER.warnf("[DREAM] Failed to delete original entry '%s': %s. " +
-                            "Duplicate will be resolved by contradiction detector.",
+                            "Duplicate may remain until next dream cycle.",
                             original.id(), e.getMessage());
                 }
             }
@@ -312,6 +324,25 @@ public class DreamService {
         }
 
         return totalConsolidated;
+    }
+
+    /**
+     * Estimate cost from an LLM summarization result using token usage. Uses a
+     * conservative upper-bound rate of $0.01 per 1,000 tokens when the provider
+     * doesn't expose real pricing. Falls back to character-based heuristic (~4
+     * chars per token) when token counts are unavailable.
+     */
+    static double estimateCost(SummarizationService.SummarizationResult result) {
+        // Conservative upper-bound: $0.01 per 1K tokens
+        double ratePerToken = 0.01 / 1000.0;
+
+        if (result.totalTokens() > 0) {
+            return result.totalTokens() * ratePerToken;
+        }
+
+        // Fallback: estimate from summary length (~4 chars per token)
+        int estimatedTokens = (result.summary() != null ? result.summary().length() : 0) / 4;
+        return estimatedTokens * ratePerToken;
     }
 
     /**

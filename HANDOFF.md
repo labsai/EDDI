@@ -966,7 +966,7 @@ Cross-conversation, agent-scoped fact retention with LLM tools, REST API, MCP ma
 | **Dream** | `DreamService.java` (stale pruning, contradiction detection, LLM-driven summarization, Micrometer metrics) |
 | **Integration** | `AgentOrchestrator.java` (groupId extraction), `GroupConversationService.java` (groupId context) |
 | **Docs** | `docs/user-memory.md`, `docs/changelog.md`, `docs/SUMMARY.md` |
-| **Tests** | 45+ new: `UserMemoryToolTest` (16), `DreamServiceTest` (37), `UserMemoryEntryTest` (22), `RestUserMemoryStoreTest` (15) |
+| **Tests** | 90 new: `UserMemoryToolTest` (16), `DreamServiceTest` (37), `UserMemoryEntryTest` (22), `RestUserMemoryStoreTest` (15) |
 
 **Total tests:** 1406 (all pass). **Last commit:** Phase 11a code review fixes.
 

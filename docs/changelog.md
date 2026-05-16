@@ -13,6 +13,28 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔍 DreamService PR Review Remediation (2026-05-16)
+
+**Repo:** EDDI (`feature/dream-summarization`)
+**What changed:** Addressed PR feedback from CodeRabbit and Copilot code review.
+
+### Fixes
+- **ObjectMapper CDI injection** — Replaced `new ObjectMapper()` with constructor-injected CDI-managed instance in `DreamService` (CodeRabbit finding)
+- **`maxCostPerRun` enforcement** — Added `SummarizationResult` record to `SummarizationService` (carries token usage), `estimateCost()` helper in `DreamService`, and pre-call cost ceiling check in summarization loop. Uses conservative $0.01/1K token upper-bound estimate; falls back to char-based heuristic when token counts unavailable
+- **Config key fix** — `docs/user-memory.md` example JSON corrected from `dreamConfig` to `dream` (matches Java field `UserMemoryConfig.dream`)
+- **Test count fix** — `HANDOFF.md` corrected from "45+" to "90" (actual sum: 16+37+22+15)
+- **Contradiction detector docs** — Corrected inaccurate claim that "duplicates resolved by contradiction detector" → detector only counts/logs, does not resolve
+- **Log message accuracy** — `DreamService` delete-failure log corrected to match actual behavior
+
+### New Tests (3 added, 40 total)
+- `estimateCost_withTokenUsage` — verifies token-based cost calculation
+- `estimateCost_withoutTokenUsage_fallsBackToCharEstimate` — verifies character-based fallback
+- `summarize_costCeilingReached_stopsEarly` — verifies loop stops when estimated cost exceeds `maxCostPerRun`
+
+### Verification
+- `./mvnw compile` → BUILD SUCCESS
+- `./mvnw test -Dtest=DreamServiceTest,ConversationSummarizerTest,SummarizationServiceTest` → 57 tests, 0 failures
+
 ## 🧠 DreamService: LLM-Driven Memory Summarization (2026-05-15)
 
 **Repo:** EDDI (`feature/dream-summarization`)
@@ -37,7 +59,7 @@ Each entry follows this format:
 - LLM returns ≥ original count → group skipped
 - LLM returns > target count → result capped to `summarizeTargetEntries`
 - Insert fails → originals never deleted
-- Delete partially fails → duplicates resolved by contradiction detector next cycle
+- Delete partially fails → duplicates may remain until next dream cycle (contradiction detector currently only counts/logs; dedup cleanup is a future enhancement)
 - Cost bounded by `maxSummarizationCalls`
 
 ### Tests (37 total: 8 existing + 29 new)

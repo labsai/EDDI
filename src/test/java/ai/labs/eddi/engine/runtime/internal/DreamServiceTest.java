@@ -34,7 +34,8 @@ class DreamServiceTest {
     void setUp() {
         store = mock(IUserMemoryStore.class);
         summarizationService = mock(SummarizationService.class);
-        dreamService = new DreamService(store, summarizationService, new SimpleMeterRegistry());
+        dreamService = new DreamService(store, summarizationService, new SimpleMeterRegistry(),
+                new com.fasterxml.jackson.databind.ObjectMapper());
         dreamService.initMetrics();
 
         dreamConfig = new AgentConfiguration.DreamConfig();
@@ -185,6 +186,19 @@ class DreamServiceTest {
         dreamConfig.setMaxSummarizationCalls(10);
     }
 
+    /**
+     * Helper: wraps an LLM response string into a SummarizationResult with zero
+     * token usage.
+     */
+    private SummarizationService.SummarizationResult llmResult(String response) {
+        return new SummarizationService.SummarizationResult(response, 0, 0);
+    }
+
+    /** Helper: wraps an LLM response string with specific token counts. */
+    private SummarizationService.SummarizationResult llmResult(String response, int inputTokens, int outputTokens) {
+        return new SummarizationService.SummarizationResult(response, inputTokens, outputTokens);
+    }
+
     @Test
     void summarize_belowThreshold_noOp() throws Exception {
         enableSummarization();
@@ -206,8 +220,8 @@ class DreamServiceTest {
 
         String llmResponse = "[{\"key\": \"summary-1\", \"value\": \"combined fact 1\"}, " +
                 "{\"key\": \"summary-2\", \"value\": \"combined fact 2\"}]";
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
-                .thenReturn(llmResponse);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResult(llmResponse));
 
         var result = dreamService.process("user-1", dreamConfig);
 
@@ -222,8 +236,8 @@ class DreamServiceTest {
         enableSummarization();
         var entries = makeEntries(6, "fact", "agent-1");
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
-                .thenReturn("");
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResult(""));
 
         var result = dreamService.process("user-1", dreamConfig);
 
@@ -238,8 +252,8 @@ class DreamServiceTest {
         enableSummarization();
         var entries = makeEntries(6, "fact", "agent-1");
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
-                .thenReturn("I can't do that, sorry!");
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResult("I can't do that, sorry!"));
 
         var result = dreamService.process("user-1", dreamConfig);
 
@@ -255,8 +269,8 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(entries);
 
         String llmResponse = "```json\n[{\"key\": \"s1\", \"value\": \"v1\"}, {\"key\": \"s2\", \"value\": \"v2\"}]\n```";
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
-                .thenReturn(llmResponse);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResult(llmResponse));
 
         var result = dreamService.process("user-1", dreamConfig);
 
@@ -275,8 +289,8 @@ class DreamServiceTest {
                 "{\"key\":\"a\",\"value\":\"1\"},{\"key\":\"b\",\"value\":\"2\"}," +
                 "{\"key\":\"c\",\"value\":\"3\"},{\"key\":\"d\",\"value\":\"4\"}," +
                 "{\"key\":\"e\",\"value\":\"5\"},{\"key\":\"f\",\"value\":\"6\"}]";
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
-                .thenReturn(llmResponse);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResult(llmResponse));
 
         var result = dreamService.process("user-1", dreamConfig);
 
@@ -292,8 +306,8 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(entries);
 
         String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}]";
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
-                .thenReturn(llmResponse);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResult(llmResponse));
         doThrow(new RuntimeException("DB write failed")).when(store).upsert(any(UserMemoryEntry.class));
 
         var result = dreamService.process("user-1", dreamConfig);
@@ -323,14 +337,14 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(entries);
 
         String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}]";
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
-                .thenReturn(llmResponse);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResult(llmResponse));
 
         var result = dreamService.process("user-1", dreamConfig);
 
         assertTrue(result.isSuccess());
         // Only 1 LLM call should have been made (limit=1)
-        verify(summarizationService, times(1)).summarize(anyString(), anyString(), anyString(), anyString());
+        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
     }
 
     @Test
@@ -351,15 +365,15 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(entries);
 
         String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}, {\"key\": \"s2\", \"value\": \"v2\"}]";
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
-                .thenReturn(llmResponse);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResult(llmResponse));
 
         var result = dreamService.process("user-1", dreamConfig);
 
         assertTrue(result.isSuccess());
         // All 6 entries in one group → 2 consolidated → 4 reduced
         assertEquals(4, result.entriesSummarized());
-        verify(summarizationService, times(1)).summarize(anyString(), anyString(), anyString(), anyString());
+        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
     }
 
     @Test
@@ -383,15 +397,15 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(entries);
 
         String llmResponse = "[{\"key\": \"s\", \"value\": \"v\"}]";
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
-                .thenReturn(llmResponse);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResult(llmResponse));
 
         var result = dreamService.process("user-1", dreamConfig);
 
         assertTrue(result.isSuccess());
         // Two separate groups, each 3→1 = 2 reduced per group = 4 total
         assertEquals(4, result.entriesSummarized());
-        verify(summarizationService, times(2)).summarize(anyString(), anyString(), anyString(), anyString());
+        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
     }
 
     @Test
@@ -402,12 +416,12 @@ class DreamServiceTest {
 
         var entries = makeEntries(6, "fact", "agent-1");
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(summarizationService.summarize(anyString(), eq(customPrompt), anyString(), anyString()))
-                .thenReturn("[{\"key\": \"s\", \"value\": \"v\"}]");
+        when(summarizationService.summarizeWithUsage(anyString(), eq(customPrompt), anyString(), anyString()))
+                .thenReturn(llmResult("[{\"key\": \"s\", \"value\": \"v\"}]"));
 
         dreamService.process("user-1", dreamConfig);
 
-        verify(summarizationService).summarize(anyString(), eq(customPrompt), anyString(), anyString());
+        verify(summarizationService).summarizeWithUsage(anyString(), eq(customPrompt), anyString(), anyString());
     }
 
     @Test
@@ -428,8 +442,8 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(entries);
 
         String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}]";
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
-                .thenReturn(llmResponse);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResult(llmResponse));
 
         dreamService.process("user-1", dreamConfig);
 
@@ -554,8 +568,8 @@ class DreamServiceTest {
         // LLM returns 4 (< 8 originals, but > 2 target) → capped to 2
         String llmResponse = "[{\"key\":\"a\",\"value\":\"1\"},{\"key\":\"b\",\"value\":\"2\"}," +
                 "{\"key\":\"c\",\"value\":\"3\"},{\"key\":\"d\",\"value\":\"4\"}]";
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
-                .thenReturn(llmResponse);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResult(llmResponse));
 
         var result = dreamService.process("user-1", dreamConfig);
 
@@ -572,8 +586,8 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(entries);
 
         String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}]";
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
-                .thenReturn(llmResponse);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResult(llmResponse));
         // First 3 deletes succeed, last 3 fail
         doNothing().doNothing().doNothing()
                 .doThrow(new RuntimeException("DB")).doThrow(new RuntimeException("DB")).doThrow(new RuntimeException("DB"))
@@ -593,7 +607,7 @@ class DreamServiceTest {
         enableSummarization();
         var entries = makeEntries(6, "fact", "agent-1");
         when(store.getAllEntries("user-1")).thenReturn(entries);
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
                 .thenThrow(new RuntimeException("LLM provider down"));
 
         var result = dreamService.process("user-1", dreamConfig);
@@ -625,8 +639,8 @@ class DreamServiceTest {
         when(store.getAllEntries("user-1")).thenReturn(initialEntries).thenReturn(afterPruneEntries);
 
         String llmResponse = "[{\"key\": \"s\", \"value\": \"v\"}]";
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString()))
-                .thenReturn(llmResponse);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResult(llmResponse));
 
         var result = dreamService.process("user-1", dreamConfig);
 
@@ -661,5 +675,54 @@ class DreamServiceTest {
     @Test
     void escapeJson_nullReturnsEmpty() {
         assertEquals("", DreamService.escapeJson(null));
+    }
+
+    // === Cost estimation tests ===
+
+    @Test
+    void estimateCost_withTokenUsage() {
+        var result = new SummarizationService.SummarizationResult("summary", 500, 100);
+        double cost = DreamService.estimateCost(result);
+        // 600 tokens * $0.01/1K = $0.006
+        assertEquals(0.006, cost, 0.0001);
+    }
+
+    @Test
+    void estimateCost_withoutTokenUsage_fallsBackToCharEstimate() {
+        var result = new SummarizationService.SummarizationResult("a]b".repeat(100), 0, 0);
+        double cost = DreamService.estimateCost(result);
+        // 300 chars / 4 = 75 estimated tokens * $0.01/1K = $0.00075
+        assertTrue(cost > 0);
+    }
+
+    @Test
+    void summarize_costCeilingReached_stopsEarly() throws Exception {
+        enableSummarization();
+        dreamConfig.setMaxSummarizationCalls(10); // high call limit
+        dreamConfig.setMaxCostPerRun(0.005); // very low cost ceiling
+        dreamConfig.setSummarizeGroupBy("category");
+
+        Instant now = Instant.now();
+        var entries = new java.util.ArrayList<UserMemoryEntry>();
+        for (int i = 0; i < 6; i++) {
+            entries.add(new UserMemoryEntry("f-" + i, "user-1", "fk-" + i, "fv-" + i,
+                    "fact", Visibility.self, "agent-1", List.of(), "conv-1", false, 0, now, now));
+        }
+        for (int i = 0; i < 6; i++) {
+            entries.add(new UserMemoryEntry("p-" + i, "user-1", "pk-" + i, "pv-" + i,
+                    "preference", Visibility.self, "agent-1", List.of(), "conv-1", false, 0, now, now));
+        }
+        when(store.getAllEntries("user-1")).thenReturn(entries);
+
+        // Return result with high token usage (1000 tokens → $0.01 > $0.005 ceiling)
+        String llmResponse = "[{\"key\": \"s1\", \"value\": \"v1\"}]";
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(llmResult(llmResponse, 800, 200));
+
+        var result = dreamService.process("user-1", dreamConfig);
+
+        assertTrue(result.isSuccess());
+        // Only 1 LLM call should have been made — cost ceiling stops second group
+        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString());
     }
 }
