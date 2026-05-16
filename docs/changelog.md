@@ -35,14 +35,17 @@ Each entry follows this format:
 - **Stale Javadoc fixed** — `SummarizationService` class doc: "future Dream consolidation" → "Dream memory consolidation"
 - **`enableSummarization()` test helper** — Now also sets `maxCostPerRun` to explicit value for clarity
 
-### New Tests (4 added: 40 DreamService + 6 SummarizationService)
+### New Tests (6 added: 40 DreamService + 8 SummarizationService)
 - `estimateCost_withTokenUsage` — token-based cost calculation
 - `estimateCost_withoutTokenUsage_fallsBackToCharEstimate` — input+output char fallback
 - `summarize_costCeilingReached_stopsEarly` — loop stops at cost ceiling
 - `summarizeWithUsage_llmError_propagatesException` — verifies re-throw (vs `summarize()` which swallows)
+- `summarizeWithUsage_returnsTokenCounts` — token usage extraction from LLM response
+- `summarizeWithUsage_checkedExceptionWrappedInRuntime` — checked exception wrapping
 
 ### Verification
-- `./mvnw clean test -Dtest=DreamServiceTest,ConversationSummarizerTest,SummarizationServiceTest` → 58 tests, 0 failures
+- `./mvnw clean test -Dtest=DreamServiceTest,ConversationSummarizerTest,SummarizationServiceTest` → 60 tests, 0 failures
+- JaCoCo coverage: DreamService 92% line / 88% branch, SummarizationService 100% line
 
 
 ## 🧠 DreamService: LLM-Driven Memory Summarization (2026-05-15)

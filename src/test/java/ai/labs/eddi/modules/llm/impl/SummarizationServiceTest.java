@@ -145,4 +145,42 @@ class SummarizationServiceTest {
         assertEquals(1.0, meterRegistry.counter("summarization.errors").count());
         assertTrue(meterRegistry.timer("summarization.duration").count() > 0);
     }
+
+    @Test
+    void summarizeWithUsage_returnsTokenCounts() throws Exception {
+        // Given
+        var chatModel = mock(ChatModel.class);
+        when(chatModelRegistry.getOrCreate(any(), any())).thenReturn(chatModel);
+
+        var aiMessage = AiMessage.from("summary text");
+        var chatResponse = ChatResponse.builder()
+                .aiMessage(aiMessage)
+                .tokenUsage(new dev.langchain4j.model.output.TokenUsage(500, 100))
+                .build();
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(chatResponse);
+
+        // When
+        var result = service.summarizeWithUsage("input text", "instructions", "anthropic", "model");
+
+        // Then
+        assertEquals("summary text", result.summary());
+        assertEquals(500, result.inputTokens());
+        assertEquals(100, result.outputTokens());
+        assertEquals(600, result.totalTokens());
+    }
+
+    @Test
+    void summarizeWithUsage_checkedExceptionWrappedInRuntime() throws Exception {
+        // Given — getOrCreate throws a checked UnsupportedLlmTaskException
+        when(chatModelRegistry.getOrCreate(any(), any()))
+                .thenThrow(new ChatModelRegistry.UnsupportedLlmTaskException("unknown provider"));
+
+        // When/Then — checked exception should be wrapped in RuntimeException
+        var ex = assertThrows(RuntimeException.class,
+                () -> service.summarizeWithUsage("text", "instructions", "bad-provider", "model"));
+
+        // The cause should be the original checked exception
+        assertInstanceOf(ChatModelRegistry.UnsupportedLlmTaskException.class, ex.getCause());
+        assertEquals(1.0, meterRegistry.counter("summarization.errors").count());
+    }
 }
