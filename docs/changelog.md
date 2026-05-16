@@ -13,10 +13,46 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
-## 🔍 DreamService PR Review Remediation (2026-05-16)
+## 🔍 DreamService PR Review Remediation — Pass 2 (2026-05-16)
 
 **Repo:** EDDI (`feature/dream-summarization`)
-**What changed:** Two review passes — initial PR feedback + thorough self-review (11 findings, all resolved).
+**What changed:** 9 findings from Copilot (8) + CodeRabbit (1) review, all resolved.
+
+### High Severity (3 — data loss / data unreachability)
+- **Multi-agent `self` visibility upgrade** — When consolidating entries from multiple agents (preserveAgentProvenance=false), self-scoped visibility is upgraded to `global` so no agent loses its memories
+- **GroupIds preserved** — Consolidated entries now inherit the union of all groupIds from originals, fixing group-scoped entries becoming unreachable after consolidation
+- **`summarizeTargetEntries` validation** — Setter now rejects `<1` (was silently accepting `0`, which would cap to empty list, insert nothing, then delete all originals)
+
+### Medium Severity (5 — atomicity, metrics, resilience)
+- **Partial insert rollback** — If any consolidated entry fails to insert, already-inserted entries are rolled back before preserving originals (was leaving orphaned consolidated entries)
+- **Accurate metrics** — `entriesSummarized` counter now tracks actual successful deletes minus inserts (was tracking intent, overstating when deletes failed)
+- **Soft cost ceiling documented** — Added comment explaining the pre-check design is intentional (can't pre-estimate output tokens). This is not a bug.
+- **Null category NPE fixed** — `Collectors.groupingBy` now uses null-safe lambda defaulting to "fact" (legacy Mongo entries may have null category)
+- **LLM output guardrails** — `parseConsolidatedEntries` now rejects blank keys/values and truncates to `MAX_KEY_LENGTH=100`/`MAX_VALUE_LENGTH=1000` (matches UserMemoryConfig guardrails)
+
+### Low Severity (1 — log level)
+- **SummarizationService log level** — Changed `warnf` → `errorf` in both exception handlers (RuntimeException + checked) per coding guidelines
+
+### New Tests (11 added: 51 DreamService total)
+- `summarize_multiAgentSelfScope_upgradesVisibility` — visibility upgrade to global
+- `summarize_preservesGroupIds` — merged groupIds on consolidated entries
+- `summarize_nullCategory_defaultsToFact` — null-safe grouping
+- `parseConsolidatedEntries_blankKeyFiltered` — blank key rejection
+- `parseConsolidatedEntries_longKeyTruncated` — key length guardrail
+- `truncate_shortString_unchanged`, `truncate_longString_truncated`, `truncate_null_returnsNull` — truncate utility
+- `summarize_partialInsertFails_rollsBack` — rollback on partial insert failure
+- `setSummarizeTargetEntries_rejectsZero`, `setSummarizeTargetEntries_rejectsNegative` — config validation
+
+### Verification
+- `./mvnw clean test -Dtest=DreamServiceTest,ConversationSummarizerTest,SummarizationServiceTest` → 71 tests, 0 failures
+- JaCoCo: DreamService 91.9% line / 86.1% branch, SummarizationService 100% line
+
+---
+
+## 🔍 DreamService PR Review Remediation — Pass 1 (2026-05-16)
+
+**Repo:** EDDI (`feature/dream-summarization`)
+**What changed:** Initial review — 11 findings from self-review, all resolved.
 
 ### Must-Fix (3)
 - **Triple DB reload eliminated** — `process()` was calling `getAllEntries()` three times when pruning + contradiction + summarization were all enabled. Hoisted the post-prune reload so it's shared (contradiction detection is read-only)

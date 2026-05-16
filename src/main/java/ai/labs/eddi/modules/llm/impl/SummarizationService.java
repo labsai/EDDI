@@ -150,12 +150,12 @@ public class SummarizationService {
 
         } catch (RuntimeException e) {
             errorCounter.increment();
-            LOGGER.warnf(e, "[SUMMARIZATION] Failed to summarize: provider=%s, model=%s, error=%s",
+            LOGGER.errorf(e, "[SUMMARIZATION] Failed to summarize: provider=%s, model=%s, error=%s",
                     llmProvider, llmModel, e.getMessage());
             throw e;
         } catch (Exception e) {
             errorCounter.increment();
-            LOGGER.warnf(e, "[SUMMARIZATION] Failed to summarize: provider=%s, model=%s, error=%s",
+            LOGGER.errorf(e, "[SUMMARIZATION] Failed to summarize: provider=%s, model=%s, error=%s",
                     llmProvider, llmModel, e.getMessage());
             throw new RuntimeException(e);
         } finally {

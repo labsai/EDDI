@@ -664,6 +664,9 @@ public class AgentConfiguration {
         }
 
         public void setSummarizeTargetEntries(int summarizeTargetEntries) {
+            if (summarizeTargetEntries < 1) {
+                throw new IllegalArgumentException("summarizeTargetEntries must be >= 1");
+            }
             this.summarizeTargetEntries = summarizeTargetEntries;
         }
 

@@ -23,6 +23,7 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.Collection;
 import java.util.stream.Collectors;
 
 /**
@@ -54,6 +55,16 @@ public class DreamService {
 
     private static final Logger LOGGER = Logger.getLogger(DreamService.class);
 
+    /**
+     * Max key length for consolidated entries (matches UserMemoryConfig.Guardrails
+     * default).
+     */
+    static final int MAX_KEY_LENGTH = 100;
+    /**
+     * Max value length for consolidated entries (matches
+     * UserMemoryConfig.Guardrails default).
+     */
+    static final int MAX_VALUE_LENGTH = 1000;
     private final IUserMemoryStore userMemoryStore;
     private final SummarizationService summarizationService;
     private final MeterRegistry meterRegistry;
@@ -236,7 +247,9 @@ public class DreamService {
                 break;
             }
 
-            // Respect cost ceiling
+            // Respect cost ceiling (soft cap: checked before each call, so the
+            // last call may push total slightly over — this is by design, since
+            // we cannot know output cost before the call)
             if (estimatedCostAccumulated >= config.getMaxCostPerRun()) {
                 LOGGER.infof("[DREAM] Cost ceiling ($%.4f >= $%.2f) reached for user='%s' " +
                         "after %d calls", estimatedCostAccumulated, config.getMaxCostPerRun(), userId, llmCallsMade);
@@ -277,39 +290,74 @@ public class DreamService {
                 continue;
             }
 
-            // 6. Cap at target
-            if (consolidated.size() > config.getSummarizeTargetEntries()) {
-                consolidated = consolidated.subList(0, config.getSummarizeTargetEntries());
+            // 6. Cap at target (guaranteed >= 1 by DreamConfig validation)
+            int target = Math.max(1, config.getSummarizeTargetEntries());
+            if (consolidated.size() > target) {
+                consolidated = consolidated.subList(0, target);
             }
 
             // 7. SAFETY: Insert new entries FIRST
+            // Derive provenance from the group — when entries span multiple
+            // agents, upgrade self-scoped visibility to global so the
+            // consolidated entry remains reachable by all contributing agents.
+            List<String> insertedIds = new ArrayList<>();
             try {
                 Visibility mergedVisibility = mostRestrictiveVisibility(groupEntries);
-                String sourceAgent = groupEntries.getFirst().sourceAgentId();
+                Set<String> distinctAgents = groupEntries.stream()
+                        .map(UserMemoryEntry::sourceAgentId)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toSet());
+                String sourceAgent = distinctAgents.size() == 1
+                        ? distinctAgents.iterator().next()
+                        : groupEntries.getFirst().sourceAgentId();
+                // If entries from multiple agents are merged AND visibility is
+                // self-scoped, upgrade to global so no agent loses its memories
+                if (distinctAgents.size() > 1 && mergedVisibility == Visibility.self) {
+                    mergedVisibility = Visibility.global;
+                }
                 Instant earliestCreated = groupEntries.stream()
                         .map(UserMemoryEntry::createdAt)
                         .filter(Objects::nonNull)
                         .min(Instant::compareTo).orElse(Instant.now());
+                // Merge groupIds from all originals to preserve group-scoped reachability
+                List<String> mergedGroupIds = groupEntries.stream()
+                        .map(UserMemoryEntry::groupIds)
+                        .filter(Objects::nonNull)
+                        .flatMap(Collection::stream)
+                        .distinct()
+                        .collect(Collectors.toList());
 
                 for (var entry : consolidated) {
-                    userMemoryStore.upsert(new UserMemoryEntry(
+                    String id = userMemoryStore.upsert(new UserMemoryEntry(
                             null, userId, entry.key(), entry.value(),
                             groupEntries.getFirst().category(),
-                            mergedVisibility, sourceAgent, List.of(),
+                            mergedVisibility, sourceAgent, mergedGroupIds,
                             "dream-consolidation", false, 0,
                             earliestCreated, Instant.now()));
+                    insertedIds.add(id);
                 }
             } catch (Exception e) {
                 LOGGER.warnf("[DREAM] Failed to insert consolidated entries for " +
-                        "user='%s', group='%s': %s. Originals preserved.",
-                        userId, group.getKey(), e.getMessage());
+                        "user='%s', group='%s': %s. Originals preserved, rolling back %d inserts.",
+                        userId, group.getKey(), e.getMessage(), insertedIds.size());
+                // Rollback: delete any partially-inserted consolidated entries
+                for (String insertedId : insertedIds) {
+                    try {
+                        userMemoryStore.deleteEntry(insertedId);
+                    } catch (Exception rollbackEx) {
+                        LOGGER.warnf("[DREAM] Rollback delete failed for '%s': %s",
+                                insertedId, rollbackEx.getMessage());
+                    }
+                }
                 continue; // Insert failed → don't delete anything
             }
 
-            // 8. Delete originals (only after successful insert)
+            // 8. Delete originals (only after ALL inserts succeeded)
+            int actualDeleted = 0;
             for (var original : groupEntries) {
                 try {
                     userMemoryStore.deleteEntry(original.id());
+                    actualDeleted++;
                 } catch (Exception e) {
                     LOGGER.warnf("[DREAM] Failed to delete original entry '%s': %s. " +
                             "Duplicate may remain until next dream cycle.",
@@ -317,9 +365,12 @@ public class DreamService {
                 }
             }
 
-            int reduced = groupEntries.size() - consolidated.size();
-            totalConsolidated += reduced;
-            entriesSummarizedCounter.increment(reduced);
+            // Track actual reduction (not intent) for accurate metrics
+            int reduced = actualDeleted - consolidated.size();
+            if (reduced > 0) {
+                totalConsolidated += reduced;
+                entriesSummarizedCounter.increment(reduced);
+            }
         }
 
         return totalConsolidated;
@@ -363,9 +414,10 @@ public class DreamService {
             return Map.of("all", new ArrayList<>(entries));
         }
 
-        // Default: group by category
+        // Default: group by category (null-safe — legacy entries may lack category)
         Map<String, List<UserMemoryEntry>> byCategory = entries.stream()
-                .collect(Collectors.groupingBy(UserMemoryEntry::category));
+                .collect(Collectors.groupingBy(
+                        e -> e.category() != null ? e.category() : "fact"));
 
         if (!config.isPreserveAgentProvenance()) {
             return byCategory;
@@ -417,7 +469,11 @@ public class DreamService {
                     });
             return entries.stream()
                     .filter(m -> m.containsKey("key") && m.containsKey("value"))
-                    .map(m -> new ConsolidatedEntry(m.get("key"), m.get("value")))
+                    .filter(m -> m.get("key") != null && !m.get("key").isBlank())
+                    .filter(m -> m.get("value") != null && !m.get("value").isBlank())
+                    .map(m -> new ConsolidatedEntry(
+                            truncate(m.get("key").strip(), MAX_KEY_LENGTH),
+                            truncate(m.get("value").strip(), MAX_VALUE_LENGTH)))
                     .toList();
         } catch (Exception e) {
             LOGGER.warnf("[DREAM] Failed to parse LLM consolidation response: %s",
@@ -476,6 +532,14 @@ public class DreamService {
         if (text == null)
             return "";
         return new String(JsonStringEncoder.getInstance().quoteAsString(text));
+    }
+
+    /** Truncate a string to maxLength, appending "…" if truncated. */
+    static String truncate(String text, int maxLength) {
+        if (text == null || text.length() <= maxLength) {
+            return text;
+        }
+        return text.substring(0, maxLength - 1) + "…";
     }
 
     /**
