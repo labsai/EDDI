@@ -239,6 +239,9 @@ public class AgentSigningService {
      *             if key generation fails
      */
     public String generateKeyPairVersioned(String tenantId, String agentId, int version) throws AgentSigningException {
+        if (version <= 0) {
+            throw new AgentSigningException("Key version must be positive, got: " + version, null);
+        }
         try {
             KeyPairGenerator keyGen = KeyPairGenerator.getInstance(ALGORITHM);
             KeyPair keyPair = keyGen.generateKeyPair();
@@ -291,13 +294,23 @@ public class AgentSigningService {
                     ? vaultKeyNameVersioned(agentId, keyVersion)
                     : vaultKeyName(agentId);
 
-            SecretReference ref = new SecretReference(tenantId, vaultKey);
-            String privateKeyB64 = secretProvider.resolve(ref);
+            // Use versioned cache key so different key versions don't collide
+            String cacheKeyStr = keyVersion > 0
+                    ? cacheKey(tenantId, agentId) + ";v=" + keyVersion
+                    : cacheKey(tenantId, agentId);
 
-            byte[] privateKeyBytes = Base64.getDecoder().decode(privateKeyB64);
-            KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
-            PrivateKey privateKey = keyFactory.generatePrivate(
-                    new java.security.spec.PKCS8EncodedKeySpec(privateKeyBytes));
+            PrivateKey privateKey = privateKeyCache.computeIfAbsent(cacheKeyStr, k -> {
+                try {
+                    SecretReference ref = new SecretReference(tenantId, vaultKey);
+                    String privateKeyB64 = secretProvider.resolve(ref);
+                    byte[] privateKeyBytes = Base64.getDecoder().decode(privateKeyB64);
+                    KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
+                    return keyFactory.generatePrivate(
+                            new java.security.spec.PKCS8EncodedKeySpec(privateKeyBytes));
+                } catch (Exception e) {
+                    throw new PrivateKeyLoadException(agentId, e);
+                }
+            });
 
             Signature sig = Signature.getInstance(ALGORITHM);
             sig.initSign(privateKey);
@@ -306,6 +319,10 @@ public class AgentSigningService {
 
             signCounter.increment();
             return envelope.withSignature(signatureB64, keyVersion);
+        } catch (PrivateKeyLoadException e) {
+            Throwable cause = e.getCause();
+            throw new AgentSigningException("Envelope signing failed for agent " + agentId
+                    + ": " + cause.getClass().getSimpleName(), cause);
         } catch (Exception e) {
             throw new AgentSigningException("Envelope signing failed for agent " + agentId, e);
         }
@@ -346,6 +363,9 @@ public class AgentSigningService {
      *             if rotation fails
      */
     public String rotateKey(String tenantId, String agentId, int newVersion) throws AgentSigningException {
+        if (newVersion <= 0) {
+            throw new AgentSigningException("Key version must be positive, got: " + newVersion, null);
+        }
         String publicKeyB64 = generateKeyPairVersioned(tenantId, agentId, newVersion);
         LOGGER.infof("Rotated signing key for agent '%s' to version %d", agentId, newVersion);
         return publicKeyB64;

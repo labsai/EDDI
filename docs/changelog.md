@@ -4,6 +4,37 @@
 
 ---
 
+## 🛠️ PR Feedback Remediation — Production Hardening (2026-05-17)
+
+**Repo:** EDDI (`feature/feature-gap-remediation`)
+**What changed:** Addressed ~25 findings from CodeQL, code quality bot, Copilot, and CodeRabbit reviews. All actionable items resolved.
+
+### Security Fixes
+- **NonceCacheService TOCTOU:** Replaced non-atomic `get()`+`put()` with `putIfAbsent()` for replay detection. The get-then-put pattern allowed two concurrent requests with the same nonce to both pass the replay check.
+- **NonceCacheService null guard:** Added null/blank nonce early rejection.
+- **Log injection:** Added `sanitizeForLog()` helpers to `GroupConversationService`, `MongoTenantQuotaStore`, `PostgresTenantQuotaStore` — strips `\r\n\t` from user-provided values in log statements (8 CodeQL findings).
+- **Fail-closed cost accounting:** `PostgresTenantQuotaStore.tryAddCost()` now returns `DENIED` on SQL failure instead of `OK` — prevents budget bypass when database is unreachable.
+- **Key version validation:** `AgentSigningService.generateKeyPairVersioned()` and `rotateKey()` now reject `version <= 0`.
+
+### Performance Fixes
+- **Incremental peer verification:** `verifyPriorEntriesIfRequired()` now tracks last-verified transcript index per conversation (O(N) amortized instead of O(N²) per-turn re-verification). Public keys cached per speaker to avoid redundant `agentStore` lookups.
+- **signEnvelope private key caching:** Now uses `privateKeyCache.computeIfAbsent()` with versioned cache key, avoiding vault round-trips on every call.
+
+### Architecture Fixes
+- **LAZY tool activation:** Fixed gap where discovered tools couldn't actually be called. `collectEnabledTools()` now returns ALL tools (registering executors), while `executeWithTools()` initially presents only `discover_tools` spec. After the LLM calls `discover_tools`, matching built-in specs are activated via `activateDiscoveredTools()`.
+- **PostgresTenantQuotaStore schema auto-creation:** Added `CREATE TABLE IF NOT EXISTS` with `ensureSchema()` pattern (matching `PostgresGlobalVariableStore`, `PostgresSecretPersistence`, etc.).
+- **DiscoverToolsTool JSON serialization:** Replaced manual `StringBuilder` JSON assembly with Jackson `ObjectMapper` for proper escaping of special characters in tool descriptions.
+- **JacksonCanonicalizer overload rename:** `canonicalize(Object)` → `canonicalizeObject(Object)` to eliminate static dispatch ambiguity.
+- **GroupConversationService FQN cleanup:** Replaced 5 fully-qualified class references (`ai.labs.eddi.configs.agents.crypto.*`) with proper imports.
+
+### Changelog accuracy
+- Fixed Item 1 and Item 2 descriptions below (see corrections inline).
+
+**Files:** `NonceCacheService.java`, `GroupConversationService.java`, `MongoTenantQuotaStore.java`, `PostgresTenantQuotaStore.java`, `AgentSigningService.java`, `AgentOrchestrator.java`, `DiscoverToolsTool.java`, `JacksonCanonicalizer.java`, `SignedEnvelope.java`, `changelog.md`
+
+---
+
+
 ## 🛡️ Crypto Security Review — Fail-Safe Remediations (2026-05-15)
 
 **Repo:** EDDI (`feature/feature-gap-remediation`)
@@ -76,15 +107,17 @@
 **Repo:** EDDI (`feature/feature-gap-remediation`)
 **What changed:** Systematic audit found 8 gaps between documented features and actual implementation. Fixed 6 items (2 required no changes).
 
-### Item 1: Session Forking — Validation Guard
+### Item 1: Session Forking — Config Removed
 - **Problem:** `forkingEnabled=true` accepted silently but no `ConversationForkService` exists
-- **Fix:** Added `validateSessionFlags()` in `RestAgentStore` — rejects `forkingEnabled=true` with clear error message explaining checkpointing is available now, forking is coming later
-- **Files:** `RestAgentStore.java`
+- **Original fix:** Added `validateSessionFlags()` in `RestAgentStore` to reject the flag with a clear error
+- **Final state:** Both `forkingEnabled` and `maxForksPerConversation` config fields were fully removed (config-without-functionality anti-pattern). `validateSessionFlags()` was also removed since there are no session flags left to validate.
+- **Files:** `AgentConfiguration.java`, `RestAgentStore.java`
 
-### Item 2: Signing Flags — Split Validation
-- **Correction:** `signInterAgentMessages` was incorrectly flagged as broken — it IS wired in `GroupConversationService:596-613` and works correctly
-- **Fix:** Split `validateSecurityFlags()` to separately reject `signMcpInvocations` (not yet implemented) while allowing `signInterAgentMessages` and `requirePeerVerification` (both now have runtime logic)
-- **Files:** `RestAgentStore.java`
+### Item 2: Signing Flags — Config Removed
+- **Problem:** `signMcpInvocations` flag accepted silently but no MCP signing implementation exists
+- **Original fix:** Split `validateSecurityFlags()` to reject `signMcpInvocations` while allowing `signInterAgentMessages` and `requirePeerVerification`
+- **Final state:** `signMcpInvocations` field was fully removed from `SecurityConfig`. The validation method was also removed since both remaining flags (`signInterAgentMessages`, `requirePeerVerification`) now have runtime implementations.
+- **Files:** `AgentConfiguration.java`, `RestAgentStore.java`
 
 ### Item 3: DiscoverToolsTool — Recovered + Wired
 - **Problem:** Token-saving lazy tool loading deleted as dead code (commit `05edf602`)

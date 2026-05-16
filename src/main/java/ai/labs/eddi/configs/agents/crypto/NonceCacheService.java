@@ -79,6 +79,12 @@ public class NonceCacheService {
      * @return validation result
      */
     public NonceValidation validate(String nonce, long timestampMs) {
+        // Reject null/blank nonces immediately
+        if (nonce == null || nonce.isBlank()) {
+            LOGGER.warn("Nonce validation failed: nonce is null or blank");
+            return NonceValidation.REPLAY; // Treat as invalid — same effect as replay
+        }
+
         long now = Instant.now().toEpochMilli();
 
         // 1. Freshness check
@@ -96,16 +102,17 @@ public class NonceCacheService {
             return NonceValidation.CLOCK_SKEW;
         }
 
-        // 3. Replay check
-        Boolean existing = nonceCache.get(nonce);
+        // 3. Atomic replay check — putIfAbsent returns null on successful insertion,
+        // existing value if already present. This eliminates the TOCTOU race between
+        // get() and put() that could allow two concurrent requests with the same nonce
+        // to both pass the replay check.
+        Boolean existing = nonceCache.putIfAbsent(nonce, Boolean.TRUE);
         if (existing != null) {
             replayRejections.increment();
             LOGGER.debugf("Nonce '%s' rejected: replay detected", nonce);
             return NonceValidation.REPLAY;
         }
 
-        // Record nonce
-        nonceCache.put(nonce, Boolean.TRUE);
         return NonceValidation.VALID;
     }
 

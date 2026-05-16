@@ -243,7 +243,17 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
     @Override
     public void resetUsage(String tenantId) {
         usage.deleteOne(Filters.eq("tenantId", tenantId));
-        LOGGER.infof("Reset usage counters for tenant '%s'", tenantId);
+        LOGGER.infof("Reset usage counters for tenant '%s'", sanitizeForLog(tenantId));
+    }
+
+    /**
+     * Sanitize a value for safe log output — strip control characters that could
+     * enable log injection.
+     */
+    private static String sanitizeForLog(String value) {
+        if (value == null)
+            return "null";
+        return value.replaceAll("[\\r\\n\\t]", "_");
     }
 
     // ─── Mapping ───

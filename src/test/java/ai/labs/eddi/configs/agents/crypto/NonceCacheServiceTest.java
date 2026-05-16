@@ -36,6 +36,10 @@ class NonceCacheServiceTest {
             cacheMap.put(inv.getArgument(0), inv.getArgument(1));
             return null;
         }).when(mockCache).put(anyString(), any(Boolean.class));
+        // putIfAbsent: return null on first insert (success), existing value on
+        // duplicate
+        when(mockCache.putIfAbsent(anyString(), any(Boolean.class)))
+                .thenAnswer(inv -> cacheMap.putIfAbsent(inv.getArgument(0), inv.getArgument(1)));
 
         ICacheFactory cacheFactory = mock(ICacheFactory.class);
         when(cacheFactory.getCache(anyString())).thenReturn((ICache) mockCache);

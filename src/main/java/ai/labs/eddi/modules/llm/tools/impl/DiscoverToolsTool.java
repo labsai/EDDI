@@ -4,13 +4,17 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.agent.tool.ToolSpecifications;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Meta-tool for lazy/dynamic tool loading. When the tool loading strategy is
@@ -25,6 +29,8 @@ import java.util.List;
  * @since 6.0.0
  */
 public class DiscoverToolsTool {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final List<ToolSpecification> allToolSpecs;
     private final int maxToolsInContext;
@@ -67,25 +73,30 @@ public class DiscoverToolsTool {
             matches = matches.subList(0, maxToolsInContext);
         }
 
-        if (matches.isEmpty()) {
-            return "{\"tools\": [], \"message\": \"No tools found matching the criteria.\", \"totalAvailable\": " + allToolSpecs.size() + "}";
-        }
-
-        StringBuilder sb = new StringBuilder("{\"tools\": [");
-        for (int i = 0; i < matches.size(); i++) {
-            ToolSpecification spec = matches.get(i);
-            if (i > 0)
-                sb.append(", ");
-            sb.append("{\"name\": \"").append(spec.name()).append("\"");
+        // Build response using Jackson for proper JSON escaping
+        Map<String, Object> response = new LinkedHashMap<>();
+        List<Map<String, String>> toolList = new ArrayList<>();
+        for (ToolSpecification spec : matches) {
+            Map<String, String> toolEntry = new LinkedHashMap<>();
+            toolEntry.put("name", spec.name());
             if (spec.description() != null) {
-                sb.append(", \"description\": \"").append(spec.description().replace("\"", "\\\"")).append("\"");
+                toolEntry.put("description", spec.description());
             }
-            sb.append("}");
+            toolList.add(toolEntry);
         }
-        sb.append("], \"count\": ").append(matches.size());
-        sb.append(", \"totalAvailable\": ").append(allToolSpecs.size()).append("}");
+        response.put("tools", toolList);
+        if (matches.isEmpty()) {
+            response.put("message", "No tools found matching the criteria.");
+        }
+        response.put("count", matches.size());
+        response.put("totalAvailable", allToolSpecs.size());
 
-        return sb.toString();
+        try {
+            return MAPPER.writeValueAsString(response);
+        } catch (JsonProcessingException e) {
+            // Fallback: should never happen with simple maps
+            return "{\"tools\":[],\"error\":\"JSON serialization failed\",\"totalAvailable\":" + allToolSpecs.size() + "}";
+        }
     }
 
     private boolean matchesCategory(ToolSpecification spec, String category) {

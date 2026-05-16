@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -26,6 +27,10 @@ import java.util.List;
  * {@code UPDATE ... WHERE ... RETURNING} for atomic counter operations — safe
  * for multi-instance deployments.
  * <p>
+ * Schema is auto-created via {@code CREATE TABLE IF NOT EXISTS} on first
+ * access, following the established pattern from
+ * {@code PostgresGlobalVariableStore}.
+ * <p>
  * Tables:
  * <ul>
  * <li>{@code tenant_quotas} — quota configuration</li>
@@ -40,18 +45,67 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresTenantQuotaStore.class);
 
-    private final DataSource dataSource;
+    private static final String CREATE_QUOTAS_TABLE = """
+            CREATE TABLE IF NOT EXISTS tenant_quotas (
+                tenant_id VARCHAR(255) PRIMARY KEY,
+                max_conversations_per_day INT NOT NULL DEFAULT -1,
+                max_agents_per_tenant INT NOT NULL DEFAULT -1,
+                max_api_calls_per_minute INT NOT NULL DEFAULT -1,
+                max_monthly_cost_usd DOUBLE PRECISION NOT NULL DEFAULT -1.0,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE
+            )
+            """;
+
+    private static final String CREATE_USAGE_TABLE = """
+            CREATE TABLE IF NOT EXISTS tenant_usage (
+                tenant_id VARCHAR(255) PRIMARY KEY,
+                conversations_today INT NOT NULL DEFAULT 0,
+                day_start BIGINT NOT NULL DEFAULT 0,
+                api_calls_this_minute INT NOT NULL DEFAULT 0,
+                minute_start BIGINT NOT NULL DEFAULT 0,
+                monthly_cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+                cost_month VARCHAR(10)
+            )
+            """;
+
+    private final Instance<DataSource> dataSourceInstance;
+    private volatile boolean schemaInitialized = false;
 
     @Inject
-    public PostgresTenantQuotaStore(DataSource dataSource) {
-        this.dataSource = dataSource;
+    public PostgresTenantQuotaStore(Instance<DataSource> dataSourceInstance) {
+        this.dataSourceInstance = dataSourceInstance;
+    }
+
+    private synchronized void ensureSchema() {
+        if (schemaInitialized)
+            return;
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                Statement stmt = conn.createStatement()) {
+            stmt.execute(CREATE_QUOTAS_TABLE);
+            stmt.execute(CREATE_USAGE_TABLE);
+            schemaInitialized = true;
+            LOGGER.info("PostgresTenantQuotaStore initialized (tables=tenant_quotas, tenant_usage)");
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to initialize tenant quota tables", e);
+        }
+    }
+
+    /**
+     * Sanitize a value for safe log output — strip control characters that could
+     * enable log injection.
+     */
+    private static String sanitizeForLog(String value) {
+        if (value == null)
+            return "null";
+        return value.replaceAll("[\\r\\n\\t]", "_");
     }
 
     // ─── Quota Configuration ───
 
     @Override
     public TenantQuota getQuota(String tenantId) {
-        try (Connection conn = dataSource.getConnection();
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement(
                         "SELECT * FROM tenant_quotas WHERE tenant_id = ?")) {
             ps.setString(1, tenantId);
@@ -61,14 +115,15 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.warnf("Failed to read quota for tenant '%s': %s", tenantId, e.getMessage());
+            LOGGER.warnf("Failed to read quota for tenant '%s': %s", sanitizeForLog(tenantId), e.getMessage());
         }
         return null;
     }
 
     @Override
     public void setQuota(TenantQuota quota) {
-        try (Connection conn = dataSource.getConnection();
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement(
                         """
                                 INSERT INTO tenant_quotas (tenant_id, max_conversations_per_day, max_agents_per_tenant,
@@ -89,14 +144,15 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             ps.setBoolean(6, quota.enabled());
             ps.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.errorf("Failed to set quota for tenant '%s': %s", quota.tenantId(), e.getMessage());
+            LOGGER.errorf("Failed to set quota for tenant '%s': %s", sanitizeForLog(quota.tenantId()), e.getMessage());
         }
     }
 
     @Override
     public List<TenantQuota> listQuotas() {
+        ensureSchema();
         List<TenantQuota> result = new ArrayList<>();
-        try (Connection conn = dataSource.getConnection();
+        try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement("SELECT * FROM tenant_quotas");
                 ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
@@ -110,7 +166,8 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
 
     @Override
     public void deleteQuota(String tenantId) {
-        try (Connection conn = dataSource.getConnection()) {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
             try (PreparedStatement ps = conn.prepareStatement("DELETE FROM tenant_quotas WHERE tenant_id = ?")) {
                 ps.setString(1, tenantId);
                 ps.executeUpdate();
@@ -120,7 +177,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 ps.executeUpdate();
             }
         } catch (SQLException e) {
-            LOGGER.warnf("Failed to delete quota for tenant '%s': %s", tenantId, e.getMessage());
+            LOGGER.warnf("Failed to delete quota for tenant '%s': %s", sanitizeForLog(tenantId), e.getMessage());
         }
     }
 
@@ -134,7 +191,8 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
 
         long dayStartMs = Instant.now().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
 
-        try (Connection conn = dataSource.getConnection()) {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
             // First: try atomic increment within current window
             try (PreparedStatement ps = conn.prepareStatement(
                     """
@@ -178,7 +236,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.errorf("Failed to increment conversations for tenant '%s': %s", tenantId, e.getMessage());
+            LOGGER.errorf("Failed to increment conversations for tenant '%s': %s", sanitizeForLog(tenantId), e.getMessage());
         }
 
         return QuotaCheckResult.denied("Daily conversation limit reached (" + limit + ")");
@@ -192,7 +250,8 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
 
         long minuteStart = Instant.now().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
 
-        try (Connection conn = dataSource.getConnection()) {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
             try (PreparedStatement ps = conn.prepareStatement(
                     """
                             UPDATE tenant_usage SET api_calls_this_minute = api_calls_this_minute + 1
@@ -235,7 +294,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.errorf("Failed to increment API calls for tenant '%s': %s", tenantId, e.getMessage());
+            LOGGER.errorf("Failed to increment API calls for tenant '%s': %s", sanitizeForLog(tenantId), e.getMessage());
         }
 
         return QuotaCheckResult.denied("API rate limit reached (" + limit + "/min)");
@@ -245,7 +304,8 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
     public QuotaCheckResult tryAddCost(String tenantId, double cost, double limit) {
         String monthKey = YearMonth.now(ZoneOffset.UTC).toString();
 
-        try (Connection conn = dataSource.getConnection();
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement(
                         """
                                 INSERT INTO tenant_usage (tenant_id, conversations_today, day_start, api_calls_this_minute, minute_start, monthly_cost_usd, cost_month)
@@ -275,7 +335,10 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.errorf("Failed to add cost for tenant '%s': %s", tenantId, e.getMessage());
+            LOGGER.errorf("Failed to add cost for tenant '%s': %s", sanitizeForLog(tenantId), e.getMessage());
+            // Fail closed — if cost accounting fails, deny the request rather than
+            // silently bypassing budget enforcement
+            return QuotaCheckResult.denied("Cost accounting failed — denying request for safety");
         }
         return QuotaCheckResult.OK;
     }
@@ -284,7 +347,8 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
 
     @Override
     public UsageSnapshot getUsage(String tenantId) {
-        try (Connection conn = dataSource.getConnection();
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement(
                         "SELECT * FROM tenant_usage WHERE tenant_id = ?")) {
             ps.setString(1, tenantId);
@@ -294,14 +358,15 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.warnf("Failed to read usage for tenant '%s': %s", tenantId, e.getMessage());
+            LOGGER.warnf("Failed to read usage for tenant '%s': %s", sanitizeForLog(tenantId), e.getMessage());
         }
         return UsageSnapshot.empty(tenantId);
     }
 
     @Override
     public double getMonthlyCost(String tenantId) {
-        try (Connection conn = dataSource.getConnection();
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement(
                         "SELECT monthly_cost_usd, cost_month FROM tenant_usage WHERE tenant_id = ?")) {
             ps.setString(1, tenantId);
@@ -314,20 +379,21 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.warnf("Failed to read monthly cost for tenant '%s': %s", tenantId, e.getMessage());
+            LOGGER.warnf("Failed to read monthly cost for tenant '%s': %s", sanitizeForLog(tenantId), e.getMessage());
         }
         return 0.0;
     }
 
     @Override
     public void resetUsage(String tenantId) {
-        try (Connection conn = dataSource.getConnection();
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement("DELETE FROM tenant_usage WHERE tenant_id = ?")) {
             ps.setString(1, tenantId);
             ps.executeUpdate();
-            LOGGER.infof("Reset usage counters for tenant '%s'", tenantId);
+            LOGGER.infof("Reset usage counters for tenant '%s'", sanitizeForLog(tenantId));
         } catch (SQLException e) {
-            LOGGER.errorf("Failed to reset usage for tenant '%s': %s", tenantId, e.getMessage());
+            LOGGER.errorf("Failed to reset usage for tenant '%s': %s", sanitizeForLog(tenantId), e.getMessage());
         }
     }
 

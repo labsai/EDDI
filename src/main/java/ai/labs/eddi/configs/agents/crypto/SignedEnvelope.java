@@ -98,6 +98,6 @@ public record SignedEnvelope(
     public String canonicalForm() throws JsonProcessingException {
         // Create a copy without signature fields for canonical form
         var forCanon = new SignedEnvelope(senderId, recipientId, payload, nonce, timestampMs, null, 0);
-        return JacksonCanonicalizer.canonicalize(forCanon);
+        return JacksonCanonicalizer.canonicalizeObject(forCanon);
     }
 }

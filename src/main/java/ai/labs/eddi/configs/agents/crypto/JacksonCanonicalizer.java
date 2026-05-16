@@ -62,7 +62,7 @@ public final class JacksonCanonicalizer {
      * @throws JsonProcessingException
      *             if serialization fails
      */
-    public static String canonicalize(Object obj) throws JsonProcessingException {
+    public static String canonicalizeObject(Object obj) throws JsonProcessingException {
         JsonNode node = MAPPER.valueToTree(obj);
         JsonNode sorted = sortKeys(node);
         return MAPPER.writeValueAsString(sorted);

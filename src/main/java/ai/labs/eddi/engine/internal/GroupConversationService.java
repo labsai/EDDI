@@ -6,6 +6,9 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
+import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
+import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
@@ -74,8 +77,13 @@ public class GroupConversationService implements IGroupConversationService {
     private final ExecutorService executorService;
     private final AgentSigningService agentSigningService;
     private final IAgentStore agentStore;
-    private final ai.labs.eddi.configs.agents.crypto.NonceCacheService nonceCacheService;
+    private final NonceCacheService nonceCacheService;
     private final String defaultTenantId;
+
+    // Incremental peer verification: tracks the last verified transcript index
+    // per group conversation ID, so we only verify new entries each turn (O(N)
+    // amortized instead of O(N²)). Cleaned up when conversations complete.
+    private final ConcurrentHashMap<String, Integer> lastVerifiedIndex = new ConcurrentHashMap<>();
 
     // Metrics
     private final Timer timerGroupDiscussion;
@@ -86,7 +94,7 @@ public class GroupConversationService implements IGroupConversationService {
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
             IAgentFactory agentFactory, ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, MeterRegistry meterRegistry,
             AgentSigningService agentSigningService, IAgentStore agentStore,
-            ai.labs.eddi.configs.agents.crypto.NonceCacheService nonceCacheService,
+            NonceCacheService nonceCacheService,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.groups.max-depth", defaultValue = "3") int maxDepth) {
         this.groupStore = groupStore;
@@ -316,6 +324,8 @@ public class GroupConversationService implements IGroupConversationService {
             throw new GroupDiscussionException("Group discussion failed: " + e.getMessage(), e);
         } finally {
             timerGroupDiscussion.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+            // Clean up incremental verification cursor — conversation is done
+            lastVerifiedIndex.remove(gc.getId());
         }
     }
 
@@ -615,7 +625,7 @@ public class GroupConversationService implements IGroupConversationService {
                                 && agentConfig.getSecurity().isSignInterAgentMessages()
                                 && response != null) {
                             // Create SignedEnvelope with nonce for replay protection
-                            var envelope = ai.labs.eddi.configs.agents.crypto.SignedEnvelope.forSigning(
+                            var envelope = SignedEnvelope.forSigning(
                                     member.agentId(), gc.getGroupId(),
                                     Map.of("content", response, "phase", phase.name()));
                             int keyVersion = 0;
@@ -623,7 +633,7 @@ public class GroupConversationService implements IGroupConversationService {
                                     && agentConfig.getIdentity().getKeys() != null
                                     && !agentConfig.getIdentity().getKeys().isEmpty()) {
                                 keyVersion = agentConfig.getIdentity().getKeys().stream()
-                                        .mapToInt(ai.labs.eddi.configs.agents.crypto.AgentPublicKey::version)
+                                        .mapToInt(AgentPublicKey::version)
                                         .max().orElse(0);
                             }
                             var signedEnvelope = agentSigningService.signEnvelope(
@@ -653,7 +663,7 @@ public class GroupConversationService implements IGroupConversationService {
                             if (signedEnvelope != null) {
                                 var nonceResult = nonceCacheService.validate(
                                         signedEnvelope.nonce(), signedEnvelope.timestampMs());
-                                if (nonceResult != ai.labs.eddi.configs.agents.crypto.NonceCacheService.NonceValidation.VALID) {
+                                if (nonceResult != NonceCacheService.NonceValidation.VALID) {
                                     LOGGER.warnf("Nonce validation failed for agent '%s': %s "
                                             + "— falling back to unsigned entry",
                                             member.agentId(), nonceResult);
@@ -1088,14 +1098,27 @@ public class GroupConversationService implements IGroupConversationService {
                 return;
             }
 
-            LOGGER.debugf("Peer verification active for agent '%s' — verifying %d transcript entries",
-                    receivingAgentId, gc.getTranscript().size());
+            List<TranscriptEntry> transcript = gc.getTranscript();
+            int totalEntries = transcript.size();
+
+            // Incremental verification: only verify entries added since last check
+            int startIdx = lastVerifiedIndex.getOrDefault(gc.getId(), 0);
+            if (startIdx >= totalEntries) {
+                return; // Nothing new to verify
+            }
+
+            LOGGER.debugf("Peer verification for agent '%s' — verifying entries %d..%d (of %d total)",
+                    receivingAgentId, startIdx, totalEntries - 1, totalEntries);
 
             int verified = 0;
             int failed = 0;
             int unsigned = 0;
 
-            for (TranscriptEntry entry : gc.getTranscript()) {
+            // Cache public keys per speaker to avoid redundant agentStore reads
+            Map<String, String> publicKeyCache = new HashMap<>();
+
+            for (int i = startIdx; i < totalEntries; i++) {
+                TranscriptEntry entry = transcript.get(i);
                 // Skip non-agent entries (user questions, errors, etc.)
                 if ("user".equals(entry.speakerAgentId()) || entry.content() == null) {
                     continue;
@@ -1105,32 +1128,36 @@ public class GroupConversationService implements IGroupConversationService {
                     unsigned++;
                     LOGGER.warnf("UNSIGNED entry from agent '%s' in group '%s' — "
                             + "peer verification required but entry has no envelope data",
-                            entry.speakerAgentId(), gc.getGroupId());
+                            entry.speakerAgentId(), sanitizeForLog(gc.getGroupId()));
                     continue;
                 }
 
                 // Reconstruct envelope for verification
-                var envelope = new ai.labs.eddi.configs.agents.crypto.SignedEnvelope(
+                var envelope = new SignedEnvelope(
                         entry.speakerAgentId(), gc.getGroupId(),
                         Map.of("content", entry.content(), "phase", entry.phaseName()),
                         entry.signatureNonce(), entry.signatureTimestampMs(),
                         entry.signature(), entry.signatureKeyVersion());
 
-                // Get speaker's public key
+                // Get speaker's public key (cached per speaker)
                 try {
-                    var speakerResourceId = agentStore.getCurrentResourceId(entry.speakerAgentId());
-                    if (speakerResourceId == null) {
-                        LOGGER.warnf("Cannot verify entry from agent '%s' — agent not found",
-                                entry.speakerAgentId());
-                        failed++;
-                        continue;
-                    }
-                    var speakerConfig = agentStore.read(
-                            entry.speakerAgentId(), speakerResourceId.getVersion());
-                    String publicKey = speakerConfig.getIdentity() != null
-                            ? speakerConfig.getIdentity()
-                                    .getKeyValidAt(entry.signatureTimestampMs())
-                            : null;
+                    String publicKey = publicKeyCache.computeIfAbsent(entry.speakerAgentId(), agentId -> {
+                        try {
+                            var speakerResourceId = agentStore.getCurrentResourceId(agentId);
+                            if (speakerResourceId == null) {
+                                return null;
+                            }
+                            var speakerConfig = agentStore.read(agentId, speakerResourceId.getVersion());
+                            return speakerConfig.getIdentity() != null
+                                    ? speakerConfig.getIdentity()
+                                            .getKeyValidAt(entry.signatureTimestampMs())
+                                    : null;
+                        } catch (Exception e) {
+                            LOGGER.warnf("Error loading public key for agent '%s': %s",
+                                    agentId, e.getMessage());
+                            return null;
+                        }
+                    });
 
                     if (publicKey == null) {
                         LOGGER.warnf("No public key found for agent '%s' — cannot verify signature",
@@ -1156,11 +1183,24 @@ public class GroupConversationService implements IGroupConversationService {
                 }
             }
 
-            LOGGER.infof("Peer verification for agent '%s': %d verified, %d failed, %d unsigned",
-                    receivingAgentId, verified, failed, unsigned);
+            // Update the cursor for this conversation
+            lastVerifiedIndex.put(gc.getId(), totalEntries);
+
+            LOGGER.infof("Peer verification for agent '%s': %d verified, %d failed, %d unsigned (range %d..%d)",
+                    receivingAgentId, verified, failed, unsigned, startIdx, totalEntries - 1);
         } catch (Exception e) {
             LOGGER.warnf("Peer verification check failed for agent '%s': %s",
                     receivingAgentId, e.getMessage());
         }
+    }
+
+    /**
+     * Sanitize a value for safe log output — strip control characters that could
+     * enable log injection.
+     */
+    private static String sanitizeForLog(String value) {
+        if (value == null)
+            return "null";
+        return value.replaceAll("[\\r\\n\\t]", "_");
     }
 }
