@@ -517,12 +517,16 @@ public class AgentConfiguration {
         private boolean enabled = false;
         private String schedule = "0 3 * * *";
         private boolean detectContradictions = true;
+        /**
+         * Contradiction resolution strategy. Reserved for future use — the current V1
+         * detector only counts and logs contradictions without resolving them.
+         */
         private String contradictionResolution = "keep_newest";
         private int pruneStaleAfterDays = 90;
         private boolean summarizeInteractions = false;
         private String llmProvider = "anthropic";
         private String llmModel = "claude-sonnet-4-6";
-        private double maxCostPerRun = 5.00;
+        private double maxCostPerRun = 0.50;
         private int batchSize = 50;
         private int maxUsersPerRun = 1000;
 

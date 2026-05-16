@@ -16,24 +16,34 @@ Each entry follows this format:
 ## 🔍 DreamService PR Review Remediation (2026-05-16)
 
 **Repo:** EDDI (`feature/dream-summarization`)
-**What changed:** Addressed PR feedback from CodeRabbit and Copilot code review.
+**What changed:** Two review passes — initial PR feedback + thorough self-review (11 findings, all resolved).
 
-### Fixes
-- **ObjectMapper CDI injection** — Replaced `new ObjectMapper()` with constructor-injected CDI-managed instance in `DreamService` (CodeRabbit finding)
-- **`maxCostPerRun` enforcement** — Added `SummarizationResult` record to `SummarizationService` (carries token usage), `estimateCost()` helper in `DreamService`, and pre-call cost ceiling check in summarization loop. Uses conservative $0.01/1K token upper-bound estimate; falls back to char-based heuristic when token counts unavailable
-- **Config key fix** — `docs/user-memory.md` example JSON corrected from `dreamConfig` to `dream` (matches Java field `UserMemoryConfig.dream`)
-- **Test count fix** — `HANDOFF.md` corrected from "45+" to "90" (actual sum: 16+37+22+15)
-- **Contradiction detector docs** — Corrected inaccurate claim that "duplicates resolved by contradiction detector" → detector only counts/logs, does not resolve
-- **Log message accuracy** — `DreamService` delete-failure log corrected to match actual behavior
+### Must-Fix (3)
+- **Triple DB reload eliminated** — `process()` was calling `getAllEntries()` three times when pruning + contradiction + summarization were all enabled. Hoisted the post-prune reload so it's shared (contradiction detection is read-only)
+- **`maxCostPerRun` default aligned** — Java default changed from `$5.00` to `$0.50` to match `user-memory.md` and `scheduling.md` documentation. Prevents a 10× cost surprise for operators
+- **`scheduling.md` contradiction claim fixed** — Changed "Identifies and resolves" to "Identifies and logs for review"
 
-### New Tests (3 added, 40 total)
-- `estimateCost_withTokenUsage` — verifies token-based cost calculation
-- `estimateCost_withoutTokenUsage_fallsBackToCharEstimate` — verifies character-based fallback
-- `summarize_costCeilingReached_stopsEarly` — verifies loop stops when estimated cost exceeds `maxCostPerRun`
+### Should-Fix (5)
+- **Cost estimator input undercount fixed** — `estimateCost()` now takes `inputContentLength` parameter and estimates from input+output chars when providers don't report tokens (was output-only, underestimating by 5-10×)
+- **Dead exception catch block fixed** — `SummarizationService.summarizeWithUsage()` now re-throws exceptions (was swallowing them, making `DreamService`'s catch block unreachable). `summarize()` wrapper retains swallow-and-return-empty behavior for backward compat with `ConversationSummarizer`
+- **`contradictionResolution` field annotated** — Added Javadoc noting it's reserved for future use (V1 detector only counts/logs)
+- **HANDOFF.md test counts corrected** — DreamServiceTest 37→40, SummarizationServiceTest +1, total 90→94
+- **`SummarizationResult.hasContent()` removed** — Unused convenience method
+
+### Nitpicks (3)
+- **`buildEntriesJson` now uses injected ObjectMapper** — Replaced hand-rolled `StringBuilder` JSON with `objectMapper.writerWithDefaultPrettyPrinter()`, keeping manual fallback for resilience
+- **Stale Javadoc fixed** — `SummarizationService` class doc: "future Dream consolidation" → "Dream memory consolidation"
+- **`enableSummarization()` test helper** — Now also sets `maxCostPerRun` to explicit value for clarity
+
+### New Tests (4 added: 40 DreamService + 6 SummarizationService)
+- `estimateCost_withTokenUsage` — token-based cost calculation
+- `estimateCost_withoutTokenUsage_fallsBackToCharEstimate` — input+output char fallback
+- `summarize_costCeilingReached_stopsEarly` — loop stops at cost ceiling
+- `summarizeWithUsage_llmError_propagatesException` — verifies re-throw (vs `summarize()` which swallows)
 
 ### Verification
-- `./mvnw compile` → BUILD SUCCESS
-- `./mvnw test -Dtest=DreamServiceTest,ConversationSummarizerTest,SummarizationServiceTest` → 57 tests, 0 failures
+- `./mvnw clean test -Dtest=DreamServiceTest,ConversationSummarizerTest,SummarizationServiceTest` → 58 tests, 0 failures
+
 
 ## 🧠 DreamService: LLM-Driven Memory Summarization (2026-05-15)
 

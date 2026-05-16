@@ -184,6 +184,7 @@ class DreamServiceTest {
         dreamConfig.setSummarizeMinEntries(5);
         dreamConfig.setSummarizeTargetEntries(2);
         dreamConfig.setMaxSummarizationCalls(10);
+        dreamConfig.setMaxCostPerRun(0.50);
     }
 
     /**
@@ -682,7 +683,7 @@ class DreamServiceTest {
     @Test
     void estimateCost_withTokenUsage() {
         var result = new SummarizationService.SummarizationResult("summary", 500, 100);
-        double cost = DreamService.estimateCost(result);
+        double cost = DreamService.estimateCost(result, 0);
         // 600 tokens * $0.01/1K = $0.006
         assertEquals(0.006, cost, 0.0001);
     }
@@ -690,9 +691,10 @@ class DreamServiceTest {
     @Test
     void estimateCost_withoutTokenUsage_fallsBackToCharEstimate() {
         var result = new SummarizationService.SummarizationResult("a]b".repeat(100), 0, 0);
-        double cost = DreamService.estimateCost(result);
-        // 300 chars / 4 = 75 estimated tokens * $0.01/1K = $0.00075
-        assertTrue(cost > 0);
+        int inputLength = 500; // simulate 500-char input
+        double cost = DreamService.estimateCost(result, inputLength);
+        // (500 input + 300 output) / 4 = 200 estimated tokens * $0.01/1K = $0.002
+        assertEquals(0.002, cost, 0.0001);
     }
 
     @Test

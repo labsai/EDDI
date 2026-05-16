@@ -112,20 +112,19 @@ public class DreamService {
                 pruned = pruneStaleEntries(userId, allEntries, dreamConfig.getPruneStaleAfterDays());
             }
 
-            // 2. Detect contradictions (future: LLM-driven)
+            // After pruning, reload once — shared by contradiction detection and
+            // summarization
+            List<UserMemoryEntry> currentEntries = pruned > 0
+                    ? userMemoryStore.getAllEntries(userId)
+                    : allEntries;
+
+            // 2. Detect contradictions (read-only — does not modify entries)
             if (dreamConfig.isDetectContradictions()) {
-                // Use remaining entries after pruning for contradiction detection
-                List<UserMemoryEntry> remainingEntries = pruned > 0 ? userMemoryStore.getAllEntries(userId) : allEntries;
-                contradictions = detectContradictions(userId, remainingEntries);
+                contradictions = detectContradictions(userId, currentEntries);
             }
 
             // 3. Summarize interactions (LLM-driven consolidation)
             if (dreamConfig.isSummarizeInteractions()) {
-                // Reload only if pruning modified the data set; contradiction detection is
-                // read-only
-                List<UserMemoryEntry> currentEntries = pruned > 0
-                        ? userMemoryStore.getAllEntries(userId)
-                        : allEntries;
                 summarized = summarizeInteractions(userId, currentEntries, dreamConfig);
             }
 
@@ -260,7 +259,7 @@ public class DreamService {
                 continue;
             }
             llmCallsMade++;
-            estimatedCostAccumulated += estimateCost(llmResult);
+            estimatedCostAccumulated += estimateCost(llmResult, content.length());
 
             // 4. Parse response (handles markdown fences, validates output)
             List<ConsolidatedEntry> consolidated = parseConsolidatedEntries(llmResult.summary());
@@ -331,8 +330,14 @@ public class DreamService {
      * conservative upper-bound rate of $0.01 per 1,000 tokens when the provider
      * doesn't expose real pricing. Falls back to character-based heuristic (~4
      * chars per token) when token counts are unavailable.
+     *
+     * @param result
+     *            the LLM result with token usage
+     * @param inputContentLength
+     *            length of the input text sent to the LLM
      */
-    static double estimateCost(SummarizationService.SummarizationResult result) {
+    static double estimateCost(SummarizationService.SummarizationResult result,
+                               int inputContentLength) {
         // Conservative upper-bound: $0.01 per 1K tokens
         double ratePerToken = 0.01 / 1000.0;
 
@@ -340,8 +345,9 @@ public class DreamService {
             return result.totalTokens() * ratePerToken;
         }
 
-        // Fallback: estimate from summary length (~4 chars per token)
-        int estimatedTokens = (result.summary() != null ? result.summary().length() : 0) / 4;
+        // Fallback: estimate from input + output character length (~4 chars per token)
+        int outputLength = result.summary() != null ? result.summary().length() : 0;
+        int estimatedTokens = (inputContentLength + outputLength) / 4;
         return estimatedTokens * ratePerToken;
     }
 
@@ -435,21 +441,30 @@ public class DreamService {
     }
 
     /**
-     * Build a JSON array string from memory entries for the LLM prompt.
+     * Build a JSON array string from memory entries for the LLM prompt. Uses the
+     * injected {@link ObjectMapper} for proper serialization.
      */
     private String buildEntriesJson(List<UserMemoryEntry> entries) {
-        var sb = new StringBuilder("[\n");
-        for (int i = 0; i < entries.size(); i++) {
-            var e = entries.get(i);
-            sb.append("  {\"key\": \"").append(escapeJson(e.key()))
-                    .append("\", \"value\": \"").append(escapeJson(String.valueOf(e.value())))
-                    .append("\"}");
-            if (i < entries.size() - 1)
-                sb.append(",");
-            sb.append("\n");
+        var list = entries.stream()
+                .map(e -> Map.of("key", e.key(), "value", String.valueOf(e.value())))
+                .toList();
+        try {
+            return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(list);
+        } catch (Exception e) {
+            LOGGER.warnf("[DREAM] Failed to serialize entries to JSON: %s", e.getMessage());
+            // Fallback: manual construction for resilience
+            var sb = new StringBuilder("[");
+            for (int i = 0; i < entries.size(); i++) {
+                var entry = entries.get(i);
+                sb.append("{\"key\": \"").append(escapeJson(entry.key()))
+                        .append("\", \"value\": \"").append(escapeJson(String.valueOf(entry.value())))
+                        .append("\"}");
+                if (i < entries.size() - 1)
+                    sb.append(",");
+            }
+            sb.append("]");
+            return sb.toString();
         }
-        sb.append("]");
-        return sb.toString();
     }
 
     /**

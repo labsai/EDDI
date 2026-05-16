@@ -130,4 +130,19 @@ class SummarizationServiceTest {
         // Then — blank/whitespace-only responses should be treated as empty
         assertTrue(result.isBlank());
     }
+    @Test
+    void summarizeWithUsage_llmError_propagatesException() throws Exception {
+        // Given
+        var chatModel = mock(ChatModel.class);
+        when(chatModelRegistry.getOrCreate(any(), any())).thenReturn(chatModel);
+        when(chatModel.chat(any(ChatRequest.class))).thenThrow(new RuntimeException("LLM API error"));
+
+        // When/Then — summarizeWithUsage should propagate, not swallow
+        assertThrows(RuntimeException.class,
+                () -> service.summarizeWithUsage("text", "instructions", "anthropic", "model"));
+
+        // Metrics should still record the error and duration
+        assertEquals(1.0, meterRegistry.counter("summarization.errors").count());
+        assertTrue(meterRegistry.timer("summarization.duration").count() > 0);
+    }
 }
