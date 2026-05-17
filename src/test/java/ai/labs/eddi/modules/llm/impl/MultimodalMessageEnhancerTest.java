@@ -42,14 +42,14 @@ class MultimodalMessageEnhancerTest {
 
         @Test
         void shouldDoNothingWhenMessagesNull() {
-            MultimodalMessageEnhancer.enhanceLastUserMessage(null, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(null, memory, null);
             // No exception = pass
         }
 
         @Test
         void shouldDoNothingWhenMessagesEmpty() {
             List<ChatMessage> messages = new ArrayList<>();
-            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, null);
             assertTrue(messages.isEmpty());
         }
 
@@ -60,7 +60,7 @@ class MultimodalMessageEnhancerTest {
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(UserMessage.from("Hello"));
 
-            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, null);
 
             assertEquals(1, messages.size());
             assertInstanceOf(UserMessage.class, messages.get(0));
@@ -76,7 +76,7 @@ class MultimodalMessageEnhancerTest {
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(UserMessage.from("Hello"));
 
-            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, null);
 
             assertEquals(1, messages.size());
         }
@@ -92,7 +92,7 @@ class MultimodalMessageEnhancerTest {
             messages.add(new SystemMessage("System"));
             messages.add(AiMessage.from("Response"));
 
-            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, null);
 
             // Messages unchanged
             assertEquals(2, messages.size());
@@ -117,7 +117,7 @@ class MultimodalMessageEnhancerTest {
             messages.add(new SystemMessage("system"));
             messages.add(UserMessage.from("Describe this image"));
 
-            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, null);
 
             assertEquals(2, messages.size());
             UserMessage enhanced = (UserMessage) messages.get(1);
@@ -137,7 +137,7 @@ class MultimodalMessageEnhancerTest {
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(UserMessage.from("What is this?"));
 
-            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, null);
 
             UserMessage enhanced = (UserMessage) messages.get(0);
             assertEquals(2, enhanced.contents().size());
@@ -160,7 +160,7 @@ class MultimodalMessageEnhancerTest {
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(UserMessage.from("Compare these"));
 
-            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, null);
 
             UserMessage enhanced = (UserMessage) messages.get(0);
             // 1 text + 2 images
@@ -185,7 +185,7 @@ class MultimodalMessageEnhancerTest {
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(UserMessage.from("Summarize this"));
 
-            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, null);
 
             UserMessage enhanced = (UserMessage) messages.get(0);
             assertEquals(2, enhanced.contents().size());
@@ -203,7 +203,7 @@ class MultimodalMessageEnhancerTest {
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(UserMessage.from("Hello"));
 
-            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory);
+            MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, null);
 
             // NONE content source → null → not added
             UserMessage enhanced = (UserMessage) messages.get(0);

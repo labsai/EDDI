@@ -159,4 +159,176 @@ class RestAgentStoreTest {
             verify(AgentStore).deleteAllPermanently(AGENT_ID);
         }
     }
+
+    // --- Wave 3: Security flag validation ---
+
+    @Nested
+    @DisplayName("rejectInertSecurityFlags")
+    class SecurityFlagValidationTests {
+
+        @Test
+        @DisplayName("createAgent should reject signInterAgentMessages=true with HTTP 400")
+        void createAgent_rejectsSignInterAgentMessages() {
+            var config = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            security.setSignInterAgentMessages(true);
+            config.setSecurity(security);
+
+            assertThrows(jakarta.ws.rs.BadRequestException.class,
+                    () -> restAgentStore.createAgent(config));
+        }
+
+        @Test
+        @DisplayName("createAgent should reject signMcpInvocations=true with HTTP 400")
+        void createAgent_rejectsSignMcpInvocations() {
+            var config = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            security.setSignMcpInvocations(true);
+            config.setSecurity(security);
+
+            assertThrows(jakarta.ws.rs.BadRequestException.class,
+                    () -> restAgentStore.createAgent(config));
+        }
+
+        @Test
+        @DisplayName("createAgent should reject requirePeerVerification=true with HTTP 400")
+        void createAgent_rejectsRequirePeerVerification() {
+            var config = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            security.setRequirePeerVerification(true);
+            config.setSecurity(security);
+
+            assertThrows(jakarta.ws.rs.BadRequestException.class,
+                    () -> restAgentStore.createAgent(config));
+        }
+
+        @Test
+        @DisplayName("createAgent should allow null security block")
+        void createAgent_allowsNullSecurity() throws Exception {
+            var config = new AgentConfiguration();
+            config.setSecurity(null);
+            config.setWorkflows(new ArrayList<>());
+
+            when(AgentStore.create(any())).thenReturn(new IResourceStore.IResourceId() {
+                @Override
+                public String getId() {
+                    return AGENT_ID;
+                }
+                @Override
+                public Integer getVersion() {
+                    return 1;
+                }
+            });
+
+            // Validation passes — no BadRequestException thrown
+            assertDoesNotThrow(() -> restAgentStore.createAgent(config));
+        }
+
+        @Test
+        @DisplayName("createAgent should allow security block with all flags false")
+        void createAgent_allowsAllFlagsFalse() throws Exception {
+            var config = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            // all default to false
+            config.setSecurity(security);
+            config.setWorkflows(new ArrayList<>());
+
+            when(AgentStore.create(any())).thenReturn(new IResourceStore.IResourceId() {
+                @Override
+                public String getId() {
+                    return AGENT_ID;
+                }
+                @Override
+                public Integer getVersion() {
+                    return 1;
+                }
+            });
+
+            // Validation passes — no BadRequestException thrown
+            assertDoesNotThrow(() -> restAgentStore.createAgent(config));
+        }
+
+        @Test
+        @DisplayName("updateAgent should reject signInterAgentMessages=true")
+        void updateAgent_rejectsSecurityFlags() {
+            var config = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            security.setSignInterAgentMessages(true);
+            config.setSecurity(security);
+
+            assertThrows(jakarta.ws.rs.BadRequestException.class,
+                    () -> restAgentStore.updateAgent(AGENT_ID, 1, config));
+        }
+
+        @Test
+        @DisplayName("duplicateAgent should reject security flags from source config")
+        void duplicateAgent_rejectsSecurityFlags() throws Exception {
+            var sourceConfig = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            security.setSignMcpInvocations(true);
+            sourceConfig.setSecurity(security);
+            sourceConfig.setWorkflows(new ArrayList<>());
+
+            when(AgentStore.read(AGENT_ID, 1)).thenReturn(sourceConfig);
+
+            assertThrows(jakarta.ws.rs.BadRequestException.class,
+                    () -> restAgentStore.duplicateAgent(AGENT_ID, 1, false));
+        }
+
+        @Test
+        @DisplayName("createAgent should accept crypto flags when rotated keys exist")
+        void createAgent_acceptsCryptoWithRotatedKeys() throws Exception {
+            var config = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            security.setSignInterAgentMessages(true);
+            config.setSecurity(security);
+            config.setWorkflows(new ArrayList<>());
+
+            var identity = new AgentConfiguration.AgentIdentity();
+            // No legacy publicKey, but rotated keys list is populated
+            identity.setKeys(List.of(
+                    ai.labs.eddi.configs.agents.crypto.AgentPublicKey.createCurrent(1, "base64key==")));
+            config.setIdentity(identity);
+
+            when(AgentStore.create(any())).thenReturn(new IResourceStore.IResourceId() {
+                @Override
+                public String getId() {
+                    return AGENT_ID;
+                }
+                @Override
+                public Integer getVersion() {
+                    return 1;
+                }
+            });
+
+            assertDoesNotThrow(() -> restAgentStore.createAgent(config));
+        }
+
+        @Test
+        @DisplayName("createAgent should accept crypto flags when legacy publicKey exists")
+        void createAgent_acceptsCryptoWithLegacyKey() throws Exception {
+            var config = new AgentConfiguration();
+            var security = new AgentConfiguration.SecurityConfig();
+            security.setSignInterAgentMessages(true);
+            config.setSecurity(security);
+            config.setWorkflows(new ArrayList<>());
+
+            var identity = new AgentConfiguration.AgentIdentity();
+            identity.setPublicKey("legacyBase64Key==");
+            config.setIdentity(identity);
+
+            when(AgentStore.create(any())).thenReturn(new IResourceStore.IResourceId() {
+                @Override
+                public String getId() {
+                    return AGENT_ID;
+                }
+                @Override
+                public Integer getVersion() {
+                    return 1;
+                }
+            });
+
+            assertDoesNotThrow(() -> restAgentStore.createAgent(config));
+        }
+    }
 }

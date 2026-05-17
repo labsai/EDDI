@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Attachment;
@@ -42,6 +43,15 @@ final class MultimodalMessageEnhancer {
 
     private static final Logger LOGGER = Logger.getLogger(MultimodalMessageEnhancer.class);
 
+    /**
+     * Maximum byte size for stored images forwarded to the LLM as base64. Larger
+     * files get a text placeholder instead of being inlined.
+     * <p>
+     * 10 MB raw → ~13 MB base64 — keeps LLM requests within typical provider limits
+     * while being generous enough for high-res images.
+     */
+    static final long MAX_MULTIMODAL_FORWARD_BYTES = 10L * 1024 * 1024; // 10 MB
+
     private MultimodalMessageEnhancer() {
         // non-instantiable utility
     }
@@ -59,7 +69,9 @@ final class MultimodalMessageEnhancer {
      * @param memory
      *            conversation memory to read attachments from
      */
-    static void enhanceLastUserMessage(List<ChatMessage> messages, IConversationMemory memory) {
+    static void enhanceLastUserMessage(List<ChatMessage> messages,
+                                       IConversationMemory memory,
+                                       IAttachmentStore attachmentStore) {
         if (messages == null || messages.isEmpty()) {
             return;
         }
@@ -102,7 +114,8 @@ final class MultimodalMessageEnhancer {
 
         int imagesAdded = 0;
         for (Attachment att : attachments) {
-            Content content = convertToContent(att);
+            Content content = convertToContent(att, attachmentStore,
+                    memory.getConversationId());
             if (content != null) {
                 contentList.add(content);
                 imagesAdded++;
@@ -121,7 +134,9 @@ final class MultimodalMessageEnhancer {
      *
      * @return the Content object, or null if the attachment type is not supported
      */
-    private static Content convertToContent(Attachment attachment) {
+    private static Content convertToContent(Attachment attachment,
+                                            IAttachmentStore attachmentStore,
+                                            String conversationId) {
         String mimeType = attachment.getMimeType();
         if (mimeType == null) {
             return null;
@@ -129,7 +144,7 @@ final class MultimodalMessageEnhancer {
 
         // Image attachments → ImageContent
         if (mimeType.startsWith("image/")) {
-            return convertImageAttachment(attachment);
+            return convertImageAttachment(attachment, attachmentStore, conversationId);
         }
 
         // For non-image types, add a text description so the LLM knows an attachment
@@ -143,7 +158,9 @@ final class MultimodalMessageEnhancer {
     /**
      * Convert an image attachment to ImageContent based on its content source.
      */
-    private static Content convertImageAttachment(Attachment attachment) {
+    private static Content convertImageAttachment(Attachment attachment,
+                                                  IAttachmentStore attachmentStore,
+                                                  String conversationId) {
         return switch (attachment.getContentSource()) {
             case URL -> {
                 try {
@@ -156,8 +173,6 @@ final class MultimodalMessageEnhancer {
             }
             case BASE64 -> {
                 try {
-                    // Use data URI format: data:<mimeType>;base64,<data>
-                    // ImageContent.from(String) supports both HTTP URLs and data URIs
                     String dataUri = "data:" + attachment.getMimeType() + ";base64," + attachment.getBase64Data();
                     yield ImageContent.from(dataUri);
                 } catch (Exception e) {
@@ -167,14 +182,41 @@ final class MultimodalMessageEnhancer {
                 }
             }
             case STORED -> {
-                // Storage-backed attachments need the IAttachmentStorage SPI to load bytes.
-                // For now, we log a warning. When storage impls are added, this path will
-                // load bytes via attachmentStorage.load(storageRef).
-                LOGGER.debugf("Storage-backed attachment '%s' — multimodal forwarding requires IAttachmentStorage (not yet available)",
-                        attachment.getFileName());
-                yield TextContent.from(String.format("[Stored attachment: %s (%s) — storage-based loading not yet implemented]",
-                        attachment.getFileName() != null ? attachment.getFileName() : "unnamed",
-                        attachment.getMimeType()));
+                if (attachmentStore == null) {
+                    LOGGER.warnf("Cannot load stored attachment '%s' — no IAttachmentStore available",
+                            attachment.getFileName());
+                    yield TextContent.from(String.format("[Stored attachment: %s (%s) — no attachment store configured]",
+                            attachment.getFileName() != null ? attachment.getFileName() : "unnamed",
+                            attachment.getMimeType()));
+                }
+                try {
+                    byte[] bytes = attachmentStore.load(
+                            attachment.getStorageRef(), conversationId);
+
+                    // Size guard — prevent blowing up the LLM request with
+                    // very large base64 payloads (raw 10 MB → ~13 MB base64)
+                    if (bytes.length > MAX_MULTIMODAL_FORWARD_BYTES) {
+                        LOGGER.warnf("Stored attachment '%s' too large for multimodal forwarding " +
+                                "(%d bytes exceeds %d byte limit)",
+                                attachment.getFileName(), bytes.length, MAX_MULTIMODAL_FORWARD_BYTES);
+                        yield TextContent.from(String.format(
+                                "[Stored attachment: %s (%s, %d bytes) — too large for multimodal forwarding (limit: %d bytes)]",
+                                attachment.getFileName() != null ? attachment.getFileName() : "unnamed",
+                                attachment.getMimeType(), bytes.length, MAX_MULTIMODAL_FORWARD_BYTES));
+                    }
+
+                    String base64 = java.util.Base64.getEncoder().encodeToString(bytes);
+                    String dataUri = "data:" + attachment.getMimeType() + ";base64," + base64;
+                    LOGGER.debugf("Loaded stored attachment '%s' (%d bytes) for multimodal forwarding",
+                            attachment.getFileName(), bytes.length);
+                    yield ImageContent.from(dataUri);
+                } catch (IAttachmentStore.AttachmentStoreException e) {
+                    LOGGER.warnf("Failed to load stored attachment '%s': %s",
+                            attachment.getFileName(), e.getMessage());
+                    yield TextContent.from(String.format("[Stored attachment: %s (%s) — load failed: %s]",
+                            attachment.getFileName() != null ? attachment.getFileName() : "unnamed",
+                            attachment.getMimeType(), e.getMessage()));
+                }
             }
             case NONE -> null;
         };

@@ -103,16 +103,27 @@ class LlmTaskTest {
         when(globalVariableResolver.getTemplateData()).thenReturn(java.util.Map.of());
         var chatModelRegistry = new ChatModelRegistry(languageModelApiConnectorBuilders, globalVariableResolver, secretResolver);
 
-        var toolResponseTruncator = new ToolResponseTruncator(new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+        var toolResponseTruncator = new ToolResponseTruncator(new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), chatModelRegistry);
+
+        var mockSnippetService = mock(PromptSnippetService.class);
+        when(mockSnippetService.getAll()).thenReturn(java.util.Collections.emptyMap());
+        var counterweightService = new CounterweightService(mockSnippetService, new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+        counterweightService.initMetrics();
+        var identityMaskingService = new IdentityMaskingService(new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
+        identityMaskingService.initMetrics();
 
         langChainTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter, templatingEngine, jsonSerialization, prePostUtils,
                 chatModelRegistry, calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool,
-                weatherTool, apiCallExecutor, toolExecutionService, mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
+                weatherTool, mock(FetchToolResponsePageTool.class),
+                apiCallExecutor, toolExecutionService, mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
                 mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(RagContextProvider.class), mock(IUserMemoryStore.class),
                 new TokenCounterFactory(), mock(ConversationSummarizer.class),
                 mock(PromptSnippetService.class),
                 globalVariableResolver,
-                toolResponseTruncator, mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class));
+                counterweightService,
+                identityMaskingService,
+                toolResponseTruncator, mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
+                null, null);
     }
 
     static Stream<Arguments> provideParameters() {

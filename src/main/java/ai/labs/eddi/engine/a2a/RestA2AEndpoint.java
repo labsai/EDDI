@@ -4,16 +4,21 @@
  */
 package ai.labs.eddi.engine.a2a;
 
+import ai.labs.eddi.configs.agents.CapabilityRegistryService;
+import ai.labs.eddi.configs.agents.CapabilityRegistryService.CapabilityMatch;
 import ai.labs.eddi.engine.a2a.A2AModels.*;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * JAX-RS endpoints for the A2A protocol.
@@ -22,6 +27,9 @@ import java.util.Map;
  * <li>{@code GET /a2a/agents/{agentId}/agent.json} — per-agent Agent Card</li>
  * <li>{@code POST /a2a/agents/{agentId}} — JSON-RPC 2.0 endpoint</li>
  * <li>{@code GET /a2a/agents} — list all A2A-enabled agents</li>
+ * <li>{@code GET /.well-known/capabilities} — public capability discovery</li>
+ * <li>{@code GET /.well-known/capabilities/skills} — list all registered
+ * skills</li>
  * </ul>
  *
  * @author ginccc
@@ -36,14 +44,20 @@ public class RestA2AEndpoint {
 
     private final AgentCardService agentCardService;
     private final A2ATaskHandler taskHandler;
+    private final CapabilityRegistryService capabilityRegistryService;
     private final boolean a2aEnabled;
+    private final boolean capabilitiesPublic;
 
     @Inject
     public RestA2AEndpoint(AgentCardService agentCardService, A2ATaskHandler taskHandler,
-            @ConfigProperty(name = "eddi.a2a.enabled", defaultValue = "true") boolean a2aEnabled) {
+            CapabilityRegistryService capabilityRegistryService,
+            @ConfigProperty(name = "eddi.a2a.enabled", defaultValue = "true") boolean a2aEnabled,
+            @ConfigProperty(name = "eddi.a2a.capabilities.public", defaultValue = "false") boolean capabilitiesPublic) {
         this.agentCardService = agentCardService;
         this.taskHandler = taskHandler;
+        this.capabilityRegistryService = capabilityRegistryService;
         this.a2aEnabled = a2aEnabled;
+        this.capabilitiesPublic = capabilitiesPublic;
     }
 
     /**
@@ -93,6 +107,56 @@ public class RestA2AEndpoint {
         }
 
         return Response.ok(agentCardService.listA2AAgents()).build();
+    }
+
+    /**
+     * Public capability discovery endpoint. Returns agents matching a skill,
+     * sanitized (no tenant IDs or private metadata). Gated behind
+     * {@code eddi.a2a.capabilities.public} (default {@code false}).
+     * <p>
+     * Path follows the well-known URI convention, same auth model as
+     * {@code /.well-known/agent.json}.
+     */
+    @GET
+    @Path(".well-known/capabilities")
+    @Tag(name = "06. Capability Registry", description = "A2A agent capability discovery")
+    @Operation(operationId = "publicSearchCapabilities",
+               description = "Public endpoint: find agents matching a skill. Requires eddi.a2a.capabilities.public=true.")
+    public Response searchCapabilities(@QueryParam("skill") String skill,
+                                       @QueryParam("strategy")
+                                       @DefaultValue("highest_confidence") String strategy) {
+        if (!a2aEnabled || !capabilitiesPublic) {
+            return Response.status(Response.Status.NOT_FOUND).build();
+        }
+
+        if (skill == null || skill.isBlank()) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(Map.of("error", "Query parameter 'skill' is required")).build();
+        }
+
+        List<CapabilityMatch> matches = capabilityRegistryService.findBySkill(skill, strategy);
+
+        // Sanitize: expose only agentId, skill, confidence, attributes
+        // (CapabilityMatch already has this shape — no internal fields to strip)
+        return Response.ok(matches).build();
+    }
+
+    /**
+     * Public endpoint listing all registered skill names. Gated behind
+     * {@code eddi.a2a.capabilities.public} (default {@code false}).
+     */
+    @GET
+    @Path(".well-known/capabilities/skills")
+    @Tag(name = "06. Capability Registry", description = "A2A agent capability discovery")
+    @Operation(operationId = "publicListSkills",
+               description = "Public endpoint: list all registered skill names. Requires eddi.a2a.capabilities.public=true.")
+    public Response listCapabilitySkills() {
+        if (!a2aEnabled || !capabilitiesPublic) {
+            return Response.status(Response.Status.NOT_FOUND).build();
+        }
+
+        Set<String> skills = capabilityRegistryService.getAllSkills();
+        return Response.ok(skills).build();
     }
 
     /**

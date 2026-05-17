@@ -16,7 +16,7 @@ This plan is split into six **Waves** (delivery order) that map to six **Improve
 | ------ | ----------------------------------------- | --------------------------------- | ----------- |
 | Wave 1 | Improvement 4 — Behavioral Counterweights | Not implemented                   | Low         |
 | Wave 2 | Improvement 5 — MCP Governance            | Partially implemented             | Medium      |
-| Wave 3 | Improvement 1 — Capability Registry       | Implemented, gaps remain          | Low (gaps)  |
+| Wave 3 | Improvement 1 — Capability Registry       | **✅ Complete** (2026-05-07)         | Low (gaps)  |
 | Wave 4 | Improvement 6 — Session Safety            | Not implemented                   | Medium      |
 | Wave 5 | Improvement 3 — Multimodal Attachments    | Model only, no pipeline/REST      | Medium      |
 | Wave 6 | Improvement 2 — Cryptographic Identity    | Signing primitive only            | High        |
@@ -44,15 +44,15 @@ This plan is split into six **Waves** (delivery order) that map to six **Improve
 - `CounterweightService`, `DeploymentContextCondition`, `IdentityMaskingService` — entire Wave 1 block.
 - Session forking endpoint (`POST /v6/conversations/{id}/fork`); `MemorySnapshotService.createCheckpoint` / `rollbackToCheckpoint`.
 - Multipart REST upload for attachments; GridFS-backed attachment store; `LlmTask` multimodal forwarding of conversation-memory attachments.
-- Token-efficient tool loading (`lazy`, `dynamic`; `discover_tools` meta-tool); `summarize` and `paginate` truncation strategies; MCP tenant-quota integration; per-tool cost weights.
+- Token-efficient tool loading (`lazy`, `dynamic`; `discover_tools` meta-tool); MCP tenant-quota integration; per-tool cost weights. (**Note:** `summarize` and `paginate` truncation strategies are now fully implemented — see changelog 2026-05-13.)
 - Signing envelope canonicalization, replay protection (nonce / `signedAt`), key rotation, call sites for `AgentSigningService`.
 - Trust scoring / `agentTrustScore` integration.
-- External A2A / capability discovery REST endpoint (only the internal admin REST exists at [`IRestCapabilityRegistry`](../../src/main/java/ai/labs/eddi/configs/agents/IRestCapabilityRegistry.java)).
+- ~~External A2A / capability discovery REST endpoint~~ — **Done (Wave 3).** Public endpoints at `GET /.well-known/capabilities` and `GET /.well-known/capabilities/skills`, gated behind `eddi.a2a.capabilities.public`.
 
 ### 1.3 Known bugs to fix while touching these areas
 
-- `CapabilityRegistryService.round_robin` is implemented as a per-call `Collections.shuffle`; not true round-robin. Either rename to `random` or add per-skill atomic counters.
-- `AgentConfiguration.security` exists with `signInterAgentMessages` / `signMcpInvocations` / `requirePeerVerification` flags but they are inert. Until Wave 6 wires them, PUT with any of them `true` MUST be rejected (see §5.2).
+- ~~`CapabilityRegistryService.round_robin` is implemented as a per-call `Collections.shuffle`; not true round-robin.~~ **Fixed (Wave 3).** Deterministic `AtomicInteger` rotation + explicit `random` strategy added.
+- ~~`AgentConfiguration.security` flags are inert.~~ **Fixed (Wave 3).** `signInterAgentMessages` / `signMcpInvocations` / `requirePeerVerification` = `true` now rejected with HTTP 400 on create/update/duplicate.
 
 ---
 
@@ -297,7 +297,9 @@ Weights are quota indicators, not dollars — dollar cost is already tracked by 
 
 ## 5. Wave 3 — A2A Capability Registry (close the gaps)
 
-**Improvement 1. Status: core implemented ✅, gaps remain. Priority P2. Effort: low.**
+**Improvement 1. Status: ✅ COMPLETE (2026-05-07, branch `feature/agentic-wave3-capabilities`). Priority P2. Effort: low.**
+
+> All sub-sections below have been implemented and tested (54 unit tests, 0 failures). Only §5.4 (`lowest_load`) is deferred — it requires `ConversationMetricsService` wiring.
 
 ### 5.1 Fix `round_robin`
 

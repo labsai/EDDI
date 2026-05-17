@@ -255,6 +255,26 @@ public record LlmConfiguration(List<Task> tasks) {
          */
         private ToolResponseLimits toolResponseLimits;
 
+        // === Behavioral Counterweight & Identity Masking (Wave 1) ===
+
+        /**
+         * Behavioral counterweight configuration. When enabled, safety instructions are
+         * injected into the system prompt to temper agent behavior. See
+         * {@link CounterweightConfig}.
+         *
+         * @since 6.0.0
+         */
+        private CounterweightConfig counterweight;
+
+        /**
+         * Identity masking configuration. When enabled, masking rules are prepended to
+         * the system prompt to prevent the agent from revealing its nature, model
+         * names, or internal infrastructure. See {@link IdentityMaskingConfig}.
+         *
+         * @since 6.0.0
+         */
+        private IdentityMaskingConfig identityMasking;
+
         // === Helper Methods ===
 
         /**
@@ -554,6 +574,23 @@ public record LlmConfiguration(List<Task> tasks) {
         public void setConversationSummary(ConversationSummaryConfig conversationSummary) {
             this.conversationSummary = conversationSummary;
         }
+
+        public CounterweightConfig getCounterweight() {
+            return counterweight;
+        }
+
+        public void setCounterweight(CounterweightConfig counterweight) {
+            this.counterweight = counterweight;
+        }
+
+        public IdentityMaskingConfig getIdentityMasking() {
+            return identityMasking;
+        }
+
+        public void setIdentityMasking(IdentityMaskingConfig identityMasking) {
+            this.identityMasking = identityMasking;
+        }
+
     }
 
     /**
@@ -567,6 +604,26 @@ public record LlmConfiguration(List<Task> tasks) {
         private int defaultMaxChars = 50000;
         /** Per-tool overrides: tool name → max chars */
         private Map<String, Integer> perToolLimits;
+
+        /**
+         * Truncation strategy: "truncate" (default), "paginate", or "summarize".
+         * <ul>
+         * <li>{@code truncate} — hard cut at limit with note (backward compatible)</li>
+         * <li>{@code paginate} — split into pages, return first page + responseId</li>
+         * <li>{@code summarize} — route through cheap model, fallback to truncate</li>
+         * </ul>
+         *
+         * @since 6.0.0
+         */
+        private String truncationStrategy;
+
+        /**
+         * Model to use for the "summarize" truncation strategy. When null, the
+         * summarize strategy falls back to simple truncation.
+         *
+         * @since 6.0.0
+         */
+        private String summarizerModel;
 
         public int getDefaultMaxChars() {
             return defaultMaxChars;
@@ -582,6 +639,22 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setPerToolLimits(Map<String, Integer> perToolLimits) {
             this.perToolLimits = perToolLimits;
+        }
+
+        public String getTruncationStrategy() {
+            return truncationStrategy;
+        }
+
+        public void setTruncationStrategy(String truncationStrategy) {
+            this.truncationStrategy = truncationStrategy;
+        }
+
+        public String getSummarizerModel() {
+            return summarizerModel;
+        }
+
+        public void setSummarizerModel(String summarizerModel) {
+            this.summarizerModel = summarizerModel;
         }
     }
 
@@ -1111,6 +1184,87 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setSummarizationPrompt(String summarizationPrompt) {
             this.summarizationPrompt = summarizationPrompt;
+        }
+    }
+
+    /**
+     * Behavioral counterweight configuration. Controls engine-level safety
+     * injection into LLM system prompts.
+     * <p>
+     * Level presets:
+     * <ul>
+     * <li>{@code normal} — no injection (default when absent)</li>
+     * <li>{@code cautious} — declare intent, prefer clarification, verify
+     * assumptions</li>
+     * <li>{@code strict} — all of cautious plus one-step-at-a-time, flag state
+     * changes</li>
+     * </ul>
+     *
+     * @since 6.0.0
+     */
+    public static class CounterweightConfig {
+        private boolean enabled = false;
+        private String level = "normal";
+        private String placement = "suffix";
+        private List<String> customInstructions;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getLevel() {
+            return level;
+        }
+
+        public void setLevel(String level) {
+            this.level = level;
+        }
+
+        public String getPlacement() {
+            return placement;
+        }
+
+        public void setPlacement(String placement) {
+            this.placement = placement;
+        }
+
+        public List<String> getCustomInstructions() {
+            return customInstructions;
+        }
+
+        public void setCustomInstructions(List<String> customInstructions) {
+            this.customInstructions = customInstructions;
+        }
+    }
+
+    /**
+     * Identity masking rules. Prepended to the system prompt to prevent the agent
+     * from revealing its nature, model names, or internal infrastructure.
+     *
+     * @since 6.0.0
+     */
+    public static class IdentityMaskingConfig {
+        private boolean enabled = false;
+        private List<String> rules = new java.util.ArrayList<>();
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public List<String> getRules() {
+            return rules;
+        }
+
+        public void setRules(List<String> rules) {
+            this.rules = rules;
         }
     }
 }

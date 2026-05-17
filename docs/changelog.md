@@ -268,6 +268,453 @@ Added 6 new MCP tools (admin-only):
 
 ---
 
+## 🔧 PR Review Remediation — 8 Findings Resolved (2026-05-14)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+**What changed:** Addressed all PR review findings from Copilot (7) and CodeRabbit (1), round 2.
+
+### Security & Safety Guards
+- **RestAttachmentUpload** — `tenantId` query param now sanitized (regex: alphanumeric + dash/underscore, max 64 chars). Invalid values silently discarded to null. Security note documents trust boundary.
+- **RestAttachmentUpload** — `CompletableFuture.runAsync()` now uses injected `ManagedExecutor` (matches `BaseRuntime` pattern) instead of default `ForkJoinPool`. Preserves request context (security, MDC).
+- **MultimodalMessageEnhancer** — Added `MAX_MULTIMODAL_FORWARD_BYTES` (10MB) guard on STORED image attachments. Files exceeding this limit get a `TextContent` placeholder instead of a ~13MB base64 data URI, preventing OOM and LLM API request bloat.
+- **ToolResponseTruncator** — Added `PAGINATE_MAX_STORABLE_CHARS` (500K) ceiling. Responses exceeding this fall back to truncation instead of materializing all page substrings in the Caffeine cache.
+
+### Bug Fixes
+- **AgentSigningService** — `generateKeyPair()` now evicts `privateKeyCache` entry for the tenant:agentId. Previously, key rotation via re-generation would silently keep using the stale cached private key, producing signatures that don't match the new public key.
+- **PostgresAttachmentStore / GridFsAttachmentStore** — `resolvedMime` now uses `MimeValidator.normalize()` (strip `;` params, trim, lowercase) before persisting. Prevents non-canonical values like `image/png; charset=utf-8` in the database.
+
+### Observability
+- **RestAttachmentUpload** — All upload log messages now include `conversationId` for correlation (was missing from rejection and success logs, only present in list/delete error logs).
+
+### New Utility
+- **MimeValidator.normalize()** — Static method to produce canonical MIME types. Used by both attachment stores.
+
+### Tests (12 new/updated)
+- `RestAttachmentUploadTest` — Updated for `ManagedExecutor` constructor. Added `shouldRejectInvalidTenantId` test (SQL injection → sanitized to null).
+- `AgentSigningServiceTest` — Added `generateKeyPair_evictsCacheOnRegeneration` (sign-verify roundtrip proves new key is in use after re-gen).
+- `MultimodalMessageEnhancerExtendedTest` — Added `oversizedStoredImageProducesTextFallback` (10MB+1 byte → text placeholder).
+- `ToolResponseTruncatorExtendedTest` — Added `testPaginateCeilingFallback` (500K+1 chars → truncation, store never called).
+- `MimeValidatorTest` — Added 7 `NormalizeTests` (params, case, trim, null, blank, combined, passthrough).
+
+### Verification
+- Clean compile: BUILD SUCCESS, 0 Checkstyle violations
+- 104 targeted tests: 0 failures, 0 errors
+
+## 🔧 PR Review Remediation — 10 Findings Resolved (2026-05-13)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+**What changed:** Addressed all PR review findings from Copilot and CodeRabbit.
+
+### Bug Fixes
+- **GroupConversationService** — `sign()` was called with `gc.getUserId()` but private keys are stored under tenant ID. Fixed to use `defaultTenantId` (from `eddi.tenant.default-id` config property), matching the `AuditLedgerService` pattern.
+- **RestAgentStore** — `validateSecurityFlags()` only checked `identity.publicKey` but ignored `identity.keys` list. Key-rotated configs were incorrectly rejected. Now accepts either legacy key or rotated keys list.
+- **ToolResponseTruncator** — `SUMMARY_HEADER` prepended to summary could push total output past `maxChars`. Guard 5 now checks `summary.length() + header.length() > maxChars`.
+
+### Architecture Compliance
+- **RestAttachmentUpload** — All 3 endpoints (`upload`, `list`, `delete`) converted from synchronous `Response` to `AsyncResponse` with `CompletableFuture.runAsync()`.
+- **RestAttachmentUpload** — Added early file size guard (`Files.size()` before `readAllBytes`) to prevent OOM. Configurable via `eddi.attachments.max-size-bytes` (default: 20MB).
+- **RestAttachmentUpload** — Added `LogSanitizer.sanitize()` on user-provided file names in log statements.
+
+### Documentation
+- **changelog.md** — Fixed "scheduled/batch" → "scheduled" wording to match code behavior.
+
+### Tests Updated
+- `RestAttachmentUploadTest` — Rewritten for `AsyncResponse` pattern with `CountDownLatch`-based capture helper. Added test for OOM size guard.
+- `GroupConversationServiceTest` — Constructor calls updated for new `defaultTenantId` parameter.
+
+## 🧠 Summarize Truncation Strategy — Production Implementation (2026-05-13)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+**What changed:** Activated the `summarize` tool-response truncation strategy, replacing the WARN stub with a fully functional LLM summarization pipeline.
+
+### Architecture: Inherit from Parent Task
+- **Problem:** `SummarizationService` only passes `modelName` to `ChatModelRegistry` — no API key. This works for `ConversationSummarizer` only because langchain4j falls back to env vars, which is a fragile implicit dependency.
+- **Solution:** The truncator now receives the parent task's `type` + `parameters` (which include `apiKey`, `baseUrl`, etc.) and calls `ChatModelRegistry.getOrCreate()` directly. Only `modelName` is overridden with `summarizerModel`. This inherits the full provider context automatically.
+
+### Changes
+- **`ToolResponseTruncator.java`** — Injected `ChatModelRegistry`. Implemented `summarizeResponse()` with 6-point fallback chain: no model → no task context → cost ceiling (200K chars) → model/LLM failure → empty summary → summary-longer-than-limit → all degrade to `truncate`. Response prefixed with `[SUMMARY — original: N chars, tool: name]` header.
+- **`AgentOrchestrator.java`** — Updated `truncateIfNeeded()` call to pass `task.getType()` and `task.getParameters()`.
+- **`ToolResponseTruncatorTest.java`** — Updated to new 5-arg API signature and 2-arg constructor.
+- **`ToolResponseTruncatorExtendedTest.java`** — 28 tests covering all strategies, all fallback paths, API key inheritance verification, parameter immutability, and case-insensitive strategy selection.
+- **`LlmTaskTest.java`** — Updated constructor call to match new signature.
+
+### Config Example
+```json
+{
+  "type": "openai",
+  "parameters": { "apiKey": "${vault:openai-key}", "modelName": "gpt-4o" },
+  "toolResponseLimits": {
+    "defaultMaxChars": 5000,
+    "truncationStrategy": "summarize",
+    "summarizerModel": "gpt-4o-mini"
+  }
+}
+```
+
+### Decision: No New Config Fields
+`summarizerModel` already existed on `ToolResponseLimits`. No `summarizerProvider` or `summarizerApiKey` needed — the summarizer inherits everything from the parent task, making the 95% use case (same provider, cheaper model) zero-config beyond setting the model name.
+
+## 🔧 Checkpoint Integrity & Dead Code Cleanup (2026-05-12)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+**What changed:** Fixed 4 findings from final code review — performance bug, dead code, redundant import, and a design bug in property scope preservation.
+
+### Bug Fix: Double Deep-Copy (Finding 1)
+- **`MemorySnapshotService.extractProperties()`** was calling `DeepCopyUtil.deepCopy()`, then **`MemoryCheckpoint.create()`** deep-copied again — wasting CPU on every checkpoint
+- **Fix:** `extractProperties()` now returns a shallow `LinkedHashMap` copy; `MemoryCheckpoint.create()` handles the single deep-copy via `copyProperties()`
+
+### Bug Fix: Property Scope Loss on Rollback (Finding 4)
+- **`MemoryCheckpoint.propertiesCopy`** was `Map<String, Object>` (flattened values) — scope, visibility, and type metadata were stripped at checkpoint time
+- **`restoreProperties()`** reconstructed all properties with hardcoded `Scope.conversation`, losing `longTerm`/`step`/`secret` scope
+- **Fix:** Changed `propertiesCopy` to `Map<String, Property>`, which preserves the full `Property` object (scope, visibility, all value types). `copyProperties()` clones each `Property` via its all-args constructor. `restoreProperties()` now simply puts back the original `Property` objects
+
+### Dead Code Removed (Finding 2)
+- **`AgentSigningService`** — Removed `generateKeyPairVersioned()` + `vaultKeyNameVersioned()` (38 lines). Only caller was deleted `rotateKey()`. Tests removed too
+- **`AgentSigningServiceTest`** — Removed 2 dead test methods exercising the deleted methods
+
+### Minor Cleanup (Finding 3)
+- **`DeepCopyUtil`** — Removed redundant `import java.util.Collections` (already covered by `import java.util.*`)
+
+### Test Improvements
+- **`MemoryCheckpointTest`** — Added 3 new tests: scope preservation, visibility preservation, deep-copy mutation isolation
+- **`MemorySnapshotServiceTest`** — Updated rollback test to assert scope preservation (`longTerm` properties survive rollback)
+
+### Verification
+- Clean compile: BUILD SUCCESS, 0 Checkstyle violations
+- 5,041 unit tests: 0 failures, 0 errors (21 Docker-dependent infra test errors = pre-existing)
+
+## 🧹 Dead Code Removal & Immutability Fix (2026-05-08)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+**What changed:** Removed all dead code identified during critical branch audit, fixed failing test, improved coverage.
+
+### Dead Code Removed (10 files deleted)
+- **`AttachmentForwarder` + test** — `@ApplicationScoped` but never injected. `MultimodalMessageEnhancer` handles the actual attachment→Content conversion
+- **`NonceCacheService` + test** — Caffeine-based replay protection, never injected by any endpoint
+- **`SignedEnvelope` + test** — Envelope signing record, never used (basic `sign()`/`verify()` on `AgentSigningService` is the live API)
+- **`JacksonCanonicalizer` + test** — RFC 8785 canonicalization, only consumer was dead `SignedEnvelope`
+- **`DiscoverToolsTool` + test** — Meta-tool for lazy tool loading, never instantiated by `AgentOrchestrator`
+
+### Dead Code Removed (from live files)
+- **`AgentSigningService`** — Removed `signEnvelope()`, `verifyEnvelope()`, `rotateKey()` (never called)
+- **`LlmConfiguration`** — Removed `ToolLoadingStrategy` inner class + field + getter/setter (never read by any pipeline component)
+- **`AgentSigningServiceTest`** — Removed 5 tests for deleted methods
+
+### Bug Fix
+- **`DeepCopyUtil.deepCopy()`** — Wrapped return value in `Collections.unmodifiableMap()`. `MemoryCheckpoint` properties are contractually immutable; the test correctly asserted this but the implementation returned a mutable `LinkedHashMap`
+- **`DeepCopyUtil.java`** — Was present in working tree but never committed to Git. Now tracked
+
+### Documentation
+- **`architecture.md`** — Replaced deleted `AttachmentForwarder` reference with `MultimodalMessageEnhancer`
+- **`ToolResponseTruncator`** — Summarize strategy log upgraded from DEBUG to WARN with clear "not yet implemented" message. Removed misleading TODO
+
+### Coverage Improvements
+- **`DeepCopyUtilTest`** (NEW) — 8 tests covering null/empty, primitives, nested maps/lists/sets, immutability
+- **`DeploymentContextConditionTest`** — 4 new edge case tests: `setConditions` no-op, `setContainingRuleSet` no-op, uninitialized getConfigs, blank `when`
+
+### Verification
+- Clean compile: BUILD SUCCESS
+- 350 targeted tests: 0 failures, 0 errors
+
+## 🔧 Test Stabilization & Integration Wiring (2026-05-08)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+**What changed:** Fixed all compilation and test failures caused by constructor signature changes from cryptographic signing, memory snapshot, and attachment store integrations.
+
+### Test Constructor Fixes
+- **`LlmTaskTest`** — Added `null, null` for `MemorySnapshotService` and `IAttachmentStore` params.
+- **`AgentOrchestratorTest`** — Added `null` for `MemorySnapshotService` param.
+- **`MultimodalMessageEnhancerTest` / `MultimodalMessageEnhancerExtendedTest`** — Added `null` for `IAttachmentStore` param.
+- **`GroupConversationServiceTest`** — Added `null, null` for `AgentSigningService` and `IAgentStore` params at both constructor sites.
+- **`RestAttachmentUploadTest`** — Complete rewrite from `IAttachmentStorage`/`Instance<>` pattern to new `IAttachmentStore`-based API. Now tests upload (success, rejection, tenant ID, MIME defaulting), list, and delete endpoints (10 tests).
+
+### Production Code Fixes
+- **`RestAttachmentUpload.java`** — Fixed `attachment.fileName()` → `attachment.filename()` to match `Attachment` record field name.
+- **`MultimodalMessageEnhancerExtendedTest`** — Updated `storedImageProducesTextFallback` assertion from "not yet implemented" to "no attachment store configured" to match implemented STORED path behavior.
+
+### JSON Serialization Test Updates
+- **`DiscoverToolsToolTest`** — Updated 5 JSON substring assertions to accept both manual (`"tools": []`) and Jackson compact (`"tools":[]`) formats after Jackson migration.
+- **`FetchToolResponsePageToolTest`** — Updated 3 JSON assertions for Jackson compact format.
+
+### Verification
+- Clean compile: BUILD SUCCESS, 0 checkstyle violations
+- 264 targeted tests: 0 failures, 0 errors
+
+## 🔧 PR Review Remediation — 11 Issues (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+**What changed:** Fixed all 11 issues flagged by GitHub code-quality bot (CodeQL) and Copilot during PR review.
+
+### Code Quality Fixes
+- **JacksonCanonicalizer:** Renamed `canonicalize(Object)` to `canonicalizeObject(Object)` to eliminate overload dispatch ambiguity (CodeQL finding).
+- **DiscoverToolsTool:** Replaced partial `String.replace()` escaping with full `escapeJson()` utility for all interpolated fields (name, description). Prevents invalid JSON from tool names containing backslashes/newlines.
+- **FetchToolResponsePageTool:** Applied `escapeJson()` to `error` and `toolName` fields (previously unescaped).
+- **DeploymentContextCondition:** `setConfigs(null)` now explicitly clears `when` and `tagMatches` fields to prevent stale config on condition reuse.
+- **CapabilityMatchCondition:** Fixed stepIndex off-by-one (`.size()` → `.size() - 1`) for 0-based consistency with audit ledger.
+- **CapabilityRegistryService:** Extracted `lookupBySkill()` internal method to prevent `findBySkillAndAttributes()` from double-counting strategy metrics via `findBySkill("all")`.
+
+### Javadoc Accuracy
+- **LlmConfiguration.summarizerModel:** Removed phantom claim about `eddi.mcp.summarizer.model` config-property defaulting (no such binding exists; null means fallback to truncation).
+- **MemorySnapshotService.rollbackToCheckpoint:** Doc now accurately states only properties are restored, not step index or step stack.
+- **MemoryCheckpoint:** Class-level doc updated from "full step stack" to "stepIndex + properties snapshot".
+
+### Documentation
+- **langchain.md:** Auto-downgrade now correctly says "scheduled channel" only, not "scheduled or batch mode".
+
+### Test Improvements
+- **RestAgentStoreTest:** Replaced 2 brittle NPE-based assertions with proper `agentStore.create()` mocking + `assertDoesNotThrow()`.
+- **CapabilityMatchConditionTest:** Updated stepIndex assertion from 3 to 2 to match 0-based fix.
+
+## 📝 Documentation Corrections & Postgres Verification (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-improvements`)
+**What changed:** Fixed 3 documentation bugs found during multi-perspective audit, improved usability notes, verified PostgreSQL compatibility.
+
+### Documentation Fixes
+- **`langchain.md`:** Removed non-existent `agentName` field from `identityMasking` examples and parameter table (field was never implemented in `IdentityMaskingConfig`).
+- **`langchain.md`:** Corrected placement values from `append`/`prepend` to `suffix`/`prefix` to match the actual `CounterweightService` code. Corrected default from `append` to `suffix`.
+- **`langchain.md`:** Added explicit `enabled: true` to counterweight JSON example and added usability notes explaining that both `enabled: true` AND a non-`normal` level (or at least one rule for masking) are required for activation.
+- **`langchain.md`:** Added `counterweight.enabled` row to parameter table (was missing), fixed `customInstructions` type from `string` to `string[]`.
+
+### Migration Note
+- `identityMasking` was moved from `AgentConfiguration` (agent-level) to `LlmConfiguration.Task` (task-level). Old agent configs with `identityMasking` at the agent level will have this field silently ignored (Jackson `FAIL_ON_UNKNOWN_PROPERTIES=false`). Since this is a new feature on this branch, no production configs are affected.
+
+### PostgreSQL Verification
+- Confirmed all modified components work identically on both MongoDB and PostgreSQL:
+  - `IAttachmentStore` → `PostgresAttachmentStore` uses correct `engine.attachments` import
+  - `IConversationCheckpointStore` → `PostgresConversationCheckpointStore` has full CRUD + prune
+  - `IPromptSnippetStore` → `AbstractResourceStore` via `PostgresResourceStorageFactory` (no Postgres-specific snippet store needed)
+  - `ISecretPersistence` → `PostgresSecretPersistence` (for `AgentSigningService` key storage)
+  - `DataStoreProducers` correctly wires all stores for both backends
+  - Jackson `SerializationCustomizer` applies to both backends (shared `ObjectMapper`)
+
+## 📊 Test Coverage Audit & Documentation Enrichment (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Boosted test coverage across all Wave 1–6 components to >86% (11/13 at ≥97%), and enriched architecture and LLM configuration docs.
+
+### Test Coverage Improvements
+- **MimeValidatorTest:** Added 11 tests for previously uncovered magic-byte branches (BMP, WebP, TIFF LE/BE, MP4, WAV, MP3 frame-sync variants) and `isCompatible` edge cases (null handling, ZIP subtypes, case insensitivity). Coverage: 72.8% → 99.6%.
+- **AgentSigningServiceTest:** Added 7 tests for versioned key generation, envelope sign/verify roundtrip, unversioned key path, tampered payload detection, invalid base64 handling, and delete-nonexistent path. Coverage: 48.5% → 86.7%.
+- **MemorySnapshotServiceTest:** Added test exercising all type branches in `restoreProperties` (String, Integer, Float, Boolean, List, Map, Long fallback). Coverage: 77.9% → 100%.
+
+### Documentation Enrichment
+- **`langchain.md`:** Added "Behavioral Safety (Counterweight & Identity Masking)" section with configuration examples, parameter tables, and execution order documentation.
+- **`architecture.md`:** Added "System Prompt Modifiers" and "Attachment Storage" subsections under Key Components, documenting the new `engine.attachments` package organization.
+
+
+## 🏗️ Architectural Fixes — Pillar Compliance (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Fixed 3 architectural concerns identified during deep audit against the 9 Pillars.
+
+### Concern 1: CounterweightService → Prompt Snippets (Pillar 1)
+- **Before:** Preset text (`CAUTIOUS_PRESET`, `STRICT_PRESET`) was hardcoded as Java constants — agent behavior baked into code.
+- **After:** `CounterweightService` now injects `PromptSnippetService` and resolves presets from snippets (`counterweight-cautious`, `counterweight-strict`) first, falling back to built-in defaults.
+- **Impact:** Admins can customize counterweight presets via the Prompt Snippets REST API without recompilation.
+- **Files:** `CounterweightService.java`, `CounterweightServiceTest.java`, `LlmTaskTest.java`
+
+### Concern 2: IdentityMaskingConfig → LlmConfiguration.Task (Pillar 8)
+- **Before:** `IdentityMaskingConfig` was on `AgentConfiguration` and smuggled through `IConversationMemory` via bespoke getter/setter. This mixed configuration passthrough with conversational state.
+- **After:** `IdentityMaskingConfig` class moved to `LlmConfiguration` alongside `CounterweightConfig`. Config read from `task.getIdentityMasking()` — consistent with `task.getCounterweight()`.
+- **Impact:** Removed 2 methods from `IConversationMemory`, 1 transient field from `ConversationMemory`, wiring from `Agent.java` and `AgentStoreClientLibrary`. Memory interface is cleaner.
+- **Files:** `LlmConfiguration.java`, `AgentConfiguration.java`, `IConversationMemory.java`, `ConversationMemory.java`, `Agent.java`, `AgentStoreClientLibrary.java`, `LlmTask.java`, `IdentityMaskingService.java`, `IdentityMaskingServiceTest.java`
+
+### Concern 3: IAttachmentStore/MimeValidator → engine.attachments (Package Organization)
+- **Before:** `IAttachmentStore` and `MimeValidator` in `engine.memory` package despite having nothing to do with conversation memory.
+- **After:** Moved to new `ai.labs.eddi.engine.attachments` package. All imports updated across source and test files.
+- **Files:** `IAttachmentStore.java`, `MimeValidator.java`, `MimeValidatorTest.java`, `GridFsAttachmentStore.java`, `PostgresAttachmentStore.java`, `DataStoreProducers.java`, `AttachmentForwarder.java`, `AttachmentForwarderTest.java`
+
+### Verification
+- Clean compile: BUILD SUCCESS
+- All 111 affected tests pass (0 failures, 0 errors)
+
+---
+
+## 🔐 Wave 6 — Cryptographic Agent Identity (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Implemented Wave 6 — Ed25519 cryptographic identity with key rotation, signed envelopes, and nonce-based replay protection.
+
+### New Components
+- **`JacksonCanonicalizer`** — RFC 8785 JSON canonicalization using pure Jackson tree model (recursive key sorting, no external dep).
+- **`SignedEnvelope`** — Immutable record with `forSigning()`/`withSignature()` factories and `canonicalForm()` for deterministic signing.
+- **`NonceCacheService`** — Caffeine-backed replay protection: freshness (5min default), clock-skew (30s), and duplicate detection with Micrometer counters.
+- **`AgentPublicKey`** — Versioned key record with `isValidAt(epochMs)`, `createCurrent()`, and `withExpiry()` for rotation windows.
+
+### Modified Components
+- **`AgentIdentity`** — Added `List<AgentPublicKey> keys` with `getKeyForVersion(int)` and `getKeyValidAt(long)` for multi-key rotation.
+- **`AgentSigningService`** — Added `signEnvelope()`, `verifyEnvelope()`, `rotateKey()`, `generateKeyPairVersioned()`. Versioned vault keys stored as `agent-signing-key:{id}:v{n}`.
+
+### Design Decisions
+- **Pure Jackson canonicalization** — No JCS library dep. Uses `TreeMap` + recursive `sortKeys()` for RFC 8785 compliance.
+- **Envelope canonical form excludes signature** — Prevents circular dependency: the canonical form is the data being signed.
+- **Versioned vault key naming** — Pattern `agent-signing-key:{agentId}:v{version}` allows parallel old/new keys during rotation.
+- **Feature flag** — `eddi.a2a.signing.enabled` (default false) guards all signing at call sites.
+
+### Tests (30 new)
+- `JacksonCanonicalizerTest` — 11 tests: key sorting, data types, determinism, error handling
+- `SignedEnvelopeTest` — 5 tests: forSigning, withSignature, canonicalForm
+- `NonceCacheServiceTest` — 7 tests: freshness, clock skew, replay detection
+- `AgentPublicKeyTest` — 7 tests: validity windows, factory methods, equality
+
+## 📎 Wave 5 — Multimodal Attachments (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Implemented Wave 5 — multimodal attachment support with dual-backend storage and magic-byte MIME validation.
+
+### New Components
+- **`IAttachmentStore`** (interface) — Store/load/delete/list with conversation-scoped access control and GDPR erasure.
+- **`PostgresAttachmentStore`** — PostgreSQL impl using BYTEA columns with size cap config.
+- **`GridFsAttachmentStore`** — MongoDB GridFS impl with metadata-based conversation scoping.
+- **`MimeValidator`** — Magic-byte MIME detection for 14 file types (no external dep). Compatibility checking with ZIP subtype support.
+- **`AttachmentForwarder`** — Converts attachments to langchain4j `ImageContent` (images) or `TextContent` markers (other files).
+
+### Design Decisions
+- **No Apache Tika** — Not in transitive deps; magic-byte header check is sufficient and avoids 20MB+ dep.
+- **BYTEA over large objects** — Simpler for PostgreSQL with 20MB cap. Large objects add complexity without benefit.
+- **Cross-conversation access denied** — Every `load()` validates conversation ownership. Defense in depth.
+- **Base64 data URIs** — Images forwarded to LLM as data URIs for maximum provider compatibility.
+
+### Tests (26 new)
+- `MimeValidatorTest` — 17 tests: detection for 8 types + compatibility + edge cases
+- `AttachmentForwarderTest` — 9 tests: image/non-image/error handling/isImageType
+
+## 🔒 Wave 4 — Session Safety (Snapshot + Fork) (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Implemented Wave 4 of the agentic improvements — memory checkpoints, snapshot/rollback, and session management configuration.
+
+### New Components
+- **`MemoryCheckpoint`** (record) — Immutable snapshot of conversation state (step index, properties copy, triggered-by metadata). Supports `create()` factory and `withParent()` for forking.
+- **`IConversationCheckpointStore`** (interface) — DB-agnostic CRUD + pruning + GDPR erasure for checkpoints.
+- **`MongoConversationCheckpointStore`** — MongoDB implementation with compound index on (conversationId, createdAt).
+- **`PostgresConversationCheckpointStore`** — PostgreSQL implementation with JSONB storage and indexed columns.
+- **`MemorySnapshotService`** — Creates/restores checkpoints with auto-pruning, type-aware property restoration, and Micrometer metrics.
+- **`SessionManagement`** config — Inner class in `AgentConfiguration` with `AutoSnapshot`, `forkingEnabled`, `maxForksPerConversation`, `maxCheckpointsPerConversation`.
+
+### Design Decisions
+- **DB-agnostic from day one** — Both MongoDB and PostgreSQL implementations created simultaneously, wired via `DataStoreProducers`.
+- **Type-aware property restore** — Properties restored using Java pattern matching (`instanceof`) to route to correct `Property` constructor (String, Map, List, Integer, Float, Boolean).
+- **JBoss Logger debugf ambiguity** — Cast numeric args to `(Object)` to resolve overloaded method ambiguity with `int`/`long` parameter variants.
+- **No ConversationForkService yet** — Deep-copy logic deferred to integration wave when ToolExecutionService is wired.
+
+### Tests (22 new)
+- `MemoryCheckpointTest` — 7 tests: create/immutability/withParent/uniqueIds/equality
+- `MemorySnapshotServiceTest` — 10 tests: create/rollback/CRUD/null-safety/metrics
+- `SessionManagementTest` — 5 tests: defaults/AutoSnapshot/getters/integration
+
+### Files Modified
+- `AgentConfiguration.java` — Added `SessionManagement` field and inner class
+- `DataStoreProducers.java` — Added `IConversationCheckpointStore` producer
+
+## 🔧 Wave 2 — MCP Governance & Token-Efficient Tool Loading (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Implemented Wave 2 of the agentic improvements — paginated tool responses, lazy/dynamic tool loading, and enhanced truncation strategies.
+
+### New Components
+- **`PaginatedResponseStore`** — Caffeine-backed store for paginated tool responses (15min TTL). Splits oversized tool output into retrievable pages.
+- **`FetchToolResponsePageTool`** — Built-in LLM tool (`fetch_tool_response_page`) that retrieves pages from the store by responseId.
+- **`DiscoverToolsTool`** — Meta-tool for lazy/dynamic tool loading. LLM discovers available tools by category/keyword instead of receiving all tool schemas upfront.
+- **`ToolLoadingStrategy`** config class — Controls tool presentation: `eager` (all upfront), `lazy` (only discover_tools first), `dynamic` (action-filtered).
+
+### Enhanced Components
+- **`ToolResponseTruncator`** — Now supports three strategies via `truncationStrategy` config:
+  - `truncate` (default) — hard cut with original behavior
+  - `paginate` — stores pages in PaginatedResponseStore, returns first page + responseId
+  - `summarize` — routes through cheap model (`summarizerModel` config), falls back to truncate on failure or cost ceiling (>200k chars)
+- **`ToolResponseLimits`** — Added `truncationStrategy` and `summarizerModel` fields
+- **`AgentOrchestrator`** — Added FetchToolResponsePageTool as built-in tool
+
+### Design Decisions
+- **Paginate as opt-in** — `truncate` remains default for backward compatibility
+- **Summarize stub** — Summarizer model integration is stubbed with proper fallback chain; actual model call wiring deferred until ChatModelRegistry supports secondary model lookups
+- **DiscoverToolsTool not CDI-managed** — Constructed per-invocation with available tool specs since it needs runtime context
+- **FetchToolResponsePageTool is CDI** — Singleton since it only reads from PaginatedResponseStore
+
+### Tests (42 new)
+- `PaginatedResponseStoreTest` — 10 tests: store/page/count/edge cases
+- `FetchToolResponsePageToolTest` — 7 tests: validation/expired/success/escaping
+- `DiscoverToolsToolTest` — 12 tests: category/keyword/cap/edge cases
+- `ToolResponseTruncatorExtendedTest` — 13 tests: all strategies/fallbacks/selection
+
+### Files Modified
+- `LlmConfiguration.java` — Added ToolLoadingStrategy, enhanced ToolResponseLimits
+- `ToolResponseTruncator.java` — Three strategies with fallback chain
+- `AgentOrchestrator.java` — FetchToolResponsePageTool wiring
+- `LlmTask.java` — Constructor updated for FetchToolResponsePageTool
+- `AgentOrchestratorTest.java` — Updated for new constructor parameter
+- `LlmTaskTest.java` — Updated for new constructor parameter
+
+## 🛡️ Wave 1 — Behavioral Counterweights & Identity Masking (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Implemented Wave 1 of the agentic improvements plan — config-driven behavioral counterweights and identity masking.
+
+### New Components
+- **`CounterweightService`** — Engine-level safety injection into LLM system prompts. Level presets: `normal` (no-op), `cautious`, `strict`. Strict auto-downgrades to cautious for scheduled agents. Custom instructions override presets.
+- **`IdentityMaskingService`** — Prepends identity concealment rules to system prompts. Independent of counterweights; agent-level config.
+- **`DeploymentContextCondition`** — Behavior rule condition matching on `EDDI_DEPLOYMENT_ENV` and agent tags. Enables environment-aware routing (e.g., force cautious in production).
+- **`CounterweightConfig`** — Inner class in `LlmConfiguration.Task` for per-task counterweight configuration (level, placement, customInstructions).
+- **`IdentityMaskingConfig`** — Inner class in `AgentConfiguration` for identity masking rules.
+
+### Modified Files
+- `LlmTask.java` — Injected both services; calls identity masking → counterweight after system prompt compilation, before message building.
+- `LlmConfiguration.java` — Added `CounterweightConfig` inner class and field to `Task`.
+- `AgentConfiguration.java` — Added `IdentityMaskingConfig` inner class and field.
+- `RuleDeserialization.java` — Registered `DeploymentContextCondition` in condition factory.
+- `IConversationMemory.java` / `ConversationMemory.java` — Added `getIdentityMaskingConfig()` / `setIdentityMaskingConfig()`.
+- `Agent.java` / `AgentStoreClientLibrary.java` — Threading identity masking config from agent factory to conversation memory.
+
+### Design Decisions
+- Counterweights are **system prompt injections**, not a separate pipeline task — they are a pre-LLM-call concern.
+- Identity masking is prepended **before** counterweight injection. Order: masking (agent-level) → counterweight (task-level).
+- Channel tag `"scheduled"` triggers strict→cautious downgrade to prevent one-step-at-a-time being destructive for batch agents.
+- All new config fields are `@JsonInclude(NON_NULL)` with safe defaults for backward compatibility.
+
+### Tests (33 new)
+- `CounterweightServiceTest` (14 tests) — all levels, placements, custom instructions, scheduled downgrade, metrics, case sensitivity.
+- `IdentityMaskingServiceTest` (7 tests) — enabled/disabled, empty/null rules, metrics, formatting.
+- `DeploymentContextConditionTest` (12 tests) — env matching, tag matching, case insensitivity, null configs, clone.
+- `LlmTaskTest` (55 existing tests) — all pass, no regressions.
+
+### Metrics
+- `eddi.counterweight.activation.count{level}` — counter per activation level
+- `eddi.counterweight.strict.downgraded` — counter for strict→cautious downgrades
+- `eddi.identity.masking.applied` — counter for masking activations
+
+---
+
+## 🔧 Wave 3 — A2A Capability Registry Gap Closure (2026-05-07)
+
+**Repo:** EDDI (`feature/agentic-wave3-capabilities`)
+**What changed:** Closed all five outstanding gaps from Wave 3 of the agentic improvements plan.
+
+### Changes
+
+1. **Fix `round_robin` strategy bug** (`CapabilityRegistryService.java`): Replaced `Collections.shuffle()` with deterministic `AtomicInteger`-based per-skill rotation. Added explicit `"random"` strategy for when shuffling is actually desired. Counters reset on agent register/unregister to avoid drift on topology changes.
+
+2. **Reject inert security flags** (`RestAgentStore.java`): Agent create/update now returns HTTP 400 if `signInterAgentMessages`, `signMcpInvocations`, or `requirePeerVerification` is set to `true`. These cryptographic identity features are not yet implemented (Wave 6). Prevents silent misconfiguration.
+
+3. **Public capability discovery endpoint** (`RestA2AEndpoint.java`):
+   - `GET /.well-known/capabilities?skill=X&strategy=highest_confidence` — queries registry, returns sanitized matches
+   - `GET /.well-known/capabilities/skills` — lists all registered skill names
+   - Gated behind `eddi.a2a.capabilities.public` config property (default `false`)
+   - Same auth model as `/.well-known/agent.json`
+
+4. **Audit capability selections** (`CapabilityMatchCondition.java`): After a successful match, emits `CAPABILITY_SELECTION` audit event via `memory.getAuditCollector()` with `skill`, `strategy`, `candidateAgentIds`, and `selectedAgentId`. Provides immutable audit trail for compliance.
+
+5. **Missing metrics** (`CapabilityRegistryService.java`):
+   - `eddi.capability.miss.count` (tagged by skill) — counts queries with no results
+   - `eddi.capability.strategy.applied` (tagged by strategy) — tracks which strategy is used
+
+### Design Decisions
+
+- **No new abstractions**: The existing `Capability` model on `AgentConfiguration` is sufficient. Workflows are already the implementation unit; capabilities are the declaration layer. No "Skill Pack" resource type needed.
+- **Backward compatible**: All changes are additive. Existing configs work unchanged.
+- **Public endpoint defaults to off**: `eddi.a2a.capabilities.public=false` — admin must explicitly opt in.
+
 ## 🐛 Fix: Windows PowerShell install command (2026-05-06)
 
 **Repo:** EDDI (`docs/windows-install-command`)
