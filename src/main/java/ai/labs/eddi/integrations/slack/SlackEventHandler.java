@@ -70,7 +70,6 @@ public class SlackEventHandler {
     /** Maximum Slack message length (safe limit under 4000). */
     private static final int MAX_SLACK_MESSAGE_LENGTH = 3900;
 
-    private final SlackIntegrationConfig config;
     private final ChannelTargetRouter channelTargetRouter;
     private final SlackWebApiClient slackApi;
     private final IConversationService conversationService;
@@ -92,14 +91,12 @@ public class SlackEventHandler {
     private final ICache<String, SlackGroupDiscussionListener> activeGroupListeners;
 
     @Inject
-    public SlackEventHandler(SlackIntegrationConfig config,
-            ChannelTargetRouter channelTargetRouter,
+    public SlackEventHandler(ChannelTargetRouter channelTargetRouter,
             SlackWebApiClient slackApi,
             IConversationService conversationService,
             IGroupConversationService groupConversationService,
             IUserConversationStore userConversationStore,
             ICacheFactory cacheFactory) {
-        this.config = config;
         this.channelTargetRouter = channelTargetRouter;
         this.slackApi = slackApi;
         this.conversationService = conversationService;
@@ -134,10 +131,6 @@ public class SlackEventHandler {
      *            the parsed event JSON as a Map
      */
     public void handleEventAsync(String eventId, Map<String, Object> event) {
-        if (!config.enabled()) {
-            return;
-        }
-
         // De-duplicate: Slack retries events up to 3 times
         if (eventDedup.get(eventId) != null) {
             LOGGER.debugf("Duplicate Slack event %s — skipping", sanitize(eventId));

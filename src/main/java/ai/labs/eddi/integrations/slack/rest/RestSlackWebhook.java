@@ -6,7 +6,6 @@ package ai.labs.eddi.integrations.slack.rest;
 
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.slack.SlackEventHandler;
-import ai.labs.eddi.integrations.slack.SlackIntegrationConfig;
 import ai.labs.eddi.integrations.slack.SlackSignatureVerifier;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -50,19 +49,16 @@ public class RestSlackWebhook {
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
-    private final SlackIntegrationConfig config;
     private final ChannelTargetRouter channelTargetRouter;
     private final SlackSignatureVerifier signatureVerifier;
     private final SlackEventHandler eventHandler;
     private final ObjectMapper objectMapper;
 
     @Inject
-    public RestSlackWebhook(SlackIntegrationConfig config,
-            ChannelTargetRouter channelTargetRouter,
+    public RestSlackWebhook(ChannelTargetRouter channelTargetRouter,
             SlackSignatureVerifier signatureVerifier,
             SlackEventHandler eventHandler,
             ObjectMapper objectMapper) {
-        this.config = config;
         this.channelTargetRouter = channelTargetRouter;
         this.signatureVerifier = signatureVerifier;
         this.eventHandler = eventHandler;
@@ -86,12 +82,6 @@ public class RestSlackWebhook {
     public Response handleEvents(String rawBody,
                                  @HeaderParam("X-Slack-Signature") String signature,
                                  @HeaderParam("X-Slack-Request-Timestamp") String timestamp) {
-
-        if (!config.enabled()) {
-            return Response.status(Response.Status.NOT_FOUND)
-                    .entity("{\"error\":\"Slack integration is not enabled\"}")
-                    .build();
-        }
 
         // Step 1: Verify signature against all known signing secrets
         Set<String> signingSecrets = channelTargetRouter.getSigningSecrets("slack");

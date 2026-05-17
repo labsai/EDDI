@@ -28,17 +28,7 @@ Add these **Bot Token Scopes**:
 2. Copy the **Bot User OAuth Token** (starts with `xoxb-`)
 3. Copy the **Signing Secret** from **Basic Information**
 
-### 4. Enable Slack in EDDI
-
-Set the master toggle (environment variable or `application.properties`):
-
-```properties
-eddi.slack.enabled=true
-```
-
-This is the only server-level setting. All credentials are configured per-agent.
-
-### 5. Store Credentials in Vault
+### 4. Store Credentials in Vault
 
 Store your Slack credentials in EDDI's Secrets Vault:
 
@@ -53,7 +43,7 @@ curl -X POST http://localhost:7070/secretstore/keys \
   -d '{"keyName":"slack-signing-secret","secretValue":"your-signing-secret"}'
 ```
 
-### 6. Configure Channel Mapping on Your Agent
+### 5. Configure Channel Mapping on Your Agent
 
 Add a `ChannelConnector` to your agent configuration:
 
@@ -77,7 +67,7 @@ The `channelId` is the Slack channel ID (find it in Slack by right-clicking a ch
 
 > **Multi-workspace**: Each agent can use different bot tokens and signing secrets, allowing a single EDDI instance to serve multiple Slack workspaces.
 
-### 7. Enable Event Subscriptions in Slack
+### 6. Enable Event Subscriptions in Slack
 
 > ⚠️ **This step must come last.** When you set the Request URL, Slack immediately sends a signed `url_verification` challenge. EDDI verifies this using the signing secrets from step 6. If no agent is configured yet, verification fails and Slack rejects the URL.
 
@@ -262,12 +252,6 @@ When running EDDI as a multi-instance cluster behind a load balancer:
 
 ## Configuration Reference
 
-### Server-Level
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `eddi.slack.enabled` | `false` | Master toggle — infrastructure-level kill switch |
-
 ### Per-Agent ChannelConnector Config
 
 Configure on each agent's `channels[]` array:
@@ -340,7 +324,6 @@ During a multi-agent group discussion, individual Slack post failures do **not**
 
 | Check | Fix |
 |-------|-----|
-| `eddi.slack.enabled=true` ? | Set in `application.properties` or env var |
 | Bot token configured? | Check agent's ChannelConnector config — `botToken` should reference a vault key |
 | Bot in channel? | Invite the bot to the channel in Slack |
 | Event subscription active? | Check **Event Subscriptions** in Slack app settings |

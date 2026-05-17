@@ -6,7 +6,6 @@ package ai.labs.eddi.integrations.slack.rest;
 
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.slack.SlackEventHandler;
-import ai.labs.eddi.integrations.slack.SlackIntegrationConfig;
 import ai.labs.eddi.integrations.slack.SlackSignatureVerifier;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.ws.rs.core.Response;
@@ -27,7 +26,6 @@ import static org.mockito.Mockito.*;
  */
 class RestSlackWebhookTest {
 
-    private SlackIntegrationConfig config;
     private ChannelTargetRouter channelTargetRouter;
     private SlackSignatureVerifier signatureVerifier;
     private SlackEventHandler eventHandler;
@@ -36,32 +34,13 @@ class RestSlackWebhookTest {
 
     @BeforeEach
     void setUp() {
-        config = mock(SlackIntegrationConfig.class);
         channelTargetRouter = mock(ChannelTargetRouter.class);
         signatureVerifier = mock(SlackSignatureVerifier.class);
         eventHandler = mock(SlackEventHandler.class);
         objectMapper = new ObjectMapper();
 
-        webhook = new RestSlackWebhook(config, channelTargetRouter, signatureVerifier,
+        webhook = new RestSlackWebhook(channelTargetRouter, signatureVerifier,
                 eventHandler, objectMapper);
-    }
-
-    // ─── Disabled ──────────────────────────────────────────────────────────────
-
-    @Nested
-    @DisplayName("Disabled integration")
-    class Disabled {
-
-        @Test
-        @DisplayName("returns 404 when slack integration is disabled")
-        void returns404WhenDisabled() {
-            when(config.enabled()).thenReturn(false);
-
-            Response response = webhook.handleEvents("{}", "sig", "ts");
-
-            assertEquals(404, response.getStatus());
-            verifyNoInteractions(signatureVerifier, eventHandler);
-        }
     }
 
     // ─── Signature verification ───────────────────────────────────────────────
@@ -73,7 +52,6 @@ class RestSlackWebhookTest {
         @Test
         @DisplayName("returns 403 when signature verification fails")
         void returns403OnBadSignature() {
-            when(config.enabled()).thenReturn(true);
             when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
             when(signatureVerifier.verify(eq("ts"), eq("{}"), eq("bad-sig"), any()))
                     .thenReturn(false);
@@ -94,7 +72,6 @@ class RestSlackWebhookTest {
         @Test
         @DisplayName("echoes challenge for url_verification type")
         void echoesChallenge() {
-            when(config.enabled()).thenReturn(true);
             when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
             when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
@@ -110,7 +87,6 @@ class RestSlackWebhookTest {
         @Test
         @DisplayName("handles null challenge gracefully")
         void handleNullChallenge() {
-            when(config.enabled()).thenReturn(true);
             when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
             when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
@@ -131,7 +107,6 @@ class RestSlackWebhookTest {
         @Test
         @DisplayName("delegates event_callback to eventHandler")
         void delegatesEventCallback() {
-            when(config.enabled()).thenReturn(true);
             when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
             when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
@@ -146,7 +121,6 @@ class RestSlackWebhookTest {
         @Test
         @DisplayName("returns 200 even when event is null")
         void nullEvent() {
-            when(config.enabled()).thenReturn(true);
             when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
             when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
@@ -161,7 +135,6 @@ class RestSlackWebhookTest {
         @Test
         @DisplayName("unknown type returns 200 (Slack expects it)")
         void unknownType() {
-            when(config.enabled()).thenReturn(true);
             when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
             when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
@@ -182,7 +155,6 @@ class RestSlackWebhookTest {
         @Test
         @DisplayName("returns 400 for invalid JSON")
         void invalidJson() {
-            when(config.enabled()).thenReturn(true);
             when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
             when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
 
