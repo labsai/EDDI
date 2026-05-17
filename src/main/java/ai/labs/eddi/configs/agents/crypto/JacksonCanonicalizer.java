@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.configs.agents.crypto;
 
+import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -15,23 +17,31 @@ import java.util.Iterator;
 import java.util.TreeMap;
 
 /**
- * RFC 8785 JSON Canonicalization Scheme (JCS) implementation using pure
- * Jackson.
+ * Deterministic JSON canonicalization for cryptographic signing.
  * <p>
  * Produces a deterministic JSON string by:
  * <ol>
  * <li>Sorting all object keys lexicographically (recursive)</li>
  * <li>Removing insignificant whitespace</li>
- * <li>Normalizing number representations</li>
  * </ol>
  * <p>
- * No external dependency required — uses Jackson's built-in tree model.
+ * <strong>Note:</strong> This is NOT a full RFC 8785 (JCS) implementation —
+ * Jackson's default numeric serialization is used. Since EDDI's signed payloads
+ * contain only string fields, this is sufficient for inter-agent signature
+ * verification. If numeric canonicalization becomes necessary, a dedicated JCS
+ * library should be adopted.
+ * <p>
+ * Strict duplicate key detection is enabled to prevent collision attacks where
+ * different JSON payloads produce identical canonical output.
  *
  * @since 6.0.0
  */
 public final class JacksonCanonicalizer {
 
-    private static final ObjectMapper MAPPER = new ObjectMapper()
+    private static final ObjectMapper MAPPER = new ObjectMapper(
+            JsonFactory.builder()
+                    .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+                    .build())
             .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
 
     private JacksonCanonicalizer() {

@@ -112,5 +112,12 @@ class JacksonCanonicalizerTest {
             assertThrows(JsonProcessingException.class,
                     () -> JacksonCanonicalizer.canonicalize("not json"));
         }
+
+        @Test
+        @DisplayName("Should throw on duplicate keys (strict duplicate detection)")
+        void testDuplicateKeysRejected() {
+            assertThrows(JsonProcessingException.class,
+                    () -> JacksonCanonicalizer.canonicalize("{\"a\":1,\"a\":2}"));
+        }
     }
 }

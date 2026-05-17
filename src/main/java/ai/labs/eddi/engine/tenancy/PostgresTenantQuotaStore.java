@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.tenancy;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -90,16 +91,6 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
         }
     }
 
-    /**
-     * Sanitize a value for safe log output — strip control characters that could
-     * enable log injection.
-     */
-    private static String sanitizeForLog(String value) {
-        if (value == null)
-            return "null";
-        return value.replaceAll("[\\r\\n\\t]", "_");
-    }
-
     // ─── Quota Configuration ───
 
     @Override
@@ -115,7 +106,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.warnf("Failed to read quota for tenant '%s': %s", sanitizeForLog(tenantId), e.getMessage());
+            LOGGER.warnf("Failed to read quota for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
         }
         return null;
     }
@@ -144,7 +135,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             ps.setBoolean(6, quota.enabled());
             ps.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.errorf("Failed to set quota for tenant '%s': %s", sanitizeForLog(quota.tenantId()), e.getMessage());
+            LOGGER.errorf("Failed to set quota for tenant '%s': %s", sanitize(quota.tenantId()), sanitize(e.getMessage()));
         }
     }
 
@@ -159,7 +150,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 result.add(toQuota(rs));
             }
         } catch (SQLException e) {
-            LOGGER.warnf("Failed to list quotas: %s", e.getMessage());
+            LOGGER.warnf("Failed to list quotas: %s", sanitize(e.getMessage()));
         }
         return result;
     }
@@ -168,16 +159,28 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
     public void deleteQuota(String tenantId) {
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection()) {
-            try (PreparedStatement ps = conn.prepareStatement("DELETE FROM tenant_quotas WHERE tenant_id = ?")) {
-                ps.setString(1, tenantId);
-                ps.executeUpdate();
-            }
-            try (PreparedStatement ps = conn.prepareStatement("DELETE FROM tenant_usage WHERE tenant_id = ?")) {
-                ps.setString(1, tenantId);
-                ps.executeUpdate();
+            conn.setAutoCommit(false);
+            try {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM tenant_quotas WHERE tenant_id = ?")) {
+                    ps.setString(1, tenantId);
+                    ps.executeUpdate();
+                }
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM tenant_usage WHERE tenant_id = ?")) {
+                    ps.setString(1, tenantId);
+                    ps.executeUpdate();
+                }
+                conn.commit();
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(true);
             }
         } catch (SQLException e) {
-            LOGGER.warnf("Failed to delete quota for tenant '%s': %s", sanitizeForLog(tenantId), e.getMessage());
+            LOGGER.warnf("Failed to delete quota for tenant '%s': %s",
+                    sanitize(tenantId), sanitize(e.getMessage()));
         }
     }
 
@@ -236,7 +239,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.errorf("Failed to increment conversations for tenant '%s': %s", sanitizeForLog(tenantId), e.getMessage());
+            LOGGER.errorf("Failed to increment conversations for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
         }
 
         return QuotaCheckResult.denied("Daily conversation limit reached (" + limit + ")");
@@ -294,7 +297,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.errorf("Failed to increment API calls for tenant '%s': %s", sanitizeForLog(tenantId), e.getMessage());
+            LOGGER.errorf("Failed to increment API calls for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
         }
 
         return QuotaCheckResult.denied("API rate limit reached (" + limit + "/min)");
@@ -335,7 +338,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.errorf("Failed to add cost for tenant '%s': %s", sanitizeForLog(tenantId), e.getMessage());
+            LOGGER.errorf("Failed to add cost for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
             // Fail closed — if cost accounting fails, deny the request rather than
             // silently bypassing budget enforcement
             return QuotaCheckResult.denied("Cost accounting failed — denying request for safety");
@@ -358,7 +361,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.warnf("Failed to read usage for tenant '%s': %s", sanitizeForLog(tenantId), e.getMessage());
+            LOGGER.warnf("Failed to read usage for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
         }
         return UsageSnapshot.empty(tenantId);
     }
@@ -379,7 +382,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.warnf("Failed to read monthly cost for tenant '%s': %s", sanitizeForLog(tenantId), e.getMessage());
+            LOGGER.warnf("Failed to read monthly cost for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
         }
         return 0.0;
     }
@@ -391,9 +394,9 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 PreparedStatement ps = conn.prepareStatement("DELETE FROM tenant_usage WHERE tenant_id = ?")) {
             ps.setString(1, tenantId);
             ps.executeUpdate();
-            LOGGER.infof("Reset usage counters for tenant '%s'", sanitizeForLog(tenantId));
+            LOGGER.infof("Reset usage counters for tenant '%s'", sanitize(tenantId));
         } catch (SQLException e) {
-            LOGGER.errorf("Failed to reset usage for tenant '%s': %s", sanitizeForLog(tenantId), e.getMessage());
+            LOGGER.errorf("Failed to reset usage for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
         }
     }
 

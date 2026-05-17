@@ -50,6 +50,8 @@ public class AgentSigningService {
     private static final Logger LOGGER = Logger.getLogger(AgentSigningService.class);
     private static final String ALGORITHM = "Ed25519";
     private static final String VAULT_KEY_PREFIX = "agent-signing-key:";
+    /** Maximum key version to scan during deletion cleanup. */
+    private static final int MAX_KEY_VERSION_SCAN = 100;
 
     private final ISecretProvider secretProvider;
     private final MeterRegistry meterRegistry;
@@ -196,14 +198,28 @@ public class AgentSigningService {
     }
 
     /**
-     * Delete the signing keypair for an agent (cleanup on agent deletion).
+     * Delete the signing keypair for an agent (cleanup on agent deletion). Removes
+     * both the legacy unversioned key and any versioned keys found.
      */
     public void deleteKeyPair(String tenantId, String agentId) {
         try {
+            // Delete legacy unversioned key
             SecretReference ref = new SecretReference(tenantId, vaultKeyName(agentId));
             secretProvider.delete(ref);
             privateKeyCache.remove(cacheKey(tenantId, agentId));
-            LOGGER.infof("Deleted signing key for agent '%s' in tenant '%s' (cache evicted)", agentId, tenantId);
+
+            // Delete versioned keys (scan reasonable range)
+            for (int v = 1; v <= MAX_KEY_VERSION_SCAN; v++) {
+                try {
+                    SecretReference vRef = new SecretReference(tenantId, vaultKeyNameVersioned(agentId, v));
+                    secretProvider.delete(vRef);
+                    privateKeyCache.remove(cacheKey(tenantId, agentId) + ";v=" + v);
+                } catch (Exception ignored) {
+                    // Version doesn't exist — stop scanning
+                    break;
+                }
+            }
+            LOGGER.infof("Deleted signing keys for agent '%s' in tenant '%s' (cache evicted)", agentId, tenantId);
         } catch (Exception e) {
             LOGGER.warnf("Failed to delete signing key for agent '%s': %s", agentId, e.getMessage());
         }
@@ -255,7 +271,9 @@ public class AgentSigningService {
                     "Ed25519 signing key v" + version + " for agent " + agentId,
                     List.of(agentId));
 
-            // Evict cached private key so the new key is used immediately
+            // Evict version-specific cached private key so the new key is used immediately
+            privateKeyCache.remove(cacheKey(tenantId, agentId) + ";v=" + version);
+            // Also evict the legacy unversioned entry (if any)
             privateKeyCache.remove(cacheKey(tenantId, agentId));
 
             LOGGER.infof("Generated Ed25519 keypair v%d for agent '%s' in tenant '%s'", version, agentId, tenantId);

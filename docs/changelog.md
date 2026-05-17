@@ -12,25 +12,31 @@
 ### Security Fixes
 - **NonceCacheService TOCTOU:** Replaced non-atomic `get()`+`put()` with `putIfAbsent()` for replay detection. The get-then-put pattern allowed two concurrent requests with the same nonce to both pass the replay check.
 - **NonceCacheService null guard:** Added null/blank nonce early rejection.
-- **Log injection:** Added `sanitizeForLog()` helpers to `GroupConversationService`, `MongoTenantQuotaStore`, `PostgresTenantQuotaStore` — strips `\r\n\t` from user-provided values in log statements (8 CodeQL findings).
+- **Log injection (centralized):** Replaced per-file `sanitizeForLog()` methods in `GroupConversationService`, `MongoTenantQuotaStore`, `PostgresTenantQuotaStore` with centralized `LogSanitizer.sanitize()`. Added Unicode line separator (U+2028/U+2029) handling per CodeQL feedback. Also wrapped `e.getMessage()` in log calls.
 - **Fail-closed cost accounting:** `PostgresTenantQuotaStore.tryAddCost()` now returns `DENIED` on SQL failure instead of `OK` — prevents budget bypass when database is unreachable.
 - **Key version validation:** `AgentSigningService.generateKeyPairVersioned()` and `rotateKey()` now reject `version <= 0`.
+- **JacksonCanonicalizer strict duplicate detection:** Enabled `StreamReadFeature.STRICT_DUPLICATE_DETECTION` to prevent collision attacks where different JSON payloads produce identical canonical output. Removed inaccurate RFC 8785 claim from javadoc.
+- **AgentSigningService versioned key cleanup:** `deleteKeyPair()` now deletes both legacy unversioned and all versioned vault secrets. `generateKeyPairVersioned()` now evicts version-specific cache entries.
 
 ### Performance Fixes
 - **Incremental peer verification:** `verifyPriorEntriesIfRequired()` now tracks last-verified transcript index per conversation (O(N) amortized instead of O(N²) per-turn re-verification). Public keys cached per speaker to avoid redundant `agentStore` lookups.
 - **signEnvelope private key caching:** Now uses `privateKeyCache.computeIfAbsent()` with versioned cache key, avoiding vault round-trips on every call.
 
 ### Architecture Fixes
+- **DiscoverToolsTool CDI exclusion:** Added `@Vetoed` to prevent Quarkus CDI from auto-discovering the class as a bean (it is manually constructed by AgentOrchestrator).
 - **LAZY tool activation:** Fixed gap where discovered tools couldn't actually be called. `collectEnabledTools()` now returns ALL tools (registering executors), while `executeWithTools()` initially presents only `discover_tools` spec. After the LLM calls `discover_tools`, matching built-in specs are activated via `activateDiscoveredTools()`.
+- **PostgresTenantQuotaStore transactional delete:** `deleteQuota()` now wraps both `tenant_quotas` and `tenant_usage` deletes in a single transaction with rollback on failure.
 - **PostgresTenantQuotaStore schema auto-creation:** Added `CREATE TABLE IF NOT EXISTS` with `ensureSchema()` pattern (matching `PostgresGlobalVariableStore`, `PostgresSecretPersistence`, etc.).
+- **MongoTenantQuotaStore unique index:** Added unique ascending index on `tenantId` for both `tenant_quotas` and `tenant_usage` collections to prevent duplicate rows from upsert races.
 - **DiscoverToolsTool JSON serialization:** Replaced manual `StringBuilder` JSON assembly with Jackson `ObjectMapper` for proper escaping of special characters in tool descriptions.
 - **JacksonCanonicalizer overload rename:** `canonicalize(Object)` → `canonicalizeObject(Object)` to eliminate static dispatch ambiguity.
 - **GroupConversationService FQN cleanup:** Replaced 5 fully-qualified class references (`ai.labs.eddi.configs.agents.crypto.*`) with proper imports.
+- **AgentOrchestrator log fix:** Compute external tool count explicitly instead of `activeSpecs.size() - 1` to avoid misleading `-1` in logs.
 
 ### Changelog accuracy
 - Fixed Item 1 and Item 2 descriptions below (see corrections inline).
 
-**Files:** `NonceCacheService.java`, `GroupConversationService.java`, `MongoTenantQuotaStore.java`, `PostgresTenantQuotaStore.java`, `AgentSigningService.java`, `AgentOrchestrator.java`, `DiscoverToolsTool.java`, `JacksonCanonicalizer.java`, `SignedEnvelope.java`, `changelog.md`
+**Files:** `NonceCacheService.java`, `GroupConversationService.java`, `MongoTenantQuotaStore.java`, `PostgresTenantQuotaStore.java`, `AgentSigningService.java`, `AgentOrchestrator.java`, `DiscoverToolsTool.java`, `JacksonCanonicalizer.java`, `SignedEnvelope.java`, `LogSanitizer.java`, `changelog.md`
 
 ---
 

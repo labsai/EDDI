@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
@@ -1128,7 +1129,7 @@ public class GroupConversationService implements IGroupConversationService {
                     unsigned++;
                     LOGGER.warnf("UNSIGNED entry from agent '%s' in group '%s' — "
                             + "peer verification required but entry has no envelope data",
-                            entry.speakerAgentId(), sanitizeForLog(gc.getGroupId()));
+                            entry.speakerAgentId(), LogSanitizer.sanitize(gc.getGroupId()));
                     continue;
                 }
 
@@ -1192,15 +1193,5 @@ public class GroupConversationService implements IGroupConversationService {
             LOGGER.warnf("Peer verification check failed for agent '%s': %s",
                     receivingAgentId, e.getMessage());
         }
-    }
-
-    /**
-     * Sanitize a value for safe log output — strip control characters that could
-     * enable log injection.
-     */
-    private static String sanitizeForLog(String value) {
-        if (value == null)
-            return "null";
-        return value.replaceAll("[\\r\\n\\t]", "_");
     }
 }

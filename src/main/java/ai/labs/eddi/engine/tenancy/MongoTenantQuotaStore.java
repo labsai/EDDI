@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.tenancy;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
+import ai.labs.eddi.utils.LogSanitizer;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
@@ -54,6 +55,11 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
     public MongoTenantQuotaStore(MongoDatabase database) {
         this.quotas = database.getCollection(QUOTAS_COLLECTION);
         this.usage = database.getCollection(USAGE_COLLECTION);
+
+        // Ensure unique index on tenantId to prevent duplicate rows from upsert races
+        var indexOptions = new com.mongodb.client.model.IndexOptions().unique(true);
+        quotas.createIndex(new Document("tenantId", 1), indexOptions);
+        usage.createIndex(new Document("tenantId", 1), indexOptions);
     }
 
     // ─── Quota Configuration ───
@@ -243,17 +249,7 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
     @Override
     public void resetUsage(String tenantId) {
         usage.deleteOne(Filters.eq("tenantId", tenantId));
-        LOGGER.infof("Reset usage counters for tenant '%s'", sanitizeForLog(tenantId));
-    }
-
-    /**
-     * Sanitize a value for safe log output — strip control characters that could
-     * enable log injection.
-     */
-    private static String sanitizeForLog(String value) {
-        if (value == null)
-            return "null";
-        return value.replaceAll("[\\r\\n\\t]", "_");
+        LOGGER.infof("Reset usage counters for tenant '%s'", LogSanitizer.sanitize(tenantId));
     }
 
     // ─── Mapping ───

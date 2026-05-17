@@ -251,14 +251,21 @@ class AgentOrchestrator {
                 }
             }
             // Add external tool specs (always visible regardless of strategy)
-            if (httpCallTools != null)
+            int externalCount = 0;
+            if (httpCallTools != null) {
                 activeSpecs.addAll(httpCallTools.toolSpecs());
-            if (mcpCallWorkflowTools != null)
+                externalCount += httpCallTools.toolSpecs().size();
+            }
+            if (mcpCallWorkflowTools != null) {
                 activeSpecs.addAll(mcpCallWorkflowTools.toolSpecs());
-            if (a2aTools != null)
+                externalCount += mcpCallWorkflowTools.toolSpecs().size();
+            }
+            if (a2aTools != null) {
                 activeSpecs.addAll(a2aTools.toolSpecs());
+                externalCount += a2aTools.toolSpecs().size();
+            }
             LOGGER.infof("LAZY mode: presenting %d specs initially (discover_tools + %d external)",
-                    activeSpecs.size(), activeSpecs.size() - 1);
+                    activeSpecs.size(), externalCount);
         } else {
             activeSpecs = toolSpecs;
         }

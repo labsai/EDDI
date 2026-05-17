@@ -10,6 +10,7 @@ import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.agent.tool.ToolSpecifications;
+import jakarta.enterprise.inject.Vetoed;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -28,6 +29,7 @@ import java.util.Map;
  *
  * @since 6.0.0
  */
+@Vetoed
 public class DiscoverToolsTool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
