@@ -86,7 +86,7 @@ public class RestSlackWebhook {
         // Step 1: Verify signature against all known signing secrets
         Set<String> signingSecrets = channelTargetRouter.getSigningSecrets("slack");
         if (!signatureVerifier.verify(timestamp, rawBody, signature, signingSecrets)) {
-            LOGGER.warnf("Slack signature verification failed (timestamp=%s)", timestamp);
+            LOGGER.warnf("Slack signature verification failed (timestamp=%s)", sanitize(timestamp));
             return Response.status(Response.Status.FORBIDDEN)
                     .entity("{\"error\":\"Invalid signature\"}")
                     .build();

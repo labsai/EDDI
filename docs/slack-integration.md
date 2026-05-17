@@ -448,4 +448,4 @@ Add your platform type (e.g., `teams`, `discord`) to the `ChannelConnector.type`
 | **Fire-and-forget in listeners** | A failed Slack post should not crash the entire multi-agent discussion. Wrap in try/catch. |
 | **Structured exhaustion logs** | After retry exhaustion, log enough context (channel, thread, text length, error) for operator recovery. |
 | **Never leak internal IDs to users** | Error messages should be generic. Log the details server-side. |
-| **All credentials in ChannelConnector** | Per-agent credentials via vault references. No server-level secrets except the master toggle. |
+| **All credentials in config** | Per-channel credentials via vault references. No server-level secrets. |
