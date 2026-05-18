@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
+import ai.labs.eddi.modules.output.model.OutputItem;
 import ai.labs.eddi.datastore.IResourceStore;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -161,10 +162,44 @@ public class SlackEventHandler {
     }
 
     private void handleEvent(Map<String, Object> event) throws Exception {
+        String eventType = (String) event.get("type");
+        String eventSubtype = (String) event.get("subtype");
+        String eventChannel = (String) event.get("channel");
+        String eventThreadTs = (String) event.get("thread_ts");
+        String textPreview = event.get("text") instanceof String t ? (t.length() > 50 ? t.substring(0, 50) + "..." : t) : "null";
+        LOGGER.infof("[SLACK] Event received: type=%s, subtype=%s, channel=%s, thread_ts=%s, has_bot_id=%s, text=%s",
+                sanitize(eventType), sanitize(eventSubtype), sanitize(eventChannel),
+                sanitize(eventThreadTs), event.containsKey("bot_id"),
+                sanitize(textPreview));
+
         // Filter bot's own messages (prevent infinite loop)
         if (event.containsKey("bot_id") || "bot_message".equals(event.get("subtype"))) {
-            LOGGER.debugf("Ignoring bot message in channel %s", sanitize(String.valueOf(event.get("channel"))));
+            LOGGER.debugf("[SLACK] Ignoring bot message in channel %s", sanitize(String.valueOf(event.get("channel"))));
             return;
+        }
+
+        // Extract once — used for DM detection in both the message filter and
+        // the DM fallback resolution (step 4 below)
+        String channelType = (String) event.get("channel_type");
+        boolean isDirectMessage = "im".equals(channelType);
+
+        // For "message" events (from message.channels/groups/im subscriptions):
+        // - DMs (channel_type: "im") → always process (no app_mention in DMs)
+        // - Top-level channel messages → handled by app_mention, skip here
+        // - Thread replies with @mention → handled by app_mention, skip here
+        // - Thread replies without @mention → process here (thread continuity)
+        if ("message".equals(eventType)) {
+            if (eventThreadTs == null && !isDirectMessage) {
+                // Top-level channel message — only app_mention should handle these
+                LOGGER.debugf("[SLACK] Ignoring top-level message event (use @mention)");
+                return;
+            }
+            String text = (String) event.get("text");
+            if (text != null && BOT_MENTION_PATTERN.matcher(text).find()) {
+                // Thread reply with @mention — app_mention event will handle it
+                LOGGER.debugf("[SLACK] Ignoring @mentioned thread reply (handled by app_mention)");
+                return;
+            }
         }
 
         String text = (String) event.get("text");
@@ -203,6 +238,13 @@ public class SlackEventHandler {
         // 3. Fresh resolution via ChannelTargetRouter
         if (resolved == null) {
             resolved = channelTargetRouter.resolveTarget("slack", channelId, text);
+        }
+
+        // 4. DM fallback: if no explicit config for this channel (DMs use dynamic
+        // D-prefixed IDs), fall back to any configured Slack integration's default
+        // target
+        if (resolved == null && isDirectMessage) {
+            resolved = channelTargetRouter.resolveDefaultForDm("slack", text);
         }
 
         if (resolved == null) {
@@ -426,7 +468,9 @@ public class SlackEventHandler {
     }
 
     /**
-     * Extract the text response from a conversation snapshot.
+     * Extract the text response from a conversation snapshot. Handles output items
+     * stored as {@link OutputItem} POJOs (live memory callback path) or as Maps
+     * (deserialized from MongoDB).
      */
     private String extractResponseText(SimpleConversationMemorySnapshot snapshot) {
         var outputs = snapshot.getConversationOutputs();
@@ -435,17 +479,50 @@ public class SlackEventHandler {
         }
 
         var lastOutput = outputs.get(outputs.size() - 1);
-        var outputItems = lastOutput.get("output");
-        if (outputItems instanceof List<?> items) {
-            var texts = new ArrayList<String>();
-            for (var item : items) {
-                if (item instanceof Map<?, ?> map && map.containsKey("text")) {
-                    texts.add(String.valueOf(map.get("text")));
+        if (lastOutput == null) {
+            return "_No response from agent._";
+        }
+
+        var texts = new ArrayList<String>();
+
+        // Format 1: Nested "output" array — may contain TextOutputItem POJOs or Maps
+        Object outputArray = lastOutput.get("output");
+        if (outputArray instanceof List<?> list) {
+            for (var item : list) {
+                if (item instanceof String s) {
+                    texts.add(s);
+                } else if (item instanceof OutputItem oi && oi.toString() != null) {
+                    // TextOutputItem.toString() returns the text field
+                    texts.add(oi.toString());
+                } else if (item instanceof Map<?, ?> map && map.get("text") instanceof String s) {
+                    texts.add(s);
                 }
             }
             if (!texts.isEmpty()) {
                 return String.join("\n", texts);
             }
+        }
+
+        // Format 2: Flat keys like "output:text:agent" or "output:text:*"
+        for (var entry : lastOutput.entrySet()) {
+            if (entry.getKey() instanceof String key && key.startsWith("output:text:")) {
+                Object val = entry.getValue();
+                if (val instanceof String s) {
+                    texts.add(s);
+                } else if (val instanceof List<?> list) {
+                    for (var item : list) {
+                        if (item instanceof String s) {
+                            texts.add(s);
+                        } else if (item instanceof Map<?, ?> map && map.get("text") instanceof String s) {
+                            texts.add(s);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!texts.isEmpty()) {
+            return String.join("\n", texts);
         }
 
         return "_Agent completed but produced no text output._";

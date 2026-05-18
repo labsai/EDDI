@@ -15,7 +15,49 @@ Each entry follows this format:
 
 
 
+## Slack Integration Hardening — IM Fix, Test Repairs, Docs Overhaul (2026-05-17)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+**What changed:** Fixed silent DM message dropping, repaired 8 broken tests, added 24 new tests for coverage, and overhauled both Slack and group-conversation documentation.
+
+### Bug Fix: DMs Silently Dropped
+
+- **Root cause:** `SlackEventHandler.handleEvent()` filtered all top-level `message` events, assuming `app_mention` handles them. But Slack never fires `app_mention` in DMs — only `message` events with `channel_type: "im"`. DMs were silently dropped.
+- **Two-part fix:**
+  1. `SlackEventHandler` now detects `channel_type: "im"` and lets DM messages through the filter
+  2. `ChannelTargetRouter.resolveDefaultForDm()` added — DM channels use dynamic `D`-prefixed IDs that are never pre-configured, so DMs fall back to the first available Slack integration's default target
+
+**Files:** `SlackEventHandler.java`, `ChannelTargetRouter.java`
+
+### Test Repairs (8 failures → 0)
+
+All 8 failures caused by UX mode changes from the previous session:
+- All styles now use expanded mode (`EXPANDED_STYLES` includes all 5 styles)
+- Start message format changed to lowercase
+- Synthesis uses header+thread pattern (2 `postMessage` calls)
+
+Rewrote `SlackGroupDiscussionListenerTest` to match current behavior.
+
+### New Test Coverage (24 new tests)
+
+- **`SlackWebApiClientTest`** — 19 new tests for `convertMarkdownToSlackMrkdwn`
+- **`SlackGroupDiscussionListenerTest`** — 5 new tests: all styles, header+thread synthesis, start message format
+
+### Documentation Overhaul
+
+- **`slack-integration.md`** — Major rewrite: `ChannelIntegrationConfiguration` as primary config model, DM support section, unified header+thread UX, trigger keywords, Markdown→mrkdwn conversion, fixed component names, DM troubleshooting
+- **`group-conversations.md`** — Added Slack Integration section: header+thread UX, all 5 styles' phase flow in Slack, trigger keywords, follow-up conversations
+
+### Verification
+
+- All Slack tests pass: 104 tests, 0 failures
+- Clean compile: BUILD SUCCESS
+
+---
+
 ## Channel Integration — Second-Pass Review Fixes (2026-05-14)
+
 
 **Repo:** EDDI (`feature/channel-integrations`)
 

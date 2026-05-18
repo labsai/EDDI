@@ -28,6 +28,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.modules.output.model.OutputItem;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -918,12 +919,15 @@ public class GroupConversationService implements IGroupConversationService {
 
         var texts = new ArrayList<String>();
 
-        // Format 1: Nested "output" array — [{type: "text", text: "...", delay: 0}]
+        // Format 1: Nested "output" array — may contain TextOutputItem POJOs or Maps
         Object outputArray = lastOutput.get("output");
         if (outputArray instanceof List<?> list) {
             for (var item : list) {
                 if (item instanceof String s) {
                     texts.add(s);
+                } else if (item instanceof OutputItem oi && oi.toString() != null) {
+                    // TextOutputItem.toString() returns the text field
+                    texts.add(oi.toString());
                 } else if (item instanceof Map<?, ?> map) {
                     Object text = map.get("text");
                     if (text instanceof String s) {

@@ -143,6 +143,35 @@ public class ChannelTargetRouter {
     }
 
     /**
+     * Resolve a default target for DMs or unconfigured channels. Used when the
+     * platform channel ID isn't explicitly configured (e.g., Slack DMs use dynamic
+     * D-prefixed IDs unique to each user-bot pair).
+     * <p>
+     * Returns the default target from the first available integration of the given
+     * channel type, or {@code null} if no integrations exist.
+     */
+    public ResolvedTarget resolveDefaultForDm(String channelType, String messageText) {
+        refreshIfNeeded();
+        String prefix = (channelType != null ? channelType.toLowerCase(Locale.ROOT) : "") + ":";
+        for (var entry : integrationMap.entrySet()) {
+            if (entry.getKey().startsWith(prefix)) {
+                return resolveFromIntegration(entry.getValue(), messageText);
+            }
+        }
+        // Fallback to first legacy entry (Slack only)
+        if (CHANNEL_TYPE_SLACK.equals(channelType) && !legacyMap.isEmpty()) {
+            var firstLegacy = legacyMap.values().iterator().next();
+            String trimmed = messageText != null ? messageText.trim() : "";
+            if (trimmed.isEmpty() || "help".equalsIgnoreCase(trimmed)) {
+                return null;
+            }
+            return new ResolvedTarget(firstLegacy.toChannelTarget(), messageText, null,
+                    firstLegacy.botToken(), firstLegacy.signingSecret());
+        }
+        return null;
+    }
+
+    /**
      * Resolve the target for a thread reply using the thread→target lock.
      *
      * @return the locked target, or {@code null} if no lock exists for this thread

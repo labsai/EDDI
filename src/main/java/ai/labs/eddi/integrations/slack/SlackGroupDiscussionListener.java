@@ -19,15 +19,14 @@ import java.util.concurrent.TimeUnit;
  * Implements {@link GroupDiscussionEventListener} to receive callbacks as
  * agents speak, and posts each contribution to Slack.
  * <p>
- * Two UX modes based on discussion style:
- * <ul>
- * <li><b>COMPACT</b> (ROUND_TABLE, DELPHI) — all messages in a single thread
- * under the user's original message. Clean and contained.</li>
- * <li><b>EXPANDED</b> (PEER_REVIEW, DEVIL_ADVOCATE, DEBATE) — each agent's
- * primary contribution is a channel-level message. Peer feedback is posted as a
- * thread reply under the target agent's message. Revisions thread under the
- * agent's own original message.</li>
- * </ul>
+ * All discussion styles use <b>EXPANDED</b> mode: each agent's first
+ * contribution is a channel-level header with a short preview, and the full
+ * response lives in a thread reply. Peer feedback threads under the target
+ * agent's message; revisions thread under the agent's own message.
+ * <p>
+ * Compact mode code paths remain as a safety net for potential future styles
+ * but are currently unreachable ({@code EXPANDED_STYLES} contains all 5
+ * styles).
  *
  * @since 6.0.0
  */
@@ -37,9 +36,11 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
 
     /**
      * Discussion styles that use EXPANDED mode (channel-level messages with peer
-     * threading).
+     * threading). All styles use expanded mode in Slack for readability — compact
+     * mode (single thread) is too hard to follow with multiple agents.
      */
-    private static final Set<String> EXPANDED_STYLES = Set.of("PEER_REVIEW", "DEVIL_ADVOCATE", "DEBATE");
+    private static final Set<String> EXPANDED_STYLES = Set.of(
+            "ROUND_TABLE", "PEER_REVIEW", "DEVIL_ADVOCATE", "DEBATE", "DELPHI");
 
     private final SlackWebApiClient slackApi;
     private final String authToken;
@@ -91,10 +92,10 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         this.groupConversationId = event.groupConversationId();
         this.expandedMode = EXPANDED_STYLES.contains(event.style());
 
-        String modeLabel = expandedMode ? "threaded" : "compact";
-        String msg = String.format("🗣️ *Starting %s discussion* (%s mode, %d agents)\n_%s_",
-                event.style().replace("_", " "), modeLabel,
-                event.memberAgentIds().size(), event.question());
+        String styleName = event.style().replace("_", " ").toLowerCase();
+        String msg = String.format(
+                "🗣️ *%s discussion started* — %d agents participating\n\n> _%s_",
+                styleName, event.memberAgentIds().size(), event.question());
 
         // Always post the start message in the user's thread
         postSafe(channelId, userThreadTs, msg);
@@ -154,10 +155,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
     @Override
     public void onSynthesisStart(GroupConversationEventSink.SynthesisStartEvent event) {
         isSynthesisPhase = true;
-        if (expandedMode) {
-            // Visual separator before synthesis in the channel
-            postSafe(channelId, null, "───────────────────────────");
-        }
+        // No separator needed — the synthesis header stands out on its own
     }
 
     @Override
@@ -193,19 +191,54 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
     // ─── Posting strategies ───
 
     /**
-     * Post an agent's first contribution as a channel-level message (EXPANDED
-     * mode). Saves the message ts for future threading.
+     * Post an agent's first contribution as a channel-level header with the full
+     * response as a thread reply (EXPANDED mode). This prevents long agent
+     * responses from flooding the channel — the header shows agent name and a brief
+     * preview, while the full content lives in the thread.
      */
     private void postPrimaryContribution(GroupConversationEventSink.SpeakerCompleteEvent event) {
         String displayName = event.displayName() != null ? event.displayName() : event.agentId();
-        String msg = String.format("🟢 *%s*\n%s", displayName, event.response());
+        String response = event.response();
 
-        String ts = postSafe(channelId, null, msg);
+        // Build a short preview for the channel-level header (first meaningful line,
+        // truncated)
+        String preview = buildPreview(response, 150);
+        String header = String.format("🟢 *%s*\n_%s_", displayName, preview);
+
+        String ts = postSafe(channelId, null, header);
         if (ts != null) {
             agentMessageTs.put(event.agentId(), ts);
             messageTsToAgentId.put(ts, event.agentId());
+
+            // Post the full response as a thread reply
+            postSafe(channelId, ts, response);
             LOGGER.debugf("Tracked agent %s message ts=%s", event.agentId(), ts);
         }
+    }
+
+    /**
+     * Build a short preview from a response — first non-empty, non-heading line,
+     * truncated to maxLength.
+     */
+    private static String buildPreview(String text, int maxLength) {
+        if (text == null || text.isBlank()) {
+            return "…";
+        }
+        for (String line : text.split("\n")) {
+            String trimmed = line.trim();
+            // Skip empty lines, headings, separators, code fences
+            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("```")
+                    || trimmed.matches("^[-─═*_]{3,}$")) {
+                continue;
+            }
+            // Strip markdown bold for cleaner preview
+            trimmed = trimmed.replaceAll("\\*\\*(.+?)\\*\\*", "$1");
+            if (trimmed.length() > maxLength) {
+                return trimmed.substring(0, maxLength) + "…";
+            }
+            return trimmed;
+        }
+        return text.substring(0, Math.min(text.length(), maxLength)) + "…";
     }
 
     /**
@@ -258,17 +291,25 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
     }
 
     /**
-     * Post the synthesis — always prominent and visible.
+     * Post the synthesis — prominent header at channel level with full content in
+     * thread. The synthesis is the final deliverable of the discussion.
      */
     private void postSynthesis(String displayName, String response) {
         synthesisPosted = true;
         isSynthesisPhase = false;
-        String msg = String.format("📋 *Synthesis* (by %s)\n%s", displayName, response);
+
+        String preview = buildPreview(response, 200);
+        String header = String.format("📋 *Panel Synthesis* (by %s)\n_%s_", displayName, preview);
 
         if (expandedMode) {
-            postSafe(channelId, null, msg);
+            String ts = postSafe(channelId, null, header);
+            if (ts != null) {
+                // Full synthesis in thread
+                postSafe(channelId, ts, response);
+            }
         } else {
-            postSafe(channelId, userThreadTs, msg);
+            postSafe(channelId, userThreadTs, header);
+            postSafe(channelId, userThreadTs, response);
         }
     }
 

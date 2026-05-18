@@ -205,9 +205,49 @@ For full control, define phases directly:
 | `read_group_conversation` | Read conversation transcript |
 | `list_group_conversations` | List past discussions |
 
+## Slack Integration
+
+Group discussions integrate natively with Slack. See [slack-integration.md](slack-integration.md) for full setup instructions.
+
+### UX Pattern: Header + Thread
+
+All discussion styles use the same rendering pattern in Slack:
+
+1. **Start Banner** — posted in the user's thread with style name, agent count, and question
+2. **Agent Headers** — each agent's first contribution is a channel-level message with a short preview
+3. **Full Content** — the complete response is posted as a thread reply under the agent's header
+4. **Peer Feedback** — feedback threads under the target agent's header message
+5. **Revisions** — revised contributions thread under the agent's own header
+6. **Synthesis** — moderator's synthesis gets its own channel-level header + thread
+
+### Discussion Styles in Slack
+
+| Style | Phase Flow in Slack |
+|-------|-------------------|
+| **ROUND_TABLE** | Each agent posts → Moderator synthesizes |
+| **PEER_REVIEW** | Agents post → Critiques thread under targets → Revisions thread under own → Synthesis |
+| **DEVIL_ADVOCATE** | Agent posts → Challenger threads challenges → Agent threads defense → Synthesis |
+| **DEBATE** | PRO agent posts → CON agent posts → Rebuttals thread under opponents → Judge synthesizes |
+| **DELPHI** | Round 1 agents post → Round 2 agents post (convergence) → Synthesis |
+
+### Trigger Keywords
+
+Configure trigger keywords in `ChannelIntegrationConfiguration` to route to specific groups:
+
+```
+@EDDI panel: Should we adopt microservices?     → GROUP target "panel"
+@EDDI debate: REST vs GraphQL                   → GROUP target "debate"
+@EDDI peer: Review this architecture             → GROUP target "peer"
+```
+
+### Follow-up Conversations
+
+After a discussion, users can reply in any agent's thread to ask follow-up questions. The system injects the agent's discussion context (contribution + peer feedback received) into the prompt for a contextual response.
+
 ## Configuration
 
 ```properties
 # application.properties
 eddi.groups.max-depth=3    # Max recursion depth for nested groups
 ```
+
