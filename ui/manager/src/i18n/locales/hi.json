@@ -43,6 +43,7 @@
     "triggers": "ट्रिगर",
     "capabilities": "क्षमताएं",
     "sync": "सिंक",
+    "channels": "चैनल",
     "userConversations": "उपयोगकर्ता वार्तालाप",
     "userData": "उपयोगकर्ता डेटा"
   },
@@ -96,6 +97,10 @@
     "chat": {
       "title": "चैट",
       "subtitle": "Deploy किए गए Agents से बात करें"
+    },
+    "channels": {
+      "title": "चैनल",
+      "subtitle": "एजेंट और समूहों को Slack जैसे मैसेजिंग प्लेटफ़ॉर्म से जोड़ें"
     },
     "groups": {
       "title": "समूह",
@@ -407,6 +412,10 @@
       "toolCalls": "उपकरण कॉल",
       "toolCall": "उपकरण कॉल",
       "toolResult": "परिणाम"
+    },
+    "channels": {
+      "title": "चैनल",
+      "subtitle": "एजेंट और समूहों को Slack जैसे मैसेजिंग प्लेटफ़ॉर्म से जोड़ें"
     },
     "context": {
       "conversationId": "बातचीत ID",
@@ -1187,6 +1196,10 @@
         "step4Title": "चैट प्रारंभ करें",
         "step4Desc": "एक संदेश टाइप करें और एंटर दबाएं। एजेंट आपके द्वारा कॉन्फ़िगर किए गए LLM, टूल और वर्कफ़्लो का उपयोग करके प्रतिक्रिया देगा।"
       },
+      "channels": {
+        "title": "चैनल",
+        "subtitle": "एजेंट और समूहों को Slack जैसे मैसेजिंग प्लेटफ़ॉर्म से जोड़ें"
+      },
       "resources": {
         "title": "संसाधन (Resources) टूर",
         "step1Title": "एक्सटेंशन लाइब्रेरी",
@@ -1606,5 +1619,76 @@
       "conAdvocate1": "Con Advocate 1",
       "conAdvocate2": "Con Advocate 2"
     }
+  },
+  "channels": {
+    "agentIdPlaceholder": "संदेश संभालने के लिए एजेंट ID",
+    "botToken": "बॉट टोकन",
+    "botTokenHint": "बॉट उपयोगकर्ता OAuth टोकन। सुरक्षा के लिए वॉल्ट संदर्भ का उपयोग करें।",
+    "botTokenPlaceholder": "xoxb-… या ${vault:slack-bot-token}",
+    "channel": "चैनल",
+    "channelId": "Slack चैनल ID",
+    "channelIdCol": "चैनल ID",
+    "channelIdHint": "Slack चैनल पर राइट-क्लिक करें → चैनल विवरण देखें → चैनल ID कॉपी करें",
+    "channelsPlural": "चैनल",
+    "channelType": "चैनल प्रकार",
+    "confirmDelete": "चैनल हटाएं?",
+    "confirmDeleteDesc": "यह चैनल एकीकरण स्थायी रूप से हटा दिया जाएगा।",
+    "create": "चैनल बनाएं",
+    "createTitle": "चैनल एकीकरण बनाएं",
+    "defaultAgentId": "डिफ़ॉल्ट एजेंट ID",
+    "defaultTargetHint": "डिफ़ॉल्ट लक्ष्य उन सभी संदेशों को संभालता है जो किसी ट्रिगर कीवर्ड से मेल नहीं खाते। निर्माण के बाद और लक्ष्य जोड़ सकते हैं।",
+    "empty": "अभी कोई चैनल नहीं",
+    "emptyDesc": "एजेंट को Slack से जोड़ने के लिए चैनल एकीकरण बनाएं।",
+    "name": "नाम",
+    "namePlaceholder": "उदा. Engineering AI Hub",
+    "openSlackApps": "Slack ऐप डैशबोर्ड खोलें",
+    "searchPlaceholder": "चैनल खोजें…",
+    "signingSecret": "साइनिंग सीक्रेट",
+    "signingSecretHint": "आपके Slack ऐप के मूलभूत जानकारी पृष्ठ से।",
+    "signingSecretPlaceholder": "हेक्स स्ट्रिंग या ${vault:slack-signing-secret}",
+    "slackSetupGuide": "Slack सेटअप गाइड",
+    "slackSetupSummary": "एक Slack ऐप बनाएं, बॉट टोकन स्कोप कॉन्फ़िगर करें (app_mentions:read, chat:write, im:history, channels:history, groups:history), फिर क्रेडेंशियल यहाँ पेस्ट करें।",
+    "target": "लक्ष्य",
+    "targets": "लक्ष्य",
+    "targetsCol": "लक्ष्य",
+    "type": "प्रकार",
+    "unnamed": "अनाम चैनल",
+    "version": "संस्करण"
+  },
+  "channelDetail": {
+    "addTarget": "लक्ष्य जोड़ें",
+    "addTrigger": "ट्रिगर जोड़ें…",
+    "agentId": "एजेंट ID",
+    "botToken": "बॉट टोकन",
+    "channelId": "Slack चैनल ID",
+    "cooldown": "कूलडाउन (सेकंड)",
+    "general": "सामान्य",
+    "groupId": "समूह ID",
+    "isDefault": "डिफ़ॉल्ट",
+    "maxCost": "अधिकतम $/दिन",
+    "maxDaily": "अधिकतम/दिन",
+    "name": "नाम",
+    "observe": "निरीक्षण",
+    "observeDesc": "निष्क्रिय रूप से निगरानी करें और चुनिंदा जवाब दें",
+    "observeKeywords": "ट्रिगर कीवर्ड",
+    "observeMimeTypes": "ट्रिगर MIME प्रकार",
+    "observeMode": "निरीक्षण मोड",
+    "observeSettings": "निरीक्षण मोड सेटिंग्स",
+    "platformConfig": "प्लेटफ़ॉर्म कॉन्फ़िगरेशन",
+    "rawConfig": "कच्चा कॉन्फ़िगरेशन",
+    "removeTarget": "हटाएं",
+    "requiredEvents": "आवश्यक इवेंट सब्सक्रिप्शन:",
+    "requiredScopes": "आवश्यक बॉट टोकन स्कोप:",
+    "setDefault": "डिफ़ॉल्ट के रूप में सेट करें",
+    "signingSecret": "साइनिंग सीक्रेट",
+    "targetName": "नाम",
+    "targets": "संदेश रूटिंग लक्ष्य",
+    "targetType": "प्रकार",
+    "triggerHint": "उपयोगकर्ता \"कीवर्ड: संदेश\" टाइप करके इस लक्ष्य पर रूट करते हैं",
+    "triggerKeywords": "ट्रिगर कीवर्ड",
+    "triggers": "ट्रिगर",
+    "type": "चैनल प्रकार",
+    "webhookHint": "इस URL को अपने Slack ऐप के Event Subscriptions → Request URL फ़ील्ड में पेस्ट करें।",
+    "webhookUrl": "वेबहुक URL"
   }
 }

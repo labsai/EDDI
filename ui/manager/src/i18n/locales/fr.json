@@ -43,6 +43,7 @@
     "triggers": "Déclencheurs",
     "capabilities": "Capacités",
     "sync": "Synchronisation",
+    "channels": "Canaux",
     "userConversations": "Conversations utilisateur",
     "userData": "Données utilisateur"
   },
@@ -96,6 +97,10 @@
     "chat": {
       "title": "Chat",
       "subtitle": "Discutez avec vos agents déployés"
+    },
+    "channels": {
+      "title": "Canaux",
+      "subtitle": "Connectez des agents et des groupes à des plateformes de messagerie comme Slack"
     },
     "groups": {
       "title": "Groupes",
@@ -407,6 +412,10 @@
       "toolCalls": "appels d’outils",
       "toolCall": "Appel d’outil",
       "toolResult": "Résultat"
+    },
+    "channels": {
+      "title": "Canaux",
+      "subtitle": "Connecter des agents et groupes à des plateformes comme Slack"
     },
     "context": {
       "conversationId": "ID conversation",
@@ -1187,6 +1196,10 @@
         "step4Title": "Exécution d'outils",
         "step4Desc": "Soumettez une requête; le LLM résoudra automatiquement l'appel d'outil nécessaire."
       },
+      "channels": {
+        "title": "Canaux",
+        "subtitle": "Connecter des agents et groupes à des plateformes comme Slack"
+      },
       "resources": {
         "title": "Visite des Ressources",
         "step1Title": "Bibliothèque",
@@ -1606,5 +1619,76 @@
       "conAdvocate1": "Avocat contre 1",
       "conAdvocate2": "Avocat contre 2"
     }
+  },
+  "channels": {
+    "agentIdPlaceholder": "ID de l’agent pour traiter les messages",
+    "botToken": "Jeton de bot",
+    "botTokenHint": "Jeton OAuth du bot. Utilisez une référence coffre-fort pour la sécurité.",
+    "botTokenPlaceholder": "xoxb-… ou ${vault:slack-bot-token}",
+    "channel": "canal",
+    "channelId": "ID du canal Slack",
+    "channelIdCol": "ID du canal",
+    "channelIdHint": "Clic droit sur un canal Slack → Afficher les détails → copier l’ID du canal",
+    "channelsPlural": "canaux",
+    "channelType": "Type de canal",
+    "confirmDelete": "Supprimer le canal ?",
+    "confirmDeleteDesc": "Cette intégration de canal sera définitivement supprimée.",
+    "create": "Créer un canal",
+    "createTitle": "Créer une intégration de canal",
+    "defaultAgentId": "ID de l’agent par défaut",
+    "defaultTargetHint": "La cible par défaut traite tous les messages ne correspondant à aucun mot-clé déclencheur. Vous pouvez ajouter d’autres cibles après la création.",
+    "empty": "Aucun canal",
+    "emptyDesc": "Créez une intégration de canal pour connecter des agents à Slack.",
+    "name": "Nom",
+    "namePlaceholder": "ex. Engineering AI Hub",
+    "openSlackApps": "Ouvrir le tableau de bord Slack App",
+    "searchPlaceholder": "Rechercher des canaux…",
+    "signingSecret": "Secret de signature",
+    "signingSecretHint": "Depuis la page Informations de base de votre application Slack.",
+    "signingSecretPlaceholder": "Chaîne hex ou ${vault:slack-signing-secret}",
+    "slackSetupGuide": "Guide de configuration Slack",
+    "slackSetupSummary": "Créez une application Slack, configurez les portées du jeton de bot (app_mentions:read, chat:write, im:history, channels:history, groups:history), puis collez les identifiants ici.",
+    "target": "cible",
+    "targets": "cibles",
+    "targetsCol": "Cibles",
+    "type": "Type",
+    "unnamed": "Canal sans nom",
+    "version": "Version"
+  },
+  "channelDetail": {
+    "addTarget": "Ajouter une cible",
+    "addTrigger": "Ajouter un déclencheur…",
+    "agentId": "ID de l’agent",
+    "botToken": "Jeton de bot",
+    "channelId": "ID du canal Slack",
+    "cooldown": "Délai (s)",
+    "general": "Général",
+    "groupId": "ID du groupe",
+    "isDefault": "par défaut",
+    "maxCost": "Max €/jour",
+    "maxDaily": "Max/jour",
+    "name": "Nom",
+    "observe": "Observer",
+    "observeDesc": "Surveiller passivement et répondre sélectivement",
+    "observeKeywords": "Mots-clés déclencheurs",
+    "observeMimeTypes": "Types MIME déclencheurs",
+    "observeMode": "Mode observation",
+    "observeSettings": "Paramètres du mode observation",
+    "platformConfig": "Configuration de la plateforme",
+    "rawConfig": "Configuration brute",
+    "removeTarget": "Supprimer",
+    "requiredEvents": "Abonnements d’événements requis :",
+    "requiredScopes": "Portées de jeton de bot requises :",
+    "setDefault": "Définir par défaut",
+    "signingSecret": "Secret de signature",
+    "targetName": "Nom",
+    "targets": "Cibles de routage des messages",
+    "targetType": "Type",
+    "triggerHint": "Les utilisateurs saisissent « mot-clé : message » pour router vers cette cible",
+    "triggerKeywords": "Mots-clés déclencheurs",
+    "triggers": "déclencheurs",
+    "type": "Type de canal",
+    "webhookHint": "Collez cette URL dans le champ Request URL des Event Subscriptions de votre application Slack.",
+    "webhookUrl": "URL du webhook"
   }
 }

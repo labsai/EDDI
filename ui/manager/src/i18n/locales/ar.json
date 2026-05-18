@@ -43,6 +43,7 @@
     "triggers": "المشغلات",
     "capabilities": "القدرات",
     "sync": "المزامنة",
+    "channels": "القنوات",
     "userConversations": "محادثات المستخدم",
     "userData": "بيانات المستخدم"
   },
@@ -96,6 +97,10 @@
     "chat": {
       "title": "دردشة",
       "subtitle": "تحدث مع Agents المنشورة"
+    },
+    "channels": {
+      "title": "القنوات",
+      "subtitle": "قم بربط الوكلاء والمجموعات بمنصات المراسلة مثل Slack"
     },
     "groups": {
       "title": "مجموعات",
@@ -407,6 +412,10 @@
       "toolCalls": "استدعاءات أدوات",
       "toolCall": "استدعاء أداة",
       "toolResult": "النتيجة"
+    },
+    "channels": {
+      "title": "القنوات",
+      "subtitle": "ربط الوكلاء والمجموعات بمنصات المراسلة مثل Slack"
     },
     "context": {
       "conversationId": "معرف المحادثة",
@@ -1187,6 +1196,10 @@
         "step4Title": "ابدأ الدردشة",
         "step4Desc": "اكتب رسالة واضغط Enter. سيستجيب الوكيل باستخدام مسارات العمل والأدوات الداعمة ونموذج LLM الذي قمت بتكوينه."
       },
+      "channels": {
+        "title": "القنوات",
+        "subtitle": "ربط الوكلاء والمجموعات بمنصات المراسلة مثل Slack"
+      },
       "resources": {
         "title": "جولة الموارد",
         "step1Title": "مكتبة الإضافات",
@@ -1606,5 +1619,76 @@
       "conAdvocate1": "Con Advocate 1",
       "conAdvocate2": "Con Advocate 2"
     }
+  },
+  "channels": {
+    "agentIdPlaceholder": "معرف الوكيل لمعالجة الرسائل",
+    "botToken": "رمز البوت",
+    "botTokenHint": "رمز OAuth للبوت. استخدم مرجع الخزنة لمزيد من الأمان.",
+    "botTokenPlaceholder": "xoxb-… أو ${vault:slack-bot-token}",
+    "channel": "قناة",
+    "channelId": "معرف قناة Slack",
+    "channelIdCol": "معرف القناة",
+    "channelIdHint": "انقر بزر اليمين على قناة Slack → عرض تفاصيل القناة → نسخ معرف القناة",
+    "channelsPlural": "قنوات",
+    "channelType": "نوع القناة",
+    "confirmDelete": "حذف القناة؟",
+    "confirmDeleteDesc": "ستتم إزالة تكامل القناة هذا نهائيًا.",
+    "create": "إنشاء قناة",
+    "createTitle": "إنشاء تكامل قناة",
+    "defaultAgentId": "معرف الوكيل الافتراضي",
+    "defaultTargetHint": "يعالج الهدف الافتراضي جميع الرسائل التي لا تتطابق مع كلمة مفتاحية. يمكنك إضافة أهداف أخرى بعد الإنشاء.",
+    "empty": "لا توجد قنوات بعد",
+    "emptyDesc": "أنشئ تكامل قناة لربط الوكلاء بـ Slack.",
+    "name": "الاسم",
+    "namePlaceholder": "مثلاً Engineering AI Hub",
+    "openSlackApps": "فتح لوحة تحكم تطبيق Slack",
+    "searchPlaceholder": "بحث في القنوات…",
+    "signingSecret": "سر التوقيع",
+    "signingSecretHint": "من صفحة المعلومات الأساسية لتطبيق Slack.",
+    "signingSecretPlaceholder": "سلسلة ست عشرية أو ${vault:slack-signing-secret}",
+    "slackSetupGuide": "دليل إعداد Slack",
+    "slackSetupSummary": "أنشئ تطبيق Slack، وكوّن نطاقات رمز البوت (app_mentions:read، chat:write، im:history، channels:history، groups:history)، ثم الصق بيانات الاعتماد هنا.",
+    "target": "هدف",
+    "targets": "أهداف",
+    "targetsCol": "الأهداف",
+    "type": "النوع",
+    "unnamed": "قناة بدون اسم",
+    "version": "الإصدار"
+  },
+  "channelDetail": {
+    "addTarget": "إضافة هدف",
+    "addTrigger": "إضافة مشغل…",
+    "agentId": "معرف الوكيل",
+    "botToken": "رمز البوت",
+    "channelId": "معرف قناة Slack",
+    "cooldown": "فترة التهدئة (ث)",
+    "general": "عام",
+    "groupId": "معرف المجموعة",
+    "isDefault": "افتراضي",
+    "maxCost": "الحد الأقصى $/يوم",
+    "maxDaily": "الحد الأقصى/يوم",
+    "name": "الاسم",
+    "observe": "مراقبة",
+    "observeDesc": "مراقبة سلبية واستجابة انتقائية",
+    "observeKeywords": "كلمات مفتاحية للتشغيل",
+    "observeMimeTypes": "أنواع MIME للتشغيل",
+    "observeMode": "وضع المراقبة",
+    "observeSettings": "إعدادات وضع المراقبة",
+    "platformConfig": "تكوين المنصة",
+    "rawConfig": "التكوين الخام",
+    "removeTarget": "إزالة",
+    "requiredEvents": "اشتراكات الأحداث المطلوبة:",
+    "requiredScopes": "نطاقات رمز البوت المطلوبة:",
+    "setDefault": "تعيين كافتراضي",
+    "signingSecret": "سر التوقيع",
+    "targetName": "الاسم",
+    "targets": "أهداف توجيه الرسائل",
+    "targetType": "النوع",
+    "triggerHint": "يكتب المستخدمون \"كلمة مفتاحية: رسالة\" للتوجيه إلى هذا الهدف",
+    "triggerKeywords": "كلمات مفتاحية للتشغيل",
+    "triggers": "مشغلات",
+    "type": "نوع القناة",
+    "webhookHint": "الصق هذا الرابط في حقل Request URL ضمن Event Subscriptions في تطبيق Slack.",
+    "webhookUrl": "رابط الويب هوك"
   }
 }

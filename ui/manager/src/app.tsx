@@ -31,6 +31,8 @@ import { UserDataPage } from "@/pages/user-data";
 import { TriggersPage } from "@/pages/triggers";
 import { CapabilitiesPage } from "@/pages/capabilities";
 import { SyncPage } from "@/pages/sync-page";
+import { ChannelsPage } from "@/pages/channels";
+import { ChannelDetailPage } from "@/pages/channel-detail";
 
 export function App() {
   return (
@@ -62,6 +64,8 @@ export function App() {
         <Route path="/manage/triggers" element={<TriggersPage />} />
         <Route path="/manage/capabilities" element={<CapabilitiesPage />} />
         <Route path="/manage/sync" element={<SyncPage />} />
+        <Route path="/manage/channels" element={<ChannelsPage />} />
+        <Route path="/manage/channels/:id" element={<ChannelDetailPage />} />
         {/* Redirects from old standalone user-data pages */}
         <Route path="/manage/memories" element={<Navigate to="/manage/userdata?tab=memories" replace />} />
         <Route path="/manage/properties" element={<Navigate to="/manage/userdata?tab=properties" replace />} />

@@ -43,6 +43,7 @@
     "triggers": "트리거",
     "capabilities": "기능",
     "sync": "동기화",
+    "channels": "채널",
     "userConversations": "사용자 대화",
     "userData": "사용자 데이터"
   },
@@ -96,6 +97,10 @@
     "chat": {
       "title": "채팅",
       "subtitle": "배포된 Agent와 대화"
+    },
+    "channels": {
+      "title": "채널",
+      "subtitle": "에이전트와 그룹을 Slack 같은 메시징 플랫폼에 연결"
     },
     "groups": {
       "title": "그룹",
@@ -407,6 +412,10 @@
       "toolCalls": "도구 호출",
       "toolCall": "도구 호출",
       "toolResult": "결과"
+    },
+    "channels": {
+      "title": "채널",
+      "subtitle": "에이전트와 그룹을 Slack 등 메시징 플랫폼에 연결"
     },
     "context": {
       "conversationId": "대화 ID",
@@ -1187,6 +1196,10 @@
         "step4Title": "채팅 시작",
         "step4Desc": "메시지를 입력하고 Enter 키를 누르세요. 계정은 구성하신 워크플로, 도구, 그리고 LLM을 사용하여 답변합니다."
       },
+      "channels": {
+        "title": "채널",
+        "subtitle": "에이전트와 그룹을 Slack 등 메시징 플랫폼에 연결"
+      },
       "resources": {
         "title": "리소스 투어",
         "step1Title": "확장 라이브러리",
@@ -1606,5 +1619,76 @@
       "conAdvocate1": "Con Advocate 1",
       "conAdvocate2": "Con Advocate 2"
     }
+  },
+  "channels": {
+    "agentIdPlaceholder": "메시지를 처리할 에이전트 ID",
+    "botToken": "봇 토큰",
+    "botTokenHint": "봇 사용자 OAuth 토큰. 보안을 위해 볼트 참조를 사용하세요.",
+    "botTokenPlaceholder": "xoxb-… 또는 ${vault:slack-bot-token}",
+    "channel": "채널",
+    "channelId": "Slack 채널 ID",
+    "channelIdCol": "채널 ID",
+    "channelIdHint": "Slack 채널을 우클릭 → 채널 세부 정보 보기 → 채널 ID 복사",
+    "channelsPlural": "채널",
+    "channelType": "채널 유형",
+    "confirmDelete": "채널을 삭제하시겠습니까?",
+    "confirmDeleteDesc": "이 채널 통합이 영구적으로 제거됩니다.",
+    "create": "채널 만들기",
+    "createTitle": "채널 통합 만들기",
+    "defaultAgentId": "기본 에이전트 ID",
+    "defaultTargetHint": "기본 대상은 트리거 키워드와 일치하지 않는 모든 메시지를 처리합니다. 생성 후 대상을 추가할 수 있습니다.",
+    "empty": "아직 채널이 없습니다",
+    "emptyDesc": "채널 통합을 만들어 에이전트를 Slack에 연결하세요.",
+    "name": "이름",
+    "namePlaceholder": "예: Engineering AI Hub",
+    "openSlackApps": "Slack 앱 대시보드 열기",
+    "searchPlaceholder": "채널 검색…",
+    "signingSecret": "서명 비밀",
+    "signingSecretHint": "Slack 앱의 기본 정보 페이지에서 확인할 수 있습니다.",
+    "signingSecretPlaceholder": "16진수 문자열 또는 ${vault:slack-signing-secret}",
+    "slackSetupGuide": "Slack 설정 가이드",
+    "slackSetupSummary": "Slack 앱을 만들고, 봇 토큰 범위(app_mentions:read, chat:write, im:history, channels:history, groups:history)를 구성한 후 여기에 자격 증명을 붙여넣으세요.",
+    "target": "대상",
+    "targets": "대상",
+    "targetsCol": "대상",
+    "type": "유형",
+    "unnamed": "이름 없는 채널",
+    "version": "버전"
+  },
+  "channelDetail": {
+    "addTarget": "대상 추가",
+    "addTrigger": "트리거 추가…",
+    "agentId": "에이전트 ID",
+    "botToken": "봇 토큰",
+    "channelId": "Slack 채널 ID",
+    "cooldown": "대기 시간(초)",
+    "general": "일반",
+    "groupId": "그룹 ID",
+    "isDefault": "기본",
+    "maxCost": "최대 $/일",
+    "maxDaily": "최대/일",
+    "name": "이름",
+    "observe": "관찰",
+    "observeDesc": "수동적으로 모니터링하고 선택적으로 응답",
+    "observeKeywords": "트리거 키워드",
+    "observeMimeTypes": "트리거 MIME 유형",
+    "observeMode": "관찰 모드",
+    "observeSettings": "관찰 모드 설정",
+    "platformConfig": "플랫폼 구성",
+    "rawConfig": "원시 구성",
+    "removeTarget": "제거",
+    "requiredEvents": "필수 이벤트 구독:",
+    "requiredScopes": "필수 봇 토큰 범위:",
+    "setDefault": "기본으로 설정",
+    "signingSecret": "서명 비밀",
+    "targetName": "이름",
+    "targets": "메시지 라우팅 대상",
+    "targetType": "유형",
+    "triggerHint": "사용자가 \"키워드: 메시지\"를 입력하면 이 대상으로 라우팅됩니다",
+    "triggerKeywords": "트리거 키워드",
+    "triggers": "트리거",
+    "type": "채널 유형",
+    "webhookHint": "이 URL을 Slack 앱의 Event Subscriptions → Request URL 필드에 붙여넣으세요.",
+    "webhookUrl": "Webhook URL"
   }
 }

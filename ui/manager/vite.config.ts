@@ -113,6 +113,8 @@ export default defineConfig({
       "/backup": p(),
       "/managerresource": p(),
       "/managedagents": p(),
+      "/channelstore": p(),
+      "/integrations": p(),
       "/mcp": p(),
       "/openapi": p(),
     },
