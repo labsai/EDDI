@@ -168,11 +168,12 @@ public class SlackWebApiClient {
 
             // Toggle code block state — preserve code blocks untouched
             if (line.trim().startsWith("```")) {
-                inCodeBlock = !inCodeBlock;
                 if (inTable) {
-                    // Close any open table-as-code-block before the actual code block
+                    // Close the table-as-code-block wrapper before the real code block
+                    result.append("```\n");
                     inTable = false;
                 }
+                inCodeBlock = !inCodeBlock;
                 result.append(line).append("\n");
                 continue;
             }

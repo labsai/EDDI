@@ -211,4 +211,16 @@ class SlackWebApiClientTest {
         assertEquals("🟢 Done ✅",
                 SlackWebApiClient.convertMarkdownToSlackMrkdwn("🟢 Done ✅"));
     }
+
+    @Test
+    void mrkdwn_tableFollowedByCodeBlock_closesTableFence() {
+        String input = "| A | B |\n|---|---|\n| 1 | 2 |\n```python\nprint('hi')\n```";
+        String result = SlackWebApiClient.convertMarkdownToSlackMrkdwn(input);
+        // Table should be wrapped in its own ``` block, closed before the real code
+        // block
+        // Count ``` occurrences — should be even (balanced)
+        long fenceCount = result.lines().filter(l -> l.trim().startsWith("```")).count();
+        assertEquals(0, fenceCount % 2, "Fences must be balanced, got " + fenceCount + " in:\n" + result);
+        assertTrue(result.contains("print('hi')"), "Code block content should be preserved");
+    }
 }
