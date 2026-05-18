@@ -129,13 +129,13 @@ class LlmTaskTest {
     static Stream<Arguments> provideParameters() {
         return Stream.of(
                 Arguments.of(Map.of("systemMessage", "Act as a real estate agent", "logSizeLimit", "10", "apiKey", "<apiKey>", "addToOutput", "true"),
-                        List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0)), 4, // times for templatingEngine.processTemplate
+                        List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0)), 3, // times for templatingEngine.processTemplate (apiKey skipped)
                         2, // times for currentStep.storeData (audit writes guarded by
                            // collector)
                         1 // times for currentStep.addConversationOutputList
                 ),
                 Arguments.of(Map.of("systemMessage", "Act as a real estate agent", "logSizeLimit", "10", "apiKey", "<apiKey1>"),
-                        List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0)), 3, // times for templatingEngine.processTemplate
+                        List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0)), 2, // times for templatingEngine.processTemplate (apiKey skipped)
                         1, // times for currentStep.storeData (audit writes guarded by
                            // collector)
                         0 // times for currentStep.addConversationOutputList
