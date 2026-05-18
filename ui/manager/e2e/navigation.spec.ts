@@ -20,14 +20,14 @@ test.describe("Navigation", () => {
     await expect(page).toHaveURL(/\/manage\/agents/);
   });
 
-  test("navigates to packages page via sidebar", async ({ page }) => {
+  test("navigates to workflows page via sidebar", async ({ page }) => {
     await page.goto("/manage");
     await waitForApp(page);
     await page
       .getByTestId("sidebar")
-      .getByRole("link", { name: /packages/i })
+      .getByRole("link", { name: /workflows/i })
       .click();
-    await expect(page).toHaveURL(/\/manage\/packages/);
+    await expect(page).toHaveURL(/\/manage\/workflows/);
   });
 
   test("navigates to conversations page via sidebar", async ({ page }) => {

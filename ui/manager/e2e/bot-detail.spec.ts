@@ -8,7 +8,7 @@ test.describe("Agent Detail", () => {
   });
 
   test("renders agent detail heading", async ({ page }) => {
-    await expect(page.locator("h1")).toContainText(/agent detail/i);
+    await expect(page.locator("h1")).toContainText(/Support Agent/i);
   });
 
   test("shows back link to agents list", async ({ page }) => {
@@ -33,10 +33,10 @@ test.describe("Agent Detail", () => {
     await expect(page.getByText("Production")).toBeVisible();
   });
 
-  test("shows packages section", async ({ page }) => {
+  test("shows Agent-to-Agent section", async ({ page }) => {
     // Use heading text to avoid matching sidebar "Workflows" link
     await expect(page.locator("main").getByText("Workflows").first()).toBeVisible();
-    await expect(page.getByText(/add package/i)).toBeVisible();
+    await expect(page.getByText(/Agent-to-Agent/i)).toBeVisible();
   });
 
   test("shows action buttons", async ({ page }) => {

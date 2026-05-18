@@ -34,6 +34,7 @@ export default defineConfig({
     baseURL: "http://localhost:3000",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
+    storageState: "e2e/storage-state.json",
   },
   projects: [
     // ── Tier 1: UI smoke tests (MSW mocks, fast, no backend needed) ──
