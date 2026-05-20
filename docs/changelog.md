@@ -158,6 +158,303 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+
+
+## Slack Integration Hardening — IM Fix, Test Repairs, Docs Overhaul (2026-05-17)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+**What changed:** Fixed silent DM message dropping, repaired 8 broken tests, added 24 new tests for coverage, and overhauled both Slack and group-conversation documentation.
+
+### Bug Fix: DMs Silently Dropped
+
+- **Root cause:** `SlackEventHandler.handleEvent()` filtered all top-level `message` events, assuming `app_mention` handles them. But Slack never fires `app_mention` in DMs — only `message` events with `channel_type: "im"`. DMs were silently dropped.
+- **Two-part fix:**
+  1. `SlackEventHandler` now detects `channel_type: "im"` and lets DM messages through the filter
+  2. `ChannelTargetRouter.resolveDefaultForDm()` added — DM channels use dynamic `D`-prefixed IDs that are never pre-configured, so DMs fall back to the first available Slack integration's default target
+
+**Files:** `SlackEventHandler.java`, `ChannelTargetRouter.java`
+
+### Test Repairs (8 failures → 0)
+
+All 8 failures caused by UX mode changes from the previous session:
+- All styles now use expanded mode (`EXPANDED_STYLES` includes all 5 styles)
+- Start message format changed to lowercase
+- Synthesis uses header+thread pattern (2 `postMessage` calls)
+
+Rewrote `SlackGroupDiscussionListenerTest` to match current behavior.
+
+### New Test Coverage (24 new tests)
+
+- **`SlackWebApiClientTest`** — 19 new tests for `convertMarkdownToSlackMrkdwn`
+- **`SlackGroupDiscussionListenerTest`** — 5 new tests: all styles, header+thread synthesis, start message format
+
+### Documentation Overhaul
+
+- **`slack-integration.md`** — Major rewrite: `ChannelIntegrationConfiguration` as primary config model, DM support section, unified header+thread UX, trigger keywords, Markdown→mrkdwn conversion, fixed component names, DM troubleshooting
+- **`group-conversations.md`** — Added Slack Integration section: header+thread UX, all 5 styles' phase flow in Slack, trigger keywords, follow-up conversations
+
+### Verification
+
+- All Slack tests pass: 104 tests, 0 failures
+- Clean compile: BUILD SUCCESS
+
+---
+
+## Channel Integration — Second-Pass Review Fixes (2026-05-14)
+
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+**What changed:** Second critical review pass, 6 additional findings fixed.
+
+- **M5**: Fixed stale `${eddivault:...}` → `${vault:...}` in `ChannelTargetRouter.deepCopyConfig()` Javadoc
+- **M6**: Added SPDX headers to `IRestChannelIntegrationStore`, `RestChannelIntegrationStore` (missed in first pass)
+- **L3**: Applied `LogSanitizer.sanitize()` to all Slack-sourced log parameters in `SlackEventHandler` (CodeQL compliance)
+- **L4**: `ChannelTarget.getTriggers()` now returns a defensive copy (consistent with `getTargets()`/`getPlatformConfig()`)
+- **L5**: Added null guard to `postMessageChunked()` to prevent NPE on null text
+- **L6**: Added `ObserveConfig` bounds validation (`cooldownSeconds`, `maxDailyResponses`, `maxCostPerDay` ≥ 0)
+
+**Files:** `ChannelTargetRouter.java`, `IRestChannelIntegrationStore.java`, `RestChannelIntegrationStore.java`, `ChannelTarget.java`, `SlackEventHandler.java`
+
+---
+
+## Channel Integration — Pre-Merge Review Fixes (2026-05-14)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+**What changed:** Addressed findings from thorough code review before merge.
+
+### Critical fixes
+- **C1 — Removed `ThreadLocal<ResolvedTarget>`:** Virtual threads and `ThreadLocal` are a known Loom footgun — carrier thread reuse can leak stale values. Replaced with explicit `botToken` parameter passing through `postMessage()`, `postMessageChunked()`, and `postHelp()`. All callers now pass `botToken` (or `null` for router fallback) directly.
+- **C2 — Intent key format change documented:** The conversation mapping intent key changed from `slack:<channelId>:<threadKey>` to `channel:slack:<channelId>:<agentId>:<threadKey>`. This is intentional (adds agent specificity for multi-target channels) but means existing Slack conversation mappings from pre-6.1 will be orphaned — new conversations will be created. This is acceptable for a pre-GA feature with very few users.
+
+### Medium fixes
+- **M1 — `eddivault` → `vault` Javadoc:** Updated stale `${eddivault:key-name}` reference in `ChannelIntegrationConfiguration` to `${vault:key-name}` (prefix was renamed on main in `1b884109`).
+- **M4 — Trigger backtick formatting:** Fixed `postHelp()` to render triggers as `` `architect`: `` instead of `` `architect:` `` — the colon is part of the user syntax, not the keyword.
+
+### Low fixes
+- **L2 — SPDX headers:** Added `Copyright EDDI contributors / Apache-2.0` headers to all 12 new files.
+
+### Merge conflicts resolved
+- `docs/changelog.md` — both branches added entries; kept both sets.
+- `SlackChannelRouter.java` / `SlackChannelRouterTest.java` — deleted on this branch, modified on main (CodeQL fixes). Resolved by keeping deletion (replaced by `ChannelTargetRouter`).
+
+**Files:** `SlackEventHandler.java`, `ChannelIntegrationConfiguration.java`, `docs/changelog.md`, 12 new files (SPDX headers)
+
+---
+
+## Fix: Postgres Integration Tests — MigrationLogStore Injection (2026-04-26)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+**What changed:** Fixed 503 Service Unavailable errors in `PostgresInfrastructureIT` and `PostgresAgentUseCaseIT` caused by MongoDB dependency in the Postgres test profile.
+
+### Root Cause
+
+`ChannelConnectorMigration`, `V6RenameMigration`, and `V6QuteMigration` all injected the concrete `MigrationLogStore` class (MongoDB implementation) instead of the `IMigrationLogStore` interface. When running with `eddi.datastore.type=postgres`, the `DataStoreProducers` correctly routes `IMigrationLogStore` to `PostgresMigrationLogStore`, but CDI injection of the **concrete class** bypasses the producer entirely.
+
+During startup, `channelConnectorMigration.runIfNeeded()` called `migrationLogStore.readMigrationLog()` which attempted to query MongoDB (not available in Postgres profile). This threw `MongoTimeoutException` after 30 seconds. Since this call was **outside** any try-catch block, the exception killed the entire `autoDeployAgents()` scheduled task, preventing `agentsReadiness.setAgentsReadiness(true)` from ever being called. The health check remained DOWN indefinitely.
+
+### Fix
+
+Changed all three migration classes to inject `IMigrationLogStore` (interface) instead of `MigrationLogStore` (concrete MongoDB class). The `DataStoreProducers` now correctly routes to the appropriate implementation based on `eddi.datastore.type`.
+
+**Files:**
+- `ChannelConnectorMigration.java` — `MigrationLogStore` → `IMigrationLogStore`
+- `V6RenameMigration.java` — `MigrationLogStore` → `IMigrationLogStore`
+- `V6QuteMigration.java` — `MigrationLogStore` → `IMigrationLogStore`
+- `ChannelConnectorMigrationTest.java` — updated mock type
+- `V6QuteMigrationTest.java` — updated mock type
+- `V6RenameMigrationTest.java` — updated mock type
+
+**Verification:** `mvnw compile` BUILD SUCCESS, `mvnw test` 94 migration tests pass (0 failures).
+
+---
+
+## Channel Integration — External Review Round 4 (2026-04-19)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+### Bugs Fixed (6 findings from external review)
+- **#1 — Legacy follow-up posting:** `postMessage` fell back to `getIntegration()` which only
+  checked `integrationMap`, not `legacyMap`. Legacy-only channels silently failed to post responses.
+  Fixed by adding `getBotToken()` method that checks both maps.
+- **#3 — Duplicate channelId:** REST validation now rejects create/update if another non-deleted
+  config already claims the same `channelType:channelId`. Prevents silent overwrites in the router.
+- **#4 — Reserved triggers:** `"help"` is now rejected as a trigger keyword — it would never fire
+  because the router short-circuits on `help` before trigger matching.
+- **#5 — NPE guard:** Added null check on `trigger.toLowerCase()` in `resolveFromIntegration` for
+  data that bypasses REST validation (e.g., raw MongoDB writes, imported ZIPs).
+- **#2 — Migration credential divergence:** Migration now logs WARN when agents sharing the same
+  channelId have different botToken/signingSecret values, with affected agentIds listed.
+- **#10 — Migration target names:** Target names now use the agent's descriptor name (slugified)
+  instead of raw ObjectId strings, making trigger keywords human-typeable.
+
+### Test Coverage (73 → 80 tests)
+- 3 new reserved trigger validation tests
+- 4 new `getBotToken()` tests (new-style, legacy fallback, precedence, unknown)
+
+**Files:**
+- `ChannelTargetRouter.java` — `getBotToken()`, null guard, import order
+- `SlackEventHandler.java` — use `getBotToken()` instead of `getIntegration()` in `postMessage`
+- `RestChannelIntegrationStore.java` — reserved triggers, `validateUniqueChannelId()`, `Locale.ROOT`
+- `ChannelConnectorMigration.java` — descriptor name lookup, slugify, divergence warning
+- `RestChannelIntegrationStoreValidationTest.java` — 3 reserved trigger tests
+- `ChannelTargetRouterRefreshTest.java` — 4 getBotToken tests
+
+## Channel Integration — Review Hardening & Test Coverage (2026-04-19)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+### Critical Bugs Fixed
+- **R1 — Compilation failure:** `ChannelConnectorMigration` called `readAgent()` on `IAgentStore`, which
+  only has `read()` (inherited from `IResourceStore`). `readAgent()` is on `IRestAgentStore`. Was masked by
+  incremental compilation; `mvnw clean compile` failed immediately. Fixed to `agentStore.read()`.
+- **R2 — Signing secret resolution:** `ChannelTargetRouter.refreshInternal()` collected signing secrets from
+  the store's cached config (containing vault references like `${eddivault:...}`) instead of the deep-copied
+  config with resolved secrets. Slack webhook HMAC verification would always fail for vaulted secrets.
+
+### Test Coverage Expansion (42 → 73 tests)
+- New `ChannelTargetRouterRefreshTest` (31 tests) covering:
+  - Public API `resolveTarget()` with mocked stores (new-style + legacy)
+  - Secret resolution (vault refs, resolver failures, absent keys)
+  - Legacy fallback (agent routing, group routing, new-style suppression)
+  - Channel detection (`hasAnyChannels`, `getIntegration`)
+  - Deep copy safety (store original unchanged after resolution)
+  - Refresh mechanism (first-call load, interval gate, error resilience)
+  - `ResolvedTarget` accessor logic (integration vs legacy preference)
+  - `LegacyTarget.toChannelTarget()` conversion
+
+**Files:**
+- `src/main/java/ai/labs/eddi/configs/migration/ChannelConnectorMigration.java` — `readAgent` → `read`
+- `src/main/java/ai/labs/eddi/integrations/channels/ChannelTargetRouter.java` — signing secret from `copy`
+- `src/test/java/ai/labs/eddi/integrations/channels/ChannelTargetRouterRefreshTest.java` — [NEW]
+
+## Channel Integration — Startup Migration & Legacy Deprecation (2026-04-18)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+**What changed:** Replaced the MCP-based migration tool with a deterministic startup migration and deprecated legacy channel connectors.
+
+**Key changes:**
+- **Removed** `migrate_channel_connectors` MCP tool from `McpAdminTools` — migration is now infrastructure, not an admin tool
+- **Added** `ChannelConnectorMigration` — startup one-shot migration following the established `V6RenameMigration` pattern (flag-based via `migrationlog` collection, idempotent, retry-safe on failure)
+- **Wired** into `AgentDeploymentManagement.autoDeployAgents()` after V6 migrations, before agent deployment
+- **Deprecated** `ChannelConnector` class and `channels` field in `AgentConfiguration` with `@Deprecated(since="6.1.0", forRemoval=true)`
+
+**Design decisions:**
+- Startup migration is cleaner than on-demand MCP tool: runs exactly once, no admin intervention needed, follows existing patterns
+- Deprecation rather than removal: old JSON configs in MongoDB can still deserialize; the legacy fallback in `ChannelTargetRouter` remains as a safety net
+- Migration is deliberately simple (preview feature with very few users)
+
+**Files:**
+- `ChannelConnectorMigration.java` [NEW] — startup migration
+- `McpAdminTools.java` — removed migration tool (-184 lines)
+- `AgentDeploymentManagement.java` — wired migration into startup
+- `AgentConfiguration.java` — deprecated channels field + ChannelConnector class
+
+---
+
+## Channel Integration — Migration Tool Hardening (2026-04-18)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+**What changed:** Re-review of the migration rewrite (fix #2) found 7 new issues (N1-N7). All fixed.
+
+- **N1: Restored per-agent error reporting** — regression from rewrite silently swallowed agent read failures.
+- **N2: Credential conflict detection** — when multiple agents share a channelId with different botToken/signingSecret, migration now skips with `action: "credential_conflict"` and an actionable hint.
+- **N3: Target name deduplication** — agents with identical names in the same channel get suffixed with short agentId to avoid `BadRequestException` on duplicate triggers.
+- **N4: Group key includes channelType** — prevents cross-platform collisions (`channelType:channelId`).
+- **N5: Deterministic ordering** — entries sorted by agentId before constructing targets; `defaultTargetName` is now reproducible across JVM runs.
+- **N6: Typed `MigrationEntry` record** — replaces `Map<String,Object>` with unsafe casts.
+- **N7: `deepCopyConfig` invariant comment** — documents that target instances are shared by reference and must not be mutated.
+
+## Channel Integration — Code Review Hardening (2026-04-18)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+**What changed:** Addressed 12 findings from a thorough code review before merge.
+
+### Critical fixes
+- **Deleted dead `SlackChannelRouter`** (#1) — was `@ApplicationScoped` but never injected, causing double agent scanning at startup. Removed 615 LOC (class + test).
+- **Migration now merges duplicate channelIds** (#2) — old tool created one config per (agent, channel) pair; new version groups by platformChannelId and creates a single multi-target config with derived triggers.
+- **Deep-copy before secret resolution** (#3) — `resolvePlatformSecrets` was mutating the store's instance in-place; added `deepCopyConfig()` so the REST layer always returns vault references.
+- **Null/blank trigger guard** (#5) — null triggers from loose JSON now return 400 instead of NPE.
+- **Removed dead fields** (#6) — `newStyleChannelIds` (assigned, never read), `cacheFactory` (constructor-only), unused `ConcurrentHashMap` import.
+- **Reject `observeMode=true`** (#12) — validation now blocks until the feature is implemented.
+- **Stack traces preserved** (#8) — all `LOGGER.warnf(msg, e.getMessage())` changed to `LOGGER.warn(msg, e)`.
+- **Renamed `channelId` → `resourceId`** (#10) in MCP tool responses to avoid confusion with Slack channelId.
+- **Fixed `deployAgent` typo** (#11) — 'production' listed twice in 4 environment descriptions.
+- **Tempered Javadoc** (#17) — now says "currently Slack-only with platform-agnostic model".
+
+### Deferred (architectural follow-ups)
+- **#7** Extensible channel type registry (CDI-based) — for Teams/Discord fork support
+- **#9** Prompt injection hardening in `buildFollowUpInput` — truncation + delimiters
+- **#13** Replace `ThreadLocal<ResolvedTarget>` with explicit parameter passing
+- **#15** Lock thread target only after successful conversation start
+
+## Channel Integration Refactor — Decoupled Multi-Target Architecture (2026-04-18)
+
+**Repo:** EDDI (`feature/channel-integrations`)
+
+**What changed:** Refactored the Slack integration from a tightly-coupled, agent-embedded model (`ChannelConnector` inside `AgentConfiguration`) to a standalone, multi-target, multi-platform architecture.
+
+### 1. Standalone Config Resource
+
+Created `ChannelIntegrationConfiguration` — a first-class versioned MongoDB document (`eddi://ai.labs.channel/channelstore/channels/{id}`) decoupled from agents. Each config holds:
+- `channelType` (slack, teams, discord)
+- `platformConfig` (credentials via vault references)
+- `targets[]` — each with name, type (AGENT/GROUP), targetId, and trigger keywords
+- `defaultTargetName` — fallback when no trigger matches
+- `observeMode` / `ObserveConfig` — schema reserved for future passive observation
+
+### 2. ChannelTargetRouter
+
+Platform-agnostic router replacing `SlackChannelRouter`:
+- **Colon-required triggers**: `architect: question` routes to the "architect" target
+- **Thread target locking**: First message locks the target for the thread (prevents mid-thread switching)
+- **New-style wins**: If a `ChannelIntegrationConfiguration` covers a channelId, all legacy `ChannelConnector` entries for that channel are ignored
+- **Signing secret aggregation**: Collects from both new and legacy configs for webhook verification
+
+### 3. Slack Adapter Refactor
+
+- `SlackEventHandler` → uses `ChannelTargetRouter` for all routing decisions
+- Removed `group:` magic prefix — groups now reached via configured triggers
+- Added `postHelp()` — lists available targets with trigger keywords when message is blank or "help"
+- `postMessage()` resolves bot token from `ResolvedTarget` or router fallback
+- `RestSlackWebhook` → uses `ChannelTargetRouter.getSigningSecrets("slack")`
+
+### 4. MCP Admin Tools + Migration
+
+Added 6 new MCP tools (admin-only):
+- `list_channel_integrations`, `read_channel_integration`, `create_channel_integration`
+- `update_channel_integration`, `delete_channel_integration`
+- `migrate_channel_connectors` — scans legacy `ChannelConnector` entries on deployed agents and converts to standalone `ChannelIntegrationConfiguration` (dry-run by default, non-destructive)
+
+### Design Decisions
+
+- **Colon-required syntax over fuzzy matching**: Deterministic, no ambiguity. `architect: hello` matches; `architect hello` does not.
+- **Thread locking over repeated resolution**: Prevents jarring mid-thread target switches in multi-target channels.
+- **Schema-now for observe mode**: `observeMode` and `ObserveConfig` are in the model but not wired. Avoids future MongoDB migration when observation is implemented.
+- **Migration as MCP tool (not REST endpoint)**: Fits admin tooling pattern, supports dry-run, accessible from Claude/MCP clients.
+
+**Files:**
+- `ChannelIntegrationConfiguration.java`, `ChannelTarget.java`, `ObserveConfig.java` — [NEW] models
+- `IChannelIntegrationStore.java` — [NEW] store interface
+- `IRestChannelIntegrationStore.java` — [NEW] REST interface
+- `ChannelIntegrationStore.java` — [NEW] DB-agnostic store
+- `RestChannelIntegrationStore.java` — [NEW] REST implementation with validation
+- `ChannelTargetRouter.java` — [NEW] platform-agnostic router
+- `ChannelTargetRouterTest.java` — [NEW] 23 unit tests
+- `SlackEventHandler.java` — refactored to use ChannelTargetRouter
+- `RestSlackWebhook.java` — updated credential resolution
+- `McpAdminTools.java` — 6 new channel integration tools
+
+**In Progress:** Manager UI, file attachment forwarding, observe mode (future PRs).
+
+---
+
 ## 🔍 DreamService PR Review Remediation — Pass 2 (2026-05-16)
 
 **Repo:** EDDI (`feature/dream-summarization`)
@@ -270,6 +567,8 @@ Each entry follows this format:
 ### Verification
 - `./mvnw compile` → BUILD SUCCESS
 - `./mvnw test -Dtest=DreamServiceTest` → 37 tests, 0 failures, 0 errors
+
+---
 
 ## 🔧 PR Review Remediation — 8 Findings Resolved (2026-05-14)
 
@@ -1123,6 +1422,7 @@ Created `LogSanitizer.java` in `ai.labs.eddi.utils` — replaces `\r`, `\n`, `\t
 
 ---
 
+
 ## 🔒 OpenSSF Scorecard: Fuzzing + SLSA Provenance + Signed Releases (2026-04-23)
 
 **Repo:** EDDI (`chore/scorecard-improvements`)
@@ -1713,6 +2013,7 @@ Renamed 20 Testcontainers-based datastore tests from `*IT.java` → `*Test.java`
 - `src/test/java/ai/labs/eddi/modules/nlp/extensions/corrections/PhoneticCorrectionTest.java` — new
 - `src/test/java/ai/labs/eddi/configs/migration/V6QuteMigrationTest.java` — new
 - `src/test/java/ai/labs/eddi/engine/triggermanagement/model/UserConversationTest.java` — new
+
 
 ---
 

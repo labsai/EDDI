@@ -76,6 +76,9 @@ public class SlackWebApiClient {
      */
     public String postMessage(String authToken, String channelId, String threadTs, String text) {
         try {
+            // Convert standard Markdown to Slack mrkdwn format
+            text = convertMarkdownToSlackMrkdwn(text);
+
             // Build JSON body using Jackson for proper escaping (handles all
             // Unicode control characters, surrogate pairs, etc.)
             Map<String, Object> body = new LinkedHashMap<>();
@@ -135,6 +138,102 @@ public class SlackWebApiClient {
             LOGGER.errorf(e, "Unexpected non-retryable error calling Slack API: %s", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Convert standard Markdown to Slack mrkdwn format.
+     * <p>
+     * Key differences handled:
+     * <ul>
+     * <li>{@code **bold**} → {@code *bold*}</li>
+     * <li>{@code # Heading} → {@code *Heading*} (bold, no heading support)</li>
+     * <li>{@code ~~strike~~} → {@code ~strike~}</li>
+     * <li>Markdown tables → code blocks (Slack has no table support)</li>
+     * <li>Horizontal rules ({@code ---}) → Unicode line</li>
+     * </ul>
+     * Code blocks (``` fenced) are preserved untouched.
+     */
+    static String convertMarkdownToSlackMrkdwn(String text) {
+        if (text == null || text.isEmpty()) {
+            return text;
+        }
+
+        String[] lines = text.split("\n", -1);
+        var result = new StringBuilder();
+        boolean inCodeBlock = false;
+        boolean inTable = false;
+
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+
+            // Toggle code block state — preserve code blocks untouched
+            if (line.trim().startsWith("```")) {
+                if (inTable) {
+                    // Close the table-as-code-block wrapper before the real code block
+                    result.append("```\n");
+                    inTable = false;
+                }
+                inCodeBlock = !inCodeBlock;
+                result.append(line).append("\n");
+                continue;
+            }
+
+            if (inCodeBlock) {
+                result.append(line).append("\n");
+                continue;
+            }
+
+            // Detect markdown table rows (| col | col |)
+            if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
+                // Skip separator rows (|---|---|)
+                if (line.matches("^\\s*\\|[-:\\s|]+\\|\\s*$")) {
+                    continue;
+                }
+                if (!inTable) {
+                    inTable = true;
+                    result.append("```\n");
+                }
+                // Clean up the table row for monospace display
+                String cleaned = line.replaceAll("\\*\\*(.+?)\\*\\*", "$1"); // remove bold in tables
+                result.append(cleaned).append("\n");
+                continue;
+            } else if (inTable) {
+                // End of table
+                inTable = false;
+                result.append("```\n");
+            }
+
+            // Convert headings: # Heading → *Heading*
+            if (line.matches("^#{1,6}\\s+.*")) {
+                line = line.replaceFirst("^#{1,6}\\s+", "");
+                line = "*" + line.trim() + "*";
+            }
+
+            // Convert bold: **text** → *text*
+            line = line.replaceAll("\\*\\*(.+?)\\*\\*", "*$1*");
+
+            // Convert strikethrough: ~~text~~ → ~text~
+            line = line.replaceAll("~~(.+?)~~", "~$1~");
+
+            // Convert horizontal rules
+            if (line.matches("^\\s*[-*_]{3,}\\s*$")) {
+                line = "───────────────────────────";
+            }
+
+            result.append(line).append("\n");
+        }
+
+        // Close any dangling table block
+        if (inTable) {
+            result.append("```\n");
+        }
+
+        // Remove trailing newline
+        if (!result.isEmpty() && result.charAt(result.length() - 1) == '\n') {
+            result.setLength(result.length() - 1);
+        }
+
+        return result.toString();
     }
 
     private static String truncateForLog(String text) {

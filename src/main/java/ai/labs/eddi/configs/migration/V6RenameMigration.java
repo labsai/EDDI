@@ -86,11 +86,11 @@ public class V6RenameMigration {
             "dictionaries", "parsers",};
 
     private final MongoDatabase database;
-    private final MigrationLogStore migrationLogStore;
+    private final IMigrationLogStore migrationLogStore;
     private final boolean enabled;
 
     @Inject
-    public V6RenameMigration(MongoDatabase database, MigrationLogStore migrationLogStore,
+    public V6RenameMigration(MongoDatabase database, IMigrationLogStore migrationLogStore,
             @ConfigProperty(name = "eddi.migration.v6-rename.enabled", defaultValue = "false") boolean enabled) {
         this.database = database;
         this.migrationLogStore = migrationLogStore;

@@ -549,12 +549,18 @@ public class LlmTask implements ILifecycleTask {
         }
     }
 
+    /**
+     * Parameters that should NOT be processed by the template engine (credentials,
+     * secrets).
+     */
+    private static final Set<String> TEMPLATE_SKIP_PARAMS = Set.of("apiKey", "signingSecret", "appPassword", "botToken");
+
     private HashMap<String, String> runTemplateEngineOnParams(Map<String, String> parameters, Map<String, Object> templateDataObjects) {
 
         var processedParams = new HashMap<>(parameters);
         processedParams.forEach((key, value) -> {
             try {
-                if (!isNullOrEmpty(value)) {
+                if (!isNullOrEmpty(value) && !TEMPLATE_SKIP_PARAMS.contains(key)) {
                     processedParams.put(key, templatingEngine.processTemplate(value, templateDataObjects));
                 }
             } catch (ITemplatingEngine.TemplateEngineException e) {

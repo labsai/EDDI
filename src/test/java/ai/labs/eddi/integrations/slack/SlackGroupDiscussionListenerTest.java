@@ -16,6 +16,9 @@ import static org.mockito.Mockito.*;
 
 /**
  * Tests for {@link SlackGroupDiscussionListener}.
+ * <p>
+ * All discussion styles now use EXPANDED mode (channel-level messages with
+ * per-agent threads). There is no compact mode.
  */
 class SlackGroupDiscussionListenerTest {
 
@@ -32,154 +35,183 @@ class SlackGroupDiscussionListenerTest {
         listener = new SlackGroupDiscussionListener(slackApi, AUTH_TOKEN, CHANNEL, USER_THREAD);
     }
 
-    // ─── UX Mode Detection ───
+    // ─── UX Mode Detection — all styles use expanded ───
 
     @Test
-    void onGroupStart_peerReview_setsExpandedMode() {
-        listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(
-                "gc1", "g1", "Test question", "PEER_REVIEW", 3, List.of("a1", "a2")));
-
+    void onGroupStart_roundTable_setsExpandedMode() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
         assertTrue(listener.isExpandedMode());
-        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("PEER REVIEW"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD),
+                contains("round table"));
     }
 
     @Test
-    void onGroupStart_roundTable_setsCompactMode() {
-        listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(
-                "gc1", "g1", "Test question", "ROUND_TABLE", 2, List.of("a1", "a2")));
-
-        assertFalse(listener.isExpandedMode());
-        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("ROUND TABLE"));
+    void onGroupStart_peerReview_setsExpandedMode() {
+        listener.onGroupStart(groupStart("PEER_REVIEW", 3));
+        assertTrue(listener.isExpandedMode());
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD),
+                contains("peer review"));
     }
 
     @Test
     void onGroupStart_debate_setsExpandedMode() {
-        listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(
-                "gc1", "g1", "Question?", "DEBATE", 3, List.of("a1", "a2", "a3")));
-
+        listener.onGroupStart(groupStart("DEBATE", 3));
         assertTrue(listener.isExpandedMode());
     }
 
     @Test
-    void onGroupStart_delphi_setsCompactMode() {
+    void onGroupStart_devilAdvocate_setsExpandedMode() {
+        listener.onGroupStart(groupStart("DEVIL_ADVOCATE", 2));
+        assertTrue(listener.isExpandedMode());
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD),
+                contains("devil advocate"));
+    }
+
+    @Test
+    void onGroupStart_delphi_setsExpandedMode() {
+        listener.onGroupStart(groupStart("DELPHI", 3));
+        assertTrue(listener.isExpandedMode());
+    }
+
+    @Test
+    void onGroupStart_messageContainsAgentCount() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD),
+                contains("2 agents"));
+    }
+
+    @Test
+    void onGroupStart_messageContainsQuestionInBlockquote() {
         listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(
-                "gc1", "g1", "Question?", "DELPHI", 3, List.of("a1")));
-
-        assertFalse(listener.isExpandedMode());
+                "gc1", "g1", "What is EDDI?", "ROUND_TABLE", 2, List.of("a1", "a2")));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD),
+                contains("> _What is EDDI?_"));
     }
 
-    // ─── Compact Mode (ROUND_TABLE) ───
+    // ─── Primary Contributions (EXPANDED mode) ───
 
     @Test
-    void compactMode_contributions_postedInThread() {
-        initCompactMode();
-
-        listener.onSpeakerComplete(speakerEvent("agent1", "Alice", "My opinion...", null, null));
-        listener.onSpeakerComplete(speakerEvent("agent2", "Bob", "I think...", null, null));
-
-        // Both posted in the user's thread
-        verify(slackApi, times(3)).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), any());
-    }
-
-    @Test
-    void compactMode_peerFeedback_postedInThread_withArrow() {
-        initCompactMode();
-
-        listener.onSpeakerComplete(speakerEvent("agent1", "Alice", "My opinion...", null, null));
-        listener.onSpeakerComplete(speakerEvent("agent2", "Bob", "I disagree because...", "agent1", "Alice"));
-
-        // Feedback includes arrow notation
-        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("→"));
-    }
-
-    // ─── Expanded Mode (PEER_REVIEW) ───
-
-    @Test
-    void expandedMode_firstContribution_postedAsChannelMessage() {
-        initExpandedMode();
+    void expandedMode_firstContribution_postsHeaderAndThread() {
+        initExpanded();
         when(slackApi.postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Alice")))
-                .thenReturn("1234567890.001");
+                .thenReturn("ts-alice");
 
         listener.onSpeakerComplete(speakerEvent("agent1", "Alice", "My opinion...", null, null));
 
-        // Posted at channel level (null threadTs)
+        // Header at channel level
         verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Alice"));
+        // Full response in thread
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq("ts-alice"), eq("My opinion..."));
         // ts is tracked
-        assertEquals("1234567890.001", listener.getAgentMessageTsMap().get("agent1"));
+        assertEquals("ts-alice", listener.getAgentMessageTsMap().get("agent1"));
     }
+
+    @Test
+    void expandedMode_secondAgent_postsOwnHeader() {
+        initExpanded();
+        when(slackApi.postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Alice")))
+                .thenReturn("ts-alice");
+        when(slackApi.postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Bob")))
+                .thenReturn("ts-bob");
+
+        listener.onSpeakerComplete(speakerEvent("agent1", "Alice", "Opinion A", null, null));
+        listener.onSpeakerComplete(speakerEvent("agent2", "Bob", "Opinion B", null, null));
+
+        assertEquals("ts-alice", listener.getAgentMessageTsMap().get("agent1"));
+        assertEquals("ts-bob", listener.getAgentMessageTsMap().get("agent2"));
+    }
+
+    // ─── Peer Feedback ───
 
     @Test
     void expandedMode_peerFeedback_postedUnderTargetMessage() {
-        initExpandedMode();
+        initExpanded();
         when(slackApi.postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Alice")))
-                .thenReturn("1234567890.001");
+                .thenReturn("ts-alice");
 
-        // Alice posts first
         listener.onSpeakerComplete(speakerEvent("agent1", "Alice", "My opinion...", null, null));
-        // Bob reviews Alice
         listener.onSpeakerComplete(speakerEvent("agent2", "Bob", "I disagree...", "agent1", "Alice"));
 
         // Bob's feedback threads under Alice's message
-        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq("1234567890.001"),
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq("ts-alice"),
                 contains("Bob"));
     }
 
     @Test
-    void expandedMode_revision_threadsUnderOwnMessage() {
-        initExpandedMode();
+    void expandedMode_peerFeedback_containsArrowNotation() {
+        initExpanded();
         when(slackApi.postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Alice")))
-                .thenReturn("1234567890.001");
+                .thenReturn("ts-alice");
 
-        // Alice posts first (channel-level)
         listener.onSpeakerComplete(speakerEvent("agent1", "Alice", "My opinion...", null, null));
-        // Alice posts again (revision — threads under own message)
-        listener.onSpeakerComplete(speakerEvent("agent1", "Alice", "Revised opinion...", null, null));
+        listener.onSpeakerComplete(speakerEvent("agent2", "Bob", "I disagree...", "agent1", "Alice"));
 
-        // Revision threads under Alice's own message
-        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq("1234567890.001"),
-                contains("revised"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq("ts-alice"),
+                contains("→"));
     }
 
     @Test
     void expandedMode_peerFeedback_fallbackToThread_whenNoTargetTs() {
-        initExpandedMode();
+        initExpanded();
         // No agent2 message posted yet, so no ts in map
-
         listener.onSpeakerComplete(speakerEvent("agent1", "Alice", "Feedback...", "agent2", "Bob"));
 
         // Falls back to user thread since agent2 has no ts
         verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("Alice"));
     }
 
-    // ─── Synthesis ───
+    // ─── Revisions ───
 
     @Test
-    void expandedMode_synthesis_postedAtChannelLevel() {
-        initExpandedMode();
-        listener.onSynthesisStart(new GroupConversationEventSink.SynthesisStartEvent("moderator1"));
+    void expandedMode_revision_threadsUnderOwnMessage() {
+        initExpanded();
+        when(slackApi.postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Alice")))
+                .thenReturn("ts-alice");
 
-        listener.onSpeakerComplete(speakerEvent("moderator1", "Moderator", "The panel agrees...", null, null));
+        listener.onSpeakerComplete(speakerEvent("agent1", "Alice", "My opinion...", null, null));
+        listener.onSpeakerComplete(speakerEvent("agent1", "Alice", "Revised opinion...", null, null));
 
-        // Synthesis is channel-level (null threadTs), not threaded
-        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Synthesis"));
+        // Revision threads under Alice's own message
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq("ts-alice"),
+                contains("revised"));
+    }
+
+    // ─── Synthesis (header + thread pattern) ───
+
+    @Test
+    void expandedMode_synthesis_postsHeaderAndThread() {
+        initExpanded();
+        when(slackApi.postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Synthesis")))
+                .thenReturn("ts-synth");
+
+        listener.onSynthesisStart(new GroupConversationEventSink.SynthesisStartEvent("mod1"));
+        listener.onSpeakerComplete(speakerEvent("mod1", "Moderator", "The panel agrees...", null, null));
+
+        // Header at channel level
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Panel Synthesis"));
+        // Full content in thread
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq("ts-synth"),
+                eq("The panel agrees..."));
     }
 
     @Test
-    void compactMode_synthesis_postedInThread() {
-        initCompactMode();
-        listener.onSynthesisStart(new GroupConversationEventSink.SynthesisStartEvent("moderator1"));
+    void synthesis_headerContainsModerator() {
+        initExpanded();
+        when(slackApi.postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), any()))
+                .thenReturn("ts-synth");
 
-        listener.onSpeakerComplete(speakerEvent("moderator1", "Moderator", "Summary...", null, null));
+        listener.onSynthesisStart(new GroupConversationEventSink.SynthesisStartEvent("mod1"));
+        listener.onSpeakerComplete(speakerEvent("mod1", "Moderator", "The panel agrees...", null, null));
 
-        // In compact mode, synthesis stays in the thread
-        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("Synthesis"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(),
+                contains("Moderator"));
     }
 
     // ─── Context Tracking ───
 
     @Test
     void agentContext_trackedForFollowUp() {
-        initExpandedMode();
+        initExpanded();
         when(slackApi.postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), any()))
                 .thenReturn("ts1");
 
@@ -194,7 +226,7 @@ class SlackGroupDiscussionListenerTest {
 
     @Test
     void agentContext_feedbackAccumulated() {
-        initExpandedMode();
+        initExpanded();
         when(slackApi.postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), any()))
                 .thenReturn("ts1");
 
@@ -210,7 +242,7 @@ class SlackGroupDiscussionListenerTest {
 
     @Test
     void getAgentIdForMessageTs_returnsCorrectAgent() {
-        initExpandedMode();
+        initExpanded();
         when(slackApi.postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Alice")))
                 .thenReturn("ts-alice");
         when(slackApi.postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Bob")))
@@ -228,29 +260,30 @@ class SlackGroupDiscussionListenerTest {
 
     @Test
     void blankResponse_notPosted() {
-        initCompactMode();
+        initExpanded();
 
         listener.onSpeakerComplete(speakerEvent("agent1", "Alice", "  ", null, null));
         listener.onSpeakerComplete(speakerEvent("agent1", "Alice", null, null, null));
 
-        // No additional postMessage calls (only the onGroupStart one)
+        // No additional postMessage calls beyond the onGroupStart one
         verify(slackApi, times(1)).postMessage(any(), any(), any(), any());
     }
 
     @Test
     void onGroupError_postsErrorMessage() {
-        initCompactMode();
+        initExpanded();
 
         listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent("timeout"));
 
-        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("error"));
+        // Error posted at channel level in expanded mode
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("error"));
     }
 
     // ─── Completion Latch ───
 
     @Test
     void awaitCompletion_returnsTrueAfterGroupComplete() {
-        initCompactMode();
+        initExpanded();
         listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(
                 ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState.COMPLETED, null));
 
@@ -259,7 +292,7 @@ class SlackGroupDiscussionListenerTest {
 
     @Test
     void awaitCompletion_returnsTrueAfterGroupError() {
-        initCompactMode();
+        initExpanded();
         listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent("fail"));
 
         assertTrue(listener.awaitCompletion(1, TimeUnit.SECONDS));
@@ -267,9 +300,7 @@ class SlackGroupDiscussionListenerTest {
 
     @Test
     void awaitCompletion_returnsFalseOnTimeout() {
-        initCompactMode();
-        // Never call onGroupComplete/onGroupError
-
+        initExpanded();
         assertFalse(listener.awaitCompletion(50, TimeUnit.MILLISECONDS));
     }
 
@@ -277,19 +308,23 @@ class SlackGroupDiscussionListenerTest {
 
     @Test
     void onGroupComplete_postsSynthesisFallback_whenNotPostedDuringSpeakerComplete() {
-        initCompactMode();
-        // No onSynthesisStart/onSpeakerComplete, synthesis comes only in
-        // onGroupComplete
+        initExpanded();
+        when(slackApi.postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Synthesis")))
+                .thenReturn("ts-synth");
+
         listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(
                 ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState.COMPLETED,
                 "Final synthesis answer"));
 
-        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("Synthesis"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Synthesis"));
     }
 
     @Test
     void onGroupComplete_doesNotDuplicateSynthesis_whenAlreadyPosted() {
-        initCompactMode();
+        initExpanded();
+        when(slackApi.postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(), contains("Synthesis")))
+                .thenReturn("ts-synth");
+
         listener.onSynthesisStart(new GroupConversationEventSink.SynthesisStartEvent("mod1"));
         listener.onSpeakerComplete(speakerEvent("mod1", "Moderator", "Synthesis via speaker", null, null));
 
@@ -298,20 +333,23 @@ class SlackGroupDiscussionListenerTest {
                 ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState.COMPLETED,
                 "Duplicate synthesis"));
 
-        // Only one synthesis message posted (the one from onSpeakerComplete)
-        verify(slackApi, times(1)).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("Synthesis"));
+        // Only one synthesis header posted
+        verify(slackApi, times(1)).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), isNull(),
+                contains("Synthesis"));
     }
 
     // ─── Helpers ───
 
-    private void initCompactMode() {
-        listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(
-                "gc1", "g1", "Test?", "ROUND_TABLE", 2, List.of("a1", "a2")));
+    private void initExpanded() {
+        listener.onGroupStart(groupStart("PEER_REVIEW", 3));
     }
 
-    private void initExpandedMode() {
-        listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(
-                "gc1", "g1", "Test?", "PEER_REVIEW", 3, List.of("a1", "a2")));
+    private GroupConversationEventSink.GroupStartEvent groupStart(String style, int memberCount) {
+        List<String> ids = new java.util.ArrayList<>();
+        for (int i = 0; i < memberCount; i++)
+            ids.add("a" + i);
+        return new GroupConversationEventSink.GroupStartEvent(
+                "gc1", "g1", "Test?", style, memberCount, ids);
     }
 
     private GroupConversationEventSink.SpeakerCompleteEvent speakerEvent(

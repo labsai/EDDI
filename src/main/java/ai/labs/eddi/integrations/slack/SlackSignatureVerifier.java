@@ -7,6 +7,8 @@ package ai.labs.eddi.integrations.slack;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
@@ -81,7 +83,7 @@ public class SlackSignatureVerifier {
                 return false;
             }
         } catch (NumberFormatException e) {
-            LOGGER.warnf("Invalid Slack timestamp: %s", timestamp);
+            LOGGER.warnf("Invalid Slack timestamp: %s", sanitize(timestamp));
             return false;
         }
 

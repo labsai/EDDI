@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -14,11 +15,16 @@ import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
+import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
+import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
+import ai.labs.eddi.modules.output.model.OutputItem;
 import ai.labs.eddi.datastore.IResourceStore;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.time.Duration;
 import java.util.*;
@@ -29,20 +35,23 @@ import java.util.regex.Pattern;
 /**
  * Core Slack event handler. Receives parsed events from
  * {@link ai.labs.eddi.integrations.slack.rest.RestSlackWebhook}, routes them to
- * the correct EDDI agent (via {@link SlackChannelRouter}), manages conversation
- * state (via {@link IUserConversationStore}), and posts responses back to Slack
- * (via {@link SlackWebApiClient}).
+ * the correct EDDI target (agent or group) via {@link ChannelTargetRouter},
+ * manages conversation state (via {@link IUserConversationStore}), and posts
+ * responses back to Slack (via {@link SlackWebApiClient}).
  * <p>
- * All credentials (bot tokens, signing secrets) are resolved per-agent from
- * {@link SlackChannelRouter.SlackCredentials} — no server-level credentials.
+ * All credentials (bot tokens, signing secrets) are resolved from
+ * {@link ChannelTargetRouter} — either from new-style
+ * {@code ChannelIntegrationConfiguration} or legacy {@code ChannelConnector}.
  * <p>
  * Key behaviors:
  * <ul>
  * <li>De-duplicates events by {@code event_id} (Slack retries up to 3x)</li>
  * <li>Filters out bot's own messages to prevent infinite loops</li>
  * <li>Strips bot mention prefix from message text</li>
- * <li>Detects {@code group:} prefix to trigger multi-agent group
- * discussions</li>
+ * <li>Routes via colon-delimited trigger keywords (e.g.,
+ * {@code architect:})</li>
+ * <li>Thread target locking — first message locks the target for the
+ * thread</li>
  * <li>Detects replies in agent threads to route context-aware follow-ups</li>
  * <li>Maps Slack threads → EDDI conversations via IUserConversationStore</li>
  * <li>Processes async to meet Slack's 3-second response requirement</li>
@@ -62,11 +71,7 @@ public class SlackEventHandler {
     /** Maximum Slack message length (safe limit under 4000). */
     private static final int MAX_SLACK_MESSAGE_LENGTH = 3900;
 
-    /** Pattern for group discussion trigger: "group: question" */
-    private static final Pattern GROUP_PREFIX = Pattern.compile("^group:\\s*(.+)", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
-
-    private final SlackIntegrationConfig config;
-    private final SlackChannelRouter channelRouter;
+    private final ChannelTargetRouter channelTargetRouter;
     private final SlackWebApiClient slackApi;
     private final IConversationService conversationService;
     private final IGroupConversationService groupConversationService;
@@ -87,15 +92,13 @@ public class SlackEventHandler {
     private final ICache<String, SlackGroupDiscussionListener> activeGroupListeners;
 
     @Inject
-    public SlackEventHandler(SlackIntegrationConfig config,
-            SlackChannelRouter channelRouter,
+    public SlackEventHandler(ChannelTargetRouter channelTargetRouter,
             SlackWebApiClient slackApi,
             IConversationService conversationService,
             IGroupConversationService groupConversationService,
             IUserConversationStore userConversationStore,
             ICacheFactory cacheFactory) {
-        this.config = config;
-        this.channelRouter = channelRouter;
+        this.channelTargetRouter = channelTargetRouter;
         this.slackApi = slackApi;
         this.conversationService = conversationService;
         this.groupConversationService = groupConversationService;
@@ -129,13 +132,9 @@ public class SlackEventHandler {
      *            the parsed event JSON as a Map
      */
     public void handleEventAsync(String eventId, Map<String, Object> event) {
-        if (!config.enabled()) {
-            return;
-        }
-
         // De-duplicate: Slack retries events up to 3 times
         if (eventDedup.get(eventId) != null) {
-            LOGGER.debugf("Duplicate Slack event %s — skipping", eventId);
+            LOGGER.debugf("Duplicate Slack event %s — skipping", sanitize(eventId));
             return;
         }
         eventDedup.put(eventId, Boolean.TRUE);
@@ -144,7 +143,7 @@ public class SlackEventHandler {
             try {
                 handleEvent(event);
             } catch (Exception e) {
-                LOGGER.errorf(e, "Error handling Slack event %s", eventId);
+                LOGGER.errorf(e, "Error handling Slack event %s", sanitize(eventId));
 
                 // Best-effort error response to user (never leak internal details)
                 String channelId = (String) event.get("channel");
@@ -152,7 +151,8 @@ public class SlackEventHandler {
                 if (channelId != null) {
                     try {
                         postMessage(channelId, threadTs,
-                                "⚠️ Sorry, I encountered an error processing your message. Please try again.");
+                                "⚠️ Sorry, I encountered an error processing your message. Please try again.",
+                                null);
                     } catch (Exception ignored) {
                         // Can't post error — nothing more we can do
                     }
@@ -162,10 +162,44 @@ public class SlackEventHandler {
     }
 
     private void handleEvent(Map<String, Object> event) throws Exception {
+        String eventType = (String) event.get("type");
+        String eventSubtype = (String) event.get("subtype");
+        String eventChannel = (String) event.get("channel");
+        String eventThreadTs = (String) event.get("thread_ts");
+        String textPreview = event.get("text") instanceof String t ? (t.length() > 50 ? t.substring(0, 50) + "..." : t) : "null";
+        LOGGER.infof("[SLACK] Event received: type=%s, subtype=%s, channel=%s, thread_ts=%s, has_bot_id=%s, text=%s",
+                sanitize(eventType), sanitize(eventSubtype), sanitize(eventChannel),
+                sanitize(eventThreadTs), event.containsKey("bot_id"),
+                sanitize(textPreview));
+
         // Filter bot's own messages (prevent infinite loop)
         if (event.containsKey("bot_id") || "bot_message".equals(event.get("subtype"))) {
-            LOGGER.debugf("Ignoring bot message in channel %s", event.get("channel"));
+            LOGGER.debugf("[SLACK] Ignoring bot message in channel %s", sanitize(String.valueOf(event.get("channel"))));
             return;
+        }
+
+        // Extract once — used for DM detection in both the message filter and
+        // the DM fallback resolution (step 4 below)
+        String channelType = (String) event.get("channel_type");
+        boolean isDirectMessage = "im".equals(channelType);
+
+        // For "message" events (from message.channels/groups/im subscriptions):
+        // - DMs (channel_type: "im") → always process (no app_mention in DMs)
+        // - Top-level channel messages → handled by app_mention, skip here
+        // - Thread replies with @mention → handled by app_mention, skip here
+        // - Thread replies without @mention → process here (thread continuity)
+        if ("message".equals(eventType)) {
+            if (eventThreadTs == null && !isDirectMessage) {
+                // Top-level channel message — only app_mention should handle these
+                LOGGER.debugf("[SLACK] Ignoring top-level message event (use @mention)");
+                return;
+            }
+            String text = (String) event.get("text");
+            if (text != null && BOT_MENTION_PATTERN.matcher(text).find()) {
+                // Thread reply with @mention — app_mention event will handle it
+                LOGGER.debugf("[SLACK] Ignoring @mentioned thread reply (handled by app_mention)");
+                return;
+            }
         }
 
         String text = (String) event.get("text");
@@ -180,78 +214,94 @@ public class SlackEventHandler {
         // Strip bot mention prefix: "<@U0123BOTID> hello" → "hello"
         text = stripBotMention(text);
 
-        if (text.isBlank()) {
-            postMessage(channelId, getThreadTs(event),
-                    "👋 Hi! Send me a message and I'll respond.\n"
-                            + "_Tip: Use `group: your question` to start a multi-agent discussion._");
-            return;
-        }
-
         String threadTs = getThreadTs(event);
 
-        // 1. Check if this is a reply in an agent's thread (follow-up)
+        if (text.isBlank()) {
+            postHelp(channelId, threadTs, null);
+            return;
+        }
+
+        // 1. Check thread target lock (existing threads keep their target)
         String parentTs = (String) event.get("thread_ts");
-        if (parentTs != null && tryHandleAgentFollowUp(parentTs, channelId, userId, text, threadTs)) {
+        ResolvedTarget resolved = null;
+
+        if (parentTs != null) {
+            resolved = channelTargetRouter.resolveThreadTarget("slack", channelId, parentTs);
+        }
+
+        // 2. Check group follow-up (thread root was a group discussion)
+        if (resolved == null && parentTs != null
+                && tryHandleAgentFollowUp(parentTs, channelId, userId, text, threadTs)) {
             return;
         }
 
-        // 2. Check for group discussion trigger: "group: question"
-        Matcher groupMatcher = GROUP_PREFIX.matcher(text);
-        if (groupMatcher.matches()) {
-            handleGroupDiscussion(channelId, userId, groupMatcher.group(1).trim(), threadTs);
+        // 3. Fresh resolution via ChannelTargetRouter
+        if (resolved == null) {
+            resolved = channelTargetRouter.resolveTarget("slack", channelId, text);
+        }
+
+        // 4. DM fallback: if no explicit config for this channel (DMs use dynamic
+        // D-prefixed IDs), fall back to any configured Slack integration's default
+        // target
+        if (resolved == null && isDirectMessage) {
+            resolved = channelTargetRouter.resolveDefaultForDm("slack", text);
+        }
+
+        if (resolved == null) {
+            postHelp(channelId, threadTs, null);
             return;
         }
 
-        // 3. Standard 1:1 agent conversation
-        handleAgentConversation(channelId, userId, text, threadTs);
+        // Lock target for this thread
+        if (threadTs != null) {
+            channelTargetRouter.lockThreadTarget("slack", channelId, threadTs, resolved.target());
+        }
+
+        // Resolve bot token once — passed explicitly to all post methods
+        String botToken = resolved.botToken();
+        switch (resolved.target().getType()) {
+            case AGENT -> handleAgentConversation(resolved, channelId, userId, threadTs, text, botToken);
+            case GROUP -> handleGroupDiscussion(resolved, channelId, userId, threadTs, text, botToken);
+        }
     }
 
     /**
-     * Handle a standard 1:1 agent conversation.
+     * Handle a standard 1:1 agent conversation routed via ChannelTargetRouter.
      */
-    private void handleAgentConversation(String channelId, String userId,
-                                         String text, String threadTs)
+    private void handleAgentConversation(ResolvedTarget resolved, String channelId,
+                                         String userId, String threadTs, String originalText,
+                                         String botToken)
             throws Exception {
-        Optional<String> agentIdOpt = channelRouter.resolveAgentId(channelId);
-        if (agentIdOpt.isEmpty()) {
-            LOGGER.warnf("No agent mapped for Slack channel %s", channelId);
-            postMessage(channelId, threadTs,
-                    "⚠️ No agent is configured for this channel. Please contact an administrator.");
-            return;
-        }
+        String agentId = resolved.target().getTargetId();
+        String threadKey = threadTs != null ? threadTs : "main";
 
-        String agentId = agentIdOpt.get();
-        String conversationId = getOrCreateConversation(agentId, userId, channelId, threadTs);
-        String response = sendAndWait(conversationId, text);
-        postMessageChunked(channelId, threadTs, response);
+        // Compose a stable intent key for conversation tracking.
+        // Uses channelId + targetId (agentId/groupId) — NOT mutable display names
+        // like integration name or target name, which would break
+        // IUserConversationStore lookups on rename.
+        String intent = "channel:slack:" + channelId + ":" + agentId + ":" + threadKey;
+
+        // Use strippedMessage (trigger keyword removed) or fall back to original text
+        // (thread replies from resolveThreadTarget have strippedMessage=null)
+        String message = resolved.strippedMessage() != null ? resolved.strippedMessage() : originalText;
+
+        String conversationId = getOrCreateConversation(agentId, userId, intent);
+        String response = sendAndWait(conversationId, message);
+        postMessageChunked(channelId, threadTs, response, botToken);
     }
 
     // ─── Group Discussion ───
 
     /**
-     * Handle a group discussion trigger. Resolves the group ID from the channel
-     * config, creates a {@link SlackGroupDiscussionListener}, and starts the
-     * discussion asynchronously.
+     * Handle a group discussion trigger routed via ChannelTargetRouter.
      */
-    private void handleGroupDiscussion(String channelId, String userId,
-                                       String question, String threadTs) {
-        Optional<String> groupIdOpt = channelRouter.resolveGroupId(channelId);
-        if (groupIdOpt.isEmpty()) {
-            postMessage(channelId, threadTs,
-                    "⚠️ No group is configured for this channel.\n"
-                            + "Add a ChannelConnector with `groupId` to your agent config.");
-            return;
-        }
+    private void handleGroupDiscussion(ResolvedTarget resolved, String channelId,
+                                       String userId, String threadTs, String originalText,
+                                       String botToken) {
+        String groupId = resolved.target().getTargetId();
 
-        String groupId = groupIdOpt.get();
-
-        // Resolve bot token for this channel
-        Optional<SlackChannelRouter.SlackCredentials> credsOpt = channelRouter.resolveCredentials(channelId);
-        String botToken = credsOpt.map(SlackChannelRouter.SlackCredentials::botToken).orElse("");
-
-        if (botToken.isEmpty()) {
-            LOGGER.errorf("No bot token configured for Slack channel %s — cannot run group discussion. " +
-                    "Check the agent's ChannelConnector config and vault key resolution.", channelId);
+        if (botToken == null || botToken.isEmpty()) {
+            LOGGER.errorf("No bot token configured for Slack channel %s — cannot run group discussion.", sanitize(channelId));
             return;
         }
 
@@ -260,9 +310,10 @@ public class SlackEventHandler {
         // Create the listener that streams discussion into Slack
         var listener = new SlackGroupDiscussionListener(slackApi, token, channelId, threadTs);
 
+        String question = resolved.strippedMessage() != null ? resolved.strippedMessage() : originalText;
         try {
             LOGGER.infof("Starting group discussion in channel %s, group %s, question: %s",
-                    channelId, groupId, question.substring(0, Math.min(80, question.length())));
+                    sanitize(channelId), sanitize(groupId), sanitize(question.substring(0, Math.min(80, question.length()))));
 
             groupConversationService.startAndDiscussAsync(groupId, question, userId, listener);
 
@@ -275,7 +326,8 @@ public class SlackEventHandler {
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to start group discussion: %s", e.getMessage());
             postMessage(channelId, threadTs,
-                    "⚠️ Failed to start group discussion. Please try again.");
+                    "⚠️ Sorry, I couldn't start the group discussion. Please try again.",
+                    botToken);
         }
     }
 
@@ -324,15 +376,16 @@ public class SlackEventHandler {
         }
 
         LOGGER.infof("Follow-up in agent %s thread from user %s: %s",
-                ctx.displayName(), userId, text.substring(0, Math.min(60, text.length())));
+                sanitize(ctx.displayName()), sanitize(userId), sanitize(text.substring(0, Math.min(60, text.length()))));
 
         // Build context-enriched input
         String enrichedInput = buildFollowUpInput(ctx, text);
 
         // Route to the specific agent from the group discussion
-        String conversationId = getOrCreateConversation(agentId, userId, channelId, parentTs);
+        String intent = "channel:followup:" + channelId + ":" + parentTs;
+        String conversationId = getOrCreateConversation(agentId, userId, intent);
         String response = sendAndWait(conversationId, enrichedInput);
-        postMessageChunked(channelId, threadTs, response);
+        postMessageChunked(channelId, threadTs, response, null);
 
         return true;
     }
@@ -362,16 +415,12 @@ public class SlackEventHandler {
 
     /**
      * Map a Slack thread to an EDDI conversation. Uses
-     * {@link IUserConversationStore} with intent = "slack:{channelId}:{threadTs}"
-     * and userId = slackUserId.
+     * {@link IUserConversationStore} with intent key composed from integration +
+     * target + thread.
      */
     private String getOrCreateConversation(String agentId, String slackUserId,
-                                           String channelId, String threadTs)
+                                           String intent)
             throws Exception {
-        // Use thread_ts for threaded conversations, channel for top-level
-        String threadKey = threadTs != null ? threadTs : "main";
-        String intent = "slack:" + channelId + ":" + threadKey;
-
         // Try existing — readUserConversation returns null when not found,
         // throws ResourceStoreException only on real DB errors (which should propagate)
         UserConversation existing = userConversationStore.readUserConversation(intent, slackUserId);
@@ -382,8 +431,7 @@ public class SlackEventHandler {
         // Create new conversation
         var result = conversationService.startConversation(
                 Deployment.Environment.production, agentId, slackUserId,
-                Map.of("slackChannel", new Context(Context.ContextType.string, channelId),
-                        "slackThread", new Context(Context.ContextType.string, threadKey)));
+                Map.of("channelIntent", new Context(Context.ContextType.string, intent)));
 
         // Store mapping
         var mapping = new UserConversation(intent, slackUserId,
@@ -391,7 +439,7 @@ public class SlackEventHandler {
         try {
             userConversationStore.createUserConversation(mapping);
         } catch (IResourceStore.ResourceAlreadyExistsException e) {
-            LOGGER.debugf("Race condition: conversation mapping already exists for %s/%s", intent, slackUserId);
+            LOGGER.debugf("Race condition: conversation mapping already exists for %s/%s", sanitize(intent), sanitize(slackUserId));
         }
 
         return result.conversationId();
@@ -420,7 +468,9 @@ public class SlackEventHandler {
     }
 
     /**
-     * Extract the text response from a conversation snapshot.
+     * Extract the text response from a conversation snapshot. Handles output items
+     * stored as {@link OutputItem} POJOs (live memory callback path) or as Maps
+     * (deserialized from MongoDB).
      */
     private String extractResponseText(SimpleConversationMemorySnapshot snapshot) {
         var outputs = snapshot.getConversationOutputs();
@@ -429,12 +479,23 @@ public class SlackEventHandler {
         }
 
         var lastOutput = outputs.get(outputs.size() - 1);
-        var outputItems = lastOutput.get("output");
-        if (outputItems instanceof List<?> items) {
-            var texts = new ArrayList<String>();
-            for (var item : items) {
-                if (item instanceof Map<?, ?> map && map.containsKey("text")) {
-                    texts.add(String.valueOf(map.get("text")));
+        if (lastOutput == null) {
+            return "_No response from agent._";
+        }
+
+        var texts = new ArrayList<String>();
+
+        // Format 1: Nested "output" array — may contain TextOutputItem POJOs or Maps
+        Object outputArray = lastOutput.get("output");
+        if (outputArray instanceof List<?> list) {
+            for (var item : list) {
+                if (item instanceof String s) {
+                    texts.add(s);
+                } else if (item instanceof OutputItem oi && oi.toString() != null) {
+                    // TextOutputItem.toString() returns the text field
+                    texts.add(oi.toString());
+                } else if (item instanceof Map<?, ?> map && map.get("text") instanceof String s) {
+                    texts.add(s);
                 }
             }
             if (!texts.isEmpty()) {
@@ -442,15 +503,43 @@ public class SlackEventHandler {
             }
         }
 
+        // Format 2: Flat keys like "output:text:agent" or "output:text:*"
+        for (var entry : lastOutput.entrySet()) {
+            if (entry.getKey() instanceof String key && key.startsWith("output:text:")) {
+                Object val = entry.getValue();
+                if (val instanceof String s) {
+                    texts.add(s);
+                } else if (val instanceof List<?> list) {
+                    for (var item : list) {
+                        if (item instanceof String s) {
+                            texts.add(s);
+                        } else if (item instanceof Map<?, ?> map && map.get("text") instanceof String s) {
+                            texts.add(s);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!texts.isEmpty()) {
+            return String.join("\n", texts);
+        }
+
         return "_Agent completed but produced no text output._";
     }
 
     /**
      * Post a message to Slack, chunking if it exceeds Slack's 4000-char limit.
+     *
+     * @param botToken
+     *            explicit bot token (if {@code null}, falls back to router lookup)
      */
-    private void postMessageChunked(String channelId, String threadTs, String text) {
+    private void postMessageChunked(String channelId, String threadTs, String text,
+                                    String botToken) {
+        if (text == null || text.isEmpty())
+            return;
         if (text.length() <= MAX_SLACK_MESSAGE_LENGTH) {
-            postMessage(channelId, threadTs, text);
+            postMessage(channelId, threadTs, text, botToken);
             return;
         }
 
@@ -469,26 +558,32 @@ public class SlackEventHandler {
             if (end <= offset) {
                 end = Math.min(offset + MAX_SLACK_MESSAGE_LENGTH, text.length());
             }
-            postMessage(channelId, threadTs, text.substring(offset, end));
+            postMessage(channelId, threadTs, text.substring(offset, end), botToken);
             offset = end;
         }
     }
 
     /**
-     * Post a single message to Slack via the Web API, using the per-agent bot token
-     * resolved from the channel's ChannelConnector config.
+     * Post a single message to Slack via the Web API.
+     *
+     * @param botToken
+     *            explicit bot token; if {@code null}, falls back to
+     *            {@link ChannelTargetRouter#getBotToken}
      */
-    private void postMessage(String channelId, String threadTs, String text) {
-        // Resolve bot token for this channel
-        Optional<SlackChannelRouter.SlackCredentials> credsOpt = channelRouter.resolveCredentials(channelId);
-        String botToken = credsOpt.map(SlackChannelRouter.SlackCredentials::botToken).orElse("");
+    private void postMessage(String channelId, String threadTs, String text,
+                             String botToken) {
+        // Resolve bot token: prefer explicit parameter, fallback to router
+        String resolvedToken = botToken;
+        if (resolvedToken == null || resolvedToken.isEmpty()) {
+            resolvedToken = channelTargetRouter.getBotToken("slack", channelId);
+        }
 
-        if (botToken.isEmpty()) {
-            LOGGER.warnf("No bot token configured for Slack channel %s — cannot post message", channelId);
+        if (resolvedToken == null || resolvedToken.isEmpty()) {
+            LOGGER.warnf("No bot token configured for Slack channel %s — cannot post message", sanitize(channelId));
             return;
         }
 
-        String auth = "Bearer " + botToken;
+        String auth = "Bearer " + resolvedToken;
 
         for (int attempt = 1; attempt <= SLACK_API_MAX_RETRIES; attempt++) {
             try {
@@ -506,15 +601,52 @@ public class SlackEventHandler {
                         return;
                     }
                 } else {
-                    // All retries exhausted — structured log for operator recovery.
-                    // The agent response is still in conversation memory; this log
-                    // provides enough context to manually re-deliver if needed.
                     LOGGER.errorf("SLACK_DELIVERY_FAILED | channel=%s | threadTs=%s | textLength=%d | attempts=%d | error=%s",
-                            channelId, threadTs, text != null ? text.length() : 0,
+                            sanitize(channelId), sanitize(threadTs), text != null ? text.length() : 0,
                             SLACK_API_MAX_RETRIES, e.getMessage());
                 }
             }
         }
+    }
+
+    /**
+     * Post a help message listing available targets for this channel.
+     *
+     * @param botToken
+     *            explicit bot token (if {@code null}, falls back to router lookup)
+     */
+    private void postHelp(String channelId, String threadTs, String botToken) {
+        var integration = channelTargetRouter.getIntegration("slack", channelId);
+        if (integration.isEmpty()) {
+            postMessage(channelId, threadTs,
+                    "👋 Hi! Send me a message and I'll respond.", botToken);
+            return;
+        }
+
+        var config = integration.get();
+        var sb = new StringBuilder();
+        sb.append("👋 *Available targets in this channel:*\n\n");
+
+        for (ChannelTarget target : config.getTargets()) {
+            String name = target.getName() != null ? target.getName() : "(unnamed)";
+            String type = target.getType() == ChannelTarget.TargetType.GROUP ? "group" : "agent";
+            String isDefault = config.getDefaultTargetName() != null
+                    && name.equalsIgnoreCase(config.getDefaultTargetName())
+                            ? " _(default)_"
+                            : "";
+            sb.append("• *").append(name).append("*").append(isDefault);
+            sb.append(" [").append(type).append("]\n");
+            if (target.getTriggers() != null && !target.getTriggers().isEmpty()) {
+                sb.append("  Triggers: ");
+                sb.append(String.join(", ", target.getTriggers().stream()
+                        .map(t -> "`" + t + "`" + ":")
+                        .toList()));
+                sb.append("\n");
+            }
+        }
+
+        sb.append("\n_Type a message to talk to the default target, or use a trigger keyword._");
+        postMessage(channelId, threadTs, sb.toString(), botToken);
     }
 
     /**

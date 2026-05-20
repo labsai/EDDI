@@ -20,13 +20,13 @@ import static org.mockito.Mockito.*;
 class V6QuteMigrationTest {
 
     private MongoDatabase database;
-    private MigrationLogStore migrationLogStore;
+    private IMigrationLogStore migrationLogStore;
     private TemplateSyntaxMigrator migrator;
 
     @BeforeEach
     void setUp() {
         database = mock(MongoDatabase.class);
-        migrationLogStore = mock(MigrationLogStore.class);
+        migrationLogStore = mock(IMigrationLogStore.class);
         migrator = mock(TemplateSyntaxMigrator.class);
     }
 
