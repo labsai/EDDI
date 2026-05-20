@@ -291,20 +291,22 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     /**
-     * Validate that an agent's cryptographic security flags are backed by actual
-     * signing infrastructure. If any signing flag is enabled, the agent must have a
-     * signing key registered via {@code AgentSigningService.generateKeyPair()}.
+     * Validate that cryptographic security flags are backed by a signing keypair.
+     * <p>
+     * Both {@code signInterAgentMessages} and {@code requirePeerVerification}
+     * require an Ed25519 keypair on the agent's identity block. This validation
+     * prevents enabling signing without the necessary infrastructure.
      *
      * @throws jakarta.ws.rs.BadRequestException
-     *             if signing is enabled but no key exists
+     *             if crypto is enabled without a keypair
      */
     private void validateSecurityFlags(AgentConfiguration config) {
         if (config.getSecurity() == null) {
             return;
         }
         var security = config.getSecurity();
+
         boolean anyCryptoEnabled = security.isSignInterAgentMessages()
-                || security.isSignMcpInvocations()
                 || security.isRequirePeerVerification();
         if (!anyCryptoEnabled) {
             return;
@@ -321,7 +323,7 @@ public class RestAgentStore implements IRestAgentStore {
             throw new jakarta.ws.rs.BadRequestException(
                     "Cryptographic identity features require a signing key. "
                             + "Generate one via POST /agentstore/{agentId}/signing/keys "
-                            + "before enabling signInterAgentMessages, signMcpInvocations, "
+                            + "before enabling signInterAgentMessages "
                             + "or requirePeerVerification.");
         }
     }

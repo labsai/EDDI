@@ -27,7 +27,7 @@ import java.util.Map;
  * via an LLM call. Currently consumed by:
  * <ul>
  * <li>{@link ConversationSummarizer} — rolling conversation summary</li>
- * <li>{@code DreamService} — future Dream consolidation</li>
+ * <li>{@code DreamService} — Dream memory consolidation</li>
  * </ul>
  * <p>
  * Uses {@link ChatModelRegistry} for model creation and caching. Thread-safe
@@ -62,7 +62,27 @@ public class SummarizationService {
     }
 
     /**
-     * Summarize content using a specified LLM.
+     * Result of an LLM summarization call, including token usage for cost tracking.
+     *
+     * @param summary
+     *            the generated summary text (empty string on failure)
+     * @param inputTokens
+     *            number of input tokens consumed (0 if unavailable)
+     * @param outputTokens
+     *            number of output tokens generated (0 if unavailable)
+     */
+    public record SummarizationResult(String summary, int inputTokens, int outputTokens) {
+
+        /** Total tokens consumed (input + output). */
+        public int totalTokens() {
+            return inputTokens + outputTokens;
+        }
+    }
+
+    /**
+     * Summarize content using a specified LLM. Failures are swallowed and return an
+     * empty string — use {@link #summarizeWithUsage} if you need to distinguish
+     * failures from empty LLM responses.
      *
      * @param content
      *            the text to summarize
@@ -75,6 +95,25 @@ public class SummarizationService {
      * @return the generated summary text, or empty string on failure
      */
     public String summarize(String content, String instructions, String llmProvider, String llmModel) {
+        try {
+            return summarizeWithUsage(content, instructions, llmProvider, llmModel).summary();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
+     * Summarize content and return token usage for cost tracking. Unlike
+     * {@link #summarize}, this method propagates exceptions to the caller so that
+     * failures can be distinguished from empty LLM responses.
+     *
+     * @return a {@link SummarizationResult} with summary text and token counts
+     * @throws RuntimeException
+     *             if the LLM call fails
+     * @see #summarize(String, String, String, String)
+     */
+    public SummarizationResult summarizeWithUsage(String content, String instructions,
+                                                  String llmProvider, String llmModel) {
         long start = System.nanoTime();
         try {
             Map<String, String> params = new HashMap<>();
@@ -89,15 +128,36 @@ public class SummarizationService {
             callCounter.increment();
 
             String result = response.aiMessage().text();
-            LOGGER.debugf("[SUMMARIZATION] Generated summary: provider=%s, model=%s, inputLength=%d, outputLength=%d", llmProvider, llmModel,
-                    content.length(), result != null ? result.length() : 0);
+            int inputTokens = 0;
+            int outputTokens = 0;
+            if (response.tokenUsage() != null) {
+                inputTokens = response.tokenUsage().inputTokenCount() != null
+                        ? response.tokenUsage().inputTokenCount()
+                        : 0;
+                outputTokens = response.tokenUsage().outputTokenCount() != null
+                        ? response.tokenUsage().outputTokenCount()
+                        : 0;
+            }
 
-            return result != null ? result : "";
+            LOGGER.debugf("[SUMMARIZATION] Generated summary: provider=%s, model=%s, " +
+                    "inputLength=%d, outputLength=%d, tokens=%d+%d",
+                    llmProvider, llmModel,
+                    content.length(), result != null ? result.length() : 0,
+                    inputTokens, outputTokens);
 
+            return new SummarizationResult(
+                    result != null ? result : "", inputTokens, outputTokens);
+
+        } catch (RuntimeException e) {
+            errorCounter.increment();
+            LOGGER.errorf(e, "[SUMMARIZATION] Failed to summarize: provider=%s, model=%s, error=%s",
+                    llmProvider, llmModel, e.getMessage());
+            throw e;
         } catch (Exception e) {
             errorCounter.increment();
-            LOGGER.warnf(e, "[SUMMARIZATION] Failed to summarize: provider=%s, model=%s, error=%s", llmProvider, llmModel, e.getMessage());
-            return "";
+            LOGGER.errorf(e, "[SUMMARIZATION] Failed to summarize: provider=%s, model=%s, error=%s",
+                    llmProvider, llmModel, e.getMessage());
+            throw new RuntimeException(e);
         } finally {
             durationTimer.record(System.nanoTime() - start, java.util.concurrent.TimeUnit.NANOSECONDS);
         }

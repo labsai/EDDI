@@ -118,6 +118,94 @@ class GroupConversationTest {
             assertEquals("Connection timed out", entry.errorReason());
             assertEquals("agent-1", entry.targetAgentId());
         }
+
+        @Test
+        @DisplayName("full constructor with all envelope fields")
+        void fullConstructorWithEnvelope() {
+            var now = Instant.now();
+            var entry = new TranscriptEntry(
+                    "agent-1", "Agent One", "Signed content",
+                    0, "Opinions", TranscriptEntryType.OPINION, now,
+                    null, null, "sig-base64",
+                    "nonce-uuid", 1715800000000L, 2);
+
+            assertEquals("sig-base64", entry.signature());
+            assertEquals("nonce-uuid", entry.signatureNonce());
+            assertEquals(1715800000000L, entry.signatureTimestampMs());
+            assertEquals(2, entry.signatureKeyVersion());
+        }
+
+        @Test
+        @DisplayName("hasEnvelopeData — true when all three fields present")
+        void hasEnvelopeData_allPresent() {
+            var entry = new TranscriptEntry(
+                    "a", "A", "msg", 0, "p", TranscriptEntryType.OPINION,
+                    Instant.now(), null, null, "sig",
+                    "nonce", 1000L, 1);
+
+            assertTrue(entry.hasEnvelopeData());
+        }
+
+        @Test
+        @DisplayName("hasEnvelopeData — false when signature is null")
+        void hasEnvelopeData_nullSignature() {
+            var entry = new TranscriptEntry(
+                    "a", "A", "msg", 0, "p", TranscriptEntryType.OPINION,
+                    Instant.now(), null, null, null,
+                    "nonce", 1000L, 1);
+
+            assertFalse(entry.hasEnvelopeData());
+        }
+
+        @Test
+        @DisplayName("hasEnvelopeData — false when nonce is null")
+        void hasEnvelopeData_nullNonce() {
+            var entry = new TranscriptEntry(
+                    "a", "A", "msg", 0, "p", TranscriptEntryType.OPINION,
+                    Instant.now(), null, null, "sig",
+                    null, 1000L, 1);
+
+            assertFalse(entry.hasEnvelopeData());
+        }
+
+        @Test
+        @DisplayName("hasEnvelopeData — false when timestamp is null")
+        void hasEnvelopeData_nullTimestamp() {
+            var entry = new TranscriptEntry(
+                    "a", "A", "msg", 0, "p", TranscriptEntryType.OPINION,
+                    Instant.now(), null, null, "sig",
+                    "nonce", null, 1);
+
+            assertFalse(entry.hasEnvelopeData());
+        }
+
+        @Test
+        @DisplayName("hasEnvelopeData — false for unsigned backward-compatible entry")
+        void hasEnvelopeData_unsignedEntry() {
+            var entry = new TranscriptEntry(
+                    "a", "A", "msg", 0, "p", TranscriptEntryType.OPINION,
+                    Instant.now(), null, null);
+
+            assertFalse(entry.hasEnvelopeData());
+            assertNull(entry.signature());
+            assertNull(entry.signatureNonce());
+            assertNull(entry.signatureTimestampMs());
+            assertNull(entry.signatureKeyVersion());
+        }
+
+        @Test
+        @DisplayName("signature-only constructor — envelope fields are null")
+        void signatureOnlyConstructor() {
+            var entry = new TranscriptEntry(
+                    "a", "A", "msg", 0, "p", TranscriptEntryType.OPINION,
+                    Instant.now(), null, null, "sig-only");
+
+            assertEquals("sig-only", entry.signature());
+            assertNull(entry.signatureNonce());
+            assertNull(entry.signatureTimestampMs());
+            assertNull(entry.signatureKeyVersion());
+            assertFalse(entry.hasEnvelopeData());
+        }
     }
 
     // ==================== Enums ====================

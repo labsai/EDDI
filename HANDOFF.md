@@ -963,10 +963,10 @@ Cross-conversation, agent-scoped fact retention with LLM tools, REST API, MCP ma
 | **LLM Tool** | `UserMemoryTool.java` (`@Vetoed`, 4 tools: remember/recall/search/forget) |
 | **REST API** | `IRestUserMemoryStore.java`, `RestUserMemoryStore.java` (9 endpoints + validation) |
 | **MCP Tools** | `McpMemoryTools.java` (8 tools, GDPR-compliant) |
-| **Dream** | `DreamService.java` (stale pruning, contradiction detection, Micrometer metrics) |
+| **Dream** | `DreamService.java` (stale pruning, contradiction detection, LLM-driven summarization, Micrometer metrics) |
 | **Integration** | `AgentOrchestrator.java` (groupId extraction), `GroupConversationService.java` (groupId context) |
 | **Docs** | `docs/user-memory.md`, `docs/changelog.md`, `docs/SUMMARY.md` |
-| **Tests** | 45 new: `UserMemoryToolTest` (16), `DreamServiceTest` (9), `UserMemoryEntryTest` (22), `RestUserMemoryStoreTest` (15) |
+| **Tests** | 107 new: `UserMemoryToolTest` (16), `DreamServiceTest` (51), `UserMemoryEntryTest` (22), `RestUserMemoryStoreTest` (15), `SummarizationServiceTest` (3 new) |
 
 **Total tests:** 1406 (all pass). **Last commit:** Phase 11a code review fixes.
 

@@ -972,8 +972,22 @@ Master Key (env var EDDI_VAULT_MASTER_KEY)
 - **Envelope encryption**: Rotating the master key re-wraps KEK→DEK without touching individual secrets
 - **Export scrubbing**: Agent export/sync automatically strips secrets from ZIP files
 
-### Authentication Model
+### Cryptographic Agent Identity
 
+EDDI agents can sign their inter-agent messages using Ed25519 digital signatures. This protects multi-agent group conversations against identity spoofing, message tampering, and provides non-repudiation for audit trails.
+
+**Key lifecycle:**
+
+1. **Key generation**: `POST /agentstore/{id}/signing/keys` → `AgentSigningService.generateKeyPair()` creates an Ed25519 keypair. Public key stored in `AgentConfiguration.identity.publicKey`, private key encrypted in the Secrets Vault
+2. **Key rotation**: `AgentPublicKey` records support versioned keys with `validFromMs`/`validUntilMs` windows. Old and new keys overlap during rotation. Private keys use versioned vault paths (`agent-signing-key:{agentId}:v{version}`)
+3. **Signing**: When `security.signInterAgentMessages=true`, the `GroupConversationService` creates a `SignedEnvelope` for each agent response. The envelope contains the message payload, a UUID nonce, and an epoch timestamp. The canonical JSON form (RFC 8785 via `JacksonCanonicalizer`) is signed with Ed25519
+4. **Self-verification**: Immediately after signing, the service verifies its own signature against the agent's public key. If self-verification fails, the signature is discarded (fail-safe to unsigned)
+5. **Replay protection**: The `NonceCacheService` registers each nonce with freshness (5min default) and clock-skew (30s default) checks. Duplicate nonces are rejected
+6. **Peer verification**: When `security.requirePeerVerification=true` on a receiving agent, the service reconstructs envelopes from stored `TranscriptEntry` fields and verifies each speaker's signature against their public key before sending context
+
+**What is NOT covered:** MCP invocation signing is not yet implemented — the `signMcpInvocations` config field has been removed until the feature is built.
+
+### Authentication Model
 | Environment | OIDC Enabled | Behavior |
 |-------------|-------------|----------|
 | **Dev mode** | No | Allowed — info log on startup |

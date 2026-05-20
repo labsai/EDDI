@@ -179,18 +179,6 @@ class RestAgentStoreTest {
         }
 
         @Test
-        @DisplayName("createAgent should reject signMcpInvocations=true with HTTP 400")
-        void createAgent_rejectsSignMcpInvocations() {
-            var config = new AgentConfiguration();
-            var security = new AgentConfiguration.SecurityConfig();
-            security.setSignMcpInvocations(true);
-            config.setSecurity(security);
-
-            assertThrows(jakarta.ws.rs.BadRequestException.class,
-                    () -> restAgentStore.createAgent(config));
-        }
-
-        @Test
         @DisplayName("createAgent should reject requirePeerVerification=true with HTTP 400")
         void createAgent_rejectsRequirePeerVerification() {
             var config = new AgentConfiguration();
@@ -261,11 +249,12 @@ class RestAgentStoreTest {
         }
 
         @Test
-        @DisplayName("duplicateAgent should reject security flags from source config")
+        @DisplayName("duplicateAgent should reject security flags from source config when no keys")
         void duplicateAgent_rejectsSecurityFlags() throws Exception {
             var sourceConfig = new AgentConfiguration();
             var security = new AgentConfiguration.SecurityConfig();
-            security.setSignMcpInvocations(true);
+            security.setSignInterAgentMessages(true);
+            // No identity/keys — should fail validation
             sourceConfig.setSecurity(security);
             sourceConfig.setWorkflows(new ArrayList<>());
 

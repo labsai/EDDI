@@ -6,6 +6,10 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
+import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
+import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
@@ -75,7 +79,13 @@ public class GroupConversationService implements IGroupConversationService {
     private final ExecutorService executorService;
     private final AgentSigningService agentSigningService;
     private final IAgentStore agentStore;
+    private final NonceCacheService nonceCacheService;
     private final String defaultTenantId;
+
+    // Incremental peer verification: tracks the last verified transcript index
+    // per group conversation ID, so we only verify new entries each turn (O(N)
+    // amortized instead of O(N²)). Cleaned up when conversations complete.
+    private final ConcurrentHashMap<String, Integer> lastVerifiedIndex = new ConcurrentHashMap<>();
 
     // Metrics
     private final Timer timerGroupDiscussion;
@@ -86,6 +96,7 @@ public class GroupConversationService implements IGroupConversationService {
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
             IAgentFactory agentFactory, ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, MeterRegistry meterRegistry,
             AgentSigningService agentSigningService, IAgentStore agentStore,
+            NonceCacheService nonceCacheService,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.groups.max-depth", defaultValue = "3") int maxDepth) {
         this.groupStore = groupStore;
@@ -97,6 +108,7 @@ public class GroupConversationService implements IGroupConversationService {
         this.maxDepth = maxDepth;
         this.agentSigningService = agentSigningService;
         this.agentStore = agentStore;
+        this.nonceCacheService = nonceCacheService;
         this.defaultTenantId = defaultTenantId;
         // Virtual threads — lightweight, no pool sizing, ideal for parallel agent calls
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
@@ -314,6 +326,8 @@ public class GroupConversationService implements IGroupConversationService {
             throw new GroupDiscussionException("Group discussion failed: " + e.getMessage(), e);
         } finally {
             timerGroupDiscussion.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
+            // Clean up incremental verification cursor — conversation is done
+            lastVerifiedIndex.remove(gc.getId());
         }
     }
 
@@ -575,6 +589,11 @@ public class GroupConversationService implements IGroupConversationService {
         context.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
         context.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
         context.put("groupDepth", new Context(Context.ContextType.string, String.valueOf(gc.getDepth())));
+
+        // Wave 6: Peer verification — if the receiving agent requires it,
+        // verify all signed entries from prior speakers before sending context
+        verifyPriorEntriesIfRequired(member.agentId(), gc);
+
         inputData.setContext(context);
 
         // Call through ConversationService with retry
@@ -594,27 +613,93 @@ public class GroupConversationService implements IGroupConversationService {
 
                 String response = responseFuture.get(timeout, TimeUnit.SECONDS);
 
-                // Wave 6: Sign inter-agent messages if configured
+                // Wave 6: Sign inter-agent messages with full envelope if configured
                 String signature = null;
-                try {
-                    var resourceId = agentStore.getCurrentResourceId(member.agentId());
-                    var agentConfig = agentStore.read(member.agentId(), resourceId.getVersion());
-                    if (agentConfig.getSecurity() != null
-                            && agentConfig.getSecurity().isSignInterAgentMessages()
-                            && response != null) {
-                        signature = agentSigningService.sign(
-                                defaultTenantId, member.agentId(), response);
-                        LOGGER.debugf("Signed inter-agent message from '%s' (sig=%s...)",
-                                member.agentId(),
-                                signature.length() > 16 ? signature.substring(0, 16) : signature);
+                String signatureNonce = null;
+                Long signatureTimestampMs = null;
+                Integer signatureKeyVersion = null;
+                // Skip signing if crypto infrastructure is not injected
+                if (agentStore != null && agentSigningService != null && nonceCacheService != null) {
+                    try {
+                        var resourceId = agentStore.getCurrentResourceId(member.agentId());
+                        var agentConfig = agentStore.read(member.agentId(), resourceId.getVersion());
+                        if (agentConfig.getSecurity() != null
+                                && agentConfig.getSecurity().isSignInterAgentMessages()
+                                && response != null) {
+                            // Create SignedEnvelope with nonce for replay protection
+                            var envelope = SignedEnvelope.forSigning(
+                                    member.agentId(), gc.getGroupId(),
+                                    Map.of("content", response, "phase", phase.name()));
+                            int keyVersion = 0;
+                            if (agentConfig.getIdentity() != null
+                                    && agentConfig.getIdentity().getKeys() != null
+                                    && !agentConfig.getIdentity().getKeys().isEmpty()) {
+                                keyVersion = agentConfig.getIdentity().getKeys().stream()
+                                        .mapToInt(AgentPublicKey::version)
+                                        .max().orElse(0);
+                            }
+                            var signedEnvelope = agentSigningService.signEnvelope(
+                                    defaultTenantId, member.agentId(), envelope, keyVersion);
+
+                            // Immediate self-verification: sanity-check the signature.
+                            // If this fails, the signature is broken — do NOT store it.
+                            String publicKey = agentConfig.getIdentity() != null
+                                    ? agentConfig.getIdentity()
+                                            .getKeyValidAt(signedEnvelope.timestampMs())
+                                    : null;
+                            if (publicKey != null) {
+                                boolean valid = agentSigningService.verifyEnvelope(
+                                        signedEnvelope, publicKey);
+                                if (!valid) {
+                                    LOGGER.errorf("SELF-VERIFY FAILED for agent '%s' "
+                                            + "— key mismatch or signing error. "
+                                            + "Falling back to unsigned entry.",
+                                            member.agentId());
+                                    // Fall back to unsigned: do NOT store broken signature
+                                    signedEnvelope = null;
+                                }
+                            }
+
+                            // Nonce validation: register nonce to prevent replay.
+                            // If validation fails (stale/skewed), discard the signature.
+                            if (signedEnvelope != null) {
+                                var nonceResult = nonceCacheService.validate(
+                                        signedEnvelope.nonce(), signedEnvelope.timestampMs());
+                                if (nonceResult != NonceCacheService.NonceValidation.VALID) {
+                                    LOGGER.warnf("Nonce validation failed for agent '%s': %s "
+                                            + "— falling back to unsigned entry",
+                                            member.agentId(), nonceResult);
+                                    signedEnvelope = null;
+                                }
+                            }
+
+                            // Store full envelope data for peer verification
+                            if (signedEnvelope != null) {
+                                signature = signedEnvelope.signature();
+                                signatureNonce = signedEnvelope.nonce();
+                                signatureTimestampMs = signedEnvelope.timestampMs();
+                                signatureKeyVersion = signedEnvelope.keyVersion();
+
+                                LOGGER.debugf("Signed inter-agent envelope from '%s' "
+                                        + "(nonce=%s, keyV=%d, sig=%s...)",
+                                        member.agentId(), signatureNonce,
+                                        signatureKeyVersion,
+                                        signature.length() > 16
+                                                ? signature.substring(0, 16)
+                                                : signature);
+                            }
+                        }
+                    } catch (Exception sigEx) {
+                        LOGGER.warnf("Failed to sign message from agent '%s': %s",
+                                member.agentId(), sigEx.getMessage());
                     }
-                } catch (Exception sigEx) {
-                    LOGGER.warnf("Failed to sign message from agent '%s': %s",
-                            member.agentId(), sigEx.getMessage());
                 }
 
-                var entry = new TranscriptEntry(member.agentId(), member.displayName(), response, phaseIdx, phase.name(), entryType, Instant.now(),
-                        null, targetAgentId, signature);
+                var entry = new TranscriptEntry(
+                        member.agentId(), member.displayName(), response,
+                        phaseIdx, phase.name(), entryType, Instant.now(),
+                        null, targetAgentId, signature,
+                        signatureNonce, signatureTimestampMs, signatureKeyVersion);
                 return entry;
 
             } catch (TimeoutException e) {
@@ -979,5 +1064,138 @@ public class GroupConversationService implements IGroupConversationService {
         sb.append("As ").append(speaker.displayName());
         sb.append(", please contribute to this phase of the discussion.");
         return sb.toString();
+    }
+
+    /**
+     * Verify signed transcript entries from prior speakers if the receiving agent
+     * has {@code requirePeerVerification=true}.
+     * <p>
+     * For each signed entry with full envelope data, this method:
+     * <ol>
+     * <li>Reconstructs the
+     * {@link ai.labs.eddi.configs.agents.crypto.SignedEnvelope} from stored
+     * fields</li>
+     * <li>Loads the speaker's public key from the agent config</li>
+     * <li>Verifies the signature against the canonical envelope form</li>
+     * </ol>
+     * Invalid signatures are logged as security warnings. This is defense-in-depth:
+     * the signing code already self-verifies at creation time, so failures here
+     * indicate either key rotation issues or data corruption.
+     *
+     * @param receivingAgentId
+     *            the agent about to receive the transcript
+     * @param gc
+     *            the group conversation containing the transcript
+     */
+    private void verifyPriorEntriesIfRequired(String receivingAgentId, GroupConversation gc) {
+        // Skip if crypto infrastructure is not injected
+        if (agentStore == null || agentSigningService == null) {
+            return;
+        }
+        try {
+            var resourceId = agentStore.getCurrentResourceId(receivingAgentId);
+            if (resourceId == null) {
+                return;
+            }
+            var receiverConfig = agentStore.read(receivingAgentId, resourceId.getVersion());
+            if (receiverConfig.getSecurity() == null
+                    || !receiverConfig.getSecurity().isRequirePeerVerification()) {
+                return;
+            }
+
+            List<TranscriptEntry> transcript = gc.getTranscript();
+            int totalEntries = transcript.size();
+
+            // Incremental verification: only verify entries added since last check
+            int startIdx = lastVerifiedIndex.getOrDefault(gc.getId(), 0);
+            if (startIdx >= totalEntries) {
+                return; // Nothing new to verify
+            }
+
+            LOGGER.debugf("Peer verification for agent '%s' — verifying entries %d..%d (of %d total)",
+                    receivingAgentId, startIdx, totalEntries - 1, totalEntries);
+
+            int verified = 0;
+            int failed = 0;
+            int unsigned = 0;
+
+            // Cache public keys per speaker to avoid redundant agentStore reads
+            Map<String, String> publicKeyCache = new HashMap<>();
+
+            for (int i = startIdx; i < totalEntries; i++) {
+                TranscriptEntry entry = transcript.get(i);
+                // Skip non-agent entries (user questions, errors, etc.)
+                if ("user".equals(entry.speakerAgentId()) || entry.content() == null) {
+                    continue;
+                }
+
+                if (!entry.hasEnvelopeData()) {
+                    unsigned++;
+                    LOGGER.warnf("UNSIGNED entry from agent '%s' in group '%s' — "
+                            + "peer verification required but entry has no envelope data",
+                            entry.speakerAgentId(), LogSanitizer.sanitize(gc.getGroupId()));
+                    continue;
+                }
+
+                // Reconstruct envelope for verification
+                var envelope = new SignedEnvelope(
+                        entry.speakerAgentId(), gc.getGroupId(),
+                        Map.of("content", entry.content(), "phase", entry.phaseName()),
+                        entry.signatureNonce(), entry.signatureTimestampMs(),
+                        entry.signature(), entry.signatureKeyVersion());
+
+                // Get speaker's public key (cached per speaker)
+                try {
+                    String publicKey = publicKeyCache.computeIfAbsent(entry.speakerAgentId(), agentId -> {
+                        try {
+                            var speakerResourceId = agentStore.getCurrentResourceId(agentId);
+                            if (speakerResourceId == null) {
+                                return null;
+                            }
+                            var speakerConfig = agentStore.read(agentId, speakerResourceId.getVersion());
+                            return speakerConfig.getIdentity() != null
+                                    ? speakerConfig.getIdentity()
+                                            .getKeyValidAt(entry.signatureTimestampMs())
+                                    : null;
+                        } catch (Exception e) {
+                            LOGGER.warnf("Error loading public key for agent '%s': %s",
+                                    agentId, e.getMessage());
+                            return null;
+                        }
+                    });
+
+                    if (publicKey == null) {
+                        LOGGER.warnf("No public key found for agent '%s' — cannot verify signature",
+                                entry.speakerAgentId());
+                        failed++;
+                        continue;
+                    }
+
+                    boolean valid = agentSigningService.verifyEnvelope(envelope, publicKey);
+                    if (valid) {
+                        verified++;
+                    } else {
+                        failed++;
+                        LOGGER.errorf("SIGNATURE VERIFICATION FAILED for entry from agent '%s' "
+                                + "(nonce=%s, keyV=%d) — potential tampering or key rotation issue",
+                                entry.speakerAgentId(), entry.signatureNonce(),
+                                entry.signatureKeyVersion());
+                    }
+                } catch (Exception e) {
+                    failed++;
+                    LOGGER.warnf("Error verifying entry from agent '%s': %s",
+                            entry.speakerAgentId(), e.getMessage());
+                }
+            }
+
+            // Update the cursor for this conversation
+            lastVerifiedIndex.put(gc.getId(), totalEntries);
+
+            LOGGER.infof("Peer verification for agent '%s': %d verified, %d failed, %d unsigned (range %d..%d)",
+                    receivingAgentId, verified, failed, unsigned, startIdx, totalEntries - 1);
+        } catch (Exception e) {
+            LOGGER.warnf("Peer verification check failed for agent '%s': %s",
+                    receivingAgentId, e.getMessage());
+        }
     }
 }

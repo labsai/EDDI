@@ -125,7 +125,6 @@ class AgentConfigurationTest {
         void defaults() {
             var config = new AgentConfiguration.SecurityConfig();
             assertFalse(config.isSignInterAgentMessages());
-            assertFalse(config.isSignMcpInvocations());
             assertFalse(config.isRequirePeerVerification());
         }
     }
@@ -271,7 +270,7 @@ class AgentConfigurationTest {
             assertFalse(dc.isSummarizeInteractions());
             assertEquals("anthropic", dc.getLlmProvider());
             assertEquals("claude-sonnet-4-6", dc.getLlmModel());
-            assertEquals(5.0, dc.getMaxCostPerRun());
+            assertEquals(0.50, dc.getMaxCostPerRun());
             assertEquals(50, dc.getBatchSize());
             assertEquals(1000, dc.getMaxUsersPerRun());
         }
@@ -303,10 +302,8 @@ class AgentConfigurationTest {
         void setters() {
             var sc = new AgentConfiguration.SecurityConfig();
             sc.setSignInterAgentMessages(true);
-            sc.setSignMcpInvocations(true);
             sc.setRequirePeerVerification(true);
             assertTrue(sc.isSignInterAgentMessages());
-            assertTrue(sc.isSignMcpInvocations());
             assertTrue(sc.isRequirePeerVerification());
         }
     }

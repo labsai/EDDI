@@ -134,6 +134,28 @@ public record LlmConfiguration(List<Task> tasks) {
         private List<String> builtInToolsWhitelist;
 
         /**
+         * Tool loading strategy for token efficiency with large tool sets.
+         * <ul>
+         * <li>{@code EAGER} (default) — all tools sent to LLM in every request</li>
+         * <li>{@code LAZY} — only a discover_tools meta-tool is sent initially; the LLM
+         * calls it to discover available tools, which are then injected for subsequent
+         * iterations</li>
+         * </ul>
+         *
+         * @since 6.0.0
+         */
+        private ToolLoadingStrategy toolLoadingStrategy = ToolLoadingStrategy.EAGER;
+
+        /**
+         * Maximum number of tool specifications returned per discovery call when using
+         * {@link ToolLoadingStrategy#LAZY}. Limits context window usage for agents with
+         * many tools. Default: 20.
+         *
+         * @since 6.0.0
+         */
+        private int maxToolsInContext = 20;
+
+        /**
          * Maximum conversation turns to include in context. -1 = unlimited, 0 = none,
          * default = 10
          */
@@ -413,6 +435,22 @@ public record LlmConfiguration(List<Task> tasks) {
 
         public void setBuiltInToolsWhitelist(List<String> builtInToolsWhitelist) {
             this.builtInToolsWhitelist = builtInToolsWhitelist;
+        }
+
+        public ToolLoadingStrategy getToolLoadingStrategy() {
+            return toolLoadingStrategy;
+        }
+
+        public void setToolLoadingStrategy(ToolLoadingStrategy toolLoadingStrategy) {
+            this.toolLoadingStrategy = toolLoadingStrategy;
+        }
+
+        public int getMaxToolsInContext() {
+            return maxToolsInContext;
+        }
+
+        public void setMaxToolsInContext(int maxToolsInContext) {
+            this.maxToolsInContext = maxToolsInContext;
         }
 
         public Integer getConversationHistoryLimit() {
@@ -1266,5 +1304,21 @@ public record LlmConfiguration(List<Task> tasks) {
         public void setRules(List<String> rules) {
             this.rules = rules;
         }
+    }
+
+    /**
+     * Controls how tool specifications are presented to the LLM.
+     *
+     * @since 6.0.0
+     */
+    public enum ToolLoadingStrategy {
+        /** All tool specs sent in every request (default, backward compatible) */
+        EAGER,
+        /**
+         * Only a {@code discover_tools} meta-tool is sent initially. The LLM calls it
+         * to search available tools, and matching specs are injected for subsequent
+         * iterations. Saves tokens for agents with many tools.
+         */
+        LAZY
     }
 }

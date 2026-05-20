@@ -41,6 +41,8 @@ import org.jboss.logging.Logger;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.util.*;
@@ -212,6 +214,14 @@ class AgentOrchestrator {
             }
         }
 
+        // --- LAZY mode: separate built-in specs from external specs ---
+        // In LAZY mode, all built-in tool executors are registered (so they CAN be
+        // called), but initially only discover_tools spec is presented to the LLM.
+        // After the LLM calls discover_tools, we parse the result and activate the
+        // matching built-in specs for subsequent iterations.
+        boolean isLazy = task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY;
+        List<ToolSpecification> builtInSpecs = new ArrayList<>(toolSpecs); // copy before merging external
+
         // Merge httpcall tools discovered from workflow (if any)
         if (httpCallTools != null && !httpCallTools.toolSpecs().isEmpty()) {
             toolSpecs.addAll(httpCallTools.toolSpecs());
@@ -228,6 +238,36 @@ class AgentOrchestrator {
         if (a2aTools != null && !a2aTools.toolSpecs().isEmpty()) {
             toolSpecs.addAll(a2aTools.toolSpecs());
             toolExecutors.putAll(a2aTools.executors());
+        }
+
+        // Active specs: what the LLM currently sees
+        List<ToolSpecification> activeSpecs;
+        if (isLazy) {
+            // Start with only discover_tools + all external tools (HTTP/MCP/A2A)
+            activeSpecs = new ArrayList<>();
+            for (ToolSpecification spec : builtInSpecs) {
+                if ("discover_tools".equals(spec.name())) {
+                    activeSpecs.add(spec);
+                }
+            }
+            // Add external tool specs (always visible regardless of strategy)
+            int externalCount = 0;
+            if (httpCallTools != null) {
+                activeSpecs.addAll(httpCallTools.toolSpecs());
+                externalCount += httpCallTools.toolSpecs().size();
+            }
+            if (mcpCallWorkflowTools != null) {
+                activeSpecs.addAll(mcpCallWorkflowTools.toolSpecs());
+                externalCount += mcpCallWorkflowTools.toolSpecs().size();
+            }
+            if (a2aTools != null) {
+                activeSpecs.addAll(a2aTools.toolSpecs());
+                externalCount += a2aTools.toolSpecs().size();
+            }
+            LOGGER.infof("LAZY mode: presenting %d specs initially (discover_tools + %d external)",
+                    activeSpecs.size(), externalCount);
+        } else {
+            activeSpecs = toolSpecs;
         }
 
         // Build message list with system message if provided
@@ -269,8 +309,8 @@ class AgentOrchestrator {
             for (int i = 0; i < maxIterations; i++) {
                 ChatRequest.Builder requestBuilder = ChatRequest.builder().messages(currentMessages);
 
-                if (!toolSpecs.isEmpty()) {
-                    requestBuilder.toolSpecifications(toolSpecs);
+                if (!activeSpecs.isEmpty()) {
+                    requestBuilder.toolSpecifications(activeSpecs);
                 }
 
                 ChatRequest chatRequest = requestBuilder.build();
@@ -359,6 +399,11 @@ class AgentOrchestrator {
                         trace.add(resultStep);
 
                         currentMessages.add(ToolExecutionResultMessage.from(toolRequest, toolResult));
+
+                        // LAZY mode: after discover_tools returns, activate the matching built-in specs
+                        if (isLazy && "discover_tools".equals(toolRequest.name())) {
+                            activateDiscoveredTools(toolResult, builtInSpecs, activeSpecs);
+                        }
                     }
                 } else {
                     return aiMessage.text();
@@ -373,7 +418,57 @@ class AgentOrchestrator {
     }
 
     /**
+     * Parses the discover_tools JSON result and activates matching built-in tool
+     * specs so the LLM can call them on subsequent iterations.
+     */
+    private void activateDiscoveredTools(String discoverResult,
+                                         List<ToolSpecification> builtInSpecs,
+                                         List<ToolSpecification> activeSpecs) {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode root = mapper.readTree(discoverResult);
+            JsonNode toolsNode = root.get("tools");
+            if (toolsNode == null || !toolsNode.isArray()) {
+                return;
+            }
+
+            Set<String> discoveredNames = new HashSet<>();
+            for (JsonNode tool : toolsNode) {
+                if (tool.has("name")) {
+                    discoveredNames.add(tool.get("name").asText());
+                }
+            }
+
+            // Add matching specs (skip discover_tools itself and already-active specs)
+            Set<String> activeNames = new HashSet<>();
+            for (ToolSpecification spec : activeSpecs) {
+                activeNames.add(spec.name());
+            }
+
+            int activated = 0;
+            for (ToolSpecification spec : builtInSpecs) {
+                if (discoveredNames.contains(spec.name()) && !activeNames.contains(spec.name())) {
+                    activeSpecs.add(spec);
+                    activated++;
+                }
+            }
+
+            LOGGER.infof("LAZY activation: %d tools activated from discovery (%s)",
+                    activated, discoveredNames);
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to parse discover_tools result for LAZY activation: %s",
+                    e.getMessage());
+        }
+    }
+
+    /**
      * Collects enabled built-in tools based on task configuration.
+     * <p>
+     * When {@link LlmConfiguration.ToolLoadingStrategy#LAZY} is set, ALL tools are
+     * returned (so executors get registered), plus a {@link DiscoverToolsTool}
+     * meta-tool. The {@code executeWithTools} method handles presenting only
+     * {@code discover_tools} spec initially and activating matching specs after
+     * discovery.
      */
     List<Object> collectEnabledTools(LlmConfiguration.Task task, IConversationMemory memory) {
         List<Object> tools = new ArrayList<>();
@@ -382,6 +477,38 @@ class AgentOrchestrator {
             return tools;
         }
 
+        // Collect the full set of tools first (needed for both EAGER and LAZY)
+        List<Object> allTools = collectAllBuiltInTools(task, memory);
+
+        // LAZY strategy: return ALL tools + DiscoverToolsTool (so executors get
+        // registered)
+        // The executeWithTools method handles initially presenting only discover_tools
+        if (task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY) {
+            // Build tool specs from all available tools for discovery
+            List<ToolSpecification> allSpecs = new ArrayList<>();
+            for (Object tool : allTools) {
+                Class<?> toolClass = tool.getClass();
+                if (toolClass.getName().contains("_ClientProxy") || toolClass.getName().contains("$$")) {
+                    toolClass = toolClass.getSuperclass();
+                }
+                allSpecs.addAll(ToolSpecifications.toolSpecificationsFrom(toolClass));
+            }
+            int maxToolsInContext = task.getMaxToolsInContext();
+            allTools.add(new DiscoverToolsTool(allSpecs, maxToolsInContext));
+            LOGGER.infof("LAZY tool loading: %d built-in tools + discover_tools meta-tool registered", allSpecs.size());
+            return allTools;
+        }
+
+        // EAGER strategy (default): return all tools directly
+        LOGGER.info("Enabled " + allTools.size() + " built-in tools for agent");
+        return allTools;
+    }
+
+    /**
+     * Collects all built-in tools without considering loading strategy.
+     */
+    private List<Object> collectAllBuiltInTools(LlmConfiguration.Task task, IConversationMemory memory) {
+        List<Object> tools = new ArrayList<>();
         List<String> whitelist = task.getBuiltInToolsWhitelist();
 
         if (whitelist != null && !whitelist.isEmpty()) {
@@ -425,7 +552,6 @@ class AgentOrchestrator {
             addConversationRecallToolIfEnabled(tools, task, memory);
         }
 
-        LOGGER.info("Enabled " + tools.size() + " built-in tools for agent");
         return tools;
     }
 

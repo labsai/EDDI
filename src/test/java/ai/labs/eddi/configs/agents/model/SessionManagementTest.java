@@ -24,8 +24,6 @@ class SessionManagementTest {
         void testDefaults() {
             var session = new AgentConfiguration.SessionManagement();
 
-            assertFalse(session.isForkingEnabled());
-            assertEquals(5, session.getMaxForksPerConversation());
             assertEquals(10, session.getMaxCheckpointsPerConversation());
             assertNull(session.getAutoSnapshot());
         }
@@ -69,13 +67,9 @@ class SessionManagementTest {
             var autoSnapshot = new AgentConfiguration.SessionManagement.AutoSnapshot();
 
             session.setAutoSnapshot(autoSnapshot);
-            session.setForkingEnabled(true);
-            session.setMaxForksPerConversation(10);
             session.setMaxCheckpointsPerConversation(20);
 
             assertEquals(autoSnapshot, session.getAutoSnapshot());
-            assertTrue(session.isForkingEnabled());
-            assertEquals(10, session.getMaxForksPerConversation());
             assertEquals(20, session.getMaxCheckpointsPerConversation());
         }
     }
@@ -89,12 +83,12 @@ class SessionManagementTest {
         void testAttachToAgent() {
             var agentConfig = new AgentConfiguration();
             var session = new AgentConfiguration.SessionManagement();
-            session.setForkingEnabled(true);
+            session.setMaxCheckpointsPerConversation(25);
 
             agentConfig.setSessionManagement(session);
 
             assertNotNull(agentConfig.getSessionManagement());
-            assertTrue(agentConfig.getSessionManagement().isForkingEnabled());
+            assertEquals(25, agentConfig.getSessionManagement().getMaxCheckpointsPerConversation());
         }
 
         @Test

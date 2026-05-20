@@ -341,7 +341,6 @@ public class AgentConfiguration {
      */
     public static class SecurityConfig {
         private boolean signInterAgentMessages = false;
-        private boolean signMcpInvocations = false;
         private boolean requirePeerVerification = false;
 
         public boolean isSignInterAgentMessages() {
@@ -350,14 +349,6 @@ public class AgentConfiguration {
 
         public void setSignInterAgentMessages(boolean signInterAgentMessages) {
             this.signInterAgentMessages = signInterAgentMessages;
-        }
-
-        public boolean isSignMcpInvocations() {
-            return signMcpInvocations;
-        }
-
-        public void setSignMcpInvocations(boolean signMcpInvocations) {
-            this.signMcpInvocations = signMcpInvocations;
         }
 
         public boolean isRequirePeerVerification() {
@@ -532,14 +523,51 @@ public class AgentConfiguration {
         private boolean enabled = false;
         private String schedule = "0 3 * * *";
         private boolean detectContradictions = true;
+        /**
+         * Contradiction resolution strategy. Reserved for future use — the current V1
+         * detector only counts and logs contradictions without resolving them.
+         */
         private String contradictionResolution = "keep_newest";
         private int pruneStaleAfterDays = 90;
         private boolean summarizeInteractions = false;
         private String llmProvider = "anthropic";
         private String llmModel = "claude-sonnet-4-6";
-        private double maxCostPerRun = 5.00;
+        private double maxCostPerRun = 0.50;
         private int batchSize = 50;
         private int maxUsersPerRun = 1000;
+
+        /** Minimum entries in a group before summarization triggers. */
+        private int summarizeMinEntries = 5;
+
+        /** Target number of entries per group after consolidation. */
+        private int summarizeTargetEntries = 2;
+
+        /**
+         * Grouping strategy: "category" (group by fact/preference/context) or "all"
+         * (single group).
+         */
+        private String summarizeGroupBy = "category";
+
+        /**
+         * Whether to sub-group by sourceAgentId before consolidating. true = entries
+         * from different agents stay separate (preserves provenance). false = entries
+         * from all agents consolidated together (better compression).
+         */
+        private boolean preserveAgentProvenance = false;
+
+        /** Maximum LLM calls per dream cycle per user. Bounds cost. */
+        private int maxSummarizationCalls = 10;
+
+        /**
+         * LLM instructions for memory consolidation. Customizable by the agent
+         * designer. Entries are appended as JSON after this prompt.
+         */
+        private String summarizationPrompt = "You are a memory consolidation assistant. Given a list of remembered facts "
+                + "about a user, distill them into fewer, non-redundant entries. Preserve all "
+                + "important details. Remove duplicates and merge related facts. Each entry "
+                + "should be a single, clear statement.\n\n"
+                + "Respond ONLY with a JSON array: [{\"key\": \"...\", \"value\": \"...\"}]\n"
+                + "Do not add any text outside the JSON array.";
 
         public boolean isEnabled() {
             return enabled;
@@ -628,6 +656,57 @@ public class AgentConfiguration {
         public void setMaxUsersPerRun(int maxUsersPerRun) {
             this.maxUsersPerRun = maxUsersPerRun;
         }
+
+        public int getSummarizeMinEntries() {
+            return summarizeMinEntries;
+        }
+
+        public void setSummarizeMinEntries(int summarizeMinEntries) {
+            this.summarizeMinEntries = summarizeMinEntries;
+        }
+
+        public int getSummarizeTargetEntries() {
+            return summarizeTargetEntries;
+        }
+
+        public void setSummarizeTargetEntries(int summarizeTargetEntries) {
+            if (summarizeTargetEntries < 1) {
+                throw new IllegalArgumentException("summarizeTargetEntries must be >= 1");
+            }
+            this.summarizeTargetEntries = summarizeTargetEntries;
+        }
+
+        public String getSummarizeGroupBy() {
+            return summarizeGroupBy;
+        }
+
+        public void setSummarizeGroupBy(String summarizeGroupBy) {
+            this.summarizeGroupBy = summarizeGroupBy;
+        }
+
+        public boolean isPreserveAgentProvenance() {
+            return preserveAgentProvenance;
+        }
+
+        public void setPreserveAgentProvenance(boolean preserveAgentProvenance) {
+            this.preserveAgentProvenance = preserveAgentProvenance;
+        }
+
+        public int getMaxSummarizationCalls() {
+            return maxSummarizationCalls;
+        }
+
+        public void setMaxSummarizationCalls(int maxSummarizationCalls) {
+            this.maxSummarizationCalls = maxSummarizationCalls;
+        }
+
+        public String getSummarizationPrompt() {
+            return summarizationPrompt;
+        }
+
+        public void setSummarizationPrompt(String summarizationPrompt) {
+            this.summarizationPrompt = summarizationPrompt;
+        }
     }
 
     /**
@@ -694,15 +773,16 @@ public class AgentConfiguration {
     }
 
     /**
-     * Session management configuration. Controls automatic checkpointing and
-     * conversation forking.
+     * Session management configuration. Controls automatic checkpointing.
+     * <p>
+     * <strong>Note:</strong> Conversation forking (session branching) is planned
+     * for a future release. When implemented, forking config fields will be added
+     * here alongside the implementation.
      *
      * @since 6.0.0
      */
     public static class SessionManagement {
         private AutoSnapshot autoSnapshot;
-        private boolean forkingEnabled = false;
-        private int maxForksPerConversation = 5;
         private int maxCheckpointsPerConversation = 10;
 
         public AutoSnapshot getAutoSnapshot() {
@@ -711,22 +791,6 @@ public class AgentConfiguration {
 
         public void setAutoSnapshot(AutoSnapshot autoSnapshot) {
             this.autoSnapshot = autoSnapshot;
-        }
-
-        public boolean isForkingEnabled() {
-            return forkingEnabled;
-        }
-
-        public void setForkingEnabled(boolean forkingEnabled) {
-            this.forkingEnabled = forkingEnabled;
-        }
-
-        public int getMaxForksPerConversation() {
-            return maxForksPerConversation;
-        }
-
-        public void setMaxForksPerConversation(int maxForksPerConversation) {
-            this.maxForksPerConversation = maxForksPerConversation;
         }
 
         public int getMaxCheckpointsPerConversation() {

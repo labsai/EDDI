@@ -56,17 +56,41 @@ public class GroupConversation {
      * @param signature
      *            Base64-encoded Ed25519 signature if the agent has
      *            {@code signInterAgentMessages=true}, null otherwise
+     * @param signatureNonce
+     *            UUID nonce for replay protection (null if unsigned)
+     * @param signatureTimestampMs
+     *            epoch milliseconds when the envelope was signed (null if unsigned)
+     * @param signatureKeyVersion
+     *            version of the signing key used (null if unsigned)
      */
     public record TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int phaseIndex, String phaseName,
-            TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId, String signature) {
+            TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId, String signature,
+            String signatureNonce, Long signatureTimestampMs, Integer signatureKeyVersion) {
 
         /**
-         * Backward-compatible constructor without signature (defaults to null).
+         * Backward-compatible constructor without any signature fields.
          */
         public TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int phaseIndex, String phaseName,
                 TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId) {
             this(speakerAgentId, speakerDisplayName, content, phaseIndex, phaseName,
-                    type, timestamp, errorReason, targetAgentId, null);
+                    type, timestamp, errorReason, targetAgentId, null, null, null, null);
+        }
+
+        /**
+         * Backward-compatible constructor with signature only (no envelope data).
+         */
+        public TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int phaseIndex, String phaseName,
+                TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId, String signature) {
+            this(speakerAgentId, speakerDisplayName, content, phaseIndex, phaseName,
+                    type, timestamp, errorReason, targetAgentId, signature, null, null, null);
+        }
+
+        /**
+         * Check whether this entry has full envelope data (signature + nonce +
+         * timestamp) suitable for cryptographic verification.
+         */
+        public boolean hasEnvelopeData() {
+            return signature != null && signatureNonce != null && signatureTimestampMs != null;
         }
     }
 

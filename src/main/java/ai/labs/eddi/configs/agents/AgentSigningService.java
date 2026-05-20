@@ -50,6 +50,8 @@ public class AgentSigningService {
     private static final Logger LOGGER = Logger.getLogger(AgentSigningService.class);
     private static final String ALGORITHM = "Ed25519";
     private static final String VAULT_KEY_PREFIX = "agent-signing-key:";
+    /** Maximum key version to scan during deletion cleanup. */
+    private static final int MAX_KEY_VERSION_SCAN = 100;
 
     private final ISecretProvider secretProvider;
     private final MeterRegistry meterRegistry;
@@ -196,14 +198,28 @@ public class AgentSigningService {
     }
 
     /**
-     * Delete the signing keypair for an agent (cleanup on agent deletion).
+     * Delete the signing keypair for an agent (cleanup on agent deletion). Removes
+     * both the legacy unversioned key and any versioned keys found.
      */
     public void deleteKeyPair(String tenantId, String agentId) {
         try {
+            // Delete legacy unversioned key
             SecretReference ref = new SecretReference(tenantId, vaultKeyName(agentId));
             secretProvider.delete(ref);
             privateKeyCache.remove(cacheKey(tenantId, agentId));
-            LOGGER.infof("Deleted signing key for agent '%s' in tenant '%s' (cache evicted)", agentId, tenantId);
+
+            // Delete versioned keys (scan reasonable range)
+            for (int v = 1; v <= MAX_KEY_VERSION_SCAN; v++) {
+                try {
+                    SecretReference vRef = new SecretReference(tenantId, vaultKeyNameVersioned(agentId, v));
+                    secretProvider.delete(vRef);
+                    privateKeyCache.remove(cacheKey(tenantId, agentId) + ";v=" + v);
+                } catch (Exception ignored) {
+                    // Version doesn't exist — stop scanning
+                    break;
+                }
+            }
+            LOGGER.infof("Deleted signing keys for agent '%s' in tenant '%s' (cache evicted)", agentId, tenantId);
         } catch (Exception e) {
             LOGGER.warnf("Failed to delete signing key for agent '%s': %s", agentId, e.getMessage());
         }
@@ -213,12 +229,164 @@ public class AgentSigningService {
         return VAULT_KEY_PREFIX + agentId;
     }
 
+    private String vaultKeyNameVersioned(String agentId, int version) {
+        return VAULT_KEY_PREFIX + agentId + ":v" + version;
+    }
+
     /**
      * Collision-resistant cache key: uses a structured format so that
      * tenantId="a:b", agentId="c" cannot collide with tenantId="a", agentId="b:c".
      */
     private static String cacheKey(String tenantId, String agentId) {
         return "tenant=" + tenantId + ";agent=" + agentId;
+    }
+
+    /**
+     * Generate a versioned keypair for key rotation.
+     *
+     * @param tenantId
+     *            the tenant identifier
+     * @param agentId
+     *            the agent identifier
+     * @param version
+     *            the key version number
+     * @return the Base64-encoded public key
+     * @throws AgentSigningException
+     *             if key generation fails
+     */
+    public String generateKeyPairVersioned(String tenantId, String agentId, int version) throws AgentSigningException {
+        if (version <= 0) {
+            throw new AgentSigningException("Key version must be positive, got: " + version, null);
+        }
+        try {
+            KeyPairGenerator keyGen = KeyPairGenerator.getInstance(ALGORITHM);
+            KeyPair keyPair = keyGen.generateKeyPair();
+
+            String publicKeyB64 = Base64.getEncoder().encodeToString(keyPair.getPublic().getEncoded());
+            String privateKeyB64 = Base64.getEncoder().encodeToString(keyPair.getPrivate().getEncoded());
+
+            // Store versioned private key in vault
+            SecretReference ref = new SecretReference(tenantId, vaultKeyNameVersioned(agentId, version));
+            secretProvider.store(ref, privateKeyB64,
+                    "Ed25519 signing key v" + version + " for agent " + agentId,
+                    List.of(agentId));
+
+            // Evict version-specific cached private key so the new key is used immediately
+            privateKeyCache.remove(cacheKey(tenantId, agentId) + ";v=" + version);
+            // Also evict the legacy unversioned entry (if any)
+            privateKeyCache.remove(cacheKey(tenantId, agentId));
+
+            LOGGER.infof("Generated Ed25519 keypair v%d for agent '%s' in tenant '%s'", version, agentId, tenantId);
+            return publicKeyB64;
+        } catch (NoSuchAlgorithmException e) {
+            throw new AgentSigningException("Ed25519 not available in JVM", e);
+        } catch (ISecretProvider.SecretProviderException e) {
+            throw new AgentSigningException("Failed to store private key in vault", e);
+        }
+    }
+
+    /**
+     * Sign a {@link ai.labs.eddi.configs.agents.crypto.SignedEnvelope} using the
+     * agent's versioned key.
+     *
+     * @param tenantId
+     *            the tenant identifier
+     * @param agentId
+     *            the agent identifier
+     * @param envelope
+     *            the unsigned envelope
+     * @param keyVersion
+     *            the key version to use for signing
+     * @return the signed envelope
+     * @throws AgentSigningException
+     *             if signing fails
+     */
+    public ai.labs.eddi.configs.agents.crypto.SignedEnvelope signEnvelope(
+                                                                          String tenantId, String agentId,
+                                                                          ai.labs.eddi.configs.agents.crypto.SignedEnvelope envelope,
+                                                                          int keyVersion)
+            throws AgentSigningException {
+        try {
+            String canonicalForm = envelope.canonicalForm();
+            String vaultKey = keyVersion > 0
+                    ? vaultKeyNameVersioned(agentId, keyVersion)
+                    : vaultKeyName(agentId);
+
+            // Use versioned cache key so different key versions don't collide
+            String cacheKeyStr = keyVersion > 0
+                    ? cacheKey(tenantId, agentId) + ";v=" + keyVersion
+                    : cacheKey(tenantId, agentId);
+
+            PrivateKey privateKey = privateKeyCache.computeIfAbsent(cacheKeyStr, k -> {
+                try {
+                    SecretReference ref = new SecretReference(tenantId, vaultKey);
+                    String privateKeyB64 = secretProvider.resolve(ref);
+                    byte[] privateKeyBytes = Base64.getDecoder().decode(privateKeyB64);
+                    KeyFactory keyFactory = KeyFactory.getInstance(ALGORITHM);
+                    return keyFactory.generatePrivate(
+                            new java.security.spec.PKCS8EncodedKeySpec(privateKeyBytes));
+                } catch (Exception e) {
+                    throw new PrivateKeyLoadException(agentId, e);
+                }
+            });
+
+            Signature sig = Signature.getInstance(ALGORITHM);
+            sig.initSign(privateKey);
+            sig.update(canonicalForm.getBytes(StandardCharsets.UTF_8));
+            String signatureB64 = Base64.getEncoder().encodeToString(sig.sign());
+
+            signCounter.increment();
+            return envelope.withSignature(signatureB64, keyVersion);
+        } catch (PrivateKeyLoadException e) {
+            Throwable cause = e.getCause();
+            throw new AgentSigningException("Envelope signing failed for agent " + agentId
+                    + ": " + cause.getClass().getSimpleName(), cause);
+        } catch (Exception e) {
+            throw new AgentSigningException("Envelope signing failed for agent " + agentId, e);
+        }
+    }
+
+    /**
+     * Verify a signed envelope against a public key.
+     *
+     * @param envelope
+     *            the signed envelope to verify
+     * @param publicKeyB64
+     *            the Base64-encoded public key
+     * @return true if the signature is valid
+     */
+    public boolean verifyEnvelope(ai.labs.eddi.configs.agents.crypto.SignedEnvelope envelope, String publicKeyB64) {
+        try {
+            String canonicalForm = envelope.canonicalForm();
+            return verify(publicKeyB64, canonicalForm, envelope.signature());
+        } catch (Exception e) {
+            LOGGER.warnf("Envelope verification failed: %s", e.getMessage());
+            verifyFailCounter.increment();
+            return false;
+        }
+    }
+
+    /**
+     * Rotate the signing key for an agent. Creates a new versioned key and returns
+     * the public key for it.
+     *
+     * @param tenantId
+     *            the tenant identifier
+     * @param agentId
+     *            the agent identifier
+     * @param newVersion
+     *            the new key version number
+     * @return the Base64-encoded new public key
+     * @throws AgentSigningException
+     *             if rotation fails
+     */
+    public String rotateKey(String tenantId, String agentId, int newVersion) throws AgentSigningException {
+        if (newVersion <= 0) {
+            throw new AgentSigningException("Key version must be positive, got: " + newVersion, null);
+        }
+        String publicKeyB64 = generateKeyPairVersioned(tenantId, agentId, newVersion);
+        LOGGER.infof("Rotated signing key for agent '%s' to version %d", agentId, newVersion);
+        return publicKeyB64;
     }
 
     public static class AgentSigningException extends Exception {
