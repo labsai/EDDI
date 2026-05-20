@@ -154,7 +154,7 @@ Dream Consolidation is a specialized schedule that performs **background memory 
 ### What It Does
 
 1. **Stale entry pruning** — Removes outdated facts that are no longer relevant
-2. **Contradiction detection** — Identifies and resolves conflicting memories (e.g., "user likes coffee" vs "user hates coffee")
+2. **Contradiction detection** — Identifies conflicting memories (e.g., "user likes coffee" vs "user hates coffee") and logs them for review. Resolution is planned for a future version.
 3. **Fact summarization** — Consolidates verbose entries into concise summaries
 
 ### Configuration
@@ -172,10 +172,15 @@ Dream consolidation is configured in the agent configuration:
         "detectContradictions": true,
         "contradictionResolution": "keep_newest",
         "pruneStaleAfterDays": 90,
-        "summarizeInteractions": false,
+        "summarizeInteractions": true,
+        "summarizeMinEntries": 5,
+        "summarizeTargetEntries": 2,
+        "summarizeGroupBy": "category",
+        "preserveAgentProvenance": false,
+        "maxSummarizationCalls": 10,
         "llmProvider": "anthropic",
         "llmModel": "claude-sonnet-4-6",
-        "maxCostPerRun": 5.00,
+        "maxCostPerRun": 0.50,
         "batchSize": 50,
         "maxUsersPerRun": 1000
       }

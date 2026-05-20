@@ -158,7 +158,121 @@ Each entry follows this format:
 - **Decision** — Key design decisions and their reasoning
 - **Files** — Links to modified files
 
+## 🔍 DreamService PR Review Remediation — Pass 2 (2026-05-16)
+
+**Repo:** EDDI (`feature/dream-summarization`)
+**What changed:** 9 findings from Copilot (8) + CodeRabbit (1) review, all resolved.
+
+### High Severity (3 — data loss / data unreachability)
+- **Multi-agent `self` visibility upgrade** — When consolidating entries from multiple agents (preserveAgentProvenance=false), self-scoped visibility is upgraded to `global` so no agent loses its memories
+- **GroupIds preserved** — Consolidated entries now inherit the union of all groupIds from originals, fixing group-scoped entries becoming unreachable after consolidation
+- **`summarizeTargetEntries` validation** — Setter now rejects `<1` (was silently accepting `0`, which would cap to empty list, insert nothing, then delete all originals)
+
+### Medium Severity (5 — atomicity, metrics, resilience)
+- **Partial insert rollback** — If any consolidated entry fails to insert, already-inserted entries are rolled back before preserving originals (was leaving orphaned consolidated entries)
+- **Accurate metrics** — `entriesSummarized` counter now tracks actual successful deletes minus inserts (was tracking intent, overstating when deletes failed)
+- **Soft cost ceiling documented** — Added comment explaining the pre-check design is intentional (can't pre-estimate output tokens). This is not a bug.
+- **Null category NPE fixed** — `Collectors.groupingBy` now uses null-safe lambda defaulting to "fact" (legacy Mongo entries may have null category)
+- **LLM output guardrails** — `parseConsolidatedEntries` now rejects blank keys/values and truncates to `MAX_KEY_LENGTH=100`/`MAX_VALUE_LENGTH=1000` (matches UserMemoryConfig guardrails)
+
+### Low Severity (1 — log level)
+- **SummarizationService log level** — Changed `warnf` → `errorf` in both exception handlers (RuntimeException + checked) per coding guidelines
+
+### New Tests (11 added: 51 DreamService total)
+- `summarize_multiAgentSelfScope_upgradesVisibility` — visibility upgrade to global
+- `summarize_preservesGroupIds` — merged groupIds on consolidated entries
+- `summarize_nullCategory_defaultsToFact` — null-safe grouping
+- `parseConsolidatedEntries_blankKeyFiltered` — blank key rejection
+- `parseConsolidatedEntries_longKeyTruncated` — key length guardrail
+- `truncate_shortString_unchanged`, `truncate_longString_truncated`, `truncate_null_returnsNull` — truncate utility
+- `summarize_partialInsertFails_rollsBack` — rollback on partial insert failure
+- `setSummarizeTargetEntries_rejectsZero`, `setSummarizeTargetEntries_rejectsNegative` — config validation
+
+### Verification
+- `./mvnw clean test -Dtest=DreamServiceTest,ConversationSummarizerTest,SummarizationServiceTest` → 71 tests, 0 failures
+- JaCoCo: DreamService 91.9% line / 86.1% branch, SummarizationService 100% line
+
+---
+
+## 🔍 DreamService PR Review Remediation — Pass 1 (2026-05-16)
+
+**Repo:** EDDI (`feature/dream-summarization`)
+**What changed:** Initial review — 11 findings from self-review, all resolved.
+
+### Must-Fix (3)
+- **Triple DB reload eliminated** — `process()` was calling `getAllEntries()` three times when pruning + contradiction + summarization were all enabled. Hoisted the post-prune reload so it's shared (contradiction detection is read-only)
+- **`maxCostPerRun` default aligned** — Java default changed from `$5.00` to `$0.50` to match `user-memory.md` and `scheduling.md` documentation. Prevents a 10× cost surprise for operators
+- **`scheduling.md` contradiction claim fixed** — Changed "Identifies and resolves" to "Identifies and logs for review"
+
+### Should-Fix (5)
+- **Cost estimator input undercount fixed** — `estimateCost()` now takes `inputContentLength` parameter and estimates from input+output chars when providers don't report tokens (was output-only, underestimating by 5-10×)
+- **Dead exception catch block fixed** — `SummarizationService.summarizeWithUsage()` now re-throws exceptions (was swallowing them, making `DreamService`'s catch block unreachable). `summarize()` wrapper retains swallow-and-return-empty behavior for backward compat with `ConversationSummarizer`
+- **`contradictionResolution` field annotated** — Added Javadoc noting it's reserved for future use (V1 detector only counts/logs)
+- **HANDOFF.md test counts corrected** — DreamServiceTest 37→40, SummarizationServiceTest +1, total 90→94
+- **`SummarizationResult.hasContent()` removed** — Unused convenience method
+
+### Nitpicks (3)
+- **`buildEntriesJson` now uses injected ObjectMapper** — Replaced hand-rolled `StringBuilder` JSON with `objectMapper.writerWithDefaultPrettyPrinter()`, keeping manual fallback for resilience
+- **Stale Javadoc fixed** — `SummarizationService` class doc: "future Dream consolidation" → "Dream memory consolidation"
+- **`enableSummarization()` test helper** — Now also sets `maxCostPerRun` to explicit value for clarity
+
+### New Tests (6 added: 40 DreamService + 8 SummarizationService)
+- `estimateCost_withTokenUsage` — token-based cost calculation
+- `estimateCost_withoutTokenUsage_fallsBackToCharEstimate` — input+output char fallback
+- `summarize_costCeilingReached_stopsEarly` — loop stops at cost ceiling
+- `summarizeWithUsage_llmError_propagatesException` — verifies re-throw (vs `summarize()` which swallows)
+- `summarizeWithUsage_returnsTokenCounts` — token usage extraction from LLM response
+- `summarizeWithUsage_checkedExceptionWrappedInRuntime` — checked exception wrapping
+
+### Verification
+- `./mvnw clean test -Dtest=DreamServiceTest,ConversationSummarizerTest,SummarizationServiceTest` → 60 tests, 0 failures
+- JaCoCo coverage: DreamService 92% line / 88% branch, SummarizationService 100% line
+
+
+## 🧠 DreamService: LLM-Driven Memory Summarization (2026-05-15)
+
+**Repo:** EDDI (`feature/dream-summarization`)
+**What changed:** Implemented `summarizeInteractions()` in `DreamService` — config-driven LLM memory consolidation that compresses related user memory entries via SummarizationService.
+
+### DreamConfig (AgentConfiguration.java)
+- Added 6 new config fields: `summarizeMinEntries` (5), `summarizeTargetEntries` (2), `summarizeGroupBy` ("category"/"all"), `preserveAgentProvenance` (false), `maxSummarizationCalls` (10), `summarizationPrompt` (customizable default)
+- All fields have sensible defaults; existing configs with `summarizeInteractions=false` are unaffected
+
+### DreamService
+- Added `SummarizationService` as constructor dependency (CDI injection)
+- Added `entriesSummarizedCounter` metric
+- Refactored `process()` to reload entries only after pruning (contradiction detection is read-only)
+- Implemented `summarizeInteractions()` with insert-before-delete safety pattern
+- LLM call wrapped in try-catch — failure skips the group, does not kill the dream cycle
+- `escapeJson()` now uses Jackson's `JsonStringEncoder` for complete RFC 8259 compliance
+- Helpers: `buildGroups()` (category/all grouping + agent provenance sub-grouping), `parseConsolidatedEntries()` (markdown fence stripping, JSON array extraction), `mostRestrictiveVisibility()`, `buildEntriesJson()`
+
+### Safety Guarantees
+- LLM returns empty/garbage → group skipped, originals untouched
+- LLM throws exception → group skipped, originals untouched, dream cycle continues
+- LLM returns ≥ original count → group skipped
+- LLM returns > target count → result capped to `summarizeTargetEntries`
+- Insert fails → originals never deleted
+- Delete partially fails → duplicates may remain until next dream cycle (contradiction detector currently only counts/logs; dedup cleanup is a future enhancement)
+- Cost bounded by `maxSummarizationCalls`
+
+### Tests (37 total: 8 existing + 29 new)
+- Updated `setUp()` for new constructor signature
+- 12 summarization behavior tests: threshold, consolidation, empty/garbage LLM, markdown fences, count validation, insert failure, call limit, groupBy all, agent provenance, custom prompt, visibility merge
+- 9 coverage-hardening tests: null updatedAt, prune delete failure, same-key-same-value no contradiction, LLM result capping, delete partial failure, LLM exception isolation, summarize-after-pruning reload, missing key field filtering, escapeJson control chars/null
+- 8 unit tests: `parseConsolidatedEntries` (valid/null/blank/fences/missing-key), `mostRestrictiveVisibility` (self/global/group), `escapeJson` (control chars/null)
+
+### Documentation Updates
+- `docs/user-memory.md` — Dream config table expanded (6 new fields), config example updated, removed "V2, not yet active" label, added `dream.entries.summarized` metric
+- `docs/scheduling.md` — Dream config example updated with new fields
+- `HANDOFF.md` — Dream description and test count updated
+
+### Verification
+- `./mvnw compile` → BUILD SUCCESS
+- `./mvnw test -Dtest=DreamServiceTest` → 37 tests, 0 failures, 0 errors
+
 ## 🔧 PR Review Remediation — 8 Findings Resolved (2026-05-14)
+
 
 **Repo:** EDDI (`feature/agentic-improvements`)
 **What changed:** Addressed all PR review findings from Copilot (7) and CodeRabbit (1), round 2.

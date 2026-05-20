@@ -270,7 +270,7 @@ class AgentConfigurationTest {
             assertFalse(dc.isSummarizeInteractions());
             assertEquals("anthropic", dc.getLlmProvider());
             assertEquals("claude-sonnet-4-6", dc.getLlmModel());
-            assertEquals(5.0, dc.getMaxCostPerRun());
+            assertEquals(0.50, dc.getMaxCostPerRun());
             assertEquals(50, dc.getBatchSize());
             assertEquals(1000, dc.getMaxUsersPerRun());
         }

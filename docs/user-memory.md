@@ -12,7 +12,7 @@ Persistent User Memory enables EDDI agents to remember facts, preferences, and c
 | **Visibility** | `self`, `group`, `global` scoping |
 | **Guardrails** | Configurable key/value limits, write-rate limits, capacity caps |
 | **GDPR** | Full right-to-erasure support via REST API and MCP tools |
-| **Maintenance** | Background "Dream" consolidation (stale pruning, contradiction detection) |
+| **Maintenance** | Background "Dream" consolidation (stale pruning, contradiction detection, LLM summarization) |
 
 ## Architecture
 
@@ -51,11 +51,16 @@ Enable advanced memory features (LLM tools, Dream consolidation, guardrails, rec
       "maxWritesPerTurn": 10,
       "allowedCategories": ["preference", "fact", "context"]
     },
-    "dreamConfig": {
+    "dream": {
       "enabled": true,
       "pruneStaleAfterDays": 90,
       "detectContradictions": true,
-      "summarizeInteractions": false,
+      "summarizeInteractions": true,
+      "summarizeMinEntries": 5,
+      "summarizeTargetEntries": 2,
+      "summarizeGroupBy": "category",
+      "preserveAgentProvenance": false,
+      "maxSummarizationCalls": 10,
       "maxCostPerRun": 0.50
     }
   },
@@ -90,8 +95,16 @@ Enable advanced memory features (LLM tools, Dream consolidation, guardrails, rec
 | `enabled` | `boolean` | `false` | Enable background consolidation |
 | `pruneStaleAfterDays` | `int` | `90` | Remove entries not accessed in N days. Set to 0 to disable. |
 | `detectContradictions` | `boolean` | `true` | Flag entries with same key but different values |
-| `summarizeInteractions` | `boolean` | `false` | V2 feature: LLM-driven fact compression |
+| `summarizeInteractions` | `boolean` | `false` | Enable LLM-driven memory consolidation |
+| `summarizeMinEntries` | `int` | `5` | Minimum entries in a group before summarization triggers |
+| `summarizeTargetEntries` | `int` | `2` | Target number of entries per group after consolidation |
+| `summarizeGroupBy` | `String` | `"category"` | Grouping strategy: `"category"` or `"all"` |
+| `preserveAgentProvenance` | `boolean` | `false` | Sub-group by `sourceAgentId` (preserves per-agent provenance) |
+| `maxSummarizationCalls` | `int` | `10` | Maximum LLM calls per dream cycle per user (bounds cost) |
+| `summarizationPrompt` | `String` | *(built-in)* | Custom LLM instructions for consolidation |
 | `maxCostPerRun` | `double` | `0.50` | Maximum dollar cost per dream cycle |
+| `llmProvider` | `String` | `"anthropic"` | LLM provider for dream operations |
+| `llmModel` | `String` | `"claude-sonnet-4-6"` | Model for dream operations |
 
 ## LLM Tools
 
@@ -222,7 +235,7 @@ The Dream service performs background maintenance on user memories:
 
 2. **Contradiction Detection** — Identifies entries with the same key but different values (e.g., `language=English` from Agent A vs `language=German` from Agent B). V1 uses key-based matching; future versions will use LLM-driven semantic analysis.
 
-3. **Interaction Summarization** — (V2, not yet active) Compresses multiple related facts into consolidated summaries using the LLM.
+3. **Interaction Summarization** — When `summarizeInteractions=true`, compresses multiple related facts into consolidated summaries using the configured LLM. Entries are grouped by the `summarizeGroupBy` strategy (per-category or all together), and each group above `summarizeMinEntries` is distilled into `summarizeTargetEntries` entries. Safety guarantees: new entries are inserted before originals are deleted; LLM failures or invalid responses preserve the original entries.
 
 ### Metrics
 
@@ -233,6 +246,7 @@ The Dream service exposes Micrometer metrics:
 | `dream.users.processed` | Counter | Users processed across all dream cycles |
 | `dream.entries.pruned` | Counter | Total entries pruned |
 | `dream.contradictions.found` | Counter | Contradictions detected |
+| `dream.entries.summarized` | Counter | Entries reduced by LLM consolidation |
 | `dream.duration` | Timer | Duration of dream cycles |
 
 ## Migration from Legacy Properties
