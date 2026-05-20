@@ -172,4 +172,12 @@ public class DataStoreProducers {
                                             Instance<PostgresAttachmentStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
+
+    @Produces
+    @ApplicationScoped
+    public ai.labs.eddi.engine.tenancy.ITenantQuotaStore tenantQuotaStore(
+                                                                          Instance<ai.labs.eddi.engine.tenancy.MongoTenantQuotaStore> mongo,
+                                                                          Instance<ai.labs.eddi.engine.tenancy.PostgresTenantQuotaStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
 }

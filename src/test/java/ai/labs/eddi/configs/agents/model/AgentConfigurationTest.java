@@ -125,7 +125,6 @@ class AgentConfigurationTest {
         void defaults() {
             var config = new AgentConfiguration.SecurityConfig();
             assertFalse(config.isSignInterAgentMessages());
-            assertFalse(config.isSignMcpInvocations());
             assertFalse(config.isRequirePeerVerification());
         }
     }
@@ -303,10 +302,8 @@ class AgentConfigurationTest {
         void setters() {
             var sc = new AgentConfiguration.SecurityConfig();
             sc.setSignInterAgentMessages(true);
-            sc.setSignMcpInvocations(true);
             sc.setRequirePeerVerification(true);
             assertTrue(sc.isSignInterAgentMessages());
-            assertTrue(sc.isSignMcpInvocations());
             assertTrue(sc.isRequirePeerVerification());
         }
     }

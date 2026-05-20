@@ -31,10 +31,11 @@ public final class LogSanitizer {
             char c = value.charAt(i);
             if (c == '\r' || c == '\n' || c == '\t') {
                 sanitized.append('_');
-            } else if (!Character.isISOControl(c)) {
+            } else if (Character.isISOControl(c) || c == '\u2028' || c == '\u2029') {
+                // Control characters stripped; Unicode line/paragraph separators blocked
+            } else {
                 sanitized.append(c);
             }
-            // else: control character — stripped
         }
         return sanitized.toString();
     }

@@ -326,7 +326,6 @@ public class AgentConfiguration {
      */
     public static class SecurityConfig {
         private boolean signInterAgentMessages = false;
-        private boolean signMcpInvocations = false;
         private boolean requirePeerVerification = false;
 
         public boolean isSignInterAgentMessages() {
@@ -335,14 +334,6 @@ public class AgentConfiguration {
 
         public void setSignInterAgentMessages(boolean signInterAgentMessages) {
             this.signInterAgentMessages = signInterAgentMessages;
-        }
-
-        public boolean isSignMcpInvocations() {
-            return signMcpInvocations;
-        }
-
-        public void setSignMcpInvocations(boolean signMcpInvocations) {
-            this.signMcpInvocations = signMcpInvocations;
         }
 
         public boolean isRequirePeerVerification() {
@@ -679,15 +670,16 @@ public class AgentConfiguration {
     }
 
     /**
-     * Session management configuration. Controls automatic checkpointing and
-     * conversation forking.
+     * Session management configuration. Controls automatic checkpointing.
+     * <p>
+     * <strong>Note:</strong> Conversation forking (session branching) is planned
+     * for a future release. When implemented, forking config fields will be added
+     * here alongside the implementation.
      *
      * @since 6.0.0
      */
     public static class SessionManagement {
         private AutoSnapshot autoSnapshot;
-        private boolean forkingEnabled = false;
-        private int maxForksPerConversation = 5;
         private int maxCheckpointsPerConversation = 10;
 
         public AutoSnapshot getAutoSnapshot() {
@@ -696,22 +688,6 @@ public class AgentConfiguration {
 
         public void setAutoSnapshot(AutoSnapshot autoSnapshot) {
             this.autoSnapshot = autoSnapshot;
-        }
-
-        public boolean isForkingEnabled() {
-            return forkingEnabled;
-        }
-
-        public void setForkingEnabled(boolean forkingEnabled) {
-            this.forkingEnabled = forkingEnabled;
-        }
-
-        public int getMaxForksPerConversation() {
-            return maxForksPerConversation;
-        }
-
-        public void setMaxForksPerConversation(int maxForksPerConversation) {
-            this.maxForksPerConversation = maxForksPerConversation;
         }
 
         public int getMaxCheckpointsPerConversation() {

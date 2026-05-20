@@ -107,6 +107,24 @@ class LogSanitizerTest {
             // All control chars should be stripped, leaving just "startend"
             assertEquals("startend", sanitize(sb.toString()));
         }
+
+        @Test
+        @DisplayName("should strip Unicode Line Separator (U+2028)")
+        void stripsLineSeparator() {
+            assertEquals("ab", sanitize("a\u2028b"));
+        }
+
+        @Test
+        @DisplayName("should strip Unicode Paragraph Separator (U+2029)")
+        void stripsParagraphSeparator() {
+            assertEquals("ab", sanitize("a\u2029b"));
+        }
+
+        @Test
+        @DisplayName("should strip mixed Unicode and ASCII line separators")
+        void stripsMixedSeparators() {
+            assertEquals("a_b_cd", sanitize("a\nb\rc\u2028d"));
+        }
     }
 
     @Nested

@@ -4,6 +4,151 @@
 
 ---
 
+## 🛠️ PR Feedback Remediation — Production Hardening (2026-05-17)
+
+**Repo:** EDDI (`feature/feature-gap-remediation`)
+**What changed:** Addressed ~25 findings from CodeQL, code quality bot, Copilot, and CodeRabbit reviews. All actionable items resolved.
+
+### Security Fixes
+- **NonceCacheService TOCTOU:** Replaced non-atomic `get()`+`put()` with `putIfAbsent()` for replay detection. The get-then-put pattern allowed two concurrent requests with the same nonce to both pass the replay check.
+- **NonceCacheService null guard:** Added null/blank nonce early rejection.
+- **Log injection (centralized):** Replaced per-file `sanitizeForLog()` methods in `GroupConversationService`, `MongoTenantQuotaStore`, `PostgresTenantQuotaStore` with centralized `LogSanitizer.sanitize()`. Added Unicode line separator (U+2028/U+2029) handling per CodeQL feedback. Also wrapped `e.getMessage()` in log calls.
+- **Fail-closed cost accounting:** `PostgresTenantQuotaStore.tryAddCost()` now returns `DENIED` on SQL failure instead of `OK` — prevents budget bypass when database is unreachable.
+- **Key version validation:** `AgentSigningService.generateKeyPairVersioned()` and `rotateKey()` now reject `version <= 0`.
+- **JacksonCanonicalizer strict duplicate detection:** Enabled `StreamReadFeature.STRICT_DUPLICATE_DETECTION` to prevent collision attacks where different JSON payloads produce identical canonical output. Removed inaccurate RFC 8785 claim from javadoc.
+- **AgentSigningService versioned key cleanup:** `deleteKeyPair()` now deletes both legacy unversioned and all versioned vault secrets. `generateKeyPairVersioned()` now evicts version-specific cache entries.
+
+### Performance Fixes
+- **Incremental peer verification:** `verifyPriorEntriesIfRequired()` now tracks last-verified transcript index per conversation (O(N) amortized instead of O(N²) per-turn re-verification). Public keys cached per speaker to avoid redundant `agentStore` lookups.
+- **signEnvelope private key caching:** Now uses `privateKeyCache.computeIfAbsent()` with versioned cache key, avoiding vault round-trips on every call.
+
+### Architecture Fixes
+- **DiscoverToolsTool CDI exclusion:** Added `@Vetoed` to prevent Quarkus CDI from auto-discovering the class as a bean (it is manually constructed by AgentOrchestrator).
+- **LAZY tool activation:** Fixed gap where discovered tools couldn't actually be called. `collectEnabledTools()` now returns ALL tools (registering executors), while `executeWithTools()` initially presents only `discover_tools` spec. After the LLM calls `discover_tools`, matching built-in specs are activated via `activateDiscoveredTools()`.
+- **PostgresTenantQuotaStore transactional delete:** `deleteQuota()` now wraps both `tenant_quotas` and `tenant_usage` deletes in a single transaction with rollback on failure.
+- **PostgresTenantQuotaStore schema auto-creation:** Added `CREATE TABLE IF NOT EXISTS` with `ensureSchema()` pattern (matching `PostgresGlobalVariableStore`, `PostgresSecretPersistence`, etc.).
+- **MongoTenantQuotaStore unique index:** Added unique ascending index on `tenantId` for both `tenant_quotas` and `tenant_usage` collections to prevent duplicate rows from upsert races.
+- **DiscoverToolsTool JSON serialization:** Replaced manual `StringBuilder` JSON assembly with Jackson `ObjectMapper` for proper escaping of special characters in tool descriptions.
+- **JacksonCanonicalizer overload rename:** `canonicalize(Object)` → `canonicalizeObject(Object)` to eliminate static dispatch ambiguity.
+- **GroupConversationService FQN cleanup:** Replaced 5 fully-qualified class references (`ai.labs.eddi.configs.agents.crypto.*`) with proper imports.
+- **AgentOrchestrator log fix:** Compute external tool count explicitly instead of `activeSpecs.size() - 1` to avoid misleading `-1` in logs.
+
+### Changelog accuracy
+- Fixed Item 1 and Item 2 descriptions below (see corrections inline).
+
+**Files:** `NonceCacheService.java`, `GroupConversationService.java`, `MongoTenantQuotaStore.java`, `PostgresTenantQuotaStore.java`, `AgentSigningService.java`, `AgentOrchestrator.java`, `DiscoverToolsTool.java`, `JacksonCanonicalizer.java`, `SignedEnvelope.java`, `LogSanitizer.java`, `changelog.md`
+
+---
+
+
+## 🛡️ Crypto Security Review — Fail-Safe Remediations (2026-05-15)
+
+**Repo:** EDDI (`feature/feature-gap-remediation`)
+**What changed:** Security-focused code review identified 7 findings (2 high, 3 medium, 2 low). All remediated. Key principle: signing failures are **fail-safe** — discard the broken signature and fall back to unsigned, rather than storing broken data.
+
+### S1+S2 (HIGH): Signing failures now fail-safe to unsigned
+- Self-verify failure (`verifyEnvelope` returns false) → discard signature, fall back to unsigned entry
+- Nonce validation failure → discard signature, fall back to unsigned entry
+- Previously: logged warning/error but continued with broken signature stored permanently
+
+### S3+S4 (MEDIUM): Null guards for crypto infrastructure
+- Signing block: `agentStore`, `agentSigningService`, `nonceCacheService` all guarded for null
+- `agentConfig.getIdentity()` guarded before `getKeyValidAt()` call
+
+### S7 (LOW): NonceCacheService unused `ttlMs` variable
+- Removed computed `ttlMs` that was never passed to cache factory
+- Added documentation comment explaining the cache TTL configuration requirement
+
+### Tests: 15 new tests (84 total affected)
+- `TranscriptEntry`: full 13-param constructor, `hasEnvelopeData()` (4 edge cases), signature-only constructor
+
+### Docs updated
+- `docs/architecture.md`: added Cryptographic Agent Identity section
+- `planning/manager-ui-handoff.md`: removed `signMcpInvocations`, `forkingEnabled`, `maxForksPerConversation`, updated Security section to show active signing flags
+
+---
+
+## 🔐 Cryptographic Agent Identity — End-to-End Hardening (2026-05-15)
+
+**Repo:** EDDI (`feature/feature-gap-remediation`)
+**What changed:** Evolved the partial SignedEnvelope infrastructure into a fully-wired, production-standard cryptographic identity system. Removed dead config fields, added peer verification, and made all security features functional.
+
+### Config Cleanup — Remove Dead Fields
+- **Removed:** `signMcpInvocations` from `SecurityConfig` (no MCP signing implementation exists)
+- **Removed:** `forkingEnabled` + `maxForksPerConversation` from `SessionManagement` (no forking service exists)
+- **Rationale:** "Configs without functionality" creates false confidence. Features are added alongside their implementation, not before.
+- **Files:** `AgentConfiguration.java`, `RestAgentStore.java` (removed `validateSessionFlags()`), tests updated
+
+### TranscriptEntry — Full Envelope Storage
+- **Added:** `signatureNonce`, `signatureTimestampMs`, `signatureKeyVersion` fields to `TranscriptEntry` record
+- **Added:** `hasEnvelopeData()` convenience method for verification checks
+- **Backward-compatible:** Two compact constructors for unsigned and signature-only entries
+- **Files:** `GroupConversation.java`
+
+### GroupConversationService — End-to-End Crypto Wiring
+- **Injected:** `NonceCacheService` for replay protection
+- **Signing block:** Now creates full `SignedEnvelope` with nonce, immediately self-verifies, registers nonce, and stores all envelope fields in `TranscriptEntry`
+- **Added:** `verifyPriorEntriesIfRequired()` — when receiving agent has `requirePeerVerification=true`, reconstructs envelopes from stored fields and verifies each speaker's signature against their public key
+- **Defense-in-depth:** Signing self-verifies at creation time; peer verification at consumption time catches key rotation issues or data corruption
+- **Files:** `GroupConversationService.java`
+
+### LlmConfiguration — Configurable maxToolsInContext
+- **Added:** `maxToolsInContext` field (default: 20) to `LlmConfiguration.Task` for LAZY tool loading
+- **Previously:** Hardcoded `int maxToolsInContext = 20` in `AgentOrchestrator`
+- **Files:** `LlmConfiguration.java`, `AgentOrchestrator.java`
+
+### MongoTenantQuotaStore — TOCTOU Documentation
+- **Added:** Comment documenting the minor TOCTOU race at window boundaries in multi-instance deployments
+- **Files:** `MongoTenantQuotaStore.java`
+
+### Test Fixes
+- Updated `SessionManagementTest`, `AgentConfigurationTest`, `RestAgentStoreTest` — removed references to deleted fields
+- Updated `GroupConversationServiceTest` — added `NonceCacheService` constructor parameter
+- All 69 affected tests pass (0 failures, 0 errors)
+
+---
+
+## 🔧 Feature Gap Remediation — 6 Items Resolved (2026-05-15)
+
+**Repo:** EDDI (`feature/feature-gap-remediation`)
+**What changed:** Systematic audit found 8 gaps between documented features and actual implementation. Fixed 6 items (2 required no changes).
+
+### Item 1: Session Forking — Config Removed
+- **Problem:** `forkingEnabled=true` accepted silently but no `ConversationForkService` exists
+- **Original fix:** Added `validateSessionFlags()` in `RestAgentStore` to reject the flag with a clear error
+- **Final state:** Both `forkingEnabled` and `maxForksPerConversation` config fields were fully removed (config-without-functionality anti-pattern). `validateSessionFlags()` was also removed since there are no session flags left to validate.
+- **Files:** `AgentConfiguration.java`, `RestAgentStore.java`
+
+### Item 2: Signing Flags — Config Removed
+- **Problem:** `signMcpInvocations` flag accepted silently but no MCP signing implementation exists
+- **Original fix:** Split `validateSecurityFlags()` to reject `signMcpInvocations` while allowing `signInterAgentMessages` and `requirePeerVerification`
+- **Final state:** `signMcpInvocations` field was fully removed from `SecurityConfig`. The validation method was also removed since both remaining flags (`signInterAgentMessages`, `requirePeerVerification`) now have runtime implementations.
+- **Files:** `AgentConfiguration.java`, `RestAgentStore.java`
+
+### Item 3: DiscoverToolsTool — Recovered + Wired
+- **Problem:** Token-saving lazy tool loading deleted as dead code (commit `05edf602`)
+- **Fix:** Recovered `DiscoverToolsTool.java` + test, added `ToolLoadingStrategy` enum (EAGER/LAZY) to `LlmConfiguration.Task`, wired LAZY branch into `AgentOrchestrator.collectEnabledTools()` — when LAZY, only `discover_tools` meta-tool is sent initially, LLM discovers available tools, specs injected mid-loop
+- **Files:** `DiscoverToolsTool.java` (recovered), `LlmConfiguration.java`, `AgentOrchestrator.java`
+
+### Item 4: Cryptographic Infrastructure — Recovered + Wired
+- **Problem:** `SignedEnvelope`, `JacksonCanonicalizer`, `NonceCacheService` deleted as dead code (commit `4a717fa5`)
+- **Fix:** Recovered all 3 files + tests, re-added `signEnvelope()`/`verifyEnvelope()`/`rotateKey()`/`generateKeyPairVersioned()` to `AgentSigningService`, upgraded `GroupConversationService` signing from simple string signing to full `SignedEnvelope` with nonce-based replay protection
+- **Files:** `SignedEnvelope.java`, `JacksonCanonicalizer.java`, `NonceCacheService.java` (all recovered), `AgentSigningService.java`, `GroupConversationService.java`
+
+### Item 5: Tenant Quota DB Persistence — Dual-Backend Stores
+- **Problem:** `ITenantQuotaStore` only had `InMemoryTenantQuotaStore` — restarts reset all quota counters, no cross-instance synchronization
+- **Fix:** Created `MongoTenantQuotaStore` (uses `findAndModify` for atomicity) and `PostgresTenantQuotaStore` (uses `UPDATE...WHERE...RETURNING`), wired into `DataStoreProducers` following existing dual-backend pattern
+- **Files:** `MongoTenantQuotaStore.java` (new), `PostgresTenantQuotaStore.java` (new), `DataStoreProducers.java`
+
+### Item 6: NATS Documentation
+- NATS code works correctly for what it does (durable ordered processing with retry/dead-letter)
+- No code changes needed — documentation accuracy to be addressed separately
+
+### Items 7-8: No Changes Needed
+- HIPAA docs accurately describe documentation, not code enforcement
+- OpenTelemetry opt-in is standard industry practice
+
+
 ## How to Read This Document
 
 Each entry follows this format:

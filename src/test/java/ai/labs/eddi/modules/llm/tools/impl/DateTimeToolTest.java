@@ -23,7 +23,8 @@ class DateTimeToolTest {
         String result = dateTimeTool.getCurrentDateTime("UTC");
         assertNotNull(result);
         assertFalse(result.startsWith("Error"));
-        assertTrue(result.contains("UTC") || result.contains("Z"));
+        assertTrue(result.matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2} .+"),
+                "Expected formatted datetime, got: " + result);
     }
 
     @Test
@@ -31,7 +32,10 @@ class DateTimeToolTest {
         String result = dateTimeTool.getCurrentDateTime("America/New_York");
         assertNotNull(result);
         assertFalse(result.startsWith("Error"));
-        assertTrue(result.contains("America") || result.contains("EST") || result.contains("EDT"));
+        // Verify the result is a formatted datetime (not just checking timezone abbrev,
+        // which varies by JVM/CLDR version: EST, EDT, ET, -04:00, etc.)
+        assertTrue(result.matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2} .+"),
+                "Expected formatted datetime, got: " + result);
     }
 
     @Test
@@ -39,7 +43,8 @@ class DateTimeToolTest {
         String result = dateTimeTool.getCurrentDateTime("Asia/Tokyo");
         assertNotNull(result);
         assertFalse(result.startsWith("Error"));
-        assertTrue(result.contains("JST") || result.contains("Asia"));
+        assertTrue(result.matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2} .+"),
+                "Expected formatted datetime, got: " + result);
     }
 
     @Test
