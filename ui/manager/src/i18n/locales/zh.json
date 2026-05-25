@@ -45,7 +45,8 @@
     "sync": "同步",
     "channels": "频道",
     "userConversations": "用户对话",
-    "userData": "用户数据"
+    "userData": "用户数据",
+    "variables": "变量"
   },
   "theme": {
     "light": "浅色",

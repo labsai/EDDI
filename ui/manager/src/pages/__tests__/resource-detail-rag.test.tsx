@@ -76,6 +76,7 @@ describe("RAG Knowledge Base Editor", () => {
         "bedrock",
         "cohere",
         "vertex",
+        "gemini",
       ]);
     });
   });

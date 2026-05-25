@@ -140,6 +140,7 @@ export function GroupWizardPage() {
   const [currentStep, setCurrentStep] = useState(0);
   const [state, setState] = useState<WizardState>(INITIAL_STATE);
   const [resultId, setResultId] = useState<string | null>(null);
+  const [resultVersion, setResultVersion] = useState<number>(1);
   const [creationProgress, setCreationProgress] = useState<string | null>(null);
   const [isBatchCreating, setIsBatchCreating] = useState(false);
 
@@ -282,18 +283,22 @@ export function GroupWizardPage() {
     createMutation.mutate(config, {
       onSuccess: (data) => {
         toast.success(t("groupWizard.success"));
-        // Parse the location URI to extract the actual group ID
+        // Parse the location URI to extract the actual group ID + version
         let id = "new";
+        let version = 1;
         try {
           const location = (data as { location?: string })?.location;
           if (location) {
-            id = parseResourceUri(location).id;
+            const parsed = parseResourceUri(location);
+            id = parsed.id;
+            version = parsed.version;
           }
         } catch {
           // fallback — use raw data if parse fails
           id = typeof data === "string" ? data : (data as { id?: string })?.id ?? "new";
         }
         setResultId(id);
+        setResultVersion(version);
         setIsBatchCreating(false);
         setCreationProgress(null);
       },
@@ -322,7 +327,7 @@ export function GroupWizardPage() {
 
           <div className="mt-6 flex items-center justify-center gap-3">
             <Link
-              to={`/manage/groups/${resultId}`}
+              to={`/manage/groups/${resultId}?version=${resultVersion}`}
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow-md active:scale-[0.98]"
             >
               {t("groupWizard.viewGroup")}
@@ -333,6 +338,7 @@ export function GroupWizardPage() {
                 setState(INITIAL_STATE);
                 setCurrentStep(0);
                 setResultId(null);
+                setResultVersion(1);
               }}
               className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             >

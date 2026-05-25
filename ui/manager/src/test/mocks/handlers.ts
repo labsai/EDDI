@@ -2649,6 +2649,114 @@ const MOCK_SECRETS = [
   },
 ];
 
+// ─── Global Variables Mock Data ────────────────────────────────────────────────
+
+const MOCK_VARIABLES = [
+  {
+    key: "default-model",
+    value: "gpt-4.1",
+    description: "Primary LLM model for all agents — cascades to gpt-4.1-mini on budget overflow",
+    exportable: true,
+  },
+  {
+    key: "fallback-model",
+    value: "gpt-4.1-mini",
+    description: "Cost-effective fallback when primary model quota is exhausted",
+    exportable: true,
+  },
+  {
+    key: "llm.temperature",
+    value: "0.7",
+    description: "Default temperature for all LLM tasks (0.0–2.0)",
+    exportable: true,
+  },
+  {
+    key: "llm.max-tokens",
+    value: "4096",
+    description: "Maximum output tokens per LLM completion",
+    exportable: true,
+  },
+  {
+    key: "api.base-url",
+    value: "https://api.openai.com/v1",
+    description: "OpenAI-compatible API base URL — change to use Azure, LiteLLM, or local proxy",
+    exportable: false,
+  },
+  {
+    key: "rag.chunk-size",
+    value: "512",
+    description: "RAG document chunk size in tokens for vector embedding",
+    exportable: true,
+  },
+  {
+    key: "rag.top-k",
+    value: "5",
+    description: "Number of top matching chunks to retrieve per RAG query",
+    exportable: true,
+  },
+  {
+    key: "feature.cascade-enabled",
+    value: "true",
+    description: "Enable automatic model cascading on confidence threshold failure",
+    exportable: true,
+  },
+  {
+    key: "branding.bot-name",
+    value: "EDDI Assistant",
+    description: "Display name shown in chat UI and system prompts",
+    exportable: true,
+  },
+  {
+    key: "rate-limit.rpm",
+    value: "60",
+    description: "Global rate limit — max requests per minute to external LLM providers",
+    exportable: false,
+  },
+  {
+    key: "mcp.timeout-ms",
+    value: "30000",
+    description: "MCP tool call timeout in milliseconds before fallback",
+    exportable: false,
+  },
+  {
+    key: "environment",
+    value: "production",
+    description: null,
+    exportable: false,
+  },
+];
+
+export const variablesHandlers = [
+  // List all global variables for a tenant
+  http.get("*/variablestore/variables/:tenantId", ({ request }) => {
+    const url = new URL(request.url);
+    // Only match /variablestore/variables/:tenantId (no trailing key segment)
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length > 3) return;
+    return HttpResponse.json(MOCK_VARIABLES);
+  }),
+
+  // Get a single variable by key
+  http.get("*/variablestore/variables/:tenantId/:key", ({ params }) => {
+    const key = params.key as string;
+    const found = MOCK_VARIABLES.find((v) => v.key === key);
+    if (!found) {
+      return new HttpResponse(null, { status: 404 });
+    }
+    return HttpResponse.json(found);
+  }),
+
+  // Create or update a variable
+  http.put("*/variablestore/variables/:tenantId/:key", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Delete a variable
+  http.delete("*/variablestore/variables/:tenantId/:key", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+];
+
 export const secretsHandlers = [
   // List secrets (tenant-scoped, no agentId)
   http.get("*/secretstore/secrets/:tenantId", ({ params, request }) => {

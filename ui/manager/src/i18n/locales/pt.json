@@ -45,7 +45,8 @@
     "sync": "Sincronização",
     "channels": "Canais",
     "userConversations": "Conversas do usuário",
-    "userData": "Dados do utilizador"
+    "userData": "Dados do utilizador",
+    "variables": "Variáveis"
   },
   "theme": {
     "light": "Claro",

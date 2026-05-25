@@ -45,7 +45,8 @@
     "sync": "동기화",
     "channels": "채널",
     "userConversations": "사용자 대화",
-    "userData": "사용자 데이터"
+    "userData": "사용자 데이터",
+    "variables": "변수"
   },
   "theme": {
     "light": "라이트",

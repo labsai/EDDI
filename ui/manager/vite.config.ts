@@ -95,6 +95,7 @@ export default defineConfig({
       "/userconversationstore": p(),
       "/descriptorstore": p(),
       "/secretstore": p(),
+      "/variablestore": p(),
       "/auditstore": p(),
       "/schedulestore": p(),
       "/deploymentstore": p(),

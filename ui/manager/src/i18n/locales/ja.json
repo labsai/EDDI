@@ -45,7 +45,8 @@
     "sync": "同期",
     "channels": "チャンネル",
     "userConversations": "ユーザー会話",
-    "userData": "ユーザーデータ"
+    "userData": "ユーザーデータ",
+    "variables": "変数"
   },
   "theme": {
     "light": "ライト",

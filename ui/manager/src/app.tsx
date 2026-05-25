@@ -18,6 +18,7 @@ import { SchedulesPage } from "@/pages/schedules";
 import { OrphansPage } from "@/pages/orphans";
 import { LogsPage } from "@/pages/logs";
 import { SecretsPage } from "@/pages/secrets";
+import { VariablesPage } from "@/pages/variables";
 import { AuditPage } from "@/pages/audit";
 import { QuotasPage } from "@/pages/quotas";
 import { GroupsPage } from "@/pages/groups";
@@ -54,6 +55,7 @@ export function App() {
         <Route path="/manage/logs" element={<LogsPage />} />
         <Route path="/manage/orphans" element={<OrphansPage />} />
         <Route path="/manage/secrets" element={<SecretsPage />} />
+        <Route path="/manage/variables" element={<VariablesPage />} />
         <Route path="/manage/audit" element={<AuditPage />} />
         <Route path="/manage/quotas" element={<QuotasPage />} />
         <Route path="/manage/gdpr" element={<GdprPage />} />

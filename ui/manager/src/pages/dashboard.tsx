@@ -356,7 +356,7 @@ export function DashboardPage() {
       </div>
 
       {/* Recent agents */}
-      <div>
+      <div data-testid="recent-agents">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             {t("pages.dashboard.recentAgents")}

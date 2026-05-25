@@ -152,7 +152,8 @@ export function getGroup(
   id: string,
   version?: number
 ): Promise<AgentGroupConfiguration> {
-  const versionSuffix = version ? `?version=${version}` : "";
+  // Backend requires version — omitting it causes 400 (RuntimeUtilities.checkNotNull)
+  const versionSuffix = version != null ? `?version=${version}` : "";
   return api.get<AgentGroupConfiguration>(
     `/groupstore/groups/${id}${versionSuffix}`
   );

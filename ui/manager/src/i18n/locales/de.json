@@ -45,7 +45,8 @@
     "sync": "Synchronisierung",
     "channels": "Kanäle",
     "userConversations": "Nutzer-Konversationen",
-    "userData": "Nutzerdaten"
+    "userData": "Nutzerdaten",
+    "variables": "Variablen"
   },
   "theme": {
     "light": "Hell",

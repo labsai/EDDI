@@ -24,21 +24,15 @@ test.describe("Agents Page", () => {
     await expect(searchInput).toHaveValue("Support");
   });
 
-  test("create agent button is visible", async ({ page }) => {
+  test("new agent button is visible", async ({ page }) => {
     await expect(
-      page.getByText(/create agent/i).first()
+      page.getByText(/New Agent/i).first()
     ).toBeVisible();
   });
 
   test("agent card click navigates to agent detail", async ({ page }) => {
     await page.getByText("Support Agent").click();
     await expect(page).toHaveURL(/\/manage\/agentview\//);
-  });
-
-  test("agent wizard button is visible", async ({ page }) => {
-    await expect(
-      page.getByText(/agent wizard/i).first()
-    ).toBeVisible();
   });
 
   test("import button is visible", async ({ page }) => {

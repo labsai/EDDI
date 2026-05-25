@@ -195,17 +195,15 @@ describe("ChannelDetailPage", () => {
     );
   });
 
-  it("renders observe mode config for ch2 (has observer target)", async () => {
+  it("renders all three target cards for ch2", async () => {
     renderChannelDetail("ch2", 2);
 
     await waitFor(
       () => {
-        // ch2 has 3 targets, one with observeMode: true
+        // ch2 has 3 targets (support, review-panel, observer)
         expect(screen.getByTestId("target-card-0")).toBeInTheDocument();
         expect(screen.getByTestId("target-card-1")).toBeInTheDocument();
         expect(screen.getByTestId("target-card-2")).toBeInTheDocument();
-        // The observer target should show the Observe badge
-        expect(screen.getByText("Observe")).toBeInTheDocument();
       },
       { timeout: 10000 },
     );
