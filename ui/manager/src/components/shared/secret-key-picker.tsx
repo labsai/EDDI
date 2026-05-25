@@ -89,6 +89,15 @@ function bareKeyName(vaultKey: string): string {
   return slashIdx >= 0 ? vaultKey.slice(slashIdx + 1) : vaultKey;
 }
 
+/**
+ * Extract the tenant portion from a vault key, if present.
+ * `"myTenant/openaiKey"` → `"myTenant"`, `"openaiKey"` → `undefined`.
+ */
+function extractTenantFromKey(vaultKey: string): string | undefined {
+  const slashIdx = vaultKey.indexOf("/");
+  return slashIdx >= 0 ? vaultKey.slice(0, slashIdx) : undefined;
+}
+
 /** Create a vault reference string in the canonical `${vault:...}` format */
 function toVaultRef(keyName: string): string {
   return `\${vault:${keyName}}`;
@@ -476,8 +485,14 @@ export function SecretKeyPicker({
   // Derived state
   const hasVaultRef = isVaultRef(value);
   const currentVaultKey = hasVaultRef ? extractVaultKey(value) : "";
-  // Strip tenant prefix (e.g. "myTenant/openaiKey" → "openaiKey") for vault lookups
-  const currentBareKey = bareKeyName(currentVaultKey);
+  // Only strip the tenant prefix when it matches this picker's tenantId;
+  // otherwise a reference like ${vault:tenantA/key} would incorrectly
+  // resolve against the current tenant's key list.
+  const refTenant = extractTenantFromKey(currentVaultKey);
+  const currentBareKey =
+    refTenant === undefined || refTenant === tenantId
+      ? bareKeyName(currentVaultKey)
+      : currentVaultKey; // keep as-is so the lookup correctly fails
   const currentKeyExists = secretKeyNames.has(currentBareKey);
   const currentDescription = hasVaultRef
     ? secretList.find((s) => s.keyName === currentBareKey)?.description ?? null
