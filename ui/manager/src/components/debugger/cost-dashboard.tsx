@@ -93,7 +93,7 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
       )}
 
       {/* Rate Limits / Quota Gauges */}
-      {costs && Object.keys(costs.toolUsage).length > 0 && (
+      {costs?.toolUsage && Object.keys(costs.toolUsage).length > 0 && (
         <MetricSection
           title={t("costDashboard.toolUsage", "Tool Usage")}
           icon={<BarChart3 className="h-3.5 w-3.5" />}

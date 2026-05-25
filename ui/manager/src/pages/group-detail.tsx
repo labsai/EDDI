@@ -138,8 +138,8 @@ export function GroupDetailPage() {
     );
   }
 
-  const styleInfo = STYLE_INFO[groupConfig.style];
-  const styleTheme = STYLE_THEME[groupConfig.style as DiscussionStyle] || STYLE_THEME.ROUND_TABLE;
+  const styleInfo = STYLE_INFO[groupConfig.style] ?? STYLE_INFO.ROUND_TABLE;
+  const styleTheme = STYLE_THEME[groupConfig.style as DiscussionStyle] ?? STYLE_THEME.ROUND_TABLE;
 
   // Determine whether to show streaming or static transcript
   const isStreamActive = streamState.isStreaming || (streamState.state !== "CREATED" && !selectedConvId);
@@ -231,7 +231,7 @@ export function GroupDetailPage() {
           )}
           <Badge variant="secondary">
             <Users className="me-1 h-3 w-3" />
-            {groupConfig.members.length}
+            {groupConfig.members?.length ?? 0}
           </Badge>
 
           {/* History dropdown — visible on mobile, and on all sizes when fullscreen */}
