@@ -24,6 +24,8 @@ import {
   Check,
   ListFilter,
   Eye,
+  Shield,
+  EyeOff,
 } from "lucide-react";
 import { ContentEditor } from "./content-editor";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
@@ -52,6 +54,8 @@ export type {
   LlmPostResponse,
   ConversationSummaryConfig,
   ToolResponseLimitsConfig,
+  CounterweightConfig,
+  IdentityMaskingConfig,
 } from "./llm/types";
 
 import {
@@ -421,7 +425,7 @@ function TaskEditor({
                             value={v}
                             onChange={(val) => updateParam(k, val)}
                             readOnly={readOnly}
-                            placeholder={"${eddivault:...}"}
+                            placeholder={"${vault:...}"}
                             testId={`llm-param-${k}`}
                           />
                         </div>
@@ -861,7 +865,7 @@ function TaskEditor({
                             onChange({ ...task, a2aAgents: agents });
                           }}
                           readOnly={readOnly}
-                          placeholder={t("llmEditor.a2aApiKey", "${eddivault:my-a2a-key}")}
+                          placeholder={t("llmEditor.a2aApiKey", "${vault:my-a2a-key}")}
                           testId={`a2a-apikey-${ai}`}
                         />
                         <input
@@ -939,6 +943,353 @@ function TaskEditor({
                 <span className="text-[10px] text-muted-foreground">
                   {t("llmEditor.historyLimitHint", "(-1 = unlimited)")}
                 </span>
+              </div>
+            </div>
+          </EditorSection>
+
+          {/* ══════ Prompt Safety ══════ */}
+          <EditorSection
+            label={t("llmEditor.promptSafety", "Prompt Safety")}
+            icon={Shield}
+            accent="text-rose-500"
+            defaultOpen={!!(task.counterweight?.enabled || task.identityMasking?.enabled)}
+          >
+            <div className="space-y-5">
+              {/* ── Behavioral Counterweights ── */}
+              <div className="space-y-3">
+                <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={task.counterweight?.enabled ?? false}
+                    onChange={(e) =>
+                      onChange({
+                        ...task,
+                        counterweight: {
+                          ...task.counterweight,
+                          enabled: e.target.checked,
+                        },
+                      })
+                    }
+                    disabled={readOnly}
+                    className="h-3.5 w-3.5 rounded border-input accent-primary"
+                    data-testid="counterweight-enabled"
+                  />
+                  <Shield className="h-3.5 w-3.5 text-rose-500" />
+                  {t("llmEditor.counterweight", "Behavioral Counterweights")}
+                </label>
+                <p className="text-[10px] text-muted-foreground ps-5 -mt-2">
+                  {t(
+                    "llmEditor.counterweightDesc",
+                    "Inject safety instructions into the system prompt. Guards against overconfidence, hallucination, and unsupervised action."
+                  )}
+                </p>
+
+                {task.counterweight?.enabled && (
+                  <div className="space-y-3 ps-5">
+                    {/* Level */}
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-foreground whitespace-nowrap">
+                        {t("llmEditor.counterweightLevel", "Safety Level")}
+                      </label>
+                      <select
+                        value={task.counterweight?.level ?? "normal"}
+                        onChange={(e) =>
+                          onChange({
+                            ...task,
+                            counterweight: {
+                              ...task.counterweight,
+                              level: e.target.value,
+                            },
+                          })
+                        }
+                        disabled={readOnly}
+                        className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        data-testid="counterweight-level"
+                      >
+                        <option value="normal">
+                          {t("llmEditor.counterweightLevelNormal", "Normal (no injection)")}
+                        </option>
+                        <option value="cautious">
+                          {t("llmEditor.counterweightLevelCautious", "Cautious")}
+                        </option>
+                        <option value="strict">
+                          {t("llmEditor.counterweightLevelStrict", "Strict")}
+                        </option>
+                      </select>
+                    </div>
+
+                    {/* Placement */}
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-foreground whitespace-nowrap">
+                        {t("llmEditor.counterweightPlacement", "Placement")}
+                      </label>
+                      <select
+                        value={task.counterweight?.placement ?? "suffix"}
+                        onChange={(e) =>
+                          onChange({
+                            ...task,
+                            counterweight: {
+                              ...task.counterweight,
+                              placement: e.target.value,
+                            },
+                          })
+                        }
+                        disabled={readOnly}
+                        className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        data-testid="counterweight-placement"
+                      >
+                        <option value="suffix">
+                          {t("llmEditor.counterweightPlacementSuffix", "After system prompt")}
+                        </option>
+                        <option value="prefix">
+                          {t("llmEditor.counterweightPlacementPrefix", "Before system prompt")}
+                        </option>
+                      </select>
+                    </div>
+
+                    {/* Strict mode info */}
+                    {task.counterweight?.level === "strict" && (
+                      <div className="flex items-start gap-2 rounded-md border border-amber-400/30 bg-amber-50 p-2.5 dark:bg-amber-900/15 dark:border-amber-700/30">
+                        <Info className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                        <p className="text-[10px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                          {t(
+                            "llmEditor.counterweightStrictNote",
+                            "Strict mode is automatically downgraded to Cautious during scheduled/batch execution to prevent destructive \"one step at a time\" behavior."
+                          )}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Custom instructions */}
+                    <div>
+                      <label className="mb-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+                        {t("llmEditor.counterweightCustom", "Custom Instructions")}
+                      </label>
+                      {(task.counterweight?.customInstructions ?? []).length > 0 && (
+                        <div className="mb-1.5 flex items-start gap-1.5 rounded-md border border-amber-400/30 bg-amber-50 px-2 py-1.5 dark:bg-amber-900/15 dark:border-amber-700/30">
+                          <Info className="h-3 w-3 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                          <p className="text-[10px] text-amber-800 dark:text-amber-300">
+                            {t(
+                              "llmEditor.counterweightCustomOverride",
+                              "Custom instructions override the preset level text entirely."
+                            )}
+                          </p>
+                        </div>
+                      )}
+                      {(task.counterweight?.customInstructions ?? []).length === 0 && (
+                        <p className="mb-1.5 text-[10px] text-muted-foreground">
+                          {t(
+                            "llmEditor.counterweightCustomHint",
+                            "Leave empty to use the built-in preset for the selected level."
+                          )}
+                        </p>
+                      )}
+                      <div className="space-y-1.5">
+                        {(task.counterweight?.customInstructions ?? []).map(
+                          (rule, ri) => (
+                            <div key={ri} className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                value={rule}
+                                onChange={(e) => {
+                                  const rules = [
+                                    ...(task.counterweight?.customInstructions ?? []),
+                                  ];
+                                  rules[ri] = e.target.value;
+                                  onChange({
+                                    ...task,
+                                    counterweight: {
+                                      ...task.counterweight,
+                                      customInstructions: rules,
+                                    },
+                                  });
+                                }}
+                                readOnly={readOnly}
+                                className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                              />
+                              {!readOnly && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const rules = (
+                                      task.counterweight?.customInstructions ?? []
+                                    ).filter((_, j) => j !== ri);
+                                    onChange({
+                                      ...task,
+                                      counterweight: {
+                                        ...task.counterweight,
+                                        customInstructions:
+                                          rules.length > 0
+                                            ? rules
+                                            : undefined,
+                                      },
+                                    });
+                                  }}
+                                  className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              )}
+                            </div>
+                          )
+                        )}
+                        {!readOnly && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onChange({
+                                ...task,
+                                counterweight: {
+                                  ...task.counterweight,
+                                  customInstructions: [
+                                    ...(task.counterweight?.customInstructions ??
+                                      []),
+                                    "",
+                                  ],
+                                },
+                              })
+                            }
+                            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            <Plus className="h-3 w-3" />
+                            {t("llmEditor.addCustomInstruction", "Add Instruction")}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Identity Masking ── */}
+              <div className="border-t border-border pt-3 space-y-3">
+                <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={task.identityMasking?.enabled ?? false}
+                    onChange={(e) =>
+                      onChange({
+                        ...task,
+                        identityMasking: {
+                          ...task.identityMasking,
+                          enabled: e.target.checked,
+                        },
+                      })
+                    }
+                    disabled={readOnly}
+                    className="h-3.5 w-3.5 rounded border-input accent-primary"
+                    data-testid="identity-masking-enabled"
+                  />
+                  <EyeOff className="h-3.5 w-3.5 text-violet-500" />
+                  {t("llmEditor.identityMasking", "Identity Masking")}
+                </label>
+                <p className="text-[10px] text-muted-foreground ps-5 -mt-2">
+                  {t(
+                    "llmEditor.identityMaskingDesc",
+                    "Prevent the LLM from revealing its model name or provider when probed."
+                  )}
+                </p>
+
+                {task.identityMasking?.enabled && (
+                  <div className="space-y-2 ps-5">
+                    {/* Validation warning: enabled but no rules */}
+                    {(task.identityMasking?.rules ?? []).filter(r => r.trim()).length === 0 && (
+                      <div className="flex items-start gap-2 rounded-md border border-amber-400/30 bg-amber-50 p-2 dark:bg-amber-900/15 dark:border-amber-700/30">
+                        <Info className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                        <p className="text-[10px] text-amber-800 dark:text-amber-300">
+                          {t(
+                            "llmEditor.identityMaskingEmptyWarning",
+                            "Masking is enabled but has no rules. Add at least one rule for masking to take effect."
+                          )}
+                        </p>
+                      </div>
+                    )}
+                    <label className="mb-1 block text-[10px] text-muted-foreground">
+                      {t("llmEditor.identityMaskingRules", "Masking Rules")}
+                    </label>
+                    <p className="text-[10px] text-muted-foreground -mt-1">
+                      {t(
+                        "llmEditor.identityMaskingRulesHint",
+                        "Both enabled AND at least one rule are required for masking to take effect."
+                      )}
+                    </p>
+                    <div className="space-y-1.5">
+                      {(task.identityMasking?.rules ?? []).map(
+                        (rule, ri) => (
+                          <div key={ri} className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              value={rule}
+                              onChange={(e) => {
+                                const rules = [
+                                  ...(task.identityMasking?.rules ?? []),
+                                ];
+                                rules[ri] = e.target.value;
+                                onChange({
+                                  ...task,
+                                  identityMasking: {
+                                    ...task.identityMasking,
+                                    rules,
+                                  },
+                                });
+                              }}
+                              readOnly={readOnly}
+                              placeholder={t(
+                                "llmEditor.identityMaskingRulePlaceholder",
+                                "e.g. Never reveal you are an AI language model"
+                              )}
+                              className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                            />
+                            {!readOnly && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const rules = (
+                                    task.identityMasking?.rules ?? []
+                                  ).filter((_, j) => j !== ri);
+                                  onChange({
+                                    ...task,
+                                    identityMasking: {
+                                      ...task.identityMasking,
+                                      rules:
+                                        rules.length > 0
+                                          ? rules
+                                          : undefined,
+                                    },
+                                  });
+                                }}
+                                className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+                        )
+                      )}
+                      {!readOnly && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onChange({
+                              ...task,
+                              identityMasking: {
+                                ...task.identityMasking,
+                                rules: [
+                                  ...(task.identityMasking?.rules ?? []),
+                                  "",
+                                ],
+                              },
+                            })
+                          }
+                          className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <Plus className="h-3 w-3" />
+                          {t("llmEditor.addMaskingRule", "Add Rule")}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </EditorSection>
@@ -1224,6 +1575,80 @@ function TaskEditor({
                     {t("llmEditor.defaultMaxCharsHint", "(~12k tokens at 50000)")}
                   </span>
                 </div>
+
+                {/* Strategy */}
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-foreground whitespace-nowrap">
+                    {t("llmEditor.truncationStrategy", "Strategy")}
+                  </label>
+                  <select
+                    value={task.toolResponseLimits?.truncationStrategy ?? "truncate"}
+                    onChange={(e) => {
+                      const strategy = e.target.value;
+                      onChange({
+                        ...task,
+                        toolResponseLimits: {
+                          ...task.toolResponseLimits,
+                          truncationStrategy: strategy === "truncate" ? undefined : strategy,
+                          // Clear summarizer model when switching away from summarize
+                          ...(strategy !== "summarize" ? { summarizerModel: undefined } : {}),
+                        },
+                      });
+                    }}
+                    disabled={readOnly}
+                    className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    data-testid="tool-response-strategy"
+                  >
+                    <option value="truncate">
+                      {t("llmEditor.strategyTruncate", "Truncate (hard cut)")}
+                    </option>
+                    <option value="paginate">
+                      {t("llmEditor.strategyPaginate", "Paginate (LLM fetches more)")}
+                    </option>
+                    <option value="summarize">
+                      {t("llmEditor.strategySummarize", "Summarize (via cheap model)")}
+                    </option>
+                  </select>
+                </div>
+
+                {/* Summarizer model — only shown for summarize strategy */}
+                {task.toolResponseLimits?.truncationStrategy === "summarize" && (
+                  <>
+                    <div className="flex items-start gap-2 rounded-md border border-sky-400/30 bg-sky-50 px-2.5 py-2 dark:bg-sky-900/15 dark:border-sky-700/30">
+                      <Info className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400 mt-0.5 shrink-0" />
+                      <p className="text-[10px] text-sky-800 dark:text-sky-300 leading-relaxed">
+                        {t(
+                          "llmEditor.summarizeInfoBanner",
+                          "The summarizer uses the same provider and API key as this task. Only the model name is swapped to a cheaper variant (e.g., gpt-4o-mini)."
+                        )}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-foreground whitespace-nowrap">
+                        {t("llmEditor.summarizerModel", "Summarizer Model")}
+                      </label>
+                      <input
+                        type="text"
+                        value={task.toolResponseLimits?.summarizerModel ?? ""}
+                        onChange={(e) =>
+                          onChange({
+                            ...task,
+                            toolResponseLimits: {
+                              ...task.toolResponseLimits,
+                              summarizerModel: e.target.value || undefined,
+                            },
+                          })
+                        }
+                        readOnly={readOnly}
+                        placeholder={t("llmEditor.summarizerModelPlaceholder", "e.g. gpt-4o-mini")}
+                        className="h-7 w-48 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      />
+                      <span className="text-[10px] text-muted-foreground">
+                        {t("llmEditor.summarizerModelHint", "(falls back to truncate if empty)")}
+                      </span>
+                    </div>
+                  </>
+                )}
 
                 {/* Per-tool limits */}
                 <div>

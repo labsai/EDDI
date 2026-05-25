@@ -120,7 +120,7 @@ describe("SecretsPage", () => {
     await user.click(screen.getByTestId("create-secret-button"));
 
     await user.type(screen.getByTestId("new-key-input"), "mySecret");
-    expect(screen.getByText(/\$\{eddivault:mySecret\}/)).toBeInTheDocument();
+    expect(screen.getByText(/\$\{vault:mySecret\}/)).toBeInTheDocument();
   });
 
   it("confirm create button is disabled until key and value are entered", async () => {

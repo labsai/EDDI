@@ -105,6 +105,10 @@ export interface LlmTask {
 
   // Tool Response Truncation
   toolResponseLimits?: ToolResponseLimitsConfig;
+
+  // Behavioral Counterweight & Identity Masking (Wave 1)
+  counterweight?: CounterweightConfig;
+  identityMasking?: IdentityMaskingConfig;
 }
 
 export interface ConversationSummaryConfig {
@@ -121,6 +125,32 @@ export interface ConversationSummaryConfig {
 export interface ToolResponseLimitsConfig {
   defaultMaxChars?: number;
   perToolLimits?: Record<string, number>;
+  /** Truncation strategy: "truncate" (default), "paginate", or "summarize" */
+  truncationStrategy?: string;
+  /** Model for summarize strategy (falls back to truncate when absent) */
+  summarizerModel?: string;
+}
+
+/**
+ * Behavioral counterweight configuration. Controls engine-level safety
+ * injection into LLM system prompts.
+ *
+ * Levels: "normal" (no injection), "cautious", "strict"
+ */
+export interface CounterweightConfig {
+  enabled?: boolean;
+  level?: string;     // "normal" | "cautious" | "strict"
+  placement?: string; // "prefix" | "suffix"
+  customInstructions?: string[];
+}
+
+/**
+ * Identity masking rules. Prepended to the system prompt to prevent the agent
+ * from revealing its nature, model names, or internal infrastructure.
+ */
+export interface IdentityMaskingConfig {
+  enabled?: boolean;
+  rules?: string[];
 }
 
 /** @deprecated Use LlmTask instead */

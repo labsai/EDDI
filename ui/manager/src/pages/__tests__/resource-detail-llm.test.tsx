@@ -254,4 +254,55 @@ describe("LangChain Editor", () => {
       expect(input.value).toBe("search_docs");
     });
   });
+
+  // ─── Agentic Improvements ───────────────────────────────────────
+
+  it("renders Prompt Safety section header", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByText("Prompt Safety")).toBeInTheDocument();
+    });
+  });
+
+  it("renders counterweight toggle from mock data (enabled)", async () => {
+    renderPage("llm");
+    // Mock data has counterweight.enabled = true, so section auto-opens
+    await waitFor(() => {
+      expect(screen.getByTestId("counterweight-enabled")).toBeInTheDocument();
+    });
+    const toggle = screen.getByTestId("counterweight-enabled") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+  });
+
+  it("renders counterweight level dropdown with cautious selected", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByTestId("counterweight-level")).toBeInTheDocument();
+    });
+    const select = screen.getByTestId("counterweight-level") as HTMLSelectElement;
+    expect(select.value).toBe("cautious");
+  });
+
+  it("renders identity masking toggle (disabled by default)", async () => {
+    renderPage("llm");
+    await waitFor(() => {
+      expect(screen.getByTestId("identity-masking-enabled")).toBeInTheDocument();
+    });
+    const toggle = screen.getByTestId("identity-masking-enabled") as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+  });
+
+  it("renders tool response strategy dropdown", async () => {
+    renderPage("llm");
+    // Expand Execution section to see tool response limits
+    await waitFor(() => {
+      expect(screen.getByText("Execution")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText("Execution"));
+    await waitFor(() => {
+      expect(screen.getByTestId("tool-response-strategy")).toBeInTheDocument();
+    });
+    const select = screen.getByTestId("tool-response-strategy") as HTMLSelectElement;
+    expect(select.value).toBe("truncate");
+  });
 });

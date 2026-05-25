@@ -59,15 +59,9 @@ describe("Agent Detail — Config Sections (Phase 15.4)", () => {
     });
   });
 
-  it("renders security toggles when section is expanded", async () => {
+  // Security section auto-opens because agent.identity.agentDid is set in mock data
+  it("renders security toggles (section auto-opens)", async () => {
     renderPage();
-    await waitFor(() => {
-      expect(screen.getByText(/Security & Identity/i)).toBeInTheDocument();
-    });
-
-    // Click to expand the Security & Identity section
-    fireEvent.click(screen.getByText(/Security & Identity/i));
-
     await waitFor(() => {
       expect(screen.getByText(/Sign inter-agent/i)).toBeInTheDocument();
     });
@@ -76,26 +70,14 @@ describe("Agent Detail — Config Sections (Phase 15.4)", () => {
   it("shows all three security toggle descriptions", async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText(/Security & Identity/i)).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByText(/Security & Identity/i));
-
-    await waitFor(() => {
       expect(screen.getByText(/Sign inter-agent/i)).toBeInTheDocument();
       expect(screen.getByText(/Sign MCP invocations/i)).toBeInTheDocument();
       expect(screen.getByText(/Require peer verification/i)).toBeInTheDocument();
     });
   });
 
-  it("shows identity fields when security section is expanded", async () => {
+  it("shows identity fields (section auto-opens)", async () => {
     renderPage();
-    await waitFor(() => {
-      expect(screen.getByText(/Security & Identity/i)).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByText(/Security & Identity/i));
-
     await waitFor(() => {
       expect(screen.getByTestId("identity-section")).toBeInTheDocument();
     });
@@ -125,6 +107,42 @@ describe("Agent Detail — Config Sections (Phase 15.4)", () => {
     await waitFor(() => {
       expect(screen.getByTestId("user-memory-section")).toBeInTheDocument();
       expect(screen.getByText(/Enable Memory Tools/i)).toBeInTheDocument();
+    });
+  });
+
+  // ─── Agentic Improvements ─────────────────────────────────────────
+
+  it("renders Session Management section header", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/Session Management/i)).toBeInTheDocument();
+    });
+  });
+
+  it("renders auto-snapshot toggle from mock data (enabled)", async () => {
+    renderPage();
+    // Session Management auto-opens because autoSnapshot.enabled is true
+    await waitFor(() => {
+      expect(screen.getByTestId("auto-snapshot-enabled")).toBeInTheDocument();
+    });
+    const toggle = screen.getByTestId("auto-snapshot-enabled") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+  });
+
+  it("renders forking toggle as disabled (coming soon)", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("forking-enabled")).toBeInTheDocument();
+    });
+    const toggle = screen.getByTestId("forking-enabled") as HTMLInputElement;
+    expect(toggle.disabled).toBe(true);
+  });
+
+  it("shows identity section with agentDid from mock data", async () => {
+    renderPage();
+    await waitFor(() => {
+      // Mock data has identity.agentDid = "did:eddi:agent-1"
+      expect(screen.getByDisplayValue("did:eddi:agent-1")).toBeInTheDocument();
     });
   });
 });

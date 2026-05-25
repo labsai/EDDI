@@ -670,12 +670,29 @@ export const handlers = [
         description: "24/7 customer support with order tracking, returns processing, and escalation handling",
         a2aSkills: ["order-tracking", "return-processing", "escalation"],
         memory: { memoryType: "longTerm", maxConversationSteps: 100 },
+        // Agentic improvements — identity, session management
+        identity: {
+          agentDid: "did:eddi:agent-1",
+          publicKey: "MCowBQYDK2VwAyEAexampleKey1234567890abcdef",
+          keys: [
+            { version: 1, publicKeyB64: "MCowBQYDK2VwAyEAexampleKey1234567890abcdef", validFromMs: 1700000000000, validUntilMs: 0 },
+          ],
+        },
+        sessionManagement: {
+          autoSnapshot: {
+            enabled: true,
+            triggerOn: ["before_tool"],
+          },
+          forkingEnabled: false,
+          maxCheckpointsPerConversation: 10,
+          maxForksPerConversation: 5,
+        },
       },
       agent3: {
         workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf3?version=1"],
         channels: [
           { type: "web", config: { allowedOrigins: ["https://clinic.example.com"] } },
-          { type: "slack", config: { channelId: "C0123ABCDEF", botToken: "${eddivault:slack-bot-token}", signingSecret: "${eddivault:slack-signing-secret}", groupId: "group-123" } },
+          { type: "slack", config: { channelId: "C0123ABCDEF", botToken: "${vault:slack-bot-token}", signingSecret: "${vault:slack-signing-secret}", groupId: "group-123" } },
         ],
         a2aEnabled: false,
         description: "Patient appointment scheduling with slot extraction and calendar integration",
@@ -714,7 +731,7 @@ export const handlers = [
         workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2"],
         channels: [
           { type: "web", config: { allowedOrigins: ["https://hr.example.com"] } },
-          { type: "slack", config: { channelId: "C0HR_ONBOARD", botToken: "${eddivault:slack-bot-token}", signingSecret: "${eddivault:slack-signing-secret}" } },
+          { type: "slack", config: { channelId: "C0HR_ONBOARD", botToken: "${vault:slack-bot-token}", signingSecret: "${vault:slack-signing-secret}" } },
         ],
         a2aEnabled: false,
         description: "Walks new hires through IT setup, policy acknowledgement, and benefits enrollment",
@@ -733,7 +750,7 @@ export const handlers = [
         workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2"],
         channels: [
           { type: "web", config: { allowedOrigins: ["https://internal.example.com"] } },
-          { type: "slack", config: { channelId: "C0IT_HELP", botToken: "${eddivault:slack-bot-token}", signingSecret: "${eddivault:slack-signing-secret}", groupId: "group-it" } },
+          { type: "slack", config: { channelId: "C0IT_HELP", botToken: "${vault:slack-bot-token}", signingSecret: "${vault:slack-signing-secret}", groupId: "group-it" } },
         ],
         a2aEnabled: true,
         description: "Troubleshoots common IT issues, resets passwords, and creates Jira tickets for escalation",
@@ -1330,7 +1347,7 @@ export const handlers = [
             path: "/v1/orders/[[${orderId}]]",
             method: "GET",
             headers: {
-              Authorization: "Bearer ${eddivault:ecommerce-api-key}",
+              Authorization: "Bearer ${vault:ecommerce-api-key}",
               Accept: "application/json",
             },
             queryParams: {},
@@ -1359,7 +1376,7 @@ export const handlers = [
             path: "/v2/issues",
             method: "POST",
             headers: {
-              Authorization: "Basic ${eddivault:jira-api-token}",
+              Authorization: "Basic ${vault:jira-api-token}",
               Accept: "application/json",
             },
             queryParams: {},
@@ -1391,7 +1408,7 @@ export const handlers = [
             path: "/v3/mail/send",
             method: "POST",
             headers: {
-              Authorization: "Bearer ${eddivault:sendgrid-api-key}",
+              Authorization: "Bearer ${vault:sendgrid-api-key}",
             },
             queryParams: {},
             contentType: "application/json",
@@ -1486,6 +1503,22 @@ export const handlers = [
                 httpCodeValidator: {},
               },
             ],
+          },
+          // Agentic improvements
+          counterweight: {
+            enabled: true,
+            level: "cautious",
+            placement: "suffix",
+            customInstructions: [],
+          },
+          identityMasking: {
+            enabled: false,
+            rules: [],
+          },
+          toolResponseLimits: {
+            defaultMaxChars: 50000,
+            truncationStrategy: "truncate",
+            perToolLimits: { webscraper: 2000 },
           },
         },
       ],
@@ -1705,7 +1738,7 @@ export const handlers = [
       name: "Enterprise Document Tools Server",
       mcpServerUrl: "https://mcp.internal.example.com/v1",
       transport: "http",
-      apiKey: "${eddivault:mcp-doc-key}",
+      apiKey: "${vault:mcp-doc-key}",
       timeoutMs: 30000,
       toolsWhitelist: ["search_documents", "index_document", "get_document_metadata"],
       toolsBlacklist: ["delete_document"],
@@ -1751,7 +1784,7 @@ export const handlers = [
       embeddingProvider: "openai",
       embeddingParameters: {
         model: "text-embedding-3-small",
-        apiKey: "${eddivault:openai-key}",
+        apiKey: "${vault:openai-key}",
       },
       storeType: "pgvector",
       storeParameters: {
@@ -1759,8 +1792,8 @@ export const handlers = [
         port: "5432",
         database: "eddi",
         table: "embeddings",
-        user: "${eddivault:pg-user}",
-        password: "${eddivault:pg-password}",
+        user: "${vault:pg-user}",
+        password: "${vault:pg-password}",
       },
       chunkStrategy: "recursive",
       chunkSize: 512,
@@ -2714,8 +2747,8 @@ export const secretsHandlers = [
     const tenantId = params.tenantId as string;
     const keyName = params.keyName as string;
     const ref = tenantId === "default"
-      ? `\${eddivault:${keyName}}`
-      : `\${eddivault:${tenantId}/${keyName}}`;
+      ? `\${vault:${keyName}}`
+      : `\${vault:${tenantId}/${keyName}}`;
     return HttpResponse.json(
       {
         reference: ref,
@@ -2742,8 +2775,8 @@ export const secretsHandlers = [
     const tenantId = params.tenantId as string;
     const keyName = params.keyName as string;
     const ref = tenantId === "default"
-      ? `\${eddivault:${keyName}}`
-      : `\${eddivault:${tenantId}/${keyName}}`;
+      ? `\${vault:${keyName}}`
+      : `\${vault:${tenantId}/${keyName}}`;
     return HttpResponse.json(
       { reference: ref, tenantId, keyName },
       { status: 200 },

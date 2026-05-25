@@ -54,6 +54,7 @@ import {
   CapabilitiesSection,
   UserMemorySection,
   MemoryPolicySection,
+  SessionManagementSection,
   ChannelsSection,
 } from "@/components/editors/agent-config-sections";
 
@@ -620,6 +621,9 @@ export function AgentDetailPage() {
 
       {/* Memory Policy */}
       <MemoryPolicySection agent={agent} agentId={id!} version={resolvedVersion} />
+
+      {/* Session Management */}
+      <SessionManagementSection agent={agent} agentId={id!} version={resolvedVersion} />
 
       {/* Channel Connectors */}
       <ChannelsSection agent={agent} agentId={id!} version={resolvedVersion} />

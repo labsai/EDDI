@@ -92,4 +92,19 @@ describe("Rules Editor", () => {
       expect(screen.getByTestId("form-view")).toBeInTheDocument();
     });
   });
+
+  it("condition type dropdown includes deploymentContext and capabilityMatch", async () => {
+    renderPage("rules");
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByTestId("condition-type-select").length
+      ).toBeGreaterThan(0);
+    });
+
+    const select = screen.getAllByTestId("condition-type-select")[0] as HTMLSelectElement;
+    const options = Array.from(select.options).map((o) => o.value);
+    expect(options).toContain("deploymentContext");
+    expect(options).toContain("capabilityMatch");
+  });
 });

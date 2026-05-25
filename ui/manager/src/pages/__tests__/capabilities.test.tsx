@@ -34,7 +34,7 @@ describe("CapabilitiesPage", () => {
 
   it("renders the page title", () => {
     renderPage();
-    expect(screen.getByText("Capability Discovery")).toBeInTheDocument();
+    expect(screen.getByText(/Capability (Registry|Discovery)/i)).toBeInTheDocument();
   });
 
   it("renders the search input", () => {
@@ -57,13 +57,45 @@ describe("CapabilitiesPage", () => {
   it("renders skill buttons from mock data", async () => {
     renderPage();
     await waitFor(() => {
+      // These skill names come from the existing ALL_SKILLS mock in handlers.ts
       expect(screen.getByTestId("skill-customer-support")).toBeInTheDocument();
       expect(screen.getByTestId("skill-faq")).toBeInTheDocument();
       expect(screen.getByTestId("skill-contract-analysis")).toBeInTheDocument();
     });
   });
 
-  it("shows matching agents when a skill is clicked", async () => {
+  it("shows the registry overview table", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("registry-table")).toBeInTheDocument();
+    });
+  });
+
+  it("renders registry rows for each skill", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("registry-row-customer-support")).toBeInTheDocument();
+      expect(screen.getByTestId("registry-row-faq")).toBeInTheDocument();
+      expect(screen.getByTestId("registry-row-contract-analysis")).toBeInTheDocument();
+    });
+  });
+
+  it("expands a registry row to show agents", async () => {
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("registry-row-customer-support")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId("registry-row-customer-support"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("registry-expanded-customer-support")).toBeInTheDocument();
+    });
+  });
+
+  it("shows matching agents when a skill pill is clicked", async () => {
     renderPage();
     const user = userEvent.setup();
 

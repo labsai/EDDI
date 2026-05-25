@@ -44,6 +44,8 @@ const CONDITION_TYPES = [
   "connector",
   "occurrence",
   "dynamicValueMatcher",
+  "deploymentContext",
+  "capabilityMatch",
 ] as const;
 
 const EXECUTION_STRATEGIES = ["currentStepOnly", "lastStepOnly", "anyStep"] as const;
@@ -237,6 +239,33 @@ function ConditionEditor({
     });
   };
 
+  /** Provide sensible default configs when switching condition type */
+  const handleTypeChange = (newType: string) => {
+    let configs: Record<string, string>;
+    switch (newType) {
+      case "inputmatcher":
+        configs = { expressions: "", occurrence: "currentStep" };
+        break;
+      case "actionmatcher":
+        configs = { actions: "", occurrence: "currentStep" };
+        break;
+      case "occurrence":
+        configs = { maxTimesOccurred: "1", behaviorRuleName: "" };
+        break;
+      case "deploymentContext":
+        configs = { when: "production", tagMatches: "" };
+        break;
+      case "capabilityMatch":
+        configs = { skill: "", strategy: "highest_confidence", attributes: "" };
+        break;
+      default:
+        // negation, connector, dynamicValueMatcher — no preset configs
+        configs = {};
+        break;
+    }
+    onChange({ ...condition, type: newType, configs });
+  };
+
   return (
     <div
       className={`rounded-lg border bg-card ${depth > 0 ? "border-dashed border-muted-foreground/30" : "border-border"}`}
@@ -256,14 +285,18 @@ function ConditionEditor({
         </button>
         <select
           value={condition.type}
-          onChange={(e) => onChange({ ...condition, type: e.target.value })}
+          onChange={(e) => handleTypeChange(e.target.value)}
           disabled={readOnly}
           className="h-7 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
           data-testid="condition-type-select"
         >
           {CONDITION_TYPES.map((ct) => (
             <option key={ct} value={ct}>
-              {ct}
+              {ct === "deploymentContext"
+                ? t("rulesEditor.condDeploymentContext", "deploymentContext")
+                : ct === "capabilityMatch"
+                  ? t("rulesEditor.condCapabilityMatch", "capabilityMatch")
+                  : ct}
             </option>
           ))}
         </select>

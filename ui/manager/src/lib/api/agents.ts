@@ -28,6 +28,8 @@ export interface Agent {
   enableMemoryTools?: boolean;
   userMemoryConfig?: UserMemoryConfig;
   memoryPolicy?: MemoryPolicy;
+  // Wave 6 — Session Management
+  sessionManagement?: SessionManagement;
 }
 
 export interface ChannelConnector {
@@ -47,6 +49,15 @@ export interface StrictWriteDiscipline {
 export interface AgentIdentity {
   agentDid?: string;
   publicKey?: string;
+  /** Versioned key list for rotation. Falls back to publicKey when empty. */
+  keys?: AgentPublicKey[];
+}
+
+export interface AgentPublicKey {
+  version?: number;
+  publicKeyB64?: string;
+  validFromMs?: number;
+  validUntilMs?: number;
 }
 
 export interface SecurityConfig {
@@ -91,6 +102,21 @@ export interface DreamConfig {
   maxCostPerRun?: number;
   batchSize?: number;
   maxUsersPerRun?: number;
+}
+
+// Wave 6 — Session Management
+
+export interface SessionManagement {
+  autoSnapshot?: AutoSnapshot;
+  forkingEnabled?: boolean;
+  maxForksPerConversation?: number;
+  maxCheckpointsPerConversation?: number;
+}
+
+export interface AutoSnapshot {
+  enabled?: boolean;
+  /** Events that trigger auto-snapshots: "before_tool", "before_action" */
+  triggerOn?: string[];
 }
 
 export interface DeploymentStatus {
