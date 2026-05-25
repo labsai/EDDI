@@ -484,6 +484,12 @@ function CapabilityAttributesEditor({
   }
 
   function removeAttribute(key: string) {
+    // Cancel any pending debounced edit for this (or any) key to prevent
+    // a stale commitValue callback from resurrecting the deleted attribute
+    if (valueTimer.current) {
+      clearTimeout(valueTimer.current);
+      valueTimer.current = null;
+    }
     const next = { ...attrsRef.current };
     delete next[key];
     onChange(next);

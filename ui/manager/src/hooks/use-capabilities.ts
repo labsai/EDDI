@@ -40,6 +40,13 @@ export function useSkillRegistry() {
   }));
 
   const isLoading = skillsLoading || matchQueries.some((q) => q.isLoading);
+  const matchError = matchQueries.some((q) => q.isError);
 
-  return { registry, isLoading, isError: skillsError, refetchSkills };
+  return {
+    registry,
+    isLoading,
+    isError: skillsError || matchError,
+    refetchSkills,
+    refetchMatches: () => matchQueries.forEach((q) => { if (q.isError) void q.refetch(); }),
+  };
 }

@@ -38,7 +38,7 @@ export function CapabilitiesPage() {
     searchTerm,
     strategy,
   );
-  const { registry, isLoading: registryLoading } = useSkillRegistry();
+  const { registry, isLoading: registryLoading, isError: registryError, refetchMatches } = useSkillRegistry();
 
   const filteredSkills = useMemo(() => {
     if (!allSkills) return [];
@@ -119,6 +119,14 @@ export function CapabilitiesPage() {
             <AlertCircle className="h-8 w-8 text-destructive" />
             <p className="mt-2 text-sm text-destructive">{t("common.error")}</p>
             <button onClick={() => refetchSkills()} className="mt-2 text-xs text-primary hover:underline">{t("common.retry")}</button>
+          </div>
+        )}
+
+        {!skillsError && registryError && (
+          <div className="flex flex-col items-center justify-center rounded-xl border border-amber-500/30 bg-amber-500/5 py-4">
+            <AlertCircle className="h-6 w-6 text-amber-500" />
+            <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300">{t("capabilities.partialError", "Some skill queries failed")}</p>
+            <button onClick={() => refetchMatches()} className="mt-1.5 text-xs text-primary hover:underline">{t("common.retry")}</button>
           </div>
         )}
 
