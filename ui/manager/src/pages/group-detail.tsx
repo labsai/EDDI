@@ -24,7 +24,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { BackLink } from "@/components/shared/back-link";
 import { ErrorState } from "@/components/shared/error-state";
 import { cn } from "@/lib/utils";
-import { STYLE_INFO, type DiscussionStyle } from "@/lib/api/groups";
+import { STYLE_INFO, type DiscussionStyle, type AgentGroupConfiguration } from "@/lib/api/groups";
 import { STYLE_THEME } from "@/components/groups/discussion-transcript";
 import { safeFormatDate } from "@/components/groups/group-utils";
 
@@ -141,6 +141,12 @@ export function GroupDetailPage() {
   const styleInfo = STYLE_INFO[groupConfig.style] ?? STYLE_INFO.ROUND_TABLE;
   const styleTheme = STYLE_THEME[groupConfig.style as DiscussionStyle] ?? STYLE_THEME.ROUND_TABLE;
 
+  // Normalize: ensure members is always an array so downstream components
+  // (GroupConfigPanel, badge, etc.) never crash on null/undefined.
+  const safeConfig: AgentGroupConfiguration = groupConfig.members
+    ? groupConfig
+    : { ...groupConfig, members: [] };
+
   // Determine whether to show streaming or static transcript
   const isStreamActive = streamState.isStreaming || (streamState.state !== "CREATED" && !selectedConvId);
 
@@ -231,7 +237,7 @@ export function GroupDetailPage() {
           )}
           <Badge variant="secondary">
             <Users className="me-1 h-3 w-3" />
-            {groupConfig.members?.length ?? 0}
+            {safeConfig.members.length}
           </Badge>
 
           {/* History dropdown — visible on mobile, and on all sizes when fullscreen */}
@@ -316,7 +322,7 @@ export function GroupDetailPage() {
         {/* RIGHT: Config panel — hidden on small screens and in fullscreen */}
         {showConfig && !isFullscreen && (
           <div className="w-72 shrink-0 rounded-xl border border-border bg-card overflow-hidden max-xl:hidden">
-            <GroupConfigPanel config={groupConfig} groupId={groupId} groupVersion={version} />
+            <GroupConfigPanel config={safeConfig} groupId={groupId} groupVersion={version} />
           </div>
         )}
       </div>
