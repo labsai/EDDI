@@ -43,6 +43,7 @@
     "triggers": "触发器",
     "capabilities": "能力",
     "sync": "同步",
+    "channels": "频道",
     "userConversations": "用户对话",
     "userData": "用户数据",
     "variables": "变量"
@@ -97,6 +98,10 @@
     "chat": {
       "title": "聊天",
       "subtitle": "与已部署的 Agents 对话"
+    },
+    "channels": {
+      "title": "频道",
+      "subtitle": "将代理和组连接到 Slack 等消息平台"
     },
     "groups": {
       "title": "群组",
@@ -408,6 +413,10 @@
       "toolCalls": "工具调用",
       "toolCall": "工具调用",
       "toolResult": "结果"
+    },
+    "channels": {
+      "title": "频道",
+      "subtitle": "将代理和群组连接到 Slack 等消息平台"
     },
     "context": {
       "conversationId": "对话 ID",
@@ -1188,6 +1197,10 @@
         "step4Title": "开始聊天",
         "step4Desc": "输入消息并按回车。系统会运用您所配置的工作流、工具及 LLM 进行回复。"
       },
+      "channels": {
+        "title": "频道",
+        "subtitle": "将代理和群组连接到 Slack 等消息平台"
+      },
       "resources": {
         "title": "资源导览",
         "step1Title": "插件库",
@@ -1607,5 +1620,76 @@
       "conAdvocate1": "Con Advocate 1",
       "conAdvocate2": "Con Advocate 2"
     }
+  },
+  "channels": {
+    "agentIdPlaceholder": "处理消息的代理 ID",
+    "botToken": "机器人令牌",
+    "botTokenHint": "机器人用户 OAuth 令牌。使用保管库引用以提高安全性。",
+    "botTokenPlaceholder": "xoxb-… 或 ${vault:slack-bot-token}",
+    "channel": "频道",
+    "channelId": "Slack 频道 ID",
+    "channelIdCol": "频道 ID",
+    "channelIdHint": "右键点击 Slack 频道 → 查看频道详情 → 复制频道 ID",
+    "channelsPlural": "频道",
+    "channelType": "频道类型",
+    "confirmDelete": "删除频道？",
+    "confirmDeleteDesc": "此频道集成将被永久删除。",
+    "create": "创建频道",
+    "createTitle": "创建频道集成",
+    "defaultAgentId": "默认代理 ID",
+    "defaultTargetHint": "默认目标处理所有不匹配触发关键词的消息。创建后可添加更多目标。",
+    "empty": "暂无频道",
+    "emptyDesc": "创建频道集成以将代理连接到 Slack。",
+    "name": "名称",
+    "namePlaceholder": "例如 Engineering AI Hub",
+    "openSlackApps": "打开 Slack 应用仪表板",
+    "searchPlaceholder": "搜索频道…",
+    "signingSecret": "签名密钥",
+    "signingSecretHint": "来自您的 Slack 应用基本信息页面。",
+    "signingSecretPlaceholder": "十六进制字符串或 ${vault:slack-signing-secret}",
+    "slackSetupGuide": "Slack 设置指南",
+    "slackSetupSummary": "创建 Slack 应用，配置机器人令牌范围（app_mentions:read、chat:write、im:history、channels:history、groups:history），然后在此处粘贴凭据。",
+    "target": "目标",
+    "targets": "目标",
+    "targetsCol": "目标",
+    "type": "类型",
+    "unnamed": "未命名频道",
+    "version": "版本"
+  },
+  "channelDetail": {
+    "addTarget": "添加目标",
+    "addTrigger": "添加触发器…",
+    "agentId": "代理 ID",
+    "botToken": "机器人令牌",
+    "channelId": "Slack 频道 ID",
+    "cooldown": "冷却时间（秒）",
+    "general": "常规",
+    "groupId": "组 ID",
+    "isDefault": "默认",
+    "maxCost": "每日最大 $",
+    "maxDaily": "每日最大",
+    "name": "名称",
+    "observe": "观察",
+    "observeDesc": "被动监控并有选择地响应",
+    "observeKeywords": "触发关键词",
+    "observeMimeTypes": "触发 MIME 类型",
+    "observeMode": "观察模式",
+    "observeSettings": "观察模式设置",
+    "platformConfig": "平台配置",
+    "rawConfig": "原始配置",
+    "removeTarget": "移除",
+    "requiredEvents": "所需事件订阅：",
+    "requiredScopes": "所需机器人令牌范围：",
+    "setDefault": "设为默认",
+    "signingSecret": "签名密钥",
+    "targetName": "名称",
+    "targets": "消息路由目标",
+    "targetType": "类型",
+    "triggerHint": "用户输入“关键词：消息”以路由到此目标",
+    "triggerKeywords": "触发关键词",
+    "triggers": "触发器",
+    "type": "频道类型",
+    "webhookHint": "将此 URL 粘贴到您的 Slack 应用的 Event Subscriptions → Request URL 字段中。",
+    "webhookUrl": "Webhook URL"
   }
 }

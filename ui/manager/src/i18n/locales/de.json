@@ -43,6 +43,7 @@
     "triggers": "Auslöser",
     "capabilities": "Fähigkeiten",
     "sync": "Synchronisierung",
+    "channels": "Kanäle",
     "userConversations": "Nutzer-Konversationen",
     "userData": "Nutzerdaten",
     "variables": "Variablen"
@@ -97,6 +98,10 @@
     "chat": {
       "title": "Chat",
       "subtitle": "Mit Ihren bereitgestellten Agents sprechen"
+    },
+    "channels": {
+      "title": "Kanäle",
+      "subtitle": "Verbinden Sie Agenten und Gruppen mit Messaging-Plattformen wie Slack"
     },
     "groups": {
       "title": "Gruppen",
@@ -408,6 +413,10 @@
       "toolCalls": "Werkzeugaufrufe",
       "toolCall": "Werkzeugaufruf",
       "toolResult": "Ergebnis"
+    },
+    "channels": {
+      "title": "Kanäle",
+      "subtitle": "Agenten und Gruppen mit Messaging-Plattformen wie Slack verbinden"
     },
     "context": {
       "conversationId": "Gesprächs-ID",
@@ -1188,6 +1197,10 @@
         "step4Title": "Chat starten",
         "step4Desc": "Mit Eingabe antwortet der Agent sofort unter Nutzung Ihrer Tools."
       },
+      "channels": {
+        "title": "Kanäle",
+        "subtitle": "Agenten und Gruppen mit Messaging-Plattformen wie Slack verbinden"
+      },
       "resources": {
         "title": "Ressourcen-Tour",
         "step1Title": "Erweiterungs-Bibliothek",
@@ -1607,5 +1620,76 @@
     "kbdNavigate": "navigieren",
     "kbdSelect": "auswählen",
     "kbdClose": "schließen"
+  },
+  "channels": {
+    "agentIdPlaceholder": "Agenten-ID zur Nachrichtenverarbeitung",
+    "botToken": "Bot-Token",
+    "botTokenHint": "Bot-Benutzer-OAuth-Token. Verwenden Sie eine Tresor-Referenz für mehr Sicherheit.",
+    "botTokenPlaceholder": "xoxb-… oder ${vault:slack-bot-token}",
+    "channel": "Kanal",
+    "channelId": "Slack-Kanal-ID",
+    "channelIdCol": "Kanal-ID",
+    "channelIdHint": "Rechtsklick auf einen Slack-Kanal → Kanaldetails anzeigen → Kanal-ID kopieren",
+    "channelsPlural": "Kanäle",
+    "channelType": "Kanaltyp",
+    "confirmDelete": "Kanal löschen?",
+    "confirmDeleteDesc": "Diese Kanalintegration wird dauerhaft entfernt.",
+    "create": "Kanal erstellen",
+    "createTitle": "Kanalintegration erstellen",
+    "defaultAgentId": "Standard-Agenten-ID",
+    "defaultTargetHint": "Das Standardziel verarbeitet alle Nachrichten, die keinem Trigger-Schlüsselwort entsprechen. Nach der Erstellung können weitere Ziele hinzugefügt werden.",
+    "empty": "Noch keine Kanäle",
+    "emptyDesc": "Erstellen Sie eine Kanalintegration, um Agenten mit Slack zu verbinden.",
+    "name": "Name",
+    "namePlaceholder": "z. B. Engineering AI Hub",
+    "openSlackApps": "Slack-App-Dashboard öffnen",
+    "searchPlaceholder": "Kanäle suchen…",
+    "signingSecret": "Signierungsgeheimnis",
+    "signingSecretHint": "Von der Seite „Grundlegende Informationen“ Ihrer Slack-App.",
+    "signingSecretPlaceholder": "Hex-String oder ${vault:slack-signing-secret}",
+    "slackSetupGuide": "Slack-Einrichtungsanleitung",
+    "slackSetupSummary": "Erstellen Sie eine Slack-App, konfigurieren Sie Bot-Token-Bereiche (app_mentions:read, chat:write, im:history, channels:history, groups:history) und fügen Sie die Anmeldedaten hier ein.",
+    "target": "Ziel",
+    "targets": "Ziele",
+    "targetsCol": "Ziele",
+    "type": "Typ",
+    "unnamed": "Unbenannter Kanal",
+    "version": "Version"
+  },
+  "channelDetail": {
+    "addTarget": "Ziel hinzufügen",
+    "addTrigger": "Trigger hinzufügen…",
+    "agentId": "Agenten-ID",
+    "botToken": "Bot-Token",
+    "channelId": "Slack-Kanal-ID",
+    "cooldown": "Abklingzeit (s)",
+    "general": "Allgemein",
+    "groupId": "Gruppen-ID",
+    "isDefault": "Standard",
+    "maxCost": "Max €/Tag",
+    "maxDaily": "Max/Tag",
+    "name": "Name",
+    "observe": "Beobachten",
+    "observeDesc": "Passiv überwachen und selektiv antworten",
+    "observeKeywords": "Trigger-Schlüsselwörter",
+    "observeMimeTypes": "Trigger-MIME-Typen",
+    "observeMode": "Beobachtungsmodus",
+    "observeSettings": "Einstellungen Beobachtungsmodus",
+    "platformConfig": "Plattformkonfiguration",
+    "rawConfig": "Rohkonfiguration",
+    "removeTarget": "Entfernen",
+    "requiredEvents": "Erforderliche Event-Abonnements:",
+    "requiredScopes": "Erforderliche Bot-Token-Bereiche:",
+    "setDefault": "Als Standard festlegen",
+    "signingSecret": "Signierungsgeheimnis",
+    "targetName": "Name",
+    "targets": "Nachrichtenrouting-Ziele",
+    "targetType": "Typ",
+    "triggerHint": "Benutzer geben „Schlüsselwort: Nachricht“ ein, um an dieses Ziel weiterzuleiten",
+    "triggerKeywords": "Trigger-Schlüsselwörter",
+    "triggers": "Trigger",
+    "type": "Kanaltyp",
+    "webhookHint": "Fügen Sie diese URL in das Feld „Request URL“ unter Event Subscriptions Ihrer Slack-App ein.",
+    "webhookUrl": "Webhook-URL"
   }
 }

@@ -43,6 +43,7 @@
     "triggers": "トリガー",
     "capabilities": "ケイパビリティ",
     "sync": "同期",
+    "channels": "チャンネル",
     "userConversations": "ユーザー会話",
     "userData": "ユーザーデータ",
     "variables": "変数"
@@ -97,6 +98,10 @@
     "chat": {
       "title": "チャット",
       "subtitle": "デプロイ済み Agent と対話"
+    },
+    "channels": {
+      "title": "チャネル",
+      "subtitle": "エージェントとグループを Slack などのメッセージングプラットフォームに接続"
     },
     "groups": {
       "title": "グループ",
@@ -408,6 +413,10 @@
       "toolCalls": "ツール呼び出し",
       "toolCall": "ツール呼び出し",
       "toolResult": "結果"
+    },
+    "channels": {
+      "title": "チャンネル",
+      "subtitle": "エージェントやグループをSlackなどに接続"
     },
     "context": {
       "conversationId": "会話ID",
@@ -1188,6 +1197,10 @@
         "step4Title": "チャットの開始",
         "step4Desc": "メッセージを入力してEnterキーを押します。エージェントは構成したワークフロー、ツール、LLMを使用して応答します。"
       },
+      "channels": {
+        "title": "チャンネル",
+        "subtitle": "エージェントやグループをSlackなどに接続"
+      },
       "resources": {
         "title": "リソース ツアー",
         "step1Title": "拡張ライブラリ",
@@ -1607,5 +1620,76 @@
       "conAdvocate1": "Con Advocate 1",
       "conAdvocate2": "Con Advocate 2"
     }
+  },
+  "channels": {
+    "agentIdPlaceholder": "メッセージを処理するエージェント ID",
+    "botToken": "ボットトークン",
+    "botTokenHint": "ボットユーザー OAuth トークン。セキュリティのためにボールト参照を使用してください。",
+    "botTokenPlaceholder": "xoxb-… または ${vault:slack-bot-token}",
+    "channel": "チャネル",
+    "channelId": "Slack チャネル ID",
+    "channelIdCol": "チャネル ID",
+    "channelIdHint": "Slack チャネルを右クリック → チャネル詳細を表示 → チャネル ID をコピー",
+    "channelsPlural": "チャネル",
+    "channelType": "チャネルタイプ",
+    "confirmDelete": "チャネルを削除しますか？",
+    "confirmDeleteDesc": "このチャネル統合は完全に削除されます。",
+    "create": "チャネルを作成",
+    "createTitle": "チャネル統合を作成",
+    "defaultAgentId": "デフォルトエージェント ID",
+    "defaultTargetHint": "デフォルトターゲットはトリガーキーワードに一致しないすべてのメッセージを処理します。作成後にターゲットを追加できます。",
+    "empty": "チャネルはまだありません",
+    "emptyDesc": "チャネル統合を作成してエージェントを Slack に接続します。",
+    "name": "名前",
+    "namePlaceholder": "例: Engineering AI Hub",
+    "openSlackApps": "Slack アプリダッシュボードを開く",
+    "searchPlaceholder": "チャネルを検索…",
+    "signingSecret": "署名シークレット",
+    "signingSecretHint": "Slack アプリの基本情報ページから取得します。",
+    "signingSecretPlaceholder": "16進数文字列または ${vault:slack-signing-secret}",
+    "slackSetupGuide": "Slack セットアップガイド",
+    "slackSetupSummary": "Slack アプリを作成し、ボットトークンスコープ（app_mentions:read、chat:write、im:history、channels:history、groups:history）を設定し、資格情報をここに貼り付けてください。",
+    "target": "ターゲット",
+    "targets": "ターゲット",
+    "targetsCol": "ターゲット",
+    "type": "タイプ",
+    "unnamed": "名前なしチャネル",
+    "version": "バージョン"
+  },
+  "channelDetail": {
+    "addTarget": "ターゲットを追加",
+    "addTrigger": "トリガーを追加…",
+    "agentId": "エージェント ID",
+    "botToken": "ボットトークン",
+    "channelId": "Slack チャネル ID",
+    "cooldown": "クールダウン（秒）",
+    "general": "一般",
+    "groupId": "グループ ID",
+    "isDefault": "デフォルト",
+    "maxCost": "最大 $/日",
+    "maxDaily": "最大/日",
+    "name": "名前",
+    "observe": "監視",
+    "observeDesc": "受動的に監視し選択的に応答",
+    "observeKeywords": "トリガーキーワード",
+    "observeMimeTypes": "トリガー MIME タイプ",
+    "observeMode": "監視モード",
+    "observeSettings": "監視モード設定",
+    "platformConfig": "プラットフォーム設定",
+    "rawConfig": "生の設定",
+    "removeTarget": "削除",
+    "requiredEvents": "必要なイベントサブスクリプション:",
+    "requiredScopes": "必要なボットトークンスコープ:",
+    "setDefault": "デフォルトに設定",
+    "signingSecret": "署名シークレット",
+    "targetName": "名前",
+    "targets": "メッセージルーティングターゲット",
+    "targetType": "タイプ",
+    "triggerHint": "ユーザーが「キーワード: メッセージ」と入力するとこのターゲットにルーティングされます",
+    "triggerKeywords": "トリガーキーワード",
+    "triggers": "トリガー",
+    "type": "チャネルタイプ",
+    "webhookHint": "この URL を Slack アプリの Event Subscriptions → Request URL フィールドに貼り付けてください。",
+    "webhookUrl": "Webhook URL"
   }
 }

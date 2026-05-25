@@ -1163,6 +1163,36 @@ export const handlers = [
   }),
 
   // --- Resource Stores ---
+
+  // Generic currentversion handler — returns version 1 for all resource types.
+  // Must be registered before the per-store `:id` handlers so it matches first.
+  http.get("*/:store/:plural/:id/currentversion", () => {
+    return HttpResponse.json(1);
+  }),
+
+  // Generic descriptors handler for resource stores — returns a minimal
+  // descriptor list. Must precede per-store `:id` wildcard handlers.
+  http.get("*/:store/:plural/descriptors", ({ request, params }) => {
+    const url = new URL(request.url);
+    const filter = url.searchParams.get("filter") ?? "";
+    const storeVal = params.store as string;
+    // Only handle known resource stores; skip stores with dedicated handlers
+    if (!storeVal.endsWith("store")) return;
+    const storesWithDedicatedHandlers = ["channelstore"];
+    if (storesWithDedicatedHandlers.includes(storeVal)) return;
+
+    const id = filter || "res1";
+    return HttpResponse.json([
+      {
+        resource: `eddi://ai.labs.mock/${storeVal}/${params.plural}/${id}?version=1`,
+        name: `Mock ${id}`,
+        description: "Mock resource descriptor",
+        createdOn: Date.now() - 86400000,
+        lastModifiedOn: Date.now() - 3600000,
+      },
+    ]);
+  }),
+
   // Specific handlers for behavior and httpcalls with realistic mock data
   http.get("*/rulestore/rulesets/:id", ({ request }) => {
     const url = new URL(request.url);
@@ -4240,6 +4270,167 @@ export const backupSyncHandlers = [
       mimeType: "application/pdf",
       sizeBytes: 102400,
     });
+  }),
+
+  // ── Channel Integration Store ──
+
+  http.get("*/channelstore/channels/descriptors", () => {
+    return HttpResponse.json([
+      {
+        resource: "eddi://ai.labs.channel/channelstore/channels/ch1?version=1",
+        name: "Engineering Slack",
+        description: "AI-powered engineering support channel",
+        createdOn: Date.now() - 5 * 86400000,
+        lastModifiedOn: Date.now() - 3600000,
+      },
+      {
+        resource: "eddi://ai.labs.channel/channelstore/channels/ch2?version=2",
+        name: "Customer Support Slack",
+        description: "External customer support integration",
+        createdOn: Date.now() - 10 * 86400000,
+        lastModifiedOn: Date.now() - 7200000,
+      },
+      {
+        resource: "eddi://ai.labs.channel/channelstore/channels/ch3?version=1",
+        name: "HR Onboarding Slack",
+        description: "New hire onboarding channel",
+        createdOn: Date.now() - 2 * 86400000,
+        lastModifiedOn: Date.now() - 1800000,
+      },
+    ]);
+  }),
+
+  http.get("*/channelstore/channels/:id", ({ params }) => {
+    const channelId = params.id as string;
+    const configs: Record<string, object> = {
+      ch1: {
+        name: "Engineering Slack",
+        channelType: "slack",
+        platformConfig: {
+          channelId: "C0123ABCDEF",
+          botToken: "${vault:eng-slack-bot-token}",
+          signingSecret: "${vault:eng-slack-signing-secret}",
+        },
+        targets: [
+          {
+            name: "default",
+            type: "AGENT",
+            targetId: "agent1",
+            triggers: [],
+            observeMode: false,
+            observeConfig: null,
+          },
+          {
+            name: "faq-bot",
+            type: "AGENT",
+            targetId: "agent2",
+            triggers: ["faq", "help-me"],
+            observeMode: false,
+            observeConfig: null,
+          },
+        ],
+        defaultTargetName: "default",
+      },
+      ch2: {
+        name: "Customer Support Slack",
+        channelType: "slack",
+        platformConfig: {
+          channelId: "C0456GHIJKL",
+          botToken: "${vault:support-slack-bot-token}",
+          signingSecret: "${vault:support-slack-signing-secret}",
+        },
+        targets: [
+          {
+            name: "support",
+            type: "AGENT",
+            targetId: "agent1",
+            triggers: [],
+            observeMode: false,
+            observeConfig: null,
+          },
+          {
+            name: "review-panel",
+            type: "GROUP",
+            targetId: "group1",
+            triggers: ["review", "panel"],
+            observeMode: false,
+            observeConfig: null,
+          },
+          {
+            name: "observer",
+            type: "AGENT",
+            targetId: "agent4",
+            triggers: [],
+            observeMode: true,
+            observeConfig: {
+              triggerKeywords: ["invoice", "payment"],
+              triggerMimeTypes: ["application/pdf"],
+              cooldownSeconds: 120,
+              maxDailyResponses: 25,
+              maxCostPerDay: 3.5,
+            },
+          },
+        ],
+        defaultTargetName: "support",
+      },
+      ch3: {
+        name: "HR Onboarding Slack",
+        channelType: "slack",
+        platformConfig: {
+          channelId: "C0789MNOPQR",
+          botToken: "${vault:hr-slack-bot-token}",
+          signingSecret: "${vault:hr-slack-signing-secret}",
+        },
+        targets: [
+          {
+            name: "onboarding",
+            type: "AGENT",
+            targetId: "agent6",
+            triggers: [],
+            observeMode: false,
+            observeConfig: null,
+          },
+        ],
+        defaultTargetName: "onboarding",
+      },
+    };
+    return HttpResponse.json(
+      configs[channelId] ?? configs["ch1"],
+    );
+  }),
+
+  http.post("*/channelstore/channels", () => {
+    const newId = `ch-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `/channelstore/channels/${newId}?version=1`,
+      },
+    });
+  }),
+
+  http.put("*/channelstore/channels/:id", ({ params }) => {
+    const id = params.id as string;
+    return new HttpResponse(null, {
+      status: 200,
+      headers: {
+        Location: `/channelstore/channels/${id}?version=2`,
+      },
+    });
+  }),
+
+  http.post("*/channelstore/channels/:id", ({ params }) => {
+    const id = params.id as string;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `/channelstore/channels/${id}-copy?version=1`,
+      },
+    });
+  }),
+
+  http.delete("*/channelstore/channels/:id", () => {
+    return new HttpResponse(null, { status: 200 });
   }),
 
   // ── Conversation Rerun ──

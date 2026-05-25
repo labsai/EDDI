@@ -30,6 +30,7 @@ import {
   RefreshCw,
   ChevronRight,
   Users,
+  Cable,
   Variable,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -49,6 +50,7 @@ const navSections = [
       { path: "/manage/agents", icon: Bot, labelKey: "nav.agents" },
       { path: "/manage/workflows", icon: Workflow, labelKey: "nav.packages" },
       { path: "/manage/groups", icon: Boxes, labelKey: "nav.groups" },
+      { path: "/manage/channels", icon: Cable, labelKey: "nav.channels" },
       { path: "/manage/capabilities", icon: Layers, labelKey: "nav.capabilities" },
     ],
   },

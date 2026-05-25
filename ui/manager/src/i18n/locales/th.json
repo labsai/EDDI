@@ -43,6 +43,7 @@
     "triggers": "ทริกเกอร์",
     "capabilities": "ขีดความสามารถ",
     "sync": "ซิงค์",
+    "channels": "ช่องทาง",
     "userConversations": "การสนทนาของผู้ใช้",
     "userData": "ข้อมูลผู้ใช้",
     "variables": "ตัวแปร"
@@ -97,6 +98,10 @@
     "chat": {
       "title": "แชท",
       "subtitle": "พูดคุยกับ Agents ที่ Deploy แล้ว"
+    },
+    "channels": {
+      "title": "ช่อง",
+      "subtitle": "เชื่อมต่อเอเจนต์และกลุ่มกับแพลตฟอร์มการส่งข้อความเช่น Slack"
     },
     "groups": {
       "title": "กลุ่ม",
@@ -408,6 +413,10 @@
       "toolCalls": "การเรียกใช้เครื่องมือ",
       "toolCall": "การเรียกใช้เครื่องมือ",
       "toolResult": "ผลลัพธ์"
+    },
+    "channels": {
+      "title": "ช่องทาง",
+      "subtitle": "เชื่อมต่อเอเจนต์และกลุ่มกับแพลตฟอร์มเช่น Slack"
     },
     "context": {
       "conversationId": "รหัสบทสนทนา",
@@ -1188,6 +1197,10 @@
         "step4Title": "สปีคมั่วซั่วกันเลย",
         "step4Desc": "ลองทักมาดูสิสักคำ. มันจะลองนำองค์ความรู้ LLM กฎและเวิร์กโฟลวเอามาตอบกลับเพื่อวิเคราะห์ผลงานของคุณนะ."
       },
+      "channels": {
+        "title": "ช่องทาง",
+        "subtitle": "เชื่อมต่อเอเจนต์และกลุ่มกับแพลตฟอร์มเช่น Slack"
+      },
       "resources": {
         "title": "ทัวร์ แหล่งข้อมูล",
         "step1Title": "Extension เสริมกำลัง",
@@ -1607,5 +1620,76 @@
       "conAdvocate1": "Con Advocate 1",
       "conAdvocate2": "Con Advocate 2"
     }
+  },
+  "channels": {
+    "agentIdPlaceholder": "ID เอเจนต์สำหรับจัดการข้อความ",
+    "botToken": "โทเค็นบอท",
+    "botTokenHint": "โทเค็น OAuth ของบอท ใช้การอ้างอิงตู้นิรภัยเพื่อความปลอดภัย",
+    "botTokenPlaceholder": "xoxb-… หรือ ${vault:slack-bot-token}",
+    "channel": "ช่อง",
+    "channelId": "ID ช่อง Slack",
+    "channelIdCol": "ID ช่อง",
+    "channelIdHint": "คลิกขวาที่ช่อง Slack → ดูรายละเอียดช่อง → คัดลอก ID ช่อง",
+    "channelsPlural": "ช่อง",
+    "channelType": "ประเภทช่อง",
+    "confirmDelete": "ลบช่องนี้?",
+    "confirmDeleteDesc": "การรวมช่องนี้จะถูกลบอย่างถาวร",
+    "create": "สร้างช่อง",
+    "createTitle": "สร้างการรวมช่อง",
+    "defaultAgentId": "ID เอเจนต์เริ่มต้น",
+    "defaultTargetHint": "เป้าหมายเริ่มต้นจัดการข้อความทั้งหมดที่ไม่ตรงกับคำสำคัญทริกเกอร์ คุณสามารถเพิ่มเป้าหมายเพิ่มเติมได้หลังสร้าง",
+    "empty": "ยังไม่มีช่อง",
+    "emptyDesc": "สร้างการรวมช่องเพื่อเชื่อมต่อเอเจนต์กับ Slack",
+    "name": "ชื่อ",
+    "namePlaceholder": "เช่น Engineering AI Hub",
+    "openSlackApps": "เปิดแดชบอร์ดแอป Slack",
+    "searchPlaceholder": "ค้นหาช่อง…",
+    "signingSecret": "ความลับในการลงนาม",
+    "signingSecretHint": "จากหน้าข้อมูลพื้นฐานของแอป Slack",
+    "signingSecretPlaceholder": "สตริงฐานสิบหกหรือ ${vault:slack-signing-secret}",
+    "slackSetupGuide": "คู่มือการตั้งค่า Slack",
+    "slackSetupSummary": "สร้างแอป Slack กำหนดขอบเขตโทเค็นบอท (app_mentions:read, chat:write, im:history, channels:history, groups:history) แล้ววางข้อมูลประจำตัวที่นี่",
+    "target": "เป้าหมาย",
+    "targets": "เป้าหมาย",
+    "targetsCol": "เป้าหมาย",
+    "type": "ประเภท",
+    "unnamed": "ช่องไม่มีชื่อ",
+    "version": "เวอร์ชัน"
+  },
+  "channelDetail": {
+    "addTarget": "เพิ่มเป้าหมาย",
+    "addTrigger": "เพิ่มทริกเกอร์…",
+    "agentId": "ID เอเจนต์",
+    "botToken": "โทเค็นบอท",
+    "channelId": "ID ช่อง Slack",
+    "cooldown": "ระยะเวลาพัก (วินาที)",
+    "general": "ทั่วไป",
+    "groupId": "ID กลุ่ม",
+    "isDefault": "ค่าเริ่มต้น",
+    "maxCost": "สูงสุด $/วัน",
+    "maxDaily": "สูงสุด/วัน",
+    "name": "ชื่อ",
+    "observe": "สังเกตการณ์",
+    "observeDesc": "ตรวจสอบแบบพาสซีฟและตอบกลับแบบเลือก",
+    "observeKeywords": "คำสำคัญทริกเกอร์",
+    "observeMimeTypes": "ประเภท MIME ทริกเกอร์",
+    "observeMode": "โหมดสังเกตการณ์",
+    "observeSettings": "การตั้งค่าโหมดสังเกตการณ์",
+    "platformConfig": "การกำหนดค่าแพลตฟอร์ม",
+    "rawConfig": "การกำหนดค่าดิบ",
+    "removeTarget": "ลบ",
+    "requiredEvents": "การสมัครรับเหตุการณ์ที่จำเป็น:",
+    "requiredScopes": "ขอบเขตโทเค็นบอทที่จำเป็น:",
+    "setDefault": "ตั้งเป็นค่าเริ่มต้น",
+    "signingSecret": "ความลับในการลงนาม",
+    "targetName": "ชื่อ",
+    "targets": "เป้าหมายการกำหนดเส้นทางข้อความ",
+    "targetType": "ประเภท",
+    "triggerHint": "ผู้ใช้พิมพ์ \"คำสำคัญ: ข้อความ\" เพื่อกำหนดเส้นทางไปยังเป้าหมายนี้",
+    "triggerKeywords": "คำสำคัญทริกเกอร์",
+    "triggers": "ทริกเกอร์",
+    "type": "ประเภทช่อง",
+    "webhookHint": "วาง URL นี้ในฟิลด์ Request URL ของ Event Subscriptions ในแอป Slack",
+    "webhookUrl": "URL เว็บฮุก"
   }
 }
