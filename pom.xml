@@ -26,7 +26,7 @@
         <failsafe-plugin.version>3.5.5</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <war-plugin.version>3.4.0</war-plugin.version>
-        <quarkus-mcp-server.version>1.11.1</quarkus-mcp-server.version>
+        <quarkus-mcp-server.version>1.12.1</quarkus-mcp-server.version>
         <skipITs>true</skipITs>
     </properties>
     <dependencyManagement>
@@ -53,7 +53,7 @@
             <dependency>
                 <groupId>io.projectreactor.netty</groupId>
                 <artifactId>reactor-netty-http</artifactId>
-                <version>1.2.8</version>
+                <version>1.3.5</version>
             </dependency>
             <!-- Override postgresql to fix CVE-2026-42198 (client-side DoS via SCRAM iteration count).
                  Vulnerable: 42.2.0–42.7.10. Pulled by langchain4j-pgvector (42.7.7) and Quarkus BOM. -->
@@ -270,7 +270,7 @@
         <dependency>
             <groupId>org.jsoup</groupId>
             <artifactId>jsoup</artifactId>
-            <version>1.22.1</version>
+            <version>1.22.2</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
@@ -284,7 +284,7 @@
         <dependency>
             <groupId>io.swagger.core.v3</groupId>
             <artifactId>swagger-annotations</artifactId>
-            <version>2.2.48</version>
+            <version>2.2.50</version>
         </dependency>
         <dependency>
             <groupId>de.undercouch</groupId>
@@ -424,7 +424,7 @@
         <dependency>
             <groupId>io.nats</groupId>
             <artifactId>jnats</artifactId>
-            <version>2.25.2</version>
+            <version>2.25.3</version>
         </dependency>
         <!-- PostgreSQL JDBC driver + Agroal connection pool (Phase 6.31) -->
         <dependency>
@@ -445,7 +445,7 @@
         <dependency>
             <groupId>io.swagger.parser.v3</groupId>
             <artifactId>swagger-parser</artifactId>
-            <version>2.1.40</version>
+            <version>2.1.42</version>
         </dependency>
 
     </dependencies>
@@ -495,7 +495,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
-                <version>3.5.0</version>
+                <version>3.6.3</version>
                 <executions>
                     <execution>
                         <id>ban-jackson3</id>
