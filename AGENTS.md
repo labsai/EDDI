@@ -487,7 +487,7 @@ public class MyFeatureTask implements ILifecycleTask {
 
     @Override
     public ExtensionDescriptor getExtensionDescriptor() {
-        ExtensionDescriptor descriptor = new ExtensionDescriptor(ID);
+        ExtensionDescriptor descriptor = new ExtensionDescriptor(getId());
         descriptor.setDisplayName("My Feature");
         ConfigValue uriConfig = new ConfigValue("Resource URI", FieldType.URI, false, null);
         descriptor.getConfigs().put("uri", uriConfig);

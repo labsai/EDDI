@@ -27,7 +27,7 @@ public class RestWorkflowStepStore implements IRestWorkflowStepStore {
     @Override
     public List<ExtensionDescriptor> getWorkflowSteps(String filter) {
         return lifecycleExtensionsProvider.keySet().stream()
-                .filter(type -> filter.isEmpty() || type.contains(filter))
+                .filter(type -> filter == null || filter.isEmpty() || type.contains(filter))
                 .map(type -> {
                     Provider<ILifecycleTask> taskProvider = lifecycleExtensionsProvider.get(type);
                     return taskProvider.get().getExtensionDescriptor();

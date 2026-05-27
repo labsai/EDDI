@@ -214,6 +214,11 @@ public class LifecycleManager implements ILifecycleManager {
         for (int index = 0; index < lifecycleTasks.size(); index++) {
             ILifecycleTask task = lifecycleTasks.get(index);
 
+            // Fail-fast: every task must have a non-null TaskId
+            if (task.getId() == null) {
+                throw new LifecycleException("Lifecycle task returned null TaskId: " + task.getClass().getName());
+            }
+
             // Check if execution should be interrupted (graceful shutdown)
             if (Thread.currentThread().isInterrupted()) {
                 throw new LifecycleException.LifecycleInterruptedException("Execution was interrupted!");
@@ -236,7 +241,7 @@ public class LifecycleManager implements ILifecycleManager {
 
             // === OpenTelemetry: create span per task ===
             Span taskSpan = getTracer().spanBuilder("eddi.pipeline.task")
-                    .setAttribute("eddi.task.id", Objects.requireNonNullElse(task.getId().name(), "unknown"))
+                    .setAttribute("eddi.task.id", task.getId().name())
                     .setAttribute("eddi.task.type", Objects.requireNonNullElse(task.getType(), "unknown"))
                     .setAttribute("eddi.task.index", (long) index)
                     .setAttribute("eddi.conversation.id",
@@ -286,7 +291,7 @@ public class LifecycleManager implements ILifecycleManager {
                 taskSpan.recordException(e);
 
                 // Record error counter for dashboards & alerting
-                String errTaskId = task.getId() != null ? task.getId().name() : "unknown";
+                String errTaskId = task.getId().name();
                 String errTaskType = task.getType() != null ? task.getType() : "unknown";
                 String errMeterKey = errTaskId + "|" + errTaskType;
                 TASK_ERROR_COUNTERS.computeIfAbsent(errMeterKey, k -> Counter.builder("eddi.pipeline.task.errors")
@@ -315,7 +320,7 @@ public class LifecycleManager implements ILifecycleManager {
                 // duration histogram (failing tasks with long timeouts are especially
                 // important for latency monitoring during incidents).
                 long durationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
-                String taskId = task.getId() != null ? task.getId().name() : "unknown";
+                String taskId = task.getId().name();
                 String taskType = task.getType() != null ? task.getType() : "unknown";
                 String meterKey = taskId + "|" + taskType;
                 TASK_TIMERS.computeIfAbsent(meterKey, k -> Timer.builder("eddi.pipeline.task.duration")

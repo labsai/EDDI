@@ -195,7 +195,7 @@ public class RulesEvaluationTask implements ILifecycleTask {
 
     @Override
     public ExtensionDescriptor getExtensionDescriptor() {
-        var extensionDescriptor = new ExtensionDescriptor(new TaskId(ID));
+        var extensionDescriptor = new ExtensionDescriptor(TASK_ID);
         extensionDescriptor.setDisplayName("Behavior Rules");
 
         var configValue = new ConfigValue("Resource URI", FieldType.URI, false, null);

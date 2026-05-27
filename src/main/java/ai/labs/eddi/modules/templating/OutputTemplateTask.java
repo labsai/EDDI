@@ -204,7 +204,7 @@ public class OutputTemplateTask implements ILifecycleTask {
 
     @Override
     public ExtensionDescriptor getExtensionDescriptor() {
-        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(new TaskId(ID));
+        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(TASK_ID);
         extensionDescriptor.setDisplayName("Templating");
         return extensionDescriptor;
     }

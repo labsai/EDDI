@@ -44,6 +44,12 @@ import com.fasterxml.jackson.annotation.JsonValue;
  */
 public record TaskId(String name) {
 
+    public TaskId {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("TaskId name cannot be null or blank");
+        }
+    }
+
     /**
      * URI scheme prefix for all task identifiers. Full identifiers have the format
      * {@code eddi://<name>}.
@@ -96,15 +102,15 @@ public record TaskId(String name) {
      * </p>
      *
      * @param value
-     *            the string to deserialize (must not be null)
+     *            the string to deserialize (must not be null or blank)
      * @return a new TaskId instance
      * @throws IllegalArgumentException
-     *             if value is null
+     *             if value is null or blank
      */
     @JsonCreator
     public static TaskId fromValue(String value) {
-        if (value == null) {
-            throw new IllegalArgumentException("TaskId cannot be null");
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("TaskId cannot be null or blank");
         }
 
         if (value.startsWith(SCHEME)) {
