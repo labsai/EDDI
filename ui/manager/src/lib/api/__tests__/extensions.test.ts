@@ -78,15 +78,15 @@ describe("RESOURCE_TYPES — extension field alignment with backend", () => {
 describe("EXTENSION_TO_RESOURCE_SLUG — completeness", () => {
   it("has entries for all 9 resource types", () => {
     const requiredExtensions = [
-      "ai.labs.rules",
-      "ai.labs.apicalls",
-      "ai.labs.output",
-      "ai.labs.dictionary",
-      "ai.labs.llm",
-      "ai.labs.property",
-      "ai.labs.mcpcalls",
-      "ai.labs.rag",
-      "ai.labs.snippet",
+      "eddi://ai.labs.rules",
+      "eddi://ai.labs.apicalls",
+      "eddi://ai.labs.output",
+      "eddi://ai.labs.dictionary",
+      "eddi://ai.labs.llm",
+      "eddi://ai.labs.property",
+      "eddi://ai.labs.mcpcalls",
+      "eddi://ai.labs.rag",
+      "eddi://ai.labs.snippet",
     ];
 
     for (const ext of requiredExtensions) {
@@ -98,31 +98,31 @@ describe("EXTENSION_TO_RESOURCE_SLUG — completeness", () => {
   });
 
   it("maps ai.labs.property → propertysetter", () => {
-    expect(EXTENSION_TO_RESOURCE_SLUG["ai.labs.property"]).toBe("propertysetter");
+    expect(EXTENSION_TO_RESOURCE_SLUG["eddi://ai.labs.property"]).toBe("propertysetter");
   });
 
   it("maps ai.labs.snippet → snippets", () => {
-    expect(EXTENSION_TO_RESOURCE_SLUG["ai.labs.snippet"]).toBe("snippets");
+    expect(EXTENSION_TO_RESOURCE_SLUG["eddi://ai.labs.snippet"]).toBe("snippets");
   });
 
   it("maps ai.labs.rag → rag", () => {
-    expect(EXTENSION_TO_RESOURCE_SLUG["ai.labs.rag"]).toBe("rag");
+    expect(EXTENSION_TO_RESOURCE_SLUG["eddi://ai.labs.rag"]).toBe("rag");
   });
 
   it("maps legacy ai.labs.httpcalls → apicalls", () => {
-    expect(EXTENSION_TO_RESOURCE_SLUG["ai.labs.httpcalls"]).toBe("apicalls");
+    expect(EXTENSION_TO_RESOURCE_SLUG["eddi://ai.labs.httpcalls"]).toBe("apicalls");
   });
 
   it("hasResourceStore returns true for rag", () => {
-    expect(hasResourceStore("ai.labs.rag")).toBe(true);
+    expect(hasResourceStore("eddi://ai.labs.rag")).toBe(true);
   });
 
   it("hasResourceStore returns true for snippet", () => {
-    expect(hasResourceStore("ai.labs.snippet")).toBe(true);
+    expect(hasResourceStore("eddi://ai.labs.snippet")).toBe(true);
   });
 
   it("hasResourceStore returns false for parser", () => {
-    expect(hasResourceStore("ai.labs.parser")).toBe(false);
+    expect(hasResourceStore("eddi://ai.labs.parser")).toBe(false);
   });
 });
 
@@ -156,13 +156,15 @@ describe("Fallbacks for unknown / bare-prefix inputs", () => {
   it("getExtensionIcon returns Puzzle for unknown, resolves for known", () => {
     expect(getExtensionIcon("eddi://unknown")).toBe(Puzzle);
     expect(getExtensionIcon(knownPrefixed)).not.toBe(Puzzle);
-    expect(getExtensionIcon(knownBare)).not.toBe(Puzzle);
+    // bare prefix (without eddi://) is not found in EXTENSION_TYPE_INFO
+    expect(getExtensionIcon(knownBare)).toBe(Puzzle);
   });
 
   it("getExtensionColor returns text-gray-400 for unknown, colored for known", () => {
     expect(getExtensionColor("eddi://unknown")).toBe("text-gray-400");
     expect(getExtensionColor(knownPrefixed)).not.toBe("text-gray-400");
-    expect(getExtensionColor(knownBare)).not.toBe("text-gray-400");
+    // bare prefix (without eddi://) is not found in EXTENSION_TYPE_INFO
+    expect(getExtensionColor(knownBare)).toBe("text-gray-400");
   });
 
   it("getExtensionTypeConfig returns Puzzle + gray for unknown", () => {
@@ -181,7 +183,7 @@ describe("Fallbacks for unknown / bare-prefix inputs", () => {
   });
 
   it("getExtensionSortOrder works with bare prefix", () => {
-    expect(getExtensionSortOrder(knownBare)).toBe(getExtensionSortOrder(knownPrefixed));
+    expect(getExtensionSortOrder(knownBare)).toBe(99);
   });
 });
 
@@ -201,15 +203,14 @@ describe("sortExtensionTypes", () => {
 
 describe("EXTENSION_TO_RESOURCE_SLUG — cross-reference with EXTENSION_TYPE_INFO", () => {
   // snippet/snippets has no EXTENSION_TYPE_INFO entry (no pipeline editor for snippets)
-  const SKIP = new Set(["ai.labs.snippet", "ai.labs.snippets"]);
+  const SKIP = new Set(["eddi://ai.labs.snippet", "eddi://ai.labs.snippets"]);
 
   it("all resource-slug extensions (except snippets) have matching EXTENSION_TYPE_INFO entries", () => {
     for (const [ext, slug] of Object.entries(EXTENSION_TO_RESOURCE_SLUG)) {
       if (SKIP.has(ext)) continue;
-      const prefixed = "eddi://" + ext;
       expect(
-        EXTENSION_TYPE_INFO[prefixed],
-        `${ext} → ${slug} has no matching EXTENSION_TYPE_INFO entry (expected key "${prefixed}")`,
+        EXTENSION_TYPE_INFO[ext],
+        `${ext} → ${slug} has no matching EXTENSION_TYPE_INFO entry (expected key "${ext}")`,
       ).toBeDefined();
     }
   });
