@@ -69,7 +69,7 @@ jobs:
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
 
       - name: Login to registry
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
         with:
           registry: ${{ inputs.registry }}
           username: ${{ inputs.registry == 'quay.io' && secrets.QUAY_USERNAME || secrets.DOCKER_USERNAME }}
