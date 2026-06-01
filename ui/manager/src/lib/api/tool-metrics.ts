@@ -14,18 +14,28 @@ export interface ConversationCosts {
   toolUsage: Record<string, number>;
 }
 
+/**
+ * Matches the backend RestToolHistory.getRateLimit() response:
+ *   Map.of("tool", toolName, "limit", info.limit, "remaining", info.remaining, "resetTimeMs", info.resetTimeMs)
+ */
 export interface ToolRateLimit {
-  toolName: string;
+  tool: string;
   limit: number;
   remaining: number;
-  resetAt: string; // ISO instant
+  resetTimeMs: number;
 }
 
+/**
+ * Matches the backend RestToolHistory.getCacheStats() response:
+ *   Map.of("size", ..., "hits", ..., "misses", ..., "hitRate", ..., "perToolStats", ..., "details", ...)
+ */
 export interface CacheStats {
-  totalHits: number;
-  totalMisses: number;
+  size: number;
+  hits: number;
+  misses: number;
   hitRate: number;
   perToolStats: Record<string, { hits: number; misses: number }>;
+  details: string;
 }
 
 export interface ToolHistoryEntry {
@@ -37,10 +47,13 @@ export interface ToolHistoryEntry {
   timestamp: string;
 }
 
+/**
+ * Matches the backend RestToolHistory.getCosts() response:
+ *   Map.of("totalCost", costTracker.getTotalCost(), "summary", summary)
+ */
 export interface ToolCostSummary {
   totalCost: number;
-  totalCalls: number;
-  perTool: Record<string, { calls: number; cost: number }>;
+  summary: string;
 }
 
 // ==================== API Functions ====================
