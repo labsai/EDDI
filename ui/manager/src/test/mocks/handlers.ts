@@ -3503,10 +3503,10 @@ export const scheduleHandlers = [
     return HttpResponse.json({
       conversationId: "conv-mock",
       totalCost: 0.015,
-      totalToolCalls: 7,
+      toolCallCount: 7,
       toolUsage: {
-        websearch: { calls: 3, totalCost: 0.003 },
-        fetch_weather: { calls: 4, totalCost: 0.002 },
+        websearch: 3,
+        fetch_weather: 4,
       },
     });
   }),
@@ -3704,12 +3704,12 @@ export const scheduleHandlers = [
     return HttpResponse.json({
       conversationId,
       totalCost: 0.0847,
-      totalToolCalls: 14,
+      toolCallCount: 14,
       toolUsage: {
-        "fetch_weather": { calls: 5, totalCost: 0.0125 },
-        "search_products": { calls: 4, totalCost: 0.0098 },
-        "create_ticket": { calls: 3, totalCost: 0.042 },
-        "send_email": { calls: 2, totalCost: 0.0204 },
+        "fetch_weather": 5,
+        "search_products": 4,
+        "create_ticket": 3,
+        "send_email": 2,
       },
     });
   }),
