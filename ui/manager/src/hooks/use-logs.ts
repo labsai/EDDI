@@ -67,7 +67,7 @@ export function useLogStream(filters: LogFilters = {}) {
   const [sseConnected, setSseConnected] = useState(false);
   const [paused, setPaused] = useState(false);
   const handleRef = useRef<AuthEventSourceHandle | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const pausedRef = useRef(false);
   const filterKey = JSON.stringify(filters);
 

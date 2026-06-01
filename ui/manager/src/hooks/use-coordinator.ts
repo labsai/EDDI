@@ -91,7 +91,7 @@ export function useCoordinatorSSE() {
   const [sseConnected, setSseConnected] = useState(false);
   const [eventHistory, setEventHistory] = useState<CoordinatorSnapshot[]>([]);
   const handleRef = useRef<AuthEventSourceHandle | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const connect = useCallback(() => {
     try {
