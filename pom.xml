@@ -17,16 +17,17 @@
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
         <quarkus.platform.version>3.35.4</quarkus.platform.version>
-        <langchain4j-beta.version>1.15.0-beta25</langchain4j-beta.version>
-        <langchain4j.version>1.15.0</langchain4j.version>
-        <langchain4j-libs.version>1.15.0</langchain4j-libs.version>
+        <langchain4j-beta.version>1.15.1-beta25</langchain4j-beta.version>
+        <langchain4j.version>1.15.1</langchain4j.version>
+        <langchain4j-libs.version>1.15.1</langchain4j-libs.version>
         <jandex-maven-plugin.version>3.5.3</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.5.5</surefire-plugin.version>
         <failsafe-plugin.version>3.5.5</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <war-plugin.version>3.4.0</war-plugin.version>
-        <quarkus-mcp-server.version>1.11.1</quarkus-mcp-server.version>
+        <quarkus-mcp-server.version>1.12.1</quarkus-mcp-server.version>
+        <langchain4j-community.version>1.15.0-beta25</langchain4j-community.version>
         <skipITs>true</skipITs>
     </properties>
     <dependencyManagement>
@@ -212,7 +213,7 @@
         <dependency>
             <groupId>dev.langchain4j</groupId>
             <artifactId>langchain4j-community-oci-genai</artifactId>
-            <version>${langchain4j-beta.version}</version>
+            <version>${langchain4j-community.version}</version>
         </dependency>
         <!-- RAG Provider Expansion: additional embedding stores + models -->
         <dependency>
@@ -270,7 +271,7 @@
         <dependency>
             <groupId>org.jsoup</groupId>
             <artifactId>jsoup</artifactId>
-            <version>1.22.1</version>
+            <version>1.22.2</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
@@ -284,7 +285,7 @@
         <dependency>
             <groupId>io.swagger.core.v3</groupId>
             <artifactId>swagger-annotations</artifactId>
-            <version>2.2.48</version>
+            <version>2.2.50</version>
         </dependency>
         <dependency>
             <groupId>de.undercouch</groupId>
@@ -424,7 +425,7 @@
         <dependency>
             <groupId>io.nats</groupId>
             <artifactId>jnats</artifactId>
-            <version>2.25.2</version>
+            <version>2.25.3</version>
         </dependency>
         <!-- PostgreSQL JDBC driver + Agroal connection pool (Phase 6.31) -->
         <dependency>
@@ -445,7 +446,7 @@
         <dependency>
             <groupId>io.swagger.parser.v3</groupId>
             <artifactId>swagger-parser</artifactId>
-            <version>2.1.40</version>
+            <version>2.1.42</version>
         </dependency>
 
     </dependencies>
@@ -495,7 +496,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
-                <version>3.5.0</version>
+                <version>3.6.3</version>
                 <executions>
                     <execution>
                         <id>ban-jackson3</id>
