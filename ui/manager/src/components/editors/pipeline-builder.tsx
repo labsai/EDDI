@@ -1,4 +1,3 @@
-import type React from "react";
 import { useTranslation } from "react-i18next";
 import {
   DndContext,
@@ -17,46 +16,10 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import {
-  GripVertical,
-  Trash2,
-  ExternalLink,
-  FileText,
-  GitBranch,
-  Globe,
-  Brain,
-  MessageSquareText,
-  Settings,
-  FileCode,
-  Plug,
-  Puzzle,
-  ArrowUpCircle,
-} from "lucide-react";
 import { Link } from "react-router-dom";
 import type { WorkflowExtension } from "@/lib/api/workflows";
-import { EXTENSION_TYPE_INFO } from "@/lib/api/extensions";
-
-/* ─── Icon map ─── */
-const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
-  FileText,
-  GitBranch,
-  Globe,
-  Brain,
-  MessageSquareText,
-  Settings,
-  FileCode,
-  Plug,
-};
-
-function getExtensionIcon(type: string): React.ComponentType<{ className?: string }> {
-  const info = EXTENSION_TYPE_INFO[type];
-  if (info && iconMap[info.icon]) return iconMap[info.icon]!;
-  return Puzzle;
-}
-
-function getExtensionLabel(type: string) {
-  return EXTENSION_TYPE_INFO[type]?.label ?? type;
-}
+import { ArrowUpCircle, ExternalLink, GripVertical, Puzzle, Trash2 } from "lucide-react";
+import { getExtensionIcon, getExtensionLabel } from "@/lib/api/extensions";
 
 /** Parse an eddi:// URI to extract the resource type slug and ID */
 function parseExtensionUri(uri: string): { slug: string; id: string } | null {

@@ -89,14 +89,14 @@ export const EDITOR_MAP: Record<string, EditorRenderFn> = {
  * Used by StudioEditorPanel to resolve pipeline stage types.
  */
 export const EXTENSION_TO_SLUG: Record<string, string> = {
-  "ai.labs.rules": "rules",
-  "ai.labs.apicalls": "apicalls",
-  "ai.labs.llm": "llm",
-  "ai.labs.output": "output",
-  "ai.labs.output.template": "output",
-  "ai.labs.property": "propertysetter",
-  "ai.labs.mcpcalls": "mcpcalls",
-  "ai.labs.dictionary": "dictionary",
-  "ai.labs.rag": "rag",
-  "ai.labs.snippets": "snippets",
+  "eddi://ai.labs.rules": "rules",
+  "eddi://ai.labs.apicalls": "apicalls",
+  "eddi://ai.labs.llm": "llm",
+  "eddi://ai.labs.output": "output",
+  "eddi://ai.labs.output.template": "output",
+  "eddi://ai.labs.property": "propertysetter",
+  "eddi://ai.labs.mcpcalls": "mcpcalls",
+  "eddi://ai.labs.dictionary": "dictionary",
+  "eddi://ai.labs.rag": "rag",
+  "eddi://ai.labs.snippets": "snippets",
 };

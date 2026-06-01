@@ -57,12 +57,12 @@ function makeWorkflow(resourceUri: string): WorkflowConfiguration {
   return {
     workflowSteps: [
       {
-        type: "ai.labs.rules",
+        type: "eddi://ai.labs.rules",
         extensions: {},
         config: { uri: resourceUri },
       },
       {
-        type: "ai.labs.output",
+        type: "eddi://ai.labs.output",
         extensions: {},
         config: { uri: "eddi://ai.labs.output/outputstore/outputsets/out1?version=1" },
       },
@@ -216,12 +216,12 @@ describe("cascadeSaveResource", () => {
       const workflow: WorkflowConfiguration = {
         workflowSteps: [
           {
-            type: "ai.labs.rules",
+            type: "eddi://ai.labs.rules",
             extensions: {},
             config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/shared-id?version=1" },
           },
           {
-            type: "ai.labs.output",
+            type: "eddi://ai.labs.output",
             extensions: {},
             config: { uri: "eddi://ai.labs.output/outputstore/outputsets/shared-id?version=1" },
           },
@@ -269,7 +269,7 @@ describe("cascadeSaveResource", () => {
       vi.mocked(getWorkflow).mockResolvedValue({
         workflowSteps: [
           {
-            type: "ai.labs.property",
+            type: "eddi://ai.labs.property",
             extensions: {},
             config: { uri: "eddi://ai.labs.property/propertysetterstore/propertysetters/ps1?version=1" },
           },
@@ -310,7 +310,7 @@ describe("cascadeSaveResource", () => {
       vi.mocked(getWorkflow).mockResolvedValue({
         workflowSteps: [
           {
-            type: "ai.labs.snippet",
+            type: "eddi://ai.labs.snippet",
             extensions: {},
             config: { uri: "eddi://ai.labs.snippet/snippetstore/snippets/sn1?version=1" },
           },

@@ -55,7 +55,7 @@ function renderEmpty() {
 describe("StudioEditorPanel", () => {
   it("renders the editor panel for an LLM step", async () => {
     renderPanel({
-      type: "ai.labs.llm",
+      type: "eddi://ai.labs.llm",
       extensions: {},
       config: { uri: "eddi://ai.labs.llm/llmstore/llms/llm1?version=1" },
     });
@@ -70,7 +70,7 @@ describe("StudioEditorPanel", () => {
 
   it("renders the editor panel for a rules step", async () => {
     renderPanel({
-      type: "ai.labs.rules",
+      type: "eddi://ai.labs.rules",
       extensions: {},
       config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1" },
     });
@@ -85,7 +85,7 @@ describe("StudioEditorPanel", () => {
 
   it("shows unsupported type message for unknown extension", async () => {
     renderPanel({
-      type: "ai.labs.unknown",
+      type: "eddi://ai.labs.unknown",
       extensions: {},
       config: { uri: "eddi://ai.labs.unknown/store/items/id1?version=1" },
     });
@@ -99,7 +99,7 @@ describe("StudioEditorPanel", () => {
 
   it("shows no-config message when URI is missing", async () => {
     renderPanel({
-      type: "ai.labs.llm",
+      type: "eddi://ai.labs.llm",
       extensions: {},
       config: {},
     });
@@ -113,21 +113,21 @@ describe("StudioEditorPanel", () => {
 
   it("displays the extension type in the unsupported fallback", async () => {
     renderPanel({
-      type: "ai.labs.newtype",
+      type: "eddi://ai.labs.newtype",
       extensions: {},
       config: { uri: "eddi://ai.labs.newtype/store/items/id1?version=1" },
     });
 
     await waitFor(() => {
       expect(
-        screen.getByText("ai.labs.newtype")
+        screen.getByText("eddi://ai.labs.newtype")
       ).toBeInTheDocument();
     });
   });
 
   it("shows unsupported type for parser extension (no standalone editor)", async () => {
     renderPanel({
-      type: "ai.labs.parser",
+      type: "eddi://ai.labs.parser",
       extensions: {},
       config: { uri: "eddi://ai.labs.parser/parserstore/parsers/parser1?version=1" },
     });
@@ -144,7 +144,7 @@ describe("StudioEditorPanel", () => {
 
   it("maps output.template to output slug", async () => {
     renderPanel({
-      type: "ai.labs.output.template",
+      type: "eddi://ai.labs.output.template",
       extensions: {},
       config: { uri: "eddi://ai.labs.output.template/outputstore/outputsets/out1?version=1" },
     });

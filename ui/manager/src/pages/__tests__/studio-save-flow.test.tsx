@@ -63,7 +63,7 @@ function renderPanelForSave(
 describe("StudioEditorPanel save flow", () => {
   it("loads resource, detects dirty state, and completes cascade save", async () => {
     renderPanelForSave({
-      type: "ai.labs.rules",
+      type: "eddi://ai.labs.rules",
       extensions: {},
       config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1" },
     });
@@ -105,7 +105,7 @@ describe("StudioEditorPanel save flow", () => {
 
   it("shows version picker with initial version from URI", async () => {
     renderPanelForSave({
-      type: "ai.labs.llm",
+      type: "eddi://ai.labs.llm",
       extensions: {},
       config: { uri: "eddi://ai.labs.llm/llmstore/llms/llm1?version=1" },
     });
@@ -125,7 +125,7 @@ describe("StudioEditorPanel save flow", () => {
 
   it("renders form editor for a known type (rules)", async () => {
     renderPanelForSave({
-      type: "ai.labs.rules",
+      type: "eddi://ai.labs.rules",
       extensions: {},
       config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1" },
     });
@@ -141,7 +141,7 @@ describe("StudioEditorPanel save flow", () => {
 
   it("renders form editor for LLM type", async () => {
     renderPanelForSave({
-      type: "ai.labs.llm",
+      type: "eddi://ai.labs.llm",
       extensions: {},
       config: { uri: "eddi://ai.labs.llm/llmstore/llms/llm1?version=1" },
     });
@@ -157,7 +157,7 @@ describe("StudioEditorPanel save flow", () => {
 
   it("renders both discard and save buttons that are initially disabled", async () => {
     renderPanelForSave({
-      type: "ai.labs.rules",
+      type: "eddi://ai.labs.rules",
       extensions: {},
       config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1" },
     });
@@ -176,7 +176,7 @@ describe("StudioEditorPanel save flow", () => {
 
   it("supports tab switching between Form and JSON views", async () => {
     renderPanelForSave({
-      type: "ai.labs.rules",
+      type: "eddi://ai.labs.rules",
       extensions: {},
       config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1" },
     });

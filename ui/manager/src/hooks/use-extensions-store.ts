@@ -10,7 +10,7 @@ const EXTENSIONS_STORE_KEY = ["extensionStore"] as const;
  */
 const WELL_KNOWN_TYPES: ExtensionDescriptor[] = [
   {
-    type: "ai.labs.mcpcalls",
+    type: "eddi://ai.labs.mcpcalls",
     displayName: "MCP Calls",
     configs: {
       uri: {

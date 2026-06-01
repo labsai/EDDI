@@ -1,29 +1,21 @@
-import type React from "react";
 import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Plus,
   X,
   RefreshCw,
-  FileText,
-  GitBranch,
-  Globe,
-  Brain,
-  MessageSquareText,
-  Settings,
-  FileCode,
-  Puzzle,
   ArrowLeft,
   FilePlus,
   FolderSearch,
-  Plug,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { useExtensionTypes } from "@/hooks/use-extensions-store";
 import {
-  EXTENSION_TYPE_INFO,
+  getExtensionIcon,
+  getExtensionLabel,
   getResourceSlugForExtension,
+  sortExtensionTypes,
 } from "@/lib/api/extensions";
 import type { ExtensionDescriptor } from "@/lib/api/extensions";
 import {
@@ -33,24 +25,6 @@ import {
   type ResourceTypeConfig,
 } from "@/lib/api/resources";
 import { parseResourceUri } from "@/lib/api/agents";
-
-/* ─── Icon map ─── */
-const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
-  FileText,
-  GitBranch,
-  Globe,
-  Brain,
-  MessageSquareText,
-  Settings,
-  FileCode,
-  Plug,
-};
-
-function getIcon(type: string): React.ComponentType<{ className?: string }> {
-  const info = EXTENSION_TYPE_INFO[type];
-  if (info && iconMap[info.icon]) return iconMap[info.icon]!;
-  return Puzzle;
-}
 
 /** Build an eddi:// resource URI from resource type, ID, and version */
 function buildEddiUri(rt: ResourceTypeConfig, id: string, version: number): string {
@@ -223,12 +197,7 @@ export function AddExtensionDialog({
 
   if (!open) return null;
 
-  // Sort by pipeline order
-  const sorted = [...(extensionTypes ?? [])].sort((a, b) => {
-    const orderA = EXTENSION_TYPE_INFO[a.type]?.order ?? 99;
-    const orderB = EXTENSION_TYPE_INFO[b.type]?.order ?? 99;
-    return orderA - orderB;
-  });
+  const sorted = sortExtensionTypes(extensionTypes ?? []);
 
   const filtered = filter
     ? sorted.filter(
@@ -322,8 +291,8 @@ export function AddExtensionDialog({
               )}
 
               {filtered.map((ext) => {
-                const Icon = getIcon(ext.type);
-                const info = EXTENSION_TYPE_INFO[ext.type];
+                const Icon = getExtensionIcon(ext.type);
+                const label = getExtensionLabel(ext.type);
                 const hasStore = !!getResourceSlugForExtension(ext.type);
                 return (
                   <button
@@ -337,7 +306,7 @@ export function AddExtensionDialog({
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-foreground">
-                        {info?.label || ext.displayName || ext.type}
+                        {label}
                       </p>
                       <p className="text-xs text-muted-foreground truncate">
                         {ext.type}
@@ -373,13 +342,11 @@ export function AddExtensionDialog({
             <div className="border-b border-border p-4">
               <div className="flex items-center gap-2">
                 {(() => {
-                  const SelIcon = getIcon(selectedType.type);
+                  const SelIcon = getExtensionIcon(selectedType.type);
                   return <SelIcon className="h-4 w-4 text-primary" />;
                 })()}
                 <span className="text-sm font-medium text-foreground">
-                  {EXTENSION_TYPE_INFO[selectedType.type]?.label ||
-                    selectedType.displayName ||
-                    selectedType.type}
+                  {getExtensionLabel(selectedType.type)}
                 </span>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">

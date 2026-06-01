@@ -2,51 +2,8 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useDebugStore } from "@/hooks/use-debug-events";
-import {
-  Circle,
-  ChevronRight,
-  type LucideIcon,
-  FileCode,
-  Bot,
-  Workflow,
-  Zap,
-  MessageSquareCode,
-  Settings,
-  BookOpen,
-  Wrench,
-  BookText,
-  Brain,
-} from "lucide-react";
-
-// ==================== Extension Type Icons ====================
-
-const TYPE_ICONS: Record<string, LucideIcon> = {
-  "ai.labs.parser": FileCode,
-  "ai.labs.rules": BookOpen,
-  "ai.labs.property": Settings,
-  "ai.labs.apicalls": Zap,
-  "ai.labs.llm": MessageSquareCode,
-  "ai.labs.output": Bot,
-  "ai.labs.output.template": Bot,
-  "ai.labs.mcpcalls": Wrench,
-  "ai.labs.dictionary": BookText,
-  "ai.labs.rag": Brain,
-};
-
-// Labels are provided via i18n in the component below
-
-const TYPE_COLORS: Record<string, string> = {
-  "ai.labs.parser": "text-blue-500",
-  "ai.labs.rules": "text-violet-500",
-  "ai.labs.property": "text-cyan-500",
-  "ai.labs.apicalls": "text-amber-500",
-  "ai.labs.llm": "text-emerald-500",
-  "ai.labs.output": "text-rose-500",
-  "ai.labs.output.template": "text-rose-400",
-  "ai.labs.mcpcalls": "text-orange-500",
-  "ai.labs.dictionary": "text-teal-500",
-  "ai.labs.rag": "text-purple-500",
-};
+import { Circle, ChevronRight, Workflow } from "lucide-react";
+import { getExtensionIcon, getExtensionColor } from "@/lib/api/extensions";
 
 // ==================== Types ====================
 
@@ -88,10 +45,10 @@ export function PipelineRailroad({
   return (
     <div className="flex flex-col gap-0 py-4 px-3" data-testid="pipeline-railroad">
       {workflowSteps.map((step, idx) => {
-        const Icon = TYPE_ICONS[step.type] ?? Workflow;
-        const typeKey = step.type.replace("ai.labs.", "");
+        const Icon = getExtensionIcon(step.type);
+        const typeKey = step.type.replace("eddi://ai.labs.", "");
         const label = t(`studio.type.${typeKey}`, typeKey.charAt(0).toUpperCase() + typeKey.slice(1));
-        const color = TYPE_COLORS[step.type] ?? "text-muted-foreground";
+        const color = getExtensionColor(step.type);
         const status = stageStatuses.get(idx) ?? "idle";
         const isSelected = selectedIndex === idx;
         const isLast = idx === workflowSteps.length - 1;
