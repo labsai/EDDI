@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { createLogEventSource, getRecentLogs, type LogEntry } from "@/lib/api/logs";
+import type { AuthEventSourceHandle } from "@/lib/api/sse-utils";
 import { cn } from "@/lib/utils";
 import {
   ScrollText,
@@ -47,7 +48,7 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [connected, setConnected] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const handleRef = useRef<AuthEventSourceHandle | null>(null);
 
   // Keep ref in sync with state for use in SSE callback
   useEffect(() => {
@@ -58,36 +59,29 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
   useEffect(() => {
     if (!agentId) return;
 
-    const es = createLogEventSource({
-      agentId,
-      conversationId: conversationId ?? undefined,
-    });
+    const handle = createLogEventSource(
+      {
+        agentId,
+        conversationId: conversationId ?? undefined,
+      },
+      {
+        onMessage: (entry) => {
+          if (pausedRef.current) return;
+          setLogs((prev) => {
+            const next = [...prev, entry];
+            return next.length > MAX_LOG_ENTRIES ? next.slice(-MAX_LOG_ENTRIES) : next;
+          });
+        },
+        onOpen: () => setConnected(true),
+        onError: () => setConnected(false),
+      },
+    );
 
-    const handleEvent = (event: MessageEvent) => {
-      if (pausedRef.current) return;
-      try {
-        const entry: LogEntry = JSON.parse(event.data);
-        setLogs((prev) => {
-          const next = [...prev, entry];
-          return next.length > MAX_LOG_ENTRIES ? next.slice(-MAX_LOG_ENTRIES) : next;
-        });
-      } catch {
-        // Ignore malformed log events
-      }
-    };
-
-    es.addEventListener("log", handleEvent);
-    // Fallback for backends that send unnamed SSE events
-    es.onmessage = handleEvent;
-
-    es.onopen = () => setConnected(true);
-    es.onerror = () => setConnected(false);
-
-    eventSourceRef.current = es;
+    handleRef.current = handle;
 
     return () => {
-      es.close();
-      eventSourceRef.current = null;
+      handle.close();
+      handleRef.current = null;
       setConnected(false);
     };
   }, [agentId, conversationId]);

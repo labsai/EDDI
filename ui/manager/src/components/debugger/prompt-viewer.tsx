@@ -13,6 +13,7 @@ import {
   Wrench,
   Cpu,
   ChevronDown,
+  AlertTriangle,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 
@@ -25,7 +26,7 @@ interface PromptViewerProps {
 export function PromptViewer({ conversationId }: PromptViewerProps) {
   const { t } = useTranslation();
 
-  const { data: auditEntries } = useQuery({
+  const { data: auditEntries, isError } = useQuery({
     queryKey: ["audit", "promptViewer", conversationId],
     queryFn: () => getAuditTrail(conversationId!, 0, 200),
     enabled: !!conversationId,
@@ -50,6 +51,17 @@ export function PromptViewer({ conversationId }: PromptViewerProps) {
       <EmptyState
         message={t("promptViewer.noConversation", "Start a conversation to inspect prompts")}
       />
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center gap-2 py-6 text-center" data-testid="prompt-viewer-error">
+        <AlertTriangle className="h-8 w-8 text-destructive/50" />
+        <p className="text-sm text-muted-foreground">
+          {t("promptViewer.error", "Failed to load prompt data")}
+        </p>
+      </div>
     );
   }
 

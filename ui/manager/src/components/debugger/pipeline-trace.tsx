@@ -4,7 +4,7 @@ import { useDebugStore, type PipelineTurn, type PipelineEvent } from "@/hooks/us
 import { useQuery } from "@tanstack/react-query";
 import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
 import { cn } from "@/lib/utils";
-import { Clock, Zap, ChevronDown } from "lucide-react";
+import { Clock, Zap, ChevronDown, AlertTriangle } from "lucide-react";
 import { useState } from "react";
 
 // ==================== Task Type Colors ====================
@@ -49,7 +49,7 @@ export function PipelineTrace({ conversationId }: PipelineTraceProps) {
   const setSelectedTurn = useDebugStore((s) => s.setSelectedTurn);
 
   // Fetch historical audit data when no live SSE events available
-  const { data: auditEntries } = useQuery({
+  const { data: auditEntries, isError: auditError } = useQuery({
     queryKey: ["audit", "debugger", conversationId],
     queryFn: () => getAuditTrail(conversationId!, 0, 200),
     enabled: !!conversationId && turns.length === 0,
@@ -98,6 +98,16 @@ export function PipelineTrace({ conversationId }: PipelineTraceProps) {
               </option>
             ))}
           </select>
+        </div>
+      )}
+
+      {/* Error state */}
+      {auditError && allTurns.length === 0 && (
+        <div className="flex flex-col items-center gap-2 py-6 text-center" data-testid="pipeline-trace-error">
+          <AlertTriangle className="h-8 w-8 text-destructive/50" />
+          <p className="text-sm text-muted-foreground">
+            {t("debugDrawer.pipelineError", "Failed to load pipeline trace")}
+          </p>
         </div>
       )}
 

@@ -1,4 +1,8 @@
 import { api } from "../api-client";
+import {
+  createAuthEventSource,
+  type AuthEventSourceHandle,
+} from "./sse-utils";
 
 // ==================== Types ====================
 
@@ -93,10 +97,19 @@ export async function getInstanceId(): Promise<InstanceInfo> {
 }
 
 /**
- * Create an SSE EventSource for live log streaming.
- * Returns an EventSource that emits "log" events with LogEntry payloads.
+ * Create an auth-aware SSE stream for live log streaming.
+ * Uses fetch + ReadableStream to support Authorization headers.
+ * Handles both named "log" events and unnamed SSE events.
  */
-export function createLogEventSource(filters: LogFilters = {}): EventSource {
+export function createLogEventSource(
+  filters: LogFilters = {},
+  options?: {
+    onMessage?: (entry: LogEntry) => void;
+    onError?: (error: Error) => void;
+    onOpen?: () => void;
+    signal?: AbortSignal;
+  },
+): AuthEventSourceHandle {
   const params = new URLSearchParams();
   if (filters.agentId) params.set("agentId", filters.agentId);
   if (filters.conversationId)
@@ -104,7 +117,18 @@ export function createLogEventSource(filters: LogFilters = {}): EventSource {
   if (filters.level) params.set("level", filters.level);
 
   const qs = params.toString();
-  return new EventSource(
-    `${BASE}/stream${qs ? `?${qs}` : ""}`
-  );
+
+  return createAuthEventSource(`${BASE}/stream${qs ? `?${qs}` : ""}`, {
+    onMessage: (event) => {
+      try {
+        options?.onMessage?.(JSON.parse(event.data));
+      } catch {
+        /* ignore parse errors */
+      }
+    },
+    onError: options?.onError,
+    onOpen: options?.onOpen,
+    signal: options?.signal,
+  });
 }
+
