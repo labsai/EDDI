@@ -33,7 +33,7 @@ public interface ConversationEventSink {
      * @param index
      *            0-based position in the workflow
      */
-    void onTaskStart(String taskId, String taskType, int index);
+    void onTaskStart(TaskId taskId, String taskType, int index);
 
     /**
      * Called after a lifecycle task completes execution.
@@ -48,7 +48,7 @@ public interface ConversationEventSink {
      *            optional task-specific summary data (e.g. emitted actions). May be
      *            empty, never null.
      */
-    void onTaskComplete(String taskId, String taskType, long durationMs, Map<String, Object> summary);
+    void onTaskComplete(TaskId taskId, String taskType, long durationMs, Map<String, Object> summary);
 
     /**
      * Called for each LLM token during streaming chat completion.

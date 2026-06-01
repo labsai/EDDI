@@ -15,6 +15,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.*;
@@ -62,6 +63,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 @ApplicationScoped
 public class LlmTask implements ILifecycleTask {
     public static final String ID = "ai.labs.llm";
+    public static final TaskId TASK_ID = new TaskId(ID);
 
     private static final String KEY_URI = "uri";
     private static final String KEY_LANGCHAIN = "langchain";
@@ -152,8 +154,8 @@ public class LlmTask implements ILifecycleTask {
     }
 
     @Override
-    public String getId() {
-        return ID;
+    public TaskId getId() {
+        return TASK_ID;
     }
 
     @Override
@@ -672,7 +674,7 @@ public class LlmTask implements ILifecycleTask {
 
     @Override
     public ExtensionDescriptor getExtensionDescriptor() {
-        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
+        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(new TaskId(ID));
         extensionDescriptor.setDisplayName("Lang Chain");
 
         ConfigValue configValue = new ConfigValue("Resource URI", FieldType.URI, false, null);

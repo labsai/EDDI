@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.IConversation;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -59,7 +60,7 @@ class LifecycleManagerTest {
         @DisplayName("valid task is accepted")
         void addValidTask() {
             var task = mock(ILifecycleTask.class);
-            when(task.getId()).thenReturn("task1");
+            when(task.getId()).thenReturn(new TaskId("task1"));
             assertDoesNotThrow(() -> lifecycleManager.addLifecycleTask(task));
         }
     }
@@ -86,7 +87,7 @@ class LifecycleManagerTest {
         @DisplayName("single task executes successfully")
         void singleTask() throws Exception {
             var task = mock(ILifecycleTask.class);
-            when(task.getId()).thenReturn("parser");
+            when(task.getId()).thenReturn(new TaskId("parser"));
             when(task.getType()).thenReturn("input");
 
             lifecycleManager.addLifecycleTask(task);
@@ -108,11 +109,11 @@ class LifecycleManagerTest {
         @DisplayName("multiple tasks execute in order")
         void multipleTasks() throws Exception {
             var task1 = mock(ILifecycleTask.class);
-            when(task1.getId()).thenReturn("parser");
+            when(task1.getId()).thenReturn(new TaskId("parser"));
             when(task1.getType()).thenReturn("input");
 
             var task2 = mock(ILifecycleTask.class);
-            when(task2.getId()).thenReturn("behavior");
+            when(task2.getId()).thenReturn(new TaskId("behavior"));
             when(task2.getType()).thenReturn("behavior_rules");
 
             lifecycleManager.addLifecycleTask(task1);
@@ -137,7 +138,7 @@ class LifecycleManagerTest {
         @DisplayName("STOP_CONVERSATION action throws ConversationStopException")
         void stopConversation() throws Exception {
             var task = mock(ILifecycleTask.class);
-            when(task.getId()).thenReturn("behavior");
+            when(task.getId()).thenReturn(new TaskId("behavior"));
             when(task.getType()).thenReturn("behavior_rules");
 
             lifecycleManager.addLifecycleTask(task);
@@ -163,7 +164,7 @@ class LifecycleManagerTest {
         @DisplayName("task failure propagates LifecycleException")
         void taskFailure() throws Exception {
             var task = mock(ILifecycleTask.class);
-            when(task.getId()).thenReturn("llm");
+            when(task.getId()).thenReturn(new TaskId("llm"));
             when(task.getType()).thenReturn("langchain");
 
             doThrow(new LifecycleException("LLM failed"))
@@ -187,7 +188,7 @@ class LifecycleManagerTest {
         @DisplayName("RuntimeException in task is wrapped in LifecycleException")
         void runtimeException() throws Exception {
             var task = mock(ILifecycleTask.class);
-            when(task.getId()).thenReturn("broken");
+            when(task.getId()).thenReturn(new TaskId("broken"));
             when(task.getType()).thenReturn("custom");
 
             doThrow(new RuntimeException("NPE"))
@@ -216,15 +217,15 @@ class LifecycleManagerTest {
         @DisplayName("filter by type — only matching and subsequent tasks execute")
         void filterByType() throws Exception {
             var parser = mock(ILifecycleTask.class);
-            when(parser.getId()).thenReturn("parser");
+            when(parser.getId()).thenReturn(new TaskId("parser"));
             when(parser.getType()).thenReturn("input");
 
             var behavior = mock(ILifecycleTask.class);
-            when(behavior.getId()).thenReturn("behavior");
+            when(behavior.getId()).thenReturn(new TaskId("behavior"));
             when(behavior.getType()).thenReturn("behavior_rules");
 
             var output = mock(ILifecycleTask.class);
-            when(output.getId()).thenReturn("output");
+            when(output.getId()).thenReturn(new TaskId("output"));
             when(output.getType()).thenReturn("output");
 
             lifecycleManager.addLifecycleTask(parser);
@@ -251,7 +252,7 @@ class LifecycleManagerTest {
         @DisplayName("filter with no match — no tasks execute")
         void filterNoMatch() throws Exception {
             var parser = mock(ILifecycleTask.class);
-            when(parser.getId()).thenReturn("parser");
+            when(parser.getId()).thenReturn(new TaskId("parser"));
             when(parser.getType()).thenReturn("input");
 
             lifecycleManager.addLifecycleTask(parser);
@@ -274,7 +275,7 @@ class LifecycleManagerTest {
         @DisplayName("task failure with strict write enabled — uncommits data and injects error digest")
         void taskFailureWithStrictWrite() throws Exception {
             var task = mock(ILifecycleTask.class);
-            when(task.getId()).thenReturn("llm_task");
+            when(task.getId()).thenReturn(new TaskId("llm_task"));
             when(task.getType()).thenReturn("langchain");
 
             doThrow(new LifecycleException("API timeout"))
@@ -316,7 +317,7 @@ class LifecycleManagerTest {
         @DisplayName("task failure with strict write exclude_all — no digest, but data uncommitted")
         void taskFailureExcludeAll() throws Exception {
             var task = mock(ILifecycleTask.class);
-            when(task.getId()).thenReturn("api_task");
+            when(task.getId()).thenReturn(new TaskId("api_task"));
             when(task.getType()).thenReturn("httpcalls");
 
             doThrow(new LifecycleException("API error"))
@@ -360,7 +361,7 @@ class LifecycleManagerTest {
         @DisplayName("event sink receives task_start and task_complete events")
         void eventSinkNotified() throws Exception {
             var task = mock(ILifecycleTask.class);
-            when(task.getId()).thenReturn("parser");
+            when(task.getId()).thenReturn(new TaskId("parser"));
             when(task.getType()).thenReturn("input");
 
             lifecycleManager.addLifecycleTask(task);
@@ -378,8 +379,8 @@ class LifecycleManagerTest {
 
             lifecycleManager.executeLifecycle(memory, null);
 
-            verify(eventSink).onTaskStart("parser", "input", 0);
-            verify(eventSink).onTaskComplete(eq("parser"), eq("input"), anyLong(), anyMap());
+            verify(eventSink).onTaskStart(new TaskId("parser"), "input", 0);
+            verify(eventSink).onTaskComplete(eq(new TaskId("parser")), eq("input"), anyLong(), anyMap());
         }
     }
 
@@ -391,7 +392,7 @@ class LifecycleManagerTest {
         @DisplayName("audit collector receives audit entry when set")
         void auditCollectorNotified() throws Exception {
             var task = mock(ILifecycleTask.class);
-            when(task.getId()).thenReturn("behavior");
+            when(task.getId()).thenReturn(new TaskId("behavior"));
             when(task.getType()).thenReturn("behavior_rules");
 
             lifecycleManager.addLifecycleTask(task);
@@ -423,7 +424,7 @@ class LifecycleManagerTest {
         @DisplayName("interrupted thread throws LifecycleInterruptedException")
         void interruptedThread() {
             var task = mock(ILifecycleTask.class);
-            when(task.getId()).thenReturn("parser");
+            when(task.getId()).thenReturn(new TaskId("parser"));
             when(task.getType()).thenReturn("input");
 
             lifecycleManager.addLifecycleTask(task);
@@ -453,7 +454,7 @@ class LifecycleManagerTest {
         @DisplayName("keep_all mode — isEffectivelyEnabled() returns false, no SWD applied")
         void keepAllMode() throws Exception {
             var task = mock(ILifecycleTask.class);
-            when(task.getId()).thenReturn("llm_task");
+            when(task.getId()).thenReturn(new TaskId("llm_task"));
             when(task.getType()).thenReturn("langchain");
 
             doThrow(new LifecycleException("LLM error"))
@@ -488,7 +489,7 @@ class LifecycleManagerTest {
         @DisplayName("null memoryPolicy — strict write discipline not applied")
         void nullMemoryPolicy() throws Exception {
             var task = mock(ILifecycleTask.class);
-            when(task.getId()).thenReturn("failing_task");
+            when(task.getId()).thenReturn(new TaskId("failing_task"));
             when(task.getType()).thenReturn("custom");
 
             doThrow(new LifecycleException("fail"))
@@ -516,7 +517,7 @@ class LifecycleManagerTest {
         @DisplayName("disabled strict write — no uncommit even on failure")
         void disabledStrictWrite() throws Exception {
             var task = mock(ILifecycleTask.class);
-            when(task.getId()).thenReturn("failing_task");
+            when(task.getId()).thenReturn(new TaskId("failing_task"));
             when(task.getType()).thenReturn("custom");
 
             doThrow(new LifecycleException("fail"))
@@ -549,11 +550,11 @@ class LifecycleManagerTest {
         @DisplayName("failure after first task — second task does NOT execute")
         void failureStopsPipeline() throws Exception {
             var task1 = mock(ILifecycleTask.class);
-            when(task1.getId()).thenReturn("parser");
+            when(task1.getId()).thenReturn(new TaskId("parser"));
             when(task1.getType()).thenReturn("input");
 
             var task2 = mock(ILifecycleTask.class);
-            when(task2.getId()).thenReturn("behavior");
+            when(task2.getId()).thenReturn(new TaskId("behavior"));
             when(task2.getType()).thenReturn("behavior_rules");
 
             doThrow(new LifecycleException("parse error"))
@@ -586,7 +587,7 @@ class LifecycleManagerTest {
         @DisplayName("empty lifecycleTaskTypes — all tasks execute (same as null)")
         void emptyListExecutesAll() throws Exception {
             var task = mock(ILifecycleTask.class);
-            when(task.getId()).thenReturn("parser");
+            when(task.getId()).thenReturn(new TaskId("parser"));
             when(task.getType()).thenReturn("input");
 
             lifecycleManager.addLifecycleTask(task);

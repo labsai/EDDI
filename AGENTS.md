@@ -305,7 +305,7 @@ A new `ILifecycleTask` requires ALL of:
 - [ ] `ExtensionDescriptor` (UI field definitions via `getExtensionDescriptor()`)
 - [ ] Unit test with Mockito
 
-All task implementations MUST implement: `getId()`, `getType()`, `execute()`, `configure()`, `getExtensionDescriptor()`.
+All task implementations MUST implement: `getId()` (returns `TaskId`), `getType()`, `execute()`, `configure()`, `getExtensionDescriptor()`.
 
 ### 4.4 Code Patterns
 
@@ -441,7 +441,7 @@ public class MyFeatureTask implements ILifecycleTask {
         this.dataFactory = dataFactory;
     }
 
-    @Override public String getId() { return ID; }
+    @Override public TaskId getId() { return new TaskId(ID); }
     @Override public String getType() { return KEY_MYFEATURE; }
 
     @Override
@@ -487,7 +487,7 @@ public class MyFeatureTask implements ILifecycleTask {
 
     @Override
     public ExtensionDescriptor getExtensionDescriptor() {
-        ExtensionDescriptor descriptor = new ExtensionDescriptor(ID);
+        ExtensionDescriptor descriptor = new ExtensionDescriptor(getId());
         descriptor.setDisplayName("My Feature");
         ConfigValue uriConfig = new ConfigValue("Resource URI", FieldType.URI, false, null);
         descriptor.getConfigs().put("uri", uriConfig);

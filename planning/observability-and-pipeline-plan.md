@@ -31,7 +31,7 @@
 The main execution path is in [`LifecycleManager.executeLifecycle()`](../../src/main/java/ai/labs/eddi/engine/lifecycle/LifecycleManager.java). Add span-per-task:
 
 ```java
-Span span = tracer.spanBuilder("eddi.task." + task.getId())
+Span span = tracer.spanBuilder("eddi.task." + task.getId().name())
     .setAttribute("conversationId", conversationId)
     .setAttribute("agentId", agentId)
     .startSpan();

@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.nlp;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.lifecycle.exceptions.UnrecognizedExtensionException;
@@ -61,6 +62,8 @@ import static ai.labs.eddi.utils.StringUtilities.joinStrings;
 @ApplicationScoped
 public class InputParserTask implements ILifecycleTask {
     public static final String ID = "ai.labs.parser";
+    public static final TaskId TASK_ID = new TaskId(ID);
+
     private static final String CONFIG_APPEND_EXPRESSIONS = "appendExpressions";
     private static final String CONFIG_INCLUDE_UNUSED = "includeUnused";
     private static final String CONFIG_INCLUDE_UNKNOWN = "includeUnknown";
@@ -94,8 +97,8 @@ public class InputParserTask implements ILifecycleTask {
     }
 
     @Override
-    public String getId() {
-        return "ai.labs.parser";
+    public TaskId getId() {
+        return TASK_ID;
     }
 
     @Override
@@ -258,11 +261,11 @@ public class InputParserTask implements ILifecycleTask {
 
     @Override
     public ExtensionDescriptor getExtensionDescriptor() {
-        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
+        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(new TaskId(ID));
         extensionDescriptor.setDisplayName("Input Parser");
 
         normalizerProviders.keySet().forEach(type -> {
-            ExtensionDescriptor normalizerDescriptor = new ExtensionDescriptor(type);
+            ExtensionDescriptor normalizerDescriptor = new ExtensionDescriptor(new TaskId(type));
             Provider<INormalizerProvider> normalizerProvider = normalizerProviders.get(type);
             INormalizerProvider provider = normalizerProvider.get();
             normalizerDescriptor.setDisplayName(provider.getDisplayName());
@@ -271,7 +274,7 @@ public class InputParserTask implements ILifecycleTask {
         });
 
         dictionaryProviders.keySet().forEach(type -> {
-            ExtensionDescriptor dictionaryDescriptor = new ExtensionDescriptor(type);
+            ExtensionDescriptor dictionaryDescriptor = new ExtensionDescriptor(new TaskId(type));
             Provider<IDictionaryProvider> dictionaryProvider = dictionaryProviders.get(type);
             IDictionaryProvider provider = dictionaryProvider.get();
             dictionaryDescriptor.setDisplayName(provider.getDisplayName());
@@ -280,7 +283,7 @@ public class InputParserTask implements ILifecycleTask {
         });
 
         correctionProviders.keySet().forEach(type -> {
-            ExtensionDescriptor correctionsDescriptor = new ExtensionDescriptor(type);
+            ExtensionDescriptor correctionsDescriptor = new ExtensionDescriptor(new TaskId(type));
             Provider<ICorrectionProvider> correctionProvider = correctionProviders.get(type);
             ICorrectionProvider provider = correctionProvider.get();
             correctionsDescriptor.setDisplayName(provider.getDisplayName());

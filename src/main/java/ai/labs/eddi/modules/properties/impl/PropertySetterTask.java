@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.properties.model.PropertyInstruction;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -50,6 +51,8 @@ import static java.lang.Boolean.parseBoolean;
 @ApplicationScoped
 public class PropertySetterTask implements ILifecycleTask {
     public static final String ID = "ai.labs.property";
+    public static final TaskId TASK_ID = new TaskId(ID);
+
     private static final Logger LOGGER = Logger.getLogger(PropertySetterTask.class);
     private static final String EXPRESSIONS_PARSED_IDENTIFIER = "expressions:parsed";
     private static final String ACTIONS_IDENTIFIER = "actions";
@@ -93,8 +96,8 @@ public class PropertySetterTask implements ILifecycleTask {
     }
 
     @Override
-    public String getId() {
-        return ID;
+    public TaskId getId() {
+        return TASK_ID;
     }
 
     @Override
@@ -270,7 +273,7 @@ public class PropertySetterTask implements ILifecycleTask {
 
     @Override
     public ExtensionDescriptor getExtensionDescriptor() {
-        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
+        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(new TaskId(ID));
         extensionDescriptor.setDisplayName("Property Extraction");
         return extensionDescriptor;
     }

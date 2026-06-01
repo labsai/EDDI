@@ -9,13 +9,16 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
+import ai.labs.eddi.engine.lifecycle.TaskId;
+
 public class ExtensionDescriptor {
-    private String type;
+    private TaskId type;
+
     private String displayName;
     private Map<String, ConfigValue> configs = new HashMap<>();
     private Map<String, List<ExtensionDescriptor>> extensions = new HashMap<>();
 
-    public ExtensionDescriptor(String type) {
+    public ExtensionDescriptor(TaskId type) {
         this.type = type;
     }
 
@@ -73,11 +76,11 @@ public class ExtensionDescriptor {
         extensions.computeIfAbsent(extensionName, k -> new LinkedList<>()).add(extensionDescriptor);
     }
 
-    public String getType() {
+    public TaskId getType() {
         return type;
     }
 
-    public void setType(String type) {
+    public void setType(TaskId type) {
         this.type = type;
     }
 

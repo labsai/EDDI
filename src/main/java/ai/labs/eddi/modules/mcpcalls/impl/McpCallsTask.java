@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -62,8 +63,9 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  */
 @ApplicationScoped
 public class McpCallsTask implements ILifecycleTask {
-
     public static final String ID = "ai.labs.mcpcalls";
+    public static final TaskId TASK_ID = new TaskId(ID);
+
     private static final String KEY_ACTIONS = "actions";
     private static final String KEY_MCP_CALLS = "mcpCalls";
 
@@ -86,8 +88,8 @@ public class McpCallsTask implements ILifecycleTask {
     }
 
     @Override
-    public String getId() {
-        return ID;
+    public TaskId getId() {
+        return TASK_ID;
     }
 
     @Override
@@ -277,7 +279,7 @@ public class McpCallsTask implements ILifecycleTask {
 
     @Override
     public ExtensionDescriptor getExtensionDescriptor() {
-        ExtensionDescriptor descriptor = new ExtensionDescriptor(ID);
+        ExtensionDescriptor descriptor = new ExtensionDescriptor(new TaskId(ID));
         descriptor.setDisplayName("MCP Calls");
         descriptor.getConfigs().put("uri", new ExtensionDescriptor.ConfigValue("Resource URI", ExtensionDescriptor.FieldType.URI, false, null));
         return descriptor;

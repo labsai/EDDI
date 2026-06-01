@@ -62,7 +62,7 @@ class McpCallsTaskTest {
     @Test
     @DisplayName("getId returns correct identifier")
     void testGetId() {
-        assertEquals("ai.labs.mcpcalls", task.getId());
+        assertEquals("ai.labs.mcpcalls", task.getId().name());
     }
 
     @Test
@@ -271,7 +271,7 @@ class McpCallsTaskTest {
         var descriptor = task.getExtensionDescriptor();
 
         assertNotNull(descriptor);
-        assertEquals("ai.labs.mcpcalls", descriptor.getType());
+        assertEquals("ai.labs.mcpcalls", descriptor.getType().name());
         assertEquals("MCP Calls", descriptor.getDisplayName());
         assertTrue(descriptor.getConfigs().containsKey("uri"));
     }

@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.datastore.serialization.DeserializationException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -38,6 +39,8 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.EXPRESSIONS_PARSED;
 @ApplicationScoped
 public class RulesEvaluationTask implements ILifecycleTask {
     public static final String ID = "ai.labs.behavior";
+    public static final TaskId TASK_ID = new TaskId(ID);
+
     public static final String BEHAVIOR_RULES_TYPE = "behavior_rules";
     private static final String KEY_BEHAVIOR_RULES_SUCCESS = BEHAVIOR_RULES_TYPE + ":success";
     private static final String KEY_BEHAVIOR_RULES_DROPPED_SUCCESS = BEHAVIOR_RULES_TYPE + ":droppedSuccess";
@@ -65,8 +68,8 @@ public class RulesEvaluationTask implements ILifecycleTask {
     }
 
     @Override
-    public String getId() {
-        return ID;
+    public TaskId getId() {
+        return TASK_ID;
     }
 
     @Override
@@ -192,7 +195,7 @@ public class RulesEvaluationTask implements ILifecycleTask {
 
     @Override
     public ExtensionDescriptor getExtensionDescriptor() {
-        var extensionDescriptor = new ExtensionDescriptor(ID);
+        var extensionDescriptor = new ExtensionDescriptor(TASK_ID);
         extensionDescriptor.setDisplayName("Behavior Rules");
 
         var configValue = new ConfigValue("Resource URI", FieldType.URI, false, null);

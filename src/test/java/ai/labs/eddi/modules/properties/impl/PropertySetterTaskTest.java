@@ -58,7 +58,7 @@ class PropertySetterTaskTest {
     @Test
     @DisplayName("getId returns correct ID")
     void getId() {
-        assertEquals("ai.labs.property", task.getId());
+        assertEquals("ai.labs.property", task.getId().name());
     }
 
     @Test

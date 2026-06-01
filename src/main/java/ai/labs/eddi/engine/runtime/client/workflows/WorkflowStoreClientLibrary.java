@@ -84,7 +84,11 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
                     var component = lifecycleTask.configure(workflowStep.getConfig(), workflowStep.getExtensions());
 
                     if (component != null) {
-                        componentCache.put(lifecycleTask.getId(), componentKey, component);
+                        if (lifecycleTask.getId() == null) {
+                            throw new WorkflowInitializationException(
+                                    "Lifecycle task returned null TaskId: " + lifecycleTask.getClass().getName(), null);
+                        }
+                        componentCache.put(lifecycleTask.getId().name(), componentKey, component);
                     }
                     lifecycleManager.addLifecycleTask(lifecycleTask);
                 }

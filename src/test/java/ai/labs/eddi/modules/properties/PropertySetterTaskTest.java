@@ -107,7 +107,7 @@ public class PropertySetterTaskTest {
         @Test
         @DisplayName("getId should return correct identifier")
         void testGetId() {
-            assertEquals("ai.labs.property", propertySetterTask.getId());
+            assertEquals("ai.labs.property", propertySetterTask.getId().name());
         }
 
         @Test
@@ -534,7 +534,7 @@ public class PropertySetterTaskTest {
             var descriptor = propertySetterTask.getExtensionDescriptor();
 
             assertNotNull(descriptor);
-            assertEquals("ai.labs.property", descriptor.getType());
+            assertEquals("ai.labs.property", descriptor.getType().name());
             assertEquals("Property Extraction", descriptor.getDisplayName());
         }
     }

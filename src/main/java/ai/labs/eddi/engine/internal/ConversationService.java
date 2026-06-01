@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.IConversation;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConversationLogGenerator;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -420,12 +421,12 @@ public class ConversationService implements IConversationService {
             // Create event sink that delegates to the streaming handler
             var eventSink = new ConversationEventSink() {
                 @Override
-                public void onTaskStart(String taskId, String taskType, int index) {
+                public void onTaskStart(TaskId taskId, String taskType, int index) {
                     streamingHandler.onTaskStart(taskId, taskType, index);
                 }
 
                 @Override
-                public void onTaskComplete(String taskId, String taskType, long durationMs, Map<String, Object> summary) {
+                public void onTaskComplete(TaskId taskId, String taskType, long durationMs, Map<String, Object> summary) {
                     streamingHandler.onTaskComplete(taskId, taskType, durationMs, summary);
                 }
 

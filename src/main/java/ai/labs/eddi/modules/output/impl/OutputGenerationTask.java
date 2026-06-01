@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
@@ -47,6 +48,8 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 @ApplicationScoped
 public class OutputGenerationTask implements ILifecycleTask {
     public static final String ID = "ai.labs.output";
+    public static final TaskId TASK_ID = new TaskId(ID);
+
     private static final String MEMORY_OUTPUT_IDENTIFIER = "output";
     private static final String MEMORY_QUICK_REPLIES_IDENTIFIER = "quickReplies";
     private static final String CONTEXT_IDENTIFIER = "context";
@@ -70,8 +73,8 @@ public class OutputGenerationTask implements ILifecycleTask {
     }
 
     @Override
-    public String getId() {
-        return ID;
+    public TaskId getId() {
+        return TASK_ID;
     }
 
     @Override
@@ -301,7 +304,7 @@ public class OutputGenerationTask implements ILifecycleTask {
 
     @Override
     public ExtensionDescriptor getExtensionDescriptor() {
-        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
+        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(new TaskId(ID));
         extensionDescriptor.setDisplayName("Output Generation");
 
         ConfigValue configValue = new ConfigValue("Resource URI", FieldType.URI, false, null);

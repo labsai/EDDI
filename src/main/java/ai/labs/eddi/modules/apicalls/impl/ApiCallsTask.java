@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.ConfigValue;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -32,6 +33,8 @@ import static java.lang.String.format;
 @ApplicationScoped
 public class ApiCallsTask implements ILifecycleTask {
     public static final String ID = "ai.labs.httpcalls";
+    public static final TaskId TASK_ID = new TaskId(ID);
+
     private static final String KEY_HTTP_CALLS = "httpCalls";
     private final IResourceClientLibrary resourceClientLibrary;
     private final IMemoryItemConverter memoryItemConverter;
@@ -47,8 +50,8 @@ public class ApiCallsTask implements ILifecycleTask {
     }
 
     @Override
-    public String getId() {
-        return ID;
+    public TaskId getId() {
+        return TASK_ID;
     }
 
     @Override
@@ -118,7 +121,7 @@ public class ApiCallsTask implements ILifecycleTask {
 
     @Override
     public ExtensionDescriptor getExtensionDescriptor() {
-        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
+        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(new TaskId(ID));
         extensionDescriptor.setDisplayName("Http Calls");
         ConfigValue configValue = new ConfigValue("Resource URI", FieldType.URI, false, null);
         extensionDescriptor.getConfigs().put("uri", configValue);

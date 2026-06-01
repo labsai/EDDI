@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.templating;
 
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
@@ -34,6 +35,8 @@ import static ai.labs.eddi.utils.StringUtilities.joinStrings;
 @ApplicationScoped
 public class OutputTemplateTask implements ILifecycleTask {
     public static final String ID = "ai.labs.templating";
+    public static final TaskId TASK_ID = new TaskId(ID);
+
     private static final String OUTPUT_HTML = "output:html";
     private static final String PRE_TEMPLATED = "preTemplated";
     private static final String POST_TEMPLATED = "postTemplated";
@@ -56,8 +59,8 @@ public class OutputTemplateTask implements ILifecycleTask {
     }
 
     @Override
-    public String getId() {
-        return "ai.labs.templating";
+    public TaskId getId() {
+        return TASK_ID;
     }
 
     @Override
@@ -201,7 +204,7 @@ public class OutputTemplateTask implements ILifecycleTask {
 
     @Override
     public ExtensionDescriptor getExtensionDescriptor() {
-        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(ID);
+        ExtensionDescriptor extensionDescriptor = new ExtensionDescriptor(TASK_ID);
         extensionDescriptor.setDisplayName("Templating");
         return extensionDescriptor;
     }
