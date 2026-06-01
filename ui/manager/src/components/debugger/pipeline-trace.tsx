@@ -1,11 +1,11 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useDebugStore, type PipelineTurn, type PipelineEvent } from "@/hooks/use-debug-events";
 import { useQuery } from "@tanstack/react-query";
 import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
 import { cn } from "@/lib/utils";
 import { Clock, Zap, ChevronDown, AlertTriangle } from "lucide-react";
-import { useState } from "react";
+
 
 // ==================== Task Type Colors ====================
 
@@ -101,8 +101,8 @@ export function PipelineTrace({ conversationId }: PipelineTraceProps) {
         </div>
       )}
 
-      {/* Error state */}
-      {auditError && allTurns.length === 0 && (
+      {/* Error state — early return when no data at all */}
+      {auditError && allTurns.length === 0 && !showLiveEvents && (
         <div className="flex flex-col items-center gap-2 py-6 text-center" data-testid="pipeline-trace-error">
           <AlertTriangle className="h-8 w-8 text-destructive/50" />
           <p className="text-sm text-muted-foreground">
@@ -112,18 +112,20 @@ export function PipelineTrace({ conversationId }: PipelineTraceProps) {
       )}
 
       {/* Current / selected turn chart */}
-      {showLiveEvents ? (
-        <LiveEventsChart events={currentTurnEvents} />
-      ) : displayTurn ? (
-        <TurnChart turn={displayTurn} />
-      ) : (
-        <div className="flex flex-col items-center gap-2 py-6 text-center">
-          <Zap className="h-8 w-8 text-muted-foreground/30" />
-          <p className="text-sm text-muted-foreground">
-            {t("debugDrawer.noPipeline", "Send a message to see the pipeline trace")}
-          </p>
-        </div>
-      )}
+      {!auditError || allTurns.length > 0 || showLiveEvents ? (
+        showLiveEvents ? (
+          <LiveEventsChart events={currentTurnEvents} />
+        ) : displayTurn ? (
+          <TurnChart turn={displayTurn} />
+        ) : (
+          <div className="flex flex-col items-center gap-2 py-6 text-center">
+            <Zap className="h-8 w-8 text-muted-foreground/30" />
+            <p className="text-sm text-muted-foreground">
+              {t("debugDrawer.noPipeline", "Send a message to see the pipeline trace")}
+            </p>
+          </div>
+        )
+      ) : null}
     </div>
   );
 }

@@ -134,9 +134,9 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
 
       {/* Error state */}
       {costsError && (
-        <div className="flex flex-col items-center gap-2 py-4 text-center">
-          <AlertTriangle className="h-6 w-6 text-amber-500/60" />
-          <p className="text-xs text-muted-foreground">
+        <div className="flex flex-col items-center gap-2 py-6 text-center" data-testid="cost-dashboard-error">
+          <AlertTriangle className="h-8 w-8 text-destructive/50" />
+          <p className="text-sm text-muted-foreground">
             {t("costDashboard.error", "Unable to load cost data from server")}
           </p>
         </div>

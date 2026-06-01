@@ -27,7 +27,7 @@ export function createAuthEventSource(
     if (options.signal.aborted) {
       abort.abort();
     } else {
-      options.signal.addEventListener("abort", () => abort.abort());
+      options.signal.addEventListener("abort", () => abort.abort(), { once: true });
     }
   }
 
@@ -53,6 +53,8 @@ export function createAuthEventSource(
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let eventType = "message";
+      let eventData = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -62,15 +64,13 @@ export function createAuthEventSource(
         const lines = buffer.split("\n");
         buffer = lines.pop() ?? "";
 
-        let eventType = "message";
-        let eventData = "";
-
         for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            eventType = line.slice(7).trim();
-          } else if (line.startsWith("data: ")) {
-            eventData += (eventData ? "\n" : "") + line.slice(6);
-          } else if (line === "" || line === "\r") {
+          const trimmed = line.replace(/\r$/, "");
+          if (trimmed.startsWith("event: ")) {
+            eventType = trimmed.slice(7).trim();
+          } else if (trimmed.startsWith("data: ")) {
+            eventData += (eventData ? "\n" : "") + trimmed.slice(6);
+          } else if (trimmed === "") {
             if (eventData) {
               options?.onMessage?.({ type: eventType, data: eventData });
               eventType = "message";

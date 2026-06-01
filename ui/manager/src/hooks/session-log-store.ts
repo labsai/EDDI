@@ -46,7 +46,8 @@ function connect() {
         },
         onError: () => {
           useSessionLogStore.setState({ connected: false });
-          // Reconnect after 5s
+          // Reconnect after 5s — no need to track timer since this
+          // singleton store runs for the entire app session lifetime.
           setTimeout(connect, 5000);
         },
       },

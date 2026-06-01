@@ -91,9 +91,11 @@ export function useCoordinatorSSE() {
   const [sseConnected, setSseConnected] = useState(false);
   const [eventHistory, setEventHistory] = useState<CoordinatorSnapshot[]>([]);
   const handleRef = useRef<AuthEventSourceHandle | null>(null);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const connect = useCallback(() => {
     try {
+      handleRef.current?.close();
       const handle = createCoordinatorEventSource({
         onMessage: (data) => {
           setLiveStatus(data);
@@ -115,7 +117,7 @@ export function useCoordinatorSSE() {
         onError: () => {
           setSseConnected(false);
           // Reconnect after 5 seconds
-          setTimeout(connect, 5000);
+          reconnectTimer.current = setTimeout(connect, 5000);
         },
       });
       handleRef.current = handle;
@@ -127,6 +129,7 @@ export function useCoordinatorSSE() {
   useEffect(() => {
     connect();
     return () => {
+      clearTimeout(reconnectTimer.current);
       handleRef.current?.close();
     };
   }, [connect]);

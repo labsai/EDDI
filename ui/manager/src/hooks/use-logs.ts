@@ -67,6 +67,7 @@ export function useLogStream(filters: LogFilters = {}) {
   const [sseConnected, setSseConnected] = useState(false);
   const [paused, setPaused] = useState(false);
   const handleRef = useRef<AuthEventSourceHandle | null>(null);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>();
   const pausedRef = useRef(false);
   const filterKey = JSON.stringify(filters);
 
@@ -77,6 +78,7 @@ export function useLogStream(filters: LogFilters = {}) {
 
   const connect = useCallback(() => {
     try {
+      handleRef.current?.close();
       const handle = createLogEventSource(filters, {
         onMessage: (entry) => {
           if (pausedRef.current) return;
@@ -90,7 +92,7 @@ export function useLogStream(filters: LogFilters = {}) {
         onOpen: () => setSseConnected(true),
         onError: () => {
           setSseConnected(false);
-          setTimeout(connect, 5000);
+          reconnectTimer.current = setTimeout(connect, 5000);
         },
       });
       handleRef.current = handle;
@@ -103,6 +105,7 @@ export function useLogStream(filters: LogFilters = {}) {
   useEffect(() => {
     connect();
     return () => {
+      clearTimeout(reconnectTimer.current);
       handleRef.current?.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
