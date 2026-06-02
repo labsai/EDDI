@@ -1048,6 +1048,16 @@ public class GroupConversationService implements IGroupConversationService {
             return String.join("\n", texts);
         }
 
+        // Check if the output only contains pipeline metadata (actions, input)
+        // rather than actual LLM-generated text — this indicates the LLM didn't
+        // produce a response (e.g., unreachable provider, timeout).
+        boolean hasOnlyMetadata = lastOutput.keySet().stream()
+                .allMatch(k -> k instanceof String s &&
+                        (s.equals("actions") || s.equals("input") || s.equals("context")));
+        if (hasOnlyMetadata) {
+            return null;
+        }
+
         // Fallback: serialize the entire output map (backward compat)
         try {
             return jsonSerialization.serialize(lastOutput);

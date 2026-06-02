@@ -21,5 +21,5 @@ public interface IAgentTriggerStore {
     void createAgentTrigger(AgentTriggerConfiguration agentTriggerConfiguration)
             throws IResourceStore.ResourceAlreadyExistsException, IResourceStore.ResourceStoreException;
 
-    void deleteAgentTrigger(String intent) throws IResourceStore.ResourceStoreException;
+    void deleteAgentTrigger(String intent) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 }

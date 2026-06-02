@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.model;
 
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
 import java.util.Map;
@@ -54,7 +55,7 @@ import java.util.Map;
  * }
  * }</pre>
  */
-public record LlmConfiguration(List<Task> tasks) {
+public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
     /**
      * Task configuration supporting both simple chat and advanced agent features.

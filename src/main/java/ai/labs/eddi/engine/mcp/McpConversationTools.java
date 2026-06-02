@@ -228,6 +228,19 @@ public class McpConversationTools {
             }
 
             var snapshot = conversationService.readConversation(conversationId, detailed, stepOnly, fields);
+
+            // Apply field-level filtering on conversationOutputs when specific
+            // field names are requested (e.g. "input", "output", "actions").
+            // The service layer only handles section-level filtering
+            // (conversationSteps, conversationOutputs, conversationProperties).
+            if (!fields.isEmpty() && snapshot.getConversationOutputs() != null) {
+                var trimmedFields = fields.stream().map(String::trim).toList();
+                for (var output : snapshot.getConversationOutputs()) {
+                    output.keySet()
+                            .removeIf(key -> key instanceof String s && trimmedFields.stream().noneMatch(f -> s.equals(f) || s.startsWith(f + ":")));
+                }
+            }
+
             return jsonSerialization.serialize(snapshot);
         } catch (Exception e) {
             LOGGER.error("MCP read_conversation failed for conversation " + conversationId, e);
@@ -513,6 +526,15 @@ public class McpConversationTools {
         }
 
         if (existing != null) {
+            // Validate that the trigger still exists — if it was deleted,
+            // the UserConversation is stale and should be cleaned up
+            try {
+                agentTriggerStore.readAgentTrigger(intent);
+            } catch (Exception triggerEx) {
+                userConversationStore.deleteUserConversation(intent, userId);
+                throw new RuntimeException("Agent trigger for intent '" + intent + "' no longer exists");
+            }
+
             // Check if conversation has ended
             ConversationState state = restAgentEngine.getConversationState(existing.getConversationId());
             if (!ConversationState.ENDED.equals(state)) {

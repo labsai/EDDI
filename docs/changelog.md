@@ -4,6 +4,53 @@
 
 ---
 
+## 🐛 MCP Endpoint Bug Fixes — 8 Bugs Resolved (2026-06-02)
+
+**Repo:** EDDI (`fix/mcp-endpoint-bugs`)
+**What changed:** Systematic testing of all 42 MCP endpoints revealed 8 bugs. All fixed with regression tests.
+
+### BUG-1: `read_resource` for `langchain` returns empty `configuration: {}`
+- **Root cause:** `LlmConfiguration` is the only Java record-based config class. The programmatic MP REST Client's ObjectMapper may lack `ParameterNamesModule`, causing silent deserialization failure to `LlmConfiguration(null)`, then `NON_NULL` serialization produces `{}`.
+- **Fix:** Added `@JsonProperty("tasks")` to the record component.
+- **Files:** `LlmConfiguration.java`
+
+### BUG-2: Group discussion shows raw `{"actions":["send_message","unknown"]}`
+- **Root cause:** `GroupConversationService.extractResponse()` fallback serialized pipeline metadata when no text output keys were found.
+- **Fix:** Added metadata-only detection: if output only contains `actions`/`input`/`context` keys, return `null` instead.
+- **Files:** `GroupConversationService.java`
+
+### BUG-3: `list_conversations` returns 0 results when filtering by agentId
+- **Root cause:** `RestConversationStore` used `getResource()` (conversation URI) instead of `getAgentResource()` (agent URI) for agent filtering — compared agentId against conversationId.
+- **Fix:** Changed to use `getAgentResource()` for agent ID extraction.
+- **Files:** `RestConversationStore.java`
+
+### BUG-4: `read_conversation_log` NPE when logSize is null
+- **Root cause:** `Integer` logSize passed directly to `int` parameter causing NPE on unboxing.
+- **Fix:** Added null guard: `logSize != null ? logSize : -1`.
+- **Files:** `ConversationService.java`
+
+### BUG-5: `delete_agent_trigger` returns 200 for nonexistent intents
+- **Root cause:** Both MongoDB and Postgres implementations silently accepted no-op deletes.
+- **Fix:** Interface, Mongo, and Postgres stores now throw `ResourceNotFoundException` when delete count is zero. REST layer catches and returns 404.
+- **Files:** `IAgentTriggerStore.java`, `AgentTriggerStore.java`, `PostgresAgentTriggerStore.java`, `RestAgentTriggerStore.java`
+
+### BUG-6: `chat_managed` routes to stale conversation after trigger deletion
+- **Root cause:** `getOrCreateManagedConversation()` reused `UserConversation` records without validating trigger existence.
+- **Fix:** Validate trigger before reusing, clean up stale records if trigger is deleted.
+- **Files:** `McpConversationTools.java`
+
+### BUG-7: `delete_group`/`update_group` fail with version=0
+- **Root cause:** `RestVersionInfo` didn't override `getCurrentResourceId()`, falling through to `IRestVersionInfo` default which throws.
+- **Fix:** Added `getCurrentResourceId()` override that delegates to `resourceStore`.
+- **Files:** `RestVersionInfo.java`
+
+### BUG-8: `returningFields` filter in `read_conversation` has no effect
+- **Root cause:** Underlying utility only handles section-level filtering, not individual field names.
+- **Fix:** Added post-processing in MCP layer to filter conversationOutputs keys.
+- **Files:** `McpConversationTools.java`
+
+---
+
 ## 📦 Dependency Updates — June 2026 (2026-06-01)
 
 **Repo:** EDDI (`chore/dependency-updates-june-2026`)
