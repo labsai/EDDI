@@ -346,13 +346,15 @@ export function AgentDetailPage() {
                       if (s.status === "READY") break;
                       if (s.status === "ERROR") throw new Error("Deploy failed");
                     }
+                    // Invalidate immediately after deployment is confirmed so
+                    // caches are fresh even if the conversation start fails.
+                    queryClient.invalidateQueries({ queryKey: ["agents"] });
+                    queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
                     drawerStore.setStep("starting");
                     chatStore.clearMessages();
                     chatStore.setSelectedAgent(id!, id!);
                     await startConversationMutation.mutateAsync({ agentId: id! });
                     drawerStore.setStep("ready");
-                    queryClient.invalidateQueries({ queryKey: ["agents"] });
-                    queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
                   } catch (err) {
                     drawerStore.setStep("error", getErrorMessage(err));
                   }

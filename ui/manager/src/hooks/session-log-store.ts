@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { createLogEventSource, type LogEntry } from "@/lib/api/logs";
 import type { AuthEventSourceHandle } from "@/lib/api/sse-utils";
-import { SSE_RECONNECT_BASE_MS, SSE_RECONNECT_MAX_ATTEMPTS } from "@/lib/constants";
+import { SSE_RECONNECT_BASE_MS, SSE_RECONNECT_MAX_ATTEMPTS, SSE_RECONNECT_MAX_DELAY_MS } from "@/lib/constants";
 
 /**
  * Session-level log store.
@@ -61,7 +61,7 @@ function connect() {
           handle?.close();
           handle = null;
           if (reconnectAttempts < SSE_RECONNECT_MAX_ATTEMPTS) {
-            const delay = SSE_RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts);
+            const delay = Math.min(SSE_RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts), SSE_RECONNECT_MAX_DELAY_MS);
             reconnectAttempts++;
             clearTimeout(reconnectTimer);
             reconnectTimer = setTimeout(connect, delay);
@@ -74,8 +74,10 @@ function connect() {
   }
 }
 
-// Only auto-connect if we're in the browser (not in SSR / test)
-if (typeof window !== "undefined") {
+// Only auto-connect if we're in the browser (not in SSR / test).
+// Vitest sets import.meta.env.MODE to "test"; without this guard the JSDOM
+// environment would schedule a real setTimeout and try to open an SSE stream.
+if (typeof window !== "undefined" && import.meta.env.MODE !== "test") {
   // Delay slightly so MSW has time to start in dev mode
   setTimeout(connect, 2000);
 }

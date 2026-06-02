@@ -29,18 +29,19 @@ function mockFetchResponse(chunks: string[], status = 200) {
   );
 }
 
+// Mock the api module used by sse-utils (hoisted to top of file by Vitest)
+vi.mock("../../api-client", () => ({
+  api: {
+    getBaseUrl: () => "http://test",
+    getAuthHeader: () => ({}),
+  },
+}));
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("createAuthEventSource", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    // Mock the api module used by sse-utils
-    vi.mock("../../api-client", () => ({
-      api: {
-        getBaseUrl: () => "http://test",
-        getAuthHeader: () => ({}),
-      },
-    }));
   });
 
   it("parses 'data: value' (with space) correctly", async () => {

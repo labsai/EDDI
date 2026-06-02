@@ -20,3 +20,6 @@ export const SSE_RECONNECT_BASE_MS = 5000;
 
 /** Maximum number of SSE reconnection attempts before giving up. */
 export const SSE_RECONNECT_MAX_ATTEMPTS = 10;
+
+/** Maximum delay between SSE reconnection attempts (ms). Caps exponential backoff. */
+export const SSE_RECONNECT_MAX_DELAY_MS = 60_000;

@@ -276,8 +276,6 @@ function TaskBar({ task, maxDuration }: { task: TaskBarData; maxDuration: number
 
 // ==================== Helpers ====================
 
-
-
 function buildTaskBars(events: PipelineEvent[]): TaskBarData[] {
   const tasks: TaskBarData[] = [];
   const started = new Map<string, PipelineEvent>();

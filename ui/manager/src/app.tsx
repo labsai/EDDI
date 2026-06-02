@@ -38,7 +38,7 @@ import { ChannelDetailPage } from "@/pages/channel-detail";
 export function App() {
   const location = useLocation();
   return (
-    <ErrorBoundary resetKey={location.pathname}>
+    <ErrorBoundary resetKey={location.key}>
     <Routes>
       {/* Studio — full-screen breakout, no sidebar/topbar chrome */}
       <Route path="/manage/studio/:agentId" element={<AgentStudioPage />} />

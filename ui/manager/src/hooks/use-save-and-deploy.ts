@@ -88,6 +88,11 @@ export function useSaveAndDeploy() {
           return;
         }
 
+        // Invalidate immediately after deployment is confirmed so caches
+        // are fresh even if the conversation start below fails.
+        queryClient.invalidateQueries({ queryKey: ["agents"] });
+        queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+
         // Step 4: Start conversation
         drawerStore.setStep("starting");
         chatStore.clearMessages();
@@ -96,9 +101,6 @@ export function useSaveAndDeploy() {
 
         // Step 5: Ready
         drawerStore.setStep("ready");
-        // Invalidate so agent list and chat reflect new deployment status
-        queryClient.invalidateQueries({ queryKey: ["agents"] });
-        queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
       } catch (err) {
         const message =
           err instanceof Error

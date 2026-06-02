@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { createLogEventSource, getRecentLogs, type LogEntry } from "@/lib/api/logs";
 import type { AuthEventSourceHandle } from "@/lib/api/sse-utils";
-import { SSE_RECONNECT_BASE_MS, SSE_RECONNECT_MAX_ATTEMPTS } from "@/lib/constants";
+import { SSE_RECONNECT_BASE_MS, SSE_RECONNECT_MAX_ATTEMPTS, SSE_RECONNECT_MAX_DELAY_MS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import {
   ScrollText,
@@ -89,7 +89,7 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
             handleRef.current?.close();
             handleRef.current = null;
             if (reconnectAttempts.current < SSE_RECONNECT_MAX_ATTEMPTS) {
-              const delay = SSE_RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts.current);
+              const delay = Math.min(SSE_RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts.current), SSE_RECONNECT_MAX_DELAY_MS);
               reconnectAttempts.current++;
               clearTimeout(reconnectTimer.current);
               reconnectTimer.current = setTimeout(connect, delay);

@@ -55,6 +55,13 @@ describe("CreateChannelDialog — error handling", () => {
     // Step 4: Submit — should trigger the error toast
     await user.click(screen.getByTestId("create-channel-submit"));
 
+    // Assert error toast is shown with the error details
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Internal Server Error/),
+      ).toBeInTheDocument();
+    });
+
     // The dialog should remain open (not close on error)
     await waitFor(() => {
       expect(screen.getByTestId("create-channel-submit")).toBeInTheDocument();

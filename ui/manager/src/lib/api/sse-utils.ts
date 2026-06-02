@@ -59,6 +59,23 @@ export function createAuthEventSource(
       while (true) {
         const { done, value } = await reader.read();
         if (done) {
+          // Process any remaining data in the buffer before disconnecting.
+          // If the server closed without a trailing newline, the final event
+          // would otherwise be silently lost.
+          if (buffer) {
+            const trimmed = buffer.replace(/\r$/, "");
+            if (trimmed.startsWith("event:")) {
+              const payload = trimmed[6] === " " ? trimmed.slice(7) : trimmed.slice(6);
+              eventType = payload.trim();
+            } else if (trimmed.startsWith("data:")) {
+              const payload = trimmed[5] === " " ? trimmed.slice(6) : trimmed.slice(5);
+              eventData += (eventData ? "\n" : "") + payload;
+            }
+          }
+          if (eventData) {
+            options?.onMessage?.({ type: eventType, data: eventData });
+          }
+
           // Treat a normal stream end as a disconnect so callers can reconnect.
           if (!abort.signal.aborted) {
             options?.onError?.(new Error("SSE connection closed"));
