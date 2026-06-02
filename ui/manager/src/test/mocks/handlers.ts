@@ -1134,15 +1134,15 @@ export const handlers = [
   // --- Extension Store ---
   http.get("*/extensionstore/extensions", () => {
     return HttpResponse.json([
-      { type: "ai.labs.parser", displayName: "Parser", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
-      { type: "ai.labs.rules", displayName: "Rules", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
-      { type: "ai.labs.property", displayName: "Property Setter", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
-      { type: "ai.labs.apicalls", displayName: "API Calls", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
-      { type: "ai.labs.llm", displayName: "LLM", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
-      { type: "ai.labs.output", displayName: "Output", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
-      { type: "ai.labs.output.template", displayName: "Output Template", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
-      { type: "ai.labs.mcpcalls", displayName: "MCP Calls", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
-      { type: "ai.labs.rag", displayName: "RAG Knowledge Base", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.parser", displayName: "Parser", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.rules", displayName: "Rules", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.property", displayName: "Property Setter", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.apicalls", displayName: "API Calls", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.llm", displayName: "LLM", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.output", displayName: "Output", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.output.template", displayName: "Output Template", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.mcpcalls", displayName: "MCP Calls", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.rag", displayName: "RAG Knowledge Base", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
     ]);
   }),
 
@@ -3503,10 +3503,10 @@ export const scheduleHandlers = [
     return HttpResponse.json({
       conversationId: "conv-mock",
       totalCost: 0.015,
-      totalToolCalls: 7,
+      toolCallCount: 7,
       toolUsage: {
-        websearch: { calls: 3, totalCost: 0.003 },
-        fetch_weather: { calls: 4, totalCost: 0.002 },
+        websearch: 3,
+        fetch_weather: 4,
       },
     });
   }),
@@ -3514,23 +3514,25 @@ export const scheduleHandlers = [
   // Tool rate limit
   http.get("*/llm/tools/ratelimit/:tool", ({ params }) => {
     return HttpResponse.json({
-      toolName: params.tool as string,
+      tool: params.tool as string,
       limit: 60,
       remaining: 42,
-      resetAt: new Date(Date.now() + 60_000).toISOString(),
+      resetTimeMs: Date.now() + 60_000,
     });
   }),
 
   // Cache stats
   http.get("*/llm/tools/cache/stats", () => {
     return HttpResponse.json({
-      totalHits: 23,
-      totalMisses: 12,
+      size: 35,
+      hits: 23,
+      misses: 12,
       hitRate: 0.657,
       perToolStats: {
         fetch_weather: { hits: 15, misses: 5 },
         websearch: { hits: 8, misses: 7 },
       },
+      details: "Cache: 35 entries, 23 hits, 12 misses (65.7%)",
     });
   }),
 
@@ -3560,18 +3562,11 @@ export const scheduleHandlers = [
   http.get("*/llm/tools/costs", () => {
     return HttpResponse.json({
       totalCost: 0.045,
-      totalCalls: 15,
-      perTool: {
-        fetch_weather: { calls: 8, cost: 0.012 },
-        websearch: { calls: 7, cost: 0.033 },
-      },
+      summary: "Tool Cost Summary:\nTotal Cost: $0.0450\nPer-Tool Costs:\n  - fetch_weather: 8 calls, $0.0120 total, $0.0015 avg\n  - websearch: 7 calls, $0.0330 total, $0.0047 avg\n",
     });
   }),
 
-  // Rerun last conversation step (replay)
-  http.post("*/agents/:convId/rerunLastConversationStep", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
+  // Rerun last conversation step (replay) — handler at end of file uses /rerun path
 
   // Detailed conversation (memory inspector)
   http.get("*/agents/:convId", ({ request }) => {
@@ -3704,12 +3699,12 @@ export const scheduleHandlers = [
     return HttpResponse.json({
       conversationId,
       totalCost: 0.0847,
-      totalToolCalls: 14,
+      toolCallCount: 14,
       toolUsage: {
-        "fetch_weather": { calls: 5, totalCost: 0.0125 },
-        "search_products": { calls: 4, totalCost: 0.0098 },
-        "create_ticket": { calls: 3, totalCost: 0.042 },
-        "send_email": { calls: 2, totalCost: 0.0204 },
+        "fetch_weather": 5,
+        "search_products": 4,
+        "create_ticket": 3,
+        "send_email": 2,
       },
     });
   }),
@@ -3717,23 +3712,25 @@ export const scheduleHandlers = [
   http.get("*/llm/tools/ratelimit/:toolName", ({ params }) => {
     const toolName = params.toolName as string;
     return HttpResponse.json({
-      toolName,
+      tool: toolName,
       limit: 60,
       remaining: 42,
-      resetAt: new Date(Date.now() + 45_000).toISOString(),
+      resetTimeMs: Date.now() + 45_000,
     });
   }),
 
   http.get("*/llm/tools/cache/stats", () => {
     return HttpResponse.json({
-      totalHits: 328,
-      totalMisses: 97,
+      size: 425,
+      hits: 328,
+      misses: 97,
       hitRate: 0.772,
       perToolStats: {
         "fetch_weather": { hits: 145, misses: 32 },
         "search_products": { hits: 98, misses: 41 },
         "create_ticket": { hits: 85, misses: 24 },
       },
+      details: "Cache: 425 entries, 328 hits, 97 misses (77.2%)",
     });
   }),
 
@@ -3770,13 +3767,7 @@ export const scheduleHandlers = [
   http.get("*/llm/tools/costs", () => {
     return HttpResponse.json({
       totalCost: 1.247,
-      totalCalls: 892,
-      perTool: {
-        "fetch_weather": { calls: 312, cost: 0.312 },
-        "search_products": { calls: 245, cost: 0.367 },
-        "create_ticket": { calls: 189, cost: 0.378 },
-        "send_email": { calls: 146, cost: 0.19 },
-      },
+      summary: "Tool Cost Summary:\nTotal Cost: $1.2470\nPer-Tool Costs:\n  - fetch_weather: 312 calls\n  - search_products: 245 calls\n  - create_ticket: 189 calls\n  - send_email: 146 calls\n",
     });
   }),
 ];

@@ -16,12 +16,9 @@ import {
 import { cn } from "@/lib/utils";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useSkills, useCapabilitySearch, useSkillRegistry } from "@/hooks/use-capabilities";
+import { CONFIDENCE_COLORS } from "@/lib/constants";
 
-const confidenceColors: Record<string, string> = {
-  high: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-  medium: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
-  low: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
-};
+const confidenceColors = CONFIDENCE_COLORS;
 
 export function CapabilitiesPage() {
   const { t } = useTranslation();

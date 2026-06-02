@@ -641,7 +641,7 @@
     "cascadeInAgent": "एजेंट मोड (उपकरण सहित) में भी कैस्केड उपयोग करें",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "जैसे gpt-4o-mini",
+    "cascadeModelName": "जैसे claude-sonnet-4-6",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "खाली = हमेशा स्वीकार",
     "cascadeTimeout": "टाइमआउट (मि.से.)",

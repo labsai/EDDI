@@ -9,7 +9,9 @@ import {
   type LogFilters,
   type HistoryFilters,
 } from "@/lib/api/logs";
+import type { AuthEventSourceHandle } from "@/lib/api/sse-utils";
 import { useSessionLogStore } from "@/hooks/session-log-store";
+import { SSE_RECONNECT_BASE_MS, SSE_RECONNECT_MAX_ATTEMPTS, SSE_RECONNECT_MAX_DELAY_MS } from "@/lib/constants";
 
 // ==================== Query Keys ====================
 
@@ -65,7 +67,9 @@ export function useLogStream(filters: LogFilters = {}) {
   );
   const [sseConnected, setSseConnected] = useState(false);
   const [paused, setPaused] = useState(false);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const handleRef = useRef<AuthEventSourceHandle | null>(null);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const reconnectAttempts = useRef(0);
   const pausedRef = useRef(false);
   const filterKey = JSON.stringify(filters);
 
@@ -76,37 +80,32 @@ export function useLogStream(filters: LogFilters = {}) {
 
   const connect = useCallback(() => {
     try {
-      const es = createLogEventSource(filters);
-      eventSourceRef.current = es;
-
-      const handleEvent = (event: MessageEvent) => {
-        if (pausedRef.current) return;
-        try {
-          const entry = JSON.parse(event.data) as LogEntry;
+      handleRef.current?.close();
+      const handle = createLogEventSource(filters, {
+        onMessage: (entry) => {
+          if (pausedRef.current) return;
           setEntries((prev) => {
             const next = [entry, ...prev];
             return next.length > MAX_LOG_ENTRIES
               ? next.slice(0, MAX_LOG_ENTRIES)
               : next;
           });
-        } catch {
-          // ignore parse errors
-        }
-      };
-
-      es.addEventListener("log", handleEvent);
-      // Fallback for backends that send unnamed SSE events
-      es.onmessage = handleEvent;
-
-      es.onerror = () => {
-        setSseConnected(false);
-        es.close();
-        setTimeout(connect, 5000);
-      };
-
-      es.onopen = () => {
-        setSseConnected(true);
-      };
+        },
+        onOpen: () => {
+          reconnectAttempts.current = 0;
+          setSseConnected(true);
+        },
+        onError: () => {
+          setSseConnected(false);
+          if (reconnectAttempts.current < SSE_RECONNECT_MAX_ATTEMPTS) {
+            const delay = Math.min(SSE_RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts.current), SSE_RECONNECT_MAX_DELAY_MS);
+            reconnectAttempts.current++;
+            clearTimeout(reconnectTimer.current);
+            reconnectTimer.current = setTimeout(connect, delay);
+          }
+        },
+      });
+      handleRef.current = handle;
     } catch {
       setSseConnected(false);
     }
@@ -114,9 +113,12 @@ export function useLogStream(filters: LogFilters = {}) {
   }, [filterKey]);
 
   useEffect(() => {
+    setEntries([]);
+    reconnectAttempts.current = 0;
     connect();
     return () => {
-      eventSourceRef.current?.close();
+      clearTimeout(reconnectTimer.current);
+      handleRef.current?.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterKey]);
@@ -127,3 +129,4 @@ export function useLogStream(filters: LogFilters = {}) {
 
   return { entries, sseConnected, paused, setPaused, clearEntries };
 }
+

@@ -97,6 +97,12 @@ export function ResourceDetailPage() {
   // Version state — default to latest version once descriptors are loaded
   const [currentVersion, setCurrentVersion] = useState<number | undefined>(undefined);
 
+  // Reset version when navigating to a different resource (React reuses
+  // the component for same-type routes, so useState values persist).
+  useEffect(() => {
+    setCurrentVersion(undefined);
+  }, [id, type]);
+
   // Fetch version descriptors first — needed to resolve the latest version
   const {
     data: versionDescriptors,

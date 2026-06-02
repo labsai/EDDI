@@ -1,4 +1,6 @@
 import { useState, useCallback } from "react";
+import { toast } from "sonner";
+import { getErrorMessage } from "@/lib/api-client";
 import { useTranslation } from "react-i18next";
 import { Cable, ChevronRight, ChevronLeft, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -84,8 +86,8 @@ export function CreateChannelDialog({
       onCreated?.(newId);
       onOpenChange(false);
       reset();
-    } catch {
-      // error handled by mutation
+    } catch (err) {
+      toast.error(getErrorMessage(err));
     }
   };
 

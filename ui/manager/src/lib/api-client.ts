@@ -137,7 +137,15 @@ class ApiClient {
     try {
       return JSON.parse(text) as T;
     } catch {
-      return undefined as T;
+      // Non-JSON body on a success response — treat as an error rather
+      // than silently returning undefined (which would be cached by
+      // TanStack Query as valid data, hiding the real problem).
+      const error: ApiError = {
+        status: response.status,
+        message: "Unexpected non-JSON response",
+        url,
+      };
+      throw error;
     }
   }
 

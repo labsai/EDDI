@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { createLogEventSource, type LogEntry } from "@/lib/api/logs";
+import type { AuthEventSourceHandle } from "@/lib/api/sse-utils";
+import { SSE_RECONNECT_BASE_MS, SSE_RECONNECT_MAX_ATTEMPTS, SSE_RECONNECT_MAX_DELAY_MS } from "@/lib/constants";
 
 /**
  * Session-level log store.
@@ -25,51 +27,57 @@ export const useSessionLogStore = create<SessionLogState>(() => ({
 
 // ─── Auto-connect SSE on module load ─────────────────────────────────────────
 
-let eventSource: EventSource | null = null;
+let handle: AuthEventSourceHandle | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+let reconnectAttempts = 0;
 
 function connect() {
   try {
-    eventSource = createLogEventSource(); // no filters — capture everything
+    // Close any existing stream before opening a new one
+    handle?.close();
+    handle = null;
+    clearTimeout(reconnectTimer);
 
-    const handleEvent = (event: MessageEvent) => {
-      try {
-        const entry = JSON.parse(event.data) as LogEntry;
-        useSessionLogStore.setState((s) => {
-          const next = [entry, ...s.entries];
-          return {
-            entries:
-              next.length > MAX_SESSION_ENTRIES
-                ? next.slice(0, MAX_SESSION_ENTRIES)
-                : next,
-          };
-        });
-      } catch {
-        // ignore parse errors
-      }
-    };
-
-    // Listen for both named "log" events and unnamed events (fallback)
-    eventSource.addEventListener("log", handleEvent);
-    eventSource.onmessage = handleEvent;
-
-    eventSource.onerror = () => {
-      useSessionLogStore.setState({ connected: false });
-      eventSource?.close();
-      eventSource = null;
-      // Reconnect after 5s
-      setTimeout(connect, 5000);
-    };
-
-    eventSource.onopen = () => {
-      useSessionLogStore.setState({ connected: true });
-    };
+    handle = createLogEventSource(
+      {}, // no filters — capture everything
+      {
+        onMessage: (entry) => {
+          useSessionLogStore.setState((s) => {
+            const next = [entry, ...s.entries];
+            return {
+              entries:
+                next.length > MAX_SESSION_ENTRIES
+                  ? next.slice(0, MAX_SESSION_ENTRIES)
+                  : next,
+            };
+          });
+        },
+        onOpen: () => {
+          reconnectAttempts = 0;
+          useSessionLogStore.setState({ connected: true });
+        },
+        onError: () => {
+          useSessionLogStore.setState({ connected: false });
+          handle?.close();
+          handle = null;
+          if (reconnectAttempts < SSE_RECONNECT_MAX_ATTEMPTS) {
+            const delay = Math.min(SSE_RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts), SSE_RECONNECT_MAX_DELAY_MS);
+            reconnectAttempts++;
+            clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(connect, delay);
+          }
+        },
+      },
+    );
   } catch {
     useSessionLogStore.setState({ connected: false });
   }
 }
 
-// Only auto-connect if we're in the browser (not in SSR / test)
-if (typeof window !== "undefined" && typeof EventSource !== "undefined") {
+// Only auto-connect if we're in the browser (not in SSR / test).
+// Vitest sets import.meta.env.MODE to "test"; without this guard the JSDOM
+// environment would schedule a real setTimeout and try to open an SSE stream.
+if (typeof window !== "undefined" && import.meta.env.MODE !== "test") {
   // Delay slightly so MSW has time to start in dev mode
   setTimeout(connect, 2000);
 }

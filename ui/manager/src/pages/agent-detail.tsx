@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -76,12 +77,19 @@ export function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const [version, setVersion] = useState<number | undefined>(undefined);
   const [showAddWorkflow, setShowAddWorkflow] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
+
+  // Reset version when navigating to a different agent (React reuses
+  // the component, so useState values persist across route param changes).
+  useEffect(() => {
+    setVersion(undefined);
+  }, [id]);
 
   const { data: versions } = useAgentVersions(id!);
 
@@ -338,6 +346,10 @@ export function AgentDetailPage() {
                       if (s.status === "READY") break;
                       if (s.status === "ERROR") throw new Error("Deploy failed");
                     }
+                    // Invalidate immediately after deployment is confirmed so
+                    // caches are fresh even if the conversation start fails.
+                    queryClient.invalidateQueries({ queryKey: ["agents"] });
+                    queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
                     drawerStore.setStep("starting");
                     chatStore.clearMessages();
                     chatStore.setSelectedAgent(id!, id!);

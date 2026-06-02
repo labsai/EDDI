@@ -641,7 +641,7 @@
     "cascadeInAgent": "在代理模式（含工具）中也使用级联",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "例如 gpt-4o-mini",
+    "cascadeModelName": "例如 claude-sonnet-4-6",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "空 = 始终接受",
     "cascadeTimeout": "超时 (毫秒)",

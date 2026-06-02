@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -55,6 +55,13 @@ export function ResourceListPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode(`resources-${type}`));
+
+  // Reset search when switching between resource types (React reuses
+  // the component, so useState values persist across route param changes).
+  useEffect(() => {
+    setSearch("");
+    setView(getStoredViewMode(`resources-${type}`));
+  }, [type]);
 
   const rt = getResourceType(type ?? "");
 

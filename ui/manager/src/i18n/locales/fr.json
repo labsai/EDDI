@@ -641,7 +641,7 @@
     "cascadeInAgent": "Utiliser aussi la cascade en mode agent (avec outils)",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "ex. gpt-4o-mini",
+    "cascadeModelName": "ex. claude-sonnet-4-6",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "vide = toujours accepter",
     "cascadeTimeout": "Délai max. (ms)",

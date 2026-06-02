@@ -641,7 +641,7 @@
     "cascadeInAgent": "에이전트 모드(도구 사용)에서도 캐스케이드 적용",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "예: gpt-4o-mini",
+    "cascadeModelName": "예: claude-sonnet-4-6",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "비워두면 항상 수락",
     "cascadeTimeout": "타임아웃 (ms)",
