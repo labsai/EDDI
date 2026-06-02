@@ -133,7 +133,7 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
       )}
 
       {/* Error state */}
-      {costsError && (
+      {costsError && !costs && (
         <div className="flex flex-col items-center gap-2 py-6 text-center" data-testid="cost-dashboard-error">
           <AlertTriangle className="h-8 w-8 text-destructive/50" />
           <p className="text-sm text-muted-foreground">

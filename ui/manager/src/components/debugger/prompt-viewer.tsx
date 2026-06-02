@@ -54,7 +54,7 @@ export function PromptViewer({ conversationId }: PromptViewerProps) {
     );
   }
 
-  if (isError) {
+  if (isError && !auditEntries) {
     return (
       <div className="flex flex-col items-center gap-2 py-6 text-center" data-testid="prompt-viewer-error">
         <AlertTriangle className="h-8 w-8 text-destructive/50" />

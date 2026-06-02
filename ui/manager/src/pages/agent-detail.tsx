@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -76,12 +77,19 @@ export function AgentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const [version, setVersion] = useState<number | undefined>(undefined);
   const [showAddWorkflow, setShowAddWorkflow] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
+
+  // Reset version when navigating to a different agent (React reuses
+  // the component, so useState values persist across route param changes).
+  useEffect(() => {
+    setVersion(undefined);
+  }, [id]);
 
   const { data: versions } = useAgentVersions(id!);
 
@@ -343,6 +351,8 @@ export function AgentDetailPage() {
                     chatStore.setSelectedAgent(id!, id!);
                     await startConversationMutation.mutateAsync({ agentId: id! });
                     drawerStore.setStep("ready");
+                    queryClient.invalidateQueries({ queryKey: ["agents"] });
+                    queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
                   } catch (err) {
                     drawerStore.setStep("error", getErrorMessage(err));
                   }

@@ -99,6 +99,7 @@ const INITIAL_STATE: WizardState = {
 /** Popular model suggestions per provider — users can still type any custom model */
 const MODEL_SUGGESTIONS: Record<string, string[]> = {
   anthropic: [
+    // Anthropic API uses dashes in version numbers (e.g. sonnet-4-6 = v4.6)
     "claude-sonnet-4-6",
     "claude-opus-4-6",
     "claude-haiku-4-5",
@@ -110,53 +111,59 @@ const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "o3-mini",
   ],
   gemini: [
+    "gemini-3.5-flash",
+    "gemini-3.1-pro",
     "gemini-2.5-flash",
     "gemini-2.5-pro",
-    "gemini-3-flash-preview",
-    "gemini-3.1-pro-preview",
-    "gemini-3.1-flash-lite-preview",
   ],
   "gemini-vertex": [
+    "gemini-3.5-flash",
     "gemini-2.5-flash",
     "gemini-2.5-pro",
-    "gemini-3-flash-preview",
-    "gemini-3.1-pro-preview",
   ],
   ollama: [
-    "gemma4:4b",
-    "llama3.2:3b",
-    "llama3.1:8b",
+    // llama3.3 was only released as 70B — no 8B variant exists on Ollama Hub
+    "llama3.3:70b",
+    "qwen3:8b",
     "gemma3:4b",
-    "mistral:7b",
-    "qwen2.5:7b",
-    "deepseek-r1:8b",
     "phi4:mini",
+    "deepseek-r1:8b",
   ],
   jlama: [
     "llama-3.2-1b",
     "tinyllama",
   ],
   huggingface: [
+    "deepseek-ai/DeepSeek-V4",
+    "google/gemma-4-assistant",
+    "THUDM/GLM-5.1",
     "Qwen/Qwen3.5-7B",
     "meta-llama/Llama-3.2-1B",
   ],
   mistral: [
+    "mistral-small-4",
     "mistral-large-latest",
     "mistral-medium-latest",
     "mistral-small-latest",
     "magistral-medium-latest",
     "magistral-small-latest",
   ],
+  // Azure uses your own deployment names — these are standard Microsoft-managed
+  // deployment identifiers for Azure OpenAI Service
   "azure-openai": [
     "gpt-5.4",
     "gpt-5.4-mini",
   ],
   bedrock: [
-    "anthropic.claude-sonnet-4-6-v1",
+    // AWS Bedrock model IDs follow the pattern: provider.model-name-v1:0
+    "anthropic.claude-sonnet-4-6-v1:0",
+    "meta.llama3-3-70b-instruct-v1:0",
     "amazon.nova-pro-v1:0",
     "amazon.nova-lite-v1:0",
   ],
   "oracle-genai": [
+    "cohere.command-r-plus-v2",
+    "meta.llama-3.3-70b-instruct",
     "cohere.command-r-plus",
     "meta.llama-3.1-70b-instruct",
   ],

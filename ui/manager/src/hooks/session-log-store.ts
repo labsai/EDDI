@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createLogEventSource, type LogEntry } from "@/lib/api/logs";
+import type { AuthEventSourceHandle } from "@/lib/api/sse-utils";
 
 /**
  * Session-level log store.
@@ -25,9 +26,17 @@ export const useSessionLogStore = create<SessionLogState>(() => ({
 
 // ─── Auto-connect SSE on module load ─────────────────────────────────────────
 
+let handle: AuthEventSourceHandle | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
 function connect() {
   try {
-    createLogEventSource(
+    // Close any existing stream before opening a new one
+    handle?.close();
+    handle = null;
+    clearTimeout(reconnectTimer);
+
+    handle = createLogEventSource(
       {}, // no filters — capture everything
       {
         onMessage: (entry) => {
@@ -46,9 +55,11 @@ function connect() {
         },
         onError: () => {
           useSessionLogStore.setState({ connected: false });
-          // Reconnect after 5s — no need to track timer since this
-          // singleton store runs for the entire app session lifetime.
-          setTimeout(connect, 5000);
+          handle?.close();
+          handle = null;
+          // Reconnect after 5s — dedup to avoid stacking
+          clearTimeout(reconnectTimer);
+          reconnectTimer = setTimeout(connect, 5000);
         },
       },
     );
@@ -62,4 +73,3 @@ if (typeof window !== "undefined") {
   // Delay slightly so MSW has time to start in dev mode
   setTimeout(connect, 2000);
 }
-

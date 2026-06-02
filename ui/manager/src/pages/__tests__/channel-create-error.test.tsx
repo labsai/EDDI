@@ -1,12 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
+import { Toaster } from "sonner";
 import { server } from "@/test/mocks/server";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { ChannelsPage } from "@/pages/channels";
 
 describe("CreateChannelDialog — error handling", () => {
-  it("shows error toast when channel creation fails", async () => {
+  it("shows error toast and keeps dialog open when channel creation fails", async () => {
     // Override the POST handler to return a 500 error
     server.use(
       http.post("*/channelstore/channels", () => {
@@ -17,9 +18,13 @@ describe("CreateChannelDialog — error handling", () => {
       }),
     );
 
-    renderWithProviders(<ChannelsPage />, {
-      initialRoute: "/manage/channels",
-    });
+    renderWithProviders(
+      <>
+        <Toaster />
+        <ChannelsPage />
+      </>,
+      { initialRoute: "/manage/channels" },
+    );
 
     const user = userEvent.setup();
 

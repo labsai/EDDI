@@ -7,6 +7,8 @@ interface ErrorBoundaryProps {
   children: ReactNode;
   /** Optional fallback component — receives error + reset function */
   fallback?: (error: Error, reset: () => void) => ReactNode;
+  /** When this value changes, the boundary auto-resets any caught error */
+  resetKey?: string;
 }
 
 interface ErrorBoundaryState {
@@ -30,6 +32,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   componentDidCatch(error: Error, info: ErrorInfo) {
     if (import.meta.env.DEV) {
       console.error("[EDDI ErrorBoundary]", error, info.componentStack);
+    }
+  }
+
+  componentDidUpdate(prevProps: ErrorBoundaryProps) {
+    if (
+      this.props.resetKey !== prevProps.resetKey &&
+      this.state.error !== null
+    ) {
+      this.setState({ error: null });
     }
   }
 

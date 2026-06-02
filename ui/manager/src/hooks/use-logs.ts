@@ -92,6 +92,7 @@ export function useLogStream(filters: LogFilters = {}) {
         onOpen: () => setSseConnected(true),
         onError: () => {
           setSseConnected(false);
+          clearTimeout(reconnectTimer.current);
           reconnectTimer.current = setTimeout(connect, 5000);
         },
       });

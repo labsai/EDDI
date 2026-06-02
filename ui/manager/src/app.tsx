@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AppLayout } from "@/components/layout/app-layout";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { DashboardPage } from "@/pages/dashboard";
@@ -36,8 +36,9 @@ import { ChannelsPage } from "@/pages/channels";
 import { ChannelDetailPage } from "@/pages/channel-detail";
 
 export function App() {
+  const location = useLocation();
   return (
-    <ErrorBoundary>
+    <ErrorBoundary resetKey={location.pathname}>
     <Routes>
       {/* Studio — full-screen breakout, no sidebar/topbar chrome */}
       <Route path="/manage/studio/:agentId" element={<AgentStudioPage />} />

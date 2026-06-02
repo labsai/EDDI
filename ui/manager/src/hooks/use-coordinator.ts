@@ -117,6 +117,7 @@ export function useCoordinatorSSE() {
         onError: () => {
           setSseConnected(false);
           // Reconnect after 5 seconds
+          clearTimeout(reconnectTimer.current);
           reconnectTimer.current = setTimeout(connect, 5000);
         },
       });

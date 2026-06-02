@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { useChatDrawerStore } from "./use-chat-drawer";
@@ -15,6 +16,7 @@ export function useSaveAndDeploy() {
   const [isRunning, setIsRunning] = useState(false);
   const runningRef = useRef(false);
   const startConversation = useStartConversation();
+  const queryClient = useQueryClient();
 
   const saveAndDeploy = useCallback(
     async (opts: {
@@ -82,6 +84,9 @@ export function useSaveAndDeploy() {
 
         // Step 5: Ready
         drawerStore.setStep("ready");
+        // Invalidate so agent list and chat reflect new deployment status
+        queryClient.invalidateQueries({ queryKey: ["agents"] });
+        queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
       } catch (err) {
         const message =
           err instanceof Error
@@ -94,7 +99,7 @@ export function useSaveAndDeploy() {
         setIsRunning(false);
       }
     },
-    [t, startConversation]
+    [t, startConversation, queryClient]
   );
 
   return { saveAndDeploy, isRunning };

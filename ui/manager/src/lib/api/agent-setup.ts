@@ -56,14 +56,14 @@ export interface SetupResult {
 export const LLM_PROVIDERS = [
   { id: "anthropic", name: "Anthropic", defaultModel: "claude-sonnet-4-6", needsKey: true },
   { id: "openai", name: "OpenAI", defaultModel: "gpt-5.4", needsKey: true },
-  { id: "gemini", name: "Google Gemini", defaultModel: "gemini-2.5-flash", needsKey: true },
-  { id: "gemini-vertex", name: "Google Vertex AI", defaultModel: "gemini-2.5-flash", needsKey: false },
+  { id: "gemini", name: "Google Gemini", defaultModel: "gemini-3.5-flash", needsKey: true },
+  { id: "gemini-vertex", name: "Google Vertex AI", defaultModel: "gemini-3.5-flash", needsKey: false },
   { id: "mistral", name: "Mistral AI", defaultModel: "mistral-large-latest", needsKey: true },
   { id: "huggingface", name: "HuggingFace", defaultModel: "Qwen/Qwen3.5-7B", needsKey: true },
   { id: "azure-openai", name: "Azure OpenAI", defaultModel: "gpt-5.4", needsKey: true },
-  { id: "bedrock", name: "Amazon Bedrock", defaultModel: "anthropic.claude-sonnet-4-6-v1", needsKey: false },
-  { id: "oracle-genai", name: "Oracle GenAI", defaultModel: "cohere.command-r-plus", needsKey: false },
-  { id: "ollama", name: "Ollama (Local)", defaultModel: "gemma4:4b", needsKey: false },
+  { id: "bedrock", name: "Amazon Bedrock", defaultModel: "anthropic.claude-sonnet-4-6-v1:0", needsKey: false },
+  { id: "oracle-genai", name: "Oracle GenAI", defaultModel: "cohere.command-r-plus-v2", needsKey: false },
+  { id: "ollama", name: "Ollama (Local)", defaultModel: "llama3.3:70b", needsKey: false },
   { id: "jlama", name: "Jlama (Local)", defaultModel: "llama-3.2-1b", needsKey: false },
 ] as const;
 

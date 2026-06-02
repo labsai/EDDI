@@ -48,7 +48,7 @@ export function MemoryInspector({ conversationId }: MemoryInspectorProps) {
     );
   }
 
-  if (isError) {
+  if (isError && !data) {
     return (
       <div className="flex flex-col items-center gap-2 py-6 text-center" data-testid="memory-inspector-error">
         <AlertTriangle className="h-8 w-8 text-destructive/50" />
