@@ -94,7 +94,7 @@ export function isValidUrl(s: string): boolean {
 
 /** Format a duration in milliseconds to a human-readable string */
 export function formatDuration(ms: number): string {
-  if (ms < 1) return "<1ms";
+  if (!Number.isFinite(ms) || ms < 1) return "<1ms";
   if (ms < 1000) return `${Math.round(ms)}ms`;
   return `${(ms / 1000).toFixed(2)}s`;
 }

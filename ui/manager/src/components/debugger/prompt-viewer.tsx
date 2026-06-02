@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
-import { cn } from "@/lib/utils";
+import { cn, formatDuration } from "@/lib/utils";
 import {
   MessageSquareCode,
   Copy,
@@ -168,9 +168,7 @@ function PromptDetail({
         </span>
         {entry.durationMs > 0 && (
           <span className="font-mono">
-            {entry.durationMs < 1000
-              ? `${entry.durationMs}ms`
-              : `${(entry.durationMs / 1000).toFixed(2)}s`}
+            {formatDuration(entry.durationMs)}
           </span>
         )}
       </div>

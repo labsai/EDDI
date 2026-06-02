@@ -61,7 +61,10 @@ export function useSaveAndDeploy() {
         let deployed = false;
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
           await sleep(2000);
-          if (abortRef.current?.signal.aborted) return;
+          if (abortRef.current?.signal.aborted) {
+            drawerStore.setStep("idle");
+            return;
+          }
           try {
             const status = await getDeploymentStatus(
               "production",
