@@ -100,26 +100,48 @@ const INITIAL_STATE: WizardState = {
 const MODEL_SUGGESTIONS: Record<string, string[]> = {
   anthropic: [
     // Anthropic API uses dashes in version numbers (e.g. sonnet-4-6 = v4.6)
-    "claude-sonnet-4-6",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
     "claude-opus-4-6",
+    "claude-sonnet-4-6",
     "claude-haiku-4-5",
   ],
   openai: [
+    "gpt-5.5",
+    "gpt-5.5-pro",
     "gpt-5.4",
+    "gpt-5.4-pro",
     "gpt-5.4-mini",
+    "gpt-5.4-nano",
     "gpt-5.4-thinking",
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-5-nano",
     "o3-mini",
   ],
   gemini: [
     "gemini-3.5-flash",
-    "gemini-3.1-pro",
-    "gemini-2.5-flash",
+    "gemini-3.1-pro-preview",
+    "gemini-3.1-pro-preview-customtools",
+    "gemini-3.1-flash-lite",
     "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
   ],
   "gemini-vertex": [
+    // Gemini models
     "gemini-3.5-flash",
-    "gemini-2.5-flash",
+    "gemini-3.1-pro-preview",
+    "gemini-3.1-flash-lite",
     "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    // Model Garden / Third-Party
+    "google/gemma3@gemma-3-12b-it",
+    "google/gemma2@gemma-2-2b-it",
+    "claude-opus-4-8",
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5@20251001",
   ],
   ollama: [
     // llama3.3 was only released as 70B — no 8B variant exists on Ollama Hub
@@ -141,10 +163,16 @@ const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "meta-llama/Llama-3.2-1B",
   ],
   mistral: [
-    "mistral-small-4",
     "mistral-large-latest",
     "mistral-medium-latest",
     "mistral-small-latest",
+    "mistral-small-4",
+    "ministral-14b-latest",
+    "ministral-8b-latest",
+    "ministral-3b-latest",
+    "devstral-latest",
+    "devstral-small-latest",
+    "codestral-latest",
     "magistral-medium-latest",
     "magistral-small-latest",
   ],
@@ -153,19 +181,45 @@ const MODEL_SUGGESTIONS: Record<string, string[]> = {
   "azure-openai": [
     "gpt-5.4",
     "gpt-5.4-mini",
+    "gpt-5.1",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4-turbo",
   ],
   bedrock: [
     // AWS Bedrock model IDs follow the pattern: provider.model-name-v1:0
+    // Anthropic
+    "anthropic.claude-opus-4-8",
+    "anthropic.claude-sonnet-4-6",
+    "anthropic.claude-haiku-4-5-20251001-v1:0",
     "anthropic.claude-sonnet-4-6-v1:0",
+    // Meta Llama
+    "meta.llama4-maverick-17b-instruct-v1:0",
+    "meta.llama4-scout-17b-instruct-v1:0",
     "meta.llama3-3-70b-instruct-v1:0",
+    "meta.llama3-1-405b-instruct-v1:0",
+    // Amazon
     "amazon.nova-pro-v1:0",
     "amazon.nova-lite-v1:0",
+    // Other
+    "minimax.minimax-m2",
   ],
   "oracle-genai": [
+    // Cohere
+    "cohere.command-latest",
+    "cohere.command-plus-latest",
     "cohere.command-r-plus-v2",
-    "meta.llama-3.3-70b-instruct",
     "cohere.command-r-plus",
+    // Meta Llama
+    "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
+    "meta-llama/Llama-4-Scout-17B-16E-Instruct",
+    "meta.llama-3.3-70b-instruct",
     "meta.llama-3.1-70b-instruct",
+    // OpenAI
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
   ],
 };
 
@@ -254,7 +308,7 @@ export function AgentWizardPage() {
     if (currentStep > 0) setCurrentStep(currentStep - 1);
   }
 
-  async function handleCreate() {
+  async function handleCreate(deployOverride?: boolean) {
     setError("");
     try {
       let res: SetupResult;
@@ -271,7 +325,7 @@ export function AgentWizardPage() {
           endpoints: state.endpoints || undefined,
           enableQuickReplies: state.enableQuickReplies || undefined,
           enableSentimentAnalysis: state.enableSentimentAnalysis || undefined,
-          deploy: state.deploy,
+          deploy: deployOverride ?? state.deploy,
           environment: state.environment,
         };
         res = await createApiAgent.mutateAsync(req);
@@ -288,7 +342,7 @@ export function AgentWizardPage() {
           builtInToolsWhitelist: state.builtInToolsWhitelist || undefined,
           enableQuickReplies: state.enableQuickReplies || undefined,
           enableSentimentAnalysis: state.enableSentimentAnalysis || undefined,
-          deploy: state.deploy,
+          deploy: deployOverride ?? state.deploy,
           environment: state.environment,
         };
         res = await setupAgent.mutateAsync(req);
@@ -519,10 +573,7 @@ export function AgentWizardPage() {
         ) : (
           <div className="flex items-center gap-2">
             <button
-              onClick={() => {
-                update({ deploy: false });
-                setTimeout(handleCreate, 0);
-              }}
+              onClick={() => handleCreate(false)}
               disabled={isCreating}
               className="inline-flex items-center gap-2 rounded-lg border border-primary/30 px-4 py-2.5 text-sm font-medium text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
               data-testid="wizard-create-only"
@@ -535,10 +586,7 @@ export function AgentWizardPage() {
               {t("setupWizard.createOnly", "Create Only")}
             </button>
             <button
-              onClick={() => {
-                update({ deploy: true });
-                setTimeout(handleCreate, 0);
-              }}
+              onClick={() => handleCreate(true)}
               disabled={isCreating}
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.98]"
               data-testid="wizard-create-deploy"

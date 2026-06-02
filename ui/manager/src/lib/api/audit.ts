@@ -17,7 +17,7 @@ export interface AuditEntry {
   input: Record<string, unknown> | null;
   output: Record<string, unknown> | null;
   llmDetail: Record<string, unknown> | null;
-  toolCalls: Record<string, unknown> | null;
+  toolCalls: Array<Record<string, unknown>> | null;
   actions: string[] | null;
   cost: number;
   timestamp: string; // ISO instant

@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useDebugStore, type PipelineTurn, type PipelineEvent } from "@/hooks/use-debug-events";
 import { useQuery } from "@tanstack/react-query";
 import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
-import { cn } from "@/lib/utils";
+import { cn, formatDuration } from "@/lib/utils";
 import { Clock, Zap, ChevronDown, AlertTriangle } from "lucide-react";
 
 
@@ -276,11 +276,7 @@ function TaskBar({ task, maxDuration }: { task: TaskBarData; maxDuration: number
 
 // ==================== Helpers ====================
 
-function formatDuration(ms: number): string {
-  if (ms < 1) return "<1ms";
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
-}
+
 
 function buildTaskBars(events: PipelineEvent[]): TaskBarData[] {
   const tasks: TaskBarData[] = [];

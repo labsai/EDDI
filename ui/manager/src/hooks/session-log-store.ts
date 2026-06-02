@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { createLogEventSource, type LogEntry } from "@/lib/api/logs";
 import type { AuthEventSourceHandle } from "@/lib/api/sse-utils";
+import { SSE_RECONNECT_BASE_MS, SSE_RECONNECT_MAX_ATTEMPTS } from "@/lib/constants";
 
 /**
  * Session-level log store.
@@ -28,6 +29,7 @@ export const useSessionLogStore = create<SessionLogState>(() => ({
 
 let handle: AuthEventSourceHandle | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+let reconnectAttempts = 0;
 
 function connect() {
   try {
@@ -51,15 +53,19 @@ function connect() {
           });
         },
         onOpen: () => {
+          reconnectAttempts = 0;
           useSessionLogStore.setState({ connected: true });
         },
         onError: () => {
           useSessionLogStore.setState({ connected: false });
           handle?.close();
           handle = null;
-          // Reconnect after 5s — dedup to avoid stacking
-          clearTimeout(reconnectTimer);
-          reconnectTimer = setTimeout(connect, 5000);
+          if (reconnectAttempts < SSE_RECONNECT_MAX_ATTEMPTS) {
+            const delay = SSE_RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts);
+            reconnectAttempts++;
+            clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(connect, delay);
+          }
         },
       },
     );

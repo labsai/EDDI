@@ -3566,10 +3566,7 @@ export const scheduleHandlers = [
     });
   }),
 
-  // Rerun last conversation step (replay)
-  http.post("*/agents/:convId/rerunLastConversationStep", () => {
-    return new HttpResponse(null, { status: 200 });
-  }),
+  // Rerun last conversation step (replay) — handler at end of file uses /rerun path
 
   // Detailed conversation (memory inspector)
   http.get("*/agents/:convId", ({ request }) => {

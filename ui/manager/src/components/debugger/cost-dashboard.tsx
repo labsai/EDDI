@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
 import { useConversationCosts, useCacheStats } from "@/hooks/use-tool-metrics";
-import { cn } from "@/lib/utils";
+import { cn, formatDuration } from "@/lib/utils";
 import { Coins, Zap, TrendingUp, Server, BarChart3, AlertTriangle } from "lucide-react";
 import { useMemo } from "react";
 
@@ -58,7 +58,7 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
           )}
           <MetricRow
             label={t("costDashboard.duration", "Duration")}
-            value={fmtDuration(latestTurn.durationMs)}
+            value={formatDuration(latestTurn.durationMs)}
           />
           {latestTurn.modelName && (
             <MetricRow
@@ -296,9 +296,4 @@ function fmtCost(n: number): string {
   if (n === 0) return "$0.00";
   if (n < 0.01) return `$${n.toFixed(4)}`;
   return `$${n.toFixed(2)}`;
-}
-
-function fmtDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
 }

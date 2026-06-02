@@ -126,7 +126,7 @@ function PromptDetail({
   const modelResponse = llm?.modelResponse as string | undefined;
   const modelName = llm?.modelName as string | undefined;
   const tokenUsage = llm?.tokenUsage as Record<string, number> | undefined;
-  const toolCalls = entry.toolCalls as Array<Record<string, unknown>> | null;
+  const toolCalls = entry.toolCalls;
 
   // Parse compiled prompt into message segments
   const messages = useMemo(() => {
@@ -148,7 +148,7 @@ function PromptDetail({
   const handleReplay = async () => {
     try {
       setReplaying(true);
-      await api.post(`/agents/${conversationId}/rerunLastConversationStep`);
+      await api.post(`/agents/${conversationId}/rerun`);
     } catch {
       // Replay may not be supported
     } finally {

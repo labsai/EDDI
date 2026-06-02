@@ -10,6 +10,7 @@ import {
   type CoordinatorStatus,
 } from "@/lib/api/coordinator";
 import type { AuthEventSourceHandle } from "@/lib/api/sse-utils";
+import { SSE_RECONNECT_BASE_MS, SSE_RECONNECT_MAX_ATTEMPTS } from "@/lib/constants";
 
 // ==================== Query Keys ====================
 
@@ -92,6 +93,7 @@ export function useCoordinatorSSE() {
   const [eventHistory, setEventHistory] = useState<CoordinatorSnapshot[]>([]);
   const handleRef = useRef<AuthEventSourceHandle | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const reconnectAttempts = useRef(0);
 
   const connect = useCallback(() => {
     try {
@@ -113,12 +115,18 @@ export function useCoordinatorSSE() {
               : next;
           });
         },
-        onOpen: () => setSseConnected(true),
+        onOpen: () => {
+          reconnectAttempts.current = 0;
+          setSseConnected(true);
+        },
         onError: () => {
           setSseConnected(false);
-          // Reconnect after 5 seconds
-          clearTimeout(reconnectTimer.current);
-          reconnectTimer.current = setTimeout(connect, 5000);
+          if (reconnectAttempts.current < SSE_RECONNECT_MAX_ATTEMPTS) {
+            const delay = SSE_RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts.current);
+            reconnectAttempts.current++;
+            clearTimeout(reconnectTimer.current);
+            reconnectTimer.current = setTimeout(connect, delay);
+          }
         },
       });
       handleRef.current = handle;

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
@@ -15,8 +15,17 @@ export function useSaveAndDeploy() {
   const { t } = useTranslation();
   const [isRunning, setIsRunning] = useState(false);
   const runningRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
   const startConversation = useStartConversation();
+  const startConvRef = useRef(startConversation);
+  useEffect(() => { startConvRef.current = startConversation; }, [startConversation]);
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   const saveAndDeploy = useCallback(
     async (opts: {
@@ -29,6 +38,8 @@ export function useSaveAndDeploy() {
       if (runningRef.current) return;
       runningRef.current = true;
       setIsRunning(true);
+      const controller = new AbortController();
+      abortRef.current = controller;
 
       const drawerStore = useChatDrawerStore.getState();
       const chatStore = useChatStore.getState();
@@ -50,6 +61,7 @@ export function useSaveAndDeploy() {
         let deployed = false;
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
           await sleep(2000);
+          if (abortRef.current?.signal.aborted) return;
           try {
             const status = await getDeploymentStatus(
               "production",
@@ -80,7 +92,7 @@ export function useSaveAndDeploy() {
         drawerStore.setStep("starting");
         chatStore.clearMessages();
         chatStore.setSelectedAgent(opts.agentId, opts.agentName ?? "Agent");
-        await startConversation.mutateAsync({ agentId: opts.agentId });
+        await startConvRef.current.mutateAsync({ agentId: opts.agentId });
 
         // Step 5: Ready
         drawerStore.setStep("ready");
@@ -97,9 +109,10 @@ export function useSaveAndDeploy() {
       } finally {
         runningRef.current = false;
         setIsRunning(false);
+        abortRef.current = null;
       }
     },
-    [t, startConversation, queryClient]
+    [t, queryClient]
   );
 
   return { saveAndDeploy, isRunning };

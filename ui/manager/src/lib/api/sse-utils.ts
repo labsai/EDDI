@@ -72,10 +72,14 @@ export function createAuthEventSource(
 
         for (const line of lines) {
           const trimmed = line.replace(/\r$/, "");
-          if (trimmed.startsWith("event: ")) {
-            eventType = trimmed.slice(7).trim();
-          } else if (trimmed.startsWith("data: ")) {
-            eventData += (eventData ? "\n" : "") + trimmed.slice(6);
+          if (trimmed.startsWith("event:")) {
+            // SSE spec: space after colon is optional
+            const payload = trimmed[6] === " " ? trimmed.slice(7) : trimmed.slice(6);
+            eventType = payload.trim();
+          } else if (trimmed.startsWith("data:")) {
+            // SSE spec: space after colon is optional
+            const payload = trimmed[5] === " " ? trimmed.slice(6) : trimmed.slice(5);
+            eventData += (eventData ? "\n" : "") + payload;
           } else if (trimmed === "") {
             if (eventData) {
               options?.onMessage?.({ type: eventType, data: eventData });
