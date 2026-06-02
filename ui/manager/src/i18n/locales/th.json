@@ -641,7 +641,7 @@
     "cascadeInAgent": "ใช้คาสเคดในโหมดเอเจนต์ (กับเครื่องมือ) ด้วย",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "เช่น gpt-4o-mini",
+    "cascadeModelName": "เช่น claude-sonnet-4-6",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "ว่าง = ยอมรับเสมอ",
     "cascadeTimeout": "เวลาหมด (มิลลิวินาที)",
