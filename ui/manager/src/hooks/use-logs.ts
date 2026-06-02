@@ -9,6 +9,7 @@ import {
   type LogFilters,
   type HistoryFilters,
 } from "@/lib/api/logs";
+import type { BearerEventSource } from "@/lib/bearer-event-source";
 import { useSessionLogStore } from "@/hooks/session-log-store";
 
 // ==================== Query Keys ====================
@@ -65,7 +66,7 @@ export function useLogStream(filters: LogFilters = {}) {
   );
   const [sseConnected, setSseConnected] = useState(false);
   const [paused, setPaused] = useState(false);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const eventSourceRef = useRef<BearerEventSource | null>(null);
   const pausedRef = useRef(false);
   const filterKey = JSON.stringify(filters);
 

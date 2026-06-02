@@ -9,6 +9,7 @@ import {
   createCoordinatorEventSource,
   type CoordinatorStatus,
 } from "@/lib/api/coordinator";
+import type { BearerEventSource } from "@/lib/bearer-event-source";
 
 // ==================== Query Keys ====================
 
@@ -89,7 +90,7 @@ export function useCoordinatorSSE() {
   const [liveStatus, setLiveStatus] = useState<CoordinatorStatus | null>(null);
   const [sseConnected, setSseConnected] = useState(false);
   const [eventHistory, setEventHistory] = useState<CoordinatorSnapshot[]>([]);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const eventSourceRef = useRef<BearerEventSource | null>(null);
 
   const connect = useCallback(() => {
     try {

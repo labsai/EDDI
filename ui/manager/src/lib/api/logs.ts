@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { BearerEventSource } from "../bearer-event-source";
 
 // ==================== Types ====================
 
@@ -93,10 +94,11 @@ export async function getInstanceId(): Promise<InstanceInfo> {
 }
 
 /**
- * Create an SSE EventSource for live log streaming.
- * Returns an EventSource that emits "log" events with LogEntry payloads.
+ * Create an authenticated SSE stream for live log tailing.
+ * Uses BearerEventSource (fetch+ReadableStream) instead of the native EventSource
+ * because EventSource cannot send custom headers like Authorization.
  */
-export function createLogEventSource(filters: LogFilters = {}): EventSource {
+export function createLogEventSource(filters: LogFilters = {}): BearerEventSource {
   const params = new URLSearchParams();
   if (filters.agentId) params.set("agentId", filters.agentId);
   if (filters.conversationId)
@@ -104,7 +106,6 @@ export function createLogEventSource(filters: LogFilters = {}): EventSource {
   if (filters.level) params.set("level", filters.level);
 
   const qs = params.toString();
-  return new EventSource(
-    `${BASE}/stream${qs ? `?${qs}` : ""}`
-  );
+  const url = `${window.location.origin}${BASE}/stream${qs ? `?${qs}` : ""}`;
+  return new BearerEventSource(url, api.getAuthHeader());
 }

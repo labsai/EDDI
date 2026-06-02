@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createLogEventSource, type LogEntry } from "@/lib/api/logs";
+import type { BearerEventSource } from "@/lib/bearer-event-source";
 
 /**
  * Session-level log store.
@@ -25,7 +26,7 @@ export const useSessionLogStore = create<SessionLogState>(() => ({
 
 // ─── Auto-connect SSE on module load ─────────────────────────────────────────
 
-let eventSource: EventSource | null = null;
+let eventSource: BearerEventSource | null = null;
 
 function connect() {
   try {

@@ -89,6 +89,12 @@ function KeycloakAuthProvider({
           onLoad: "login-required",
           checkLoginIframe: false,
           pkceMethod: "S256",
+          // Use query params (not hash fragment) for the auth code redirect.
+          // This avoids hash-parsing issues in browsers with stale session data
+          // and makes the 400-without-CORS-headers error easier to diagnose
+          // (the browser can read the actual 400 response body instead of
+          // seeing a generic "TypeError: Failed to fetch").
+          responseMode: "query",
         });
 
         if (!mounted) return;
@@ -98,20 +104,19 @@ function KeycloakAuthProvider({
         if (auth && keycloak.token) {
           api.setAuthToken(keycloak.token);
 
-          // Load user profile
+          // Load user info from OIDC /userinfo endpoint (has CORS headers).
+          // loadUserProfile() uses /account which lacks CORS for cross-origin setups.
           try {
-            const profile = await keycloak.loadUserProfile();
+            const info = await keycloak.loadUserInfo() as Record<string, string>;
             setUser({
-              username: profile.username ?? "",
-              firstName: profile.firstName ?? "",
-              lastName: profile.lastName ?? "",
-              email: profile.email ?? "",
-              fullName: [profile.firstName, profile.lastName]
-                .filter(Boolean)
-                .join(" "),
+              username: info.preferred_username ?? (keycloak.tokenParsed?.preferred_username as string) ?? "",
+              firstName: info.given_name ?? (keycloak.tokenParsed?.given_name as string) ?? "",
+              lastName: info.family_name ?? (keycloak.tokenParsed?.family_name as string) ?? "",
+              email: info.email ?? (keycloak.tokenParsed?.email as string) ?? "",
+              fullName: info.name ?? (keycloak.tokenParsed?.name as string) ?? "",
             });
           } catch {
-            // Profile load failed — use token claims
+            // Fallback to token claims if userinfo request fails
             setUser({
               username:
                 (keycloak.tokenParsed?.preferred_username as string) ?? "",

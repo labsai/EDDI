@@ -30,7 +30,7 @@ declare global {
 const DEFAULTS = {
   url: "http://localhost:8180",
   realm: "eddi",
-  clientId: "eddi-manager",
+  clientId: "eddi-frontend",
 } as const;
 
 export function getAuthConfig(): AuthConfig {

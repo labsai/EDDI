@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { BearerEventSource } from "../bearer-event-source";
 
 // ==================== Types ====================
 
@@ -46,8 +47,12 @@ export async function purgeDeadLetters(): Promise<number> {
 
 /**
  * Subscribe to the coordinator SSE stream.
- * Returns an EventSource that emits "status" events with CoordinatorStatus payloads.
+ * Uses BearerEventSource (fetch+ReadableStream) instead of the native EventSource
+ * because EventSource cannot send custom headers like Authorization.
  */
-export function createCoordinatorEventSource(): EventSource {
-  return new EventSource(`${window.location.origin}${BASE}/stream`);
+export function createCoordinatorEventSource(): BearerEventSource {
+  return new BearerEventSource(
+    `${window.location.origin}${BASE}/stream`,
+    api.getAuthHeader()
+  );
 }

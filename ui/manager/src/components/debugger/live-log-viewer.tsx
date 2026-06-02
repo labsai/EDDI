@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { createLogEventSource, getRecentLogs, type LogEntry } from "@/lib/api/logs";
+import type { BearerEventSource } from "@/lib/bearer-event-source";
 import { cn } from "@/lib/utils";
 import {
   ScrollText,
@@ -47,7 +48,7 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [connected, setConnected] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const eventSourceRef = useRef<BearerEventSource | null>(null);
 
   // Keep ref in sync with state for use in SSE callback
   useEffect(() => {
