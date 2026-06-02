@@ -114,7 +114,7 @@ public class RestConversationStore implements IRestConversationStore {
                         URI resourceUri = conversationDescriptor.getResource();
                         var conversationResourceId = extractResourceId(resourceUri);
                         if (conversationResourceId == null) {
-                            log.warn(format("agentResourceId was null, this should never happen. (%s)", resourceUri));
+                            log.warn(format("conversationResourceId was null, this should never happen. (%s)", resourceUri));
                             continue;
                         }
 
