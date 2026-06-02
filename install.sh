@@ -512,7 +512,7 @@ wizard_auth() {
   echo ""
   local auth_choice
   auth_choice=$(ask "1" "1" "2")
-  [[ "$auth_choice" == "2" ]] && WITH_AUTH=true
+  if [[ "$auth_choice" == "2" ]]; then WITH_AUTH=true; fi
 }
 
 wizard_monitoring() {
@@ -525,7 +525,7 @@ wizard_monitoring() {
   echo ""
   local mon_choice
   mon_choice=$(ask "1" "1" "2")
-  [[ "$mon_choice" == "2" ]] && WITH_MONITORING=true
+  if [[ "$mon_choice" == "2" ]]; then WITH_MONITORING=true; fi
 }
 
 wizard_ports() {
@@ -773,6 +773,69 @@ wait_for_ready() {
   # (we explicitly told the user containers are left running)
   HEALTHY=true
   exit 1
+}
+
+# ── Configure Keycloak client (post-start) ────────────────
+
+configure_keycloak_client() {
+  [[ "$WITH_AUTH" != "true" ]] && return 0
+
+  local kc_port="${KEYCLOAK_PORT:-8180}"
+  local eddi_origin="http://localhost:${EDDI_PORT}"
+  local kc_base="http://localhost:${kc_port}"
+
+  echo -ne "  Configuring Keycloak CORS  "
+
+  # Wait up to 30s for Keycloak admin API
+  local elapsed=0
+  while [[ $elapsed -lt 30 ]]; do
+    if curl -sf "${kc_base}/realms/master/.well-known/openid-configuration" &>/dev/null; then
+      break
+    fi
+    sleep 2; elapsed=$((elapsed + 2)); echo -ne "."
+  done
+
+  # Get admin token
+  local admin_token
+  admin_token=$(curl -sf -X POST \
+    -d "client_id=admin-cli&username=admin&password=admin&grant_type=password" \
+    "${kc_base}/realms/master/protocol/openid-connect/token" 2>/dev/null | \
+    python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null) || true
+
+  if [[ -z "$admin_token" ]]; then
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(Keycloak admin API unavailable — CORS origins not updated)${RESET}"
+    return 0
+  fi
+
+  # Get the eddi-frontend client UUID
+  local client_uuid
+  client_uuid=$(curl -sf \
+    -H "Authorization: Bearer ${admin_token}" \
+    "${kc_base}/admin/realms/eddi/clients?clientId=eddi-frontend" 2>/dev/null | \
+    python3 -c "import sys,json; c=json.load(sys.stdin); print(c[0]['id'] if c else '')" 2>/dev/null) || true
+
+  if [[ -z "$client_uuid" ]]; then
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(eddi-frontend client not found)${RESET}"
+    return 0
+  fi
+
+  # Add EDDI origin to webOrigins so CORS works for token exchange
+  local http_origin="http://localhost:${EDDI_PORT}"
+  local https_origin="https://localhost:${EDDI_PORT}"
+
+  local update_status
+  update_status=$(curl -sf -o /dev/null -w "%{http_code}" -X PUT \
+    -H "Authorization: Bearer ${admin_token}" \
+    -H "Content-Type: application/json" \
+    "${kc_base}/admin/realms/eddi/clients/${client_uuid}" \
+    -d "{\"webOrigins\":[\"${http_origin}\",\"${https_origin}\",\"+\"],\"redirectUris\":[\"http://localhost:*\",\"https://localhost:*\",\"${http_origin}/*\"]}" \
+    2>/dev/null) || update_status="000"
+
+  if [[ "$update_status" == "204" ]]; then
+    echo -e "${GREEN}✅${RESET}"
+  else
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(HTTP ${update_status} — CORS may not work for port ${EDDI_PORT})${RESET}"
+  fi
 }
 
 # ── Import initial agents ──────────────────────────────────
@@ -1069,6 +1132,7 @@ CFGEOF
   resolve_compose_files
   start_eddi
   wait_for_ready
+  configure_keycloak_client
   maybe_import_initial_agents
 
   # Install CLI wrapper

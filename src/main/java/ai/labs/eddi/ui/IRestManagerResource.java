@@ -29,6 +29,13 @@ public interface IRestManagerResource {
 
     @GET
     @Cache(noCache = true, mustRevalidate = true)
+    @Path("/manage/__auth_config__.js")
+    @Produces("application/javascript")
+    @Operation(hidden = true)
+    Response fetchAuthConfig();
+
+    @GET
+    @Cache(noCache = true, mustRevalidate = true)
     @Path("/manage/{path:.*}")
     @Produces(MediaType.TEXT_HTML)
     @Operation(hidden = true)

@@ -11,10 +11,24 @@ services:
   eddi:
     environment:
       QUARKUS_OIDC_TENANT_ENABLED: "true"
+      # Backend uses Docker-internal hostname to reach Keycloak container
       QUARKUS_OIDC_AUTH_SERVER_URL: "http://keycloak:8080/realms/eddi"
       QUARKUS_OIDC_CLIENT_ID: "eddi-backend"
       QUARKUS_OIDC_APPLICATION_TYPE: "service"
       QUARKUS_HTTP_CORS_ORIGINS: "http://localhost:3000,http://localhost:${EDDI_PORT:-7070},https://localhost:${EDDI_HTTPS_PORT:-7443}"
+      # Public Keycloak URL injected into the Manager SPA via window.__EDDI_AUTH__.url
+      # Must be reachable from the browser (use the externally accessible hostname)
+      EDDI_KEYCLOAK_PUBLIC_URL: "http://localhost:${KEYCLOAK_PORT:-8180}"
+      # Explicit token issuer override.
+      # KC_HOSTNAME forces Keycloak to embed the public hostname in tokens
+      # (iss: http://localhost:8180/realms/eddi), but the backend fetches the
+      # OIDC discovery doc from the Docker-internal address (keycloak:8080).
+      # KC_HOSTNAME_BACKCHANNEL_DYNAMIC lets the discovery doc use keycloak:8080
+      # so the backend can reach the JWKS endpoint, but that makes the
+      # discovery "issuer" differ from the token "iss". This config tells Quarkus
+      # to validate the token's iss against the public hostname, not the
+      # Docker-internal issuer from the discovery doc.
+      QUARKUS_OIDC_TOKEN_ISSUER: "http://localhost:${KEYCLOAK_PORT:-8180}/realms/eddi"
     depends_on:
       keycloak:
         condition: service_healthy
@@ -27,6 +41,11 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
       KC_HTTP_PORT: "8080"
       KC_HEALTH_ENABLED: "true"
+      # KC_HOSTNAME must equal what browsers use to reach Keycloak.
+      # Without this, Keycloak embeds the Docker-internal hostname in tokens,
+      # causing iss-mismatch failures when the browser validates them.
+      KC_HOSTNAME: "http://localhost:${KEYCLOAK_PORT:-8180}"
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
     ports:
       - "8180:8080"
     volumes:
