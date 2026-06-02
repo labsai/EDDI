@@ -60,6 +60,7 @@ export function ResourceListPage() {
   // the component, so useState values persist across route param changes).
   useEffect(() => {
     setSearch("");
+    setView(getStoredViewMode(`resources-${type}`));
   }, [type]);
 
   const rt = getResourceType(type ?? "");

@@ -50,7 +50,7 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
   const [connected, setConnected] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<AuthEventSourceHandle | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const reconnectAttempts = useRef(0);
 
   // Keep ref in sync with state for use in SSE callback
@@ -65,6 +65,7 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
     handleRef.current?.close();
     clearTimeout(reconnectTimer.current);
     reconnectAttempts.current = 0;
+    setLogs([]);
 
     function connect() {
       const handle = createLogEventSource(
