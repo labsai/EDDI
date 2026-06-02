@@ -233,12 +233,20 @@ public class McpConversationTools {
             // field names are requested (e.g. "input", "output", "actions").
             // The service layer only handles section-level filtering
             // (conversationSteps, conversationOutputs, conversationProperties).
+            // Create filtered copies to avoid mutating the original snapshot.
             if (!fields.isEmpty() && snapshot.getConversationOutputs() != null) {
                 var trimmedFields = fields.stream().map(String::trim).toList();
-                for (var output : snapshot.getConversationOutputs()) {
-                    output.keySet()
-                            .removeIf(key -> key instanceof String s && trimmedFields.stream().noneMatch(f -> s.equals(f) || s.startsWith(f + ":")));
-                }
+                var filteredOutputs = snapshot.getConversationOutputs().stream()
+                        .map(output -> {
+                            var filtered = new ai.labs.eddi.engine.memory.model.ConversationOutput();
+                            output.forEach((key, value) -> {
+                                if (key instanceof String s && trimmedFields.stream().anyMatch(f -> s.equals(f) || s.startsWith(f + ":"))) {
+                                    filtered.put(key, value);
+                                }
+                            });
+                            return filtered;
+                        }).toList();
+                snapshot.setConversationOutputs(filteredOutputs);
             }
 
             return jsonSerialization.serialize(snapshot);
@@ -527,10 +535,12 @@ public class McpConversationTools {
 
         if (existing != null) {
             // Validate that the trigger still exists — if it was deleted,
-            // the UserConversation is stale and should be cleaned up
+            // the UserConversation is stale and should be cleaned up.
+            // Only catch ResourceNotFoundException (via sneakyThrow) — transient
+            // DB errors should propagate so we don't falsely delete state.
             try {
                 agentTriggerStore.readAgentTrigger(intent);
-            } catch (Exception triggerEx) {
+            } catch (IResourceStore.ResourceNotFoundException triggerEx) {
                 userConversationStore.deleteUserConversation(intent, userId);
                 throw new RuntimeException("Agent trigger for intent '" + intent + "' no longer exists");
             }

@@ -49,6 +49,12 @@
 - **Fix:** Added post-processing in MCP layer to filter conversationOutputs keys.
 - **Files:** `McpConversationTools.java`
 
+### Code Review Follow-up (3 additional fixes)
+- **ISSUE-1:** `PostgresAgentTriggerStore.deleteAgentTrigger()` silently swallowed `SQLException` — callers thought delete succeeded on DB failure. Added `throw ResourceStoreException`.
+- **ISSUE-2:** BUG-8 field filter mutated the live `ConversationOutput` map via `removeIf` — replaced with filtered copy to avoid corrupting shared/cached snapshots.
+- **ISSUE-3:** BUG-2 metadata detection used a fragile hardcoded positive-list of 3 keys. Replaced with resilient absence-of-output check (`startsWith("output") || startsWith("reply")`).
+- **OBS-1:** BUG-6 trigger validation used `catch (Exception)` — narrowed to `catch (ResourceNotFoundException)` so transient DB errors propagate instead of falsely deleting state.
+
 ---
 
 ## 📦 Dependency Updates — June 2026 (2026-06-01)

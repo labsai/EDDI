@@ -142,7 +142,7 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
     }
 
     @Override
-    public void deleteAgentTrigger(String intent) throws IResourceStore.ResourceNotFoundException {
+    public void deleteAgentTrigger(String intent) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "DELETE FROM agent_triggers WHERE intent = ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -156,6 +156,7 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
             throw e;
         } catch (SQLException e) {
             LOGGER.error("Failed to delete Agent trigger intent=" + intent, e);
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
         }
     }
 }

@@ -9,7 +9,6 @@ import org.junit.jupiter.api.Test;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -17,31 +16,34 @@ import static org.junit.jupiter.api.Assertions.*;
  * Regression tests for BUG-2: GroupConversationService.extractResponse()
  * metadata detection.
  * <p>
- * The fix adds metadata-only detection: when conversation output only contains
- * pipeline metadata keys like 'actions', 'input', 'context' (and no actual
- * LLM-generated text), extractResponse() returns null instead of serializing
- * raw pipeline internals as the agent's response.
+ * The fix detects when conversation output contains no actual LLM-generated
+ * content (i.e., no keys starting with "output" or "reply"). In that case,
+ * extractResponse() returns null instead of serializing raw pipeline internals
+ * as the agent's response.
  * <p>
  * Since extractResponse() is private, we test the detection logic pattern
- * directly. The logic checks whether all keys in the output map are metadata
- * keys that don't represent actual agent output.
+ * directly. The logic checks whether any key in the output map represents
+ * actual agent output.
  */
 class GroupConversationServiceExtractResponseTest {
 
     /**
-     * Evaluates the metadata-only detection predicate. This mirrors the logic in
+     * Evaluates the output detection predicate. This mirrors the logic in
      * GroupConversationService.extractResponse():
      *
      * <pre>
-     * boolean hasOnlyMetadata = lastOutput.keySet().stream()
-     *         .allMatch(k -> k instanceof String s &&
-     *                 (s.equals("actions") || s.equals("input") || s.equals("context")));
+     * boolean hasAnyOutput = lastOutput.keySet().stream()
+     *         .anyMatch(k -> k instanceof String s &&
+     *                 (s.startsWith("output") || s.startsWith("reply")));
      * </pre>
+     *
+     * @return true if the map has NO output keys (metadata-only)
      */
     private boolean hasOnlyMetadata(Map<?, ?> output) {
-        return output.keySet().stream()
-                .allMatch(k -> k instanceof String s &&
-                        (s.equals("actions") || s.equals("input") || s.equals("context")));
+        boolean hasAnyOutput = output.keySet().stream()
+                .anyMatch(k -> k instanceof String s &&
+                        (s.startsWith("output") || s.startsWith("reply")));
+        return !hasAnyOutput;
     }
 
     /**
@@ -74,16 +76,16 @@ class GroupConversationServiceExtractResponseTest {
     }
 
     /**
-     * An empty map trivially satisfies allMatch (vacuous truth), so it should be
-     * detected as metadata-only. This is correct behavior because an empty output
-     * means no LLM text was produced.
+     * An empty map has no output keys, so it should be detected as metadata-only.
+     * This is correct behavior because an empty output means no LLM text was
+     * produced.
      */
     @Test
     void metadataDetection_empty_detected() {
         Map<String, Object> output = new LinkedHashMap<>();
 
         assertTrue(hasOnlyMetadata(output),
-                "Empty map should be detected as metadata-only (vacuous truth)");
+                "Empty map should be detected as metadata-only (no output keys)");
     }
 
     /**
@@ -99,7 +101,7 @@ class GroupConversationServiceExtractResponseTest {
     }
 
     /**
-     * All three metadata keys together should still be metadata-only.
+     * All three common metadata keys together should still be metadata-only.
      */
     @Test
     void metadataDetection_allThreeMetadataKeys_detected() {
@@ -109,7 +111,7 @@ class GroupConversationServiceExtractResponseTest {
         output.put("context", Map.of("lang", "en"));
 
         assertTrue(hasOnlyMetadata(output),
-                "Map with all three metadata keys should be detected as metadata-only");
+                "Map with only metadata keys (no output/reply) should be detected as metadata-only");
     }
 
     /**
@@ -127,15 +129,33 @@ class GroupConversationServiceExtractResponseTest {
     }
 
     /**
-     * Non-String keys should cause the predicate to return false (not metadata).
+     * Output with a 'reply' key is NOT metadata.
      */
     @Test
-    void metadataDetection_nonStringKey_notDetected() {
-        Map<Object, Object> output = new LinkedHashMap<>();
-        output.put("actions", List.of("greet"));
-        output.put(42, "numeric key");
+    void metadataDetection_withReplyKey_notDetected() {
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("actions", List.of("respond"));
+        output.put("reply", "Here is my reply");
 
         assertFalse(hasOnlyMetadata(output),
-                "Map with non-String keys should NOT be detected as metadata-only");
+                "Map with 'reply' key should NOT be detected as metadata-only");
+    }
+
+    /**
+     * Future pipeline metadata keys (e.g., 'timestamp', 'debug') should be
+     * correctly detected as metadata-only — the logic is resilient to new metadata
+     * keys because it checks for absence of output keys rather than presence of
+     * specific metadata keys.
+     */
+    @Test
+    void metadataDetection_unknownMetadataKeys_stillDetected() {
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("actions", List.of("greet"));
+        output.put("input", "hello");
+        output.put("timestamp", "2026-01-01T00:00:00Z");
+        output.put("debug", Map.of("traceId", "abc123"));
+
+        assertTrue(hasOnlyMetadata(output),
+                "Map with unknown metadata keys (but no output/reply) should be detected as metadata-only");
     }
 }
