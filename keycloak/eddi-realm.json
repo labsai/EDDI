@@ -87,6 +87,7 @@
         "https://localhost:7070",
         "http://localhost:7071",
         "https://localhost:7071",
+        "https://localhost:7443",
         "http://localhost:3000",
         "http://localhost:5173"
       ],
@@ -137,7 +138,7 @@
         {
           "type": "password",
           "value": "eddi",
-          "temporary": false
+          "temporary": true
         }
       ],
       "realmRoles": [
@@ -156,7 +157,7 @@
         {
           "type": "password",
           "value": "viewer",
-          "temporary": false
+          "temporary": true
         }
       ],
       "realmRoles": [
@@ -174,7 +175,7 @@
         {
           "type": "password",
           "value": "user",
-          "temporary": false
+          "temporary": true
         }
       ],
       "realmRoles": [

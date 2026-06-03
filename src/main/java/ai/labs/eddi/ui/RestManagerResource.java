@@ -124,13 +124,30 @@ public class RestManagerResource implements IRestManagerResource {
         int idx = authServerUrl.lastIndexOf("/realms/");
         if (idx >= 0) {
             String realm = authServerUrl.substring(idx + "/realms/".length());
+            int end = realm.length();
+            int slashIdx = realm.indexOf('/');
             int qIdx = realm.indexOf('?');
-            return qIdx >= 0 ? realm.substring(0, qIdx) : realm;
+            int hashIdx = realm.indexOf('#');
+            if (slashIdx >= 0) {
+                end = Math.min(end, slashIdx);
+            }
+            if (qIdx >= 0) {
+                end = Math.min(end, qIdx);
+            }
+            if (hashIdx >= 0) {
+                end = Math.min(end, hashIdx);
+            }
+            return end > 0 ? realm.substring(0, end) : "eddi";
         }
         return "eddi";
     }
 
     private static String escapeJs(String value) {
-        return value.replace("\\", "\\\\").replace("\"", "\\\"");
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
     }
 }

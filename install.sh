@@ -781,10 +781,20 @@ configure_keycloak_client() {
   [[ "$WITH_AUTH" != "true" ]] && return 0
 
   local kc_port="${KEYCLOAK_PORT:-8180}"
-  local eddi_origin="http://localhost:${EDDI_PORT}"
   local kc_base="http://localhost:${kc_port}"
 
   echo -ne "  Configuring Keycloak CORS  "
+
+  # Require jq or python3 for JSON parsing
+  local json_tool=""
+  if command -v jq &>/dev/null; then
+    json_tool="jq"
+  elif command -v python3 &>/dev/null; then
+    json_tool="python3"
+  else
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(jq or python3 required — Keycloak CORS not configured)${RESET}"
+    return 0
+  fi
 
   # Wait up to 30s for Keycloak admin API
   local elapsed=0
@@ -796,11 +806,16 @@ configure_keycloak_client() {
   done
 
   # Get admin token
-  local admin_token
-  admin_token=$(curl -sf -X POST \
+  local admin_token_json admin_token=""
+  admin_token_json=$(curl -sf -X POST \
     -d "client_id=admin-cli&username=admin&password=admin&grant_type=password" \
-    "${kc_base}/realms/master/protocol/openid-connect/token" 2>/dev/null | \
-    python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null) || true
+    "${kc_base}/realms/master/protocol/openid-connect/token" 2>/dev/null) || true
+
+  if [[ "$json_tool" == "jq" ]]; then
+    admin_token=$(echo "$admin_token_json" | jq -r '.access_token // empty' 2>/dev/null) || admin_token=""
+  else
+    admin_token=$(echo "$admin_token_json" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null) || admin_token=""
+  fi
 
   if [[ -z "$admin_token" ]]; then
     echo -e "${YELLOW}⚠️${RESET}  ${DIM}(Keycloak admin API unavailable — CORS origins not updated)${RESET}"
@@ -808,27 +823,68 @@ configure_keycloak_client() {
   fi
 
   # Get the eddi-frontend client UUID
-  local client_uuid
-  client_uuid=$(curl -sf \
+  local clients_json client_uuid=""
+  clients_json=$(curl -sf \
     -H "Authorization: Bearer ${admin_token}" \
-    "${kc_base}/admin/realms/eddi/clients?clientId=eddi-frontend" 2>/dev/null | \
-    python3 -c "import sys,json; c=json.load(sys.stdin); print(c[0]['id'] if c else '')" 2>/dev/null) || true
+    "${kc_base}/admin/realms/eddi/clients?clientId=eddi-frontend" 2>/dev/null) || true
+
+  if [[ "$json_tool" == "jq" ]]; then
+    client_uuid=$(echo "$clients_json" | jq -r '.[0].id // empty' 2>/dev/null) || client_uuid=""
+  else
+    client_uuid=$(echo "$clients_json" | python3 -c "import sys,json; c=json.load(sys.stdin); print(c[0]['id'] if c else '')" 2>/dev/null) || client_uuid=""
+  fi
 
   if [[ -z "$client_uuid" ]]; then
     echo -e "${YELLOW}⚠️${RESET}  ${DIM}(eddi-frontend client not found)${RESET}"
     return 0
   fi
 
-  # Add EDDI origin to webOrigins so CORS works for token exchange
+  # Build correct HTTP and HTTPS origins for EDDI
   local http_origin="http://localhost:${EDDI_PORT}"
-  local https_origin="https://localhost:${EDDI_PORT}"
+  local https_origin="https://localhost:${EDDI_HTTPS_PORT}"
+
+  # GET full client config, patch webOrigins + redirectUris, PUT it back
+  # (partial PUT wipes omitted fields in Keycloak's Admin API)
+  local client_config updated_config=""
+  client_config=$(curl -sf \
+    -H "Authorization: Bearer ${admin_token}" \
+    "${kc_base}/admin/realms/eddi/clients/${client_uuid}" 2>/dev/null) || true
+
+  if [[ -z "$client_config" ]]; then
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(could not read client config — CORS not updated)${RESET}"
+    return 0
+  fi
+
+  if [[ "$json_tool" == "jq" ]]; then
+    updated_config=$(echo "$client_config" | jq \
+      --arg h "$http_origin" \
+      --arg s "$https_origin" \
+      '.webOrigins = [$h, $s, "+"] | .redirectUris = ["http://localhost:*", "https://localhost:*", ($h + "/*"), ($s + "/*")]' \
+      2>/dev/null) || updated_config=""
+  else
+    updated_config=$(echo "$client_config" | \
+      HTTP_ORIGIN="$http_origin" HTTPS_ORIGIN="$https_origin" \
+      python3 -c "
+import sys, json, os
+d = json.load(sys.stdin)
+h = os.environ['HTTP_ORIGIN']
+s = os.environ['HTTPS_ORIGIN']
+d['webOrigins'] = [h, s, '+']
+d['redirectUris'] = ['http://localhost:*', 'https://localhost:*', h + '/*', s + '/*']
+print(json.dumps(d))" 2>/dev/null) || updated_config=""
+  fi
+
+  if [[ -z "$updated_config" ]]; then
+    echo -e "${YELLOW}⚠️${RESET}  ${DIM}(could not patch client config — CORS not updated)${RESET}"
+    return 0
+  fi
 
   local update_status
   update_status=$(curl -sf -o /dev/null -w "%{http_code}" -X PUT \
     -H "Authorization: Bearer ${admin_token}" \
     -H "Content-Type: application/json" \
     "${kc_base}/admin/realms/eddi/clients/${client_uuid}" \
-    -d "{\"webOrigins\":[\"${http_origin}\",\"${https_origin}\",\"+\"],\"redirectUris\":[\"http://localhost:*\",\"https://localhost:*\",\"${http_origin}/*\"]}" \
+    -d "$updated_config" \
     2>/dev/null) || update_status="000"
 
   if [[ "$update_status" == "204" ]]; then

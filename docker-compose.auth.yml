@@ -47,7 +47,7 @@ services:
       KC_HOSTNAME: "http://localhost:${KEYCLOAK_PORT:-8180}"
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
     ports:
-      - "8180:8080"
+      - "${KEYCLOAK_PORT:-8180}:8080"
     volumes:
       - keycloak-data:/opt/keycloak/data
       - ./keycloak:/opt/keycloak/data/import:ro
