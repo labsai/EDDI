@@ -192,7 +192,7 @@ class PostgresGlobalVariableStoreTest {
         when(rs.getString("tenant_id")).thenReturn(DEFAULT, DEFAULT);
         when(rs.getString("key")).thenReturn("a", "b");
         when(rs.getString("value")).thenReturn("1", "2");
-        when(rs.getString("description")).thenReturn("desc-a", null);
+        when(rs.getString("description")).thenReturn("desc-a", (String) null);
         when(rs.getBoolean("exportable")).thenReturn(true, false);
 
         List<GlobalVariable> result = store.listAll(DEFAULT);

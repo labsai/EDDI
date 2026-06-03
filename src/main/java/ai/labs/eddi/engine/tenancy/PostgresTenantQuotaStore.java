@@ -216,7 +216,10 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             // Window may be stale — try to reset and increment atomically
             try (PreparedStatement ps = conn.prepareStatement(
                     """
-                            INSERT INTO tenant_usage (tenant_id, conversations_today, day_start, api_calls_this_minute, minute_start, monthly_cost_usd, cost_month)
+                            INSERT INTO tenant_usage
+                                (tenant_id, conversations_today, day_start,
+                                 api_calls_this_minute, minute_start,
+                                 monthly_cost_usd, cost_month)
                             VALUES (?, 1, ?, 0, ?, 0.0, ?)
                             ON CONFLICT (tenant_id) DO UPDATE SET
                                 conversations_today = CASE WHEN tenant_usage.day_start < ? THEN 1 ELSE tenant_usage.conversations_today END,
@@ -274,7 +277,10 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             // Window may be stale — reset
             try (PreparedStatement ps = conn.prepareStatement(
                     """
-                            INSERT INTO tenant_usage (tenant_id, conversations_today, day_start, api_calls_this_minute, minute_start, monthly_cost_usd, cost_month)
+                            INSERT INTO tenant_usage
+                                (tenant_id, conversations_today, day_start,
+                                 api_calls_this_minute, minute_start,
+                                 monthly_cost_usd, cost_month)
                             VALUES (?, 0, ?, 1, ?, 0.0, ?)
                             ON CONFLICT (tenant_id) DO UPDATE SET
                                 api_calls_this_minute = CASE WHEN tenant_usage.minute_start < ? THEN 1 ELSE tenant_usage.api_calls_this_minute END,
@@ -311,7 +317,10 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
         try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement(
                         """
-                                INSERT INTO tenant_usage (tenant_id, conversations_today, day_start, api_calls_this_minute, minute_start, monthly_cost_usd, cost_month)
+                                INSERT INTO tenant_usage
+                                    (tenant_id, conversations_today, day_start,
+                                     api_calls_this_minute, minute_start,
+                                     monthly_cost_usd, cost_month)
                                 VALUES (?, 0, ?, 0, ?, ?, ?)
                                 ON CONFLICT (tenant_id) DO UPDATE SET
                                     monthly_cost_usd = CASE WHEN tenant_usage.cost_month = ? THEN tenant_usage.monthly_cost_usd + ? ELSE ? END,

@@ -4,6 +4,30 @@
 
 ---
 
+## 🐛 Fix: White Page at Root — index.html Revert to Redirect (2026-06-03)
+
+**Repo:** EDDI (`fix/manager-deploy-and-index-html`) + EDDI-Manager (deploy script)
+**What changed:** Root URL (`/`) showed a white page because `index.html` referenced deleted asset hashes.
+
+### Root Cause
+Commit `0ec6cb47c` (Jun 2) replaced `index.html`'s simple redirect with a full copy of the Manager SPA, duplicating the hashed asset references from `manage.html`. When the deploy script (`deploy-to-local-eddi-repo.ps1`) ran a Manager rebuild in `d9e6361`, it updated `manage.html` and the asset files but had no knowledge of `index.html` — leaving it pointing at deleted files (`index-Bn-sgAam.js`, `index-BZNayFGO.css`). With `X-Content-Type-Options: nosniff`, the browser blocked the HTML fallback response.
+
+### Fix
+- **`index.html`** — Reverted to a simple `<meta http-equiv="refresh">` redirect to `/manage`. No asset references, no sync needed. Keycloak works because the SPA boots at `/manage` and sets `redirectUri` to its own URL; the Keycloak client's `redirectUris: ["http://localhost:*"]` matches any path.
+- **`deploy-to-local-eddi-repo.ps1`** — Removed `$IndexHtml` handling (no longer needed). Script only updates `manage.html`.
+
+### Architecture Clarification
+
+| File | Served at | Purpose |
+|------|-----------|---------|
+| `index.html` | `/` (Quarkus static) | Redirect to `/manage` |
+| `manage.html` | `/manage` + `/manage/{path}` (RestManagerResource) | Manager SPA entry + client-side route fallback |
+| `chat.html` | `/chat/...` | Chat widget (separate assets under `/scripts/`) |
+
+**Files:** `index.html`, `deploy-to-local-eddi-repo.ps1`
+
+---
+
 ## 🔍 PR Review Fixes — Code Quality & Correctness (2026-06-03)
 
 **Repo:** EDDI (`fix/mcp-endpoint-bugs`)
