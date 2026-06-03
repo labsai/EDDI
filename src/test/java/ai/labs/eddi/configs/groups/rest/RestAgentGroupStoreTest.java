@@ -168,6 +168,56 @@ class RestAgentGroupStoreTest {
         }
     }
 
+    @Nested
+    @DisplayName("syncDescriptor — resource URI construction")
+    class SyncDescriptorResourceUri {
+
+        /**
+         * Regression test for the bug where syncDescriptor used the bare string
+         * "version" instead of versionQueryParam ("?version="), causing the resource
+         * URI to be stored as: eddi://ai.labs.group/groupstore/groups/IDversion1
+         * instead of the correct: eddi://ai.labs.group/groupstore/groups/ID?version=1
+         */
+        @Test
+        @DisplayName("createGroup should produce descriptor with ?version= query param, not concatenated 'version'")
+        void createGroup_descriptorResourceUri_containsQueryParam() throws Exception {
+            var config = new AgentGroupConfiguration();
+            config.setName("URI Test Group");
+            config.setDescription("Regression test");
+
+            String newId = "6a1f2a825e0172b6b7d9219f";
+            int newVersion = 1;
+            var resourceId = createResourceId(newId, newVersion);
+
+            when(groupStore.create(any(AgentGroupConfiguration.class))).thenReturn(resourceId);
+            when(groupStore.getCurrentResourceId(newId)).thenReturn(resourceId);
+            // Descriptor does not exist yet (create path)
+            when(documentDescriptorStore.readDescriptor(eq(newId), eq(newVersion)))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
+
+            restStore.createGroup(config);
+
+            // Capture the descriptor that was created
+            var descriptorCaptor = org.mockito.ArgumentCaptor.forClass(
+                    ai.labs.eddi.configs.descriptors.model.DocumentDescriptor.class);
+            verify(documentDescriptorStore).createDescriptor(eq(newId), eq(newVersion), descriptorCaptor.capture());
+
+            var descriptor = descriptorCaptor.getValue();
+            assertNotNull(descriptor.getResource(), "Descriptor resource URI must not be null");
+
+            String resourceUri = descriptor.getResource().toString();
+            // Must contain ?version= as a query param separator
+            assertTrue(resourceUri.contains("?version="),
+                    "Resource URI must use '?version=' query param, got: " + resourceUri);
+            // Must NOT have 'version' concatenated into the path (the old bug)
+            assertFalse(resourceUri.contains(newId + "version"),
+                    "Resource URI must not concatenate 'version' into the ID, got: " + resourceUri);
+            // The full URI should end with the expected pattern
+            assertTrue(resourceUri.endsWith(newId + "?version=" + newVersion),
+                    "Resource URI should end with ID?version=N, got: " + resourceUri);
+        }
+    }
+
     private IResourceStore.IResourceId createResourceId(String id, int version) {
         return new IResourceStore.IResourceId() {
             @Override
