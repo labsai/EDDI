@@ -407,7 +407,7 @@ export function parseGroupResourceUri(resource: string): {
   // Use a dummy base so relative paths (Location headers) parse correctly
   const url = new URL(normalised, "http://dummy");
   const parts = url.pathname.split("/").filter(Boolean);
-  let id = parts[parts.length - 1]!;
+  let id = parts[parts.length - 1] ?? resource;
   const hasQueryVersion = url.searchParams.has("version");
   let version = hasQueryVersion
     ? parseInt(url.searchParams.get("version")!, 10)

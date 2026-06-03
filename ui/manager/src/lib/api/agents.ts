@@ -140,8 +140,9 @@ export function parseResourceUri(resource: string): {
   // Use a dummy base so relative paths (Location headers) parse correctly
   const url = new URL(normalised, "http://dummy");
   const parts = url.pathname.split("/").filter(Boolean);
-  const id = parts[parts.length - 1]!;
-  const version = parseInt(url.searchParams.get("version") || "1", 10);
+  const id = parts[parts.length - 1] ?? resource;
+  const parsedVersion = parseInt(url.searchParams.get("version") || "1", 10);
+  const version = isNaN(parsedVersion) ? 1 : parsedVersion;
   return { id, version };
 }
 

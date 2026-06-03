@@ -50,6 +50,20 @@ describe("parseResourceUri", () => {
     expect(result.id).toBe("550e8400-e29b-41d4-a716-446655440000");
     expect(result.version).toBe(1);
   });
+
+  it("falls back to raw resource when path has no segments", () => {
+    const result = parseResourceUri("eddi://ai.labs.agent");
+    expect(result.id).toBe("eddi://ai.labs.agent");
+    expect(result.version).toBe(1);
+  });
+
+  it("handles non-numeric version by defaulting to 1", () => {
+    const result = parseResourceUri(
+      "eddi://ai.labs.agent/agentstore/agents/abc?version=abc"
+    );
+    expect(result.id).toBe("abc");
+    expect(result.version).toBe(1);
+  });
 });
 
 describe("getAgent — version parameter guard", () => {

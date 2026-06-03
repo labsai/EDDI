@@ -86,7 +86,8 @@ export function parseResourceUri(resource: string): { id: string; version: numbe
     const parts = url.pathname.split("/").filter(Boolean);
     const id = parts[parts.length - 1] || resource;
     const versionStr = url.searchParams.get("version");
-    const version = versionStr ? parseInt(versionStr, 10) : null;
+    const parsedVersion = versionStr ? parseInt(versionStr, 10) : NaN;
+    const version = Number.isFinite(parsedVersion) ? parsedVersion : null;
     return { id, version };
   } catch {
     // Fallback for completely unparseable strings
