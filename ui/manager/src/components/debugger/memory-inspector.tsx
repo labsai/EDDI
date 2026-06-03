@@ -13,6 +13,7 @@ import {
   Eye,
   EyeOff,
   RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 
 // ==================== Component ====================
@@ -24,7 +25,7 @@ interface MemoryInspectorProps {
 export function MemoryInspector({ conversationId }: MemoryInspectorProps) {
   const { t } = useTranslation();
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["memory", "detailed", conversationId],
     queryFn: () => getDetailedConversation(conversationId!),
     enabled: !!conversationId,
@@ -43,6 +44,17 @@ export function MemoryInspector({ conversationId }: MemoryInspectorProps) {
     return (
       <div className="flex items-center justify-center py-8">
         <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (isError && !data) {
+    return (
+      <div className="flex flex-col items-center gap-2 py-6 text-center" data-testid="memory-inspector-error">
+        <AlertTriangle className="h-8 w-8 text-destructive/50" />
+        <p className="text-sm text-muted-foreground">
+          {t("memoryInspector.error", "Failed to load memory data")}
+        </p>
       </div>
     );
   }

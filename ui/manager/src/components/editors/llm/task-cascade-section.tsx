@@ -163,7 +163,7 @@ export function TaskCascadeSection({ task, onChange, readOnly }: TaskSectionProp
                           onChange({ ...task, modelCascade: { ...task.modelCascade!, steps } });
                         }}
                         readOnly={readOnly}
-                        placeholder={t("llmEditor.cascadeModelName", "e.g. gpt-5.4-mini")}
+                        placeholder={t("llmEditor.cascadeModelName", "e.g. claude-sonnet-4-6")}
                         className="h-7 flex-1 rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                       />
                       {!readOnly && (

@@ -1,26 +1,41 @@
-import { api } from "../api-client";
+import { api, isApiError } from "../api-client";
 
 // ==================== Types ====================
 
+/**
+ * Matches the backend RestToolHistory.getConversationCosts() response:
+ *   Map.of("conversationId", ..., "totalCost", ..., "toolCallCount", ..., "toolUsage", ...)
+ * where toolUsage is Map<String, Integer> (tool name → call count).
+ */
 export interface ConversationCosts {
   conversationId: string;
   totalCost: number;
-  totalToolCalls: number;
-  toolUsage: Record<string, { calls: number; totalCost: number }>;
+  toolCallCount: number;
+  toolUsage: Record<string, number>;
 }
 
+/**
+ * Matches the backend RestToolHistory.getRateLimit() response:
+ *   Map.of("tool", toolName, "limit", info.limit, "remaining", info.remaining, "resetTimeMs", info.resetTimeMs)
+ */
 export interface ToolRateLimit {
-  toolName: string;
+  tool: string;
   limit: number;
   remaining: number;
-  resetAt: string; // ISO instant
+  resetTimeMs: number;
 }
 
+/**
+ * Matches the backend RestToolHistory.getCacheStats() response:
+ *   Map.of("size", ..., "hits", ..., "misses", ..., "hitRate", ..., "perToolStats", ..., "details", ...)
+ */
 export interface CacheStats {
-  totalHits: number;
-  totalMisses: number;
+  size: number;
+  hits: number;
+  misses: number;
   hitRate: number;
   perToolStats: Record<string, { hits: number; misses: number }>;
+  details: string;
 }
 
 export interface ToolHistoryEntry {
@@ -32,23 +47,35 @@ export interface ToolHistoryEntry {
   timestamp: string;
 }
 
+/**
+ * Matches the backend RestToolHistory.getCosts() response:
+ *   Map.of("totalCost", costTracker.getTotalCost(), "summary", summary)
+ */
 export interface ToolCostSummary {
   totalCost: number;
-  totalCalls: number;
-  perTool: Record<string, { calls: number; cost: number }>;
+  summary: string;
 }
 
 // ==================== API Functions ====================
 
 const TOOLS_BASE = "/llm/tools";
 
-/** Get cost breakdown for a specific conversation. */
+/**
+ * Get cost breakdown for a specific conversation.
+ * Returns null when the backend has no cost data yet (404).
+ */
 export async function getConversationCosts(
   conversationId: string,
-): Promise<ConversationCosts> {
-  return api.get<ConversationCosts>(
-    `${TOOLS_BASE}/costs/conversation/${conversationId}`,
-  );
+): Promise<ConversationCosts | null> {
+  try {
+    return await api.get<ConversationCosts>(
+      `${TOOLS_BASE}/costs/conversation/${conversationId}`,
+    );
+  } catch (err) {
+    // Backend returns 404 when no cost data exists for the conversation yet
+    if (isApiError(err) && err.status === 404) return null;
+    throw err;
+  }
 }
 
 /** Get rate limit info for a specific tool. */

@@ -1,9 +1,9 @@
 import { api } from "../api-client";
 
 // Types matching EDDI backend
-export type ConversationState = "READY" | "IN_PROGRESS" | "ERROR" | "ENDED";
+export type ConversationState = "READY" | "IN_PROGRESS" | "ENDED" | "EXECUTION_INTERRUPTED" | "ERROR";
 
-export type ViewState = "UNSEEN" | "READ" | "DONE";
+export type ViewState = "UNSEEN" | "SEEN";
 
 /** Raw shape returned by the backend GET /conversationstore/conversations */
 export interface ConversationDescriptorRaw {

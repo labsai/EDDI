@@ -21,6 +21,7 @@ import {
 import { useUpdateAgent } from "@/hooks/use-agents";
 import { useSkills } from "@/hooks/use-capabilities";
 import type { Agent, ChannelConnector } from "@/lib/api/agents";
+import { CONFIDENCE_COLORS } from "@/lib/constants";
 import { isApiError } from "@/lib/api-client";
 import { EditorSection } from "./editor-section";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
@@ -91,7 +92,7 @@ function DebouncedNumberInput({
     (raw: string) => {
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => {
-        onCommit(parseInt(raw, 10) || fallback);
+        onCommit(parseFloat(raw) || fallback);
       }, delay);
     },
     [onCommit, delay, fallback],
@@ -350,11 +351,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
 
 // ─── Capabilities ───────────────────────────────────────────────────────────
 
-const confidenceColors: Record<string, string> = {
-  high: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-  medium: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
-  low: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
-};
+const confidenceColors = CONFIDENCE_COLORS;
 
 /** Autocomplete input for selecting a skill from the registry or typing a custom one. */
 function SkillAutocomplete({

@@ -47,6 +47,7 @@ const stateIcons: Record<
   IN_PROGRESS: { icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10" },
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
   ENDED: { icon: CheckCircle2, color: "text-muted-foreground", bg: "bg-muted" },
+  EXECUTION_INTERRUPTED: { icon: AlertTriangle, color: "text-amber-500", bg: "bg-amber-500/10" },
 };
 
 export function ConversationDetailPage() {
@@ -62,6 +63,7 @@ export function ConversationDetailPage() {
     IN_PROGRESS: t("conversations.stateInProgress", "In Progress"),
     ERROR: t("status.error", "Error"),
     ENDED: t("conversations.stateEnded", "Ended"),
+    EXECUTION_INTERRUPTED: t("conversations.stateInterrupted", "Interrupted"),
   };
 
   const deleteMutation = useDeleteConversation();

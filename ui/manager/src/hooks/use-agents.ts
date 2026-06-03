@@ -190,6 +190,7 @@ export function useDeployAgent() {
     }) => deployAgent(environment, agentId, version),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
+      queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
     },
   });
 }
@@ -208,6 +209,7 @@ export function useUndeployAgent() {
     }) => undeployAgent(environment, agentId, version),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: AGENTS_KEY });
+      queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
     },
   });
 }

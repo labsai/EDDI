@@ -2,8 +2,8 @@ import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
 import { useConversationCosts, useCacheStats } from "@/hooks/use-tool-metrics";
-import { cn } from "@/lib/utils";
-import { Coins, Zap, TrendingUp, Server, BarChart3 } from "lucide-react";
+import { cn, formatDuration } from "@/lib/utils";
+import { Coins, Zap, TrendingUp, Server, BarChart3, AlertTriangle } from "lucide-react";
 import { useMemo } from "react";
 
 // ==================== Component ====================
@@ -17,7 +17,7 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
   const { t } = useTranslation();
 
   // Fetch costs from the tool metrics API
-  const { data: costs } = useConversationCosts(conversationId, isActive);
+  const { data: costs, isError: costsError } = useConversationCosts(conversationId, isActive);
 
   // Fetch cache stats
   const { data: cacheStats } = useCacheStats(isActive);
@@ -58,7 +58,7 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
           )}
           <MetricRow
             label={t("costDashboard.duration", "Duration")}
-            value={fmtDuration(latestTurn.durationMs)}
+            value={formatDuration(latestTurn.durationMs)}
           />
           {latestTurn.modelName && (
             <MetricRow
@@ -83,10 +83,10 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
             label={t("costDashboard.cost", "Cost")}
             value={fmtCost(tokenMetrics.totalCost)}
           />
-          {costs?.totalToolCalls != null && costs.totalToolCalls > 0 && (
+          {costs?.toolCallCount != null && costs.toolCallCount > 0 && (
             <MetricRow
               label={t("costDashboard.toolCalls", "Tool Calls")}
-              value={`${costs.totalToolCalls}`}
+              value={`${costs.toolCallCount}`}
             />
           )}
         </MetricSection>
@@ -98,12 +98,12 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
           title={t("costDashboard.toolUsage", "Tool Usage")}
           icon={<BarChart3 className="h-3.5 w-3.5" />}
         >
-          {Object.entries(costs.toolUsage).map(([tool, usage]) => (
+          {Object.entries(costs.toolUsage).map(([tool, callCount]) => (
             <div key={tool} className="space-y-0.5">
               <div className="flex items-center justify-between text-[11px]">
                 <span className="font-medium text-foreground truncate">{tool}</span>
                 <span className="text-muted-foreground font-mono">
-                  {usage.calls} {t("costDashboard.calls", "calls")} · {fmtCost(usage.totalCost)}
+                  {callCount} {t("costDashboard.calls", "calls")}
                 </span>
               </div>
             </div>
@@ -132,8 +132,18 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
         </MetricSection>
       )}
 
+      {/* Error state */}
+      {costsError && !costs && (
+        <div className="flex flex-col items-center gap-2 py-6 text-center" data-testid="cost-dashboard-error">
+          <AlertTriangle className="h-8 w-8 text-destructive/50" />
+          <p className="text-sm text-muted-foreground">
+            {t("costDashboard.error", "Unable to load cost data from server")}
+          </p>
+        </div>
+      )}
+
       {/* Empty state */}
-      {!tokenMetrics && !costs && (
+      {!tokenMetrics && !costs && !costsError && (
         <div className="flex flex-col items-center gap-2 py-6 text-center">
           <Coins className="h-8 w-8 text-muted-foreground/30" />
           <p className="text-sm text-muted-foreground">
@@ -286,9 +296,4 @@ function fmtCost(n: number): string {
   if (n === 0) return "$0.00";
   if (n < 0.01) return `$${n.toFixed(4)}`;
   return `$${n.toFixed(2)}`;
-}
-
-function fmtDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
 }

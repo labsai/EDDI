@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
-import { cn } from "@/lib/utils";
+import { cn, formatDuration } from "@/lib/utils";
 import {
   MessageSquareCode,
   Copy,
@@ -13,6 +13,7 @@ import {
   Wrench,
   Cpu,
   ChevronDown,
+  AlertTriangle,
 } from "lucide-react";
 import { api } from "@/lib/api-client";
 
@@ -25,7 +26,7 @@ interface PromptViewerProps {
 export function PromptViewer({ conversationId }: PromptViewerProps) {
   const { t } = useTranslation();
 
-  const { data: auditEntries } = useQuery({
+  const { data: auditEntries, isError } = useQuery({
     queryKey: ["audit", "promptViewer", conversationId],
     queryFn: () => getAuditTrail(conversationId!, 0, 200),
     enabled: !!conversationId,
@@ -50,6 +51,17 @@ export function PromptViewer({ conversationId }: PromptViewerProps) {
       <EmptyState
         message={t("promptViewer.noConversation", "Start a conversation to inspect prompts")}
       />
+    );
+  }
+
+  if (isError && !auditEntries) {
+    return (
+      <div className="flex flex-col items-center gap-2 py-6 text-center" data-testid="prompt-viewer-error">
+        <AlertTriangle className="h-8 w-8 text-destructive/50" />
+        <p className="text-sm text-muted-foreground">
+          {t("promptViewer.error", "Failed to load prompt data")}
+        </p>
+      </div>
     );
   }
 
@@ -114,7 +126,7 @@ function PromptDetail({
   const modelResponse = llm?.modelResponse as string | undefined;
   const modelName = llm?.modelName as string | undefined;
   const tokenUsage = llm?.tokenUsage as Record<string, number> | undefined;
-  const toolCalls = entry.toolCalls as Array<Record<string, unknown>> | null;
+  const toolCalls = entry.toolCalls;
 
   // Parse compiled prompt into message segments
   const messages = useMemo(() => {
@@ -136,7 +148,7 @@ function PromptDetail({
   const handleReplay = async () => {
     try {
       setReplaying(true);
-      await api.post(`/agents/${conversationId}/rerunLastConversationStep`);
+      await api.post(`/agents/${conversationId}/rerun`);
     } catch {
       // Replay may not be supported
     } finally {
@@ -156,9 +168,7 @@ function PromptDetail({
         </span>
         {entry.durationMs > 0 && (
           <span className="font-mono">
-            {entry.durationMs < 1000
-              ? `${entry.durationMs}ms`
-              : `${(entry.durationMs / 1000).toFixed(2)}s`}
+            {formatDuration(entry.durationMs)}
           </span>
         )}
       </div>

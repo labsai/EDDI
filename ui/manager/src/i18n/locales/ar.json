@@ -641,7 +641,7 @@
     "cascadeInAgent": "استخدام التسلسل أيضاً في وضع الوكيل (مع الأدوات)",
     "cascadeSteps": "Cascade Steps",
     "cascadeStepsDesc": "Order matters: first step tried first. Last step is always accepted.",
-    "cascadeModelName": "مثال: gpt-4o-mini",
+    "cascadeModelName": "مثال: claude-sonnet-4-6",
     "cascadeConfidence": "Min. Confidence (0-1)",
     "cascadeConfidencePlaceholder": "فارغ = قبول دائم",
     "cascadeTimeout": "المهلة (مللي ثانية)",
