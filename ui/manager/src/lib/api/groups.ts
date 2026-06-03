@@ -390,14 +390,23 @@ export async function* streamGroupDiscussion(
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
-/** Parse group resource URI to extract id and version */
+/** Parse group resource URI to extract id and version.
+ *
+ * Accepted formats:
+ *   - `eddi://ai.labs.group/groupstore/groups/ID?version=VERSION`
+ *   - `/groupstore/groups/ID?version=VERSION`   (Location header path)
+ *   - `http://host/groupstore/groups/ID?version=VERSION`
+ */
 export function parseGroupResourceUri(resource: string): {
   id: string;
   version: number;
 } {
-  // Format: eddi://ai.labs.group/groupstore/groups/ID?version=VERSION
-  const url = new URL(resource.replace("eddi://", "http://"));
-  const parts = url.pathname.split("/");
+  const normalised = resource.startsWith("eddi://")
+    ? resource.replace("eddi://", "http://")
+    : resource;
+  // Use a dummy base so relative paths (Location headers) parse correctly
+  const url = new URL(normalised, "http://dummy");
+  const parts = url.pathname.split("/").filter(Boolean);
   const id = parts[parts.length - 1]!;
   const version = parseInt(url.searchParams.get("version") || "1", 10);
   return { id, version };
