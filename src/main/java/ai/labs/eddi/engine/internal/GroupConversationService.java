@@ -30,6 +30,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.modules.output.model.OutputItem;
@@ -608,6 +609,13 @@ public class GroupConversationService implements IGroupConversationService {
 
                 conversationService.say(DEFAULT_ENV, member.agentId(), convId, false, true, null, inputData, false, snapshot -> {
                     String response = extractResponse(snapshot);
+                    // When the agent pipeline fails (e.g. LLM unreachable), extractResponse
+                    // returns null because there are no output keys — only pipeline metadata.
+                    // Surface the failure as explicit content so the transcript entry is not empty.
+                    if (response == null && snapshot != null
+                            && snapshot.getConversationState() == ConversationState.ERROR) {
+                        response = "[Agent failed to produce output — conversation entered ERROR state]";
+                    }
                     responseFuture.complete(response);
                 });
 

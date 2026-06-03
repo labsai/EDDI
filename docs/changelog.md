@@ -4,6 +4,28 @@
 
 ---
 
+## 🐛 MCP Bug Fixes — Round 2: chat_managed + group discussion error content (2026-06-03)
+
+**Repo:** EDDI (`fix/mcp-endpoint-bugs`)
+**What changed:** Fixed 3 remaining bugs from MCP endpoint audit retest.
+
+### chat_managed Internal Error (NEW — all calls returned "Internal error")
+- **Root cause:** Missing `@Blocking` annotation on `chatManaged()`. Both `talkToAgent()` and `chatWithAgent()` had it, but `chatManaged()` did not. Since `sendMessageAndWait()` blocks on `CompletableFuture.get()`, the MCP framework's event-loop thread was blocked, causing the generic "Internal error".
+- **Fix 1:** Added `@Blocking` annotation.
+- **Fix 2:** Replaced `restAgentEngine.startConversationWithContext()` with direct `conversationService.startConversation()` to avoid the JAX-RS layer wrapping exceptions as HTTP responses.
+- **Fix 3:** Hardened stale conversation handling — `getConversationState()` now catches `Exception` when the stored UserConversation references a deleted conversation, cleans up the stale mapping, and creates a fresh conversation.
+- **Files:** `McpConversationTools.java`
+
+### BUG-2 Follow-up: Group discussion empty content when LLM fails
+- **Root cause:** `extractResponse()` correctly returns `null` when no output keys are present (pipeline metadata only), but this `null` was silently stored as the transcript `content` field — making entries appear empty.
+- **Fix:** In `executeAgentTurn()`, after `extractResponse()` returns null, check the conversation state. If ERROR, set content to `"[Agent failed to produce output — conversation entered ERROR state]"`.
+- **Files:** `GroupConversationService.java`
+
+### BUG-6 Follow-up: Trigger cache invalidation (verified indirectly)
+- The trigger validation in `getOrCreateManagedConversation()` was already correct from the first fix round. It was untestable because `chat_managed` itself was broken. Now that `@Blocking` is fixed, the trigger validation path is reachable.
+
+---
+
 ## 🐛 MCP Endpoint Bug Fixes — 8 Bugs Resolved (2026-06-02)
 
 **Repo:** EDDI (`fix/mcp-endpoint-bugs`)

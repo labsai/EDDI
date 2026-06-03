@@ -30,7 +30,6 @@ import ai.labs.eddi.engine.memory.rest.IRestConversationStore;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
-import ai.labs.eddi.utils.RestUtilities;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -40,7 +39,6 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import java.net.URI;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -478,6 +476,7 @@ public class McpConversationTools {
         }
     }
 
+    @Blocking
     @Tool(name = "chat_managed", description = "Send a message to a Agent using intent-based managed conversations. "
             + "Unlike chat_with_agent (which requires a agentId and creates multiple conversations), this "
             + "tool uses an 'intent' to find the right Agent and maintains exactly ONE conversation "
@@ -536,21 +535,32 @@ public class McpConversationTools {
         if (existing != null) {
             // Validate that the trigger still exists — if it was deleted,
             // the UserConversation is stale and should be cleaned up.
-            // Only catch ResourceNotFoundException (via sneakyThrow) — transient
-            // DB errors should propagate so we don't falsely delete state.
+            // Note: readAgentTrigger throws ResourceNotFoundException via sneakyThrow
+            // (bypasses checked exception analysis), so we catch Exception + instanceof.
             try {
                 agentTriggerStore.readAgentTrigger(intent);
-            } catch (IResourceStore.ResourceNotFoundException triggerEx) {
-                userConversationStore.deleteUserConversation(intent, userId);
-                throw new RuntimeException("Agent trigger for intent '" + intent + "' no longer exists");
+            } catch (Exception triggerEx) {
+                if (triggerEx instanceof IResourceStore.ResourceNotFoundException) {
+                    userConversationStore.deleteUserConversation(intent, userId);
+                    throw new RuntimeException("Agent trigger for intent '" + intent + "' no longer exists");
+                }
+                throw triggerEx; // Rethrow transient DB errors
             }
 
-            // Check if conversation has ended
-            ConversationState state = restAgentEngine.getConversationState(existing.getConversationId());
-            if (!ConversationState.ENDED.equals(state)) {
-                return existing;
+            // Check if conversation has ended or no longer exists in the DB.
+            // The UserConversation mapping may reference a conversation that was
+            // deleted externally — handle gracefully by creating a fresh one.
+            try {
+                ConversationState state = restAgentEngine.getConversationState(existing.getConversationId());
+                if (!ConversationState.ENDED.equals(state)) {
+                    return existing;
+                }
+            } catch (Exception stateEx) {
+                // Conversation not found in DB — stale mapping, fall through to create fresh
+                LOGGER.warnv("Stale UserConversation for intent={0}, userId={1}: conversation {2} not found, recreating",
+                        intent, userId, existing.getConversationId());
             }
-            // Ended — delete and create fresh
+            // Ended or stale — delete and create fresh
             userConversationStore.deleteUserConversation(intent, userId);
         }
 
@@ -565,18 +575,12 @@ public class McpConversationTools {
         String agentId = deployment.getAgentId();
         var usedEnv = deployment.getEnvironment() != null ? deployment.getEnvironment() : env;
 
-        // Start a new conversation
-        var initialContext = new HashMap<>(deployment.getInitialContext());
-        jakarta.ws.rs.core.Response agentResponse = restAgentEngine.startConversationWithContext(agentId, usedEnv, userId, initialContext);
-
-        if (agentResponse.getStatus() != 201) {
-            throw new RuntimeException(
-                    "Failed to create conversation for intent=" + intent + ", agentId=" + agentId + ", status=" + agentResponse.getStatus());
-        }
-
-        var locationUri = URI.create(agentResponse.getHeaders().get("location").getFirst().toString());
-        var resourceId = RestUtilities.extractResourceId(locationUri);
-        String conversationId = resourceId.getId();
+        // Start a new conversation — use ConversationService directly to avoid
+        // the JAX-RS layer which converts exceptions to HTTP responses that are
+        // hard to inspect programmatically.
+        var initialContext = new HashMap<String, ai.labs.eddi.engine.model.Context>(deployment.getInitialContext());
+        var convResult = conversationService.startConversation(usedEnv, agentId, userId, initialContext);
+        String conversationId = convResult.conversationId();
 
         // Store the user conversation mapping
         var userConversation = new UserConversation(intent, userId, usedEnv, agentId, conversationId);
