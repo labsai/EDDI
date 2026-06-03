@@ -65,6 +65,23 @@ describe("parseGroupResourceUri", () => {
     expect(result.id).toBe("550e8400-e29b-41d4-a716-446655440000");
     expect(result.version).toBe(1);
   });
+
+  it("handles corrupted backend data with version concatenated into path", () => {
+    // Backend bug: syncDescriptor wrote "version" instead of "?version="
+    const result = parseGroupResourceUri(
+      "eddi://ai.labs.group/groupstore/groups/6a1f2a825e0172b6b7d9219fversion1"
+    );
+    expect(result.id).toBe("6a1f2a825e0172b6b7d9219f");
+    expect(result.version).toBe(1);
+  });
+
+  it("handles corrupted backend data with higher version numbers", () => {
+    const result = parseGroupResourceUri(
+      "eddi://ai.labs.group/groupstore/groups/abc123version42"
+    );
+    expect(result.id).toBe("abc123");
+    expect(result.version).toBe(42);
+  });
 });
 
 describe("groupGroupsByName", () => {
