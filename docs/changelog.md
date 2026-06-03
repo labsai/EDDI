@@ -17,6 +17,7 @@ Commit `0ec6cb47c` (Jun 2) replaced `index.html`'s simple redirect with a full c
 - **`deploy-to-local-eddi-repo.ps1`** — Removed `$IndexHtml` handling (no longer needed). Script only updates `manage.html`.
 
 ### Architecture Clarification
+
 | File | Served at | Purpose |
 |------|-----------|---------|
 | `index.html` | `/` (Quarkus static) | Redirect to `/manage` |
