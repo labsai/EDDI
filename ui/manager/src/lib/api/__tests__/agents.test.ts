@@ -18,6 +18,38 @@ describe("parseResourceUri", () => {
     expect(result.id).toBe("xyz789");
     expect(result.version).toBe(1);
   });
+
+  it("parses a plain path Location header", () => {
+    const result = parseResourceUri(
+      "/agentstore/agents/abc123?version=2"
+    );
+    expect(result.id).toBe("abc123");
+    expect(result.version).toBe(2);
+  });
+
+  it("parses an HTTP URL", () => {
+    const result = parseResourceUri(
+      "http://localhost:7070/agentstore/agents/abc123?version=5"
+    );
+    expect(result.id).toBe("abc123");
+    expect(result.version).toBe(5);
+  });
+
+  it("handles version=0 correctly", () => {
+    const result = parseResourceUri(
+      "eddi://ai.labs.agent/agentstore/agents/test1?version=0"
+    );
+    expect(result.id).toBe("test1");
+    expect(result.version).toBe(0);
+  });
+
+  it("handles UUID resource IDs", () => {
+    const result = parseResourceUri(
+      "eddi://ai.labs.agent/agentstore/agents/550e8400-e29b-41d4-a716-446655440000?version=1"
+    );
+    expect(result.id).toBe("550e8400-e29b-41d4-a716-446655440000");
+    expect(result.version).toBe(1);
+  });
 });
 
 describe("getAgent — version parameter guard", () => {

@@ -39,6 +39,14 @@ describe("parseChannelResourceUri", () => {
       version: 7,
     });
   });
+
+  it("parses an HTTP URL", () => {
+    const result = parseChannelResourceUri(
+      "http://localhost:7070/channelstore/channels/ch42?version=3"
+    );
+    expect(result.id).toBe("ch42");
+    expect(result.version).toBe(3);
+  });
 });
 
 describe("createDefaultTarget", () => {

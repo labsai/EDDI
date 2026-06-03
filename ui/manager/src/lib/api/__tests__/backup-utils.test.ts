@@ -30,4 +30,18 @@ describe("parseResourceUri", () => {
     const result = parseResourceUri("/store/items/item1?version=0");
     expect(result).toEqual({ id: "item1", version: 0 });
   });
+
+  it("parses an HTTP URL", () => {
+    const result = parseResourceUri(
+      "http://localhost:7070/agentstore/agents/abc123?version=5"
+    );
+    expect(result.id).toBe("abc123");
+    expect(result.version).toBe(5);
+  });
+
+  it("handles empty string gracefully", () => {
+    const result = parseResourceUri("");
+    expect(result.id).toBe("");
+    expect(result.version).toBeNull();
+  });
 });
