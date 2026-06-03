@@ -11,13 +11,13 @@ EDDI is built on and fully supports **Red Hat Enterprise Linux (RHEL)**. The pro
 
 EDDI is delivered as an OCI-compliant Docker container image and runs on any platform that supports OCI containers, including:
 
-| Platform | Support Level |
-|---|---|
-| **Red Hat Enterprise Linux 9** | ✅ Primary — UBI 9 base image, Red Hat-certified |
-| **Red Hat OpenShift 4.12+** | ✅ Certified — listed in the [Red Hat Ecosystem Catalog](https://catalog.redhat.com/) |
-| **Docker** (any Linux, macOS, Windows) | ✅ Full support — standard OCI container |
-| **Kubernetes** (any distribution) | ✅ Full support — standard OCI container |
-| **Podman** | ✅ Full support — OCI-compliant runtime |
+| Platform                               | Support Level                                                                         |
+| -------------------------------------- | ------------------------------------------------------------------------------------- |
+| **Red Hat Enterprise Linux 9**         | ✅ Primary — UBI 9 base image, Red Hat-certified                                      |
+| **Red Hat OpenShift 4.12+**            | ✅ Certified — listed in the [Red Hat Ecosystem Catalog](https://catalog.redhat.com/) |
+| **Docker** (any Linux, macOS, Windows) | ✅ Full support — standard OCI container                                              |
+| **Kubernetes** (any distribution)      | ✅ Full support — standard OCI container                                              |
+| **Podman**                             | ✅ Full support — OCI-compliant runtime                                               |
 
 > **Note**: Because EDDI ships as a standard OCI container image built on Red Hat UBI 9, it is inherently compatible with RHEL 9 and any RHEL-based platform. No host-level OS dependencies are required beyond a container runtime.
 
@@ -39,15 +39,15 @@ The EDDI container image is certified by Red Hat / IBM for use on OpenShift. Cer
 
 ### Certification Compliance
 
-| Requirement | Implementation |
-|---|---|
-| **Base image** | `registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24` (pinned by SHA256 digest) |
-| **Non-root execution** | Runs as UID `185` — the default `jboss` user |
-| **Licenses** | Auto-generated `/licenses` directory containing `THIRD-PARTY.txt` and downloaded license texts |
-| **Required labels** | `name`, `vendor`, `version`, `release`, `summary`, `description` |
-| **OpenShift labels** | `io.k8s.display-name`, `io.k8s.description`, `io.openshift.tags` |
-| **Health check** | Docker-native `HEALTHCHECK` on `/q/health/ready` |
-| **Security scanning** | Trivy image scan in CI blocks push on OS-level CVEs |
+| Requirement            | Implementation                                                                                 |
+| ---------------------- | ---------------------------------------------------------------------------------------------- |
+| **Base image**         | `registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24` (pinned by SHA256 digest)            |
+| **Non-root execution** | Runs as UID `185` — the default `jboss` user                                                   |
+| **Licenses**           | Auto-generated `/licenses` directory containing `THIRD-PARTY.txt` and downloaded license texts |
+| **Required labels**    | `name`, `vendor`, `version`, `release`, `summary`, `description`                               |
+| **OpenShift labels**   | `io.k8s.display-name`, `io.k8s.description`, `io.openshift.tags`                               |
+| **Health check**       | Docker-native `HEALTHCHECK` on `/q/health/ready`                                               |
+| **Security scanning**  | Trivy image scan in CI blocks push on OS-level CVEs                                            |
 
 ### Automated Certification Workflow
 
@@ -61,7 +61,7 @@ The certification release process is fully automated:
 
 To trigger a certification release, go to **Actions → Red Hat Certification Release → Run workflow** and provide:
 
-- `version` — EDDI version (e.g., `6.0.2`)
+- `version` — EDDI version (e.g., `6.1.0`)
 - `release` — Incremental release number (e.g., `1`, `2`, `3`)
 - `submit` — Whether to submit results to Red Hat (`true`/`false`)
 - `registry` — Target registry (`docker.io` or `quay.io`)
@@ -72,14 +72,14 @@ Every push to `main` or release tag that produces a Docker image is validated by
 
 ### Required GitHub Secrets
 
-| Secret | Purpose |
-|---|---|
-| `REDHAT_API_TOKEN` | Pyxis API token from Red Hat Partner Connect |
-| `REDHAT_CERT_PROJECT_ID` | Certification project ID |
-| `DOCKER_USERNAME` | Docker Hub username |
-| `DOCKER_PASSWORD` | Docker Hub password |
-| `QUAY_USERNAME` | Quay.io robot account (optional, for Quay.io publishing) |
-| `QUAY_PASSWORD` | Quay.io password (optional) |
+| Secret                   | Purpose                                                  |
+| ------------------------ | -------------------------------------------------------- |
+| `REDHAT_API_TOKEN`       | Pyxis API token from Red Hat Partner Connect             |
+| `REDHAT_CERT_PROJECT_ID` | Certification project ID                                 |
+| `DOCKER_USERNAME`        | Docker Hub username                                      |
+| `DOCKER_PASSWORD`        | Docker Hub password                                      |
+| `QUAY_USERNAME`          | Quay.io robot account (optional, for Quay.io publishing) |
+| `QUAY_PASSWORD`          | Quay.io password (optional)                              |
 
 ---
 
@@ -93,11 +93,11 @@ Third-party licenses are generated on-demand using the `license-gen` Maven profi
 
 This generates:
 
-| File | Contents |
-|---|---|
+| File                       | Contents                                          |
+| -------------------------- | ------------------------------------------------- |
 | `licenses/THIRD-PARTY.txt` | All runtime dependencies with their license names |
-| `licenses/third-party/` | Downloaded license text files for each dependency |
-| `licenses/licenses.xml` | Machine-readable license index |
+| `licenses/third-party/`    | Downloaded license text files for each dependency |
+| `licenses/licenses.xml`    | Machine-readable license index                    |
 
 The profile is **not activated during normal dev builds** to keep them fast. CI workflows (`redhat-certify.yml`, `ci.yml`) activate it automatically.
 
@@ -129,13 +129,13 @@ After installation, go to **Installed Operators → EDDI** and create a new inst
 apiVersion: labs.ai/v1alpha1
 kind: Eddi
 metadata:
-  name: eddi
+    name: eddi
 spec:
-  size: 1
-  mongodb:
-    environment: prod
-    storageclass_name: managed-nfs-storage
-    storage_size: 20G
+    size: 1
+    mongodb:
+        environment: prod
+        storageclass_name: managed-nfs-storage
+        storage_size: 20G
 ```
 
 The operator creates a route automatically. With the CR above, the route would be:
@@ -147,16 +147,16 @@ The operator creates a route automatically. With the CR above, the route would b
 
 ## Docker Image Details
 
-| Property | Value |
-|---|---|
-| **Image** | `docker.io/labsai/eddi` |
-| **Base** | `registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24` |
-| **Digest pinning** | SHA256 digest for supply-chain integrity (OpenSSF Silver) |
-| **User** | `185` (non-root) |
-| **Port** | `7070` |
-| **Health endpoint** | `GET /q/health/ready` |
-| **Java** | OpenJDK 25 (Red Hat build) |
-| **Framework** | Quarkus 3.34.x |
+| Property            | Value                                                     |
+| ------------------- | --------------------------------------------------------- |
+| **Image**           | `docker.io/labsai/eddi`                                   |
+| **Base**            | `registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24` |
+| **Digest pinning**  | SHA256 digest for supply-chain integrity (OpenSSF Silver) |
+| **User**            | `185` (non-root)                                          |
+| **Port**            | `7070`                                                    |
+| **Health endpoint** | `GET /q/health/ready`                                     |
+| **Java**            | OpenJDK 25 (Red Hat build)                                |
+| **Framework**       | Quarkus 3.34.x                                            |
 
 ### Quick Start
 
@@ -171,5 +171,5 @@ For production deployments with MongoDB:
 docker run -d \
   -p 7070:7070 \
   -e QUARKUS_MONGODB_CONNECTION_STRING=mongodb://mongo:27017 \
-  labsai/eddi:6.0.2
+  labsai/eddi:6.1.0
 ```

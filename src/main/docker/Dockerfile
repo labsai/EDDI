@@ -81,7 +81,7 @@
 FROM registry.access.redhat.com/ubi9/openjdk-25-runtime:1.24@sha256:9156d717de79ff9593229ca5c4faedac0b1af7b5f6050c3d32790aa4c8329c5a
 
 ### Red Hat Container Certification — required labels
-ARG EDDI_VERSION=6.0.2
+ARG EDDI_VERSION=6.1.0
 ARG EDDI_RELEASE=1
 
 LABEL name="labsai/eddi" \
@@ -126,6 +126,6 @@ ENV JAVA_APP_JAR="/deployments/quarkus-run.jar"
 
 # Docker-native healthcheck (supplements k8s liveness/readiness probes)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:7070/q/health/ready || exit 1
+      CMD curl -f http://localhost:7070/q/health/ready || exit 1
 
 ENTRYPOINT [ "/opt/jboss/container/java/run/run-java.sh" ]

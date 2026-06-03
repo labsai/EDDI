@@ -4,6 +4,26 @@
 
 ---
 
+## 📦 Version Bump 6.0.2 → 6.1.0 (2026-06-03)
+
+**Repo:** EDDI (`fix/mcp-endpoint-bugs`)
+**What changed:** Bumped project version from 6.0.2 to 6.1.0 across all deployment artifacts to reflect the scope of changes since RC2 (MCP bug fixes, dependency updates, Manager UI refresh, security hardening).
+
+### Files Updated
+- `pom.xml` — Maven artifact version
+- `src/main/docker/Dockerfile` — `EDDI_VERSION` build arg + Red Hat certification labels
+- `helm/eddi/Chart.yaml` — `appVersion`
+- `k8s/base/eddi-deployment.yaml` — `app.kubernetes.io/version` labels
+- `k8s/quickstart.yaml` — `app.kubernetes.io/version` labels
+- `src/main/resources/application.properties` — `systemRuntime.projectVersion`, `quarkus.smallrye-openapi.info-version`, `quarkus.container-image.additional-tags`
+- `src/main/resources/initial-agents/available_agents.txt` — Agent Father ZIP filename
+- `src/main/resources/initial-agents/Agent+Father-6.1.0.zip` — [NEW] updated bundled agent
+- `src/main/resources/initial-agents/Agent+Father-6.0.2.zip` — [DELETED] superseded
+- `.github/workflows/redhat-certify.yml` — Red Hat certification workflow version refs
+- `docs/redhat-openshift.md` — documentation version refs
+
+---
+
 ## 🐛 MCP Bug Fixes — Round 2: chat_managed + group discussion error content (2026-06-03)
 
 **Repo:** EDDI (`fix/mcp-endpoint-bugs`)
