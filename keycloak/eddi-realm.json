@@ -8,6 +8,15 @@
   "resetPasswordAllowed": true,
   "editUsernameAllowed": false,
   "bruteForceProtected": true,
+  "defaultRole": {
+    "name": "default-roles-eddi",
+    "description": "Default roles assigned to every new user on registration",
+    "composite": true,
+    "composites": {
+      "realm": ["eddi-user"]
+    },
+    "clientRole": false
+  },
   "roles": {
     "realm": [
       {
@@ -25,9 +34,29 @@
       {
         "name": "eddi-viewer",
         "description": "Read-only access to EDDI resources"
+      },
+      {
+        "name": "default-roles-eddi",
+        "description": "Default roles assigned to every new user on registration",
+        "composite": true,
+        "composites": {
+          "realm": ["eddi-user"]
+        },
+        "clientRole": false
       }
     ]
   },
+  "clientScopes": [
+    {
+      "name": "openid",
+      "description": "OpenID Connect scope — required for userinfo endpoint access",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    }
+  ],
   "clients": [
     {
       "clientId": "eddi-backend",
@@ -53,9 +82,17 @@
         "https://localhost:*"
       ],
       "webOrigins": [
-        "+"
+        "+",
+        "http://localhost:7070",
+        "https://localhost:7070",
+        "http://localhost:7071",
+        "https://localhost:7071",
+        "https://localhost:7443",
+        "http://localhost:3000",
+        "http://localhost:5173"
       ],
       "defaultClientScopes": [
+        "openid",
         "web-origins",
         "acr",
         "profile",
@@ -74,6 +111,17 @@
             "access.token.claim": "true",
             "userinfo.token.claim": "true"
           }
+        },
+        {
+          "name": "eddi-backend-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "eddi-backend",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
         }
       ]
     }
@@ -81,6 +129,8 @@
   "users": [
     {
       "username": "eddi",
+      "firstName": "EDDI",
+      "lastName": "Admin",
       "email": "eddi@localhost",
       "enabled": true,
       "emailVerified": true,
@@ -98,6 +148,8 @@
     },
     {
       "username": "viewer",
+      "firstName": "EDDI",
+      "lastName": "Viewer",
       "email": "viewer@localhost",
       "enabled": true,
       "emailVerified": true,
@@ -114,6 +166,8 @@
     },
     {
       "username": "user",
+      "firstName": "EDDI",
+      "lastName": "User",
       "email": "user@localhost",
       "enabled": true,
       "emailVerified": true,

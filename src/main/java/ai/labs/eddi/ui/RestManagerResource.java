@@ -8,6 +8,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.io.FileNotFoundException;
@@ -15,6 +16,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Optional;
 
 /**
  * @author ginccc
@@ -22,10 +24,28 @@ import java.nio.file.Paths;
 @ApplicationScoped
 public class RestManagerResource implements IRestManagerResource {
     private static final Logger LOGGER = Logger.getLogger(RestManagerResource.class);
+    private static final String SPA_CLIENT_ID = "eddi-frontend";
+
+    @ConfigProperty(name = "eddi.keycloak.public.url")
+    Optional<String> keycloakPublicUrl;
+
+    @ConfigProperty(name = "quarkus.oidc.auth-server-url", defaultValue = "")
+    String oidcAuthServerUrl;
+
+    @ConfigProperty(name = "quarkus.oidc.tenant-enabled", defaultValue = "false")
+    boolean oidcEnabled;
 
     @Override
     public Response fetchManagerResources() {
         return fetchManagerResources("/manage.html");
+    }
+
+    @Override
+    public Response fetchAuthConfig() {
+        return Response.ok(buildAuthConfigJs())
+                .type("application/javascript")
+                .header("Cache-Control", "no-cache, must-revalidate")
+                .build();
     }
 
     @Override
@@ -76,5 +96,58 @@ public class RestManagerResource implements IRestManagerResource {
             LOGGER.error("Failed to serve resource: " + path, e);
             throw new InternalServerErrorException("An error occurred while accessing the resource");
         }
+    }
+
+    private String buildAuthConfigJs() {
+        if (!oidcEnabled) {
+            return "window.__EDDI_AUTH__={method:\"none\"};";
+        }
+
+        String url = keycloakPublicUrl.filter(s -> !s.isBlank()).orElse("");
+        String realm = extractRealm(oidcAuthServerUrl);
+
+        StringBuilder sb = new StringBuilder("window.__EDDI_AUTH__={");
+        sb.append("method:\"keycloak\"");
+        if (!url.isBlank()) {
+            sb.append(",url:\"").append(escapeJs(url)).append("\"");
+        }
+        sb.append(",realm:\"").append(escapeJs(realm)).append("\"");
+        sb.append(",clientId:\"").append(SPA_CLIENT_ID).append("\"");
+        sb.append("};");
+        return sb.toString();
+    }
+
+    private static String extractRealm(String authServerUrl) {
+        if (authServerUrl == null || authServerUrl.isBlank()) {
+            return "eddi";
+        }
+        int idx = authServerUrl.lastIndexOf("/realms/");
+        if (idx >= 0) {
+            String realm = authServerUrl.substring(idx + "/realms/".length());
+            int end = realm.length();
+            int slashIdx = realm.indexOf('/');
+            int qIdx = realm.indexOf('?');
+            int hashIdx = realm.indexOf('#');
+            if (slashIdx >= 0) {
+                end = Math.min(end, slashIdx);
+            }
+            if (qIdx >= 0) {
+                end = Math.min(end, qIdx);
+            }
+            if (hashIdx >= 0) {
+                end = Math.min(end, hashIdx);
+            }
+            return end > 0 ? realm.substring(0, end) : "eddi";
+        }
+        return "eddi";
+    }
+
+    private static String escapeJs(String value) {
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
     }
 }
