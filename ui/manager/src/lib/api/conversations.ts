@@ -47,8 +47,10 @@ export interface ConversationDescriptor {
 export function parseAgentResource(uri?: string): { agentId: string; agentVersion: number } {
   if (!uri) return { agentId: "", agentVersion: 0 };
   try {
-    const normalized = uri.replace("eddi://", "http://");
-    const url = new URL(normalized);
+    const normalized = uri.startsWith("eddi://")
+      ? uri.replace("eddi://", "http://")
+      : uri;
+    const url = new URL(normalized, "http://dummy");
     const parts = url.pathname.split("/");
     const agentId = parts[parts.length - 1] || "";
     const version = parseInt(url.searchParams.get("version") || "0", 10);
@@ -225,7 +227,10 @@ export interface ConversationMemorySnapshot {
 /** Parse conversation resource URI to extract ID */
 export function parseConversationUri(resource: string): string {
   try {
-    const url = new URL(resource.replace("eddi://", "http://"));
+    const normalised = resource.startsWith("eddi://")
+      ? resource.replace("eddi://", "http://")
+      : resource;
+    const url = new URL(normalised, "http://dummy");
     const parts = url.pathname.split("/");
     return parts[parts.length - 1] || resource;
   } catch {

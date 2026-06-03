@@ -19,8 +19,11 @@ import { getExtensionTypeConfig } from "@/lib/api/extensions";
 /** Extract resource ID from a URI like eddi://ai.labs.rules/rulestore/rulesets/abc123?version=1 */
 function extractIdFromUri(uri: string): string {
   try {
-    const path = new URL(uri).pathname;
-    const segments = path.split("/").filter(Boolean);
+    const normalised = uri.startsWith("eddi://")
+      ? uri.replace("eddi://", "http://")
+      : uri;
+    const url = new URL(normalised, "http://dummy");
+    const segments = url.pathname.split("/").filter(Boolean);
     return segments[segments.length - 1] ?? uri;
   } catch {
     // Fallback: take last path segment
@@ -33,7 +36,10 @@ function extractIdFromUri(uri: string): string {
 /** Extract version from URI query string */
 function extractVersionFromUri(uri: string): string | null {
   try {
-    const url = new URL(uri);
+    const normalised = uri.startsWith("eddi://")
+      ? uri.replace("eddi://", "http://")
+      : uri;
+    const url = new URL(normalised, "http://dummy");
     return url.searchParams.get("version");
   } catch {
     const match = uri.match(/[?&]version=(\d+)/);

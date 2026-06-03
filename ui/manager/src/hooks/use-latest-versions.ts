@@ -26,7 +26,10 @@ export function useLatestVersions(resourceUris: string[]) {
           if (seen.has(id)) continue;
           seen.add(id);
           // Extract store and plural from the URI path
-          const parsed = new URL(uri.replace("eddi://", "http://"));
+          const normalised = uri.startsWith("eddi://")
+            ? uri.replace("eddi://", "http://")
+            : uri;
+          const parsed = new URL(normalised, "http://dummy");
           const segments = parsed.pathname.split("/").filter(Boolean);
           if (segments.length >= 3) {
             toFetch.push({ uri, id, store: segments[0]!, plural: segments[1]! });
