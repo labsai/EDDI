@@ -4,6 +4,29 @@
 
 ---
 
+## 🐛 Fix: Swagger UI Broken by CSP — Per-Path Filter Override (2026-06-03)
+
+**Repo:** EDDI (`fix/swagger-ui-csp`)
+**What changed:** Swagger UI (`/q/swagger-ui/`) was blocked by the strict `Content-Security-Policy` header — inline scripts and `eval()` were rejected, rendering a blank page.
+
+### Root Cause
+The global `quarkus.http.header.Content-Security-Policy` applied `script-src 'self'` to all paths, including Swagger UI. Swagger UI requires `'unsafe-inline'` (inline `<script>` tags) and `'unsafe-eval'` (JSON schema rendering via `eval()`).
+
+### Fix
+Replaced the global `quarkus.http.header.Content-Security-Policy` with two `quarkus.http.filter` entries using Quarkus's native path-based filter mechanism:
+- **`csp-default`** (order=10, matches `/.*`): Strict CSP for the entire application — `script-src 'self'`
+- **`csp-swagger`** (order=20, matches `/q/swagger-ui/.*`): Relaxed CSP — adds `'unsafe-inline' 'unsafe-eval'` to `script-src`
+
+Higher `order` takes precedence, so the Swagger filter overrides the default for its path.
+
+### Why not a Java filter?
+An initial approach used `@Observes Router` to register a Vert.x handler, but this has an ordering race: Quarkus may apply `quarkus.http.header` headers via a `headersEndHandler` (fires just before wire flush), which would overwrite the Java handler's header. The `quarkus.http.filter` approach has no such ambiguity — Quarkus manages precedence internally via the `order` property.
+
+**Files:** `application.properties`
+
+---
+
+
 ## 🐛 Fix: White Page at Root — index.html Revert to Redirect (2026-06-03)
 
 **Repo:** EDDI (`fix/manager-deploy-and-index-html`) + EDDI-Manager (deploy script)
