@@ -81,7 +81,7 @@ public class AgentTriggerStore implements IAgentTriggerStore {
     }
 
     @Override
-    public void deleteAgentTrigger(String intent) {
+    public void deleteAgentTrigger(String intent) throws IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkNotNull(intent, INTENT_FIELD);
 
         agentTriggerStore.deleteAgentTrigger(intent);
@@ -146,8 +146,12 @@ public class AgentTriggerStore implements IAgentTriggerStore {
             collection.insertOne(createDocument(agentTriggerConfiguration));
         }
 
-        void deleteAgentTrigger(String intent) {
-            collection.deleteOne(new Document(INTENT_FIELD, intent));
+        void deleteAgentTrigger(String intent) throws IResourceStore.ResourceNotFoundException {
+            var result = collection.deleteOne(new Document(INTENT_FIELD, intent));
+            if (result.getDeletedCount() == 0) {
+                throw new IResourceStore.ResourceNotFoundException(
+                        String.format("AgentTriggerConfiguration with intent=%s does not exist", intent));
+            }
         }
 
         private Document createDocument(AgentTriggerConfiguration agentTriggerConfiguration) throws IResourceStore.ResourceStoreException {

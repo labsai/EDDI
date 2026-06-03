@@ -86,7 +86,7 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
             agentTriggerStore.deleteAgentTrigger(intent);
             agentTriggersCache.remove(intent);
             return Response.ok().build();
-        } catch (IResourceStore.ResourceStoreException e) {
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
     }

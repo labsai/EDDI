@@ -133,4 +133,9 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
     public String getResourceURI() {
         return resourceURI;
     }
+
+    @Override
+    public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
+        return resourceStore.getCurrentResourceId(id);
+    }
 }
