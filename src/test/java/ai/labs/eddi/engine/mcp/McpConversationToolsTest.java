@@ -643,12 +643,38 @@ class McpConversationToolsTest {
 
         when(jsonSerialization.serialize(any(LinkedHashMap.class))).thenReturn("{\"conversationId\":\"new-conv-id\"}");
 
-        String result = tools.chatManaged("support", "user1", "Hello!", "production");
+        tools.chatManaged("support", "user1", "Hello!", "production");
 
         // Should clean up stale mapping and create a new one
         verify(userConversationStore).deleteUserConversation("support", "user1");
         verify(userConversationStore).createUserConversation(any());
         verify(conversationService).startConversation(any(), eq(AGENT_ID), eq("user1"), anyMap());
+    }
+
+    @Test
+    void chatManaged_transientStateError_doesNotRecreate() throws Exception {
+        // Existing UserConversation is valid
+        var existing = new ai.labs.eddi.engine.triggermanagement.model.UserConversation(
+                "support", "user1", Environment.production, AGENT_ID, CONV_ID);
+        when(userConversationStore.readUserConversation("support", "user1")).thenReturn(existing);
+
+        // Trigger still exists
+        var trigger = new AgentTriggerConfiguration();
+        trigger.setIntent("support");
+        when(AgentTriggerStore.readAgentTrigger("support")).thenReturn(trigger);
+
+        // getConversationState throws a transient error (NOT NotFoundException)
+        when(RestAgentEngine.getConversationState(CONV_ID))
+                .thenThrow(new RuntimeException("Database connection timeout"));
+
+        String result = tools.chatManaged("support", "user1", "Hello!", "production");
+
+        // Should NOT delete the mapping — transient errors must propagate,
+        // not silently discard a valid conversation
+        verify(userConversationStore, never()).deleteUserConversation(any(), any());
+        verify(conversationService, never()).startConversation(any(), any(), any(), anyMap());
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("Database connection timeout"));
     }
 
     @Test

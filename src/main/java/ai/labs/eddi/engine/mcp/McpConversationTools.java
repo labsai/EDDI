@@ -234,17 +234,24 @@ public class McpConversationTools {
             // Create filtered copies to avoid mutating the original snapshot.
             if (!fields.isEmpty() && snapshot.getConversationOutputs() != null) {
                 var trimmedFields = fields.stream().map(String::trim).toList();
-                var filteredOutputs = snapshot.getConversationOutputs().stream()
-                        .map(output -> {
-                            var filtered = new ai.labs.eddi.engine.memory.model.ConversationOutput();
-                            output.forEach((key, value) -> {
-                                if (key instanceof String s && trimmedFields.stream().anyMatch(f -> s.equals(f) || s.startsWith(f + ":"))) {
-                                    filtered.put(key, value);
-                                }
-                            });
-                            return filtered;
-                        }).toList();
-                snapshot.setConversationOutputs(filteredOutputs);
+                // If the caller requested a section-level name (e.g. "conversationOutputs"),
+                // skip field-level filtering — the caller wants the full section.
+                boolean requestedFullSection = trimmedFields.stream()
+                        .anyMatch(f -> f.equals("conversationOutputs") || f.equals("conversationSteps")
+                                || f.equals("conversationProperties"));
+                if (!requestedFullSection) {
+                    var filteredOutputs = snapshot.getConversationOutputs().stream()
+                            .map(output -> {
+                                var filtered = new ai.labs.eddi.engine.memory.model.ConversationOutput();
+                                output.forEach((key, value) -> {
+                                    if (key instanceof String s && trimmedFields.stream().anyMatch(f -> s.equals(f) || s.startsWith(f + ":"))) {
+                                        filtered.put(key, value);
+                                    }
+                                });
+                                return filtered;
+                            }).toList();
+                    snapshot.setConversationOutputs(filteredOutputs);
+                }
             }
 
             return jsonSerialization.serialize(snapshot);
@@ -555,7 +562,7 @@ public class McpConversationTools {
                 if (!ConversationState.ENDED.equals(state)) {
                     return existing;
                 }
-            } catch (Exception stateEx) {
+            } catch (jakarta.ws.rs.NotFoundException stateEx) {
                 // Conversation not found in DB — stale mapping, fall through to create fresh
                 LOGGER.warnv("Stale UserConversation for intent={0}, userId={1}: conversation {2} not found, recreating",
                         intent, userId, existing.getConversationId());

@@ -7,7 +7,7 @@
 ## 📦 Version Bump 6.0.2 → 6.1.0 (2026-06-03)
 
 **Repo:** EDDI (`fix/mcp-endpoint-bugs`)
-**What changed:** Bumped project version from 6.0.2 to 6.1.0 across all deployment artifacts to reflect the scope of changes since RC2 (MCP bug fixes, dependency updates, Manager UI refresh, security hardening).
+**What changed:** Bumped project version from 6.0.2 to 6.1.0 across the main deployment artifacts and related documentation to reflect the scope of changes since RC2 (MCP bug fixes, dependency updates, Manager UI refresh, security hardening).
 
 ### Files Updated
 - `pom.xml` — Maven artifact version
