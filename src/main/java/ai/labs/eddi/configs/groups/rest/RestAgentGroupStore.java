@@ -183,7 +183,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
                 // No descriptor at any version — brand-new resource (create path).
                 descriptor = new DocumentDescriptor();
                 descriptor.setResource(RestUtilities.createURI(resourceURI, resourceId,
-                        "version", version));
+                        versionQueryParam, version));
                 if (config.getName() != null) {
                     descriptor.setName(config.getName());
                 }
