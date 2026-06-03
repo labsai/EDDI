@@ -4,6 +4,31 @@
 
 ---
 
+## 📦 Dependency Updates — June 2026 (2026-06-01)
+
+**Repo:** EDDI (`chore/dependency-updates-june-2026`)
+**What changed:** Bumped langchain4j and direct dependencies to latest versions.
+
+### Platform Version Bumps
+- `langchain4j` / `langchain4j-libs`: 1.15.0 → **1.15.1**
+- `langchain4j-beta`: 1.15.0-beta25 → **1.15.1-beta25**
+- New `langchain4j-community.version` property: **1.15.0-beta25** (community OCI GenAI module hasn't released 1.15.1-beta25 yet; separated from beta property to avoid resolution failure)
+
+### Direct Dependency Updates
+- `org.jsoup:jsoup`: 1.22.1 → **1.22.2**
+- `io.swagger.core.v3:swagger-annotations`: 2.2.48 → **2.2.50**
+- `io.nats:jnats`: 2.25.2 → **2.25.3**
+- `io.quarkiverse.mcp:quarkus-mcp-server-http`: 1.11.1 → **1.12.1**
+- `io.swagger.parser.v3:swagger-parser`: 2.1.40 → **2.1.42**
+- `org.apache.maven.plugins:maven-enforcer-plugin`: 3.5.0 → **3.6.3**
+
+### Skipped (Transitive)
+- `io.projectreactor.netty:reactor-netty-http`: 1.2.8 → 1.3.5 — **not updated**. 1.3.x is a different Reactor release train (2025.x / Spring Framework 7). Our CVE-2025-22227 override at 1.2.8 is correct for the Azure SDK's 1.2.x dependency line.
+
+**Files:** `pom.xml`, `docs/changelog.md`
+
+---
+
 ## 🛠️ PR Feedback Remediation — Production Hardening (2026-05-17)
 
 **Repo:** EDDI (`feature/feature-gap-remediation`)
