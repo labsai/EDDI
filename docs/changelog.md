@@ -4,6 +4,33 @@
 
 ---
 
+## 🔍 PR Review Fixes — Code Quality & Correctness (2026-06-03)
+
+**Repo:** EDDI (`fix/mcp-endpoint-bugs`)
+**What changed:** Addressed all findings from automated PR review bots (github-code-quality, CodeRabbit, Copilot) plus a critical exception handling bug found during manual review.
+
+### Critical Fix: Stale Conversation Cleanup Was Dead Code
+- **Root cause:** `McpConversationTools.getOrCreateManagedConversation()` caught `jakarta.ws.rs.NotFoundException`, but `RestAgentEngine.getConversationState()` actually throws `IConversationService.ConversationNotFoundException` (a plain `RuntimeException`). The JAX-RS exception was never thrown by this code path.
+- **Impact:** Stale conversation mappings (pointing to deleted conversations) were never cleaned up — the exception propagated to the outer catch and returned a generic error.
+- **Fix:** Changed catch to `IConversationService.ConversationNotFoundException`.
+- **Test:** Updated `chatManaged_staleConversation_recreatesFresh` to throw the correct exception type.
+
+### Other Fixes
+- **Unused variable:** Removed `String result` in test (github-code-quality)
+- **Field filter bypass:** `readConversation` with `returningFields=conversationOutputs` no longer strips the full payload — section-level names are now detected and preserved
+- **redhat-certify.yml:** Updated default version from `6.0.2` to `6.1.0`
+- **README.md:** Updated version from `6.0.2` to `6.1.0` (header badge and Maven snippet)
+- **redhat-openshift.md:** Fixed YAML example indentation back to standard 2-space Kubernetes style
+- **Changelog wording:** Softened "across all deployment artifacts" to "across the main deployment artifacts"
+
+### New Tests
+- `chatManaged_endedConversation_recreatesFresh` — covers `ConversationState.ENDED` → delete+recreate path
+- `chatManaged_transientStateError_doesNotRecreate` — verifies transient DB errors propagate without deleting valid mappings
+- `readConversationDescriptors_agentVersionFilter_matchesCorrectVersion` — agentVersion filter positive match
+- `readConversationDescriptors_agentVersionFilter_filtersWrongVersion` — agentVersion filter negative match
+
+---
+
 ## 📦 Version Bump 6.0.2 → 6.1.0 (2026-06-03)
 
 **Repo:** EDDI (`fix/mcp-endpoint-bugs`)

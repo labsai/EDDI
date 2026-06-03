@@ -129,13 +129,13 @@ After installation, go to **Installed Operators → EDDI** and create a new inst
 apiVersion: labs.ai/v1alpha1
 kind: Eddi
 metadata:
-    name: eddi
+  name: eddi
 spec:
-    size: 1
-    mongodb:
-        environment: prod
-        storageclass_name: managed-nfs-storage
-        storage_size: 20G
+  size: 1
+  mongodb:
+    environment: prod
+    storageclass_name: managed-nfs-storage
+    storage_size: 20G
 ```
 
 The operator creates a route automatically. With the CR above, the route would be:

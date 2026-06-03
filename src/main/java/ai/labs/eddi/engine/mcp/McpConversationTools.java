@@ -562,7 +562,7 @@ public class McpConversationTools {
                 if (!ConversationState.ENDED.equals(state)) {
                     return existing;
                 }
-            } catch (jakarta.ws.rs.NotFoundException stateEx) {
+            } catch (IConversationService.ConversationNotFoundException stateEx) {
                 // Conversation not found in DB — stale mapping, fall through to create fresh
                 LOGGER.warnv("Stale UserConversation for intent={0}, userId={1}: conversation {2} not found, recreating",
                         intent, userId, existing.getConversationId());

@@ -627,7 +627,7 @@ class McpConversationToolsTest {
 
         // getConversationState throws — conversation no longer exists
         when(RestAgentEngine.getConversationState("deleted-conv-id"))
-                .thenThrow(new jakarta.ws.rs.NotFoundException("Conversation not found"));
+                .thenThrow(new IConversationService.ConversationNotFoundException("Conversation not found"));
 
         // New conversation creation succeeds
         when(conversationService.startConversation(eq(Environment.production), eq(AGENT_ID), eq("user1"), anyMap()))
@@ -646,6 +646,49 @@ class McpConversationToolsTest {
         tools.chatManaged("support", "user1", "Hello!", "production");
 
         // Should clean up stale mapping and create a new one
+        verify(userConversationStore).deleteUserConversation("support", "user1");
+        verify(userConversationStore).createUserConversation(any());
+        verify(conversationService).startConversation(any(), eq(AGENT_ID), eq("user1"), anyMap());
+    }
+
+    @Test
+    void chatManaged_endedConversation_recreatesFresh() throws Exception {
+        // Existing UserConversation references an ended conversation
+        var existing = new ai.labs.eddi.engine.triggermanagement.model.UserConversation(
+                "support", "user1", Environment.production, AGENT_ID, "ended-conv-id");
+        when(userConversationStore.readUserConversation("support", "user1")).thenReturn(existing);
+
+        // Trigger still exists
+        var trigger = new AgentTriggerConfiguration();
+        trigger.setIntent("support");
+        var deployment = new AgentDeployment();
+        deployment.setAgentId(AGENT_ID);
+        deployment.setEnvironment(Environment.production);
+        deployment.setInitialContext(Collections.emptyMap());
+        trigger.setAgentDeployments(List.of(deployment));
+        when(AgentTriggerStore.readAgentTrigger("support")).thenReturn(trigger);
+
+        // getConversationState returns ENDED
+        when(RestAgentEngine.getConversationState("ended-conv-id"))
+                .thenReturn(ai.labs.eddi.engine.memory.model.ConversationState.ENDED);
+
+        // New conversation creation succeeds
+        when(conversationService.startConversation(eq(Environment.production), eq(AGENT_ID), eq("user1"), anyMap()))
+                .thenReturn(new ConversationResult("new-conv-id", URI.create("eddi://conv/new-conv-id")));
+
+        // Mock say
+        doAnswer(invocation -> {
+            ConversationResponseHandler handler = invocation.getArgument(6);
+            handler.onComplete(new SimpleConversationMemorySnapshot());
+            return null;
+        }).when(conversationService).say(eq("new-conv-id"), anyBoolean(), anyBoolean(), anyList(),
+                any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
+
+        when(jsonSerialization.serialize(any(LinkedHashMap.class))).thenReturn("{\"conversationId\":\"new-conv-id\"}");
+
+        tools.chatManaged("support", "user1", "Hello!", "production");
+
+        // Should delete ended conversation and create a new one
         verify(userConversationStore).deleteUserConversation("support", "user1");
         verify(userConversationStore).createUserConversation(any());
         verify(conversationService).startConversation(any(), eq(AGENT_ID), eq("user1"), anyMap());

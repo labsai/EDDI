@@ -135,4 +135,55 @@ class RestConversationStoreFilterTest {
         // Assert — descriptor with non-matching agentResource should be filtered
         assertEquals(0, results.size());
     }
+
+    /**
+     * When filtering by agentId AND agentVersion, a descriptor whose agentResource
+     * has the matching version should be included.
+     */
+    @Test
+    void readConversationDescriptors_agentVersionFilter_matchesCorrectVersion() throws Exception {
+        var descriptor = createDescriptor(CONVERSATION_ID, AGENT_ID, 1);
+
+        when(conversationDescriptorStore.readDescriptors(eq("ai.labs.conversation"), any(), eq(0), eq(20), eq(false)))
+                .thenReturn(List.of(descriptor));
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID))
+                .thenReturn(createSnapshot(AGENT_ID, 1));
+
+        var docDescriptor = new DocumentDescriptor();
+        docDescriptor.setName("Test Agent");
+        when(documentDescriptorStore.readDescriptor(AGENT_ID, 1)).thenReturn(docDescriptor);
+
+        // Act — filter by AGENT_ID + version 1
+        var results = restConversationStore.readConversationDescriptors(
+                0, 20, null, null, AGENT_ID, 1, null, null);
+
+        // Assert — matching version should be included
+        assertEquals(1, results.size());
+    }
+
+    /**
+     * When filtering by agentId AND agentVersion, a descriptor whose agentResource
+     * has a different version should be excluded.
+     */
+    @Test
+    void readConversationDescriptors_agentVersionFilter_filtersWrongVersion() throws Exception {
+        // Descriptor is version 1, but we filter for version 2
+        var descriptor = createDescriptor(CONVERSATION_ID, AGENT_ID, 1);
+
+        when(conversationDescriptorStore.readDescriptors(eq("ai.labs.conversation"), any(), eq(0), eq(20), eq(false)))
+                .thenReturn(List.of(descriptor));
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID))
+                .thenReturn(createSnapshot(AGENT_ID, 1));
+
+        var docDescriptor = new DocumentDescriptor();
+        docDescriptor.setName("Test Agent");
+        when(documentDescriptorStore.readDescriptor(AGENT_ID, 1)).thenReturn(docDescriptor);
+
+        // Act — filter by AGENT_ID + version 2 (descriptor is version 1)
+        var results = restConversationStore.readConversationDescriptors(
+                0, 20, null, null, AGENT_ID, 2, null, null);
+
+        // Assert — wrong version should be filtered out
+        assertEquals(0, results.size());
+    }
 }
