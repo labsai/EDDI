@@ -9,8 +9,7 @@ import {
   createCoordinatorEventSource,
   type CoordinatorStatus,
 } from "@/lib/api/coordinator";
-import type { AuthEventSourceHandle } from "@/lib/api/sse-utils";
-import { SSE_RECONNECT_BASE_MS, SSE_RECONNECT_MAX_ATTEMPTS, SSE_RECONNECT_MAX_DELAY_MS } from "@/lib/constants";
+import type { BearerEventSource } from "@/lib/bearer-event-source";
 
 // ==================== Query Keys ====================
 
@@ -91,15 +90,16 @@ export function useCoordinatorSSE() {
   const [liveStatus, setLiveStatus] = useState<CoordinatorStatus | null>(null);
   const [sseConnected, setSseConnected] = useState(false);
   const [eventHistory, setEventHistory] = useState<CoordinatorSnapshot[]>([]);
-  const handleRef = useRef<AuthEventSourceHandle | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const reconnectAttempts = useRef(0);
+  const eventSourceRef = useRef<BearerEventSource | null>(null);
 
   const connect = useCallback(() => {
     try {
-      handleRef.current?.close();
-      const handle = createCoordinatorEventSource({
-        onMessage: (data) => {
+      const es = createCoordinatorEventSource();
+      eventSourceRef.current = es;
+
+      es.addEventListener("status", (event) => {
+        try {
+          const data = JSON.parse(event.data) as CoordinatorStatus;
           setLiveStatus(data);
           setSseConnected(true);
 
@@ -114,22 +114,21 @@ export function useCoordinatorSSE() {
               ? next.slice(-EVENT_HISTORY_LIMIT)
               : next;
           });
-        },
-        onOpen: () => {
-          reconnectAttempts.current = 0;
-          setSseConnected(true);
-        },
-        onError: () => {
-          setSseConnected(false);
-          if (reconnectAttempts.current < SSE_RECONNECT_MAX_ATTEMPTS) {
-            const delay = Math.min(SSE_RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts.current), SSE_RECONNECT_MAX_DELAY_MS);
-            reconnectAttempts.current++;
-            clearTimeout(reconnectTimer.current);
-            reconnectTimer.current = setTimeout(connect, delay);
-          }
-        },
+        } catch {
+          // ignore parse errors
+        }
       });
-      handleRef.current = handle;
+
+      es.onerror = () => {
+        setSseConnected(false);
+        es.close();
+        // Reconnect after 5 seconds
+        setTimeout(connect, 5000);
+      };
+
+      es.onopen = () => {
+        setSseConnected(true);
+      };
     } catch {
       setSseConnected(false);
     }
@@ -138,11 +137,9 @@ export function useCoordinatorSSE() {
   useEffect(() => {
     connect();
     return () => {
-      clearTimeout(reconnectTimer.current);
-      handleRef.current?.close();
+      eventSourceRef.current?.close();
     };
   }, [connect]);
 
   return { liveStatus, sseConnected, eventHistory };
 }
-

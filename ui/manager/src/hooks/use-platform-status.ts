@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { api } from "@/lib/api-client";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -25,7 +26,7 @@ async function checkPlatformHealth(): Promise<HealthResult> {
   const start = performance.now();
   const res = await fetch(
     `${window.location.origin}/administration/logs/instance-id`,
-    { signal: AbortSignal.timeout(5000) },
+    { signal: AbortSignal.timeout(5000), headers: api.getAuthHeader() },
   );
   const latencyMs = Math.round(performance.now() - start);
 

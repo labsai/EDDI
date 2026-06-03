@@ -1,8 +1,5 @@
 import { api } from "../api-client";
-import {
-  createAuthEventSource,
-  type AuthEventSourceHandle,
-} from "./sse-utils";
+import { BearerEventSource } from "../bearer-event-source";
 
 // ==================== Types ====================
 
@@ -97,19 +94,11 @@ export async function getInstanceId(): Promise<InstanceInfo> {
 }
 
 /**
- * Create an auth-aware SSE stream for live log streaming.
- * Uses fetch + ReadableStream to support Authorization headers.
- * Handles both named "log" events and unnamed SSE events.
+ * Create an authenticated SSE stream for live log tailing.
+ * Uses BearerEventSource (fetch+ReadableStream) instead of the native EventSource
+ * because EventSource cannot send custom headers like Authorization.
  */
-export function createLogEventSource(
-  filters: LogFilters = {},
-  options?: {
-    onMessage?: (entry: LogEntry) => void;
-    onError?: (error: Error) => void;
-    onOpen?: () => void;
-    signal?: AbortSignal;
-  },
-): AuthEventSourceHandle {
+export function createLogEventSource(filters: LogFilters = {}): BearerEventSource {
   const params = new URLSearchParams();
   if (filters.agentId) params.set("agentId", filters.agentId);
   if (filters.conversationId)
@@ -117,18 +106,6 @@ export function createLogEventSource(
   if (filters.level) params.set("level", filters.level);
 
   const qs = params.toString();
-
-  return createAuthEventSource(`${BASE}/stream${qs ? `?${qs}` : ""}`, {
-    onMessage: (event) => {
-      try {
-        options?.onMessage?.(JSON.parse(event.data));
-      } catch {
-        /* ignore parse errors */
-      }
-    },
-    onError: options?.onError,
-    onOpen: options?.onOpen,
-    signal: options?.signal,
-  });
+  const url = `${window.location.origin}${BASE}/stream${qs ? `?${qs}` : ""}`;
+  return new BearerEventSource(url, api.getAuthHeader());
 }
-

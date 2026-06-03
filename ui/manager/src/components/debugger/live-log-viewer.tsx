@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { createLogEventSource, getRecentLogs, type LogEntry } from "@/lib/api/logs";
-import type { AuthEventSourceHandle } from "@/lib/api/sse-utils";
-import { SSE_RECONNECT_BASE_MS, SSE_RECONNECT_MAX_ATTEMPTS, SSE_RECONNECT_MAX_DELAY_MS } from "@/lib/constants";
+import type { BearerEventSource } from "@/lib/bearer-event-source";
 import { cn } from "@/lib/utils";
 import {
   ScrollText,
@@ -49,9 +48,7 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [connected, setConnected] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const handleRef = useRef<AuthEventSourceHandle | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const reconnectAttempts = useRef(0);
+  const eventSourceRef = useRef<BearerEventSource | null>(null);
 
   // Keep ref in sync with state for use in SSE callback
   useEffect(() => {
@@ -62,50 +59,36 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
   useEffect(() => {
     if (!agentId) return;
 
-    handleRef.current?.close();
-    clearTimeout(reconnectTimer.current);
-    reconnectAttempts.current = 0;
-    setLogs([]);
+    const es = createLogEventSource({
+      agentId,
+      conversationId: conversationId ?? undefined,
+    });
 
-    function connect() {
-      const handle = createLogEventSource(
-        {
-          agentId: agentId!,
-          conversationId: conversationId ?? undefined,
-        },
-        {
-          onMessage: (entry) => {
-            if (pausedRef.current) return;
-            setLogs((prev) => {
-              const next = [...prev, entry];
-              return next.length > MAX_LOG_ENTRIES ? next.slice(-MAX_LOG_ENTRIES) : next;
-            });
-          },
-          onOpen: () => {
-            reconnectAttempts.current = 0;
-            setConnected(true);
-          },
-          onError: () => {
-            setConnected(false);
-            handleRef.current?.close();
-            handleRef.current = null;
-            if (reconnectAttempts.current < SSE_RECONNECT_MAX_ATTEMPTS) {
-              const delay = Math.min(SSE_RECONNECT_BASE_MS * Math.pow(2, reconnectAttempts.current), SSE_RECONNECT_MAX_DELAY_MS);
-              reconnectAttempts.current++;
-              clearTimeout(reconnectTimer.current);
-              reconnectTimer.current = setTimeout(connect, delay);
-            }
-          },
-        },
-      );
-      handleRef.current = handle;
-    }
+    const handleEvent = (event: MessageEvent) => {
+      if (pausedRef.current) return;
+      try {
+        const entry: LogEntry = JSON.parse(event.data);
+        setLogs((prev) => {
+          const next = [...prev, entry];
+          return next.length > MAX_LOG_ENTRIES ? next.slice(-MAX_LOG_ENTRIES) : next;
+        });
+      } catch {
+        // Ignore malformed log events
+      }
+    };
 
-    connect();
+    es.addEventListener("log", handleEvent);
+    // Fallback for backends that send unnamed SSE events
+    es.onmessage = handleEvent;
+
+    es.onopen = () => setConnected(true);
+    es.onerror = () => setConnected(false);
+
+    eventSourceRef.current = es;
 
     return () => {
-      clearTimeout(reconnectTimer.current);
-      handleRef.current?.close();
+      es.close();
+      eventSourceRef.current = null;
       setConnected(false);
     };
   }, [agentId, conversationId]);
@@ -114,12 +97,9 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
   useEffect(() => {
     if (!agentId) return;
     getRecentLogs({ agentId, conversationId: conversationId ?? undefined, limit: 50 })
-      .then((entries) => {
-        // Only seed from REST if SSE hasn't already provided entries
-        setLogs((prev) => (prev.length === 0 ? entries : prev));
-      })
+      .then((entries) => setLogs(entries))
       .catch(() => {
-        /* ignore — SSE is the primary source */
+        /* ignore */
       });
   }, [agentId, conversationId]);
 
@@ -245,7 +225,7 @@ export function LiveLogViewer({ agentId, conversationId }: LiveLogViewerProps) {
           </div>
         ) : (
           filteredLogs.map((entry, idx) => (
-            <LogLine key={`${entry.timestamp}-${entry.loggerName}-${idx}`} entry={entry} />
+            <LogLine key={idx} entry={entry} />
           ))
         )}
       </div>

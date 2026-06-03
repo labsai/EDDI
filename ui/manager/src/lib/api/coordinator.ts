@@ -1,8 +1,5 @@
 import { api } from "../api-client";
-import {
-  createAuthEventSource,
-  type AuthEventSourceHandle,
-} from "./sse-utils";
+import { BearerEventSource } from "../bearer-event-source";
 
 // ==================== Types ====================
 
@@ -49,26 +46,13 @@ export async function purgeDeadLetters(): Promise<number> {
 }
 
 /**
- * Create an auth-aware SSE stream for coordinator status updates.
- * Uses fetch + ReadableStream to support Authorization headers.
+ * Subscribe to the coordinator SSE stream.
+ * Uses BearerEventSource (fetch+ReadableStream) instead of the native EventSource
+ * because EventSource cannot send custom headers like Authorization.
  */
-export function createCoordinatorEventSource(options?: {
-  onMessage?: (status: CoordinatorStatus) => void;
-  onError?: (error: Error) => void;
-  onOpen?: () => void;
-  signal?: AbortSignal;
-}): AuthEventSourceHandle {
-  return createAuthEventSource(`${BASE}/stream`, {
-    onMessage: (event) => {
-      try {
-        options?.onMessage?.(JSON.parse(event.data));
-      } catch {
-        /* ignore parse errors */
-      }
-    },
-    onError: options?.onError,
-    onOpen: options?.onOpen,
-    signal: options?.signal,
-  });
+export function createCoordinatorEventSource(): BearerEventSource {
+  return new BearerEventSource(
+    `${window.location.origin}${BASE}/stream`,
+    api.getAuthHeader()
+  );
 }
-
