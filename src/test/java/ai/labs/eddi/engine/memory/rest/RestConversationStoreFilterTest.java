@@ -146,12 +146,14 @@ class RestConversationStoreFilterTest {
 
         when(conversationDescriptorStore.readDescriptors(eq("ai.labs.conversation"), any(), eq(0), eq(20), eq(false)))
                 .thenReturn(List.of(descriptor));
+        // Intentionally different from descriptor agentResource version to ensure
+        // filtering is based on agentResource, not snapshot metadata.
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID))
-                .thenReturn(createSnapshot(AGENT_ID, 1));
+                .thenReturn(createSnapshot(AGENT_ID, 99));
 
         var docDescriptor = new DocumentDescriptor();
         docDescriptor.setName("Test Agent");
-        when(documentDescriptorStore.readDescriptor(AGENT_ID, 1)).thenReturn(docDescriptor);
+        when(documentDescriptorStore.readDescriptor(AGENT_ID, 99)).thenReturn(docDescriptor);
 
         // Act — filter by AGENT_ID + version 1
         var results = restConversationStore.readConversationDescriptors(
@@ -172,12 +174,14 @@ class RestConversationStoreFilterTest {
 
         when(conversationDescriptorStore.readDescriptors(eq("ai.labs.conversation"), any(), eq(0), eq(20), eq(false)))
                 .thenReturn(List.of(descriptor));
+        // Intentionally different from descriptor agentResource version to ensure
+        // filtering is based on agentResource, not snapshot metadata.
         when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID))
-                .thenReturn(createSnapshot(AGENT_ID, 1));
+                .thenReturn(createSnapshot(AGENT_ID, 99));
 
         var docDescriptor = new DocumentDescriptor();
         docDescriptor.setName("Test Agent");
-        when(documentDescriptorStore.readDescriptor(AGENT_ID, 1)).thenReturn(docDescriptor);
+        when(documentDescriptorStore.readDescriptor(AGENT_ID, 99)).thenReturn(docDescriptor);
 
         // Act — filter by AGENT_ID + version 2 (descriptor is version 1)
         var results = restConversationStore.readConversationDescriptors(
