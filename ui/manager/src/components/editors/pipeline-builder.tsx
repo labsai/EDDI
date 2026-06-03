@@ -24,7 +24,10 @@ import { getExtensionIcon, getExtensionLabel } from "@/lib/api/extensions";
 /** Parse an eddi:// URI to extract the resource type slug and ID */
 function parseExtensionUri(uri: string): { slug: string; id: string } | null {
   try {
-    const url = new URL(uri.replace("eddi://", "http://"));
+    const normalised = uri.startsWith("eddi://")
+      ? uri.replace("eddi://", "http://")
+      : uri;
+    const url = new URL(normalised, "http://dummy");
     const segments = url.pathname.split("/").filter(Boolean);
     // e.g. /rulestore/rulesets/abc123 → slug=rules, id=abc123
     if (segments.length >= 3) {

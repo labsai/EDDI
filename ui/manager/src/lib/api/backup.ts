@@ -68,17 +68,32 @@ export interface DocumentDescriptor {
   lastModifiedOn: string;
 }
 
-// ==================== Shared Utilities ====================
-
 /**
  * Parse an EDDI resource URI into its id and version.
- * e.g. "eddi://ai.labs.agent/agentstore/agents/abc123?version=3" → { id: "abc123", version: 3 }
+ *
+ * Accepted formats:
+ *   - `eddi://ai.labs.agent/agentstore/agents/abc123?version=3`
+ *   - `/agentstore/agents/abc123?version=3` (Location header path)
+ *   - `simple-id` (bare string fallback)
  */
 export function parseResourceUri(resource: string): { id: string; version: number | null } {
-  const match = resource.match(/\/([^/?]+)\?version=(\d+)/);
-  if (match) return { id: match[1]!, version: parseInt(match[2]!, 10) };
-  const parts = resource.split("/");
-  return { id: parts[parts.length - 1] || resource, version: null };
+  try {
+    const normalised = resource.startsWith("eddi://")
+      ? resource.replace("eddi://", "http://")
+      : resource;
+    // Use a dummy base so relative paths parse correctly
+    const url = new URL(normalised, "http://dummy");
+    const parts = url.pathname.split("/").filter(Boolean);
+    const id = parts[parts.length - 1] || resource;
+    const versionStr = url.searchParams.get("version");
+    const parsedVersion = versionStr ? parseInt(versionStr, 10) : NaN;
+    const version = Number.isFinite(parsedVersion) ? parsedVersion : null;
+    return { id, version };
+  } catch {
+    // Fallback for completely unparseable strings
+    const parts = resource.split("/");
+    return { id: parts[parts.length - 1] || resource, version: null };
+  }
 }
 
 /**

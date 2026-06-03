@@ -390,17 +390,41 @@ export async function* streamGroupDiscussion(
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
-/** Parse group resource URI to extract id and version */
+/** Parse group resource URI to extract id and version.
+ *
+ * Accepted formats:
+ *   - `eddi://ai.labs.group/groupstore/groups/ID?version=VERSION`
+ *   - `/groupstore/groups/ID?version=VERSION`   (Location header path)
+ *   - `http://host/groupstore/groups/ID?version=VERSION`
+ */
 export function parseGroupResourceUri(resource: string): {
   id: string;
   version: number;
 } {
-  // Format: eddi://ai.labs.group/groupstore/groups/ID?version=VERSION
-  const url = new URL(resource.replace("eddi://", "http://"));
-  const parts = url.pathname.split("/");
-  const id = parts[parts.length - 1]!;
-  const version = parseInt(url.searchParams.get("version") || "1", 10);
-  return { id, version };
+  const normalised = resource.startsWith("eddi://")
+    ? resource.replace("eddi://", "http://")
+    : resource;
+  // Use a dummy base so relative paths (Location headers) parse correctly
+  const url = new URL(normalised, "http://dummy");
+  const parts = url.pathname.split("/").filter(Boolean);
+  let id = parts[parts.length - 1] ?? resource;
+  const hasQueryVersion = url.searchParams.has("version");
+  let version = hasQueryVersion
+    ? parseInt(url.searchParams.get("version")!, 10)
+    : NaN;
+
+  // Handle backend data bug: `version` may be concatenated into the path
+  // segment instead of appearing as a `?version=` query param, e.g.
+  // "eddi://…/groupstore/groups/IDversion1" instead of "…/ID?version=1"
+  if (!hasQueryVersion) {
+    const match = id.match(/^(.+?)version(\d+)$/);
+    if (match) {
+      id = match[1]!;
+      version = parseInt(match[2]!, 10);
+    }
+  }
+
+  return { id, version: isNaN(version) ? 1 : version };
 }
 
 /** Group descriptors by ID, keeping the latest version per group */

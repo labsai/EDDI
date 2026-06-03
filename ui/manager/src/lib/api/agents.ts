@@ -123,16 +123,26 @@ export interface DeploymentStatus {
   status: "NOT_FOUND" | "IN_PROGRESS" | "READY" | "ERROR";
 }
 
-/** Parse resource URI to extract id and version */
+/** Parse resource URI to extract id and version.
+ *
+ * Accepted formats:
+ *   - `eddi://ai.labs.agent/agentstore/agents/ID?version=VERSION`
+ *   - `/agentstore/agents/ID?version=VERSION`   (Location header path)
+ *   - `http://host/agentstore/agents/ID?version=VERSION`
+ */
 export function parseResourceUri(resource: string): {
   id: string;
   version: number;
 } {
-  // Format: eddi://ai.labs.agent/agentstore/agents/ID?version=VERSION
-  const url = new URL(resource.replace("eddi://", "http://"));
-  const parts = url.pathname.split("/");
-  const id = parts[parts.length - 1]!;
-  const version = parseInt(url.searchParams.get("version") || "1", 10);
+  const normalised = resource.startsWith("eddi://")
+    ? resource.replace("eddi://", "http://")
+    : resource;
+  // Use a dummy base so relative paths (Location headers) parse correctly
+  const url = new URL(normalised, "http://dummy");
+  const parts = url.pathname.split("/").filter(Boolean);
+  const id = parts[parts.length - 1] ?? resource;
+  const parsedVersion = parseInt(url.searchParams.get("version") || "1", 10);
+  const version = isNaN(parsedVersion) ? 1 : parsedVersion;
   return { id, version };
 }
 

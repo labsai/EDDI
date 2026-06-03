@@ -33,6 +33,55 @@ describe("parseGroupResourceUri", () => {
     expect(result.id).toBe("xyz");
     expect(result.version).toBe(1);
   });
+
+  it("parses a plain path Location header", () => {
+    const result = parseGroupResourceUri(
+      "/groupstore/groups/grp42?version=2"
+    );
+    expect(result.id).toBe("grp42");
+    expect(result.version).toBe(2);
+  });
+
+  it("parses an HTTP URL", () => {
+    const result = parseGroupResourceUri(
+      "http://localhost:7070/groupstore/groups/grp42?version=5"
+    );
+    expect(result.id).toBe("grp42");
+    expect(result.version).toBe(5);
+  });
+
+  it("handles version=0 correctly", () => {
+    const result = parseGroupResourceUri(
+      "eddi://ai.labs.group/groupstore/groups/testgrp?version=0"
+    );
+    expect(result.id).toBe("testgrp");
+    expect(result.version).toBe(0);
+  });
+
+  it("handles UUID resource IDs", () => {
+    const result = parseGroupResourceUri(
+      "eddi://ai.labs.group/groupstore/groups/550e8400-e29b-41d4-a716-446655440000?version=1"
+    );
+    expect(result.id).toBe("550e8400-e29b-41d4-a716-446655440000");
+    expect(result.version).toBe(1);
+  });
+
+  it("handles corrupted backend data with version concatenated into path", () => {
+    // Backend bug: syncDescriptor wrote "version" instead of "?version="
+    const result = parseGroupResourceUri(
+      "eddi://ai.labs.group/groupstore/groups/6a1f2a825e0172b6b7d9219fversion1"
+    );
+    expect(result.id).toBe("6a1f2a825e0172b6b7d9219f");
+    expect(result.version).toBe(1);
+  });
+
+  it("handles corrupted backend data with higher version numbers", () => {
+    const result = parseGroupResourceUri(
+      "eddi://ai.labs.group/groupstore/groups/abc123version42"
+    );
+    expect(result.id).toBe("abc123");
+    expect(result.version).toBe(42);
+  });
 });
 
 describe("groupGroupsByName", () => {
