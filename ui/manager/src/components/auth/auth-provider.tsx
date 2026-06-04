@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -63,6 +64,13 @@ function KeycloakAuthProvider({
   const [user, setUser] = useState<AuthUser | null>(null);
   const [roles, setRoles] = useState<string[]>([]);
 
+  // Preserve the ID token across token refreshes.
+  // keycloak-js deletes `keycloak.idToken` when the refresh token endpoint
+  // response doesn't include a new id_token (OIDC spec allows this).
+  // Without id_token_hint, Keycloak 26 redirects back after logout WITHOUT
+  // actually invalidating the SSO session — the user silently re-authenticates.
+  const idTokenRef = useRef<string | undefined>(undefined);
+
   // Initialize Keycloak
   useEffect(() => {
     let mounted = true;
@@ -76,12 +84,18 @@ function KeycloakAuthProvider({
             .then(() => {
               if (mounted && keycloak.token) {
                 api.setAuthToken(keycloak.token);
+                // Keep idTokenRef in sync — Keycloak may or may not return a
+                // new id_token in the refresh response. We always preserve the
+                // most recent one so logout can send id_token_hint.
+                if (keycloak.idToken) {
+                  idTokenRef.current = keycloak.idToken;
+                }
                 if (import.meta.env.DEV) console.log("[EDDI Auth] Token refreshed");
               }
             })
             .catch(() => {
               console.warn("[EDDI Auth] Token refresh failed, logging out");
-              keycloak.logout();
+              keycloak.logout({ redirectUri: `${window.location.origin}/manage` });
             });
         };
 
@@ -103,6 +117,11 @@ function KeycloakAuthProvider({
 
         if (auth && keycloak.token) {
           api.setAuthToken(keycloak.token);
+
+          // Persist the initial id_token so logout always has id_token_hint available.
+          if (keycloak.idToken) {
+            idTokenRef.current = keycloak.idToken;
+          }
 
           // Load user info from OIDC /userinfo endpoint (has CORS headers).
           // loadUserProfile() uses /account which lacks CORS for cross-origin setups.
@@ -157,7 +176,16 @@ function KeycloakAuthProvider({
 
   const logout = useCallback(() => {
     api.clearAuthToken();
-    keycloak.logout({ redirectUri: window.location.origin });
+    // Keycloak 26 only terminates the SSO session when id_token_hint is present.
+    // keycloak.idToken may have been deleted by a token refresh that didn't
+    // return a new id_token — restore it from the ref so the hint is always sent.
+    if (!keycloak.idToken && idTokenRef.current) {
+      keycloak.idToken = idTokenRef.current;
+    }
+    // Redirect to /manage (the SPA root), not window.location.origin (bare
+    // origin = "/"), because the EDDI backend returns 401 for the root path
+    // when auth is enabled — only /manage and its sub-paths serve the SPA.
+    keycloak.logout({ redirectUri: `${window.location.origin}/manage` });
   }, [keycloak]);
 
   const contextValue = useMemo<AuthContextValue>(
