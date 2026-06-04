@@ -132,9 +132,13 @@ echo -e "\n${CYAN}[4/4] Deploying new assets...${NC}"
 cp -f "$DIST_ASSETS"/* "$ASSETS_DIR/" 2>/dev/null || true
 echo "  Copied all files into assets/"
 
+# sed -i requires an explicit empty-string suffix on macOS (BSD sed).
+# Using '' as the suffix means "no backup file".
+SED_INPLACE=(sed -i '')
+
 # Update manage.html references
 # Replace the HTML references to either /scripts/js or /assets/ logic
-sed -i \
+"${SED_INPLACE[@]}" \
     -e 's|src="/\(scripts/js\|assets\)/index-[^"]*\.js"|src="/assets/'"$NEW_JS_NAME"'"|g' \
     -e 's|href="/\(scripts/css\|assets\)/index-[^"]*\.css"|href="/assets/'"$NEW_CSS_NAME"'"|g' \
     "$MANAGE_HTML"
@@ -143,7 +147,7 @@ echo -e "\n  ${GREEN}Updated manage.html${NC}"
 
 # Update index.html if it contains asset references (no-op when it is a redirect page)
 if grep -q 'index-.*\.js\|index-.*\.css' "$INDEX_HTML" 2>/dev/null; then
-    sed -i \
+    "${SED_INPLACE[@]}" \
         -e 's|src="/\(scripts/js\|assets\)/index-[^"]*\.js"|src="/assets/'"$NEW_JS_NAME"'"|g' \
         -e 's|href="/\(scripts/css\|assets\)/index-[^"]*\.css"|href="/assets/'"$NEW_CSS_NAME"'"|g' \
         "$INDEX_HTML"
@@ -178,9 +182,13 @@ if [[ "$answer" =~ ^[Yy]$ ]]; then
     git add "src/main/resources/META-INF/resources/index.html"
 
     # Stage the specific old files that were deleted
-    for removed in "${REMOVED_FILES[@]}"; do
-        git add "$removed"
-    done
+    # Guard with length check: bash 3.2 (macOS default) treats empty array
+    # expansion "${arr[@]}" as unbound when set -u is active.
+    if [[ ${#REMOVED_FILES[@]} -gt 0 ]]; then
+        for removed in "${REMOVED_FILES[@]}"; do
+            git add "$removed"
+        done
+    fi
 
     if git commit --no-verify -m "$COMMIT_MSG"; then
         echo -e "  ${GREEN}Committed: $COMMIT_MSG${NC}"
