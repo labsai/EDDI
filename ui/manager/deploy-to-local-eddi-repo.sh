@@ -28,6 +28,7 @@ ASSETS_DIR="$RESOURCE_DIR/assets"
 SCRIPTS_JS="$RESOURCE_DIR/scripts/js"
 SCRIPTS_CSS="$RESOURCE_DIR/scripts/css"
 MANAGE_HTML="$RESOURCE_DIR/manage.html"
+INDEX_HTML="$RESOURCE_DIR/index.html"
 
 # Colors for output
 CYAN='\033[0;36m'
@@ -108,7 +109,7 @@ while IFS= read -r -d '' f; do
     if [[ "$filename" =~ ^(.+)-([A-Za-z0-9_-]{8})\.([A-Za-z0-9]+)$ ]]; then
         prefix="${BASH_REMATCH[1]}"
         ext="${BASH_REMATCH[3]}"
-        
+
         # Find matching old files in assets dir
         while IFS= read -r -d '' old; do
             oldname=$(basename "$old")
@@ -139,6 +140,15 @@ sed -i \
     "$MANAGE_HTML"
 
 echo -e "\n  ${GREEN}Updated manage.html${NC}"
+
+# Update index.html if it contains asset references (no-op when it is a redirect page)
+if grep -q 'index-.*\.js\|index-.*\.css' "$INDEX_HTML" 2>/dev/null; then
+    sed -i \
+        -e 's|src="/\(scripts/js\|assets\)/index-[^"]*\.js"|src="/assets/'"$NEW_JS_NAME"'"|g' \
+        -e 's|href="/\(scripts/css\|assets\)/index-[^"]*\.css"|href="/assets/'"$NEW_CSS_NAME"'"|g' \
+        "$INDEX_HTML"
+    echo -e "  ${GREEN}Updated index.html${NC}"
+fi
 echo -e "\n${GREEN}[DONE] EDDI Manager deployed successfully!${NC}"
 echo "  JS:  /assets/$NEW_JS_NAME"
 echo -e "  CSS: /assets/$NEW_CSS_NAME\n"
@@ -147,30 +157,31 @@ echo -e "  CSS: /assets/$NEW_CSS_NAME\n"
 read -p "Commit these assets in the EDDI repo? [y/N] " answer
 if [[ "$answer" =~ ^[Yy]$ ]]; then
     echo -e "\n${CYAN}[5/5] Committing in EDDI repo...${NC}"
-    
+
     # Get the latest Manager commit hash for the message
     MANAGER_HASH=$(git -C "$SCRIPT_DIR" log -1 --format="%h" 2>/dev/null || echo "")
-    
+
     COMMIT_MSG="chore: update Manager UI assets"
     if [[ -n "$MANAGER_HASH" ]]; then
         COMMIT_MSG="chore: update Manager UI assets (Manager@$MANAGER_HASH)"
     fi
-    
+
     cd "$EDDI_PATH"
-    
+
     # Stage all newly added files from dist/assets into assets/
     while IFS= read -r -d '' f; do
         filename=$(basename "$f")
         git add "src/main/resources/META-INF/resources/assets/$filename"
     done < <(find "$DIST_ASSETS" -maxdepth 1 -type f -print0)
-    
+
     git add "src/main/resources/META-INF/resources/manage.html"
-    
+    git add "src/main/resources/META-INF/resources/index.html"
+
     # Stage the specific old files that were deleted
     for removed in "${REMOVED_FILES[@]}"; do
         git add "$removed"
     done
-    
+
     if git commit --no-verify -m "$COMMIT_MSG"; then
         echo -e "  ${GREEN}Committed: $COMMIT_MSG${NC}"
         if [[ -n "$MANAGER_HASH" ]]; then
