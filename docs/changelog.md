@@ -4,6 +4,175 @@
 
 ---
 
+## 🐛 Fix: Swagger UI Broken by CSP — Per-Path Filter Override (2026-06-03)
+
+**Repo:** EDDI (`fix/swagger-ui-csp`)
+**What changed:** Swagger UI (`/q/swagger-ui/`) was blocked by the strict `Content-Security-Policy` header — inline scripts and `eval()` were rejected, rendering a blank page.
+
+### Root Cause
+The global `quarkus.http.header.Content-Security-Policy` applied `script-src 'self'` to all paths, including Swagger UI. Swagger UI requires `'unsafe-inline'` (inline `<script>` tags) and `'unsafe-eval'` (JSON schema rendering via `eval()`).
+
+### Fix
+Replaced the global `quarkus.http.header.Content-Security-Policy` with two `quarkus.http.filter` entries using Quarkus's native path-based filter mechanism:
+- **`csp-default`** (order=10, matches `/.*`): Strict CSP for the entire application — `script-src 'self'`
+- **`csp-swagger`** (order=20, matches `/q/swagger-ui/.*`): Relaxed CSP — adds `'unsafe-inline' 'unsafe-eval'` to `script-src`
+
+Higher `order` takes precedence, so the Swagger filter overrides the default for its path.
+
+### Why not a Java filter?
+An initial approach used `@Observes Router` to register a Vert.x handler, but this has an ordering race: Quarkus may apply `quarkus.http.header` headers via a `headersEndHandler` (fires just before wire flush), which would overwrite the Java handler's header. The `quarkus.http.filter` approach has no such ambiguity — Quarkus manages precedence internally via the `order` property.
+
+**Files:** `application.properties`
+
+---
+
+
+## 🐛 Fix: White Page at Root — index.html Revert to Redirect (2026-06-03)
+
+**Repo:** EDDI (`fix/manager-deploy-and-index-html`) + EDDI-Manager (deploy script)
+**What changed:** Root URL (`/`) showed a white page because `index.html` referenced deleted asset hashes.
+
+### Root Cause
+Commit `0ec6cb47c` (Jun 2) replaced `index.html`'s simple redirect with a full copy of the Manager SPA, duplicating the hashed asset references from `manage.html`. When the deploy script (`deploy-to-local-eddi-repo.ps1`) ran a Manager rebuild in `d9e6361`, it updated `manage.html` and the asset files but had no knowledge of `index.html` — leaving it pointing at deleted files (`index-Bn-sgAam.js`, `index-BZNayFGO.css`). With `X-Content-Type-Options: nosniff`, the browser blocked the HTML fallback response.
+
+### Fix
+- **`index.html`** — Reverted to a simple `<meta http-equiv="refresh">` redirect to `/manage`. No asset references, no sync needed. Keycloak works because the SPA boots at `/manage` and sets `redirectUri` to its own URL; the Keycloak client's `redirectUris: ["http://localhost:*"]` matches any path.
+- **`deploy-to-local-eddi-repo.ps1`** — Removed `$IndexHtml` handling (no longer needed). Script only updates `manage.html`.
+
+### Architecture Clarification
+
+| File | Served at | Purpose |
+|------|-----------|---------|
+| `index.html` | `/` (Quarkus static) | Redirect to `/manage` |
+| `manage.html` | `/manage` + `/manage/{path}` (RestManagerResource) | Manager SPA entry + client-side route fallback |
+| `chat.html` | `/chat/...` | Chat widget (separate assets under `/scripts/`) |
+
+**Files:** `index.html`, `deploy-to-local-eddi-repo.ps1`
+
+---
+
+## 🔍 PR Review Fixes — Code Quality & Correctness (2026-06-03)
+
+**Repo:** EDDI (`fix/mcp-endpoint-bugs`)
+**What changed:** Addressed all findings from automated PR review bots (github-code-quality, CodeRabbit, Copilot) plus a critical exception handling bug found during manual review.
+
+### Critical Fix: Stale Conversation Cleanup Was Dead Code
+- **Root cause:** `McpConversationTools.getOrCreateManagedConversation()` caught `jakarta.ws.rs.NotFoundException`, but `RestAgentEngine.getConversationState()` actually throws `IConversationService.ConversationNotFoundException` (a plain `RuntimeException`). The JAX-RS exception was never thrown by this code path.
+- **Impact:** Stale conversation mappings (pointing to deleted conversations) were never cleaned up — the exception propagated to the outer catch and returned a generic error.
+- **Fix:** Changed catch to `IConversationService.ConversationNotFoundException`.
+- **Test:** Updated `chatManaged_staleConversation_recreatesFresh` to throw the correct exception type.
+
+### Other Fixes
+- **Unused variable:** Removed `String result` in test (github-code-quality)
+- **Field filter bypass:** `readConversation` with `returningFields=conversationOutputs` no longer strips the full payload — section-level names are now detected and preserved
+- **redhat-certify.yml:** Updated default version from `6.0.2` to `6.1.0`
+- **README.md:** Updated version from `6.0.2` to `6.1.0` (header badge and Maven snippet)
+- **redhat-openshift.md:** Fixed YAML example indentation back to standard 2-space Kubernetes style
+- **Changelog wording:** Softened "across all deployment artifacts" to "across the main deployment artifacts"
+
+### New Tests
+- `chatManaged_endedConversation_recreatesFresh` — covers `ConversationState.ENDED` → delete+recreate path
+- `chatManaged_transientStateError_doesNotRecreate` — verifies transient DB errors propagate without deleting valid mappings
+- `readConversationDescriptors_agentVersionFilter_matchesCorrectVersion` — agentVersion filter positive match
+- `readConversationDescriptors_agentVersionFilter_filtersWrongVersion` — agentVersion filter negative match
+
+---
+
+## 📦 Version Bump 6.0.2 → 6.1.0 (2026-06-03)
+
+**Repo:** EDDI (`fix/mcp-endpoint-bugs`)
+**What changed:** Bumped project version from 6.0.2 to 6.1.0 across the main deployment artifacts and related documentation to reflect the scope of changes since RC2 (MCP bug fixes, dependency updates, Manager UI refresh, security hardening).
+
+### Files Updated
+- `pom.xml` — Maven artifact version
+- `src/main/docker/Dockerfile` — `EDDI_VERSION` build arg + Red Hat certification labels
+- `helm/eddi/Chart.yaml` — `appVersion`
+- `k8s/base/eddi-deployment.yaml` — `app.kubernetes.io/version` labels
+- `k8s/quickstart.yaml` — `app.kubernetes.io/version` labels
+- `src/main/resources/application.properties` — `systemRuntime.projectVersion`, `quarkus.smallrye-openapi.info-version`, `quarkus.container-image.additional-tags`
+- `src/main/resources/initial-agents/available_agents.txt` — Agent Father ZIP filename
+- `src/main/resources/initial-agents/Agent+Father-6.1.0.zip` — [NEW] updated bundled agent
+- `src/main/resources/initial-agents/Agent+Father-6.0.2.zip` — [DELETED] superseded
+- `.github/workflows/redhat-certify.yml` — Red Hat certification workflow version refs
+- `docs/redhat-openshift.md` — documentation version refs
+
+---
+
+## 🐛 MCP Bug Fixes — Round 2: chat_managed + group discussion error content (2026-06-03)
+
+**Repo:** EDDI (`fix/mcp-endpoint-bugs`)
+**What changed:** Fixed 3 remaining bugs from MCP endpoint audit retest.
+
+### chat_managed Internal Error (NEW — all calls returned "Internal error")
+- **Root cause:** Missing `@Blocking` annotation on `chatManaged()`. Both `talkToAgent()` and `chatWithAgent()` had it, but `chatManaged()` did not. Since `sendMessageAndWait()` blocks on `CompletableFuture.get()`, the MCP framework's event-loop thread was blocked, causing the generic "Internal error".
+- **Fix 1:** Added `@Blocking` annotation.
+- **Fix 2:** Replaced `restAgentEngine.startConversationWithContext()` with direct `conversationService.startConversation()` to avoid the JAX-RS layer wrapping exceptions as HTTP responses.
+- **Fix 3:** Hardened stale conversation handling — `getConversationState()` now catches `Exception` when the stored UserConversation references a deleted conversation, cleans up the stale mapping, and creates a fresh conversation.
+- **Files:** `McpConversationTools.java`
+
+### BUG-2 Follow-up: Group discussion empty content when LLM fails
+- **Root cause:** `extractResponse()` correctly returns `null` when no output keys are present (pipeline metadata only), but this `null` was silently stored as the transcript `content` field — making entries appear empty.
+- **Fix:** In `executeAgentTurn()`, after `extractResponse()` returns null, check the conversation state. If ERROR, set content to `"[Agent failed to produce output — conversation entered ERROR state]"`.
+- **Files:** `GroupConversationService.java`
+
+### BUG-6 Follow-up: Trigger cache invalidation (verified indirectly)
+- The trigger validation in `getOrCreateManagedConversation()` was already correct from the first fix round. It was untestable because `chat_managed` itself was broken. Now that `@Blocking` is fixed, the trigger validation path is reachable.
+
+---
+
+## 🐛 MCP Endpoint Bug Fixes — 8 Bugs Resolved (2026-06-02)
+
+**Repo:** EDDI (`fix/mcp-endpoint-bugs`)
+**What changed:** Systematic testing of all 42 MCP endpoints revealed 8 bugs. All fixed with regression tests.
+
+### BUG-1: `read_resource` for `langchain` returns empty `configuration: {}`
+- **Root cause:** `LlmConfiguration` is the only Java record-based config class. The programmatic MP REST Client's ObjectMapper may lack `ParameterNamesModule`, causing silent deserialization failure to `LlmConfiguration(null)`, then `NON_NULL` serialization produces `{}`.
+- **Fix:** Added `@JsonProperty("tasks")` to the record component.
+- **Files:** `LlmConfiguration.java`
+
+### BUG-2: Group discussion shows raw `{"actions":["send_message","unknown"]}`
+- **Root cause:** `GroupConversationService.extractResponse()` fallback serialized pipeline metadata when no text output keys were found.
+- **Fix:** Added metadata-only detection: if output only contains `actions`/`input`/`context` keys, return `null` instead.
+- **Files:** `GroupConversationService.java`
+
+### BUG-3: `list_conversations` returns 0 results when filtering by agentId
+- **Root cause:** `RestConversationStore` used `getResource()` (conversation URI) instead of `getAgentResource()` (agent URI) for agent filtering — compared agentId against conversationId.
+- **Fix:** Changed to use `getAgentResource()` for agent ID extraction.
+- **Files:** `RestConversationStore.java`
+
+### BUG-4: `read_conversation_log` NPE when logSize is null
+- **Root cause:** `Integer` logSize passed directly to `int` parameter causing NPE on unboxing.
+- **Fix:** Added null guard: `logSize != null ? logSize : -1`.
+- **Files:** `ConversationService.java`
+
+### BUG-5: `delete_agent_trigger` returns 200 for nonexistent intents
+- **Root cause:** Both MongoDB and Postgres implementations silently accepted no-op deletes.
+- **Fix:** Interface, Mongo, and Postgres stores now throw `ResourceNotFoundException` when delete count is zero. REST layer catches and returns 404.
+- **Files:** `IAgentTriggerStore.java`, `AgentTriggerStore.java`, `PostgresAgentTriggerStore.java`, `RestAgentTriggerStore.java`
+
+### BUG-6: `chat_managed` routes to stale conversation after trigger deletion
+- **Root cause:** `getOrCreateManagedConversation()` reused `UserConversation` records without validating trigger existence.
+- **Fix:** Validate trigger before reusing, clean up stale records if trigger is deleted.
+- **Files:** `McpConversationTools.java`
+
+### BUG-7: `delete_group`/`update_group` fail with version=0
+- **Root cause:** `RestVersionInfo` didn't override `getCurrentResourceId()`, falling through to `IRestVersionInfo` default which throws.
+- **Fix:** Added `getCurrentResourceId()` override that delegates to `resourceStore`.
+- **Files:** `RestVersionInfo.java`
+
+### BUG-8: `returningFields` filter in `read_conversation` has no effect
+- **Root cause:** Underlying utility only handles section-level filtering, not individual field names.
+- **Fix:** Added post-processing in MCP layer to filter conversationOutputs keys.
+- **Files:** `McpConversationTools.java`
+
+### Code Review Follow-up (3 additional fixes)
+- **ISSUE-1:** `PostgresAgentTriggerStore.deleteAgentTrigger()` silently swallowed `SQLException` — callers thought delete succeeded on DB failure. Added `throw ResourceStoreException`.
+- **ISSUE-2:** BUG-8 field filter mutated the live `ConversationOutput` map via `removeIf` — replaced with filtered copy to avoid corrupting shared/cached snapshots.
+- **ISSUE-3:** BUG-2 metadata detection used a fragile hardcoded positive-list of 3 keys. Replaced with resilient absence-of-output check (`startsWith("output") || startsWith("reply")`).
+- **OBS-1:** BUG-6 trigger validation used `catch (Exception)` — narrowed to `catch (ResourceNotFoundException)` so transient DB errors propagate instead of falsely deleting state.
+
+---
+
 ## 📦 Dependency Updates — June 2026 (2026-06-01)
 
 **Repo:** EDDI (`chore/dependency-updates-june-2026`)

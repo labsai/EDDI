@@ -496,6 +496,54 @@ class GroupConversationServiceTest {
             assertTrue(result.getTranscript().stream()
                     .anyMatch(e -> e.type() == TranscriptEntryType.SKIPPED && "a1".equals(e.speakerAgentId())));
         }
+
+        /**
+         * BUG-2 regression: when an agent's pipeline fails (e.g. LLM unreachable),
+         * extractResponse() returns null. The fix ensures the transcript entry gets an
+         * explicit error message instead of null content.
+         */
+        @Test
+        void agentErrorState_transcriptContainsErrorMessage() throws Exception {
+            var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
+                    new GroupMember("a1", "Failing Agent", 1, null));
+            cfg.setModeratorAgentId("mod");
+            setupStore(cfg);
+
+            // a1 is deployed and conversation starts
+            when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("a1"))).thenReturn(mock(IAgent.class));
+            when(conversationService.startConversation(any(), eq("a1"), any(), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-a1", null));
+
+            // a1 responds with ERROR state and no output keys (LLM unreachable)
+            doAnswer(inv -> {
+                ConversationResponseHandler handler = inv.getArgument(8);
+                var snapshot = new SimpleConversationMemorySnapshot();
+                // Only metadata — no "output" or "reply" keys
+                var output = new ConversationOutput();
+                output.put("actions", List.of("send_message", "unknown"));
+                output.put("input", "What is the best approach?");
+                snapshot.setConversationOutputs(new ArrayList<>(List.of(output)));
+                snapshot.setConversationState(ai.labs.eddi.engine.memory.model.ConversationState.ERROR);
+                handler.onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(any(Environment.class), eq("a1"), anyString(),
+                    any(), any(), any(), any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
+
+            stubAgent("mod", "Synthesis despite error");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+
+            // Find the a1 transcript entry — it should have error content, NOT null
+            var a1Entry = result.getTranscript().stream()
+                    .filter(e -> "a1".equals(e.speakerAgentId()) && e.type() == TranscriptEntryType.OPINION)
+                    .findFirst();
+            assertTrue(a1Entry.isPresent(), "Expected an OPINION entry from a1");
+            assertNotNull(a1Entry.get().content(), "Content should NOT be null when agent is in ERROR state");
+            assertTrue(a1Entry.get().content().contains("failed to produce output"),
+                    "Content should describe the error, got: " + a1Entry.get().content());
+        }
     }
 
     // =========================================================

@@ -257,7 +257,7 @@ public class ConversationService implements IConversationService {
             throws ResourceStoreException, ResourceNotFoundException {
 
         var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
-        var conversationLog = new ConversationLogGenerator(memorySnapshot).generate(logSize);
+        var conversationLog = new ConversationLogGenerator(memorySnapshot).generate(logSize != null ? logSize : -1);
         outputType = outputType.toLowerCase();
 
         if (isNullOrEmpty(outputType) || outputType.equals("string") || outputType.equals("text")) {

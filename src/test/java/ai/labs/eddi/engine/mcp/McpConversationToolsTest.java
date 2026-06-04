@@ -535,4 +535,236 @@ class McpConversationToolsTest {
 
         assertTrue(result.contains("error"));
     }
+
+    @Test
+    void chatManaged_happyPath_createsConversationAndSendsMessage() throws Exception {
+        // No existing UserConversation
+        when(userConversationStore.readUserConversation("support", "user1"))
+                .thenThrow(new ai.labs.eddi.datastore.IResourceStore.ResourceStoreException("not found"));
+
+        // Trigger exists with a deployment
+        var trigger = new AgentTriggerConfiguration();
+        trigger.setIntent("support");
+        var deployment = new AgentDeployment();
+        deployment.setAgentId(AGENT_ID);
+        deployment.setEnvironment(Environment.production);
+        deployment.setInitialContext(Collections.emptyMap());
+        trigger.setAgentDeployments(List.of(deployment));
+        when(AgentTriggerStore.readAgentTrigger("support")).thenReturn(trigger);
+
+        // Conversation creation succeeds
+        when(conversationService.startConversation(eq(Environment.production), eq(AGENT_ID), eq("user1"), anyMap()))
+                .thenReturn(new ConversationResult(CONV_ID, URI.create("eddi://conv/" + CONV_ID)));
+
+        // Mock say for sendMessageAndWait
+        doAnswer(invocation -> {
+            ConversationResponseHandler handler = invocation.getArgument(6);
+            handler.onComplete(new SimpleConversationMemorySnapshot());
+            return null;
+        }).when(conversationService).say(eq(CONV_ID), anyBoolean(), anyBoolean(), anyList(),
+                any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
+
+        when(jsonSerialization.serialize(any(LinkedHashMap.class))).thenReturn(
+                "{\"intent\":\"support\",\"conversationId\":\"test-conv-id\",\"agentId\":\"test-agent-id\"}");
+
+        String result = tools.chatManaged("support", "user1", "Hello!", "production");
+
+        assertNotNull(result);
+        assertTrue(result.contains("test-conv-id"));
+        verify(userConversationStore).createUserConversation(any());
+        verify(conversationService).startConversation(any(), eq(AGENT_ID), eq("user1"), anyMap());
+    }
+
+    @Test
+    void chatManaged_existingConversation_reusesIt() throws Exception {
+        // Existing UserConversation found
+        var existing = new ai.labs.eddi.engine.triggermanagement.model.UserConversation(
+                "support", "user1", Environment.production, AGENT_ID, CONV_ID);
+        when(userConversationStore.readUserConversation("support", "user1")).thenReturn(existing);
+
+        // Trigger still exists
+        var trigger = new AgentTriggerConfiguration();
+        trigger.setIntent("support");
+        when(AgentTriggerStore.readAgentTrigger("support")).thenReturn(trigger);
+
+        // Conversation state is READY (not ended)
+        when(RestAgentEngine.getConversationState(CONV_ID))
+                .thenReturn(ai.labs.eddi.engine.memory.model.ConversationState.READY);
+
+        // Mock say
+        doAnswer(invocation -> {
+            ConversationResponseHandler handler = invocation.getArgument(6);
+            handler.onComplete(new SimpleConversationMemorySnapshot());
+            return null;
+        }).when(conversationService).say(eq(CONV_ID), anyBoolean(), anyBoolean(), anyList(),
+                any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
+
+        when(jsonSerialization.serialize(any(LinkedHashMap.class))).thenReturn("{\"conversationId\":\"test-conv-id\"}");
+
+        tools.chatManaged("support", "user1", "Follow-up message", "production");
+
+        // Should NOT create a new conversation — should reuse existing
+        verify(conversationService, never()).startConversation(any(), any(), any(), anyMap());
+        verify(userConversationStore, never()).createUserConversation(any());
+    }
+
+    @Test
+    void chatManaged_staleConversation_recreatesFresh() throws Exception {
+        // Existing UserConversation references a deleted conversation
+        var existing = new ai.labs.eddi.engine.triggermanagement.model.UserConversation(
+                "support", "user1", Environment.production, AGENT_ID, "deleted-conv-id");
+        when(userConversationStore.readUserConversation("support", "user1")).thenReturn(existing);
+
+        // Trigger still exists
+        var trigger = new AgentTriggerConfiguration();
+        trigger.setIntent("support");
+        var deployment = new AgentDeployment();
+        deployment.setAgentId(AGENT_ID);
+        deployment.setEnvironment(Environment.production);
+        deployment.setInitialContext(Collections.emptyMap());
+        trigger.setAgentDeployments(List.of(deployment));
+        when(AgentTriggerStore.readAgentTrigger("support")).thenReturn(trigger);
+
+        // getConversationState throws — conversation no longer exists
+        when(RestAgentEngine.getConversationState("deleted-conv-id"))
+                .thenThrow(new IConversationService.ConversationNotFoundException("Conversation not found"));
+
+        // New conversation creation succeeds
+        when(conversationService.startConversation(eq(Environment.production), eq(AGENT_ID), eq("user1"), anyMap()))
+                .thenReturn(new ConversationResult("new-conv-id", URI.create("eddi://conv/new-conv-id")));
+
+        // Mock say
+        doAnswer(invocation -> {
+            ConversationResponseHandler handler = invocation.getArgument(6);
+            handler.onComplete(new SimpleConversationMemorySnapshot());
+            return null;
+        }).when(conversationService).say(eq("new-conv-id"), anyBoolean(), anyBoolean(), anyList(),
+                any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
+
+        when(jsonSerialization.serialize(any(LinkedHashMap.class))).thenReturn("{\"conversationId\":\"new-conv-id\"}");
+
+        tools.chatManaged("support", "user1", "Hello!", "production");
+
+        // Should clean up stale mapping and create a new one
+        verify(userConversationStore).deleteUserConversation("support", "user1");
+        verify(userConversationStore).createUserConversation(any());
+        verify(conversationService).startConversation(any(), eq(AGENT_ID), eq("user1"), anyMap());
+    }
+
+    @Test
+    void chatManaged_endedConversation_recreatesFresh() throws Exception {
+        // Existing UserConversation references an ended conversation
+        var existing = new ai.labs.eddi.engine.triggermanagement.model.UserConversation(
+                "support", "user1", Environment.production, AGENT_ID, "ended-conv-id");
+        when(userConversationStore.readUserConversation("support", "user1")).thenReturn(existing);
+
+        // Trigger still exists
+        var trigger = new AgentTriggerConfiguration();
+        trigger.setIntent("support");
+        var deployment = new AgentDeployment();
+        deployment.setAgentId(AGENT_ID);
+        deployment.setEnvironment(Environment.production);
+        deployment.setInitialContext(Collections.emptyMap());
+        trigger.setAgentDeployments(List.of(deployment));
+        when(AgentTriggerStore.readAgentTrigger("support")).thenReturn(trigger);
+
+        // getConversationState returns ENDED
+        when(RestAgentEngine.getConversationState("ended-conv-id"))
+                .thenReturn(ai.labs.eddi.engine.memory.model.ConversationState.ENDED);
+
+        // New conversation creation succeeds
+        when(conversationService.startConversation(eq(Environment.production), eq(AGENT_ID), eq("user1"), anyMap()))
+                .thenReturn(new ConversationResult("new-conv-id", URI.create("eddi://conv/new-conv-id")));
+
+        // Mock say
+        doAnswer(invocation -> {
+            ConversationResponseHandler handler = invocation.getArgument(6);
+            handler.onComplete(new SimpleConversationMemorySnapshot());
+            return null;
+        }).when(conversationService).say(eq("new-conv-id"), anyBoolean(), anyBoolean(), anyList(),
+                any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
+
+        when(jsonSerialization.serialize(any(LinkedHashMap.class))).thenReturn("{\"conversationId\":\"new-conv-id\"}");
+
+        tools.chatManaged("support", "user1", "Hello!", "production");
+
+        // Should delete ended conversation and create a new one
+        verify(userConversationStore).deleteUserConversation("support", "user1");
+        verify(userConversationStore).createUserConversation(any());
+        verify(conversationService).startConversation(any(), eq(AGENT_ID), eq("user1"), anyMap());
+    }
+
+    @Test
+    void chatManaged_transientStateError_doesNotRecreate() throws Exception {
+        // Existing UserConversation is valid
+        var existing = new ai.labs.eddi.engine.triggermanagement.model.UserConversation(
+                "support", "user1", Environment.production, AGENT_ID, CONV_ID);
+        when(userConversationStore.readUserConversation("support", "user1")).thenReturn(existing);
+
+        // Trigger still exists
+        var trigger = new AgentTriggerConfiguration();
+        trigger.setIntent("support");
+        when(AgentTriggerStore.readAgentTrigger("support")).thenReturn(trigger);
+
+        // getConversationState throws a transient error (NOT NotFoundException)
+        when(RestAgentEngine.getConversationState(CONV_ID))
+                .thenThrow(new RuntimeException("Database connection timeout"));
+
+        String result = tools.chatManaged("support", "user1", "Hello!", "production");
+
+        // Should NOT delete the mapping — transient errors must propagate,
+        // not silently discard a valid conversation
+        verify(userConversationStore, never()).deleteUserConversation(any(), any());
+        verify(conversationService, never()).startConversation(any(), any(), any(), anyMap());
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("Database connection timeout"));
+    }
+
+    @Test
+    void chatManaged_triggerDeleted_returnsError() throws Exception {
+        // Existing UserConversation found
+        var existing = new ai.labs.eddi.engine.triggermanagement.model.UserConversation(
+                "deleted_intent", "user1", Environment.production, AGENT_ID, CONV_ID);
+        when(userConversationStore.readUserConversation("deleted_intent", "user1")).thenReturn(existing);
+
+        // Trigger was deleted — readAgentTrigger throws ResourceNotFoundException via
+        // sneakyThrow (bypasses checked exception declaration). Mockito's thenThrow()
+        // validates declared exceptions, so we use doAnswer to replicate sneakyThrow.
+        doAnswer(inv -> {
+            throw new ResourceNotFoundException("Trigger not found");
+        }).when(AgentTriggerStore).readAgentTrigger("deleted_intent");
+
+        String result = tools.chatManaged("deleted_intent", "user1", "hello", "production");
+
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("no longer exists"));
+        // Should clean up stale UserConversation
+        verify(userConversationStore).deleteUserConversation("deleted_intent", "user1");
+    }
+
+    @Test
+    void chatManaged_conversationCreationFails_returnsError() throws Exception {
+        // No existing UserConversation
+        when(userConversationStore.readUserConversation("support", "user1"))
+                .thenThrow(new ai.labs.eddi.datastore.IResourceStore.ResourceStoreException("not found"));
+
+        // Trigger exists
+        var trigger = new AgentTriggerConfiguration();
+        trigger.setIntent("support");
+        var deployment = new AgentDeployment();
+        deployment.setAgentId(AGENT_ID);
+        deployment.setEnvironment(Environment.production);
+        deployment.setInitialContext(Collections.emptyMap());
+        trigger.setAgentDeployments(List.of(deployment));
+        when(AgentTriggerStore.readAgentTrigger("support")).thenReturn(trigger);
+
+        // Conversation creation fails — agent not deployed
+        when(conversationService.startConversation(any(), eq(AGENT_ID), eq("user1"), anyMap()))
+                .thenThrow(new IConversationService.AgentNotReadyException("Agent not deployed"));
+
+        String result = tools.chatManaged("support", "user1", "hello", "production");
+
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("Agent not deployed"));
+    }
 }

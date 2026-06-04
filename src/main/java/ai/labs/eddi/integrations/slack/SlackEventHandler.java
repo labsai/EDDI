@@ -262,6 +262,7 @@ public class SlackEventHandler {
         switch (resolved.target().getType()) {
             case AGENT -> handleAgentConversation(resolved, channelId, userId, threadTs, text, botToken);
             case GROUP -> handleGroupDiscussion(resolved, channelId, userId, threadTs, text, botToken);
+            default -> LOGGER.warnf("Unsupported target type: %s", resolved.target().getType());
         }
     }
 

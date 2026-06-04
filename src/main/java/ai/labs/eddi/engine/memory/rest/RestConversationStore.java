@@ -112,20 +112,26 @@ public class RestConversationStore implements IRestConversationStore {
                 for (var conversationDescriptor : conversationDescriptors) {
                     try {
                         URI resourceUri = conversationDescriptor.getResource();
-                        var agentResourceId = extractResourceId(resourceUri);
-                        if (agentResourceId == null) {
-                            log.warn(format("agentResourceId was null, this should never happen. (%s)", resourceUri));
+                        var conversationResourceId = extractResourceId(resourceUri);
+                        if (conversationResourceId == null) {
+                            log.warn(format("conversationResourceId was null, this should never happen. (%s)", resourceUri));
                             continue;
                         }
 
-                        populateDataToDescriptor(conversationDescriptor, agentResourceId);
+                        populateDataToDescriptor(conversationDescriptor, conversationResourceId);
 
-                        if (!isNullOrEmpty(agentId) && !agentId.equals(agentResourceId.getId())) {
-                            continue;
-                        }
+                        // Agent filtering uses the agentResource URI (which contains
+                        // the agent's ID), NOT the conversation's resource URI.
+                        if (!isNullOrEmpty(agentId)) {
+                            URI agentResourceUri = conversationDescriptor.getAgentResource();
+                            var agentResourceId = agentResourceUri != null ? extractResourceId(agentResourceUri) : null;
+                            if (agentResourceId == null || !agentId.equals(agentResourceId.getId())) {
+                                continue;
+                            }
 
-                        if (!isNullOrEmpty(agentVersion) && !agentVersion.equals(agentResourceId.getVersion())) {
-                            continue;
+                            if (!isNullOrEmpty(agentVersion) && !agentVersion.equals(agentResourceId.getVersion())) {
+                                continue;
+                            }
                         }
 
                         if (!isNullOrEmpty(conversationState)) {

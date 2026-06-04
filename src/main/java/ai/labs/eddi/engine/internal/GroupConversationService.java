@@ -30,6 +30,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.modules.output.model.OutputItem;
@@ -608,6 +609,13 @@ public class GroupConversationService implements IGroupConversationService {
 
                 conversationService.say(DEFAULT_ENV, member.agentId(), convId, false, true, null, inputData, false, snapshot -> {
                     String response = extractResponse(snapshot);
+                    // When the agent pipeline fails (e.g. LLM unreachable), extractResponse
+                    // returns null because there are no output keys — only pipeline metadata.
+                    // Surface the failure as explicit content so the transcript entry is not empty.
+                    if (response == null && snapshot != null
+                            && snapshot.getConversationState() == ConversationState.ERROR) {
+                        response = "[Agent failed to produce output — conversation entered ERROR state]";
+                    }
                     responseFuture.complete(response);
                 });
 
@@ -1046,6 +1054,18 @@ public class GroupConversationService implements IGroupConversationService {
 
         if (!texts.isEmpty()) {
             return String.join("\n", texts);
+        }
+
+        // Check if the output contains any actual LLM-generated content.
+        // Output keys follow patterns like "output", "output:text:*", "reply".
+        // If none are present, the map only contains pipeline metadata
+        // (e.g. "actions", "input", "context") — return null to avoid
+        // serializing raw metadata as a group discussion response.
+        boolean hasAnyOutput = lastOutput.keySet().stream()
+                .anyMatch(k -> k instanceof String s &&
+                        (s.startsWith("output") || s.startsWith("reply")));
+        if (!hasAnyOutput) {
+            return null;
         }
 
         // Fallback: serialize the entire output map (backward compat)
