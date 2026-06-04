@@ -91,6 +91,9 @@
         "http://localhost:3000",
         "http://localhost:5173"
       ],
+      "attributes": {
+        "post.logout.redirect.uris": "+"
+      },
       "defaultClientScopes": [
         "openid",
         "web-origins",
