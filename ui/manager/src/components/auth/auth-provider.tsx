@@ -95,7 +95,7 @@ function KeycloakAuthProvider({
             })
             .catch(() => {
               console.warn("[EDDI Auth] Token refresh failed, logging out");
-              keycloak.logout({ redirectUri: window.location.origin });
+              keycloak.logout({ redirectUri: `${window.location.origin}/manage` });
             });
         };
 
@@ -182,7 +182,10 @@ function KeycloakAuthProvider({
     if (!keycloak.idToken && idTokenRef.current) {
       keycloak.idToken = idTokenRef.current;
     }
-    keycloak.logout({ redirectUri: window.location.origin });
+    // Redirect to /manage (the SPA root), not window.location.origin (bare
+    // origin = "/"), because the EDDI backend returns 401 for the root path
+    // when auth is enabled — only /manage and its sub-paths serve the SPA.
+    keycloak.logout({ redirectUri: `${window.location.origin}/manage` });
   }, [keycloak]);
 
   const contextValue = useMemo<AuthContextValue>(
