@@ -13,7 +13,7 @@
     "description": "Default roles assigned to every new user on registration",
     "composite": true,
     "composites": {
-      "realm": ["eddi-user"]
+      "realm": ["eddi-admin", "eddi-editor", "eddi-user"]
     },
     "clientRole": false
   },
@@ -40,7 +40,7 @@
         "description": "Default roles assigned to every new user on registration",
         "composite": true,
         "composites": {
-          "realm": ["eddi-user"]
+          "realm": ["eddi-admin", "eddi-editor", "eddi-user"]
         },
         "clientRole": false
       }
