@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.rag;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -45,8 +46,10 @@ import static ai.labs.eddi.configs.workflows.model.ExtensionDescriptor.FieldType
 @ApplicationScoped
 public class RagTask implements ILifecycleTask {
 
-    private static final Logger LOGGER = Logger.getLogger(RagTask.class);
     public static final String ID = "ai.labs.rag";
+    public static final TaskId TASK_ID = new TaskId(ID);
+
+    private static final Logger LOGGER = Logger.getLogger(RagTask.class);
     private static final String KEY_URI = "uri";
 
     private final IResourceClientLibrary resourceClientLibrary;
@@ -57,8 +60,8 @@ public class RagTask implements ILifecycleTask {
     }
 
     @Override
-    public String getId() {
-        return ID;
+    public TaskId getId() {
+        return TASK_ID;
     }
 
     @Override
@@ -98,7 +101,7 @@ public class RagTask implements ILifecycleTask {
 
     @Override
     public ExtensionDescriptor getExtensionDescriptor() {
-        ExtensionDescriptor descriptor = new ExtensionDescriptor(ID);
+        ExtensionDescriptor descriptor = new ExtensionDescriptor(TASK_ID);
         descriptor.setDisplayName("RAG Knowledge Base");
 
         ConfigValue uriConfig = new ConfigValue("RAG Configuration URI", FieldType.URI, false, null);
