@@ -10,13 +10,12 @@ import java.util.List;
 /**
  * Configuration for web-based ingestion sources.
  * <p>
- * Defines how to crawl a website: starting URL, TOC extraction selector, crawl
- * scope constraints, and HTTP request behavior.
+ * Defines how to crawl a website: starting URL, crawl scope constraints, and
+ * HTTP request behavior. The crawler starts at {@code startUrl} and follows all
+ * same-domain links recursively within scope limits.
  *
  * @param startUrl
  *            Entry point URL for the crawler
- * @param tocSelector
- *            CSS selector for TOC links (e.g., "nav.sidebar a[href]")
  * @param scope
  *            Crawl scope constraints (domain, depth, page limits)
  * @param crawlSettings
@@ -26,7 +25,6 @@ import java.util.List;
  */
 public record WebSourceConfig(
         String startUrl,
-        String tocSelector,
         Scope scope,
         CrawlSettings crawlSettings) implements SourceConfig {
 
@@ -65,7 +63,18 @@ public record WebSourceConfig(
             List<String> excludePatterns) {
 
         /**
-         * No-arg constructor for Jackson deserialization with defaults.
+         * Compact constructor — provides safe defaults when Jackson deserializes
+         * partial JSON (missing fields get Java's primitive defaults: 0, false, null).
+         */
+        public Scope {
+            if (maxPages <= 0) maxPages = 200;
+            if (maxDepth <= 0) maxDepth = 3;
+            if (excludePatterns == null) excludePatterns = new ArrayList<>();
+            if (pathPrefix == null) pathPrefix = "/";
+        }
+
+        /**
+         * No-arg constructor for programmatic creation with defaults.
          */
         public Scope() {
             this(true, "/", 3, 200, new ArrayList<>());
@@ -86,7 +95,16 @@ public record WebSourceConfig(
             String userAgent) {
 
         /**
-         * No-arg constructor for Jackson deserialization with defaults.
+         * Compact constructor — provides safe defaults for Jackson partial JSON.
+         */
+        public CrawlSettings {
+            if (requestDelayMs <= 0) requestDelayMs = 500;
+            if (timeoutSeconds <= 0) timeoutSeconds = 15;
+            if (userAgent == null) userAgent = "EDDI-Crawler/1.0";
+        }
+
+        /**
+         * No-arg constructor for programmatic creation with defaults.
          */
         public CrawlSettings() {
             this(500, 15, "EDDI-Crawler/1.0");

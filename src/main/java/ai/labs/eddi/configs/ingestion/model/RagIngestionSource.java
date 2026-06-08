@@ -41,8 +41,8 @@ public record RagIngestionSource(
         /**
          * Type-specific source configuration.
          * <p>
-         * For "web" type, this is a {@link WebSourceConfig} with startUrl, tocSelector,
-         * scope, and crawlSettings.
+         * For "web" type, this is a {@link WebSourceConfig} with startUrl, scope, and
+         * crawlSettings.
          */
         SourceConfig sourceConfig,
 
@@ -71,7 +71,7 @@ public record RagIngestionSource(
 
         // Ensure sourceConfig is not null for web type
         if (sourceConfig == null && "web".equals(type)) {
-            sourceConfig = new WebSourceConfig(null, null, null, null);
+            sourceConfig = new WebSourceConfig(null, null, null);
         }
 
         // Set defaults for other nullable nested configs
