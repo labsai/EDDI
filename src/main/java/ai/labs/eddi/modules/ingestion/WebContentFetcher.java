@@ -28,11 +28,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 /**
  * Web content fetcher implementing {@link ContentFetcher}.
  * <p>
- * TOC-driven BFS web crawler for ingesting documentation from websites. The
+ * Recursive BFS web crawler for ingesting documentation from websites. The
  * crawler:
  * <ol>
  * <li>Fetches the starting URL</li>
- * <li>Extracts table-of-contents links using a CSS selector</li>
+ * <li>Extracts all same-domain links from each page</li>
  * <li>BFS-crawls each discovered page within scope constraints</li>
  * <li>Returns raw HTML content and metadata for each page</li>
  * </ol>
@@ -70,19 +70,18 @@ public class WebContentFetcher implements ContentFetcher {
         long startTime = System.currentTimeMillis();
 
         String startUrl = webConfig.startUrl();
-        String tocSelector = webConfig.tocSelector();
         WebSourceConfig.Scope scope = webConfig.scope();
         WebSourceConfig.CrawlSettings settings = webConfig.crawlSettings();
 
-        LOGGER.infof("[web] Starting crawl for source '%s' from %s with TOC selector: %s",
-                sanitize(sourceId), sanitize(startUrl), sanitize(tocSelector));
+        LOGGER.infof("[web] Starting crawl for source '%s' from %s",
+                sanitize(sourceId), sanitize(startUrl));
 
         List<FetchedDocument> documents = new ArrayList<>();
         List<FetchError> errors = new ArrayList<>();
         Set<String> visited = new HashSet<>();
         Queue<UrlDepth> queue = new LinkedList<>();
 
-        // Extract start URL domain and path
+        // Extract start URL domain and path for scope filtering
         String startDomain;
         String startPathPrefix;
         try {
@@ -94,29 +93,8 @@ public class WebContentFetcher implements ContentFetcher {
             return new FetchResult(documents, errors, System.currentTimeMillis() - startTime);
         }
 
-        // Start by fetching the start URL to extract TOC links
-        try {
-            FetchedDocument startDoc = fetchDocument(startUrl, settings);
-            if (startDoc != null) {
-                documents.add(startDoc);
-                visited.add(normalizeUrl(startUrl));
-
-                // Extract TOC links from start page
-                List<String> tocLinks = extractTocLinks(startDoc.content(), tocSelector, startUrl);
-                LOGGER.infof("[web] Found %d TOC links on start page for source '%s'", tocLinks.size(), sanitize(sourceId));
-
-                // Add TOC links to queue at depth 1
-                for (String link : tocLinks) {
-                    link = stripFragment(link);
-                    if (shouldCrawl(link, startDomain, startPathPrefix, scope)) {
-                        queue.offer(new UrlDepth(link, 1));
-                    }
-                }
-            }
-        } catch (Exception e) {
-            errors.add(new FetchError(startUrl, "Failed to fetch start URL: " + e.getMessage()));
-            LOGGER.errorf(e, "[web] Failed to fetch start URL for source '%s': %s", sanitize(sourceId), sanitize(startUrl));
-        }
+        // Seed the queue with the start URL at depth 0
+        queue.offer(new UrlDepth(startUrl, 0));
 
         // BFS crawl
         while (!queue.isEmpty() && documents.size() < scope.maxPages()) {
@@ -224,21 +202,6 @@ public class WebContentFetcher implements ContentFetcher {
         metadata.put("contentType", contentType.isEmpty() ? "text/html" : contentType.split(";")[0].trim());
 
         return new FetchedDocument(url, title, response.body(), "text/html", metadata);
-    }
-
-    private List<String> extractTocLinks(String html, String tocSelector, String baseUrl) {
-        Document doc = Jsoup.parse(html, baseUrl);
-        Elements links = doc.select(tocSelector);
-
-        List<String> result = new ArrayList<>();
-        for (Element link : links) {
-            String href = link.attr("abs:href");
-            if (href != null && !href.isBlank()) {
-                result.add(href);
-            }
-        }
-
-        return result;
     }
 
     private List<String> extractLinks(String html, String baseUrl) {
