@@ -23,14 +23,13 @@
 #
 #  ── Install on the VM ────────────────────────────────────────────────────────
 #
-#  From your local machine:
+#  From your local machine (recommended):
 #    ./gcp/provision-vm.sh install-reset eddi-demo
 #
 #  Or manually on the VM:
-#    sudo cp eddi-demo-reset.sh /root/.eddi/eddi-demo-reset.sh
-#    sudo chmod +x /root/.eddi/eddi-demo-reset.sh
-#    echo "0 3 */2 * * root /root/.eddi/eddi-demo-reset.sh >> /var/log/eddi-reset.log 2>&1" \
-#      | sudo tee /etc/cron.d/eddi-demo-reset
+#    sudo install -m 0755 eddi-demo-reset.sh /root/.eddi/eddi-demo-reset.sh
+#    # then create /etc/systemd/system/eddi-reset.{service,timer} — see
+#    # cmd_install_reset() in provision-vm.sh for the exact unit file content.
 #
 #  ── Manual run ───────────────────────────────────────────────────────────────
 #
