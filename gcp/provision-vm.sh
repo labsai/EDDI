@@ -49,6 +49,7 @@ DEFAULT_IMAGE_PROJECT="ubuntu-os-cloud"
 DEFAULT_EDDI_PORT="7070"
 DEFAULT_EDDI_HTTPS_PORT="7443"
 DEFAULT_EDDI_BRANCH="main"
+DEFAULT_EDDI_VERSION="latest"
 NETWORK_TAG="eddi-server"
 FIREWALL_RULE_HTTP="allow-eddi-http"
 FIREWALL_RULE_HTTPS="allow-eddi-https"
@@ -84,6 +85,7 @@ ${BOLD}Usage:${RESET}
 
 ${BOLD}Commands:${RESET}
   create        Provision a new GCP VM and install EDDI
+  update        Update EDDI image tag on an existing VM
   delete        Delete a VM (pass VM_NAME as first positional arg)
   list          List all EDDI VMs in the project
   ssh           SSH into a VM (pass VM_NAME as first positional arg)
@@ -98,6 +100,7 @@ ${BOLD}Create options:${RESET}
   --disk-size=GB            Boot disk size in GB         [${DEFAULT_DISK_SIZE}]
   --project=PROJECT_ID      GCP project ID               [from gcloud config]
   --eddi-branch=BRANCH      EDDI GitHub branch           [${DEFAULT_EDDI_BRANCH}]
+  --eddi-version=TAG        EDDI Docker image tag        [${DEFAULT_EDDI_VERSION}]
   --with-auth               Enable Keycloak OIDC auth
   --with-monitoring         Include Grafana + Prometheus
   --with-postgres           Use PostgreSQL instead of MongoDB
@@ -107,6 +110,10 @@ ${BOLD}Create options:${RESET}
   --letsencrypt-email=EMAIL Email for Let's Encrypt notifications
   --static-ip               Reserve a static external IP address
   --no-wait                 Don't wait for EDDI to become healthy
+
+${BOLD}Update options:${RESET}
+  --eddi-version=TAG        New image tag to deploy (required)
+  --no-wait                 Don't wait for EDDI to become healthy after restart
 
 ${BOLD}How HTTPS works:${RESET}
   When --https is passed, the VM installs nginx and requests a Let's Encrypt
@@ -138,6 +145,12 @@ ${BOLD}Examples:${RESET}
       --with-auth --https --letsencrypt-email=you@example.com \\
       --with-postgres --static-ip \\
       --project=my-gcp-project
+
+  # Update EDDI to a specific version
+  $(basename "$0") update eddi-demo --eddi-version=6.0.0-RC2
+
+  # Roll back to latest
+  $(basename "$0") update eddi-demo --eddi-version=latest
 
   # Delete
   $(basename "$0") delete eddi-demo
@@ -290,6 +303,7 @@ build_startup_script() {
 
   # Capture provision-time values into locals so the heredoc picks them up cleanly
   local p_branch="${EDDI_BRANCH}"
+  local p_version="${EDDI_VERSION}"
   local p_port="${EDDI_PORT}"
   local p_https_port="${EDDI_HTTPS_PORT}"
   local p_flags="${install_flags}"
@@ -407,8 +421,9 @@ else
 fi
 
 # ── [5/6] EDDI install ─────────────────────────────────────────────────────────
-echo "[5/6] Installing EDDI (branch: ${p_branch}, flags: ${p_flags})..."
+echo "[5/6] Installing EDDI (branch: ${p_branch}, version: ${p_version}, flags: ${p_flags})..."
 export EDDI_BRANCH="${p_branch}"
+export EDDI_VERSION="${p_version}"
 export EDDI_PORT="${p_port}"
 export EDDI_HTTPS_PORT="${p_https_port}"
 
@@ -806,6 +821,7 @@ print_config_summary() {
   echo -e "  Disk:           ${BOLD}${DISK_SIZE} GB SSD${RESET}"
   echo -e "  Image:          ${BOLD}${IMAGE_FAMILY} / ${IMAGE_PROJECT}${RESET}"
   echo -e "  EDDI branch:    ${BOLD}${EDDI_BRANCH}${RESET}"
+  echo -e "  EDDI version:   ${BOLD}labsai/eddi:${EDDI_VERSION}${RESET}"
   echo -e "  Database:       ${BOLD}${db_label}${RESET}"
   echo -e "  Auth:           ${BOLD}${auth_label}${RESET}"
   echo -e "  HTTPS:          ${BOLD}${https_label}${RESET}"
@@ -865,6 +881,116 @@ cmd_delete() {
   echo -e "  ${DIM}Firewall rules were not deleted (shared across VMs).${RESET}"
   echo -e "  ${DIM}To remove them: gcloud compute firewall-rules delete allow-eddi-* --project=${GCP_PROJECT}${RESET}"
   echo ""
+}
+
+# ── Command: update ───────────────────────────────────────────────────────────
+#
+# SSHes into an existing VM and hot-swaps the EDDI image tag by:
+#   1. Writing EDDI_VERSION=<tag> into ~/.eddi/.env on the VM
+#   2. docker compose pull eddi   (only the EDDI container — DB/KC untouched)
+#   3. docker compose up -d --no-deps eddi
+
+cmd_update() {
+  local name="${1:-$VM_NAME}"
+  check_prerequisites
+  resolve_project
+
+  if [[ "$EDDI_VERSION" == "$DEFAULT_EDDI_VERSION" ]]; then
+    fail "No version specified.\n     Usage: $(basename "$0") update ${name} --eddi-version=<tag>\n     Example: $(basename "$0") update ${name} --eddi-version=6.0.0-RC2\n     Use 'latest' to switch back to the rolling latest image."
+  fi
+
+  step "Updating EDDI on: ${name}"
+
+  local vm_status
+  vm_status=$(gcloud compute instances describe "$name" \
+    --zone="$ZONE" --project="$GCP_PROJECT" \
+    --format='value(status)' 2>/dev/null) || {
+    fail "VM '${name}' not found in zone '${ZONE}'."
+  }
+  if [[ "$vm_status" != "RUNNING" ]]; then
+    fail "VM '${name}' is not running (status: ${vm_status}).\n     Start it: gcloud compute instances start ${name} --zone=${ZONE}"
+  fi
+
+  local external_ip
+  external_ip=$(gcloud compute instances describe "$name" \
+    --zone="$ZONE" --project="$GCP_PROJECT" \
+    --format='value(networkInterfaces[0].accessConfigs[0].natIP)' 2>/dev/null)
+
+  info "Target image: ${CYAN}labsai/eddi:${EDDI_VERSION}${RESET}"
+  info "VM:           ${CYAN}${name}${RESET} (${external_ip})"
+  echo ""
+
+  local version="${EDDI_VERSION}"
+
+  # Run update script remotely via SSH.
+  # Variables prefixed \$ are evaluated on the VM; ${version} is expanded locally.
+  gcloud compute ssh "$name" \
+    --zone="$ZONE" --project="$GCP_PROJECT" \
+    -- "sudo bash -s" << REMOTE_SCRIPT
+set -euo pipefail
+EDDI_DIR=/root/.eddi
+ENV_FILE="\${EDDI_DIR}/.env"
+CONFIG_FILE="\${EDDI_DIR}/.eddi-config"
+
+if [[ ! -f "\${ENV_FILE}" ]]; then
+  echo "ERROR: \${ENV_FILE} not found — is EDDI installed on this VM?"
+  exit 1
+fi
+
+echo "Setting EDDI_VERSION=${version} in \${ENV_FILE} ..."
+if grep -q '^EDDI_VERSION=' "\${ENV_FILE}" 2>/dev/null; then
+  sed -i "s|^EDDI_VERSION=.*|EDDI_VERSION=${version}|" "\${ENV_FILE}"
+else
+  echo "EDDI_VERSION=${version}" >> "\${ENV_FILE}"
+fi
+
+COMPOSE_FILES_STR=\$(grep '^COMPOSE_FILES=' "\${CONFIG_FILE}" 2>/dev/null | cut -d= -f2-) \
+  || COMPOSE_FILES_STR="\${EDDI_DIR}/docker-compose.yml"
+read -ra CF_ARRAY <<< "\${COMPOSE_FILES_STR}"
+
+COMPOSE_ARGS=(--env-file "\${ENV_FILE}")
+for f in "\${CF_ARRAY[@]}"; do
+  [[ -n "\${f}" ]] && COMPOSE_ARGS+=(-f "\${f}")
+done
+
+echo "Pulling labsai/eddi:${version} ..."
+docker compose "\${COMPOSE_ARGS[@]}" pull eddi
+
+echo "Restarting EDDI container ..."
+docker compose "\${COMPOSE_ARGS[@]}" up -d --no-deps eddi
+
+echo "Remote update complete."
+REMOTE_SCRIPT
+
+  echo ""
+  info "Image pulled and EDDI restarted."
+
+  if [[ "$NO_WAIT" == "true" ]]; then
+    return 0
+  fi
+
+  echo ""
+  echo "  Waiting for EDDI to become healthy..."
+  local health_url="http://${external_ip}:${EDDI_PORT}/q/health/ready"
+  local elapsed=0
+  echo -ne "  "
+  while [[ $elapsed -lt 120 ]]; do
+    if curl -sf --connect-timeout 5 "$health_url" &>/dev/null 2>&1; then
+      echo ""
+      echo ""
+      info "EDDI is healthy! (${elapsed}s)"
+      echo ""
+      echo -e "  ${BOLD}Dashboard${RESET}  →  ${CYAN}http://${external_ip}:${EDDI_PORT}/manage${RESET}"
+      echo ""
+      return 0
+    fi
+    sleep 5
+    elapsed=$((elapsed + 5))
+    echo -ne "."
+  done
+  echo ""
+  warn "EDDI didn't respond within 120s."
+  echo "  Check logs: $(basename "$0") logs ${name}"
 }
 
 # ── Command: list ─────────────────────────────────────────────────────────────
@@ -1001,6 +1127,7 @@ IMAGE_PROJECT="$DEFAULT_IMAGE_PROJECT"
 EDDI_PORT="$DEFAULT_EDDI_PORT"
 EDDI_HTTPS_PORT="$DEFAULT_EDDI_HTTPS_PORT"
 EDDI_BRANCH="$DEFAULT_EDDI_BRANCH"
+EDDI_VERSION="$DEFAULT_EDDI_VERSION"
 GCP_PROJECT=""
 WITH_AUTH="false"
 WITH_MONITORING="false"
@@ -1026,6 +1153,7 @@ for arg in "$@"; do
     --disk-size=*)          DISK_SIZE="${arg#*=}" ;;
     --project=*)            GCP_PROJECT="${arg#*=}" ;;
     --eddi-branch=*)        EDDI_BRANCH="${arg#*=}" ;;
+    --eddi-version=*)       EDDI_VERSION="${arg#*=}" ;;
     --vault-key=*)          VAULT_KEY_ARG="${arg#*=}" ;;
     --letsencrypt-email=*)  LETSENCRYPT_EMAIL="${arg#*=}" ;;
     --with-auth)            WITH_AUTH="true" ;;
@@ -1048,6 +1176,7 @@ done
 
 case "$COMMAND" in
   create)         cmd_create ;;
+  update)         cmd_update "${POSITIONAL[0]:-}" ;;
   delete|destroy|rm) cmd_delete "${POSITIONAL[0]:-}" ;;
   list|ls)        cmd_list ;;
   ssh|connect)    cmd_ssh "${POSITIONAL[0]:-}" ;;
