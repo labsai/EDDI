@@ -34,7 +34,7 @@ public class RagModule {
 
     @PostConstruct
     protected void configure() {
-        lifecycleTaskProviders.put(RagTask.ID, () -> lifecycleTaskInstance.select(RagTask.class).get());
+        lifecycleTaskProviders.put(RagTask.TASK_ID.name(), () -> lifecycleTaskInstance.select(RagTask.class).get());
         LOGGER.debug("Added RAG Module, current size of lifecycle modules " + lifecycleTaskProviders.size());
     }
 }

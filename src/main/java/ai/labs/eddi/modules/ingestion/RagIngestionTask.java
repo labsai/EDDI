@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.ingestion;
 
 import ai.labs.eddi.configs.ingestion.model.RagIngestionSource;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -51,8 +52,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 @ApplicationScoped
 public class RagIngestionTask implements ILifecycleTask {
 
-    private static final Logger LOGGER = Logger.getLogger(RagIngestionTask.class);
     public static final String ID = "ai.labs.ingestion";
+    public static final TaskId TASK_ID = new TaskId(ID);
+
+    private static final Logger LOGGER = Logger.getLogger(RagIngestionTask.class);
     public static final String KEY_INGESTION_RESULT = "ingestion:result";
     public static final String KEY_INGESTION_SOURCE = "ingestion:source";
 
@@ -70,8 +73,8 @@ public class RagIngestionTask implements ILifecycleTask {
     }
 
     @Override
-    public String getId() {
-        return ID;
+    public TaskId getId() {
+        return TASK_ID;
     }
 
     @Override
@@ -190,7 +193,7 @@ public class RagIngestionTask implements ILifecycleTask {
 
     @Override
     public ExtensionDescriptor getExtensionDescriptor() {
-        ExtensionDescriptor descriptor = new ExtensionDescriptor(ID);
+        ExtensionDescriptor descriptor = new ExtensionDescriptor(TASK_ID);
         descriptor.setDisplayName("RAG Ingestion");
 
         // URI config for the ingestion source
