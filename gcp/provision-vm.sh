@@ -84,14 +84,15 @@ ${BOLD}Usage:${RESET}
   $(basename "$0") <command> [options]
 
 ${BOLD}Commands:${RESET}
-  create        Provision a new GCP VM and install EDDI
-  update        Update EDDI image tag on an existing VM
-  delete        Delete a VM (pass VM_NAME as first positional arg)
-  list          List all EDDI VMs in the project
-  ssh           SSH into a VM (pass VM_NAME as first positional arg)
-  status        Check VM state and EDDI health
-  logs          Stream startup/EDDI logs from the VM
-  ip            Print the external IP of a VM
+  create          Provision a new GCP VM and install EDDI
+  update          Update EDDI image tag on an existing VM
+  install-reset   Install the 48-hour demo-reset cron on a VM
+  delete          Delete a VM (pass VM_NAME as first positional arg)
+  list            List all EDDI VMs in the project
+  ssh             SSH into a VM (pass VM_NAME as first positional arg)
+  status          Check VM state and EDDI health
+  logs            Stream startup/EDDI logs from the VM
+  ip              Print the external IP of a VM
 
 ${BOLD}Create options:${RESET}
   --name=NAME               VM name                      [${DEFAULT_VM_NAME}]
@@ -151,6 +152,9 @@ ${BOLD}Examples:${RESET}
 
   # Roll back to latest
   $(basename "$0") update eddi-demo --eddi-version=latest
+
+  # Install 48-hour demo reset cron
+  $(basename "$0") install-reset eddi-demo
 
   # Delete
   $(basename "$0") delete eddi-demo
@@ -993,6 +997,73 @@ REMOTE_SCRIPT
   echo "  Check logs: $(basename "$0") logs ${name}"
 }
 
+# ── Command: install-reset ────────────────────────────────────────────────────
+#
+# Copies eddi-demo-reset.sh to the VM and installs a cron job that runs it
+# every 48 hours at 03:00 UTC.  Idempotent — safe to re-run.
+
+cmd_install_reset() {
+  local name="${1:-$VM_NAME}"
+  check_prerequisites
+  resolve_project
+
+  step "Installing demo-reset cron on: ${name}"
+
+  local vm_status
+  vm_status=$(gcloud compute instances describe "$name" \
+    --zone="$ZONE" --project="$GCP_PROJECT" \
+    --format='value(status)' 2>/dev/null) || {
+    fail "VM '${name}' not found in zone '${ZONE}'."
+  }
+  if [[ "$vm_status" != "RUNNING" ]]; then
+    fail "VM '${name}' is not running (status: ${vm_status})."
+  fi
+
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local reset_script="${script_dir}/eddi-demo-reset.sh"
+  [[ -f "$reset_script" ]] || fail "eddi-demo-reset.sh not found at: ${reset_script}"
+
+  info "Uploading eddi-demo-reset.sh..."
+  gcloud compute scp "$reset_script" "${name}:/tmp/eddi-demo-reset.sh" \
+    --zone="$ZONE" --project="$GCP_PROJECT" >/dev/null
+
+  info "Installing script and cron job on VM..."
+  gcloud compute ssh "$name" \
+    --zone="$ZONE" --project="$GCP_PROJECT" \
+    -- "sudo bash -s" << 'REMOTE_SCRIPT'
+set -euo pipefail
+EDDI_DIR=/root/.eddi
+DEST="${EDDI_DIR}/eddi-demo-reset.sh"
+CRON_FILE="/etc/cron.d/eddi-demo-reset"
+
+install -m 0755 /tmp/eddi-demo-reset.sh "$DEST"
+rm -f /tmp/eddi-demo-reset.sh
+
+# Runs at 03:00 on every even-numbered day  (≈ every 48 h)
+echo "0 3 */2 * * root ${DEST} >> /var/log/eddi-reset.log 2>&1" > "$CRON_FILE"
+chmod 644 "$CRON_FILE"
+
+echo "Installed: $DEST"
+echo "Cron:      $CRON_FILE  (03:00 UTC every 48 h)"
+
+if systemctl is-active --quiet cron 2>/dev/null || \
+   systemctl is-active --quiet crond 2>/dev/null; then
+  echo "Cron daemon is running — job active."
+else
+  echo "WARN: cron daemon not detected. File is in place but may not run."
+fi
+REMOTE_SCRIPT
+
+  echo ""
+  info "Demo-reset cron installed on ${CYAN}${name}${RESET}."
+  echo ""
+  dim "Runs automatically: 03:00 UTC every 48 h"
+  dim "Trigger manually:   $(basename "$0") ssh ${name}  →  sudo /root/.eddi/eddi-demo-reset.sh"
+  dim "Watch log:          $(basename "$0") ssh ${name}  →  tail -f /var/log/eddi-reset.log"
+  echo ""
+}
+
 # ── Command: list ─────────────────────────────────────────────────────────────
 
 cmd_list() {
@@ -1175,14 +1246,15 @@ done
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 
 case "$COMMAND" in
-  create)         cmd_create ;;
-  update)         cmd_update "${POSITIONAL[0]:-}" ;;
-  delete|destroy|rm) cmd_delete "${POSITIONAL[0]:-}" ;;
-  list|ls)        cmd_list ;;
-  ssh|connect)    cmd_ssh "${POSITIONAL[0]:-}" ;;
-  status|health)  cmd_status "${POSITIONAL[0]:-}" ;;
-  logs|log)       cmd_logs "${POSITIONAL[0]:-}" ;;
-  ip)             cmd_ip "${POSITIONAL[0]:-}" ;;
+  create)              cmd_create ;;
+  update)              cmd_update "${POSITIONAL[0]:-}" ;;
+  install-reset)       cmd_install_reset "${POSITIONAL[0]:-}" ;;
+  delete|destroy|rm)   cmd_delete "${POSITIONAL[0]:-}" ;;
+  list|ls)             cmd_list ;;
+  ssh|connect)         cmd_ssh "${POSITIONAL[0]:-}" ;;
+  status|health)       cmd_status "${POSITIONAL[0]:-}" ;;
+  logs|log)            cmd_logs "${POSITIONAL[0]:-}" ;;
+  ip)                  cmd_ip "${POSITIONAL[0]:-}" ;;
   help|--help|-h) usage ;;
   *)
     echo -e "${RED}Unknown command: ${COMMAND}${RESET}" >&2
