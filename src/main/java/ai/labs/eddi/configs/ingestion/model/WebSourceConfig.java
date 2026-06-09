@@ -67,10 +67,21 @@ public record WebSourceConfig(
          * partial JSON (missing fields get Java's primitive defaults: 0, false, null).
          */
         public Scope {
-            if (maxPages <= 0) maxPages = 200;
-            if (maxDepth <= 0) maxDepth = 3;
-            if (excludePatterns == null) excludePatterns = new ArrayList<>();
-            if (pathPrefix == null) pathPrefix = "/";
+            if (maxPages <= 0) {
+                maxPages = 200;
+            }
+
+            if (maxDepth <= 0) {
+                maxDepth = 3;
+            }
+
+            if (excludePatterns == null){
+                excludePatterns = new ArrayList<>();
+            }
+
+            if (pathPrefix == null) {
+                pathPrefix = "/";
+            }
         }
 
         /**
@@ -98,9 +109,12 @@ public record WebSourceConfig(
          * Compact constructor — provides safe defaults for Jackson partial JSON.
          */
         public CrawlSettings {
-            if (requestDelayMs <= 0) requestDelayMs = 500;
-            if (timeoutSeconds <= 0) timeoutSeconds = 15;
-            if (userAgent == null) userAgent = "EDDI-Crawler/1.0";
+            if (requestDelayMs <= 0)
+                requestDelayMs = 500;
+            if (timeoutSeconds <= 0)
+                timeoutSeconds = 15;
+            if (userAgent == null)
+                userAgent = "EDDI-Crawler/1.0";
         }
 
         /**
