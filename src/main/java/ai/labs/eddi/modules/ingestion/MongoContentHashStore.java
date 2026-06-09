@@ -13,7 +13,7 @@ import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.ReturnDocument;
 import com.mongodb.client.model.Updates;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.inject.Default;
+import io.quarkus.arc.DefaultBean;
 import jakarta.inject.Inject;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -36,7 +36,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @since 6.0.3
  */
 @ApplicationScoped
-@Default
+@DefaultBean
 public class MongoContentHashStore implements IContentHashStore {
 
     private static final Logger LOGGER = Logger.getLogger(MongoContentHashStore.class);
