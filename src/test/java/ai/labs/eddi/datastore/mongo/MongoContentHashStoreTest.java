@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.datastore.mongo;
 
-import ai.labs.eddi.modules.ingestion.ContentHashTracker;
+import ai.labs.eddi.modules.ingestion.MongoContentHashStore;
 import org.junit.jupiter.api.*;
 
 import java.util.List;
@@ -12,18 +12,18 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Integration tests for {@link ContentHashTracker} using Testcontainers.
+ * Integration tests for {@link MongoContentHashStore} using Testcontainers.
  *
  * @since 6.0.3
  */
-@DisplayName("ContentHashTracker IT")
-class ContentHashTrackerTest extends MongoTestBase {
+@DisplayName("MongoContentHashStore IT")
+class MongoContentHashStoreTest extends MongoTestBase {
 
-    private static ContentHashTracker tracker;
+    private static MongoContentHashStore tracker;
 
     @BeforeAll
     static void init() {
-        tracker = new ContentHashTracker(getDatabase());
+        tracker = new MongoContentHashStore(getDatabase());
     }
 
     @BeforeEach
@@ -189,6 +189,13 @@ class ContentHashTrackerTest extends MongoTestBase {
             String hash = tracker.computeHash("");
             assertNotNull(hash);
             assertEquals(64, hash.length());
+        }
+
+        @Test
+        @DisplayName("null input throws NullPointerException")
+        void nullInput() {
+            assertThrows(NullPointerException.class,
+                    () -> tracker.computeHash(null));
         }
     }
 }

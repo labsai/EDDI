@@ -13,6 +13,7 @@ import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.ReturnDocument;
 import com.mongodb.client.model.Updates;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Default;
 import jakarta.inject.Inject;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -26,28 +27,25 @@ import java.util.List;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
- * Content hash tracker for deduplication and stale marking in ingestion.
+ * MongoDB-backed {@link IContentHashStore} that tracks content hashes in the
+ * {@code rag_ingestion_hashes} collection.
  * <p>
- * Uses MongoDB collection {@code rag_ingestion_hashes} to track content hashes
- * per document per ingestion source. When content is re-ingested:
- * <ul>
- * <li>If hash unchanged → skip (unchanged document)</li>
- * <li>If hash changed → re-ingest and update hash</li>
- * <li>If document no longer present → mark as stale</li>
- * </ul>
+ * Uses MongoDB's {@code findOneAndUpdate} with upsert and
+ * {@code ReturnDocument.BEFORE} for atomic deduplication.
  *
  * @since 6.0.3
  */
 @ApplicationScoped
-public class ContentHashTracker {
+@Default
+public class MongoContentHashStore implements IContentHashStore {
 
-    private static final Logger LOGGER = Logger.getLogger(ContentHashTracker.class);
+    private static final Logger LOGGER = Logger.getLogger(MongoContentHashStore.class);
     private static final String COLLECTION_NAME = "rag_ingestion_hashes";
 
     private MongoCollection<Document> collection;
 
     @Inject
-    public ContentHashTracker(MongoDatabase database) {
+    public MongoContentHashStore(MongoDatabase database) {
         this.collection = database.getCollection(COLLECTION_NAME);
         createIndexes();
     }
@@ -205,54 +203,5 @@ public class ContentHashTracker {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
         return normalized;
-    }
-
-    /**
-     * A tracked hash entry.
-     *
-     * @param documentId
-     *            the document identifier
-     * @param hash
-     *            the content hash
-     * @param stale
-     *            whether the document is stale
-     * @param ingestedAt
-     *            when the document was last ingested
-     */
-    public record HashEntry(String documentId, String hash, boolean stale, Instant ingestedAt) {
-    }
-
-    /**
-     * Result of deduplication processing.
-     *
-     * @param newDocuments
-     *            newly discovered documents
-     * @param updatedDocuments
-     *            documents with changed content
-     * @param unchangedIds
-     *            documents with unchanged content
-     * @param staleDocumentsMarked
-     *            number of documents marked stale
-     */
-    public record DedupResult(
-            List<DocumentToProcess> newDocuments,
-            List<DocumentToProcess> updatedDocuments,
-            List<String> unchangedIds,
-            int staleDocumentsMarked) {
-    }
-
-    /**
-     * A document that needs to be processed (new or updated).
-     *
-     * @param id
-     *            the document identifier
-     * @param title
-     *            the document title
-     * @param markdown
-     *            the markdown content
-     * @param contentHash
-     *            the content hash
-     */
-    public record DocumentToProcess(String id, String title, String markdown, String contentHash) {
     }
 }
