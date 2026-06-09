@@ -75,7 +75,7 @@ public record WebSourceConfig(
                 maxDepth = 3;
             }
 
-            if (excludePatterns == null){
+            if (excludePatterns == null) {
                 excludePatterns = new ArrayList<>();
             }
 
