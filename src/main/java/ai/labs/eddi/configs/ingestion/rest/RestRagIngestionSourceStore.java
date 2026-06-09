@@ -12,11 +12,13 @@ import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.modules.ingestion.ContentHashTracker;
 import ai.labs.eddi.modules.ingestion.RagIngestionService;
 import ai.labs.eddi.utils.LogSanitizer;
+import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -24,6 +26,7 @@ import org.jboss.logging.Logger;
 
 import java.net.URI;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -113,20 +116,19 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
 
     @Override
     public Response createIngestionSource(RagIngestionSource source) {
-        Response response = restVersionInfo.create(source);
+        IResourceStore.IResourceId resourceId = restVersionInfo.createDocument(source);
 
         // Create associated schedule
-        if (response.getStatus() == Response.Status.CREATED.getStatusCode()) {
-            try {
-                String location = response.getLocation().toString();
-                String id = extractIdFromLocation(location);
-                createScheduleForSource(id, source);
-            } catch (Exception e) {
-                LOGGER.warnf(e, "Failed to create schedule for new source");
-            }
+        try {
+            createScheduleForSource(resourceId.getId(), source);
+        } catch (Exception e) {
+            LOGGER.warnf(e, "Failed to create schedule for new source %s",
+                    LogSanitizer.sanitize(resourceId.getId()));
         }
 
-        return response;
+        URI createdUri = RestUtilities.createURI(resourceURI, resourceId.getId(),
+                versionQueryParam, resourceId.getVersion());
+        return Response.created(createdUri).build();
     }
 
     @Override
@@ -199,6 +201,8 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
             return;
         }
 
+        CronParser.validate(source.schedule().cronExpression());
+
         ScheduleConfiguration schedule = new ScheduleConfiguration();
         schedule.setName("ingestion:" + source.name());
         schedule.setTriggerType(ScheduleConfiguration.TriggerType.CRON);
@@ -229,6 +233,11 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
             for (ScheduleConfiguration schedule : schedules) {
                 Map<String, Object> metadata = schedule.getMetadata();
                 if (metadata != null && sourceId.equals(metadata.get("sourceId"))) {
+                    // Validate cron expression if schedule is enabled
+                    if (source.schedule().enabled()) {
+                        CronParser.validate(source.schedule().cronExpression());
+                    }
+
                     // Update schedule
                     schedule.setName("ingestion:" + source.name());
                     schedule.setCronExpression(source.schedule().cronExpression());
@@ -278,29 +287,6 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
     }
 
     private Instant computeNextFire(String cronExpression) {
-        // Simple implementation: next fire is now + 1 minute (cron parsing is complex)
-        // In production, this should use a proper cron parser
-        return Instant.now().plusSeconds(60);
-    }
-
-    private String extractIdFromLocation(String location) {
-        // Extract ID from location URI like:
-        // http://host/ragstore/ingestion-sources/abc123
-        // http://host/ragstore/ingestion-sources/abc123?version=1
-        int lastSlash = location.lastIndexOf('/');
-        if (lastSlash >= 0 && lastSlash < location.length() - 1) {
-            String idAndParams = location.substring(lastSlash + 1);
-            // Strip query parameters (?version=1) and fragments
-            int queryStart = idAndParams.indexOf('?');
-            if (queryStart > 0) {
-                return idAndParams.substring(0, queryStart);
-            }
-            int fragmentStart = idAndParams.indexOf('#');
-            if (fragmentStart > 0) {
-                return idAndParams.substring(0, fragmentStart);
-            }
-            return idAndParams;
-        }
-        return null;
+        return CronParser.computeNextFire(cronExpression, Instant.now(), ZoneId.of("UTC"));
     }
 }

@@ -5,12 +5,15 @@
 package ai.labs.eddi.configs.ingestion.mongo;
 
 import ai.labs.eddi.configs.ingestion.IRagIngestionSourceStore;
+import ai.labs.eddi.configs.ingestion.IRestRagIngestionSourceStore;
 import ai.labs.eddi.configs.ingestion.model.RagIngestionSource;
 import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.utils.RestUtilities;
+import ai.labs.eddi.utils.StringUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -44,7 +47,7 @@ public class MongoRagIngestionSourceStore extends AbstractResourceStore<RagInges
             throws IResourceStore.ResourceStoreException {
         var results = new ArrayList<Map<String, Object>>();
         try {
-            var escaped = ragConfigUri.replace(".", "\\.").replace("?", "\\?");
+            var escaped = StringUtilities.escapeRegexChars(ragConfigUri);
             var filter = new IResourceFilter.QueryFilters(
                     List.of(new IResourceFilter.QueryFilter("ragConfigUri", "^" + escaped + "$")));
             var resourceIds = resourceStorage.findResources(
@@ -62,8 +65,11 @@ public class MongoRagIngestionSourceStore extends AbstractResourceStore<RagInges
                         map.put("ragConfigUri", data.ragConfigUri());
                         map.put("ingestionSettings", data.ingestionSettings());
                         map.put("schedule", data.schedule());
-                        map.put("resource", "eddi://ai.labs.rag/ragstore/ingestion-sources/"
-                                + resourceId.getId() + "?version=" + resourceId.getVersion());
+                        map.put("resource", RestUtilities.createURI(
+                                IRestRagIngestionSourceStore.resourceURI,
+                                resourceId.getId(),
+                                IRestRagIngestionSourceStore.versionQueryParam,
+                                resourceId.getVersion()).toString());
                         results.add(map);
                     }
                 } catch (IOException e) {

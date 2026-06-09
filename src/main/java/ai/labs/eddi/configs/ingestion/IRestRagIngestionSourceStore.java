@@ -32,8 +32,8 @@ import static jakarta.ws.rs.core.MediaType.APPLICATION_JSON;
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestRagIngestionSourceStore extends IRestVersionInfo {
 
-    String resourceBaseType = "eddi://ai.labs.ingestion";
-    String resourceURI = resourceBaseType + "/ingestionstore/ingestionsources/";
+    String resourceBaseType = "eddi://ai.labs.rag";
+    String resourceURI = resourceBaseType + "/ragstore/ingestion-sources/";
     String versionQueryParam = "?version=";
 
     @GET
