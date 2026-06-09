@@ -25,6 +25,26 @@ public final class UrlValidationUtils {
     }
 
     /**
+     * Toggle to disable private-IP validation for integration testing. When
+     * {@code false}, only URL syntax and scheme are validated — DNS resolution and
+     * private-IP checks are skipped. Default is {@code true}.
+     * <p>
+     * Set via {@link #setValidationEnabled(boolean)} before test execution. This is
+     * intentionally a static flag (not a config property) because
+     * {@code UrlValidationUtils} is a stateless utility class. Test frameworks
+     * should reset this in {@code @BeforeEach} / {@code @AfterEach}.
+     */
+    private static volatile boolean validationEnabled = true;
+
+    /**
+     * Enables or disables SSRF validation. When disabled, only URL syntax and
+     * scheme (http/https) are checked — no DNS resolution or private-IP blocking.
+     */
+    public static void setValidationEnabled(boolean enabled) {
+        validationEnabled = enabled;
+    }
+
+    /**
      * Functional interface for hostname resolution. Allows mocking in tests to
      * simulate DNS rebinding scenarios.
      */
@@ -40,6 +60,10 @@ public final class UrlValidationUtils {
      * Validates that the given URL is safe for server-side fetching. Checks: 1. URL
      * is syntactically valid 2. Scheme is http or https only 3. Hostname does not
      * resolve to a private/loopback/link-local address
+     * <p>
+     * When {@link #setValidationEnabled(boolean) validation is disabled}, only
+     * steps 1 and 2 are performed — DNS resolution and private-IP checks are
+     * skipped.
      *
      * @param url
      *            the URL to validate
@@ -47,7 +71,35 @@ public final class UrlValidationUtils {
      *             if the URL is invalid or targets a private address
      */
     public static void validateUrl(String url) {
+        if (!validationEnabled) {
+            validateSyntaxOnly(url);
+            return;
+        }
         validateUrl(url, DEFAULT_RESOLVER);
+    }
+
+    /**
+     * Lightweight validation that checks URL syntax, scheme, and hostname presence
+     * without DNS resolution. Used when {@link #validationEnabled} is false.
+     */
+    private static void validateSyntaxOnly(String url) {
+        if (url == null || url.isBlank()) {
+            throw new IllegalArgumentException("URL must not be null or empty");
+        }
+        URI uri;
+        try {
+            uri = new URI(url);
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("Invalid URL syntax: " + e.getMessage());
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
+            throw new IllegalArgumentException("Only http and https URLs are allowed. Got: " + (scheme != null ? scheme : "<no scheme>"));
+        }
+        String host = uri.getHost();
+        if (host == null || host.isBlank()) {
+            throw new IllegalArgumentException("URL must have a valid hostname");
+        }
     }
 
     /**
