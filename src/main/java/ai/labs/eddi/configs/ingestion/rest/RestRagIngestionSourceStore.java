@@ -15,7 +15,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
-import ai.labs.eddi.modules.ingestion.ContentHashTracker;
+import ai.labs.eddi.modules.ingestion.IContentHashStore;
 import ai.labs.eddi.modules.ingestion.RagIngestionService;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
@@ -50,7 +50,7 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
     private final IJsonSchemaCreator jsonSchemaCreator;
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final RagIngestionService ingestionService;
-    private final ContentHashTracker contentHashTracker;
+    private final IContentHashStore contentHashTracker;
     private final RestVersionInfo<RagIngestionSource> restVersionInfo;
 
     @Inject
@@ -60,7 +60,7 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
             IJsonSchemaCreator jsonSchemaCreator,
             IDocumentDescriptorStore documentDescriptorStore,
             RagIngestionService ingestionService,
-            ContentHashTracker contentHashTracker) {
+            IContentHashStore contentHashTracker) {
         this.sourceStore = sourceStore;
         this.scheduleStore = scheduleStore;
         this.jsonSchemaCreator = jsonSchemaCreator;

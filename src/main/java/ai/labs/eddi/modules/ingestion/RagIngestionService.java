@@ -51,7 +51,7 @@ import java.util.stream.Collectors;
  * <ol>
  * <li>{@link ContentFetcher} — fetch content from the source</li>
  * <li>{@link ContentConverter} — convert to Markdown</li>
- * <li>{@link ContentHashTracker} — SHA-256 deduplication + stale marking</li>
+ * <li>{@link IContentHashStore} — SHA-256 deduplication + stale marking</li>
  * <li>{@link EmbeddingModelFactory} — cached embedding model creation</li>
  * <li>{@link EmbeddingStoreFactory} — cached vector store access</li>
  * </ol>
@@ -67,7 +67,7 @@ public class RagIngestionService {
 
     private final Instance<ContentFetcher> fetcherInstances;
     private final Instance<ContentConverter> converters;
-    private final ContentHashTracker contentHashTracker;
+    private final IContentHashStore contentHashTracker;
     private final EmbeddingModelFactory embeddingModelFactory;
     private final EmbeddingStoreFactory embeddingStoreFactory;
     private final IResourceClientLibrary resourceClientLibrary;
@@ -89,7 +89,7 @@ public class RagIngestionService {
     public RagIngestionService(
             Instance<ContentFetcher> fetcherInstances,
             Instance<ContentConverter> converters,
-            ContentHashTracker contentHashTracker,
+            IContentHashStore contentHashTracker,
             EmbeddingModelFactory embeddingModelFactory,
             EmbeddingStoreFactory embeddingStoreFactory,
             IResourceClientLibrary resourceClientLibrary,
@@ -171,7 +171,7 @@ public class RagIngestionService {
                     fetchResult.errors().size(), fetchDuration);
 
             // 4. Convert to Markdown and deduplicate
-            List<ContentHashTracker.DocumentToProcess> docsToProcess = new ArrayList<>();
+            List<IContentHashStore.DocumentToProcess> docsToProcess = new ArrayList<>();
             List<String> unchangedIds = new ArrayList<>();
 
             for (FetchedDocument doc : fetchResult.documents()) {
@@ -204,7 +204,7 @@ public class RagIngestionService {
 
                     if (shouldIngest) {
                         String hash = contentHashTracker.computeHash(markdown);
-                        docsToProcess.add(new ContentHashTracker.DocumentToProcess(
+                        docsToProcess.add(new IContentHashStore.DocumentToProcess(
                                 doc.id(), doc.title(), markdown, hash));
                     } else {
                         unchangedIds.add(doc.id());
@@ -284,14 +284,14 @@ public class RagIngestionService {
         return resourceClientLibrary.getResource(URI.create(ragConfigUri), RagConfiguration.class);
     }
 
-    private int embedAndStore(List<ContentHashTracker.DocumentToProcess> docs, RagConfiguration ragConfig, String kbId) {
+    private int embedAndStore(List<IContentHashStore.DocumentToProcess> docs, RagConfiguration ragConfig, String kbId) {
         // Get or create embedding model and store
         EmbeddingModel embeddingModel = embeddingModelFactory.getOrCreate(ragConfig);
         EmbeddingStore<TextSegment> embeddingStore = embeddingStoreFactory.getOrCreate(ragConfig, kbId);
 
         int totalChunks = 0;
 
-        for (ContentHashTracker.DocumentToProcess doc : docs) {
+        for (IContentHashStore.DocumentToProcess doc : docs) {
             try {
                 // Create document with metadata
                 Metadata metadata = Metadata.from("documentId", doc.id())
