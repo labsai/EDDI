@@ -7,8 +7,11 @@ package ai.labs.eddi.modules.ingestion;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.ReturnDocument;
+import com.mongodb.client.model.Updates;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
@@ -49,7 +52,7 @@ public class ContentHashTracker {
         createIndexes();
     }
 
-    private void createIndexes() {
+    public void createIndexes() {
         // Compound index on sourceId + documentId for efficient lookups
         collection.createIndex(
                 Indexes.compoundIndex(
@@ -87,50 +90,28 @@ public class ContentHashTracker {
             return false;
         }
         String hash = computeHash(content);
+        Instant now = Instant.now();
 
-        Document existing = collection.find(
-                Filters.and(
-                        Filters.eq("sourceId", sourceId),
-                        Filters.eq("documentId", documentId)))
-                .first();
+        Bson filter = Filters.and(
+                Filters.eq("sourceId", sourceId),
+                Filters.eq("documentId", documentId));
 
-        if (existing == null) {
-            // New document
-            Document doc = new Document()
-                    .append("sourceId", sourceId)
-                    .append("documentId", documentId)
-                    .append("hash", hash)
-                    .append("stale", false)
-                    .append("ingestedAt", Instant.now())
-                    .append("updatedAt", Instant.now());
-            collection.insertOne(doc);
-            return true;
-        }
+        Bson update = Updates.combine(
+                Updates.set("hash", hash),
+                Updates.set("ingestedAt", now),
+                Updates.set("updatedAt", now),
+                Updates.set("stale", false),
+                Updates.setOnInsert("sourceId", sourceId),
+                Updates.setOnInsert("documentId", documentId));
 
-        String existingHash = existing.getString("hash");
-        if (hash.equals(existingHash)) {
-            // Unchanged - update ingestedAt but don't ingest
-            collection.updateOne(
-                    Filters.and(
-                            Filters.eq("sourceId", sourceId),
-                            Filters.eq("documentId", documentId)),
-                    new Document("$set", new Document()
-                            .append("ingestedAt", Instant.now())
-                            .append("stale", false)));
-            return false;
-        }
+        FindOneAndUpdateOptions options = new FindOneAndUpdateOptions()
+                .upsert(true)
+                .returnDocument(ReturnDocument.BEFORE);
 
-        // Changed - update hash and re-ingest
-        collection.updateOne(
-                Filters.and(
-                        Filters.eq("sourceId", sourceId),
-                        Filters.eq("documentId", documentId)),
-                new Document("$set", new Document()
-                        .append("hash", hash)
-                        .append("ingestedAt", Instant.now())
-                        .append("updatedAt", Instant.now())
-                        .append("stale", false)));
-        return true;
+        Document before = collection.findOneAndUpdate(filter, update, options);
+
+        // If before is null, the document was just created (upserted)
+        return before == null || !hash.equals(before.getString("hash"));
     }
 
     /**
