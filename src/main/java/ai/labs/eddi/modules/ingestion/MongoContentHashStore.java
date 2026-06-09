@@ -87,6 +87,7 @@ public class MongoContentHashStore implements IContentHashStore {
             LOGGER.warnf("Skipping document with null/empty content: %s", sanitize(documentId));
             return false;
         }
+        documentId = normalizeId(documentId);
         String hash = computeHash(content);
         Instant now = Instant.now();
 

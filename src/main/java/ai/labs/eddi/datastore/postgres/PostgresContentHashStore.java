@@ -98,68 +98,34 @@ public class PostgresContentHashStore implements IContentHashStore {
             return false;
         }
 
+        documentId = normalizeId(documentId);
         String hash = computeHash(content);
         Instant now = Instant.now();
 
         try (Connection conn = dataSourceInstance.get().getConnection()) {
-            conn.setAutoCommit(false);
-            try {
-                boolean changed;
-                try (PreparedStatement ps = conn.prepareStatement(
-                        "SELECT hash FROM rag_ingestion_hashes " +
-                                "WHERE source_id = ? AND document_id = ? FOR UPDATE")) {
-                    ps.setString(1, sourceId);
-                    ps.setString(2, documentId);
-                    ResultSet rs = ps.executeQuery();
-
-                    if (rs.next()) {
-                        String existingHash = rs.getString("hash");
-                        if (hash.equals(existingHash)) {
-                            try (PreparedStatement upd = conn.prepareStatement(
-                                    "UPDATE rag_ingestion_hashes SET ingested_at = ?, stale = false " +
-                                            "WHERE source_id = ? AND document_id = ?")) {
-                                upd.setTimestamp(1, Timestamp.from(now));
-                                upd.setString(2, sourceId);
-                                upd.setString(3, documentId);
-                                upd.executeUpdate();
-                            }
-                            changed = false;
-                        } else {
-                            try (PreparedStatement upd = conn.prepareStatement(
-                                    "UPDATE rag_ingestion_hashes SET hash = ?, stale = false, " +
-                                            "ingested_at = ?, updated_at = ? " +
-                                            "WHERE source_id = ? AND document_id = ?")) {
-                                upd.setString(1, hash);
-                                upd.setTimestamp(2, Timestamp.from(now));
-                                upd.setTimestamp(3, Timestamp.from(now));
-                                upd.setString(4, sourceId);
-                                upd.setString(5, documentId);
-                                upd.executeUpdate();
-                            }
-                            changed = true;
-                        }
-                    } else {
-                        try (PreparedStatement ins = conn.prepareStatement(
-                                "INSERT INTO rag_ingestion_hashes " +
-                                        "(source_id, document_id, hash, stale, ingested_at, updated_at) " +
-                                        "VALUES (?, ?, ?, false, ?, ?)")) {
-                            ins.setString(1, sourceId);
-                            ins.setString(2, documentId);
-                            ins.setString(3, hash);
-                            ins.setTimestamp(4, Timestamp.from(now));
-                            ins.setTimestamp(5, Timestamp.from(now));
-                            ins.executeUpdate();
-                        }
-                        changed = true;
-                    }
-                }
-                conn.commit();
-                return changed;
-            } catch (SQLException e) {
-                conn.rollback();
-                throw new RuntimeException("Failed to check content hash for " + documentId, e);
-            } finally {
-                conn.setAutoCommit(true);
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO rag_ingestion_hashes (source_id, document_id, hash, stale, ingested_at, updated_at) "
+                            +
+                            "VALUES (?, ?, ?, false, ?, ?) " +
+                            "ON CONFLICT (source_id, document_id) DO UPDATE SET " +
+                            "  hash = EXCLUDED.hash, " +
+                            "  stale = false, " +
+                            "  ingested_at = CASE WHEN rag_ingestion_hashes.hash = EXCLUDED.hash THEN rag_ingestion_hashes.ingested_at ELSE ? END, "
+                            +
+                            "  updated_at = ? " +
+                            "RETURNING ingested_at = updated_at AS changed")) {
+                int idx = 1;
+                ps.setString(idx++, sourceId);
+                ps.setString(idx++, documentId);
+                ps.setString(idx++, hash);
+                Timestamp nowTs = Timestamp.from(now);
+                ps.setTimestamp(idx++, nowTs);
+                ps.setTimestamp(idx++, nowTs);
+                ps.setTimestamp(idx++, nowTs);
+                ps.setTimestamp(idx++, nowTs);
+                ResultSet rs = ps.executeQuery();
+                rs.next();
+                return rs.getBoolean("changed");
             }
         } catch (SQLException e) {
             throw new RuntimeException("Failed to check content hash for " + documentId, e);

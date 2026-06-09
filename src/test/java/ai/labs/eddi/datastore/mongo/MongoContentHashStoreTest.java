@@ -5,6 +5,7 @@
 package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.modules.ingestion.MongoContentHashStore;
+import org.bson.Document;
 import org.junit.jupiter.api.*;
 
 import java.util.List;
@@ -28,7 +29,7 @@ class MongoContentHashStoreTest extends MongoTestBase {
 
     @BeforeEach
     void clean() {
-        dropCollections("rag_ingestion_hashes");
+        getDatabase().getCollection("rag_ingestion_hashes").deleteMany(new Document());
     }
 
     @Nested
