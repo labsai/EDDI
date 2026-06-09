@@ -109,12 +109,17 @@ public record WebSourceConfig(
          * Compact constructor — provides safe defaults for Jackson partial JSON.
          */
         public CrawlSettings {
-            if (requestDelayMs <= 0)
+            if (requestDelayMs <= 0) {
                 requestDelayMs = 500;
-            if (timeoutSeconds <= 0)
+            }
+
+            if (timeoutSeconds <= 0) {
                 timeoutSeconds = 15;
-            if (userAgent == null)
+            }
+
+            if (userAgent == null) {
                 userAgent = "EDDI-Crawler/1.0";
+            }
         }
 
         /**
