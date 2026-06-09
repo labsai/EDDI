@@ -6,7 +6,7 @@ package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.modules.ingestion.IContentHashStore;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.inject.Default;
+import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -34,7 +34,7 @@ import java.util.List;
  * @since 6.0.3
  */
 @ApplicationScoped
-@Default
+@DefaultBean
 public class PostgresContentHashStore implements IContentHashStore {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresContentHashStore.class);
