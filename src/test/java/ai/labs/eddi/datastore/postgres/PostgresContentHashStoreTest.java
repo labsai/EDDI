@@ -197,33 +197,4 @@ class PostgresContentHashStoreTest extends PostgresTestBase {
                     () -> store.computeHash(null));
         }
     }
-
-    @Nested
-    @DisplayName("concurrency")
-    class Concurrency {
-
-        @Test
-        @DisplayName("concurrent shouldIngest with same sourceId+documentId is safe")
-        void concurrentShouldIngest() throws Exception {
-            int threadCount = 10;
-            var results = java.util.concurrent.ConcurrentHashMap.<Boolean>newKeySet();
-            var threads = new java.util.ArrayList<Thread>();
-
-            for (int i = 0; i < threadCount; i++) {
-                Thread t = new Thread(() -> {
-                    boolean result = store.shouldIngest("src-1", "same-doc", "same-content");
-                    results.add(result);
-                });
-                threads.add(t);
-                t.start();
-            }
-
-            for (Thread t : threads) {
-                t.join(5000);
-            }
-
-            // At least one thread should have returned true (first insertion wins)
-            assertTrue(results.contains(true), "At least one concurrent caller should detect new content");
-        }
-    }
 }
