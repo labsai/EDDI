@@ -96,7 +96,27 @@ class HistorizedResourceStoreTest {
 
         assertEquals(2, newVersion);
         verify(storage).store(historyResource); // archived old version
-        verify(storage).store(newResource); // stored new version
+        verify(storage).storeIfCurrentVersion(newResource, 1); // stored new version with optimistic lock
+    }
+
+    @Test
+    void shouldThrowResourceModifiedWhenConcurrentUpdate() throws Exception {
+        IResourceStorage.IResource<String> currentResource = mock(IResourceStorage.IResource.class);
+        when(storage.read("id1", 1)).thenReturn(currentResource);
+        when(currentResource.getId()).thenReturn("id1");
+        when(currentResource.getVersion()).thenReturn(1);
+
+        IResourceStorage.IHistoryResource<String> historyResource = mock(IResourceStorage.IHistoryResource.class);
+        when(storage.newHistoryResourceFor(currentResource, false)).thenReturn(historyResource);
+
+        IResourceStorage.IResource<String> newResource = mock(IResourceStorage.IResource.class);
+        when(storage.newResource("id1", 2, "updated")).thenReturn(newResource);
+
+        doThrow(new IResourceStore.ResourceModifiedException("concurrent edit"))
+                .when(storage).storeIfCurrentVersion(newResource, 1);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> store.update("id1", 1, "updated"));
     }
 
     @Test

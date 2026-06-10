@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
@@ -90,6 +91,22 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         } else {
             currentCollection.updateOne(Filters.eq("_id", new ObjectId(resource.getId())), new Document("$set", resource.getMongoDocument()),
                     new UpdateOptions().upsert(true));
+        }
+    }
+
+    @Override
+    public void storeIfCurrentVersion(IResource<T> newResource, int expectedCurrentVersion)
+            throws IResourceStore.ResourceModifiedException {
+        Resource resource = checkInternalResource(newResource);
+        var result = currentCollection.updateOne(
+                Filters.and(
+                        Filters.eq(ID_FIELD, new ObjectId(resource.getId())),
+                        Filters.eq(VERSION_FIELD, expectedCurrentVersion)),
+                new Document("$set", resource.getMongoDocument()));
+        if (result.getMatchedCount() == 0) {
+            throw new IResourceStore.ResourceModifiedException(
+                    String.format("Resource was modified concurrently (id=%s, expected version=%d)",
+                            resource.getId(), expectedCurrentVersion));
         }
     }
 
@@ -204,7 +221,16 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     @Override
     public void store(IHistoryResource<T> resource) {
         HistoryResource historyResource = checkInternalHistoryResource(resource);
-        historyCollection.insertOne(historyResource.getMongoDocument());
+        try {
+            historyCollection.insertOne(historyResource.getMongoDocument());
+        } catch (MongoWriteException e) {
+            if (e.getError().getCode() == 11000) {
+                // Duplicate key — another thread already archived this version.
+                // Safe to ignore: the history row is identical (same id + version).
+                return;
+            }
+            throw e;
+        }
     }
 
     @Override

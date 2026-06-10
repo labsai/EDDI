@@ -37,6 +37,26 @@ public interface IResourceStorage<T> {
     Integer getCurrentVersion(String id);
 
     /**
+     * Atomically store a new version of a resource, but only if the current version
+     * in the database matches {@code expectedCurrentVersion}.
+     * <p>
+     * Used by {@link ai.labs.eddi.datastore.HistorizedResourceStore#update} for
+     * optimistic locking. Backends that support conditional writes should override
+     * this method.
+     *
+     * @param newResource
+     *            the resource with the new version to store
+     * @param expectedCurrentVersion
+     *            the version the caller believes is currently stored
+     * @throws IResourceStore.ResourceModifiedException
+     *             if the current version no longer matches (concurrent edit)
+     */
+    default void storeIfCurrentVersion(IResource<T> newResource, int expectedCurrentVersion)
+            throws IResourceStore.ResourceModifiedException {
+        store(newResource);
+    }
+
+    /**
      * Find resource IDs where the JSON data contains the given value at the given
      * path. Used by AgentStore/WorkflowStore for "find configs containing resource"
      * queries.
