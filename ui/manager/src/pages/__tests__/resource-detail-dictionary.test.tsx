@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { ResourceDetailPage } from "@/pages/resource-detail";
+import userEvent from "@testing-library/user-event";
 
 function renderPage(type: string, id = "res1") {
   const queryClient = new QueryClient({
@@ -71,5 +72,52 @@ describe("Dictionary Editor", () => {
     await waitFor(() => {
       expect(screen.getByTestId("form-view")).toBeInTheDocument();
     });
+  });
+
+  // ─── Interaction tests ──────────────────────────────────────────────────
+
+  it("clicking add word button adds a new word row", async () => {
+    renderPage("dictionary");
+    const user = userEvent.setup();
+    await waitFor(() => {
+      expect(screen.getByTestId("add-words-btn")).toBeInTheDocument();
+    });
+
+    const initialCount = screen.getAllByTestId("word-row").length;
+    await user.click(screen.getByTestId("add-words-btn"));
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("word-row").length).toBe(initialCount + 1);
+    });
+  });
+
+  it("switching to JSON tab shows JSON view", async () => {
+    renderPage("dictionary");
+    const user = userEvent.setup();
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-json")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByTestId("tab-json"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("json-view")).toBeInTheDocument();
+    });
+  });
+
+  it("switching back to form tab shows form view", async () => {
+    renderPage("dictionary");
+    const user = userEvent.setup();
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-json")).toBeInTheDocument();
+    });
+
+    // Go to JSON
+    await user.click(screen.getByTestId("tab-json"));
+    expect(screen.getByTestId("json-view")).toBeInTheDocument();
+
+    // Go back to Form
+    await user.click(screen.getByTestId("tab-form"));
+    expect(screen.getByTestId("form-view")).toBeInTheDocument();
   });
 });

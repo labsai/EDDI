@@ -6,6 +6,8 @@ import { ThemeProvider } from "@/components/layout/theme-provider";
 import { CapabilitiesSection } from "@/components/editors/agent-config-sections";
 import type { Agent } from "@/lib/api/agents";
 import userEvent from "@testing-library/user-event";
+import { server } from "@/test/mocks/server";
+import { http, HttpResponse } from "msw";
 
 function renderSection(agentOverrides: Partial<Agent> = {}) {
   const queryClient = new QueryClient({
@@ -31,47 +33,59 @@ function renderSection(agentOverrides: Partial<Agent> = {}) {
 }
 
 describe("CapabilitiesSection — Editor", () => {
-  it("renders capabilities section container", () => {
+  it("renders capabilities section container", async () => {
     renderSection();
     // Section is collapsed by default when no capabilities
-    expect(screen.getByText(/Capabilities/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/Capabilities/i)).toBeInTheDocument();
+    });
   });
 
-  it("shows capabilities description when expanded", () => {
+  it("shows capabilities description when expanded", async () => {
     renderSection({ capabilities: [{ skill: "test-skill", confidence: "high" }] });
-    expect(screen.getByTestId("capabilities-section")).toBeInTheDocument();
-    expect(screen.getByText(/Declared skills/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("capabilities-section")).toBeInTheDocument();
+      expect(screen.getByText(/Declared skills/i)).toBeInTheDocument();
+    });
   });
 
-  it("renders existing capabilities with skill name", () => {
+  it("renders existing capabilities with skill name", async () => {
     renderSection({
       capabilities: [
         { skill: "customer-support", confidence: "high" },
         { skill: "code-review", confidence: "medium" },
       ],
     });
-    expect(screen.getByText("customer-support")).toBeInTheDocument();
-    expect(screen.getByText("code-review")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("customer-support")).toBeInTheDocument();
+      expect(screen.getByText("code-review")).toBeInTheDocument();
+    });
   });
 
-  it("renders confidence selects for each capability", () => {
+  it("renders confidence selects for each capability", async () => {
     renderSection({
       capabilities: [
         { skill: "test-skill", confidence: "high" },
       ],
     });
-    expect(screen.getByTestId("confidence-select-0")).toBeInTheDocument();
-    expect(screen.getByTestId("confidence-select-0")).toHaveValue("high");
+    await waitFor(() => {
+      expect(screen.getByTestId("confidence-select-0")).toBeInTheDocument();
+      expect(screen.getByTestId("confidence-select-0")).toHaveValue("high");
+    });
   });
 
-  it("shows the skill autocomplete input", () => {
+  it("shows the skill autocomplete input", async () => {
     renderSection({ capabilities: [{ skill: "x", confidence: "low" }] });
-    expect(screen.getByTestId("skill-autocomplete-input")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("skill-autocomplete-input")).toBeInTheDocument();
+    });
   });
 
-  it("shows add capability button", () => {
+  it("shows add capability button", async () => {
     renderSection({ capabilities: [{ skill: "x", confidence: "low" }] });
-    expect(screen.getByTestId("add-capability-btn")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("add-capability-btn")).toBeInTheDocument();
+    });
   });
 
   it("shows autocomplete dropdown when typing a matching skill", async () => {
@@ -87,13 +101,15 @@ describe("CapabilitiesSection — Editor", () => {
     });
   });
 
-  it("renders attribute count pill when attributes exist", () => {
+  it("renders attribute count pill when attributes exist", async () => {
     renderSection({
       capabilities: [
         { skill: "my-skill", confidence: "medium", attributes: { lang: "en", domain: "tech" } },
       ],
     });
-    expect(screen.getByText("2 attrs")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("2 attrs")).toBeInTheDocument();
+    });
   });
 
   it("expands attributes editor when capability icon is clicked", async () => {
@@ -144,6 +160,139 @@ describe("CapabilitiesSection — Editor", () => {
     await waitFor(() => {
       expect(screen.getByText("languages")).toBeInTheDocument();
       expect(screen.getByDisplayValue("en,de,fr")).toBeInTheDocument();
+    });
+  });
+
+  // ─── Interaction tests ────────────────────────────────────────────────
+
+  it("adds a new capability via add button and calls update API", async () => {
+    let updateCalled = false;
+    server.use(
+      http.put("*/agentstore/agents/:id", () => {
+        updateCalled = true;
+        return new HttpResponse(null, {
+          status: 200,
+          headers: { Location: "/agentstore/agents/agent-test?version=2" },
+        });
+      })
+    );
+
+    renderSection({ capabilities: [] });
+    const user = userEvent.setup();
+
+    // Expand the section first
+    await user.click(screen.getByText(/Capabilities/i));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("skill-autocomplete-input")).toBeInTheDocument();
+    });
+
+    // Type a new skill and click add
+    const input = screen.getByTestId("skill-autocomplete-input");
+    await user.type(input, "new-skill");
+    await user.click(screen.getByTestId("add-capability-btn"));
+
+    await waitFor(() => {
+      expect(updateCalled).toBe(true);
+    });
+  });
+
+  it("removes a capability and calls update API", async () => {
+    let updateCalled = false;
+    server.use(
+      http.put("*/agentstore/agents/:id", () => {
+        updateCalled = true;
+        return new HttpResponse(null, {
+          status: 200,
+          headers: { Location: "/agentstore/agents/agent-test?version=2" },
+        });
+      })
+    );
+
+    renderSection({
+      capabilities: [{ skill: "to-remove", confidence: "low" }],
+    });
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByText("to-remove")).toBeInTheDocument();
+    });
+
+    // The remove button is the X icon in the capability entry
+    const capEntry = screen.getByTestId("capability-entry-0");
+    const removeBtn = capEntry.querySelector('button[class*="destructive"]') as HTMLButtonElement;
+    expect(removeBtn).toBeTruthy();
+    await user.click(removeBtn);
+
+    await waitFor(() => {
+      expect(updateCalled).toBe(true);
+    });
+  });
+
+  it("changes confidence level and calls update API", async () => {
+    let updateCalled = false;
+    server.use(
+      http.put("*/agentstore/agents/:id", () => {
+        updateCalled = true;
+        return new HttpResponse(null, {
+          status: 200,
+          headers: { Location: "/agentstore/agents/agent-test?version=2" },
+        });
+      })
+    );
+
+    renderSection({
+      capabilities: [{ skill: "test-skill", confidence: "medium" }],
+    });
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("confidence-select-0")).toBeInTheDocument();
+    });
+
+    await user.selectOptions(screen.getByTestId("confidence-select-0"), "high");
+
+    await waitFor(() => {
+      expect(updateCalled).toBe(true);
+    });
+  });
+
+  it("selects an autocomplete item and calls update API", async () => {
+    let updateCalled = false;
+    server.use(
+      http.put("*/agentstore/agents/:id", () => {
+        updateCalled = true;
+        return new HttpResponse(null, {
+          status: 200,
+          headers: { Location: "/agentstore/agents/agent-test?version=2" },
+        });
+      })
+    );
+
+    renderSection({ capabilities: [] });
+    const user = userEvent.setup();
+
+    // Expand section
+    await user.click(screen.getByText(/Capabilities/i));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("skill-autocomplete-input")).toBeInTheDocument();
+    });
+
+    // Type to trigger autocomplete — "customer" should match "customer-support" from skills MSW handler
+    const input = screen.getByTestId("skill-autocomplete-input");
+    await user.type(input, "customer");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("skill-autocomplete-dropdown")).toBeInTheDocument();
+    });
+
+    // Click the autocomplete suggestion
+    const suggestion = screen.getByText("customer-support");
+    await user.click(suggestion);
+
+    await waitFor(() => {
+      expect(updateCalled).toBe(true);
     });
   });
 });

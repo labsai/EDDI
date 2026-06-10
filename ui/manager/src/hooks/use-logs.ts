@@ -69,6 +69,7 @@ export function useLogStream(filters: LogFilters = {}) {
   const eventSourceRef = useRef<BearerEventSource | null>(null);
   const pausedRef = useRef(false);
   const filterKey = JSON.stringify(filters);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep ref in sync
   useEffect(() => {
@@ -76,6 +77,10 @@ export function useLogStream(filters: LogFilters = {}) {
   }, [paused]);
 
   const connect = useCallback(() => {
+    if (reconnectTimerRef.current !== null) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     try {
       const es = createLogEventSource(filters);
       eventSourceRef.current = es;
@@ -102,7 +107,10 @@ export function useLogStream(filters: LogFilters = {}) {
       es.onerror = () => {
         setSseConnected(false);
         es.close();
-        setTimeout(connect, 5000);
+        if (reconnectTimerRef.current !== null) {
+          clearTimeout(reconnectTimerRef.current);
+        }
+        reconnectTimerRef.current = setTimeout(connect, 5000);
       };
 
       es.onopen = () => {
@@ -118,6 +126,9 @@ export function useLogStream(filters: LogFilters = {}) {
     connect();
     return () => {
       eventSourceRef.current?.close();
+      if (reconnectTimerRef.current !== null) {
+        clearTimeout(reconnectTimerRef.current);
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterKey]);

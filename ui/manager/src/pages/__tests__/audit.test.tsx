@@ -1,29 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { render } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { AuditPage } from "@/pages/audit";
-import userEvent from "@testing-library/user-event";
 
 function renderAudit() {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
+  return renderWithProviders(<AuditPage />, {
+    initialRoute: "/manage/audit",
   });
-
-  return render(
-    <MemoryRouter initialEntries={["/manage/audit"]}>
-      <QueryClientProvider client={queryClient}>
-        <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
-          <AuditPage />
-        </ThemeProvider>
-      </QueryClientProvider>
-    </MemoryRouter>
-  );
 }
 
 describe("AuditPage", () => {
@@ -192,7 +175,7 @@ describe("AuditPage", () => {
     // Find and expand LLM Detail
     const llmButtons = screen.getAllByTestId("expand-LLM Detail");
     expect(llmButtons.length).toBe(1); // Only langchain entry has LLM detail
-    await userEvent.click(llmButtons[0]!);
+    await user.click(llmButtons[0]!);
 
     await waitFor(() => {
       expect(screen.getByText(/"compiled_prompt"/)).toBeInTheDocument();

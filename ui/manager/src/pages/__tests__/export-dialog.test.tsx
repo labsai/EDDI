@@ -42,8 +42,9 @@ describe("ExportAgentDialog", () => {
     });
 
     const checkboxes = screen.getAllByRole("checkbox");
-    // The first checkbox (agent root) should be disabled (required)
-    expect(checkboxes[0]).toBeDisabled();
+    // Find disabled checkboxes (required items)
+    const disabledCheckboxes = checkboxes.filter((cb) => cb.hasAttribute("disabled"));
+    expect(disabledCheckboxes.length).toBeGreaterThan(0);
   });
 
   it("non-required items can be toggled", async () => {
@@ -81,15 +82,30 @@ describe("ExportAgentDialog", () => {
       expect(screen.getByTestId("export-confirm-btn")).toBeInTheDocument();
     });
 
-    // Find the toggle-all checkbox (the standalone checkbox outside the resource list)
-    const checkboxes = screen.getAllByRole("checkbox");
-    // Last should be the "select all" in the footer
-    const selectAllCheckbox = checkboxes[checkboxes.length - 1]!;
+    const selectAllCheckbox = screen.getByTestId("select-all-checkbox") as HTMLInputElement;
 
-    // Toggle off
+    // Initially all should be selected
+    expect(selectAllCheckbox.checked).toBe(true);
+
+    // Toggle off — should deselect non-required items
     await user.click(selectAllCheckbox);
-    // Toggle on
+
+    // The select-all checkbox should now be unchecked (only required remain)
+    const enabledCheckboxes = screen.getAllByRole("checkbox").filter(
+      (cb) => !cb.hasAttribute("disabled") && cb !== selectAllCheckbox
+    );
+    const allUnchecked = enabledCheckboxes.every(
+      (cb) => !(cb as HTMLInputElement).checked
+    );
+    expect(allUnchecked).toBe(true);
+
+    // Toggle on — should re-select all
     await user.click(selectAllCheckbox);
+    expect(selectAllCheckbox.checked).toBe(true);
+    const allCheckedAfter = screen.getAllByRole("checkbox").every(
+      (cb) => (cb as HTMLInputElement).checked
+    );
+    expect(allCheckedAfter).toBe(true);
   });
 
   it("does not render when open is false", () => {

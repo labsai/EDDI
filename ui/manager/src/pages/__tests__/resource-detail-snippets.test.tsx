@@ -1,10 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { screen, waitFor, fireEvent } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { ResourceDetailPage } from "@/pages/resource-detail";
+import userEvent from "@testing-library/user-event";
 
 function renderPage(type: string, id = "snip1") {
   const queryClient = new QueryClient({
@@ -88,22 +89,49 @@ describe("Snippet Editor", () => {
 
   it("allows changing the category", async () => {
     renderPage("snippets");
+    const user = userEvent.setup();
     await waitFor(() => {
       expect(screen.getByTestId("snippet-category")).toBeInTheDocument();
     });
     const select = screen.getByTestId("snippet-category") as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: "compliance" } });
+    await user.selectOptions(select, "compliance");
     expect(select.value).toBe("compliance");
   });
 
   it("normalizes name input to lowercase with underscores", async () => {
     renderPage("snippets");
+    const user = userEvent.setup();
     await waitFor(() => {
       expect(screen.getByTestId("snippet-name")).toBeInTheDocument();
     });
     const input = screen.getByTestId("snippet-name") as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "My Test Name!" } });
+    await user.clear(input);
+    await user.type(input, "My Test Name!");
     // The component transforms input: toLowerCase + replace non-alphanumeric with _
     expect(input.value).toMatch(/^[a-z0-9_]+$/);
+  });
+
+  it("switching to JSON tab shows JSON view", async () => {
+    renderPage("snippets");
+    const user = userEvent.setup();
+    await waitFor(() => {
+      expect(screen.getByTestId("tab-json")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("tab-json"));
+    await waitFor(() => {
+      expect(screen.getByTestId("json-view")).toBeInTheDocument();
+    });
+  });
+
+  it("toggling template enabled checkbox changes state", async () => {
+    renderPage("snippets");
+    const user = userEvent.setup();
+    await waitFor(() => {
+      expect(screen.getByTestId("snippet-template-enabled")).toBeInTheDocument();
+    });
+    const checkbox = screen.getByTestId("snippet-template-enabled") as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+    await user.click(checkbox);
+    expect(checkbox.checked).toBe(false);
   });
 });

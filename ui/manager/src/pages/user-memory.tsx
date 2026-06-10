@@ -211,7 +211,7 @@ export function UserMemoryPage({ embedded }: { embedded?: boolean } = {}) {
 
       {/* Loading */}
       {debouncedUserId && isLoading && (
-        <div className="flex items-center justify-center py-16">
+        <div className="flex items-center justify-center py-16" data-testid="memory-loading-spinner">
           <RefreshCw className="h-8 w-8 animate-spin text-primary" />
         </div>
       )}
@@ -314,6 +314,7 @@ function MemoryRow({
     >
       <div
         className="flex items-center gap-3 px-4 py-3 cursor-pointer"
+        data-testid={`memory-expand-toggle-${entry.id ?? entry.key}`}
         onClick={() => setExpanded(!expanded)}
       >
         <button type="button" className="shrink-0 text-muted-foreground">

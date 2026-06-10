@@ -111,7 +111,7 @@ export function ConversationDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-20">
+      <div className="flex items-center justify-center py-20" data-testid="conversation-loading">
         <RefreshCw className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
@@ -186,6 +186,7 @@ export function ConversationDetailPage() {
           <button
             onClick={() => setShowDeleteDialog(true)}
             className="rounded-lg bg-destructive/10 px-4 py-2 text-sm font-medium text-destructive hover:bg-destructive/20 transition-colors"
+            data-testid="delete-conversation-btn"
           >
             <Trash2 className="h-4 w-4" />
           </button>
@@ -437,6 +438,7 @@ function ChatBubbleStep({
         <div className="mx-4 sm:mx-8 rounded-lg bg-secondary/50 p-3 border border-border overflow-x-auto">
           <pre
             className="text-xs leading-relaxed"
+            data-testid={`step-raw-${stepNumber}`}
             dangerouslySetInnerHTML={{ __html: syntaxHighlightJson(JSON.stringify(step, null, 2)) }}
           />
         </div>
@@ -476,7 +478,7 @@ function PropertiesSection({
       </button>
       {expanded && (
         <div className="border-t border-border p-5">
-          <pre className="overflow-x-auto rounded-lg bg-secondary p-4 text-sm text-foreground">
+          <pre className="overflow-x-auto rounded-lg bg-secondary p-4 text-sm text-foreground" data-testid="properties-json">
             {JSON.stringify(properties, null, 2)}
           </pre>
         </div>

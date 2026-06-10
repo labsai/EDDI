@@ -574,7 +574,7 @@ export function SchedulesPage() {
 
       {/* Status Cards */}
       {isLoading ? (
-        <div className="cq-stat-grid">
+        <div className="cq-stat-grid" data-testid="schedules-loading">
           {[...Array(4)].map((_, i) => (
             <div
               key={i}

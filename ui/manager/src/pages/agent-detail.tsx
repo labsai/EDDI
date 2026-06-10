@@ -236,7 +236,7 @@ export function AgentDetailPage() {
 
   if (isLoading && !agent) {
     return (
-      <div className="flex items-center justify-center py-20">
+      <div className="flex items-center justify-center py-20" data-testid="agent-detail-loading">
         <RefreshCw className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
@@ -1203,6 +1203,7 @@ function A2ASection({
                       onClick={() => copyToClipboard(url, label)}
                       className="rounded p-1 text-muted-foreground hover:text-foreground transition-colors"
                       aria-label="Copy URL"
+                      data-testid={`copy-url-${label}`}
                     >
                       {copied === label ? (
                         <span className="text-[10px] font-medium text-emerald-500">✓</span>

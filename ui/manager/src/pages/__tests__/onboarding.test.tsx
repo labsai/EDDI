@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/components/layout/theme-provider";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { WelcomeModal } from "@/components/onboarding/welcome-modal";
 import { GuidedTour } from "@/components/onboarding/guided-tour";
+import userEvent from "@testing-library/user-event";
 
 /* ─── Test helpers ─── */
 
@@ -228,13 +229,14 @@ describe("Onboarding — Welcome Modal", () => {
 
   it("'Start the Tour' button closes modal and starts dashboard chapter", async () => {
     render(<WelcomeModal />, { wrapper: createWrapper() });
+    const user = userEvent.setup();
 
     // Navigate to panel 3 where the start tour button is
     const dots = screen.getAllByRole("button", { name: /Panel/i });
-    fireEvent.click(dots[2]!); // Panel 3
+    await user.click(dots[2]!); // Panel 3
 
     const startBtn = await screen.findByTestId("welcome-start-tour");
-    fireEvent.click(startBtn);
+    await user.click(startBtn);
 
     await waitFor(() => {
       expect(useOnboarding.getState().showWelcome).toBe(false);
@@ -244,13 +246,14 @@ describe("Onboarding — Welcome Modal", () => {
 
   it("'Explore on My Own' button closes modal without starting tour", async () => {
     render(<WelcomeModal />, { wrapper: createWrapper() });
+    const user = userEvent.setup();
 
     // Navigate to panel 3
     const dots = screen.getAllByRole("button", { name: /Panel/i });
-    fireEvent.click(dots[2]!);
+    await user.click(dots[2]!);
 
     const exploreBtn = await screen.findByTestId("welcome-explore");
-    fireEvent.click(exploreBtn);
+    await user.click(exploreBtn);
 
     await waitFor(() => {
       expect(useOnboarding.getState().showWelcome).toBe(false);
@@ -260,6 +263,7 @@ describe("Onboarding — Welcome Modal", () => {
 
   it("Escape key dismisses welcome modal", () => {
     render(<WelcomeModal />, { wrapper: createWrapper() });
+    // Escape is a keyboard event not a user interaction, fireEvent is acceptable here
     fireEvent.keyDown(document, { key: "Escape" });
     expect(useOnboarding.getState().showWelcome).toBe(false);
   });
@@ -324,6 +328,7 @@ describe("Onboarding — Guided Tour", () => {
     useOnboarding.getState().startChapter("dashboard");
     render(<GuidedTour />, { wrapper: createWrapper() });
 
+    // Escape is a non-user-initiated DOM event, fireEvent is acceptable
     fireEvent.keyDown(document, { key: "Escape" });
 
     expect(useOnboarding.getState().activeChapter).toBeNull();

@@ -1,10 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { UserDataPage } from "@/pages/user-data";
+import userEvent from "@testing-library/user-event";
 
 function renderPage(initialRoute = "/manage/userdata") {
   const queryClient = new QueryClient({
@@ -53,26 +54,25 @@ describe("UserDataPage", () => {
 
   it("does not show the standalone h1 header of the embedded Memories component", () => {
     renderPage();
-    // The standalone h1 "User Memory" should NOT exist as a heading
-    // (it only appears inside the h1 which is hidden when embedded)
-    // But the tab label uses the same i18n key, so check the heading role instead
     const headings = screen.getAllByRole("heading", { level: 1 });
     // Should only have the parent User Data heading, not a User Memory h1
     expect(headings).toHaveLength(1);
     expect(headings[0]!.textContent).toContain("User Data");
   });
 
-  it("switches to Properties tab on click", () => {
+  it("switches to Properties tab on click", async () => {
     renderPage();
-    fireEvent.click(screen.getByTestId("tab-properties"));
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("tab-properties"));
 
     expect(screen.getByTestId("properties-page")).toBeInTheDocument();
     expect(screen.queryByTestId("user-memory-page")).not.toBeInTheDocument();
   });
 
-  it("does not show the standalone h1 header of the embedded Properties component", () => {
+  it("does not show the standalone h1 header of the embedded Properties component", async () => {
     renderPage();
-    fireEvent.click(screen.getByTestId("tab-properties"));
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("tab-properties"));
 
     // Only one h1 should exist: the parent User Data heading
     const headings = screen.getAllByRole("heading", { level: 1 });
@@ -80,9 +80,10 @@ describe("UserDataPage", () => {
     expect(headings[0]!.textContent).toContain("User Data");
   });
 
-  it("switches to Conversations tab on click", () => {
+  it("switches to Conversations tab on click", async () => {
     renderPage();
-    fireEvent.click(screen.getByTestId("tab-conversations"));
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("tab-conversations"));
 
     expect(screen.getByTestId("user-conversations-page")).toBeInTheDocument();
     expect(screen.queryByTestId("user-memory-page")).not.toBeInTheDocument();
@@ -93,8 +94,9 @@ describe("UserDataPage", () => {
     expect(screen.getByRole("tablist")).toBeInTheDocument();
   });
 
-  it("marks only the active tab as aria-selected", () => {
+  it("marks only the active tab as aria-selected", async () => {
     renderPage();
+    const user = userEvent.setup();
 
     const memoriesTab = screen.getByTestId("tab-memories");
     const propertiesTab = screen.getByTestId("tab-properties");
@@ -102,7 +104,7 @@ describe("UserDataPage", () => {
     expect(memoriesTab.getAttribute("aria-selected")).toBe("true");
     expect(propertiesTab.getAttribute("aria-selected")).toBe("false");
 
-    fireEvent.click(propertiesTab);
+    await user.click(propertiesTab);
 
     expect(memoriesTab.getAttribute("aria-selected")).toBe("false");
     expect(propertiesTab.getAttribute("aria-selected")).toBe("true");

@@ -1,29 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
-import { render } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { screen, waitFor, within } from "@testing-library/react";
+import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { TriggersPage } from "@/pages/triggers";
-import userEvent from "@testing-library/user-event";
+import { server } from "@/test/mocks/server";
+import { http, HttpResponse } from "msw";
 
 function renderPage() {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  });
-
-  return render(
-    <MemoryRouter>
-      <QueryClientProvider client={queryClient}>
-        <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test-triggers">
-          <TriggersPage />
-        </ThemeProvider>
-      </QueryClientProvider>
-    </MemoryRouter>,
-  );
+  return renderWithProviders(<TriggersPage />);
 }
 
 describe("TriggersPage", () => {
@@ -122,6 +105,179 @@ describe("TriggersPage", () => {
 
     await waitFor(() => {
       expect(screen.queryByTestId("trigger-dialog")).not.toBeInTheDocument();
+    });
+  });
+
+  // ─── Subtitle ──────────────────────────────────────────────────────────
+
+  it("renders the page subtitle", () => {
+    renderPage();
+    expect(screen.getByText(/Map intents to agent deployments/)).toBeInTheDocument();
+  });
+
+  // ─── Error state ───────────────────────────────────────────────────────
+
+  it("shows error state when API fails", async () => {
+    server.use(
+      http.get("*/AgentTriggerStore/agenttriggers", () => {
+        return HttpResponse.json({ error: "fail" }, { status: 500 });
+      })
+    );
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+    });
+  });
+
+  it("shows retry button in error state", async () => {
+    server.use(
+      http.get("*/AgentTriggerStore/agenttriggers", () => {
+        return HttpResponse.json({ error: "fail" }, { status: 500 });
+      })
+    );
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Retry")).toBeInTheDocument();
+    });
+  });
+
+  // ─── Empty state ───────────────────────────────────────────────────────
+
+  it("shows empty state when no triggers exist", async () => {
+    server.use(
+      http.get("*/AgentTriggerStore/agenttriggers", () => {
+        return HttpResponse.json([]);
+      })
+    );
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("No triggers configured yet")).toBeInTheDocument();
+    });
+  });
+
+  it("shows no results empty state when search matches nothing", async () => {
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("trigger-list")).toBeInTheDocument();
+    });
+
+    await user.type(screen.getByTestId("trigger-search"), "zzzzzznonexistent");
+
+    await waitFor(() => {
+      expect(screen.getByText(/No results found/i)).toBeInTheDocument();
+    });
+  });
+
+  // ─── Trigger expand/collapse ────────────────────────────────────────────
+
+  it("expands a trigger card to show agent deployments", async () => {
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("trigger-booking_request")).toBeInTheDocument();
+    });
+
+    // Click the expand button — use within() to find by aria-expanded
+    const triggerCard = screen.getByTestId("trigger-booking_request");
+    const expandBtn = within(triggerCard).getByRole("button", { expanded: false });
+    await user.click(expandBtn);
+
+    // Deployment details should appear — environment badge visible
+    await waitFor(() => {
+      expect(within(triggerCard).getByText("production")).toBeInTheDocument();
+    });
+  });
+
+  // ─── Edit dialog ────────────────────────────────────────────────────────
+
+  it("opens edit trigger dialog when edit button is clicked", async () => {
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("trigger-booking_request")).toBeInTheDocument();
+    });
+
+    // Use within() to find edit button by accessible label
+    const triggerCard = screen.getByTestId("trigger-booking_request");
+    const editBtn = within(triggerCard).getByTitle("Edit");
+    await user.click(editBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("trigger-dialog")).toBeInTheDocument();
+      expect(screen.getByText("Edit Trigger")).toBeInTheDocument();
+    });
+  });
+
+  it("intent field is readonly in edit mode", async () => {
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("trigger-booking_request")).toBeInTheDocument();
+    });
+
+    const triggerCard = screen.getByTestId("trigger-booking_request");
+    const editBtn = within(triggerCard).getByTitle("Edit");
+    await user.click(editBtn);
+
+    await waitFor(() => {
+      const intentInput = screen.getByTestId("trigger-intent-input") as HTMLInputElement;
+      expect(intentInput.readOnly).toBe(true);
+    });
+  });
+
+  // ─── Delete dialog ──────────────────────────────────────────────────────
+
+  it("opens delete confirmation dialog when delete button is clicked", async () => {
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("trigger-booking_request")).toBeInTheDocument();
+    });
+
+    const triggerCard = screen.getByTestId("trigger-booking_request");
+    const deleteBtn = within(triggerCard).getByTitle("Delete");
+    await user.click(deleteBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Delete Trigger")).toBeInTheDocument();
+    });
+  });
+
+  // ─── Search hides when no triggers ──────────────────────────────────────
+
+  it("hides search when triggers list is empty", async () => {
+    server.use(
+      http.get("*/AgentTriggerStore/agenttriggers", () => {
+        return HttpResponse.json([]);
+      })
+    );
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("No triggers configured yet")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId("trigger-search")).not.toBeInTheDocument();
+  });
+
+  // ─── Save button disabled without intent ────────────────────────────────
+
+  it("save button is disabled when intent is empty in create dialog", async () => {
+    renderPage();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("create-trigger-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("trigger-save-btn")).toBeDisabled();
     });
   });
 });

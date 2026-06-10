@@ -74,3 +74,14 @@ if (typeof window !== "undefined" && typeof EventSource !== "undefined") {
   // Delay slightly so MSW has time to start in dev mode
   setTimeout(connect, 2000);
 }
+
+export function _connectForTesting() {
+  connect();
+  return {
+    close: () => {
+      eventSource?.close();
+      eventSource = null;
+    },
+    getEventSource: () => eventSource,
+  };
+}

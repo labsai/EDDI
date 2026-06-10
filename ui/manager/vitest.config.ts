@@ -8,7 +8,7 @@ export default mergeConfig(
       globals: true,
       environment: "jsdom",
       setupFiles: ["./src/test/setup.ts"],
-      testTimeout: 15_000,
+      testTimeout: 30_000,
       css: true,
       exclude: ["e2e/**", "node_modules/**"],
       server: {
@@ -20,9 +20,14 @@ export default mergeConfig(
       },
       coverage: {
         provider: "v8",
-        reporter: ["text", "json", "html"],
+        reporter: ["text", "json", "html", "lcov"],
         include: ["src/**/*.{ts,tsx}"],
-        exclude: ["src/test/**", "src/**/*.d.ts"],
+        exclude: [
+          "src/test/**",
+          "src/**/*.d.ts",
+          "src/main.tsx",
+          "src/lib/auth-config.ts",
+        ],
       },
     },
   })

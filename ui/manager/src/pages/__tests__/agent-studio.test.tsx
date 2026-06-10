@@ -1,32 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { render } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { renderPage, userEvent } from "@/test/test-utils";
 import { AgentStudioPage } from "@/pages/agent-studio";
 
 function renderStudio(agentId = "agent1") {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  });
-
-  return render(
-    <MemoryRouter initialEntries={[`/manage/studio/${agentId}`]}>
-      <QueryClientProvider client={queryClient}>
-        <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test-studio">
-          <Routes>
-            <Route
-              path="/manage/studio/:agentId"
-              element={<AgentStudioPage />}
-            />
-          </Routes>
-        </ThemeProvider>
-      </QueryClientProvider>
-    </MemoryRouter>
+  return renderPage(
+    `/manage/studio/${agentId}`,
+    <AgentStudioPage />,
+    "/manage/studio/:agentId"
   );
 }
 
@@ -38,19 +19,14 @@ describe("Agent Studio Page", () => {
     });
   });
 
-  it("shows agent name or ID in the header", async () => {
+  it("shows actual agent name from mock data in the header", async () => {
     renderStudio();
+    // The agent descriptor resolves agent1 to "Support Agent"
     await waitFor(() => {
-      // Either the resolved agent name or the raw agentId
-      const header = screen.getByTestId("agent-studio");
-      expect(header).toBeInTheDocument();
+      expect(screen.getByText("Support Agent")).toBeInTheDocument();
     });
-    // The agent descriptor should resolve to the name
-    await waitFor(() => {
-      expect(
-        screen.getByText("Agent Studio")
-      ).toBeInTheDocument();
-    });
+    // The subtitle should say "Agent Studio"
+    expect(screen.getByText("Agent Studio")).toBeInTheDocument();
   });
 
   it("renders the back link to agent detail", async () => {
@@ -106,25 +82,56 @@ describe("Agent Studio Page", () => {
     });
   });
 
-  it("loads pipeline stages from the workflow", async () => {
+  it("loads pipeline stages from the workflow and shows stage content", async () => {
     renderStudio();
-    // The mock workflow has 5 steps; pipeline-railroad renders them
-    // Wait for the pipeline to load (the workflow fetch needs to complete)
+    // The mock workflow for agent1 has 5 steps: parser, rules, property, llm, output
+    // The pipeline railroad renders them with data-testid="stage-{idx}"
+    // Note: PipelineRailroad renders twice (desktop + mobile), so use getAllByTestId
     await waitFor(
       () => {
-        // The pipeline railroad should render the pipeline steps
-        // At minimum, the studio container should be present
-        expect(screen.getByTestId("agent-studio")).toBeInTheDocument();
+        const railroads = screen.getAllByTestId("pipeline-railroad");
+        expect(railroads.length).toBeGreaterThanOrEqual(1);
+        // Verify actual pipeline stage labels from mock data
+        const stages = screen.getAllByTestId("stage-0");
+        expect(stages.length).toBeGreaterThanOrEqual(1);
+        const lastStages = screen.getAllByTestId("stage-4");
+        expect(lastStages.length).toBeGreaterThanOrEqual(1);
       },
       { timeout: 3000 }
     );
+
+    // Verify actual extension type labels are rendered
+    await waitFor(() => {
+      expect(screen.getAllByText("Rules").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("LLM").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("Output").length).toBeGreaterThanOrEqual(1);
+    });
   });
 
-  it("navigates back correctly with back link", async () => {
+  it("can select a pipeline stage by clicking", async () => {
     renderStudio();
+    const user = userEvent.setup();
+
+    await waitFor(
+      () => {
+        // Multiple renders of stage-1 exist (desktop + mobile)
+        const stages = screen.getAllByTestId("stage-1");
+        expect(stages.length).toBeGreaterThanOrEqual(1);
+      },
+      { timeout: 3000 }
+    );
+
+    // Click on the first "Rules" stage (index 1) - pick first one (desktop)
+    const stageButtons = screen.getAllByTestId("stage-1");
+    await user.click(stageButtons[0]);
+
+    // After selecting, the button should have aria-current="true"
     await waitFor(() => {
-      const backLink = screen.getByTestId("studio-back");
-      expect(backLink.getAttribute("href")).toBe("/manage/agentview/agent1");
+      const updatedStages = screen.getAllByTestId("stage-1");
+      const hasAriaCurrent = updatedStages.some(
+        (el) => el.getAttribute("aria-current") === "true"
+      );
+      expect(hasAriaCurrent).toBe(true);
     });
   });
 });
