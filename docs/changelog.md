@@ -4,6 +4,42 @@
 
 ---
 
+## 🐛 Bug Fixes from Code Review — 4 Concurrency & Null Safety Issues (2026-06-10)
+
+**Repo:** EDDI (`fix/code-review-bugs`)
+**What changed:** Fixed 4 verified bugs from code review (priority HIGH to MEDIUM). All fixes include regression tests.
+
+### Fix #1 — PropertySetterTask NPE on blank input (HIGH)
+
+- **Root cause:** `CATCH_ANY_INPUT_AS_PROPERTY` handler dereferences `getLatestData("input:initial")` without null check. When a client sends an empty/whitespace-only message, `Conversation.storeUserInputInMemory` skips storing `input:initial` → `getLatestData` returns null → NPE → pipeline dies → conversation enters ERROR state.
+- **Fix:** Added null guards for both `initialInputData` and `initialInput`.
+- **Tests:** 3 new tests — missing `input:initial`, null result, empty string result.
+- **Files:** `PropertySetterTask.java`, `PropertySetterTaskTest.java`
+
+### Fix #2 — Config version race condition (HIGH PG / MEDIUM-LOW Mongo)
+
+- **Root cause:** `HistorizedResourceStore.update()` does non-atomic read→increment→write. Two concurrent edits both read version N, both write N+1 — last write wins silently. On PostgreSQL: `ON CONFLICT DO UPDATE` silently merges history. On MongoDB: history `insertOne` throws unhandled `MongoWriteException` (HTTP 500 instead of 409).
+- **Fix:** Introduced optimistic locking via `storeIfCurrentVersion()` default method on `IResourceStorage`. MongoDB overrides with version-conditioned `updateOne` (check `matchedCount`). PostgreSQL overrides with `UPDATE WHERE version = ?` (check affected rows). History inserts hardened: Mongo catches duplicate-key 11000; Postgres uses `ON CONFLICT DO NOTHING`.
+- **Tests:** 1 new test for concurrent modification detection (mock throws `ResourceModifiedException`); existing update test updated to verify `storeIfCurrentVersion` delegation.
+- **Files:** `IResourceStorage.java`, `MongoResourceStorage.java`, `PostgresResourceStorage.java`, `HistorizedResourceStore.java`, `HistorizedResourceStoreTest.java`
+
+### Fix #3 — ComponentCache HashMap race (MEDIUM)
+
+- **Root cause:** `ComponentCache` is `@ApplicationScoped` (singleton) using plain `HashMap`. `computeIfAbsent` on `HashMap` is not thread-safe. Concurrent reads (every conversation turn via `LifecycleManager`) and writes (lazy agent deployment via `WorkflowStoreClientLibrary`) can corrupt the map.
+- **Fix:** Replaced `HashMap` with `ConcurrentHashMap` for both outer and inner maps.
+- **Tests:** 1 new concurrent stress test (8 threads, 500 ops each, mixed read/write).
+- **Files:** `ComponentCache.java`, `ComponentCacheTest.java`
+
+### Fix #4 — Zombie-write snapshot clobber after timeout (MEDIUM)
+
+- **Root cause:** When an agent times out, `future.cancel(true)` sets the interrupt flag but doesn't stop threads blocked in non-interruptible I/O (LLM HTTP calls). When the call eventually completes, `onComplete` callback fires → `storeConversationMemory` → unconditional `replaceOne` overwrites the newer conversation state.
+- **Fix:** Check `Thread.currentThread().isInterrupted()` before calling `onComplete()`. If interrupted, route to `onFailure()` instead (with log warning).
+- **Tests:** 2 new tests — cancelled thread routes to `onFailure`; non-interrupted thread still routes to `onComplete`.
+- **Files:** `BaseRuntime.java`, `BaseRuntimeTest.java`
+
+---
+
+
 ## 🐛 Fix: Swagger UI Broken by CSP — Per-Path Filter Override (2026-06-03)
 
 **Repo:** EDDI (`fix/swagger-ui-csp`)
