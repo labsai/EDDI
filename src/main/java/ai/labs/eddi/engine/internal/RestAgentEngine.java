@@ -28,6 +28,7 @@ import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -248,8 +249,9 @@ public class RestAgentEngine implements IRestAgentEngine {
     /**
      * Validates that the caller owns the conversation identified by
      * {@code conversationId}. Admin role bypasses the check. If the descriptor
-     * cannot be loaded (e.g., not found), the check is skipped and the actual
-     * operation will handle the error.
+     * cannot be loaded due to a store error, access is denied (fail-closed). If the
+     * descriptor is not found, the check is skipped and the actual operation will
+     * handle the 404.
      */
     private void validateConversationOwnership(String conversationId) {
         try {
@@ -259,10 +261,11 @@ public class RestAgentEngine implements IRestAgentEngine {
             throw e;
         } catch (ResourceNotFoundException e) {
             // Descriptor not found — let the actual operation handle it
-            LOGGER.debugf("Conversation descriptor not found for %s", conversationId);
+            LOGGER.debugf("Conversation descriptor not found for %s", sanitize(conversationId));
         } catch (ResourceStoreException e) {
-            // Store error — let the actual operation handle it
-            LOGGER.debugf("Could not load conversation descriptor for %s: %s", conversationId, e.getMessage());
+            // Fail-closed: cannot verify ownership → deny access
+            LOGGER.warnf("Could not load conversation descriptor for ownership check: %s", sanitize(conversationId));
+            throw new ForbiddenException("Access denied: unable to verify conversation ownership");
         }
     }
 }

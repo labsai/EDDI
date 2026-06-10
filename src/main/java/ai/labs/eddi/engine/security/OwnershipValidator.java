@@ -11,6 +11,8 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Centralized ownership validation utility. Provides methods to assert that the
  * authenticated caller owns the resource they are attempting to access, or
@@ -69,7 +71,7 @@ public class OwnershipValidator {
         String callerId = identity.getPrincipal().getName();
         if (!callerId.equals(requestedUserId)) {
             LOGGER.warnf("Ownership check failed: caller attempted to access another user's data");
-            LOGGER.debugf("Ownership detail: caller='%s', requestedUserId='%s'", callerId, requestedUserId);
+            LOGGER.debugf("Ownership detail: caller='%s', requestedUserId='%s'", sanitize(callerId), sanitize(requestedUserId));
             throw new ForbiddenException("Access denied: you do not own this user's data");
         }
     }
@@ -111,7 +113,7 @@ public class OwnershipValidator {
 
         if (!callerId.equals(requestedUserId)) {
             LOGGER.warnf("UserId resolution rejected: caller attempted to impersonate another user");
-            LOGGER.debugf("UserId resolution detail: caller='%s', requestedUserId='%s'", callerId, requestedUserId);
+            LOGGER.debugf("UserId resolution detail: caller='%s', requestedUserId='%s'", sanitize(callerId), sanitize(requestedUserId));
             throw new ForbiddenException("Access denied: you cannot start a conversation as another user");
         }
 
@@ -153,7 +155,8 @@ public class OwnershipValidator {
         String callerId = identity.getPrincipal().getName();
         if (!callerId.equals(resourceOwnerId)) {
             LOGGER.warnf("Ownership check failed: caller denied access to %s owned by another user", resourceType);
-            LOGGER.debugf("Ownership detail: caller='%s', resourceType='%s', ownerId='%s'", callerId, resourceType, resourceOwnerId);
+            LOGGER.debugf("Ownership detail: caller='%s', resourceType='%s', ownerId='%s'", sanitize(callerId), sanitize(resourceType),
+                    sanitize(resourceOwnerId));
             throw new ForbiddenException("Access denied: you do not own this " + resourceType);
         }
     }

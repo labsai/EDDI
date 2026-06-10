@@ -62,9 +62,9 @@ public class McpMemoryTools {
     public String listUserMemories(@ToolArg(description = "User ID (required)") String userId,
                                    @ToolArg(description = "Maximum number of entries to return (default: 50)") Integer limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
-        ownershipValidator.validateUserAccess(identity, userId);
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
+        ownershipValidator.validateUserAccess(identity, userId);
         try {
             var entries = userMemoryStore.getAllEntries(userId);
             int maxEntries = limit != null && limit > 0 ? limit : 50;
@@ -92,9 +92,9 @@ public class McpMemoryTools {
                                      @ToolArg(description = "Recall order: 'most_recent' or 'most_accessed' (default: most_recent)") String order,
                                      @ToolArg(description = "Maximum number of entries (default: 50)") Integer limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
-        ownershipValidator.validateUserAccess(identity, userId);
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
+        ownershipValidator.validateUserAccess(identity, userId);
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         try {
@@ -120,9 +120,9 @@ public class McpMemoryTools {
     public String searchUserMemories(@ToolArg(description = "User ID (required)") String userId,
                                      @ToolArg(description = "Search query (required)") String query) {
         requireRole(identity, authEnabled, "eddi-viewer");
-        ownershipValidator.validateUserAccess(identity, userId);
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
+        ownershipValidator.validateUserAccess(identity, userId);
         if (query == null || query.isBlank())
             return errorJson("query is required");
         try {
@@ -144,9 +144,9 @@ public class McpMemoryTools {
     public String getMemoryByKey(@ToolArg(description = "User ID (required)") String userId,
                                  @ToolArg(description = "Memory key name (required)") String key) {
         requireRole(identity, authEnabled, "eddi-viewer");
-        ownershipValidator.validateUserAccess(identity, userId);
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
+        ownershipValidator.validateUserAccess(identity, userId);
         if (key == null || key.isBlank())
             return errorJson("key is required");
         try {
@@ -232,9 +232,9 @@ public class McpMemoryTools {
     @Tool(name = "count_user_memories", description = "Count the number of memory entries for a user.")
     public String countUserMemories(@ToolArg(description = "User ID (required)") String userId) {
         requireRole(identity, authEnabled, "eddi-viewer");
-        ownershipValidator.validateUserAccess(identity, userId);
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
+        ownershipValidator.validateUserAccess(identity, userId);
         try {
             long count = userMemoryStore.countEntries(userId);
             return jsonSerialization.serialize(Map.of("userId", userId, "count", count));

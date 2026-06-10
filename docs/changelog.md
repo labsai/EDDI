@@ -31,7 +31,7 @@
 
 ### Finding: MCP Memory Ownership (NEW → FIXED)
 - **Problem:** MCP memory read tools (`list_user_memories`, `get_visible_memories`, etc.) accepted `userId` as a tool parameter without validating against the caller's identity.
-- **Fix:** Added `requireOwnerOrAdmin()` to `McpToolUtils` and applied it in all 5 read-only MCP memory tools.
+- **Fix:** `McpMemoryTools` now injects `OwnershipValidator` and calls `validateUserAccess()` in all 5 read-only MCP memory tools (initially via `McpToolUtils.requireOwnerOrAdmin()`, consolidated to direct `OwnershipValidator` use in code review hardening below).
 
 ### New Component: OwnershipValidator
 - Centralized `@ApplicationScoped` utility for ownership checks
@@ -71,6 +71,19 @@
 
 **Total:** 184 security-related tests, 0 failures, 0 errors.
 **Files:** `OwnershipValidatorTest.java` [NEW], `RestAgentEngineTest.java`, `RestUserMemoryStoreTest.java`, `RestGroupConversationTest.java`, `McpMemoryToolsTest.java`
+
+### GitHub Advanced Security / CodeQL Remediation (2026-06-10)
+
+**Repo:** EDDI (`fix/security-audit-idor-remediation`)
+**What changed:** Addressed 12 CodeQL "Log Injection" findings and 5 Copilot validation-order findings from automated PR review.
+
+- **Log Injection — RestAgentEngine:** `validateConversationOwnership()` now sanitizes `conversationId` via `LogSanitizer.sanitize()` before logging.
+- **Log Injection — OwnershipValidator:** All 3 debug-level log statements (`validateUserAccess`, `validateAndResolveUserId`, `requireOwnerOrAdmin`) now sanitize user-provided values (`callerId`, `requestedUserId`, `resourceOwnerId`, `resourceType`) via `LogSanitizer.sanitize()`.
+- **Fail-closed ownership check:** `RestAgentEngine.validateConversationOwnership()` now throws `ForbiddenException` on `ResourceStoreException` instead of silently skipping the ownership check. Previous fail-open behavior could allow unauthorized access during transient DB errors.
+- **MCP validation order:** In `McpMemoryTools`, all 5 read-only tools (`listUserMemories`, `getVisibleMemories`, `searchUserMemories`, `getMemoryByKey`, `countUserMemories`) now validate `userId` is non-null/non-blank **before** calling `ownershipValidator.validateUserAccess()`. Previously, a missing `userId` with auth enabled would throw `ForbiddenException` instead of the intended `"userId is required"` error JSON.
+- **Changelog clarity:** Updated MCP ownership entry (line 32-35) to reflect final state — `OwnershipValidator.validateUserAccess()` is the sole mechanism, not `requireOwnerOrAdmin()` in `McpToolUtils`.
+
+**Files:** `RestAgentEngine.java`, `OwnershipValidator.java`, `McpMemoryTools.java`, `docs/changelog.md`
 
 ---
 
