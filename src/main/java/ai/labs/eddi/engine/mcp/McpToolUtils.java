@@ -44,36 +44,6 @@ final class McpToolUtils {
     }
 
     /**
-     * Check that the current caller owns the requested userId, or has admin role.
-     * When authorization is disabled, no check is performed. When the userId is
-     * null or blank, no check is performed (legacy data without ownership).
-     *
-     * @param identity
-     *            the current security identity
-     * @param authEnabled
-     *            whether authorization is enabled
-     * @param userId
-     *            the requested userId to validate against the caller
-     * @throws ForbiddenException
-     *             if the caller does not own the userId and is not admin
-     */
-    static void requireOwnerOrAdmin(SecurityIdentity identity, boolean authEnabled, String userId) {
-        if (!authEnabled || userId == null || userId.isBlank()) {
-            return;
-        }
-        if (identity == null || identity.isAnonymous()) {
-            return; // Let requireRole handle authentication
-        }
-        if (identity.hasRole("eddi-admin")) {
-            return;
-        }
-        String callerId = identity.getPrincipal().getName();
-        if (!callerId.equals(userId)) {
-            throw new ForbiddenException("MCP operation denied: userId '" + userId + "' does not match authenticated caller");
-        }
-    }
-
-    /**
      * Get a REST interface proxy via IRestInterfaceFactory. These proxies make HTTP
      * calls that go through the full JAX-RS workflow, including
      * DocumentDescriptorFilter which auto-creates descriptors.

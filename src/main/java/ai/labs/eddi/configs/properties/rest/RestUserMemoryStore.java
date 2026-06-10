@@ -131,8 +131,15 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
     @Override
     public Response deleteMemory(String entryId) {
         try {
+            var entry = userMemoryStore.findEntryById(entryId);
+            if (entry.isEmpty()) {
+                throw new NotFoundException("Memory entry not found: " + entryId);
+            }
+            ownershipValidator.validateUserAccess(identity, entry.get().userId());
             userMemoryStore.deleteEntry(entryId);
             return Response.noContent().build();
+        } catch (NotFoundException e) {
+            throw e;
         } catch (IResourceStore.ResourceStoreException e) {
             LOGGER.error("Failed to delete memory entry: " + entryId, e);
             throw new InternalServerErrorException(e.getLocalizedMessage());

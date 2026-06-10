@@ -256,10 +256,13 @@ public class RestAgentEngine implements IRestAgentEngine {
             var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
             ownershipValidator.requireOwnerOrAdmin(identity, descriptor.getUserId(), "conversation");
         } catch (ForbiddenException e) {
-            throw e; // re-throw ownership errors
-        } catch (Exception e) {
-            // Descriptor not found or store error — let the actual operation handle it
-            LOGGER.debugf("Could not validate conversation ownership for %s: %s", conversationId, e.getMessage());
+            throw e;
+        } catch (ResourceNotFoundException e) {
+            // Descriptor not found — let the actual operation handle it
+            LOGGER.debugf("Conversation descriptor not found for %s", conversationId);
+        } catch (ResourceStoreException e) {
+            // Store error — let the actual operation handle it
+            LOGGER.debugf("Could not load conversation descriptor for %s: %s", conversationId, e.getMessage());
         }
     }
 }

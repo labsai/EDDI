@@ -43,9 +43,9 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     @Inject
     public RestGroupConversation(IGroupConversationService groupConversationService,
-                                 IJsonSerialization jsonSerialization,
-                                 SecurityIdentity identity,
-                                 OwnershipValidator ownershipValidator) {
+            IJsonSerialization jsonSerialization,
+            SecurityIdentity identity,
+            OwnershipValidator ownershipValidator) {
         this.groupConversationService = groupConversationService;
         this.jsonSerialization = jsonSerialization;
         this.identity = identity;
@@ -56,7 +56,8 @@ public class RestGroupConversation implements IRestGroupConversation {
     public Response discuss(String groupId, DiscussRequest request) {
         try {
             String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
-            if (userId == null || userId.isBlank()) userId = "anonymous";
+            if (userId == null || userId.isBlank())
+                userId = "anonymous";
             GroupConversation gc = groupConversationService.discuss(groupId, request.question(), userId, 0);
             URI location = URI.create("/groups/" + groupId + "/conversations/" + gc.getId());
             return Response.created(location).entity(gc).build();
@@ -74,7 +75,8 @@ public class RestGroupConversation implements IRestGroupConversation {
     public void discussStreaming(String groupId, DiscussRequest request, SseEventSink eventSink, Sse sse) {
         try {
             String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
-            if (userId == null || userId.isBlank()) userId = "anonymous";
+            if (userId == null || userId.isBlank())
+                userId = "anonymous";
 
             GroupDiscussionEventListener listener = new GroupDiscussionEventListener() {
                 @Override

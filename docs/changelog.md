@@ -46,6 +46,32 @@
 
 **Files:** `OwnershipValidator.java` [NEW], `RestAgentEngine.java`, `RestUserMemoryStore.java`, `RestGroupConversation.java`, `IRestGdprAdmin.java`, `RestGdprAdmin.java`, `RestA2AEndpoint.java`, `McpToolUtils.java`, `McpMemoryTools.java`
 
+### Code Review Hardening (2026-06-10)
+
+**Repo:** EDDI (`fix/security-audit-idor-remediation`)
+**What changed:** Addressed all findings from the post-implementation code review.
+
+- **M1 — MCP ownership consolidation:** Removed duplicate `requireOwnerOrAdmin` static method from `McpToolUtils`. `McpMemoryTools` now injects `OwnershipValidator` directly and calls `validateUserAccess()` — single source of truth for ownership logic.
+- **M3 — PII in WARN logs:** `OwnershipValidator` WARN messages no longer include caller/user IDs. Full details are logged at DEBUG level only, reducing compliance risk.
+- **M4 — Narrow catch clause:** `RestAgentEngine.validateConversationOwnership()` now catches `ResourceNotFoundException` and `ResourceStoreException` specifically instead of generic `Exception`, preventing unexpected errors from being silently swallowed.
+- **BUG-2 — deleteMemory ownership:** Added `findEntryById(String entryId)` to `IUserMemoryStore` with MongoDB and PostgreSQL implementations. `RestUserMemoryStore.deleteMemory()` now looks up the entry, validates ownership via `validateUserAccess()`, and returns 404 if not found.
+
+**Files:** `OwnershipValidator.java`, `RestAgentEngine.java`, `RestUserMemoryStore.java`, `McpToolUtils.java`, `McpMemoryTools.java`, `IUserMemoryStore.java`, `MongoUserMemoryStore.java`, `PostgresUserMemoryStore.java`
+
+### Test Coverage for Security Fixes (2026-06-10)
+
+**Repo:** EDDI (`fix/security-audit-idor-remediation`)
+**What changed:** Added 36 new tests covering all security-critical ownership validation logic.
+
+- **OwnershipValidatorTest [NEW]:** 24 tests across 4 nested groups — `validateUserAccess`, `validateAndResolveUserId`, `requireOwnerOrAdmin`, `isAuthEnabled`. Covers auth on/off, admin bypass, legacy null owner, caller mismatch → ForbiddenException.
+- **RestAgentEngineTest — OwnershipValidation:** 5 tests — admin userId override, impersonation rejection, non-owner read/end, descriptor-not-found graceful skip.
+- **RestUserMemoryStoreTest — DeleteMemory:** 3 tests — owner match → 204, not found → 404, non-owner → ForbiddenException.
+- **RestGroupConversationTest — OwnershipValidation:** 4 tests — non-owner read/delete, userId resolution in discuss, list filtering for non-admin.
+- **Existing test fixes:** Updated `RestAgentEngineTest`, `RestGroupConversationTest`, `McpMemoryToolsTest` stubs for new constructor parameters and ownership lookup patterns.
+
+**Total:** 184 security-related tests, 0 failures, 0 errors.
+**Files:** `OwnershipValidatorTest.java` [NEW], `RestAgentEngineTest.java`, `RestUserMemoryStoreTest.java`, `RestGroupConversationTest.java`, `McpMemoryToolsTest.java`
+
 ---
 
 ## 🐛 Fix: Swagger UI Broken by CSP — Per-Path Filter Override (2026-06-03)
