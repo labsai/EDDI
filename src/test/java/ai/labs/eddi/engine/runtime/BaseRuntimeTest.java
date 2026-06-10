@@ -154,12 +154,12 @@ class BaseRuntimeTest {
         CompletableFuture<String> onCompleteCalled = new CompletableFuture<>();
         CompletableFuture<Throwable> onFailureCalled = new CompletableFuture<>();
 
-        // Submit a callable that interrupts its own thread (simulating
-        // future.cancel(true)
-        // arriving while the callable is executing, e.g. during a slow LLM HTTP call)
+        // Sets the interrupt flag to simulate the scenario where future.cancel(true)
+        // was called during a non-interruptible I/O operation (e.g., LLM HTTP call).
+        // The callable completes normally but the interrupt flag remains set.
         runtime.submitCallable(
                 () -> {
-                    Thread.currentThread().interrupt(); // simulate cancel(true) from timeout
+                    Thread.currentThread().interrupt(); // simulate interrupt flag left by cancel(true)
                     return "stale-result";
                 },
                 new IRuntime.IFinishedExecution<>() {
@@ -187,6 +187,8 @@ class BaseRuntimeTest {
 
     @Test
     @DisplayName("submitCallable without interruption still calls onComplete normally")
+    // Pair test with submitCallable_cancelledRoutesToOnFailure — confirms the
+    // interrupt-checking code path doesn't affect normal (non-cancelled) execution.
     void submitCallable_noInterruption_callsOnComplete() throws Exception {
         CompletableFuture<String> completed = new CompletableFuture<>();
 

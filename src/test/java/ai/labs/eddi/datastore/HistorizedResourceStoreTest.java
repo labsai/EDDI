@@ -8,6 +8,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
+import org.mockito.InOrder;
+
 import static org.mockito.Mockito.*;
 
 /**
@@ -95,8 +97,12 @@ class HistorizedResourceStoreTest {
         Integer newVersion = store.update("id1", 1, "updated");
 
         assertEquals(2, newVersion);
-        verify(storage).store(historyResource); // archived old version
-        verify(storage).storeIfCurrentVersion(newResource, 1); // stored new version with optimistic lock
+        // Verify ordering: history MUST be archived BEFORE the conditional store.
+        // If swapped, a failed storeIfCurrentVersion would leave an orphaned new
+        // version.
+        InOrder inOrder = inOrder(storage);
+        inOrder.verify(storage).store(historyResource); // archived old version first
+        inOrder.verify(storage).storeIfCurrentVersion(newResource, 1); // then conditional store
     }
 
     @Test
@@ -117,6 +123,9 @@ class HistorizedResourceStoreTest {
 
         assertThrows(IResourceStore.ResourceModifiedException.class,
                 () -> store.update("id1", 1, "updated"));
+
+        // History should still have been archived before the conditional store failed
+        verify(storage).store(historyResource);
     }
 
     @Test
