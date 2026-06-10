@@ -37,6 +37,14 @@
 - **Tests:** 2 new tests — cancelled thread routes to `onFailure`; non-interrupted thread still routes to `onComplete`.
 - **Files:** `BaseRuntime.java`, `BaseRuntimeTest.java`
 
+### Design Decisions
+
+- **Optimistic locking as default method:** `storeIfCurrentVersion()` was added as a `default` method on the `IResourceStorage` interface (delegating to `store()`) rather than an abstract method. This avoids breaking all existing implementations while letting backends opt into conditional writes. The Javadoc clearly states that the default does _not_ provide optimistic locking.
+- **Interrupt check over Future.isCancelled():** The zombie-write fix checks `Thread.currentThread().isInterrupted()` inside the submitted lambda rather than inspecting `Future.isCancelled()` from outside, because the interrupt flag is the only signal visible from within the executing thread after a non-interruptible I/O completes.
+- **Return null on interruption:** When the interrupt flag is set, the lambda now returns `null` instead of the stale result. This prevents callers who `future.get()` the returned Future from receiving a stale value that was already routed to `onFailure`.
+- **ConcurrentHashMap over synchronized blocks:** For `ComponentCache`, `ConcurrentHashMap` was chosen over `Collections.synchronizedMap` or explicit locking because `computeIfAbsent` provides exactly the atomic read-or-create semantics needed, with better concurrency than full map locking.
+- **No conversation context in BaseRuntime logs:** `BaseRuntime` is generic executor infrastructure with no access to conversation/agent IDs. The warning log includes the thread name for traceability; richer context is logged by the downstream `onFailure` callback in `ConversationService`.
+
 ---
 
 

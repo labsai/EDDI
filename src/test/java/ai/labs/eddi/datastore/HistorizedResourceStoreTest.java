@@ -98,8 +98,8 @@ class HistorizedResourceStoreTest {
 
         assertEquals(2, newVersion);
         // Verify ordering: history MUST be archived BEFORE the conditional store.
-        // If swapped, a failed storeIfCurrentVersion would leave an orphaned new
-        // version.
+        // If swapped, a successful storeIfCurrentVersion followed by a failed
+        // history archive could leave the update without a corresponding history entry.
         InOrder inOrder = inOrder(storage);
         inOrder.verify(storage).store(historyResource); // archived old version first
         inOrder.verify(storage).storeIfCurrentVersion(newResource, 1); // then conditional store

@@ -113,9 +113,12 @@ public class BaseRuntime implements IRuntime {
                     // Execution was cancelled (e.g., agent timeout) but the callable
                     // completed anyway (non-interruptible I/O). Route to onFailure
                     // to skip stale persistence that would overwrite newer state.
-                    log.warn("Execution completed after cancellation — discarding result to prevent stale persistence");
+                    // Return null to prevent leaking the stale result via the Future.
+                    log.warnf("Execution completed after cancellation — discarding result to prevent stale persistence (thread=%s)",
+                            Thread.currentThread().getName());
                     callback.onFailure(new InterruptedException(
                             "Execution completed after cancellation — result discarded"));
+                    return null;
                 } else {
                     callback.onComplete(result);
                 }

@@ -37,12 +37,16 @@ public interface IResourceStorage<T> {
     Integer getCurrentVersion(String id);
 
     /**
-     * Atomically store a new version of a resource, but only if the current version
-     * in the database matches {@code expectedCurrentVersion}.
+     * Store a new version of a resource only if the current version in the database
+     * matches {@code expectedCurrentVersion}.
+     * <p>
+     * Implementations that support conditional writes should override this method
+     * to enforce the check atomically. The default implementation delegates to
+     * {@link #store(IResource)} and does <strong>not</strong> provide optimistic
+     * locking.
      * <p>
      * Used by {@link ai.labs.eddi.datastore.HistorizedResourceStore#update} for
-     * optimistic locking. Backends that support conditional writes should override
-     * this method.
+     * optimistic locking.
      *
      * @param newResource
      *            the resource with the new version to store
