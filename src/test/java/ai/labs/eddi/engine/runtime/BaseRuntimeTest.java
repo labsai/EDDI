@@ -147,4 +147,64 @@ class BaseRuntimeTest {
             rt.getScheduledExecutorService().shutdownNow();
         });
     }
+
+    @Test
+    @DisplayName("submitCallable with interrupted thread routes to onFailure instead of onComplete")
+    void submitCallable_cancelledRoutesToOnFailure() throws Exception {
+        CompletableFuture<String> onCompleteCalled = new CompletableFuture<>();
+        CompletableFuture<Throwable> onFailureCalled = new CompletableFuture<>();
+
+        // Submit a callable that interrupts its own thread (simulating
+        // future.cancel(true)
+        // arriving while the callable is executing, e.g. during a slow LLM HTTP call)
+        runtime.submitCallable(
+                () -> {
+                    Thread.currentThread().interrupt(); // simulate cancel(true) from timeout
+                    return "stale-result";
+                },
+                new IRuntime.IFinishedExecution<>() {
+                    @Override
+                    public void onComplete(String result) {
+                        onCompleteCalled.complete(result);
+                    }
+
+                    @Override
+                    public void onFailure(Throwable t) {
+                        onFailureCalled.complete(t);
+                    }
+                },
+                null);
+
+        // onFailure should be called with InterruptedException
+        Throwable failure = onFailureCalled.get(5, TimeUnit.SECONDS);
+        assertInstanceOf(InterruptedException.class, failure);
+        assertTrue(failure.getMessage().contains("cancellation"));
+
+        // onComplete should NOT have been called
+        assertFalse(onCompleteCalled.isDone(),
+                "onComplete should not be called when thread was interrupted");
+    }
+
+    @Test
+    @DisplayName("submitCallable without interruption still calls onComplete normally")
+    void submitCallable_noInterruption_callsOnComplete() throws Exception {
+        CompletableFuture<String> completed = new CompletableFuture<>();
+
+        runtime.submitCallable(
+                () -> "normal-result",
+                new IRuntime.IFinishedExecution<>() {
+                    @Override
+                    public void onComplete(String result) {
+                        completed.complete(result);
+                    }
+
+                    @Override
+                    public void onFailure(Throwable t) {
+                        completed.completeExceptionally(t);
+                    }
+                },
+                null);
+
+        assertEquals("normal-result", completed.get(5, TimeUnit.SECONDS));
+    }
 }
