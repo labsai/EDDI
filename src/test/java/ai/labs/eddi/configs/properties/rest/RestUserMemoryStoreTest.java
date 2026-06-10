@@ -9,11 +9,14 @@ import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -161,13 +164,43 @@ class RestUserMemoryStoreTest {
 
     // === deleteMemory ===
 
-    @Test
-    void deleteMemory_shouldReturn204() throws Exception {
-        doNothing().when(store).deleteEntry("entry-1");
+    @Nested
+    @DisplayName("deleteMemory")
+    class DeleteMemory {
 
-        Response response = rest.deleteMemory("entry-1");
+        @Test
+        @DisplayName("should return 204 when owner matches")
+        void deleteMemory_shouldReturn204WhenOwnerMatches() throws Exception {
+            var memEntry = new UserMemoryEntry("entry-1", "user-1", "key", "value", "fact",
+                    Visibility.global, null, List.of(), null, false, 0, Instant.now(), Instant.now());
+            when(store.findEntryById("entry-1")).thenReturn(Optional.of(memEntry));
 
-        assertEquals(204, response.getStatus());
+            Response response = rest.deleteMemory("entry-1");
+
+            assertEquals(204, response.getStatus());
+            verify(store).deleteEntry("entry-1");
+        }
+
+        @Test
+        @DisplayName("should throw NotFoundException when entry not found")
+        void deleteMemory_shouldThrow404WhenNotFound() throws Exception {
+            when(store.findEntryById("entry-1")).thenReturn(Optional.empty());
+
+            assertThrows(NotFoundException.class, () -> rest.deleteMemory("entry-1"));
+        }
+
+        @Test
+        @DisplayName("should throw ForbiddenException when caller does not own entry")
+        void deleteMemory_shouldRejectNonOwner() throws Exception {
+            var memEntry = new UserMemoryEntry("entry-1", "other-user", "key", "value", "fact",
+                    Visibility.global, null, List.of(), null, false, 0, Instant.now(), Instant.now());
+            when(store.findEntryById("entry-1")).thenReturn(Optional.of(memEntry));
+            doThrow(new ForbiddenException("Access denied"))
+                    .when(ownershipValidator).validateUserAccess(identity, "other-user");
+
+            assertThrows(ForbiddenException.class, () -> rest.deleteMemory("entry-1"));
+            verify(store, never()).deleteEntry(anyString());
+        }
     }
 
     // === deleteAllForUser ===
