@@ -243,9 +243,11 @@ public class PropertySetterTask implements ILifecycleTask {
                 List<String> actions = actionsData.getResult();
                 if (actions != null && actions.contains(CATCH_ANY_INPUT_AS_PROPERTY_ACTION)) {
                     IData<String> initialInputData = currentStep.getLatestData(INPUT_INITIAL_IDENTIFIER);
-                    String initialInput = initialInputData.getResult();
-                    if (!initialInput.isEmpty()) {
-                        properties.add(new Property(EXPRESSION_MEANING_USER_INPUT, initialInput, conversation));
+                    if (initialInputData != null) {
+                        String initialInput = initialInputData.getResult();
+                        if (initialInput != null && !initialInput.isEmpty()) {
+                            properties.add(new Property(EXPRESSION_MEANING_USER_INPUT, initialInput, conversation));
+                        }
                     }
                 }
             }
