@@ -8,6 +8,8 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
@@ -28,12 +30,16 @@ import static org.mockito.Mockito.*;
 class RestUserMemoryStoreTest {
 
     private IUserMemoryStore store;
+    private SecurityIdentity identity;
+    private OwnershipValidator ownershipValidator;
     private RestUserMemoryStore rest;
 
     @BeforeEach
     void setUp() {
         store = mock(IUserMemoryStore.class);
-        rest = new RestUserMemoryStore(store);
+        identity = mock(SecurityIdentity.class);
+        ownershipValidator = mock(OwnershipValidator.class);
+        rest = new RestUserMemoryStore(store, identity, ownershipValidator);
     }
 
     // === getAllMemories ===

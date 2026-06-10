@@ -9,6 +9,8 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IRestGroupConversation.DiscussRequest;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -27,13 +29,18 @@ class RestGroupConversationTest {
 
     private IGroupConversationService groupService;
     private IJsonSerialization jsonSerialization;
+    private SecurityIdentity identity;
+    private OwnershipValidator ownershipValidator;
     private RestGroupConversation restGroupConversation;
 
     @BeforeEach
     void setUp() {
         groupService = mock(IGroupConversationService.class);
         jsonSerialization = mock(IJsonSerialization.class);
-        restGroupConversation = new RestGroupConversation(groupService, jsonSerialization);
+        identity = mock(SecurityIdentity.class);
+        ownershipValidator = mock(OwnershipValidator.class);
+        when(ownershipValidator.validateAndResolveUserId(any(), any())).thenAnswer(inv -> inv.getArgument(1));
+        restGroupConversation = new RestGroupConversation(groupService, jsonSerialization, identity, ownershipValidator);
     }
 
     @Nested

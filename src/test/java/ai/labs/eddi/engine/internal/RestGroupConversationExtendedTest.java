@@ -11,6 +11,8 @@ import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IRestGroupConversation.DiscussRequest;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.sse.OutboundSseEvent;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
@@ -33,6 +35,8 @@ class RestGroupConversationExtendedTest {
 
     private IGroupConversationService groupService;
     private IJsonSerialization jsonSerialization;
+    private SecurityIdentity identity;
+    private OwnershipValidator ownershipValidator;
     private RestGroupConversation restGroupConversation;
     private SseEventSink eventSink;
     private Sse sse;
@@ -41,7 +45,10 @@ class RestGroupConversationExtendedTest {
     void setUp() {
         groupService = mock(IGroupConversationService.class);
         jsonSerialization = mock(IJsonSerialization.class);
-        restGroupConversation = new RestGroupConversation(groupService, jsonSerialization);
+        identity = mock(SecurityIdentity.class);
+        ownershipValidator = mock(OwnershipValidator.class);
+        when(ownershipValidator.validateAndResolveUserId(any(), any())).thenAnswer(inv -> inv.getArgument(1));
+        restGroupConversation = new RestGroupConversation(groupService, jsonSerialization, identity, ownershipValidator);
         eventSink = mock(SseEventSink.class);
         sse = mock(Sse.class);
 

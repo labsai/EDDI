@@ -9,10 +9,13 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.Response;
@@ -35,12 +38,18 @@ import static org.mockito.Mockito.*;
 class RestAgentEngineTest {
 
     private IConversationService conversationService;
+    private IConversationDescriptorStore descriptorStore;
+    private SecurityIdentity identity;
+    private OwnershipValidator ownershipValidator;
     private RestAgentEngine restAgentEngine;
 
     @BeforeEach
     void setUp() {
         conversationService = mock(IConversationService.class);
-        restAgentEngine = new RestAgentEngine(conversationService, 30);
+        descriptorStore = mock(IConversationDescriptorStore.class);
+        identity = mock(SecurityIdentity.class);
+        ownershipValidator = mock(OwnershipValidator.class);
+        restAgentEngine = new RestAgentEngine(conversationService, descriptorStore, identity, ownershipValidator, 30);
     }
 
     @Nested
