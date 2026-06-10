@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import org.eclipse.microprofile.openapi.annotations.Operation;
@@ -23,6 +24,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 @Path("/admin/gdpr")
 @Tag(name = "GDPR / Privacy")
 @Produces(MediaType.APPLICATION_JSON)
+@RolesAllowed("eddi-admin")
 public interface IRestGdprAdmin {
 
     @DELETE

@@ -4,6 +4,50 @@
 
 ---
 
+## 🛡️ Security Audit Remediation — IDOR Prevention & Ownership Validation (2026-06-10)
+
+**Repo:** EDDI (`fix/security-audit-idor-remediation`)
+**What changed:** Addressed 5 findings from a comprehensive security audit. Added resource ownership validation across all conversation, user memory, and group conversation REST endpoints. Hardened GDPR, A2A, and MCP annotations.
+
+### Finding: IDOR — Conversations (HIGH → FIXED)
+- **Problem:** Any authenticated user with `eddi-user` role could read/modify ANY conversation by guessing the conversationId. No ownership validation existed despite `ConversationDescriptor` having a `userId` field.
+- **Fix:** `RestAgentEngine` now injects `SecurityIdentity`, `OwnershipValidator`, and `IConversationDescriptorStore`. All conversation-scoped endpoints (`readConversation`, `say`, `endConversation`, `undo`, `redo`, `rerun`, `readConversationLog`, `getConversationState`) validate that the caller owns the conversation. `startConversation` validates that the provided `userId` matches the caller's identity (admins can set any userId).
+
+### Finding: IDOR — User Memory (HIGH → FIXED)
+- **Problem:** Any authenticated user could read/delete another user's persistent memories via the `/usermemorystore/memories/{userId}` endpoints.
+- **Fix:** `RestUserMemoryStore` now injects `SecurityIdentity` and `OwnershipValidator`. All endpoints validate that the `{userId}` path parameter matches the authenticated caller. `upsertMemory` validates against the `userId` in the request body.
+
+### Finding: IDOR — Group Conversations (HIGH → FIXED)
+- **Problem:** Any authenticated user could read/delete any group conversation.
+- **Fix:** `RestGroupConversation` now validates ownership on `readGroupConversation` and `deleteGroupConversation`. `listGroupConversations` filters results to only the caller's conversations. `discuss`/`discussStreaming` validate the provided userId.
+
+### Finding: GDPR Annotation on Implementation Only (MEDIUM → FIXED)
+- **Problem:** `@RolesAllowed("eddi-admin")` was only on `RestGdprAdmin` implementation, not the `IRestGdprAdmin` interface. Fragile to refactoring.
+- **Fix:** Moved `@RolesAllowed("eddi-admin")` to the interface level.
+
+### Finding: A2A Endpoint Annotation Clarity (MEDIUM → FIXED)
+- **Problem:** A2A GET discovery endpoints had no explicit security annotations, making intent unclear.
+- **Fix:** Added `@PermitAll` to all 5 GET discovery endpoints to document intentional public access per A2A protocol spec.
+
+### Finding: MCP Memory Ownership (NEW → FIXED)
+- **Problem:** MCP memory read tools (`list_user_memories`, `get_visible_memories`, etc.) accepted `userId` as a tool parameter without validating against the caller's identity.
+- **Fix:** Added `requireOwnerOrAdmin()` to `McpToolUtils` and applied it in all 5 read-only MCP memory tools.
+
+### New Component: OwnershipValidator
+- Centralized `@ApplicationScoped` utility for ownership checks
+- Three methods: `validateUserAccess()`, `validateAndResolveUserId()`, `requireOwnerOrAdmin()`
+- All checks are no-ops when `authorization.enabled=false` (dev mode)
+- `eddi-admin` role bypasses all ownership checks
+- Legacy data without ownership (null/blank userId) is allowed through gracefully
+- WARN-level audit logging on all ownership check failures
+
+### Dropped Finding: MCP Unauthenticated by Default
+- **Rationale:** When OIDC is disabled, ALL endpoints are unauthenticated — MCP is not uniquely vulnerable. `AuthStartupGuard` already prevents accidental unauthenticated production deployments. Not a finding.
+
+**Files:** `OwnershipValidator.java` [NEW], `RestAgentEngine.java`, `RestUserMemoryStore.java`, `RestGroupConversation.java`, `IRestGdprAdmin.java`, `RestGdprAdmin.java`, `RestA2AEndpoint.java`, `McpToolUtils.java`, `McpMemoryTools.java`
+
+---
+
 ## 🐛 Fix: Swagger UI Broken by CSP — Per-Path Filter Override (2026-06-03)
 
 **Repo:** EDDI (`fix/swagger-ui-csp`)

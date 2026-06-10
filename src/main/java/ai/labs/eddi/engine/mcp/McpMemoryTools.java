@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
+import static ai.labs.eddi.engine.mcp.McpToolUtils.requireOwnerOrAdmin;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.requireRole;
 
 /**
@@ -57,6 +58,7 @@ public class McpMemoryTools {
     public String listUserMemories(@ToolArg(description = "User ID (required)") String userId,
                                    @ToolArg(description = "Maximum number of entries to return (default: 50)") Integer limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
+        requireOwnerOrAdmin(identity, authEnabled, userId);
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
         try {
@@ -86,6 +88,7 @@ public class McpMemoryTools {
                                      @ToolArg(description = "Recall order: 'most_recent' or 'most_accessed' (default: most_recent)") String order,
                                      @ToolArg(description = "Maximum number of entries (default: 50)") Integer limit) {
         requireRole(identity, authEnabled, "eddi-viewer");
+        requireOwnerOrAdmin(identity, authEnabled, userId);
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
         if (agentId == null || agentId.isBlank())
@@ -113,6 +116,7 @@ public class McpMemoryTools {
     public String searchUserMemories(@ToolArg(description = "User ID (required)") String userId,
                                      @ToolArg(description = "Search query (required)") String query) {
         requireRole(identity, authEnabled, "eddi-viewer");
+        requireOwnerOrAdmin(identity, authEnabled, userId);
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
         if (query == null || query.isBlank())
@@ -136,6 +140,7 @@ public class McpMemoryTools {
     public String getMemoryByKey(@ToolArg(description = "User ID (required)") String userId,
                                  @ToolArg(description = "Memory key name (required)") String key) {
         requireRole(identity, authEnabled, "eddi-viewer");
+        requireOwnerOrAdmin(identity, authEnabled, userId);
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
         if (key == null || key.isBlank())
@@ -223,6 +228,7 @@ public class McpMemoryTools {
     @Tool(name = "count_user_memories", description = "Count the number of memory entries for a user.")
     public String countUserMemories(@ToolArg(description = "User ID (required)") String userId) {
         requireRole(identity, authEnabled, "eddi-viewer");
+        requireOwnerOrAdmin(identity, authEnabled, userId);
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
         try {

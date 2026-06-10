@@ -10,11 +10,15 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.ForbiddenException;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
@@ -46,13 +50,23 @@ import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 public class RestAgentEngine implements IRestAgentEngine {
 
     private final IConversationService conversationService;
+    private final IConversationDescriptorStore conversationDescriptorStore;
+    private final SecurityIdentity identity;
+    private final OwnershipValidator ownershipValidator;
     private final int agentTimeout;
 
     private static final Logger LOGGER = Logger.getLogger(RestAgentEngine.class);
 
     @Inject
-    public RestAgentEngine(IConversationService conversationService, @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
+    public RestAgentEngine(IConversationService conversationService,
+            IConversationDescriptorStore conversationDescriptorStore,
+            SecurityIdentity identity,
+            OwnershipValidator ownershipValidator,
+            @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.conversationService = conversationService;
+        this.conversationDescriptorStore = conversationDescriptorStore;
+        this.identity = identity;
+        this.ownershipValidator = ownershipValidator;
         this.agentTimeout = agentTimeout;
     }
 
@@ -64,7 +78,8 @@ public class RestAgentEngine implements IRestAgentEngine {
     @Override
     public Response startConversationWithContext(String agentId, Environment environment, String userId, Map<String, Context> context) {
         try {
-            var result = conversationService.startConversation(environment, agentId, userId, context);
+            String resolvedUserId = ownershipValidator.validateAndResolveUserId(identity, userId);
+            var result = conversationService.startConversation(environment, agentId, resolvedUserId, context);
             return Response.created(result.conversationUri()).build();
         } catch (ProcessingRestrictedException e) {
             LOGGER.warnf("GDPR processing restricted for user: %s", e.getMessage());
@@ -80,6 +95,7 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public Response endConversation(String conversationId) {
+        validateConversationOwnership(conversationId);
         conversationService.endConversation(conversationId);
         return Response.ok().build();
     }
@@ -87,6 +103,7 @@ public class RestAgentEngine implements IRestAgentEngine {
     @Override
     public SimpleConversationMemorySnapshot readConversation(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                                                              List<String> returningFields) {
+        validateConversationOwnership(conversationId);
         try {
             return conversationService.readConversation(conversationId, returnDetailed, returnCurrentStepOnly, returningFields);
         } catch (ResourceStoreException e) {
@@ -99,6 +116,7 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public Response readConversationLog(String conversationId, String outputType, Integer logSize) {
+        validateConversationOwnership(conversationId);
         try {
             var result = conversationService.readConversationLog(conversationId, outputType, logSize);
             return Response.ok(result.content(), result.mediaType()).build();
@@ -112,6 +130,7 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public ConversationState getConversationState(String conversationId) {
+        validateConversationOwnership(conversationId);
         return conversationService.getConversationState(conversationId);
     }
 
@@ -120,6 +139,7 @@ public class RestAgentEngine implements IRestAgentEngine {
                                           List<String> returningFields, final AsyncResponse response) {
         checkNotNull(conversationId, "conversationId");
         checkNotEmpty(language, "language");
+        validateConversationOwnership(conversationId);
 
         sayInternal(conversationId, returnDetailed, returnCurrentStepOnly, returningFields,
                 new InputData("", Map.of(KEY_LANG, new Context(string, language))), true, response);
@@ -139,6 +159,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         checkNotNull(conversationId, "conversationId");
         checkNotNull(inputData, "inputData");
         checkNotNull(inputData.getInput(), "inputData.input");
+        validateConversationOwnership(conversationId);
 
         sayInternal(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, false, response);
     }
@@ -172,6 +193,7 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public Boolean isUndoAvailable(String conversationId) {
+        validateConversationOwnership(conversationId);
         try {
             return conversationService.isUndoAvailable(conversationId);
         } catch (ResourceStoreException e) {
@@ -184,6 +206,7 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public Response undo(final String conversationId) {
+        validateConversationOwnership(conversationId);
         try {
             boolean performed = conversationService.undo(conversationId);
             return performed ? Response.ok().build() : Response.status(Response.Status.CONFLICT).build();
@@ -197,6 +220,7 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public Boolean isRedoAvailable(final String conversationId) {
+        validateConversationOwnership(conversationId);
         try {
             return conversationService.isRedoAvailable(conversationId);
         } catch (ResourceStoreException e) {
@@ -209,6 +233,7 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public Response redo(final String conversationId) {
+        validateConversationOwnership(conversationId);
         try {
             boolean performed = conversationService.redo(conversationId);
             return performed ? Response.ok().build() : Response.status(Response.Status.CONFLICT).build();
@@ -217,6 +242,24 @@ public class RestAgentEngine implements IRestAgentEngine {
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Failed to redo");
+        }
+    }
+
+    /**
+     * Validates that the caller owns the conversation identified by
+     * {@code conversationId}. Admin role bypasses the check. If the descriptor
+     * cannot be loaded (e.g., not found), the check is skipped and the actual
+     * operation will handle the error.
+     */
+    private void validateConversationOwnership(String conversationId) {
+        try {
+            var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
+            ownershipValidator.requireOwnerOrAdmin(identity, descriptor.getUserId(), "conversation");
+        } catch (ForbiddenException e) {
+            throw e; // re-throw ownership errors
+        } catch (Exception e) {
+            // Descriptor not found or store error — let the actual operation handle it
+            LOGGER.debugf("Could not validate conversation ownership for %s: %s", conversationId, e.getMessage());
         }
     }
 }
