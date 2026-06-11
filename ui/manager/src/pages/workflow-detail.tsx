@@ -162,7 +162,7 @@ export function WorkflowDetailPage() {
     [currentExtensions]
   );
 
-    const handleAddExtension = useCallback(
+  const handleAddExtension = useCallback(
     (result: AddExtensionResult) => {
       // Parser steps get default inline config instead of an empty config
       const isParser = result.descriptor.type === "eddi://ai.labs.parser";
@@ -711,7 +711,7 @@ function ParserDialog({
       <div
         ref={dialogRef}
         tabIndex={-1}
-        className="relative z-10 w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl border border-border bg-card shadow-2xl mi-4 p-5 outline-none animate-in fade-in zoom-in-95 duration-200"
+        className="relative z-10 w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl border border-border bg-card shadow-2xl mx-4 p-5 outline-none animate-in fade-in zoom-in-95 duration-200"
         role="dialog"
         aria-modal="true"
         aria-labelledby="parser-dialog-title"

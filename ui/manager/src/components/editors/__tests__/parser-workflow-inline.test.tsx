@@ -40,93 +40,86 @@ describe("Workflow Detail — Parser Inline Editing", () => {
     });
   });
 
-  it("shows Configure button for parser steps (no config URI)", async () => {
+  it("shows Configure button for inline parser step (no config URI)", async () => {
     renderWorkflowPage();
     await waitFor(() => {
-      // The workflow mock data should contain a parser step
-      // Check that at least one configure-inline button exists
-      const configButtons = screen.queryAllByTestId(/^configure-inline-/);
-      // Parser step may or may not be in mock workflow data.
-      // If it exists, verify the button is there
-      if (configButtons.length > 0) {
-        expect(configButtons[0]).toBeInTheDocument();
-      }
+      // The mock workflow has an inline parser step at index 1 (no config.uri)
+      expect(screen.getByTestId("configure-inline-1")).toBeInTheDocument();
     });
+  });
+
+  it("does NOT show Configure button for parser steps with config URI", async () => {
+    renderWorkflowPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("pipeline-list")).toBeInTheDocument();
+    });
+    // The parser step at index 0 has a config.uri — no Configure button
+    expect(screen.queryByTestId("configure-inline-0")).not.toBeInTheDocument();
   });
 
   it("opens parser dialog when Configure is clicked", async () => {
     renderWorkflowPage();
 
     await waitFor(() => {
-      expect(screen.getByTestId("pipeline-list")).toBeInTheDocument();
+      expect(screen.getByTestId("configure-inline-1")).toBeInTheDocument();
     });
 
-    // Try to find a configure-inline button
-    const configButtons = screen.queryAllByTestId(/^configure-inline-/);
-    if (configButtons.length > 0) {
-      await userEvent.click(configButtons[0]!);
+    await userEvent.click(screen.getByTestId("configure-inline-1"));
 
-      await waitFor(() => {
-        expect(screen.getByTestId("parser-edit-dialog")).toBeInTheDocument();
-        expect(screen.getByTestId("parser-editor")).toBeInTheDocument();
-      });
-    }
+    await waitFor(() => {
+      expect(screen.getByTestId("parser-edit-dialog")).toBeInTheDocument();
+      expect(screen.getByTestId("parser-editor")).toBeInTheDocument();
+    });
   });
 
   it("closes parser dialog on cancel", async () => {
     renderWorkflowPage();
 
     await waitFor(() => {
-      expect(screen.getByTestId("pipeline-list")).toBeInTheDocument();
+      expect(screen.getByTestId("configure-inline-1")).toBeInTheDocument();
     });
 
-    const configButtons = screen.queryAllByTestId(/^configure-inline-/);
-    if (configButtons.length > 0) {
-      await userEvent.click(configButtons[0]!);
+    await userEvent.click(screen.getByTestId("configure-inline-1"));
 
-      await waitFor(() => {
-        expect(screen.getByTestId("parser-edit-dialog")).toBeInTheDocument();
-      });
+    await waitFor(() => {
+      expect(screen.getByTestId("parser-edit-dialog")).toBeInTheDocument();
+    });
 
-      await userEvent.click(screen.getByTestId("parser-dialog-cancel"));
+    await userEvent.click(screen.getByTestId("parser-dialog-cancel"));
 
-      await waitFor(() => {
-        expect(screen.queryByTestId("parser-edit-dialog")).not.toBeInTheDocument();
-      });
-    }
+    await waitFor(() => {
+      expect(screen.queryByTestId("parser-edit-dialog")).not.toBeInTheDocument();
+    });
   });
 
   it("applies parser changes and marks workflow dirty", async () => {
     renderWorkflowPage();
 
     await waitFor(() => {
-      expect(screen.getByTestId("pipeline-list")).toBeInTheDocument();
+      expect(screen.getByTestId("configure-inline-1")).toBeInTheDocument();
     });
 
-    const configButtons = screen.queryAllByTestId(/^configure-inline-/);
-    if (configButtons.length > 0) {
-      await userEvent.click(configButtons[0]!);
+    await userEvent.click(screen.getByTestId("configure-inline-1"));
 
-      await waitFor(() => {
-        expect(screen.getByTestId("parser-editor")).toBeInTheDocument();
-      });
+    await waitFor(() => {
+      expect(screen.getByTestId("parser-editor")).toBeInTheDocument();
+    });
 
-      // Make a change (toggle appendExpressions)
-      const toggle = within(screen.getByTestId("toggle-appendExpressions")).getByRole("checkbox");
-      await userEvent.click(toggle);
+    // Make a change (toggle appendExpressions)
+    const toggle = within(screen.getByTestId("toggle-appendExpressions")).getByRole("checkbox");
+    await userEvent.click(toggle);
 
-      // Click Apply
-      await userEvent.click(screen.getByTestId("parser-dialog-save"));
+    // Click Apply
+    await userEvent.click(screen.getByTestId("parser-dialog-save"));
 
-      // Dialog should close
-      await waitFor(() => {
-        expect(screen.queryByTestId("parser-edit-dialog")).not.toBeInTheDocument();
-      });
+    // Dialog should close
+    await waitFor(() => {
+      expect(screen.queryByTestId("parser-edit-dialog")).not.toBeInTheDocument();
+    });
 
-      // Workflow should now be dirty
-      await waitFor(() => {
-        expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
-      });
-    }
+    // Workflow should now be dirty
+    await waitFor(() => {
+      expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
+    });
   });
 });

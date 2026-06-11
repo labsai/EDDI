@@ -860,6 +860,22 @@ export const handlers = [
           config: { uri: "eddi://ai.labs.parser/parserstore/parsers/parser1?version=1" },
         },
         {
+          type: "eddi://ai.labs.parser",
+          extensions: {
+            dictionaries: [
+              { type: "eddi://ai.labs.parser.dictionaries.integer" },
+              { type: "eddi://ai.labs.parser.dictionaries.decimal" },
+            ],
+            corrections: [],
+            normalizer: [],
+          },
+          config: {
+            appendExpressions: true,
+            includeUnused: true,
+            includeUnknown: true,
+          },
+        },
+        {
           type: "eddi://ai.labs.rules",
           extensions: {},
           config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1" },
