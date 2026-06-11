@@ -63,7 +63,7 @@ function Section({
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-start transition-colors hover:bg-muted/30"
+        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-start transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       >
         <Icon className={cn("h-4 w-4 shrink-0", accent)} />
         <span className="flex-1 text-xs font-semibold uppercase tracking-wider text-foreground/80">
@@ -76,7 +76,7 @@ function Section({
         )}
         <ChevronDown
           className={cn(
-            "h-3.5 w-3.5 text-muted-foreground transition-transform",
+            "h-3.5 w-3.5 text-muted-foreground transition-transform duration-200",
             open && "rotate-180",
           )}
         />
@@ -180,7 +180,10 @@ export function ParserEditor({ data, onChange, readOnly }: ParserEditorProps) {
     [data, extensions, dictionaries, onChange],
   );
 
-  const regularDicts = dictionaries.filter((d) => d.type === REGULAR_DICT_TYPE);
+  const regularDicts = useMemo(
+    () => dictionaries.filter((d) => d.type === REGULAR_DICT_TYPE),
+    [dictionaries],
+  );
 
   const addRegularDict = useCallback(
     (uri: string) => {
@@ -368,7 +371,7 @@ export function ParserEditor({ data, onChange, readOnly }: ParserEditorProps) {
                 <button
                   type="button"
                   onClick={() => setShowDictPicker(true)}
-                  className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-primary hover:bg-primary/10 transition-colors"
+                  className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-primary hover:bg-primary/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   data-testid="add-regular-dict-btn"
                 >
                   <Plus className="h-3 w-3" />
@@ -389,7 +392,7 @@ export function ParserEditor({ data, onChange, readOnly }: ParserEditorProps) {
               const displayId = extractIdFromUri(uri);
               return (
                 <div
-                  key={`regular-${idx}`}
+                  key={`regular-${(rd.config?.uri as string) ?? idx}`}
                   className="mt-1 flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2"
                   data-testid={`regular-dict-${idx}`}
                 >
@@ -406,7 +409,7 @@ export function ParserEditor({ data, onChange, readOnly }: ParserEditorProps) {
                     <button
                       type="button"
                       onClick={() => removeRegularDict(idx)}
-                      className="rounded p-1 text-muted-foreground hover:text-destructive transition-colors"
+                      className="rounded p-1 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       aria-label={t("parserEditor.removeDict", "Remove dictionary")}
                       data-testid={`remove-regular-dict-${idx}`}
                     >
@@ -442,7 +445,7 @@ export function ParserEditor({ data, onChange, readOnly }: ParserEditorProps) {
                     setShowDictPicker(false);
                   }}
                   disabled={!newDictUri.trim()}
-                  className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   data-testid="confirm-add-dict"
                 >
                   <Plus className="h-3 w-3" />
@@ -454,7 +457,7 @@ export function ParserEditor({ data, onChange, readOnly }: ParserEditorProps) {
                     setShowDictPicker(false);
                     setNewDictUri("");
                   }}
-                  className="inline-flex items-center gap-1 rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary transition-colors"
+                  className="inline-flex items-center gap-1 rounded-md border border-input px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   data-testid="cancel-add-dict"
                 >
                   <X className="h-3 w-3" />

@@ -344,7 +344,7 @@ function SortableExtensionItem({
         {isInlineEditable && (
           <button
             type="button"
-            onClick={() => onEditInline!(item.index)}
+            onClick={() => onEditInline?.(item.index)}
             disabled={disabled}
             className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
             data-testid={`configure-inline-${item.index}`}

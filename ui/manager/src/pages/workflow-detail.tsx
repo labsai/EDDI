@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -515,57 +515,12 @@ export function WorkflowDetailPage() {
 
       {/* Parser inline editing dialog */}
       {parserEditIndex !== null && parserEditData && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          data-testid="parser-edit-dialog"
-        >
-          <div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-            onClick={handleParserCancel}
-            aria-hidden="true"
-          />
-          <div
-            className="relative z-10 w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl border bg-card shadow-xl mx-4 p-5"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="parser-dialog-title"
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 id="parser-dialog-title" className="text-lg font-semibold text-foreground">
-                {t("parserEditor.title", "Parser Configuration")}
-              </h3>
-              <button
-                onClick={handleParserCancel}
-                className="rounded-md p-1 text-muted-foreground hover:bg-secondary transition-colors"
-                aria-label={t("common.close", "Close")}
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <ParserEditor
-              data={parserEditData}
-              onChange={setParserEditData}
-            />
-
-            <div className="mt-4 flex items-center justify-end gap-2 border-t border-border pt-4">
-              <button
-                onClick={handleParserCancel}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-input px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-all hover:bg-secondary"
-                data-testid="parser-dialog-cancel"
-              >
-                {t("common.cancel", "Cancel")}
-              </button>
-              <button
-                onClick={handleParserSave}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90"
-                data-testid="parser-dialog-save"
-              >
-                {t("common.apply", "Apply")}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ParserDialog
+          data={parserEditData}
+          onChange={setParserEditData}
+          onSave={handleParserSave}
+          onCancel={handleParserCancel}
+        />
       )}
 
       {/* Raw config (collapsible) */}
@@ -692,5 +647,107 @@ function RawConfigSection({
         </div>
       )}
     </section>
+  );
+}
+
+/* ─── Parser Editing Dialog ─── */
+
+function ParserDialog({
+  data,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  data: ParserData;
+  onChange: (d: ParserData) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useTranslation();
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Auto-focus the dialog panel on mount for keyboard a11y
+  useEffect(() => {
+    dialogRef.current?.focus();
+  }, []);
+
+  // Lock body scroll while dialog is open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  // Close on Escape key
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onCancel();
+      }
+    },
+    [onCancel],
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      data-testid="parser-edit-dialog"
+      onKeyDown={handleKeyDown}
+    >
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-in fade-in duration-150"
+        onClick={onCancel}
+        aria-hidden="true"
+      />
+
+      {/* Dialog panel */}
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        className="relative z-10 w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl border border-border bg-card shadow-2xl mx-4 p-5 outline-none animate-in fade-in zoom-in-95 duration-200"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="parser-dialog-title"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <h3 id="parser-dialog-title" className="text-lg font-semibold text-foreground">
+            {t("parserEditor.title", "Parser Configuration")}
+          </h3>
+          <button
+            onClick={onCancel}
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={t("common.close", "Close")}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Editor content */}
+        <ParserEditor data={data} onChange={onChange} />
+
+        {/* Footer */}
+        <div className="mt-4 flex items-center justify-end gap-2 border-t border-border pt-4">
+          <button
+            onClick={onCancel}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-input px-4 py-2 text-sm font-medium text-foreground shadow-sm transition-all hover:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            data-testid="parser-dialog-cancel"
+          >
+            {t("common.cancel", "Cancel")}
+          </button>
+          <button
+            onClick={onSave}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            data-testid="parser-dialog-save"
+          >
+            {t("common.apply", "Apply")}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
