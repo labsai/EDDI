@@ -288,10 +288,8 @@ describe("GDPR Privacy Admin Page", () => {
   // ─── Restrict processing toggle ─────────────────────────────────────
 
   it("clicking restrict toggle triggers restrict mutation for non-restricted user", async () => {
-    let restrictCalled = false;
     server.use(
       http.post("*/admin/gdpr/:userId/restrict", () => {
-        restrictCalled = true;
         return new HttpResponse(null, { status: 200 });
       })
     );

@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders } from "@/test/test-utils";
 import { MemoryInspector } from "@/components/debugger/memory-inspector";
 import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";

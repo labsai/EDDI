@@ -447,7 +447,7 @@ describe("LangChain Editor", () => {
   });
 
   it("switches to Select Specific tool mode and shows tool chips", async () => {
-    const user = userEvent.setup();
+    userEvent.setup();
     renderLlmPage();
     await waitFor(() => {
       expect(screen.getByTestId("tool-mode-specific")).toBeInTheDocument();

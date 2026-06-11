@@ -1,4 +1,4 @@
-import { renderHook, act } from "@testing-library/react";
+import { act } from "@testing-library/react";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 
 describe("useCommandPalette", () => {

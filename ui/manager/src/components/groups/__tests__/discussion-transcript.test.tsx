@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor, fireEvent } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { screen, fireEvent } from "@testing-library/react";
+import { renderWithProviders } from "@/test/test-utils";
 import { DiscussionTranscript } from "../discussion-transcript";
 import type { GroupConversation } from "@/lib/api/groups";
 import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";

@@ -3,8 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { type ReactNode } from "react";
-import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+
 import {
   useSecrets,
   useStoreSecret,

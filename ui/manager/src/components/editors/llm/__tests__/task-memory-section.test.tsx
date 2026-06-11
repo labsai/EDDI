@@ -70,7 +70,7 @@ describe("TaskMemorySection", () => {
   });
 
   it("shows token window inputs when section is expanded", async () => {
-    const user = userEvent.setup();
+    userEvent.setup();
     renderWithProviders(
       <TaskMemorySection task={taskWithTokenWindow} onChange={onChange} />
     );

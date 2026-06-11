@@ -70,7 +70,7 @@ describe("ChatInput", () => {
 
   it("does not send when disabled", async () => {
     const onSend = vi.fn();
-    const user = userEvent.setup();
+    userEvent.setup();
     renderWithProviders(<ChatInput onSend={onSend} disabled />);
 
     const input = screen.getByTestId("chat-input");

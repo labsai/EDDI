@@ -1,5 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect } from "vitest";
 import { renderWithProviders } from "@/test/test-utils";
 import { PageLoader } from "@/components/layout/page-loader";
 

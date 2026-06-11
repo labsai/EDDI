@@ -46,7 +46,7 @@ vi.mock("@/lib/api/resources", async () => {
 });
 
 vi.mock("@/lib/api/agents", () => ({
-  parseResourceUri: vi.fn((uri: string) => ({
+  parseResourceUri: vi.fn(() => ({
     id: "new-123",
     version: 1,
   })),

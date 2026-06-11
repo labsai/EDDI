@@ -1,5 +1,5 @@
-import { renderHook, act } from "@testing-library/react";
-import { useOnboarding, ALL_CHAPTERS, type TourChapterId } from "@/hooks/use-onboarding";
+import { act } from "@testing-library/react";
+import { useOnboarding, ALL_CHAPTERS } from "@/hooks/use-onboarding";
 
 describe("useOnboarding", () => {
   beforeEach(() => {

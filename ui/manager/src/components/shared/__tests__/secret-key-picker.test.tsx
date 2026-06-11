@@ -45,7 +45,7 @@ describe("SecretKeyPicker", () => {
           },
         ]);
       }),
-      http.put("*/secretstore/secrets/default/:keyName", async ({ params, request }) => {
+      http.put("*/secretstore/secrets/default/:keyName", async ({ params }) => {
         const { keyName } = params;
         return HttpResponse.json({
           reference: `\${vault:${keyName}}`,
@@ -166,7 +166,7 @@ describe("SecretKeyPicker", () => {
 
   it("opens create secret modal, handles inputs, and successfully calls store secret mutation", async () => {
     const user = userEvent.setup();
-    let mutationPayload: any = null;
+    let mutationPayload: Record<string, unknown> | null = null;
 
     server.use(
       http.put("*/secretstore/secrets/default/new-api-key", async ({ request }) => {
@@ -213,7 +213,7 @@ describe("SecretKeyPicker", () => {
   });
 
   it("handles vault health down gracefully", async () => {
-    const user = userEvent.setup();
+    userEvent.setup();
     server.use(
       http.get("*/secretstore/secrets/health", () => {
         return HttpResponse.json({

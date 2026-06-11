@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { GroupConfigPanel } from "../group-config-panel";
@@ -96,7 +96,7 @@ describe("GroupConfigPanel", () => {
   it("handles soft-delete workflow of the group and member agents", async () => {
     const user = userEvent.setup();
 
-    let deletedAgents: string[] = [];
+    const deletedAgents: string[] = [];
     let groupDeleted = false;
 
     server.use(

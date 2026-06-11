@@ -100,7 +100,7 @@ describe("CreateResourceDialog", () => {
 
   it("submits the form successfully and navigates to the detail page", async () => {
     const user = userEvent.setup();
-    let mutationPayload: any = null;
+    let mutationPayload: Record<string, unknown> | null = null;
 
     server.use(
       http.post("*/rulestore/rulesets", async ({ request }) => {
@@ -137,7 +137,7 @@ describe("CreateResourceDialog", () => {
 
   it("submits prompt snippet successfully with custom fields embedded", async () => {
     const user = userEvent.setup();
-    let mutationPayload: any = null;
+    let mutationPayload: Record<string, unknown> | null = null;
 
     server.use(
       http.post("*/snippetstore/snippets", async ({ request }) => {

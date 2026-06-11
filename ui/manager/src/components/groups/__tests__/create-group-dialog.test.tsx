@@ -160,7 +160,7 @@ describe("CreateGroupDialog", () => {
 
   it("renders review summary and executes group creation successfully", async () => {
     const user = userEvent.setup();
-    let mutationPayload: any = null;
+    let mutationPayload: Record<string, unknown> | null = null;
 
     server.use(
       http.post("*/groupstore/groups", async ({ request }) => {

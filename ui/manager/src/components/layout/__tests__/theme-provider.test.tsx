@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { ThemeProvider, useTheme } from "@/components/layout/theme-provider";
 import { userEvent } from "@/test/test-utils";
 
