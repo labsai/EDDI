@@ -157,7 +157,7 @@ class BaseRuntimeTest {
         // Sets the interrupt flag to simulate the scenario where future.cancel(true)
         // was called during a non-interruptible I/O operation (e.g., LLM HTTP call).
         // The callable completes normally but the interrupt flag remains set.
-        runtime.submitCallable(
+        Future<String> future = runtime.submitCallable(
                 () -> {
                     Thread.currentThread().interrupt(); // simulate interrupt flag left by cancel(true)
                     return "stale-result";
@@ -183,6 +183,12 @@ class BaseRuntimeTest {
         // onComplete should NOT have been called
         assertFalse(onCompleteCalled.isDone(),
                 "onComplete should not be called when thread was interrupted");
+
+        // Future must return null — NOT the stale "stale-result" value.
+        // This prevents callers who do future.get() from receiving data
+        // that was already routed to onFailure.
+        assertNull(future.get(5, TimeUnit.SECONDS),
+                "Future should return null when thread was interrupted to prevent stale result leakage");
     }
 
     @Test
