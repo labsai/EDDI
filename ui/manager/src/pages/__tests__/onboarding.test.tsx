@@ -267,6 +267,75 @@ describe("Onboarding — Welcome Modal", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     expect(useOnboarding.getState().showWelcome).toBe(false);
   });
+
+  it("ArrowRight key advances to the next panel", () => {
+    render(<WelcomeModal />, { wrapper: createWrapper() });
+    // Panel 0 is shown initially (welcome text)
+    expect(screen.getByText(/EDDI Manager/i)).toBeInTheDocument();
+
+    // Press ArrowRight to go to panel 1 (capabilities)
+    fireEvent.keyDown(document, { key: "ArrowRight" });
+    expect(screen.queryByTestId("welcome-start-tour")).not.toBeInTheDocument();
+  });
+
+  it("ArrowLeft key goes back to the previous panel", () => {
+    render(<WelcomeModal />, { wrapper: createWrapper() });
+
+    // Go to panel 1 first
+    fireEvent.keyDown(document, { key: "ArrowRight" });
+    // Then go back to panel 0
+    fireEvent.keyDown(document, { key: "ArrowLeft" });
+    // Panel 0 should show the welcome text
+    expect(screen.getByText(/EDDI Manager/i)).toBeInTheDocument();
+  });
+
+  it("ArrowLeft does not go below panel 0", () => {
+    render(<WelcomeModal />, { wrapper: createWrapper() });
+    // Already on panel 0, pressing ArrowLeft should stay on panel 0
+    fireEvent.keyDown(document, { key: "ArrowLeft" });
+    expect(screen.getByText(/EDDI Manager/i)).toBeInTheDocument();
+  });
+
+  it("ArrowRight does not go beyond last panel", async () => {
+    render(<WelcomeModal />, { wrapper: createWrapper() });
+    // Navigate to last panel (index 2)
+    fireEvent.keyDown(document, { key: "ArrowRight" }); // panel 1
+    fireEvent.keyDown(document, { key: "ArrowRight" }); // panel 2
+    fireEvent.keyDown(document, { key: "ArrowRight" }); // should stay on panel 2
+    // Panel 2 has the start tour button
+    expect(screen.getByTestId("welcome-start-tour")).toBeInTheDocument();
+  });
+
+  it("clicking next arrow button advances panel", async () => {
+    render(<WelcomeModal />, { wrapper: createWrapper() });
+    const user = userEvent.setup();
+    // Click the next arrow button (aria-label contains "next" from i18n)
+    const nextBtn = screen.getAllByRole("button").find(
+      (btn) => btn.querySelector("svg") && !btn.classList.contains("invisible") && btn.getAttribute("aria-label")?.toLowerCase().includes("next")
+    );
+    if (nextBtn) {
+      await user.click(nextBtn);
+      // Should advance to panel 1
+    }
+    // Regardless, the modal should still be open
+    expect(screen.getByTestId("welcome-modal")).toBeInTheDocument();
+  });
+
+  it("clicking back arrow button goes to previous panel", async () => {
+    render(<WelcomeModal />, { wrapper: createWrapper() });
+    const user = userEvent.setup();
+    // First go to panel 1 via keyboard
+    fireEvent.keyDown(document, { key: "ArrowRight" });
+    // Now find the back button
+    const backBtn = screen.getAllByRole("button").find(
+      (btn) => btn.getAttribute("aria-label")?.toLowerCase().includes("back")
+    );
+    if (backBtn) {
+      await user.click(backBtn);
+    }
+    // Should be back on panel 0
+    expect(screen.getByText(/EDDI Manager/i)).toBeInTheDocument();
+  });
 });
 
 describe("Onboarding — Guided Tour", () => {

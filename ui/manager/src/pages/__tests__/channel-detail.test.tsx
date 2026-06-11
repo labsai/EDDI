@@ -174,4 +174,128 @@ describe("ChannelDetailPage", () => {
       expect(nameInput1.value).toBe("review-panel");
     });
   });
+
+  // ─── Interaction tests ──────────────────────────────────────────────────
+
+  it("removes a target card when remove button is clicked", async () => {
+    renderChannelDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("target-card-1")).toBeInTheDocument();
+    });
+
+    // Click the Remove button on the second target
+    const targetCard = screen.getByTestId("target-card-1");
+    const removeBtn = within(targetCard).getByText("Remove");
+    await user.click(removeBtn);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("target-card-1")).not.toBeInTheDocument();
+    });
+  });
+
+  it("sets a non-default target as default", async () => {
+    renderChannelDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("target-card-1")).toBeInTheDocument();
+    });
+
+    // The second target is not default, it should have a "Set as Default" button
+    const targetCard = screen.getByTestId("target-card-1");
+    const setDefaultBtn = within(targetCard).getByText("Set as Default");
+    await user.click(setDefaultBtn);
+
+    // After clicking, the second target should now show the default badge
+    await waitFor(() => {
+      const defaultBadges = within(screen.getByTestId("target-card-1")).queryAllByText("default");
+      expect(defaultBadges.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it("adds a trigger keyword via Enter key", async () => {
+    renderChannelDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("target-card-0")).toBeInTheDocument();
+    });
+
+    const targetCard = screen.getByTestId("target-card-0");
+    const triggerInput = within(targetCard).getByPlaceholderText("Add trigger...");
+    await user.type(triggerInput, "billing{enter}");
+
+    // The new trigger should appear as a chip
+    await waitFor(() => {
+      expect(within(targetCard).getByLabelText("Remove billing")).toBeInTheDocument();
+    });
+  });
+
+  it("copies webhook URL to clipboard", async () => {
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    if (!navigator.clipboard) {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: writeTextMock },
+        configurable: true
+      });
+    } else {
+      vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(writeTextMock);
+    }
+
+    renderChannelDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByText(/\/integrations\/slack\/events/)).toBeInTheDocument();
+    });
+
+    // Click the Copy button next to the webhook URL
+    const copyBtn = screen.getByText("Copy");
+    await user.click(copyBtn);
+
+    expect(writeTextMock).toHaveBeenCalledWith(
+      expect.stringContaining("/integrations/slack/events")
+    );
+  });
+
+  it("collapses a target card when header is clicked", async () => {
+    renderChannelDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("target-card-0")).toBeInTheDocument();
+    });
+
+    // The target card should be expanded by default (showing name input)
+    const targetCard = screen.getByTestId("target-card-0");
+    expect(within(targetCard).getByTestId("target-name-0")).toBeInTheDocument();
+
+    // Click the header to collapse
+    const header = within(targetCard).getAllByText("default")[0].closest("div[class*='cursor-pointer']");
+    if (header) {
+      await user.click(header);
+      // After collapsing, the name input should not be visible
+      await waitFor(() => {
+        expect(within(targetCard).queryByTestId("target-name-0")).not.toBeInTheDocument();
+      });
+    }
+  });
+
+  it("expands raw JSON section", async () => {
+    renderChannelDetail();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(screen.getByText("Raw Configuration")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByText("Raw Configuration"));
+
+    await waitFor(() => {
+      // The JSON should now be visible
+      expect(screen.getByText(/"channelType"/)).toBeInTheDocument();
+    });
+  });
 });

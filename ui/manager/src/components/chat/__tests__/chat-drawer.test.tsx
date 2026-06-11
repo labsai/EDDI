@@ -123,7 +123,7 @@ describe("ChatDrawer", () => {
 
     server.use(
       http.post("*/agents/conv1", async () => {
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await new Promise((resolve) => setTimeout(resolve, 200));
         return HttpResponse.json({
           conversationOutputs: [
             {
@@ -169,7 +169,7 @@ describe("ChatDrawer", () => {
 
     server.use(
       http.post("*/agents/conv1", async () => {
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await new Promise((resolve) => setTimeout(resolve, 200));
         return HttpResponse.json({
           conversationOutputs: [
             {
