@@ -770,6 +770,7 @@
     "noRegularDicts": "ไม่มีพจนานุกรมทั่วไปที่กำหนดค่า",
     "regularDictLabel": "พจนานุกรมทั่วไป",
     "dictUri": "URI ทรัพยากรพจนานุกรม",
+    "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "การแก้ไข",
     "distance": "ระยะทาง",
     "normalizers": "ตัวปรับปกติ",

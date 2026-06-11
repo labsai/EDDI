@@ -770,6 +770,7 @@
     "noRegularDicts": "通常辞書が設定されていません",
     "regularDictLabel": "通常辞書",
     "dictUri": "辞書リソース URI",
+    "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "補正",
     "distance": "距離",
     "normalizers": "正規化器",

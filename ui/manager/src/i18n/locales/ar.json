@@ -480,7 +480,7 @@
       },
       "snippets": {
         "name": "قصاصات التوجيه",
-        "description": "Reusable system prompt building blocks"
+        "description": "وحدات بناء قابلة لإعادة الاستخدام لتوجيهات النظام"
       },
       "parser": {
         "name": "المحللات",
@@ -770,6 +770,7 @@
     "noRegularDicts": "لم يتم تهيئة أي قواميس عادية",
     "regularDictLabel": "قاموس عادي",
     "dictUri": "عنوان URI لمورد القاموس",
+    "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "التصحيحات",
     "distance": "المسافة",
     "normalizers": "المُعيِّرات",

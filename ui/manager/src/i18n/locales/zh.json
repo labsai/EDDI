@@ -770,6 +770,7 @@
     "noRegularDicts": "未配置常规词典",
     "regularDictLabel": "常规词典",
     "dictUri": "词典资源 URI",
+    "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "纠错",
     "distance": "距离",
     "normalizers": "规范化器",

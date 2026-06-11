@@ -806,6 +806,7 @@
     "noRegularDicts": "No regular dictionaries configured",
     "regularDictLabel": "Regular Dictionary",
     "dictUri": "Dictionary Resource URI",
+    "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "Corrections",
     "distance": "Distance",
     "normalizers": "Normalizers",

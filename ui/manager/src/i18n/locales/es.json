@@ -770,6 +770,7 @@
     "noRegularDicts": "No hay diccionarios regulares configurados",
     "regularDictLabel": "Diccionario regular",
     "dictUri": "URI del recurso de diccionario",
+    "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "Correcciones",
     "distance": "Distancia",
     "normalizers": "Normalizadores",

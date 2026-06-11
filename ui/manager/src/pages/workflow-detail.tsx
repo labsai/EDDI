@@ -170,7 +170,9 @@ export function WorkflowDetailPage() {
 
       const newExt: WorkflowExtension = {
         type: result.descriptor.type,
-        extensions: isParser ? ({ ...defaultParser!.extensions } as Record<string, unknown>) : {},
+        extensions: isParser && !result.configUri
+          ? ({ ...defaultParser!.extensions } as Record<string, unknown>)
+          : {},
         config: result.configUri
           ? { uri: result.configUri }
           : isParser
@@ -684,6 +686,7 @@ function ParserDialog({
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Escape") {
+        e.preventDefault();
         e.stopPropagation();
         onCancel();
       }
@@ -708,7 +711,7 @@ function ParserDialog({
       <div
         ref={dialogRef}
         tabIndex={-1}
-        className="relative z-10 w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl border border-border bg-card shadow-2xl mx-4 p-5 outline-none animate-in fade-in zoom-in-95 duration-200"
+        className="relative z-10 w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl border border-border bg-card shadow-2xl mi-4 p-5 outline-none animate-in fade-in zoom-in-95 duration-200"
         role="dialog"
         aria-modal="true"
         aria-labelledby="parser-dialog-title"

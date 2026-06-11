@@ -770,6 +770,7 @@
     "noRegularDicts": "구성된 일반 사전이 없습니다",
     "regularDictLabel": "일반 사전",
     "dictUri": "사전 리소스 URI",
+    "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "교정",
     "distance": "거리",
     "normalizers": "정규화기",

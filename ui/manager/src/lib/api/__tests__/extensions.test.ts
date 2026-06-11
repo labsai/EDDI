@@ -40,6 +40,7 @@ describe("RESOURCE_TYPES — extension field alignment with backend", () => {
     mcpcalls: "ai.labs.mcpcalls",
     rag: "ai.labs.rag",
     snippets: "ai.labs.snippet",
+    parser: "ai.labs.parser",
   };
 
   it("has 10 resource types", () => {
@@ -203,8 +204,8 @@ describe("sortExtensionTypes", () => {
 });
 
 describe("EXTENSION_TO_RESOURCE_SLUG — cross-reference with EXTENSION_TYPE_INFO", () => {
-  // snippet/snippets and parser have no EXTENSION_TYPE_INFO entry (no pipeline editor type info)
-  const SKIP = new Set(["eddi://ai.labs.snippet", "eddi://ai.labs.snippets", "eddi://ai.labs.parser"]);
+  // snippet/snippets has no EXTENSION_TYPE_INFO entry (no pipeline editor type info)
+  const SKIP = new Set(["eddi://ai.labs.snippet", "eddi://ai.labs.snippets"]);
 
   it("all resource-slug extensions (except snippets) have matching EXTENSION_TYPE_INFO entries", () => {
     for (const [ext, slug] of Object.entries(EXTENSION_TO_RESOURCE_SLUG)) {

@@ -770,6 +770,7 @@
     "noRegularDicts": "कोई सामान्य शब्दकोश कॉन्फ़िगर नहीं हैं",
     "regularDictLabel": "सामान्य शब्दकोश",
     "dictUri": "शब्दकोश संसाधन URI",
+    "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
     "corrections": "सुधार",
     "distance": "दूरी",
     "normalizers": "नॉर्मलाइज़र",

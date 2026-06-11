@@ -262,8 +262,9 @@ function SortableExtensionItem({
     return path;
   })() : null;
 
-  // Inline-editable steps: no config.uri but has extensions (e.g. parser)
-  const isInlineEditable = !resourceLink && onEditInline != null;
+  // Inline-editable steps: parser with embedded config (no config.uri)
+  const isInlineEditable =
+    ext.type === "eddi://ai.labs.parser" && !configUri && onEditInline != null;
 
   return (
     <div

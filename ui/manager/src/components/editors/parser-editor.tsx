@@ -187,10 +187,11 @@ export function ParserEditor({ data, onChange, readOnly }: ParserEditorProps) {
 
   const addRegularDict = useCallback(
     (uri: string) => {
-      if (!uri.trim()) return;
+      const trimmedUri = uri.trim();
+      if (!trimmedUri) return;
       const newEntry: ParserExtensionItem = {
         type: REGULAR_DICT_TYPE,
-        config: { uri },
+        config: { uri: trimmedUri },
       };
       onChange({
         ...data,
@@ -431,7 +432,7 @@ export function ParserEditor({ data, onChange, readOnly }: ParserEditorProps) {
                 type="text"
                 value={newDictUri}
                 onChange={(e) => setNewDictUri(e.target.value)}
-                placeholder="eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>"
+                placeholder={t("parserEditor.dictUriPlaceholder", "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>")}
                 className="h-8 w-full rounded-md border border-input bg-background px-3 font-mono text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                 data-testid="dict-uri-input"
                 autoFocus
