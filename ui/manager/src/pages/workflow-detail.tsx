@@ -12,6 +12,7 @@ import {
   Save,
   Undo2,
   Rocket,
+  X,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { toast } from "sonner";
@@ -38,6 +39,13 @@ import { useLatestVersions } from "@/hooks/use-latest-versions";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { useSaveAndDeploy } from "@/hooks/use-save-and-deploy";
 import { getAgent, updateAgent } from "@/lib/api/agents";
+import {
+  ParserEditor,
+} from "@/components/editors/parser-editor";
+import {
+  createDefaultParserData,
+  type ParserData,
+} from "@/components/editors/parser-editor-types";
 
 /* ─── Main page ─── */
 export function WorkflowDetailPage() {
@@ -63,6 +71,10 @@ export function WorkflowDetailPage() {
     type: "success" | "error";
     text: string;
   } | null>(null);
+
+  // Parser inline editing
+  const [parserEditIndex, setParserEditIndex] = useState<number | null>(null);
+  const [parserEditData, setParserEditData] = useState<ParserData | null>(null);
 
   const { data: versionDescriptors } = useWorkflowVersions(id!);
 
@@ -150,12 +162,20 @@ export function WorkflowDetailPage() {
     [currentExtensions]
   );
 
-  const handleAddExtension = useCallback(
+    const handleAddExtension = useCallback(
     (result: AddExtensionResult) => {
+      // Parser steps get default inline config instead of an empty config
+      const isParser = result.descriptor.type === "eddi://ai.labs.parser";
+      const defaultParser = isParser ? createDefaultParserData() : undefined;
+
       const newExt: WorkflowExtension = {
         type: result.descriptor.type,
-        extensions: {},
-        config: result.configUri ? { uri: result.configUri } : {},
+        extensions: isParser ? ({ ...defaultParser!.extensions } as Record<string, unknown>) : {},
+        config: result.configUri
+          ? { uri: result.configUri }
+          : isParser
+            ? ({ ...defaultParser!.config } as Record<string, unknown>)
+            : {},
       };
       setLocalExtensions([...currentExtensions, newExt]);
       setShowAddDialog(false);
@@ -245,6 +265,42 @@ export function WorkflowDetailPage() {
 
   const handleDiscard = useCallback(() => {
     setLocalExtensions(null);
+  }, []);
+
+  // Parser inline editing handlers
+  const handleEditInline = useCallback(
+    (index: number) => {
+      const ext = currentExtensions[index];
+      if (ext) {
+        setParserEditIndex(index);
+        setParserEditData({
+          config: (ext.config ?? {}) as ParserData["config"],
+          extensions: (ext.extensions ?? {}) as ParserData["extensions"],
+        });
+      }
+    },
+    [currentExtensions]
+  );
+
+  const handleParserSave = useCallback(() => {
+    if (parserEditIndex === null || !parserEditData) return;
+    const updated = [...currentExtensions];
+    const ext = updated[parserEditIndex];
+    if (ext) {
+      updated[parserEditIndex] = {
+        ...ext,
+        config: (parserEditData.config ?? {}) as Record<string, unknown>,
+        extensions: (parserEditData.extensions ?? {}) as Record<string, unknown>,
+      };
+      setLocalExtensions(updated);
+    }
+    setParserEditIndex(null);
+    setParserEditData(null);
+  }, [parserEditIndex, parserEditData, currentExtensions]);
+
+  const handleParserCancel = useCallback(() => {
+    setParserEditIndex(null);
+    setParserEditData(null);
   }, []);
 
   function handleDelete() {
@@ -445,6 +501,7 @@ export function WorkflowDetailPage() {
           agentVer={agentVer}
           latestVersions={latestVersions}
           onUpdateVersion={handleUpdateVersion}
+          onEditInline={handleEditInline}
         />
       </section>
 
@@ -455,6 +512,61 @@ export function WorkflowDetailPage() {
         onSelect={handleAddExtension}
       />
 
+
+      {/* Parser inline editing dialog */}
+      {parserEditIndex !== null && parserEditData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          data-testid="parser-edit-dialog"
+        >
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={handleParserCancel}
+            aria-hidden="true"
+          />
+          <div
+            className="relative z-10 w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl border bg-card shadow-xl mx-4 p-5"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="parser-dialog-title"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 id="parser-dialog-title" className="text-lg font-semibold text-foreground">
+                {t("parserEditor.title", "Parser Configuration")}
+              </h3>
+              <button
+                onClick={handleParserCancel}
+                className="rounded-md p-1 text-muted-foreground hover:bg-secondary transition-colors"
+                aria-label={t("common.close", "Close")}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <ParserEditor
+              data={parserEditData}
+              onChange={setParserEditData}
+            />
+
+            <div className="mt-4 flex items-center justify-end gap-2 border-t border-border pt-4">
+              <button
+                onClick={handleParserCancel}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-input px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-all hover:bg-secondary"
+                data-testid="parser-dialog-cancel"
+              >
+                {t("common.cancel", "Cancel")}
+              </button>
+              <button
+                onClick={handleParserSave}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90"
+                data-testid="parser-dialog-save"
+              >
+                {t("common.apply", "Apply")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Raw config (collapsible) */}
       <RawConfigSection config={workflow} />

@@ -481,6 +481,10 @@
       "snippets": {
         "name": "Excertos",
         "description": "Blocos de construcao reutilizaveis para prompts do sistema"
+      },
+      "parser": {
+        "name": "Analisadores",
+        "description": "Análise NLP de entradas e configuração de dicionários"
       }
     },
     "emptyDescription": "Crie seu primeiro(a) {{type}} para usar em workflows."
@@ -750,6 +754,46 @@
     "expressionPlaceholder": "ex. greeting(hello)",
     "frequency": "Frequência",
     "none": "Nenhuma definida"
+  },
+  "parserEditor": {
+    "title": "Configuração do analisador",
+    "configure": "Configurar",
+    "config": "Configuração",
+    "appendExpressions": "Adicionar expressões",
+    "includeUnused": "Incluir expressões não utilizadas",
+    "includeUnknown": "Incluir expressões desconhecidas",
+    "dictionaries": "Dicionários",
+    "builtInDicts": "Dicionários integrados",
+    "regularDicts": "Dicionários regulares",
+    "addDict": "Adicionar",
+    "removeDict": "Remover dicionário",
+    "noRegularDicts": "Nenhum dicionário regular configurado",
+    "regularDictLabel": "Dicionário regular",
+    "dictUri": "URI do recurso de dicionário",
+    "corrections": "Correções",
+    "distance": "Distância",
+    "normalizers": "Normalizadores",
+    "removePunctuation": "Remover pontuação",
+    "regexPattern": "Padrão",
+    "dict": {
+      "integer": "Dicionário de inteiros",
+      "decimal": "Dicionário de decimais",
+      "punctuation": "Dicionário de pontuação",
+      "email": "Dicionário de e-mails",
+      "time": "Dicionário de expressões temporais",
+      "ordinalNumber": "Dicionário de números ordinais"
+    },
+    "corr": {
+      "levenshtein": "Correção de Levenshtein",
+      "phonetic": "Correção fonética",
+      "mergedTerms": "Correção de termos mesclados"
+    },
+    "norm": {
+      "punctuation": "Normalizador de pontuação",
+      "specialCharacter": "Normalizador de caracteres especiais",
+      "contractedWords": "Normalizador de palavras contraídas",
+      "allowedCharacter": "Normalizador de caracteres permitidos"
+    }
   },
   "coordinator": {
     "title": "Painel do coordenador",

@@ -481,6 +481,10 @@
       "snippets": {
         "name": "स्निपेट प्रॉम्प्ट",
         "description": "Reusable system prompt building blocks"
+      },
+      "parser": {
+        "name": "पार्सर",
+        "description": "NLP इनपुट पार्सिंग और शब्दकोश कॉन्फ़िगरेशन"
       }
     },
     "emptyDescription": "Workflow में उपयोग करने के लिए अपना पहला {{type}} बनाएं।"
@@ -750,6 +754,46 @@
     "expressionPlaceholder": "उदा: greeting(hello)",
     "frequency": "आवृत्ति",
     "none": "कुछ परिभाषित नहीं"
+  },
+  "parserEditor": {
+    "title": "पार्सर कॉन्फ़िगरेशन",
+    "configure": "कॉन्फ़िगर करें",
+    "config": "कॉन्फ़िगरेशन",
+    "appendExpressions": "अभिव्यक्तियाँ जोड़ें",
+    "includeUnused": "अप्रयुक्त अभिव्यक्तियाँ शामिल करें",
+    "includeUnknown": "अज्ञात अभिव्यक्तियाँ शामिल करें",
+    "dictionaries": "शब्दकोश",
+    "builtInDicts": "इन-बिल्ट शब्दकोश",
+    "regularDicts": "सामान्य शब्दकोश",
+    "addDict": "जोड़ें",
+    "removeDict": "शब्दकोश हटाएँ",
+    "noRegularDicts": "कोई सामान्य शब्दकोश कॉन्फ़िगर नहीं हैं",
+    "regularDictLabel": "सामान्य शब्दकोश",
+    "dictUri": "शब्दकोश संसाधन URI",
+    "corrections": "सुधार",
+    "distance": "दूरी",
+    "normalizers": "नॉर्मलाइज़र",
+    "removePunctuation": "विराम चिह्न हटाएँ",
+    "regexPattern": "पैटर्न",
+    "dict": {
+      "integer": "पूर्णांक शब्दकोश",
+      "decimal": "दशमलव शब्दकोश",
+      "punctuation": "विराम चिह्न शब्दकोश",
+      "email": "ईमेल शब्दकोश",
+      "time": "समय अभिव्यक्ति शब्दकोश",
+      "ordinalNumber": "क्रमसूचक संख्या शब्दकोश"
+    },
+    "corr": {
+      "levenshtein": "लेवेनश्टाइन सुधार",
+      "phonetic": "ध्वनि सुधार",
+      "mergedTerms": "मिश्रित शब्द सुधार"
+    },
+    "norm": {
+      "punctuation": "विराम चिह्न नॉर्मलाइज़र",
+      "specialCharacter": "विशेष अक्षर नॉर्मलाइज़र",
+      "contractedWords": "संक्षिप्त शब्द नॉर्मलाइज़र",
+      "allowedCharacter": "अनुमत अक्षर नॉर्मलाइज़र"
+    }
   },
   "coordinator": {
     "title": "कोऑर्डिनेटर डैशबोर्ड",

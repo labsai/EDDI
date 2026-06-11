@@ -481,6 +481,10 @@
       "snippets": {
         "name": "提示词片段",
         "description": "Reusable system prompt building blocks"
+      },
+      "parser": {
+        "name": "解析器",
+        "description": "NLP输入解析和词典配置"
       }
     },
     "emptyDescription": "创建您的第一个 {{type}} 以在 Workflow 中使用。"
@@ -750,6 +754,46 @@
     "expressionPlaceholder": "例如 greeting(hello)",
     "frequency": "频率",
     "none": "未定义"
+  },
+  "parserEditor": {
+    "title": "解析器配置",
+    "configure": "配置",
+    "config": "配置",
+    "appendExpressions": "追加表达式",
+    "includeUnused": "包含未使用的表达式",
+    "includeUnknown": "包含未知表达式",
+    "dictionaries": "词典",
+    "builtInDicts": "内置词典",
+    "regularDicts": "常规词典",
+    "addDict": "添加",
+    "removeDict": "移除词典",
+    "noRegularDicts": "未配置常规词典",
+    "regularDictLabel": "常规词典",
+    "dictUri": "词典资源 URI",
+    "corrections": "纠错",
+    "distance": "距离",
+    "normalizers": "规范化器",
+    "removePunctuation": "移除标点符号",
+    "regexPattern": "模式",
+    "dict": {
+      "integer": "整数词典",
+      "decimal": "小数词典",
+      "punctuation": "标点符号词典",
+      "email": "电子邮件词典",
+      "time": "时间表达式词典",
+      "ordinalNumber": "序数词词典"
+    },
+    "corr": {
+      "levenshtein": "Levenshtein 纠错",
+      "phonetic": "语音纠错",
+      "mergedTerms": "合并词项纠错"
+    },
+    "norm": {
+      "punctuation": "标点符号规范化器",
+      "specialCharacter": "特殊字符规范化器",
+      "contractedWords": "缩略词规范化器",
+      "allowedCharacter": "允许字符规范化器"
+    }
   },
   "coordinator": {
     "title": "协调器仪表盘",

@@ -481,6 +481,10 @@
       "snippets": {
         "name": "Extraits de prompt",
         "description": "Blocs de construction reutilisables pour les prompts systeme"
+      },
+      "parser": {
+        "name": "Parseurs",
+        "description": "Analyse NLP des entrées et configuration des dictionnaires"
       }
     },
     "emptyDescription": "Créez votre premier(ère) {{type}} pour l'utiliser dans les workflows."
@@ -750,6 +754,46 @@
     "expressionPlaceholder": "ex. greeting(hello)",
     "frequency": "Fréquence",
     "none": "Aucune définie"
+  },
+  "parserEditor": {
+    "title": "Configuration du parseur",
+    "configure": "Configurer",
+    "config": "Configuration",
+    "appendExpressions": "Ajouter des expressions",
+    "includeUnused": "Inclure les expressions inutilisées",
+    "includeUnknown": "Inclure les expressions inconnues",
+    "dictionaries": "Dictionnaires",
+    "builtInDicts": "Dictionnaires intégrés",
+    "regularDicts": "Dictionnaires réguliers",
+    "addDict": "Ajouter",
+    "removeDict": "Supprimer le dictionnaire",
+    "noRegularDicts": "Aucun dictionnaire régulier configuré",
+    "regularDictLabel": "Dictionnaire régulier",
+    "dictUri": "URI de la ressource dictionnaire",
+    "corrections": "Corrections",
+    "distance": "Distance",
+    "normalizers": "Normalisateurs",
+    "removePunctuation": "Supprimer la ponctuation",
+    "regexPattern": "Motif",
+    "dict": {
+      "integer": "Dictionnaire d'entiers",
+      "decimal": "Dictionnaire de décimaux",
+      "punctuation": "Dictionnaire de ponctuation",
+      "email": "Dictionnaire d'e-mails",
+      "time": "Dictionnaire d'expressions temporelles",
+      "ordinalNumber": "Dictionnaire de nombres ordinaux"
+    },
+    "corr": {
+      "levenshtein": "Correction de Levenshtein",
+      "phonetic": "Correction phonétique",
+      "mergedTerms": "Correction de termes fusionnés"
+    },
+    "norm": {
+      "punctuation": "Normalisateur de ponctuation",
+      "specialCharacter": "Normalisateur de caractères spéciaux",
+      "contractedWords": "Normalisateur de mots contractés",
+      "allowedCharacter": "Normalisateur de caractères autorisés"
+    }
   },
   "coordinator": {
     "title": "Tableau de bord du coordinateur",

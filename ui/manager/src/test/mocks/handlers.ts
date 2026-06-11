@@ -2151,6 +2151,39 @@ export const handlers = [
     });
   }),
 
+  // Parser config mock data (BEFORE generic handlers)
+  http.get("*/parserstore/parsers/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    return HttpResponse.json({
+      config: {
+        appendExpressions: true,
+        includeUnused: true,
+        includeUnknown: true,
+      },
+      extensions: {
+        dictionaries: [
+          { type: "eddi://ai.labs.parser.dictionaries.integer" },
+          { type: "eddi://ai.labs.parser.dictionaries.decimal" },
+          { type: "eddi://ai.labs.parser.dictionaries.punctuation" },
+          { type: "eddi://ai.labs.parser.dictionaries.email" },
+          { type: "eddi://ai.labs.parser.dictionaries.time" },
+          { type: "eddi://ai.labs.parser.dictionaries.ordinalNumber" },
+          {
+            type: "eddi://ai.labs.parser.dictionaries.regular",
+            config: { uri: "eddi://ai.labs.dictionary/dictionarystore/dictionaries/dict1?version=1" },
+          },
+        ],
+        corrections: [
+          { type: "eddi://ai.labs.parser.corrections.levenshtein", config: { distance: "2" } },
+          { type: "eddi://ai.labs.parser.corrections.mergedTerms" },
+        ],
+        normalizer: [],
+      },
+    });
+  }),
+
   // Generic descriptor handlers for all resource types
   ...createResourceHandlers("rulestore", "rulesets", "rules"),
   ...createResourceHandlers("apicallstore", "apicalls", "apicalls"),

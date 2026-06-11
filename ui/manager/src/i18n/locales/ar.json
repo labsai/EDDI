@@ -481,6 +481,10 @@
       "snippets": {
         "name": "قصاصات التوجيه",
         "description": "Reusable system prompt building blocks"
+      },
+      "parser": {
+        "name": "المحللات",
+        "description": "تحليل المدخلات بمعالجة اللغة الطبيعية وتهيئة القواميس"
       }
     },
     "emptyDescription": "أنشئ أول {{type}} لاستخدامه في مسارات العمل."
@@ -750,6 +754,46 @@
     "expressionPlaceholder": "مثال: greeting(hello)",
     "frequency": "التكرار",
     "none": "لم يتم تحديد أي"
+  },
+  "parserEditor": {
+    "title": "تهيئة المحلل",
+    "configure": "تهيئة",
+    "config": "الإعدادات",
+    "appendExpressions": "إلحاق التعبيرات",
+    "includeUnused": "تضمين التعبيرات غير المستخدمة",
+    "includeUnknown": "تضمين التعبيرات غير المعروفة",
+    "dictionaries": "القواميس",
+    "builtInDicts": "القواميس المدمجة",
+    "regularDicts": "القواميس العادية",
+    "addDict": "إضافة",
+    "removeDict": "إزالة القاموس",
+    "noRegularDicts": "لم يتم تهيئة أي قواميس عادية",
+    "regularDictLabel": "قاموس عادي",
+    "dictUri": "عنوان URI لمورد القاموس",
+    "corrections": "التصحيحات",
+    "distance": "المسافة",
+    "normalizers": "المُعيِّرات",
+    "removePunctuation": "إزالة علامات الترقيم",
+    "regexPattern": "النمط",
+    "dict": {
+      "integer": "قاموس الأعداد الصحيحة",
+      "decimal": "قاموس الأعداد العشرية",
+      "punctuation": "قاموس علامات الترقيم",
+      "email": "قاموس البريد الإلكتروني",
+      "time": "قاموس التعبيرات الزمنية",
+      "ordinalNumber": "قاموس الأعداد الترتيبية"
+    },
+    "corr": {
+      "levenshtein": "تصحيح ليفنشتاين",
+      "phonetic": "تصحيح صوتي",
+      "mergedTerms": "تصحيح المصطلحات المدمجة"
+    },
+    "norm": {
+      "punctuation": "مُعيِّر علامات الترقيم",
+      "specialCharacter": "مُعيِّر الأحرف الخاصة",
+      "contractedWords": "مُعيِّر الكلمات المختصرة",
+      "allowedCharacter": "مُعيِّر الأحرف المسموحة"
+    }
   },
   "coordinator": {
     "title": "لوحة تحكم المنسق",

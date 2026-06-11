@@ -18,7 +18,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Link } from "react-router-dom";
 import type { WorkflowExtension } from "@/lib/api/workflows";
-import { ArrowUpCircle, ExternalLink, GripVertical, Puzzle, Trash2 } from "lucide-react";
+import { ArrowUpCircle, ExternalLink, GripVertical, Pencil, Puzzle, Trash2 } from "lucide-react";
 import { getExtensionIcon, getExtensionLabel } from "@/lib/api/extensions";
 
 /** Parse an eddi:// URI to extract the resource type slug and ID */
@@ -42,6 +42,7 @@ function parseExtensionUri(uri: string): { slug: string; id: string } | null {
         mcpcallsstore: "mcpcalls",
         ragstore: "rag",
         snippetstore: "snippets",
+        parserstore: "parser",
       };
       const storeName = segments[0];
       const resourceId = segments[2];
@@ -82,6 +83,8 @@ export interface PipelineBuilderProps {
   latestVersions?: Record<string, number>;
   /** Called when user clicks "Update" on a stale resource */
   onUpdateVersion?: (index: number, newUri: string) => void;
+  /** Called when a step should be edited inline (e.g. parser with embedded config) */
+  onEditInline?: (index: number) => void;
 }
 
 /* ─── Main component ─── */
@@ -96,6 +99,7 @@ export function PipelineBuilder({
   agentVer,
   latestVersions,
   onUpdateVersion,
+  onEditInline,
 }: PipelineBuilderProps) {
   const { t } = useTranslation();
   const sensors = useSensors(
@@ -166,6 +170,7 @@ export function PipelineBuilder({
               agentVer={agentVer}
               latestVersions={latestVersions}
               onUpdateVersion={onUpdateVersion}
+              onEditInline={onEditInline}
             />
           ))}
         </div>
@@ -187,6 +192,7 @@ function SortableExtensionItem({
   agentVer,
   latestVersions,
   onUpdateVersion,
+  onEditInline,
 }: {
   item: PipelineItem;
   position: number;
@@ -199,6 +205,7 @@ function SortableExtensionItem({
   agentVer?: string;
   latestVersions?: Record<string, number>;
   onUpdateVersion?: (index: number, newUri: string) => void;
+  onEditInline?: (index: number) => void;
 }) {
   const { t } = useTranslation();
   const {
@@ -254,6 +261,9 @@ function SortableExtensionItem({
     if (qs) path += `?${qs}`;
     return path;
   })() : null;
+
+  // Inline-editable steps: no config.uri but has extensions (e.g. parser)
+  const isInlineEditable = !resourceLink && onEditInline != null;
 
   return (
     <div
@@ -328,6 +338,20 @@ function SortableExtensionItem({
             <ExternalLink className="h-3 w-3" />
             {t("common.edit", "Edit")}
           </Link>
+        )}
+
+        {/* Inline configure (e.g. parser) */}
+        {isInlineEditable && (
+          <button
+            type="button"
+            onClick={() => onEditInline!(item.index)}
+            disabled={disabled}
+            className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
+            data-testid={`configure-inline-${item.index}`}
+          >
+            <Pencil className="h-3 w-3" />
+            {t("parserEditor.configure", "Configure")}
+          </button>
         )}
 
         {/* Remove */}

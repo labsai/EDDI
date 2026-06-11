@@ -518,6 +518,10 @@
       "snippets": {
         "name": "Prompt Snippets",
         "description": "Reusable system prompt building blocks for template composition"
+      },
+      "parser": {
+        "name": "Parsers",
+        "description": "NLP input parsing and dictionary configuration"
       }
     }
   },
@@ -786,6 +790,46 @@
     "expressionPlaceholder": "e.g. greeting(hello)",
     "frequency": "Frequency",
     "none": "None defined"
+  },
+  "parserEditor": {
+    "title": "Parser Configuration",
+    "configure": "Configure",
+    "config": "Configuration",
+    "appendExpressions": "Append Expressions",
+    "includeUnused": "Include Unused Expressions",
+    "includeUnknown": "Include Unknown Expressions",
+    "dictionaries": "Dictionaries",
+    "builtInDicts": "Built-in Dictionaries",
+    "regularDicts": "Regular Dictionaries",
+    "addDict": "Add",
+    "removeDict": "Remove dictionary",
+    "noRegularDicts": "No regular dictionaries configured",
+    "regularDictLabel": "Regular Dictionary",
+    "dictUri": "Dictionary Resource URI",
+    "corrections": "Corrections",
+    "distance": "Distance",
+    "normalizers": "Normalizers",
+    "removePunctuation": "Remove Punctuation",
+    "regexPattern": "Pattern",
+    "dict": {
+      "integer": "Integer Dictionary",
+      "decimal": "Decimal Dictionary",
+      "punctuation": "Punctuation Dictionary",
+      "email": "Email Dictionary",
+      "time": "Time Expression Dictionary",
+      "ordinalNumber": "Ordinal Number Dictionary"
+    },
+    "corr": {
+      "levenshtein": "Levenshtein Correction",
+      "phonetic": "Phonetic Correction",
+      "mergedTerms": "Merged Terms Correction"
+    },
+    "norm": {
+      "punctuation": "Punctuation Normalizer",
+      "specialCharacter": "Special Character Normalizer",
+      "contractedWords": "Contracted Word Normalizer",
+      "allowedCharacter": "Allowed Character Normalizer"
+    }
   },
   "coordinator": {
     "title": "Coordinator Dashboard",
