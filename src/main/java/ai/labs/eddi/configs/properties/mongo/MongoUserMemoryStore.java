@@ -186,6 +186,13 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         memoriesCollection.deleteOne(eq("_id", new ObjectId(entryId)));
     }
 
+    @Override
+    public Optional<UserMemoryEntry> findEntryById(String entryId) throws IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(entryId, "entryId");
+        Document doc = memoriesCollection.find(eq("_id", new ObjectId(entryId))).first();
+        return doc != null ? Optional.of(documentToEntry(doc)) : Optional.empty();
+    }
+
     // === Queries ===
 
     @Override

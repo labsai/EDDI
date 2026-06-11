@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.a2a;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService.CapabilityMatch;
 import ai.labs.eddi.engine.a2a.A2AModels.*;
+import jakarta.annotation.security.PermitAll;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
@@ -63,6 +64,7 @@ public class RestA2AEndpoint {
     /**
      * Default Agent Card — returns the first A2A-enabled agent's card.
      */
+    @PermitAll
     @GET
     @Path(".well-known/agent.json")
     public Response getDefaultAgentCard() {
@@ -81,6 +83,7 @@ public class RestA2AEndpoint {
     /**
      * Per-agent Agent Card.
      */
+    @PermitAll
     @GET
     @Path("a2a/agents/{agentId}/agent.json")
     public Response getAgentCard(@PathParam("agentId") String agentId) {
@@ -99,6 +102,7 @@ public class RestA2AEndpoint {
     /**
      * List all A2A-enabled agents.
      */
+    @PermitAll
     @GET
     @Path("a2a/agents")
     public Response listA2AAgents() {
@@ -117,6 +121,7 @@ public class RestA2AEndpoint {
      * Path follows the well-known URI convention, same auth model as
      * {@code /.well-known/agent.json}.
      */
+    @PermitAll
     @GET
     @Path(".well-known/capabilities")
     @Tag(name = "06. Capability Registry", description = "A2A agent capability discovery")
@@ -145,6 +150,7 @@ public class RestA2AEndpoint {
      * Public endpoint listing all registered skill names. Gated behind
      * {@code eddi.a2a.capabilities.public} (default {@code false}).
      */
+    @PermitAll
     @GET
     @Path(".well-known/capabilities/skills")
     @Tag(name = "06. Capability Registry", description = "A2A agent capability discovery")

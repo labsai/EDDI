@@ -11,6 +11,9 @@ import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.ForbiddenException;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -35,17 +38,26 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     private final IGroupConversationService groupConversationService;
     private final IJsonSerialization jsonSerialization;
+    private final SecurityIdentity identity;
+    private final OwnershipValidator ownershipValidator;
 
     @Inject
-    public RestGroupConversation(IGroupConversationService groupConversationService, IJsonSerialization jsonSerialization) {
+    public RestGroupConversation(IGroupConversationService groupConversationService,
+            IJsonSerialization jsonSerialization,
+            SecurityIdentity identity,
+            OwnershipValidator ownershipValidator) {
         this.groupConversationService = groupConversationService;
         this.jsonSerialization = jsonSerialization;
+        this.identity = identity;
+        this.ownershipValidator = ownershipValidator;
     }
 
     @Override
     public Response discuss(String groupId, DiscussRequest request) {
         try {
-            String userId = request.userId() != null ? request.userId() : "anonymous";
+            String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
+            if (userId == null || userId.isBlank())
+                userId = "anonymous";
             GroupConversation gc = groupConversationService.discuss(groupId, request.question(), userId, 0);
             URI location = URI.create("/groups/" + groupId + "/conversations/" + gc.getId());
             return Response.created(location).entity(gc).build();
@@ -62,7 +74,9 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public void discussStreaming(String groupId, DiscussRequest request, SseEventSink eventSink, Sse sse) {
         try {
-            String userId = request.userId() != null ? request.userId() : "anonymous";
+            String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
+            if (userId == null || userId.isBlank())
+                userId = "anonymous";
 
             GroupDiscussionEventListener listener = new GroupDiscussionEventListener() {
                 @Override
@@ -125,7 +139,11 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public GroupConversation readGroupConversation(String groupId, String groupConversationId) {
         try {
-            return groupConversationService.readGroupConversation(groupConversationId);
+            GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
+            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            return gc;
+        } catch (ForbiddenException e) {
+            throw e;
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
@@ -134,9 +152,13 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public Response deleteGroupConversation(String groupId, String groupConversationId) {
         try {
+            GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
+            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
             groupConversationService.deleteGroupConversation(groupConversationId);
             return Response.ok().build();
-        } catch (IResourceStore.ResourceStoreException e) {
+        } catch (ForbiddenException e) {
+            throw e;
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
     }
@@ -144,7 +166,16 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public List<GroupConversation> listGroupConversations(String groupId, Integer index, Integer limit) {
         try {
-            return groupConversationService.listGroupConversations(groupId, index, limit);
+            List<GroupConversation> conversations = groupConversationService.listGroupConversations(groupId, index, limit);
+            // Filter to owned conversations unless admin
+            if (ownershipValidator.isAuthEnabled() && identity != null && !identity.isAnonymous()
+                    && !identity.hasRole("eddi-admin")) {
+                String callerId = identity.getPrincipal().getName();
+                conversations = conversations.stream()
+                        .filter(gc -> callerId.equals(gc.getUserId()))
+                        .toList();
+            }
+            return conversations;
         } catch (IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }
