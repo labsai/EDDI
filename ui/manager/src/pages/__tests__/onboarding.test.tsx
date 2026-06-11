@@ -313,11 +313,10 @@ describe("Onboarding — Welcome Modal", () => {
     const nextBtn = screen.getAllByRole("button").find(
       (btn) => btn.querySelector("svg") && !btn.classList.contains("invisible") && btn.getAttribute("aria-label")?.toLowerCase().includes("next")
     );
-    if (nextBtn) {
-      await user.click(nextBtn);
-      // Should advance to panel 1
-    }
-    // Regardless, the modal should still be open
+    expect(nextBtn).toBeTruthy();
+
+    await user.click(nextBtn!);
+    // The modal should still be open after advancing
     expect(screen.getByTestId("welcome-modal")).toBeInTheDocument();
   });
 
@@ -330,9 +329,9 @@ describe("Onboarding — Welcome Modal", () => {
     const backBtn = screen.getAllByRole("button").find(
       (btn) => btn.getAttribute("aria-label")?.toLowerCase().includes("back")
     );
-    if (backBtn) {
-      await user.click(backBtn);
-    }
+    expect(backBtn).toBeTruthy();
+
+    await user.click(backBtn!);
     // Should be back on panel 0
     expect(screen.getByText(/EDDI Manager/i)).toBeInTheDocument();
   });
@@ -355,7 +354,7 @@ describe("Onboarding — Guided Tour", () => {
     expect(screen.queryByTestId("tour-tooltip")).not.toBeInTheDocument();
   });
 
-  it("renders spotlight and tooltip when a tour is active and target exists", async () => {
+  it("activates chapter state when a tour is started with a target element", async () => {
     // Create a mock target element
     const target = document.createElement("div");
     target.setAttribute("data-testid", "sidebar");

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { renderPage, userEvent } from "@/test/test-utils";
 import { ChannelDetailPage } from "@/pages/channel-detail";
@@ -235,13 +235,14 @@ describe("ChannelDetailPage", () => {
 
   it("copies webhook URL to clipboard", async () => {
     const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    let clipboardSpy: ReturnType<typeof vi.spyOn> | undefined;
     if (!navigator.clipboard) {
       Object.defineProperty(navigator, 'clipboard', {
         value: { writeText: writeTextMock },
         configurable: true
       });
     } else {
-      vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(writeTextMock);
+      clipboardSpy = vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(writeTextMock);
     }
 
     renderChannelDetail();
@@ -258,6 +259,9 @@ describe("ChannelDetailPage", () => {
     expect(writeTextMock).toHaveBeenCalledWith(
       expect.stringContaining("/integrations/slack/events")
     );
+
+    // Restore clipboard spy to avoid leaking into other tests
+    clipboardSpy?.mockRestore();
   });
 
   it("collapses a target card when header is clicked", async () => {
@@ -274,13 +278,13 @@ describe("ChannelDetailPage", () => {
 
     // Click the header to collapse
     const header = within(targetCard).getAllByText("default")[0].closest("div[class*='cursor-pointer']");
-    if (header) {
-      await user.click(header);
-      // After collapsing, the name input should not be visible
-      await waitFor(() => {
-        expect(within(targetCard).queryByTestId("target-name-0")).not.toBeInTheDocument();
-      });
-    }
+    expect(header).toBeTruthy();
+
+    await user.click(header!);
+    // After collapsing, the name input should not be visible
+    await waitFor(() => {
+      expect(within(targetCard).queryByTestId("target-name-0")).not.toBeInTheDocument();
+    });
   });
 
   it("expands raw JSON section", async () => {

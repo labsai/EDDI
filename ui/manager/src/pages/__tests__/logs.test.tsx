@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
-import { render } from "@testing-library/react";
+import { screen, waitFor, render, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
@@ -14,7 +13,7 @@ vi.mock("@/hooks/use-logs", () => ({
     entries: [
       { timestamp: 1700000000000, level: "INFO", message: "Server started", loggerName: "main", agentId: "agent1", conversationId: "conv1" },
       { timestamp: 1700000001000, level: "ERROR", message: "NullPointerException\n  at com.example.Main.run(Main.java:42)\n  at com.example.App.start(App.java:10)\nCaused by: java.lang.RuntimeException", loggerName: "error-logger" },
-      { timestamp: 1700000002000, level: "WARN", message: "Low memory", loggerName: "sys" },
+      { timestamp: 1700000002000, level: "WARNING", message: "Low memory", loggerName: "sys" },
     ],
     sseConnected: true,
     paused: false,
@@ -133,10 +132,13 @@ describe("LogsPage", () => {
 
   it("renders level badges for entries", () => {
     renderLogs();
-    // Assuming badges have the text INFO, ERROR, WARN
-    expect(screen.getAllByText("INFO").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("ERROR").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("WARN").length).toBeGreaterThan(0);
+    // Scope to the log entries scroll area to avoid matching <option> elements in filter dropdowns
+    const logEntries = screen.getByTestId("logs-page");
+    const badges = within(logEntries).getAllByText(/^(INFO|ERROR|WARN)$/);
+    const badgeTexts = badges.map((b) => b.textContent);
+    expect(badgeTexts).toContain("INFO");
+    expect(badgeTexts).toContain("ERROR");
+    expect(badgeTexts).toContain("WARN");
   });
 
   it("shows stacktrace toggle for error with stacktrace", () => {
@@ -159,13 +161,14 @@ describe("LogsPage", () => {
 
   it("copies log entry to clipboard", async () => {
     const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    let clipboardSpy: ReturnType<typeof vi.spyOn> | undefined;
     if (!navigator.clipboard) {
       Object.defineProperty(navigator, 'clipboard', {
         value: { writeText: writeTextMock },
         configurable: true
       });
     } else {
-      vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(writeTextMock);
+      clipboardSpy = vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(writeTextMock);
     }
 
     renderLogs();
@@ -176,6 +179,9 @@ describe("LogsPage", () => {
     await user.click(copyBtns[0]);
     
     expect(writeTextMock).toHaveBeenCalled();
+
+    // Restore clipboard spy to avoid leaking into other tests
+    clipboardSpy?.mockRestore();
   });
 
   it("switches to History tab and shows history content", async () => {
