@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.ingestion.IRagIngestionSourceStore;
 import ai.labs.eddi.configs.ingestion.IRestRagIngestionSourceStore;
 import ai.labs.eddi.configs.ingestion.model.RagIngestionSource;
+import ai.labs.eddi.configs.ingestion.model.WebSourceConfig;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -48,7 +49,6 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
     private final IRagIngestionSourceStore sourceStore;
     private final IScheduleStore scheduleStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
-    private final IDocumentDescriptorStore documentDescriptorStore;
     private final RagIngestionService ingestionService;
     private final IContentHashStore contentHashTracker;
     private final RestVersionInfo<RagIngestionSource> restVersionInfo;
@@ -64,7 +64,6 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
         this.sourceStore = sourceStore;
         this.scheduleStore = scheduleStore;
         this.jsonSchemaCreator = jsonSchemaCreator;
-        this.documentDescriptorStore = documentDescriptorStore;
         this.ingestionService = ingestionService;
         this.contentHashTracker = contentHashTracker;
         this.restVersionInfo = new RestVersionInfo<>(resourceURI, sourceStore, documentDescriptorStore);
@@ -100,6 +99,8 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
 
     @Override
     public Response updateIngestionSource(String id, Integer version, RagIngestionSource source) {
+        validateSource(source);
+
         Response response = restVersionInfo.update(id, version, source);
 
         // Update associated schedule
@@ -116,6 +117,8 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
 
     @Override
     public Response createIngestionSource(RagIngestionSource source) {
+        validateSource(source);
+
         IResourceStore.IResourceId resourceId = restVersionInfo.createDocument(source);
 
         // Create associated schedule
@@ -192,6 +195,18 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
     @Override
     public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return sourceStore.getCurrentResourceId(id);
+    }
+
+    // --- Source validation ---
+
+    private void validateSource(RagIngestionSource source) {
+        if ("web".equals(source.type())) {
+            if (source.sourceConfig() instanceof WebSourceConfig webConfig) {
+                webConfig.validate();
+            } else if (source.sourceConfig() == null) {
+                throw new IllegalArgumentException("sourceConfig is required for web-type ingestion sources");
+            }
+        }
     }
 
     // --- Schedule management ---
