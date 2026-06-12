@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.ingestion.model;
 
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -38,6 +39,21 @@ public record WebSourceConfig(
         if (crawlSettings == null) {
             crawlSettings = new CrawlSettings();
         }
+    }
+
+    /**
+     * Validates this configuration and throws {@link IllegalArgumentException} if
+     * any field is invalid. Call this before using the config for crawling.
+     */
+    public void validate() {
+        if (!UrlValidationUtils.isValidHttpUrl(startUrl)) {
+            throw new IllegalArgumentException(
+                    startUrl == null || startUrl.isBlank()
+                            ? "startUrl must not be null or blank"
+                            : "startUrl must be a valid http or https URL, got: " + startUrl);
+        }
+        scope.validate();
+        crawlSettings.validate();
     }
 
     /**
@@ -90,6 +106,15 @@ public record WebSourceConfig(
         public Scope() {
             this(true, "/", 3, 200, new ArrayList<>());
         }
+
+        void validate() {
+            if (maxPages > 10_000) {
+                throw new IllegalArgumentException("maxPages must not exceed 10,000, got: " + maxPages);
+            }
+            if (maxDepth > 20) {
+                throw new IllegalArgumentException("maxDepth must not exceed 20, got: " + maxDepth);
+            }
+        }
     }
 
     /**
@@ -127,6 +152,15 @@ public record WebSourceConfig(
          */
         public CrawlSettings() {
             this(500, 15, "EDDI-Crawler/1.0");
+        }
+
+        void validate() {
+            if (requestDelayMs > 30_000) {
+                throw new IllegalArgumentException("requestDelayMs must not exceed 30,000, got: " + requestDelayMs);
+            }
+            if (timeoutSeconds > 300) {
+                throw new IllegalArgumentException("timeoutSeconds must not exceed 300, got: " + timeoutSeconds);
+            }
         }
     }
 }

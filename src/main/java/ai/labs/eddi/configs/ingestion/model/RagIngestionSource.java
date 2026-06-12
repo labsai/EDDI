@@ -69,15 +69,11 @@ public record RagIngestionSource(
             type = "web";
         }
 
-        // Ensure sourceConfig is not null for web type
-        if (sourceConfig == null && "web".equals(type)) {
-            sourceConfig = new WebSourceConfig(null, null, null);
-        }
-
         // Set defaults for other nullable nested configs
         if (ingestionSettings == null) {
             ingestionSettings = new IngestionSettings();
         }
+
         if (schedule == null) {
             schedule = new Schedule();
         }
