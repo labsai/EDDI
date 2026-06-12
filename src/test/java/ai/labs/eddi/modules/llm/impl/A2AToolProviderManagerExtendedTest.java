@@ -239,4 +239,179 @@ class A2AToolProviderManagerExtendedTest {
             assertTrue(result.executors().isEmpty());
         }
     }
+
+    // ─── sanitizeToolName edge cases (via reflection) ────────────
+
+    @Nested
+    @DisplayName("sanitizeToolName edge cases")
+    class SanitizeToolNameEdgeCases {
+
+        private String invokeSanitize(String input) {
+            try {
+                var method = A2AToolProviderManager.class.getDeclaredMethod("sanitizeToolName", String.class);
+                method.setAccessible(true);
+                return (String) method.invoke(manager, input);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        @Test
+        @DisplayName("special characters replaced with underscores")
+        void specialCharsReplaced() {
+            String result = invokeSanitize("my-agent!@#v2");
+            // Should keep alphanumeric and underscores, collapse multiples
+            assertFalse(result.contains("-"));
+            assertFalse(result.contains("!"));
+            assertFalse(result.contains("@"));
+            assertFalse(result.contains("#"));
+            assertTrue(result.matches("[a-z0-9_]+"));
+        }
+
+        @Test
+        @DisplayName("leading underscores are stripped")
+        void leadingUnderscoresStripped() {
+            String result = invokeSanitize("___leading");
+            assertFalse(result.startsWith("_"));
+            assertEquals("leading", result);
+        }
+
+        @Test
+        @DisplayName("trailing underscores are stripped")
+        void trailingUnderscoresStripped() {
+            String result = invokeSanitize("trailing___");
+            assertFalse(result.endsWith("_"));
+            assertEquals("trailing", result);
+        }
+
+        @Test
+        @DisplayName("consecutive underscores collapsed to single")
+        void consecutiveUnderscoresCollapsed() {
+            String result = invokeSanitize("foo___bar");
+            assertEquals("foo_bar", result);
+        }
+
+        @Test
+        @DisplayName("mixed special chars, leading/trailing, and consecutive underscores")
+        void mixedEdgeCases() {
+            String result = invokeSanitize("--Hello World!! Test--");
+            // lowercase, specials→_, collapse, trim leading/trailing
+            assertEquals("hello_world_test", result);
+        }
+
+        @Test
+        @DisplayName("uppercase is lowercased")
+        void uppercaseLowered() {
+            String result = invokeSanitize("MyAgent");
+            assertEquals("myagent", result);
+        }
+
+        @Test
+        @DisplayName("already valid name is unchanged")
+        void alreadyValid() {
+            String result = invokeSanitize("valid_name_123");
+            assertEquals("valid_name_123", result);
+        }
+    }
+
+    // ─── Discovery with empty/blank URL config ──────────────────
+
+    @Nested
+    @DisplayName("Discovery with empty URL config")
+    class EmptyUrlConfigTests {
+
+        @Test
+        @DisplayName("blank URL string is skipped — returns empty result")
+        void blankUrlSkipped() {
+            var config = new A2AAgentConfig();
+            config.setUrl(""); // blank string — isNullOrEmpty returns true
+            config.setTimeoutMs(100L);
+
+            var result = manager.discoverTools(List.of(config));
+            assertNotNull(result);
+            assertTrue(result.toolSpecs().isEmpty());
+            assertTrue(result.executors().isEmpty());
+        }
+
+        @Test
+        @DisplayName("null URL is skipped — returns empty result")
+        void nullUrlSkipped() {
+            var config = new A2AAgentConfig();
+            config.setUrl(null);
+            config.setTimeoutMs(100L);
+
+            var result = manager.discoverTools(List.of(config));
+            assertNotNull(result);
+            assertTrue(result.toolSpecs().isEmpty());
+        }
+
+        @Test
+        @DisplayName("mix of blank and valid URL — blank is skipped")
+        void mixedBlankAndValidUrl() {
+            var blankConfig = new A2AAgentConfig();
+            blankConfig.setUrl("");
+            blankConfig.setTimeoutMs(100L);
+
+            var validConfig = new A2AAgentConfig();
+            validConfig.setUrl("http://192.0.2.1:1"); // will fail to connect but not skipped
+            validConfig.setTimeoutMs(100L);
+
+            var result = manager.discoverTools(List.of(blankConfig, validConfig));
+            assertNotNull(result);
+            // Both return no tools (blank skipped, valid fails to connect)
+            assertTrue(result.toolSpecs().isEmpty());
+        }
+    }
+
+    // ─── warnIfRawKey with vars reference ────────────────────────
+
+    @Nested
+    @DisplayName("warnIfRawKey with vars reference")
+    class VarsReferenceTests {
+
+        @Test
+        @DisplayName("${vars:key} reference — no warning (treated like vault)")
+        void varsRefKey() {
+            var config = new A2AAgentConfig();
+            config.setUrl("http://192.0.2.1:1");
+            config.setApiKey("${vars:my-api-key}");
+            config.setTimeoutMs(100L);
+
+            // Should not throw — vars reference is accepted just like vault
+            assertDoesNotThrow(() -> manager.discoverTools(List.of(config)));
+        }
+
+        @Test
+        @DisplayName("${eddivault:key} reference — no warning")
+        void eddiVaultRefKey() {
+            var config = new A2AAgentConfig();
+            config.setUrl("http://192.0.2.1:1");
+            config.setApiKey("${eddivault:secret-key}");
+            config.setTimeoutMs(100L);
+
+            assertDoesNotThrow(() -> manager.discoverTools(List.of(config)));
+        }
+
+        @Test
+        @DisplayName("null API key — no warning, no exception")
+        void nullApiKey() {
+            var config = new A2AAgentConfig();
+            config.setUrl("http://192.0.2.1:1");
+            config.setApiKey(null);
+            config.setTimeoutMs(100L);
+
+            assertDoesNotThrow(() -> manager.discoverTools(List.of(config)));
+        }
+
+        @Test
+        @DisplayName("empty API key — no warning, no exception")
+        void emptyApiKey() {
+            var config = new A2AAgentConfig();
+            config.setUrl("http://192.0.2.1:1");
+            config.setApiKey("");
+            config.setTimeoutMs(100L);
+
+            assertDoesNotThrow(() -> manager.discoverTools(List.of(config)));
+        }
+    }
 }

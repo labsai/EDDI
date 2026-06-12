@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventLis
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
@@ -747,6 +748,591 @@ class GroupConversationServiceExtendedTest {
                     null, null, null, "default", 3);
 
             assertDoesNotThrow(svc::shutdown);
+        }
+    }
+
+    // =========================================================
+    // Context scope: LAST_PHASE
+    // =========================================================
+
+    @Nested
+    class ContextScopeLastPhase {
+
+        @Test
+        void lastPhaseScope_onlyIncludesPriorPhaseEntries() throws Exception {
+            var cfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice", 1, null),
+                    new GroupMember("bbbbbbbbbbbbbbbbbbbbbbbb", "Bob", 2, null));
+            cfg.setPhases(List.of(
+                    new DiscussionPhase("Phase0", PhaseType.OPINION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.NONE, false, null, 1),
+                    new DiscussionPhase("Phase1", PhaseType.OPINION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.LAST_PHASE, false, null, 1)));
+            setupStore(cfg);
+            stubAgent("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice phase0 opinion");
+            stubAgent("bbbbbbbbbbbbbbbbbbbbbbbb", "Bob phase0 opinion");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // Phase1 should contain opinions from both agents with LAST_PHASE context
+            long phase1Opinions = result.getTranscript().stream()
+                    .filter(e -> e.type() == TranscriptEntryType.OPINION && e.phaseIndex() == 1)
+                    .count();
+            assertEquals(2, phase1Opinions, "Both agents should contribute opinions in phase 1");
+        }
+    }
+
+    // =========================================================
+    // Multiple rounds (repeats > 1)
+    // =========================================================
+
+    @Nested
+    class MultipleRounds {
+
+        @Test
+        void roundTable_multipleRounds_executesDiscussionPhasesMultipleTimes() throws Exception {
+            var cfg = config(DiscussionStyle.ROUND_TABLE, 3,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice", 1, null),
+                    new GroupMember("bbbbbbbbbbbbbbbbbbbbbbbb", "Bob", 2, null));
+            cfg.setModeratorAgentId("cccccccccccccccccccccccc");
+            setupStore(cfg);
+            stubAgent("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice opinion");
+            stubAgent("bbbbbbbbbbbbbbbbbbbbbbbb", "Bob opinion");
+            stubAgent("cccccccccccccccccccccccc", "Final synthesis");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            assertNotNull(result.getSynthesizedAnswer());
+            // Round 1: 2 independent opinions + Rounds 2-3: 2x2=4 context opinions + 1
+            // synthesis = 7
+            long opinionCount = result.getTranscript().stream()
+                    .filter(e -> e.type() == TranscriptEntryType.OPINION)
+                    .count();
+            assertTrue(opinionCount >= 6,
+                    "Expected at least 6 opinions for 3 rounds with 2 agents, got " + opinionCount);
+        }
+
+        @Test
+        void customPhase_withRepeats_executesMultipleTimes() throws Exception {
+            var cfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice", 1, null));
+            cfg.setPhases(List.of(
+                    new DiscussionPhase("RepeatingOpinion", PhaseType.OPINION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 3)));
+            setupStore(cfg);
+            stubAgent("aaaaaaaaaaaaaaaaaaaaaaaa", "Opinion iteration");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            long opinionCount = result.getTranscript().stream()
+                    .filter(e -> e.type() == TranscriptEntryType.OPINION)
+                    .count();
+            assertEquals(3, opinionCount, "Expected 3 opinions from 3 repeats");
+        }
+    }
+
+    // =========================================================
+    // Discussion with DEBATE style
+    // =========================================================
+
+    @Nested
+    class DebateStyle {
+
+        @Test
+        void debate_proConRebuttalsAndJudgment() throws Exception {
+            var cfg = config(DiscussionStyle.DEBATE, 1,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "ProAgent", 1, "PRO"),
+                    new GroupMember("bbbbbbbbbbbbbbbbbbbbbbbb", "ConAgent", 2, "CON"));
+            cfg.setModeratorAgentId("cccccccccccccccccccccccc");
+            setupStore(cfg);
+            stubAgent("aaaaaaaaaaaaaaaaaaaaaaaa", "Pro argument");
+            stubAgent("bbbbbbbbbbbbbbbbbbbbbbbb", "Con argument");
+            stubAgent("cccccccccccccccccccccccc", "Judgment synthesis");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            assertNotNull(result.getSynthesizedAnswer());
+            // DEBATE has 5 phases: ARGUE(PRO), ARGUE(CON), REBUTTAL(PRO), REBUTTAL(CON),
+            // SYNTHESIS
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.ARGUMENT),
+                    "Expected ARGUMENT entries");
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.REBUTTAL),
+                    "Expected REBUTTAL entries");
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.SYNTHESIS),
+                    "Expected SYNTHESIS entry");
+        }
+
+        @Test
+        void debate_teamSideInjectedCorrectly() throws Exception {
+            var cfg = config(DiscussionStyle.DEBATE, 1,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "ProAgent", 1, "PRO"),
+                    new GroupMember("bbbbbbbbbbbbbbbbbbbbbbbb", "ConAgent", 2, "CON"));
+            cfg.setModeratorAgentId("cccccccccccccccccccccccc");
+            setupStore(cfg);
+            stubAgent("aaaaaaaaaaaaaaaaaaaaaaaa", "For the motion");
+            stubAgent("bbbbbbbbbbbbbbbbbbbbbbbb", "Against the motion");
+            stubAgent("cccccccccccccccccccccccc", "The motion passes");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // Verify both agents participated
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> "aaaaaaaaaaaaaaaaaaaaaaaa".equals(e.speakerAgentId())));
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> "bbbbbbbbbbbbbbbbbbbbbbbb".equals(e.speakerAgentId())));
+        }
+    }
+
+    // =========================================================
+    // Discussion with PEER_REVIEW style
+    // =========================================================
+
+    @Nested
+    class PeerReviewStyle {
+
+        @Test
+        void peerReview_fullCycle() throws Exception {
+            var cfg = config(DiscussionStyle.PEER_REVIEW, 1,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice", 1, null),
+                    new GroupMember("bbbbbbbbbbbbbbbbbbbbbbbb", "Bob", 2, null));
+            cfg.setModeratorAgentId("cccccccccccccccccccccccc");
+            setupStore(cfg);
+            stubAgent("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice's response");
+            stubAgent("bbbbbbbbbbbbbbbbbbbbbbbb", "Bob's response");
+            stubAgent("cccccccccccccccccccccccc", "Synthesis");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            assertNotNull(result.getSynthesizedAnswer());
+            // PEER_REVIEW has: OPINION (parallel) → CRITIQUE (peer-targeted) → REVISION
+            // (parallel) → SYNTHESIS
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.OPINION));
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.CRITIQUE));
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.REVISION));
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.SYNTHESIS));
+        }
+    }
+
+    // =========================================================
+    // Discussion with DELPHI style (anonymous rounds)
+    // =========================================================
+
+    @Nested
+    class DelphiStyle {
+
+        @Test
+        void delphi_anonymousRounds() throws Exception {
+            var cfg = config(DiscussionStyle.DELPHI, 3,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice", 1, null),
+                    new GroupMember("bbbbbbbbbbbbbbbbbbbbbbbb", "Bob", 2, null));
+            cfg.setModeratorAgentId("cccccccccccccccccccccccc");
+            setupStore(cfg);
+            stubAgent("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice opinion");
+            stubAgent("bbbbbbbbbbbbbbbbbbbbbbbb", "Bob opinion");
+            stubAgent("cccccccccccccccccccccccc", "Delphi synthesis");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            assertNotNull(result.getSynthesizedAnswer());
+            // DELPHI with 3 rounds: Round1 (independent) + Round2 + Round3 (anonymous) +
+            // Synthesis
+            long opinionCount = result.getTranscript().stream()
+                    .filter(e -> e.type() == TranscriptEntryType.OPINION)
+                    .count();
+            assertTrue(opinionCount >= 6,
+                    "Expected at least 6 opinions (3 rounds × 2 agents), got " + opinionCount);
+        }
+    }
+
+    // =========================================================
+    // extractResponse edge cases
+    // =========================================================
+
+    @Nested
+    class ExtractResponseEdgeCases {
+
+        @Test
+        void nullSnapshot_returnsEmptyString() throws Exception {
+            var cfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice", 1, null));
+            cfg.setPhases(List.of(
+                    new DiscussionPhase("Op", PhaseType.OPINION)));
+            setupStore(cfg);
+
+            when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("aaaaaaaaaaaaaaaaaaaaaaaa")))
+                    .thenReturn(mock(IAgent.class));
+            when(conversationService.startConversation(any(), eq("aaaaaaaaaaaaaaaaaaaaaaaa"), any(), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-a1", null));
+
+            // Handler called with null snapshot
+            doAnswer(inv -> {
+                ConversationResponseHandler handler = inv.getArgument(8);
+                handler.onComplete(null);
+                return null;
+            }).when(conversationService).say(any(Environment.class), eq("aaaaaaaaaaaaaaaaaaaaaaaa"),
+                    anyString(), any(), any(), any(), any(InputData.class),
+                    anyBoolean(), any(ConversationResponseHandler.class));
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+        }
+
+        @Test
+        void emptyConversationOutputs_returnsEmptyString() throws Exception {
+            var cfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice", 1, null));
+            cfg.setPhases(List.of(
+                    new DiscussionPhase("Op", PhaseType.OPINION)));
+            setupStore(cfg);
+
+            when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("aaaaaaaaaaaaaaaaaaaaaaaa")))
+                    .thenReturn(mock(IAgent.class));
+            when(conversationService.startConversation(any(), eq("aaaaaaaaaaaaaaaaaaaaaaaa"), any(), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-a1", null));
+
+            doAnswer(inv -> {
+                ConversationResponseHandler handler = inv.getArgument(8);
+                var snapshot = new SimpleConversationMemorySnapshot();
+                snapshot.setConversationOutputs(new ArrayList<>());
+                handler.onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(any(Environment.class), eq("aaaaaaaaaaaaaaaaaaaaaaaa"),
+                    anyString(), any(), any(), any(), any(InputData.class),
+                    anyBoolean(), any(ConversationResponseHandler.class));
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+        }
+
+        @Test
+        void outputWithNoOutputKey_returnsNull() throws Exception {
+            var cfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice", 1, null));
+            cfg.setPhases(List.of(
+                    new DiscussionPhase("Op", PhaseType.OPINION)));
+            setupStore(cfg);
+
+            when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("aaaaaaaaaaaaaaaaaaaaaaaa")))
+                    .thenReturn(mock(IAgent.class));
+            when(conversationService.startConversation(any(), eq("aaaaaaaaaaaaaaaaaaaaaaaa"), any(), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-a1", null));
+
+            // Output map with only non-output keys (e.g., 'actions', 'input')
+            doAnswer(inv -> {
+                ConversationResponseHandler handler = inv.getArgument(8);
+                var snapshot = new SimpleConversationMemorySnapshot();
+                var output = new ConversationOutput();
+                output.put("actions", List.of("action1"));
+                output.put("input", "some input");
+                snapshot.setConversationOutputs(new ArrayList<>(List.of(output)));
+                handler.onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(any(Environment.class), eq("aaaaaaaaaaaaaaaaaaaaaaaa"),
+                    anyString(), any(), any(), any(), any(InputData.class),
+                    anyBoolean(), any(ConversationResponseHandler.class));
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // The output had no 'output' key, so extractResponse returns null
+            // The transcript entry content should reflect this
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.OPINION
+                            && "aaaaaaaaaaaaaaaaaaaaaaaa".equals(e.speakerAgentId())));
+        }
+
+        @Test
+        void snapshotWithErrorState_producesErrorMessage() throws Exception {
+            var cfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice", 1, null));
+            cfg.setPhases(List.of(
+                    new DiscussionPhase("Op", PhaseType.OPINION)));
+            setupStore(cfg);
+
+            when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("aaaaaaaaaaaaaaaaaaaaaaaa")))
+                    .thenReturn(mock(IAgent.class));
+            when(conversationService.startConversation(any(), eq("aaaaaaaaaaaaaaaaaaaaaaaa"), any(), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-a1", null));
+
+            // Snapshot with ERROR state and no output keys
+            doAnswer(inv -> {
+                ConversationResponseHandler handler = inv.getArgument(8);
+                var snapshot = new SimpleConversationMemorySnapshot();
+                var output = new ConversationOutput();
+                output.put("actions", List.of("action1"));
+                snapshot.setConversationOutputs(new ArrayList<>(List.of(output)));
+                snapshot.setConversationState(ConversationState.ERROR);
+                handler.onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(any(Environment.class), eq("aaaaaaaaaaaaaaaaaaaaaaaa"),
+                    anyString(), any(), any(), any(), any(InputData.class),
+                    anyBoolean(), any(ConversationResponseHandler.class));
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // Should contain the error message from ERROR state fallback
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.OPINION
+                            && e.content() != null
+                            && e.content().contains("Agent failed")));
+        }
+
+        @Test
+        void outputWithFlatTextKeys_extractsCorrectly() throws Exception {
+            var cfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice", 1, null));
+            cfg.setPhases(List.of(
+                    new DiscussionPhase("Op", PhaseType.OPINION)));
+            setupStore(cfg);
+
+            when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("aaaaaaaaaaaaaaaaaaaaaaaa")))
+                    .thenReturn(mock(IAgent.class));
+            when(conversationService.startConversation(any(), eq("aaaaaaaaaaaaaaaaaaaaaaaa"), any(), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-a1", null));
+
+            // Output with "output:text:0" flat key
+            doAnswer(inv -> {
+                ConversationResponseHandler handler = inv.getArgument(8);
+                var snapshot = new SimpleConversationMemorySnapshot();
+                var output = new ConversationOutput();
+                output.put("output:text:0", "Flat text output");
+                snapshot.setConversationOutputs(new ArrayList<>(List.of(output)));
+                handler.onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(any(Environment.class), eq("aaaaaaaaaaaaaaaaaaaaaaaa"),
+                    anyString(), any(), any(), any(), any(InputData.class),
+                    anyBoolean(), any(ConversationResponseHandler.class));
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.OPINION
+                            && "Flat text output".equals(e.content())));
+        }
+    }
+
+    // =========================================================
+    // startAndDiscussAsync error handling (FAILED state)
+    // =========================================================
+
+    @Nested
+    class AsyncErrorHandling {
+
+        @Test
+        void startAndDiscussAsync_discussThrows_setsFailedState() throws Exception {
+            var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice", 1, null));
+            cfg.setModeratorAgentId("cccccccccccccccccccccccc");
+            cfg.setProtocol(new ProtocolConfig(60,
+                    ProtocolConfig.MemberFailurePolicy.ABORT, 0,
+                    ProtocolConfig.MemberUnavailablePolicy.FAIL));
+            setupStore(cfg);
+
+            // Agent not deployed + FAIL policy → discussion will throw
+            when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("aaaaaaaaaaaaaaaaaaaaaaaa")))
+                    .thenReturn(null);
+
+            var listener = mock(GroupDiscussionEventListener.class);
+
+            var result = service.startAndDiscussAsync(GROUP_ID, QUESTION, USER_ID, listener);
+
+            assertNotNull(result);
+            assertEquals("gc-1", result.getId());
+
+            // Wait for async thread to complete and set FAILED state
+            Thread.sleep(2000);
+
+            // Listener should have received onGroupError
+            verify(listener, atLeastOnce()).onGroupError(any(GroupConversationEventSink.GroupErrorEvent.class));
+        }
+
+        @Test
+        void startAndDiscussAsync_nullListener_noNPEOnError() throws Exception {
+            var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice", 1, null));
+            cfg.setProtocol(new ProtocolConfig(60,
+                    ProtocolConfig.MemberFailurePolicy.ABORT, 0,
+                    ProtocolConfig.MemberUnavailablePolicy.FAIL));
+            setupStore(cfg);
+
+            when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("aaaaaaaaaaaaaaaaaaaaaaaa")))
+                    .thenReturn(null);
+
+            // Null listener — should not throw NPE
+            var result = service.startAndDiscussAsync(GROUP_ID, QUESTION, USER_ID, null);
+
+            assertNotNull(result);
+            Thread.sleep(2000);
+            // Should not throw NPE — just verify it didn't crash
+        }
+    }
+
+    // =========================================================
+    // Group-of-groups (nested group discussions)
+    // =========================================================
+
+    @Nested
+    class GroupOfGroups {
+
+        @Test
+        void groupMember_delegatesToSubGroup() throws Exception {
+            // Parent group has a GROUP member pointing to a sub-group
+            String parentGroupId = "parent-group-id";
+            String subGroupId = "sub-group-id-00";
+
+            var parentCfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember(subGroupId, "SubGroupTeam", 1, null, MemberType.GROUP));
+            parentCfg.setPhases(List.of(
+                    new DiscussionPhase("OpinionPhase", PhaseType.OPINION)));
+            setupStore(parentGroupId, parentCfg);
+
+            // Sub-group config
+            var subCfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice", 1, null));
+            subCfg.setPhases(List.of(
+                    new DiscussionPhase("SubOpinion", PhaseType.OPINION)));
+            setupStore(subGroupId, subCfg);
+            stubAgent("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice sub-group opinion");
+
+            var result = service.discuss(parentGroupId, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // The sub-group's response should appear in the parent transcript
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> subGroupId.equals(e.speakerAgentId())
+                            && e.content() != null
+                            && e.content().contains("Alice sub-group opinion")));
+        }
+
+        @Test
+        void groupMember_depthExceeded_producesSkippedEntry() throws Exception {
+            String parentGroupId = "parent-group-id";
+            String subGroupId = "sub-group-id-00";
+
+            var parentCfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember(subGroupId, "SubGroupTeam", 1, null, MemberType.GROUP));
+            parentCfg.setPhases(List.of(
+                    new DiscussionPhase("OpinionPhase", PhaseType.OPINION)));
+            setupStore(parentGroupId, parentCfg);
+
+            // Sub-group config (will be at depth 4 > maxDepth 3)
+            var subCfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice", 1, null));
+            subCfg.setPhases(List.of(
+                    new DiscussionPhase("SubOpinion", PhaseType.OPINION)));
+            setupStore(subGroupId, subCfg);
+
+            // Start parent at depth 3, so sub-group will be at depth 4 (exceeds maxDepth 3)
+            var result = service.discuss(parentGroupId, QUESTION, USER_ID, 3);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // Sub-group should produce a SKIPPED entry due to depth exceeded
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.SKIPPED
+                            && e.errorReason() != null
+                            && e.errorReason().contains("depth")),
+                    "Expected SKIPPED entry for depth exceeded sub-group");
+        }
+
+        @Test
+        void groupMember_subGroupFails_handledByPolicy() throws Exception {
+            String parentGroupId = "parent-group-id";
+            String subGroupId = "sub-group-id-00";
+
+            var parentCfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember(subGroupId, "SubGroupTeam", 1, null, MemberType.GROUP));
+            parentCfg.setPhases(List.of(
+                    new DiscussionPhase("OpinionPhase", PhaseType.OPINION)));
+            setupStore(parentGroupId, parentCfg);
+
+            // Sub-group does NOT exist → ResourceNotFoundException
+            when(groupStore.getCurrentResourceId(subGroupId)).thenReturn(null);
+
+            var result = service.discuss(parentGroupId, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // Sub-group failure should produce a SKIPPED entry (default policy is SKIP)
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.SKIPPED
+                            && subGroupId.equals(e.speakerAgentId())));
+        }
+    }
+
+    // =========================================================
+    // DEVIL_ADVOCATE style (CHALLENGE + DEFENSE phases)
+    // =========================================================
+
+    @Nested
+    class DevilAdvocateStyle {
+
+        @Test
+        void devilAdvocate_challengeAndDefense() throws Exception {
+            var cfg = config(DiscussionStyle.DEVIL_ADVOCATE, 1,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "Expert", 1, null),
+                    new GroupMember("bbbbbbbbbbbbbbbbbbbbbbbb", "Devil", 2, "DEVIL_ADVOCATE"));
+            cfg.setModeratorAgentId("cccccccccccccccccccccccc");
+            setupStore(cfg);
+            stubAgent("aaaaaaaaaaaaaaaaaaaaaaaa", "Expert opinion");
+            stubAgent("bbbbbbbbbbbbbbbbbbbbbbbb", "I challenge that");
+            stubAgent("cccccccccccccccccccccccc", "Synthesis after debate");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            assertNotNull(result.getSynthesizedAnswer());
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.CHALLENGE));
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.DEFENSE));
+        }
+    }
+
+    // =========================================================
+    // Context scope: OWN_FEEDBACK
+    // =========================================================
+
+    @Nested
+    class ContextScopeOwnFeedback {
+
+        @Test
+        void ownFeedbackScope_onlyIncludesFeedbackTargetedAtSpeaker() throws Exception {
+            var cfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice", 1, null),
+                    new GroupMember("bbbbbbbbbbbbbbbbbbbbbbbb", "Bob", 2, null));
+            cfg.setPhases(List.of(
+                    new DiscussionPhase("Opinions", PhaseType.OPINION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.NONE, false, null, 1),
+                    new DiscussionPhase("PeerCritique", PhaseType.CRITIQUE,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, true, null, 1),
+                    new DiscussionPhase("Revision", PhaseType.REVISION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.OWN_FEEDBACK, false, null, 1)));
+            setupStore(cfg);
+            stubAgent("aaaaaaaaaaaaaaaaaaaaaaaa", "Alice revised");
+            stubAgent("bbbbbbbbbbbbbbbbbbbbbbbb", "Bob revised");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.REVISION));
         }
     }
 }

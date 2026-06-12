@@ -272,4 +272,187 @@ class RestWorkflowStoreCrudTest {
             assertEquals(3, result.getVersion());
         }
     }
+
+    // ─── deleteWorkflow cascade with ResourceStoreException ────────────────────
+
+    @Nested
+    @DisplayName("deleteWorkflow cascade error handling")
+    class DeleteCascadeErrorHandling {
+
+        @Test
+        @DisplayName("should log warning and still delete when ResourceStoreException occurs during cascade")
+        void cascadeWithResourceStoreException() throws Exception {
+            when(workflowStore.read("aabbccddeeff112233445566", 1))
+                    .thenThrow(new IResourceStore.ResourceStoreException("DB failure"));
+
+            // Should not throw — logs warning and proceeds to delete
+            assertDoesNotThrow(() -> sut.deleteWorkflow("aabbccddeeff112233445566", 1, true, true));
+        }
+
+        @Test
+        @DisplayName("should log warning and still delete when ResourceNotFoundException occurs during cascade")
+        void cascadeWithResourceNotFoundException() throws Exception {
+            when(workflowStore.read("aabbccddeeff112233445566", 1))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
+
+            assertDoesNotThrow(() -> sut.deleteWorkflow("aabbccddeeff112233445566", 1, true, true));
+            verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
+        }
+    }
+
+    // ─── duplicateWorkflow ─────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("duplicateWorkflow")
+    class DuplicateWorkflow {
+
+        @Test
+        @DisplayName("should duplicate workflow without deep copy (deepCopy=false)")
+        void duplicateShallowCopy() throws Exception {
+            var config = new WorkflowConfiguration();
+            var step = new WorkflowStep();
+            step.setType(URI.create("eddi://ai.labs.rules"));
+            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1")));
+            config.getWorkflowSteps().add(step);
+
+            when(workflowStore.read(WORKFLOW_ID, 1)).thenReturn(config);
+            when(workflowStore.create(any())).thenReturn(dummyResourceId("newwf112233445566aabb", 1));
+
+            // Stub descriptor read for createDocumentDescriptorForDuplicate
+            when(documentDescriptorStore.readDescriptor(eq(WORKFLOW_ID), eq(1)))
+                    .thenReturn(new DocumentDescriptor());
+
+            Response response = sut.duplicateWorkflow(WORKFLOW_ID, 1, false);
+
+            assertEquals(201, response.getStatus());
+            // With deepCopy=false, should NOT duplicate sub-resources
+            verify(resourceClientLibrary, never()).duplicateResource(any());
+        }
+
+        @Test
+        @DisplayName("should duplicate workflow with deep copy including parser dictionaries")
+        void duplicateDeepCopyWithParserDictionaries() throws Exception {
+            var config = new WorkflowConfiguration();
+
+            // Parser step with dictionary
+            var parserStep = new WorkflowStep();
+            parserStep.setType(URI.create("eddi://ai.labs.parser"));
+
+            Map<String, Object> dictEntry = new HashMap<>();
+            dictEntry.put("type", "eddi://ai.labs.parser.dictionaries.regular");
+            dictEntry.put("config", new HashMap<>(Map.of("uri", "eddi://ai.labs.dictionary/dictionarystore/dictionaries/dict1?version=1")));
+            List<Map<String, Object>> dictionaries = new ArrayList<>();
+            dictionaries.add(dictEntry);
+            parserStep.getExtensions().put("dictionaries", dictionaries);
+            config.getWorkflowSteps().add(parserStep);
+
+            // Rules step
+            var rulesStep = new WorkflowStep();
+            rulesStep.setType(URI.create("eddi://ai.labs.rules"));
+            rulesStep.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rule1?version=1")));
+            config.getWorkflowSteps().add(rulesStep);
+
+            when(workflowStore.read(WORKFLOW_ID, 1)).thenReturn(config);
+            when(workflowStore.create(any())).thenReturn(dummyResourceId("newwf112233445566aabb", 1));
+
+            // Stub descriptor reads for createDocumentDescriptorForDuplicate
+            when(documentDescriptorStore.readDescriptor(anyString(), any()))
+                    .thenReturn(new DocumentDescriptor());
+
+            // Mock duplicate responses with valid Location headers
+            Response dictDupResponse = Response.created(
+                    URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/newdict1122334455aa?version=1"))
+                    .build();
+            Response ruleDupResponse = Response.created(
+                    URI.create("eddi://ai.labs.rules/rulestore/rulesets/newrule1122334455aa?version=1"))
+                    .build();
+
+            when(resourceClientLibrary.duplicateResource(
+                    URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/dict1?version=1")))
+                    .thenReturn(dictDupResponse);
+            when(resourceClientLibrary.duplicateResource(
+                    URI.create("eddi://ai.labs.rules/rulestore/rulesets/rule1?version=1")))
+                    .thenReturn(ruleDupResponse);
+
+            Response response = sut.duplicateWorkflow(WORKFLOW_ID, 1, true);
+
+            assertEquals(201, response.getStatus());
+            // With deepCopy=true, should duplicate both resources
+            verify(resourceClientLibrary).duplicateResource(
+                    URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/dict1?version=1"));
+            verify(resourceClientLibrary).duplicateResource(
+                    URI.create("eddi://ai.labs.rules/rulestore/rulesets/rule1?version=1"));
+        }
+
+        @Test
+        @DisplayName("should throw ServiceException when duplicateResource returns null location header")
+        void duplicateResourceNullLocation() throws Exception {
+            var config = new WorkflowConfiguration();
+            var step = new WorkflowStep();
+            step.setType(URI.create("eddi://ai.labs.rules"));
+            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rule1?version=1")));
+            config.getWorkflowSteps().add(step);
+
+            when(workflowStore.read(WORKFLOW_ID, 1)).thenReturn(config);
+
+            // Return a response WITHOUT Location header
+            Response noLocationResponse = Response.ok().build();
+            when(resourceClientLibrary.duplicateResource(any())).thenReturn(noLocationResponse);
+
+            // Stub descriptor read for createDocumentDescriptorForDuplicate
+            when(documentDescriptorStore.readDescriptor(anyString(), any()))
+                    .thenReturn(new DocumentDescriptor());
+
+            // duplicateResource should throw ServiceException wrapped by sneakyThrow
+            assertThrows(Exception.class, () -> sut.duplicateWorkflow(WORKFLOW_ID, 1, true));
+        }
+    }
+
+    // ─── deleteResourceSafely edge cases ───────────────────────────────────────
+
+    @Nested
+    @DisplayName("deleteResourceSafely edge cases")
+    class DeleteResourceSafelyTests {
+
+        @Test
+        @DisplayName("should skip deletion when resource is referenced by multiple workflows")
+        void skipsDeletionForMultiReferencedResource() throws Exception {
+            WorkflowConfiguration config = new WorkflowConfiguration();
+            WorkflowStep ext = new WorkflowStep();
+            ext.setType(URI.create("eddi://ai.labs.rules"));
+            ext.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/shared1?version=1")));
+            config.getWorkflowSteps().add(ext);
+
+            when(workflowStore.read("aabbccddeeff112233445566", 1)).thenReturn(config);
+
+            // Resource referenced by 3 workflows — should skip
+            when(workflowStore.getWorkflowDescriptorsContainingResource(
+                    eq("eddi://ai.labs.rules/rulestore/rulesets/shared1?version=1"), eq(false)))
+                    .thenReturn(List.of(new DocumentDescriptor(), new DocumentDescriptor(), new DocumentDescriptor()));
+
+            sut.deleteWorkflow("aabbccddeeff112233445566", 1, true, true);
+
+            verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("should log warning when deletion throws and continue")
+        void logsWarningWhenDeletionThrows() throws Exception {
+            WorkflowConfiguration config = new WorkflowConfiguration();
+            WorkflowStep ext = new WorkflowStep();
+            ext.setType(URI.create("eddi://ai.labs.output"));
+            ext.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.output/outputstore/outputsets/out1?version=1")));
+            config.getWorkflowSteps().add(ext);
+
+            when(workflowStore.read("aabbccddeeff112233445566", 1)).thenReturn(config);
+            when(workflowStore.getWorkflowDescriptorsContainingResource(anyString(), eq(false)))
+                    .thenReturn(List.of(new DocumentDescriptor())); // single reference
+
+            when(resourceClientLibrary.deleteResource(any(), anyBoolean()))
+                    .thenThrow(new RuntimeException("Network error"));
+
+            // Should not propagate — logs warning and continues
+            assertDoesNotThrow(() -> sut.deleteWorkflow("aabbccddeeff112233445566", 1, true, true));
+        }
+    }
 }

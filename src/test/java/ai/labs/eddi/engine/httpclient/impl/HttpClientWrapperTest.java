@@ -472,4 +472,288 @@ class HttpClientWrapperTest {
             assertEquals("Bearer token", result.get("Authorization"));
         }
     }
+
+    // ==================== Empty-value query param ====================
+
+    @Nested
+    @DisplayName("URI with key=value where value is empty")
+    class EmptyValueQueryParamTests {
+
+        @Test
+        @DisplayName("key= (empty value) is parsed with null value")
+        void keyEqualsEmptyValue() {
+            IRequest request = httpClientWrapper.newRequest(
+                    URI.create("https://example.com/path?key="));
+            Map<String, Object> map = request.toMap();
+
+            Map<String, ?> queryParams = (Map<String, ?>) map.get("queryParams");
+            assertTrue(queryParams.containsKey("key"),
+                    "Should contain key with empty value");
+        }
+
+        @Test
+        @DisplayName("key=value&empty= parses both params")
+        void mixedEmptyAndNonEmpty() {
+            IRequest request = httpClientWrapper.newRequest(
+                    URI.create("https://example.com?name=alice&token="));
+            Map<String, Object> map = request.toMap();
+
+            Map<String, ?> queryParams = (Map<String, ?>) map.get("queryParams");
+            assertEquals(2, queryParams.size());
+            assertTrue(queryParams.containsKey("name"));
+            assertTrue(queryParams.containsKey("token"));
+        }
+
+        @Test
+        @DisplayName("key= followed by &other=val parses correctly")
+        void emptyValueThenNonEmpty() {
+            IRequest request = httpClientWrapper.newRequest(
+                    URI.create("https://example.com?empty=&valid=data"));
+            Map<String, Object> map = request.toMap();
+
+            Map<String, ?> queryParams = (Map<String, ?>) map.get("queryParams");
+            assertEquals(2, queryParams.size());
+            assertTrue(queryParams.containsKey("empty"));
+            assertTrue(queryParams.containsKey("valid"));
+        }
+    }
+
+    // ==================== RequestWrapper.equals() with different requests
+    // ====================
+
+    @Nested
+    @DisplayName("RequestWrapper.equals() with different requests")
+    class RequestEqualsDifferencesTests {
+
+        @Test
+        @DisplayName("Different URIs are not equal")
+        void differentUri_notEqual() {
+            IRequest request1 = httpClientWrapper.newRequest(URI.create("https://example.com/a"));
+            IRequest request2 = httpClientWrapper.newRequest(URI.create("https://example.com/b"));
+
+            assertNotEquals(request1, request2);
+        }
+
+        @Test
+        @DisplayName("Different methods are not equal")
+        void differentMethod_notEqual() {
+            IRequest request1 = httpClientWrapper.newRequest(
+                    URI.create("https://example.com"), IHttpClient.Method.GET);
+            IRequest request2 = httpClientWrapper.newRequest(
+                    URI.create("https://example.com"), IHttpClient.Method.POST);
+
+            assertNotEquals(request1, request2);
+        }
+
+        @Test
+        @DisplayName("Different bodies are not equal")
+        void differentBody_notEqual() {
+            IRequest request1 = httpClientWrapper.newRequest(URI.create("https://example.com"));
+            request1.setBodyEntity("body1", null, null);
+
+            IRequest request2 = httpClientWrapper.newRequest(URI.create("https://example.com"));
+            request2.setBodyEntity("body2", null, null);
+
+            assertNotEquals(request1, request2);
+        }
+
+        @Test
+        @DisplayName("Different maxResponseSize are not equal")
+        void differentMaxResponseSize_notEqual() {
+            IRequest request1 = httpClientWrapper.newRequest(URI.create("https://example.com"));
+            request1.setMaxResponseSize(1024);
+
+            IRequest request2 = httpClientWrapper.newRequest(URI.create("https://example.com"));
+            request2.setMaxResponseSize(2048);
+
+            assertNotEquals(request1, request2);
+        }
+
+        @Test
+        @DisplayName("Different timeouts are not equal")
+        void differentTimeout_notEqual() {
+            IRequest request1 = httpClientWrapper.newRequest(URI.create("https://example.com"));
+            request1.setTimeout(5, TimeUnit.SECONDS);
+
+            IRequest request2 = httpClientWrapper.newRequest(URI.create("https://example.com"));
+            request2.setTimeout(10, TimeUnit.SECONDS);
+
+            assertNotEquals(request1, request2);
+        }
+
+        @Test
+        @DisplayName("Different hashCodes for different requests")
+        void differentRequests_differentHashCode() {
+            IRequest request1 = httpClientWrapper.newRequest(
+                    URI.create("https://example.com/a"), IHttpClient.Method.GET);
+            IRequest request2 = httpClientWrapper.newRequest(
+                    URI.create("https://example.com/b"), IHttpClient.Method.POST);
+
+            // Not guaranteed by contract, but different requests should usually differ
+            assertNotEquals(request1.hashCode(), request2.hashCode());
+        }
+    }
+
+    // ==================== ResponseWrapper (via reflection) ====================
+
+    @Nested
+    @DisplayName("ResponseWrapper tests via reflection")
+    class ResponseWrapperTests {
+
+        private Object createResponseWrapper() throws Exception {
+            Class<?> clazz = Class.forName(
+                    "ai.labs.eddi.engine.httpclient.impl.HttpClientWrapper$ResponseWrapper");
+            var ctor = clazz.getDeclaredConstructor();
+            ctor.setAccessible(true);
+            return ctor.newInstance();
+        }
+
+        private void setField(Object obj, String fieldName, Object value) throws Exception {
+            var field = obj.getClass().getDeclaredField(fieldName);
+            field.setAccessible(true);
+            field.set(obj, value);
+        }
+
+        private Object getField(Object obj, String fieldName) throws Exception {
+            var field = obj.getClass().getDeclaredField(fieldName);
+            field.setAccessible(true);
+            return field.get(obj);
+        }
+
+        @Test
+        @DisplayName("getters and setters work correctly")
+        void gettersAndSetters() throws Exception {
+            Object resp = createResponseWrapper();
+            var clazz = resp.getClass();
+
+            clazz.getMethod("setContentAsString", String.class).invoke(resp, "hello");
+            clazz.getMethod("setHttpCode", int.class).invoke(resp, 200);
+            clazz.getMethod("setHttpCodeMessage", String.class).invoke(resp, "OK");
+            clazz.getMethod("setHttpHeader", Map.class).invoke(resp, Map.of("X-Key", "val"));
+
+            assertEquals("hello", clazz.getMethod("getContentAsString").invoke(resp));
+            assertEquals(200, clazz.getMethod("getHttpCode").invoke(resp));
+            assertEquals("OK", clazz.getMethod("getHttpCodeMessage").invoke(resp));
+            assertEquals(Map.of("X-Key", "val"), clazz.getMethod("getHttpHeader").invoke(resp));
+        }
+
+        @Test
+        @DisplayName("toString includes all fields")
+        void toStringIncludesFields() throws Exception {
+            Object resp = createResponseWrapper();
+            var clazz = resp.getClass();
+            clazz.getMethod("setContentAsString", String.class).invoke(resp, "body text");
+            clazz.getMethod("setHttpCode", int.class).invoke(resp, 404);
+            clazz.getMethod("setHttpCodeMessage", String.class).invoke(resp, "Not Found");
+            clazz.getMethod("setHttpHeader", Map.class).invoke(resp, Map.of("H", "V"));
+
+            String str = resp.toString();
+            assertTrue(str.contains("404"));
+            assertTrue(str.contains("Not Found"));
+            assertTrue(str.contains("body text"));
+        }
+
+        @Test
+        @DisplayName("toString truncates long content")
+        void toStringTruncatesLongContent() throws Exception {
+            Object resp = createResponseWrapper();
+            var clazz = resp.getClass();
+            clazz.getMethod("setContentAsString", String.class).invoke(resp, "x".repeat(200));
+            clazz.getMethod("setHttpCode", int.class).invoke(resp, 200);
+
+            String str = resp.toString();
+            assertTrue(str.contains("..."));
+        }
+
+        @Test
+        @DisplayName("equals — same values are equal")
+        void equalsSameValues() throws Exception {
+            Object resp1 = createResponseWrapper();
+            Object resp2 = createResponseWrapper();
+            var clazz = resp1.getClass();
+
+            for (Object resp : new Object[]{resp1, resp2}) {
+                clazz.getMethod("setContentAsString", String.class).invoke(resp, "body");
+                clazz.getMethod("setHttpCode", int.class).invoke(resp, 200);
+                clazz.getMethod("setHttpCodeMessage", String.class).invoke(resp, "OK");
+                clazz.getMethod("setHttpHeader", Map.class).invoke(resp, Map.of("K", "V"));
+            }
+
+            assertEquals(resp1, resp2);
+            assertEquals(resp1.hashCode(), resp2.hashCode());
+        }
+
+        @Test
+        @DisplayName("equals — different httpCode not equal")
+        void equalsDifferentCode() throws Exception {
+            Object resp1 = createResponseWrapper();
+            Object resp2 = createResponseWrapper();
+            var clazz = resp1.getClass();
+
+            clazz.getMethod("setHttpCode", int.class).invoke(resp1, 200);
+            clazz.getMethod("setHttpCode", int.class).invoke(resp2, 404);
+
+            assertNotEquals(resp1, resp2);
+        }
+
+        @Test
+        @DisplayName("equals — different content not equal")
+        void equalsDifferentContent() throws Exception {
+            Object resp1 = createResponseWrapper();
+            Object resp2 = createResponseWrapper();
+            var clazz = resp1.getClass();
+
+            clazz.getMethod("setContentAsString", String.class).invoke(resp1, "aaa");
+            clazz.getMethod("setContentAsString", String.class).invoke(resp2, "bbb");
+
+            assertNotEquals(resp1, resp2);
+        }
+
+        @Test
+        @DisplayName("equals — reflexive")
+        void equalsReflexive() throws Exception {
+            Object resp = createResponseWrapper();
+            assertEquals(resp, resp);
+        }
+
+        @Test
+        @DisplayName("equals — null returns false")
+        void equalsNull() throws Exception {
+            Object resp = createResponseWrapper();
+            assertNotEquals(null, resp);
+        }
+
+        @Test
+        @DisplayName("equals — different type returns false")
+        void equalsDifferentType() throws Exception {
+            Object resp = createResponseWrapper();
+            assertNotEquals("string", resp);
+        }
+
+        @Test
+        @DisplayName("hashCode — consistent")
+        void hashCodeConsistent() throws Exception {
+            Object resp = createResponseWrapper();
+            var clazz = resp.getClass();
+            clazz.getMethod("setHttpCode", int.class).invoke(resp, 200);
+            clazz.getMethod("setContentAsString", String.class).invoke(resp, "test");
+
+            int h1 = resp.hashCode();
+            int h2 = resp.hashCode();
+            assertEquals(h1, h2);
+        }
+
+        @Test
+        @DisplayName("toString with null httpHeader does not throw")
+        void toStringNullHeader() throws Exception {
+            Object resp = createResponseWrapper();
+            var clazz = resp.getClass();
+            clazz.getMethod("setHttpCode", int.class).invoke(resp, 200);
+            clazz.getMethod("setContentAsString", String.class).invoke(resp, "test");
+            // httpHeader defaults to null
+
+            assertDoesNotThrow(() -> resp.toString());
+            assertTrue(resp.toString().contains("null"));
+        }
+    }
 }

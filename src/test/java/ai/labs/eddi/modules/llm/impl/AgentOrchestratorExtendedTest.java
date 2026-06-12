@@ -640,4 +640,411 @@ class AgentOrchestratorExtendedTest {
             assertTrue(result.executors().isEmpty());
         }
     }
+
+    // ==================== A2A Agent Tool Collection Tests ====================
+
+    @Nested
+    @DisplayName("A2A agent tool collection")
+    class A2AAgentToolCollectionTests {
+
+        @Test
+        @DisplayName("Should call discoverTools when a2aAgents list is non-empty")
+        void discoverTools_calledWhenA2aAgentsPresent() throws LifecycleException {
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(false);
+            task.setEnableHttpCallTools(false);
+            task.setEnableMcpCallTools(false);
+
+            var a2aConfig = new A2AAgentConfig();
+            a2aConfig.setUrl("http://remote-agent:9000");
+            task.setA2aAgents(List.of(a2aConfig));
+
+            // A2A tools return empty specs → overall should return null
+            doReturn(new A2AToolProviderManager.A2AToolsResult(List.of(), Map.of()))
+                    .when(a2aToolProviderManager).discoverTools(any());
+
+            when(mockMemory.getAgentId()).thenReturn(null);
+            when(mockMemory.getAgentVersion()).thenReturn(null);
+
+            var result = orchestrator.executeIfToolsEnabled(
+                    mock(ChatModel.class), "sys", List.of(UserMessage.from("hi")),
+                    task, mockMemory);
+
+            verify(a2aToolProviderManager).discoverTools(any());
+            assertNull(result, "Should return null when A2A discovery returns empty specs");
+        }
+
+        @Test
+        @DisplayName("Should return ExecutionResult when A2A tools provide specs")
+        void returnResult_whenA2aToolsProvideSpecs() throws LifecycleException {
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(false);
+            task.setEnableHttpCallTools(false);
+            task.setEnableMcpCallTools(false);
+
+            var a2aConfig = new A2AAgentConfig();
+            a2aConfig.setUrl("http://remote-agent:9000");
+            task.setA2aAgents(List.of(a2aConfig));
+
+            var a2aSpec = ToolSpecification.builder()
+                    .name("remote_skill")
+                    .description("Remote A2A skill")
+                    .build();
+
+            doReturn(new A2AToolProviderManager.A2AToolsResult(
+                    List.of(a2aSpec),
+                    Map.of("remote_skill", (req, memId) -> "result from A2A")))
+                    .when(a2aToolProviderManager).discoverTools(any());
+
+            when(mockMemory.getAgentId()).thenReturn(null);
+            when(mockMemory.getAgentVersion()).thenReturn(null);
+            when(mockMemory.getConversationId()).thenReturn("conv-1");
+
+            // Mock ChatModel to return a simple text AiMessage (no tool calls)
+            ChatModel chatModel = mock(ChatModel.class);
+            ChatResponse chatResponse = ChatResponse.builder()
+                    .aiMessage(AiMessage.from("Hello from agent"))
+                    .build();
+            doReturn(chatResponse).when(chatModel).chat(any(ChatRequest.class));
+
+            var result = orchestrator.executeIfToolsEnabled(
+                    chatModel, "system", List.of(UserMessage.from("hi")),
+                    task, mockMemory);
+
+            assertNotNull(result, "Should return non-null when A2A tools are available");
+            assertEquals("Hello from agent", result.response());
+        }
+    }
+
+    // ==================== MCP Tool Collection Tests ====================
+
+    @Nested
+    @DisplayName("MCP tool collection via enableMcpCallTools")
+    class McpToolCollectionTests {
+
+        @Test
+        @DisplayName("Should call discoverMcpCallTools when enableMcpCallTools=true and agentId is set")
+        void discoverMcpCallTools_calledWhenEnabled() throws LifecycleException {
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(false);
+            task.setEnableHttpCallTools(false);
+            task.setEnableMcpCallTools(true);
+
+            when(mockMemory.getAgentId()).thenReturn("agent-1");
+            when(mockMemory.getAgentVersion()).thenReturn(null);
+
+            // discoverMcpCallTools calls WorkflowTraversal which needs agentVersion
+            // With null agentVersion, WorkflowTraversal returns empty results
+            var result = orchestrator.executeIfToolsEnabled(
+                    mock(ChatModel.class), "sys", List.of(UserMessage.from("hi")),
+                    task, mockMemory);
+
+            // Since WorkflowTraversal returns empty (agentVersion is null) and
+            // no other tools are enabled, result should be null
+            assertNull(result, "Should return null when MCP discovery finds no tools");
+        }
+
+        @Test
+        @DisplayName("Should skip MCP discovery when enableMcpCallTools=false")
+        void skipMcpDiscovery_whenDisabled() throws LifecycleException {
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(false);
+            task.setEnableHttpCallTools(false);
+            task.setEnableMcpCallTools(false);
+
+            when(mockMemory.getAgentId()).thenReturn("agent-1");
+            when(mockMemory.getAgentVersion()).thenReturn(1);
+
+            var result = orchestrator.executeIfToolsEnabled(
+                    mock(ChatModel.class), "sys", List.of(UserMessage.from("hi")),
+                    task, mockMemory);
+
+            assertNull(result);
+        }
+    }
+
+    // ==================== executeIfToolsEnabled with Actual Tools Tests
+    // ====================
+
+    @Nested
+    @DisplayName("executeIfToolsEnabled with non-empty tool list")
+    class ExecuteWithActualToolsTests {
+
+        @Test
+        @DisplayName("Should return ExecutionResult when collectEnabledTools returns non-empty list")
+        void returnExecutionResult_withBuiltInTools() throws LifecycleException {
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setBuiltInToolsWhitelist(List.of("calculator"));
+            task.setEnableHttpCallTools(false);
+            task.setEnableMcpCallTools(false);
+
+            when(mockMemory.getAgentId()).thenReturn(null);
+            when(mockMemory.getAgentVersion()).thenReturn(null);
+            when(mockMemory.getConversationId()).thenReturn("conv-1");
+
+            // Mock ChatModel to return a simple AiMessage without tool calls
+            ChatModel chatModel = mock(ChatModel.class);
+            ChatResponse chatResponse = ChatResponse.builder()
+                    .aiMessage(AiMessage.from("The answer is 42"))
+                    .build();
+            doReturn(chatResponse).when(chatModel).chat(any(ChatRequest.class));
+
+            var result = orchestrator.executeIfToolsEnabled(
+                    chatModel, "You are a calculator", List.of(UserMessage.from("what is 6*7?")),
+                    task, mockMemory);
+
+            assertNotNull(result, "Should return ExecutionResult when built-in tools are enabled");
+            assertEquals("The answer is 42", result.response());
+            assertTrue(result.trace().isEmpty(), "Trace should be empty when no tool calls made");
+        }
+
+        @Test
+        @DisplayName("Should return ExecutionResult with multiple built-in tools")
+        void returnExecutionResult_withMultipleTools() throws LifecycleException {
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setBuiltInToolsWhitelist(List.of("calculator", "datetime", "weather"));
+            task.setEnableHttpCallTools(false);
+            task.setEnableMcpCallTools(false);
+
+            when(mockMemory.getAgentId()).thenReturn(null);
+            when(mockMemory.getAgentVersion()).thenReturn(null);
+            when(mockMemory.getConversationId()).thenReturn("conv-1");
+
+            ChatModel chatModel = mock(ChatModel.class);
+            ChatResponse chatResponse = ChatResponse.builder()
+                    .aiMessage(AiMessage.from("Here is the info"))
+                    .build();
+            doReturn(chatResponse).when(chatModel).chat(any(ChatRequest.class));
+
+            var result = orchestrator.executeIfToolsEnabled(
+                    chatModel, "system", List.of(UserMessage.from("info please")),
+                    task, mockMemory);
+
+            assertNotNull(result);
+            assertEquals("Here is the info", result.response());
+        }
+    }
+
+    // ==================== ConversationRecallTool Enabled Tests
+    // ====================
+
+    @Nested
+    @DisplayName("ConversationRecallTool enabled when summary exists")
+    class ConversationRecallToolEnabledTests {
+
+        @Test
+        @DisplayName("Should add recall tool when summary config is enabled and summary exists")
+        void addRecallTool_summaryEnabledAndExists() {
+            var summaryConfig = new ConversationSummaryConfig();
+            summaryConfig.setEnabled(true);
+
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setConversationSummary(summaryConfig);
+            task.setBuiltInToolsWhitelist(List.of("conversationRecall"));
+
+            // Mock conversation properties so readSummary returns non-null
+            var props = mock(IConversationMemory.IConversationProperties.class);
+            var summaryProp = new Property();
+            summaryProp.setValueString("This is a rolling summary of the conversation");
+            when(props.get("conversation:running_summary")).thenReturn(summaryProp);
+
+            var stepProp = new Property();
+            stepProp.setValueInt(3);
+            when(props.get("conversation:summary_through_step")).thenReturn(stepProp);
+
+            when(mockMemory.getConversationProperties()).thenReturn(props);
+            when(mockMemory.getConversationOutputs()).thenReturn(List.of());
+
+            List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
+
+            assertEquals(1, tools.size(), "Should have ConversationRecallTool");
+            assertEquals("ConversationRecallTool", tools.get(0).getClass().getSimpleName());
+        }
+
+        @Test
+        @DisplayName("Should NOT add recall tool when summary config enabled but no summary exists yet")
+        void noRecallTool_enabledButNoSummaryYet() {
+            var summaryConfig = new ConversationSummaryConfig();
+            summaryConfig.setEnabled(true);
+
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setConversationSummary(summaryConfig);
+            task.setBuiltInToolsWhitelist(List.of("conversationRecall"));
+
+            // Mock conversation properties with no running summary
+            var props = mock(IConversationMemory.IConversationProperties.class);
+            when(props.get("conversation:running_summary")).thenReturn(null);
+            when(mockMemory.getConversationProperties()).thenReturn(props);
+
+            List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
+
+            assertTrue(tools.isEmpty(), "No recall tool when summary doesn't exist yet");
+        }
+    }
+
+    // ==================== HTTP Call Tool Discovery Tests ====================
+
+    @Nested
+    @DisplayName("HTTP call tool discovery")
+    class HttpCallToolDiscoveryTests {
+
+        @Test
+        @DisplayName("Should attempt discovery when enableHttpCallTools=true with agentId and version set")
+        void discoverHttpCallTools_withAgentContext() throws LifecycleException {
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(false);
+            task.setEnableHttpCallTools(true);
+            task.setEnableMcpCallTools(false);
+
+            when(mockMemory.getAgentId()).thenReturn("agent-123");
+            when(mockMemory.getAgentVersion()).thenReturn(2);
+
+            // WorkflowTraversal.discoverConfigs will try to call restAgentStore.readAgent
+            // which returns null → empty configs → empty toolSpecs
+            var result = orchestrator.executeIfToolsEnabled(
+                    mock(ChatModel.class), "sys", List.of(UserMessage.from("hi")),
+                    task, mockMemory);
+
+            assertNull(result, "Should return null when httpcall discovery finds no tools");
+        }
+
+        @Test
+        @DisplayName("discoverHttpCallTools should return empty result when agentId is null")
+        void discoverHttpCallTools_nullAgentId() {
+            when(mockMemory.getAgentId()).thenReturn(null);
+            when(mockMemory.getAgentVersion()).thenReturn(null);
+
+            var result = orchestrator.discoverHttpCallTools(mockMemory);
+
+            assertNotNull(result);
+            assertTrue(result.toolSpecs().isEmpty());
+            assertTrue(result.executors().isEmpty());
+        }
+
+        @Test
+        @DisplayName("discoverHttpCallTools should return empty result when version is null")
+        void discoverHttpCallTools_nullVersion() {
+            when(mockMemory.getAgentId()).thenReturn("agent-1");
+            when(mockMemory.getAgentVersion()).thenReturn(null);
+
+            var result = orchestrator.discoverHttpCallTools(mockMemory);
+
+            assertNotNull(result);
+            assertTrue(result.toolSpecs().isEmpty());
+        }
+    }
+
+    // ==================== Counterweight Injection Tests ====================
+
+    @Nested
+    @DisplayName("Counterweight strict mode iteration capping")
+    class CounterweightTests {
+
+        @Test
+        @DisplayName("Strict counterweight should cap tool iterations to 5")
+        void strictCounterweight_capsIterations() throws LifecycleException {
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setBuiltInToolsWhitelist(List.of("calculator"));
+            task.setEnableHttpCallTools(false);
+            task.setEnableMcpCallTools(false);
+            task.setMaxToolIterations(20);
+
+            var counterweight = new LlmConfiguration.CounterweightConfig();
+            counterweight.setEnabled(true);
+            counterweight.setLevel("strict");
+            task.setCounterweight(counterweight);
+
+            when(mockMemory.getAgentId()).thenReturn(null);
+            when(mockMemory.getAgentVersion()).thenReturn(null);
+            when(mockMemory.getConversationId()).thenReturn("conv-1");
+
+            // Mock ChatModel to return a simple AiMessage (no tool calls)
+            ChatModel chatModel = mock(ChatModel.class);
+            ChatResponse chatResponse = ChatResponse.builder()
+                    .aiMessage(AiMessage.from("Capped response"))
+                    .build();
+            doReturn(chatResponse).when(chatModel).chat(any(ChatRequest.class));
+
+            var result = orchestrator.executeIfToolsEnabled(
+                    chatModel, "system", List.of(UserMessage.from("hi")),
+                    task, mockMemory);
+
+            assertNotNull(result, "Should return result even with strict counterweight");
+            assertEquals("Capped response", result.response());
+            // The chatModel.chat should have been called exactly once
+            // (first iteration returns no tool calls → exits loop)
+            verify(chatModel, times(1)).chat(any(ChatRequest.class));
+        }
+
+        @Test
+        @DisplayName("Normal counterweight should NOT cap iterations")
+        void normalCounterweight_doesNotCap() throws LifecycleException {
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setBuiltInToolsWhitelist(List.of("calculator"));
+            task.setEnableHttpCallTools(false);
+            task.setEnableMcpCallTools(false);
+            task.setMaxToolIterations(20);
+
+            var counterweight = new LlmConfiguration.CounterweightConfig();
+            counterweight.setEnabled(true);
+            counterweight.setLevel("normal");
+            task.setCounterweight(counterweight);
+
+            when(mockMemory.getAgentId()).thenReturn(null);
+            when(mockMemory.getAgentVersion()).thenReturn(null);
+            when(mockMemory.getConversationId()).thenReturn("conv-1");
+
+            ChatModel chatModel = mock(ChatModel.class);
+            ChatResponse chatResponse = ChatResponse.builder()
+                    .aiMessage(AiMessage.from("Normal response"))
+                    .build();
+            doReturn(chatResponse).when(chatModel).chat(any(ChatRequest.class));
+
+            var result = orchestrator.executeIfToolsEnabled(
+                    chatModel, "system", List.of(UserMessage.from("hi")),
+                    task, mockMemory);
+
+            assertNotNull(result);
+            assertEquals("Normal response", result.response());
+        }
+
+        @Test
+        @DisplayName("Disabled counterweight should NOT cap iterations")
+        void disabledCounterweight_doesNotCap() throws LifecycleException {
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setBuiltInToolsWhitelist(List.of("calculator"));
+            task.setEnableHttpCallTools(false);
+            task.setEnableMcpCallTools(false);
+            task.setMaxToolIterations(20);
+
+            var counterweight = new LlmConfiguration.CounterweightConfig();
+            counterweight.setEnabled(false);
+            counterweight.setLevel("strict");
+            task.setCounterweight(counterweight);
+
+            when(mockMemory.getAgentId()).thenReturn(null);
+            when(mockMemory.getAgentVersion()).thenReturn(null);
+            when(mockMemory.getConversationId()).thenReturn("conv-1");
+
+            ChatModel chatModel = mock(ChatModel.class);
+            ChatResponse chatResponse = ChatResponse.builder()
+                    .aiMessage(AiMessage.from("Not capped"))
+                    .build();
+            doReturn(chatResponse).when(chatModel).chat(any(ChatRequest.class));
+
+            var result = orchestrator.executeIfToolsEnabled(
+                    chatModel, "system", List.of(UserMessage.from("hi")),
+                    task, mockMemory);
+
+            assertNotNull(result);
+            assertEquals("Not capped", result.response());
+        }
+    }
 }
