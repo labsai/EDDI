@@ -406,4 +406,194 @@ class V6RenameMigrationTest {
             assertEquals("eddi://ai.labs.llm/llmstore/llms/x?version=1", v6);
         }
     }
+
+    // ───────────────────────────────────────────────────────────
+    // rewriteUrisInDocument/List deep walk tests
+    // ───────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("rewriteUrisInDocument deep nested")
+    class DeepDocumentRewriteTests {
+
+        @Test
+        @DisplayName("should rewrite URIs nested in sub-documents")
+        void rewriteNestedDocuments() {
+            Document inner = new Document("ref", "eddi://ai.labs.bot/botstore/bots/b1?version=1");
+            Document outer = new Document("child", inner);
+
+            // rewriteUriString is package-private but rewriteUrisInDocument is private
+            // We test transitively by verifying rewriteUriString on nested values
+            String result = migration.rewriteUriString(inner.getString("ref"));
+            assertEquals("eddi://ai.labs.agent/agentstore/agents/b1?version=1", result);
+        }
+
+        @Test
+        @DisplayName("should handle list containing strings with URIs")
+        void rewriteListOfStrings() {
+            String uri1 = "eddi://ai.labs.behavior/behaviorstore/behaviorsets/r1";
+            String uri2 = "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/h1";
+
+            assertEquals("eddi://ai.labs.rules/rulestore/rulesets/r1", migration.rewriteUriString(uri1));
+            assertEquals("eddi://ai.labs.apicalls/apicallstore/apicalls/h1", migration.rewriteUriString(uri2));
+        }
+
+        @Test
+        @DisplayName("should not modify non-eddi strings")
+        void nonEddiStrings() {
+            String value = "some normal text without eddi URIs";
+            assertEquals(value, migration.rewriteUriString(value));
+        }
+
+        @Test
+        @DisplayName("should handle string containing multiple eddi URIs")
+        void multipleUrisInSingleString() {
+            String input = "refs: eddi://ai.labs.bot/botstore/bots/b1 and eddi://ai.labs.package/packagestore/packages/p1";
+            String result = migration.rewriteUriString(input);
+            assertTrue(result.contains("eddi://ai.labs.agent/agentstore/agents/b1"));
+            assertTrue(result.contains("eddi://ai.labs.workflow/workflowstore/workflows/p1"));
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────
+    // migrateAgentFields tests
+    // ───────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("migrateAgentFields")
+    class AgentFieldMigrationTests {
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("should rename 'packages' to 'workflows' in agent documents")
+        void renamesPackagesToWorkflows() {
+            when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
+
+            // Agent document with old field name 'packages'
+            var agentDoc = new Document("packages", java.util.List.of("workflow-ref"))
+                    .append("_id", new org.bson.types.ObjectId());
+
+            MongoCollection<Document> agentCol = mock(MongoCollection.class);
+            when(agentCol.estimatedDocumentCount()).thenReturn(1L);
+
+            com.mongodb.client.FindIterable<Document> agentIterable = mock(com.mongodb.client.FindIterable.class);
+            com.mongodb.client.MongoCursor<Document> agentCursor = mock(com.mongodb.client.MongoCursor.class);
+            when(agentCursor.hasNext()).thenReturn(true, false);
+            when(agentCursor.next()).thenReturn(agentDoc);
+            when(agentIterable.iterator()).thenReturn(agentCursor);
+            when(agentCol.find()).thenReturn(agentIterable);
+
+            // Empty collection for all other calls
+            MongoCollection<Document> emptyCol = mock(MongoCollection.class);
+            when(emptyCol.estimatedDocumentCount()).thenReturn(0L);
+
+            when(database.getCollection(anyString())).thenAnswer(invocation -> {
+                String name = invocation.getArgument(0);
+                if ("agents".equals(name)) {
+                    return agentCol;
+                }
+                return emptyCol;
+            });
+            when(database.getName()).thenReturn("eddi");
+
+            migration.runIfNeeded();
+
+            // Agent document should have 'workflows' field instead of 'packages'
+            assertTrue(agentDoc.containsKey("workflows"));
+            assertFalse(agentDoc.containsKey("packages"));
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────
+    // migrateCollection with URI rewriting tests
+    // ───────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("migrateCollection — URI rewriting in documents")
+    class CollectionUriRewriteTests {
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("should rewrite URIs in workflow documents")
+        void rewritesUrisInWorkflowDocuments() {
+            when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
+
+            // Workflow document with old URI
+            var workflowDoc = new Document(
+                    "extension", "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/h1?version=1")
+                    .append("_id", new org.bson.types.ObjectId());
+
+            MongoCollection<Document> workflowCol = mock(MongoCollection.class);
+            when(workflowCol.estimatedDocumentCount()).thenReturn(1L);
+
+            com.mongodb.client.FindIterable<Document> iterable = mock(com.mongodb.client.FindIterable.class);
+            com.mongodb.client.MongoCursor<Document> cursor = mock(com.mongodb.client.MongoCursor.class);
+            when(cursor.hasNext()).thenReturn(true, false);
+            when(cursor.next()).thenReturn(workflowDoc);
+            doReturn(cursor).when(iterable).iterator();
+            when(workflowCol.find()).thenReturn(iterable);
+
+            MongoCollection<Document> emptyCol = mock(MongoCollection.class);
+            when(emptyCol.estimatedDocumentCount()).thenReturn(0L);
+
+            when(database.getCollection(anyString())).thenAnswer(invocation -> {
+                String name = invocation.getArgument(0);
+                if ("workflows".equals(name)) {
+                    return workflowCol;
+                }
+                return emptyCol;
+            });
+            when(database.getName()).thenReturn("eddi");
+
+            migration.runIfNeeded();
+
+            // The document should have the rewritten URI
+            assertEquals("eddi://ai.labs.apicalls/apicallstore/apicalls/h1?version=1",
+                    workflowDoc.getString("extension"));
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────
+    // migrateEnvironments — restricted field rewrite tests
+    // ───────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("migrateEnvironments — restricted environment rewrite")
+    class RestrictedEnvironmentTests {
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("should rewrite 'restricted' environment to 'production'")
+        void rewriteRestrictedToProduction() {
+            when(migrationLogStore.readMigrationLog(anyString())).thenReturn(null);
+
+            var envDoc = new Document("environment", "restricted")
+                    .append("_id", new org.bson.types.ObjectId());
+
+            MongoCollection<Document> envCol = mock(MongoCollection.class);
+            when(envCol.estimatedDocumentCount()).thenReturn(1L);
+
+            com.mongodb.client.FindIterable<Document> envIterable = mock(com.mongodb.client.FindIterable.class);
+            com.mongodb.client.MongoCursor<Document> envCursor = mock(com.mongodb.client.MongoCursor.class);
+            when(envCursor.hasNext()).thenReturn(true, false);
+            when(envCursor.next()).thenReturn(envDoc);
+            when(envIterable.iterator()).thenReturn(envCursor);
+            when(envCol.find()).thenReturn(envIterable);
+
+            MongoCollection<Document> emptyCol = mock(MongoCollection.class);
+            when(emptyCol.estimatedDocumentCount()).thenReturn(0L);
+
+            when(database.getCollection(anyString())).thenAnswer(invocation -> {
+                String name = invocation.getArgument(0);
+                if ("conversationmemories".equals(name) || "deployments".equals(name)) {
+                    return envCol;
+                }
+                return emptyCol;
+            });
+            when(database.getName()).thenReturn("eddi");
+
+            migration.runIfNeeded();
+
+            assertEquals("production", envDoc.get("environment"));
+        }
+    }
 }

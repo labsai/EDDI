@@ -23,6 +23,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
@@ -40,6 +42,7 @@ class RestConversationStoreTest {
     private IUserMemoryStore userMemoryStore;
     private IRuntime runtime;
     private Instance<IAttachmentStorage> attachmentStorageInstance;
+    private IAttachmentStorage attachmentStorage;
     private RestConversationStore restConversationStore;
 
     @SuppressWarnings("unchecked")
@@ -51,6 +54,7 @@ class RestConversationStoreTest {
         userMemoryStore = mock(IUserMemoryStore.class);
         runtime = mock(IRuntime.class);
         attachmentStorageInstance = mock(Instance.class);
+        attachmentStorage = mock(IAttachmentStorage.class);
         when(attachmentStorageInstance.isResolvable()).thenReturn(false);
 
         restConversationStore = new RestConversationStore(
@@ -85,6 +89,46 @@ class RestConversationStoreTest {
     }
 
     @Nested
+    @DisplayName("readSimpleConversationLog")
+    class ReadSimpleConversationLog {
+
+        @Test
+        @DisplayName("should throw for null conversationId")
+        void throwsForNullConversationId() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> restConversationStore.readSimpleConversationLog(null, true, false, null));
+        }
+
+        @Test
+        @DisplayName("should throw for null returnDetailed")
+        void throwsForNullReturnDetailed() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> restConversationStore.readSimpleConversationLog("conv-1", null, false, null));
+        }
+
+        @Test
+        @DisplayName("should throw for null returnCurrentStepOnly")
+        void throwsForNullReturnCurrentStepOnly() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> restConversationStore.readSimpleConversationLog("conv-1", true, null, null));
+        }
+
+        @Test
+        @DisplayName("should delegate to memory store and convert")
+        void delegatesAndConverts() throws Exception {
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            snapshot.setConversationSteps(new ArrayList<>());
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1"))
+                    .thenReturn(snapshot);
+
+            var result = restConversationStore.readSimpleConversationLog("conv-1", false, false, null);
+
+            assertNotNull(result);
+        }
+    }
+
+    @Nested
     @DisplayName("deleteConversationLog")
     class DeleteConversationLog {
 
@@ -110,6 +154,41 @@ class RestConversationStoreTest {
             assertThrows(IllegalArgumentException.class,
                     () -> restConversationStore.deleteConversationLog(null, true));
         }
+
+        @Test
+        @DisplayName("should delete attachments when storage is resolvable and permanently deleting")
+        void deletesAttachments() throws Exception {
+            when(attachmentStorageInstance.isResolvable()).thenReturn(true);
+            when(attachmentStorageInstance.get()).thenReturn(attachmentStorage);
+            when(attachmentStorage.deleteByConversation("conv-1")).thenReturn(3L);
+
+            var store = new RestConversationStore(
+                    documentDescriptorStore, conversationDescriptorStore,
+                    conversationMemoryStore, userMemoryStore, runtime,
+                    30, 90, attachmentStorageInstance);
+
+            store.deleteConversationLog("conv-1", true);
+
+            verify(attachmentStorage).deleteByConversation("conv-1");
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-1");
+        }
+
+        @Test
+        @DisplayName("should handle attachment deletion failure gracefully")
+        void handlesAttachmentDeletionFailure() throws Exception {
+            when(attachmentStorageInstance.isResolvable()).thenReturn(true);
+            when(attachmentStorageInstance.get()).thenReturn(attachmentStorage);
+            when(attachmentStorage.deleteByConversation("conv-1")).thenThrow(new RuntimeException("Storage error"));
+
+            var store = new RestConversationStore(
+                    documentDescriptorStore, conversationDescriptorStore,
+                    conversationMemoryStore, userMemoryStore, runtime,
+                    30, 90, attachmentStorageInstance);
+
+            // Should not throw — logs warning and continues
+            assertDoesNotThrow(() -> store.deleteConversationLog("conv-1", true));
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-1");
+        }
     }
 
     @Nested
@@ -120,6 +199,13 @@ class RestConversationStoreTest {
         @DisplayName("should return 0 when deleteOlderThanDays is null")
         void nullDays() throws Exception {
             Integer result = restConversationStore.permanentlyDeleteEndedConversationLogs(null);
+            assertEquals(0, result);
+        }
+
+        @Test
+        @DisplayName("should return 0 when deleteOlderThanDays is -1")
+        void negativeDays() throws Exception {
+            Integer result = restConversationStore.permanentlyDeleteEndedConversationLogs(-1);
             assertEquals(0, result);
         }
 
@@ -168,6 +254,21 @@ class RestConversationStoreTest {
             assertEquals(0, result);
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-orphan");
         }
+
+        @Test
+        @DisplayName("should work with deleteOlderThanDays=0 (delete all)")
+        void zeroDeletes() throws Exception {
+            when(conversationMemoryStore.getEndedConversationIds())
+                    .thenReturn(List.of("conv-1"));
+            var descriptor = new DocumentDescriptor();
+            descriptor.setLastModifiedOn(new Date()); // now
+            when(documentDescriptorStore.readDescriptor("conv-1", 0)).thenReturn(descriptor);
+
+            // deleteOlderThanDays=0 means "delete conversations older than now"
+            // A conversation from NOW is NOT older than now, so it won't be deleted
+            Integer result = restConversationStore.permanentlyDeleteEndedConversationLogs(0);
+            assertEquals(0, result);
+        }
     }
 
     @Nested
@@ -200,6 +301,13 @@ class RestConversationStoreTest {
             assertThrows(IllegalArgumentException.class,
                     () -> restConversationStore.getActiveConversations(null, 1));
         }
+
+        @Test
+        @DisplayName("should throw for null agentVersion")
+        void throwsForNullVersion() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> restConversationStore.getActiveConversations("agent-1", null));
+        }
     }
 
     @Nested
@@ -220,6 +328,24 @@ class RestConversationStoreTest {
             verify(conversationMemoryStore).setConversationState("conv-1", ConversationState.ENDED);
             verify(conversationDescriptorStore).setDescriptor(eq("conv-1"), eq(0), any());
         }
+
+        @Test
+        @DisplayName("should handle multiple conversation statuses")
+        void multipleStatuses() throws Exception {
+            var status1 = new ConversationStatus();
+            status1.setConversationId("conv-1");
+            var status2 = new ConversationStatus();
+            status2.setConversationId("conv-2");
+
+            when(conversationDescriptorStore.readDescriptor("conv-1", 0)).thenReturn(new ConversationDescriptor());
+            when(conversationDescriptorStore.readDescriptor("conv-2", 0)).thenReturn(new ConversationDescriptor());
+
+            Response response = restConversationStore.endActiveConversations(List.of(status1, status2));
+
+            assertEquals(200, response.getStatus());
+            verify(conversationMemoryStore).setConversationState("conv-1", ConversationState.ENDED);
+            verify(conversationMemoryStore).setConversationState("conv-2", ConversationState.ENDED);
+        }
     }
 
     @Nested
@@ -239,6 +365,66 @@ class RestConversationStoreTest {
 
             verify(runtime, never()).submitCallable(any(), any());
         }
+
+        @Test
+        @DisplayName("should skip when deleteMemoriesOlderThanDays is null")
+        void skipsWhenNull() {
+            var store = new RestConversationStore(
+                    documentDescriptorStore, conversationDescriptorStore,
+                    conversationMemoryStore, userMemoryStore, runtime,
+                    30, null, attachmentStorageInstance);
+
+            store.cleanupOldUserMemories();
+
+            verify(runtime, never()).submitCallable(any(), any());
+        }
+
+        @Test
+        @DisplayName("should submit cleanup task when deleteMemoriesOlderThanDays is positive")
+        void submitsTaskWhenPositive() {
+            var store = new RestConversationStore(
+                    documentDescriptorStore, conversationDescriptorStore,
+                    conversationMemoryStore, userMemoryStore, runtime,
+                    30, 90, attachmentStorageInstance);
+
+            store.cleanupOldUserMemories();
+
+            verify(runtime).submitCallable(any(), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("readConversationDescriptors with conversation state filter")
+    class DescriptorsStateFilter {
+
+        @Test
+        @DisplayName("should filter by conversation state")
+        void filtersConversationState() throws Exception {
+            var descriptor = new ConversationDescriptor();
+            descriptor.setResource(URI.create("eddi://conv/conversationstore/conversations/conv-1?version=1"));
+            descriptor.setLastModifiedOn(new Date());
+
+            when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean()))
+                    .thenReturn(List.of(descriptor));
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.ENDED);
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            snapshot.setConversationSteps(new ArrayList<>());
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1"))
+                    .thenReturn(snapshot);
+
+            var docDesc = new DocumentDescriptor();
+            docDesc.setName("Agent Name");
+            when(documentDescriptorStore.readDescriptor("agent-1", 1)).thenReturn(docDesc);
+
+            // Filter by READY state — snapshot is ENDED, so it should be excluded
+            List<ConversationDescriptor> result = restConversationStore.readConversationDescriptors(
+                    0, 20, null, null, null, null, ConversationState.READY, null);
+
+            assertEquals(0, result.size());
+        }
     }
 
     @Nested
@@ -254,9 +440,7 @@ class RestConversationStoreTest {
             List<ConversationDescriptor> result = restConversationStore.readConversationDescriptors(
                     null, 10, null, null, null, null, null, null);
 
-            // Should not throw, empty result is fine
             assertNotNull(result);
-            // Verify it called with index=0 (clamped from null)
             verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(10), anyBoolean());
         }
 
@@ -307,6 +491,31 @@ class RestConversationStoreTest {
                     0, 50, null, null, null, null, null, null);
 
             verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(50), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("should clamp zero limit to 20")
+        void zeroLimit() throws Exception {
+            when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+
+            restConversationStore.readConversationDescriptors(
+                    0, 0, null, null, null, null, null, null);
+
+            verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean());
+        }
+    }
+
+    @Nested
+    @DisplayName("deleteEndedConversationsOlderThanXDays scheduled task")
+    class ScheduledDeletion {
+
+        @Test
+        @DisplayName("should submit callable to runtime")
+        void submitsCallable() {
+            restConversationStore.deleteEndedConversationsOlderThanXDays();
+
+            verify(runtime).submitCallable(any(), any());
         }
     }
 }
