@@ -110,6 +110,7 @@ public class PostgresContentHashStore implements IContentHashStore {
                             "ON CONFLICT (source_id, document_id) DO UPDATE SET " +
                             "  hash = EXCLUDED.hash, " +
                             "  stale = false, " +
+                            "  stale_at = NULL, " +
                             "  ingested_at = CASE WHEN rag_ingestion_hashes.hash = EXCLUDED.hash THEN rag_ingestion_hashes.ingested_at ELSE ? END, "
                             +
                             "  updated_at = ? " +
