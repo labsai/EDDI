@@ -100,6 +100,7 @@ public class MongoContentHashStore implements IContentHashStore {
                 Updates.set("ingestedAt", now),
                 Updates.set("updatedAt", now),
                 Updates.set("stale", false),
+                Updates.set("staleAt", null),
                 Updates.setOnInsert("sourceId", sourceId),
                 Updates.setOnInsert("documentId", documentId));
 
@@ -142,7 +143,7 @@ public class MongoContentHashStore implements IContentHashStore {
                 filter,
                 new Document("$set", new Document()
                         .append("stale", true)
-                        .append("staleAt", Instant.now().toString())));
+                        .append("staleAt", Instant.now())));
 
         int markedStale = (int) result.getModifiedCount();
         if (markedStale > 0) {

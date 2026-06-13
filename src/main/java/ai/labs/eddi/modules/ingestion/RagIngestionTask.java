@@ -10,7 +10,6 @@ import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
@@ -26,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 
 /**
  * Lifecycle task for RAG ingestion.
@@ -161,7 +161,8 @@ public class RagIngestionTask implements ILifecycleTask {
             RagIngestionSource sourceConfig = resourceClientLibrary.getResource(uri, RagIngestionSource.class);
 
             // Extract source ID from URI path
-            String sourceId = extractSourceId(uriStr);
+            var resourceId = extractResourceId(uri);
+            String sourceId = resourceId != null ? resourceId.getId() : "unknown";
 
             LOGGER.infof("[INGESTION TASK] Configured with source: %s (type=%s, name=%s)",
                     sanitize(sourceId), sanitize(sourceConfig.type()), sanitize(sourceConfig.name()));
@@ -172,23 +173,6 @@ public class RagIngestionTask implements ILifecycleTask {
             throw new WorkflowConfigurationException(
                     "Failed to load ingestion source from URI: " + uriStr + " - " + e.getMessage(), e);
         }
-    }
-
-    private String extractSourceId(String uriStr) {
-        // Extract ID from URI like:
-        // eddi://ai.labs.ingestion/ingestionstore/ingestionsources/{id}?version=1
-        try {
-            int lastSlash = uriStr.lastIndexOf('/');
-            int queryStart = uriStr.indexOf('?', lastSlash);
-            if (queryStart > lastSlash) {
-                return uriStr.substring(lastSlash + 1, queryStart);
-            } else if (lastSlash > 0) {
-                return uriStr.substring(lastSlash + 1);
-            }
-        } catch (Exception e) {
-            LOGGER.warnf("Could not extract source ID from URI: %s", sanitize(uriStr));
-        }
-        return "unknown";
     }
 
     @Override

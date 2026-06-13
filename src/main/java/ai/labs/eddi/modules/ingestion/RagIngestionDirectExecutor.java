@@ -12,6 +12,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.regex.Pattern;
+
 /**
  * Direct schedule executor for RAG ingestion.
  * <p>
@@ -29,7 +31,7 @@ public class RagIngestionDirectExecutor implements DirectScheduleExecutor {
 
     private static final Logger LOGGER = Logger.getLogger(RagIngestionDirectExecutor.class);
 
-    private static final String OBJECTID_PATTERN = "^[0-9a-fA-F]{24}$";
+    private static final Pattern OBJECTID_PATTERN = Pattern.compile("^[0-9a-fA-F]{24}$");
 
     private final RagIngestionService ingestionService;
     private final IRagIngestionSourceStore sourceStore;
@@ -64,7 +66,7 @@ public class RagIngestionDirectExecutor implements DirectScheduleExecutor {
         sourceId = stripIdParams(sourceId);
 
         // Validate sourceId is a valid MongoDB ObjectId (24-char hex)
-        if (!sourceId.matches(OBJECTID_PATTERN)) {
+        if (!OBJECTID_PATTERN.matcher(sourceId).matches()) {
             throw new IllegalArgumentException(
                     "Schedule metadata field 'sourceId' is not a valid MongoDB ObjectId "
                             + "(expected 24-character hex string, got '" + sourceId + "' of length "

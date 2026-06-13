@@ -4,8 +4,6 @@
  */
 package ai.labs.eddi.modules.ingestion;
 
-import ai.labs.eddi.configs.ingestion.model.SourceConfig;
-
 import java.util.List;
 import java.util.Map;
 
