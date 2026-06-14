@@ -182,7 +182,7 @@ public class WebContentFetcher implements ContentFetcher {
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (response.statusCode() != 200) {
-            throw new RuntimeException("HTTP " + response.statusCode());
+            throw new RuntimeException("HTTP " + response.statusCode() + " for URL: " + url);
         }
 
         String contentType = response.headers().firstValue("Content-Type").orElse("");
