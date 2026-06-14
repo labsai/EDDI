@@ -95,7 +95,7 @@ class WorkflowStoreTest {
         String resourceURI = "eddi://ai.labs.behavior/behaviorId?version=1";
 
         IResourceStore.IResourceId workflowId = mock(IResourceStore.IResourceId.class);
-        when(workflowId.getId()).thenReturn("wf-1");
+        when(workflowId.getId()).thenReturn("111111111111111111111111");
         when(workflowId.getVersion()).thenReturn(1);
 
         when(resourceStorage.findResourceIdsContaining(anyString(), anyString()))
@@ -103,11 +103,11 @@ class WorkflowStoreTest {
         when(resourceStorage.findHistoryResourceIdsContaining(anyString(), anyString()))
                 .thenReturn(List.of());
 
-        when(resourceStorage.getCurrentVersion("wf-1")).thenReturn(1);
+        when(resourceStorage.getCurrentVersion("111111111111111111111111")).thenReturn(1);
 
         DocumentDescriptor descriptor = new DocumentDescriptor();
-        descriptor.setResource(java.net.URI.create("eddi://ai.labs.workflow/wf-1?version=1"));
-        when(documentDescriptorStore.readDescriptor("wf-1", 1)).thenReturn(descriptor);
+        descriptor.setResource(java.net.URI.create("eddi://ai.labs.workflow/workflowstore/workflows/111111111111111111111111?version=1"));
+        when(documentDescriptorStore.readDescriptor("111111111111111111111111", 1)).thenReturn(descriptor);
 
         List<DocumentDescriptor> result = store.getWorkflowDescriptorsContainingResource(resourceURI, false);
         assertEquals(1, result.size());

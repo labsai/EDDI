@@ -193,13 +193,13 @@ class RestWorkflowStoreCrudTest {
             var config = new WorkflowConfiguration();
             var step = new WorkflowStep();
             step.setType(URI.create("eddi://ai.labs.rules"));
-            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rule1?version=1")));
+            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/111111111111111111111111?version=1")));
             config.getWorkflowSteps().add(step);
 
             when(workflowStore.read(WORKFLOW_ID, 1)).thenReturn(config);
             when(workflowStore.update(eq(WORKFLOW_ID), eq(1), any())).thenReturn(2);
 
-            URI newResourceUri = URI.create("eddi://ai.labs.rules/rulestore/rulesets/rule1?version=2");
+            URI newResourceUri = URI.create("eddi://ai.labs.rules/rulestore/rulesets/111111111111111111111111?version=2");
             Response response = sut.updateResourceInWorkflow(WORKFLOW_ID, 1, newResourceUri);
 
             assertEquals(200, response.getStatus());
@@ -213,7 +213,7 @@ class RestWorkflowStoreCrudTest {
             step.setType(URI.create("eddi://ai.labs.parser"));
 
             Map<String, Object> extElement = new HashMap<>();
-            extElement.put("config", new HashMap<>(Map.of("uri", "eddi://ai.labs.dictionary/dictionarystore/dict1?version=1")));
+            extElement.put("config", new HashMap<>(Map.of("uri", "eddi://ai.labs.dictionary/dictionarystore/222222222222222222222222?version=1")));
             List<Map<String, Object>> extensions = new ArrayList<>();
             extensions.add(extElement);
             step.getExtensions().put("dictionaries", extensions);
@@ -222,7 +222,7 @@ class RestWorkflowStoreCrudTest {
             when(workflowStore.read(WORKFLOW_ID, 1)).thenReturn(config);
             when(workflowStore.update(eq(WORKFLOW_ID), eq(1), any())).thenReturn(2);
 
-            URI newUri = URI.create("eddi://ai.labs.dictionary/dictionarystore/dict1?version=2");
+            URI newUri = URI.create("eddi://ai.labs.dictionary/dictionarystore/222222222222222222222222?version=2");
             Response response = sut.updateResourceInWorkflow(WORKFLOW_ID, 1, newUri);
 
             assertEquals(200, response.getStatus());
@@ -234,12 +234,12 @@ class RestWorkflowStoreCrudTest {
             var config = new WorkflowConfiguration();
             var step = new WorkflowStep();
             step.setType(URI.create("eddi://ai.labs.rules"));
-            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/DIFFERENT?version=1")));
+            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/333333333333333333333333?version=1")));
             config.getWorkflowSteps().add(step);
 
             when(workflowStore.read(WORKFLOW_ID, 1)).thenReturn(config);
 
-            URI newUri = URI.create("eddi://ai.labs.rules/rulestore/rulesets/rule1?version=2");
+            URI newUri = URI.create("eddi://ai.labs.rules/rulestore/rulesets/111111111111111111111111?version=2");
             Response response = sut.updateResourceInWorkflow(WORKFLOW_ID, 1, newUri);
 
             assertEquals(400, response.getStatus());
@@ -340,7 +340,8 @@ class RestWorkflowStoreCrudTest {
 
             Map<String, Object> dictEntry = new HashMap<>();
             dictEntry.put("type", "eddi://ai.labs.parser.dictionaries.regular");
-            dictEntry.put("config", new HashMap<>(Map.of("uri", "eddi://ai.labs.dictionary/dictionarystore/dictionaries/dict1?version=1")));
+            dictEntry.put("config",
+                    new HashMap<>(Map.of("uri", "eddi://ai.labs.dictionary/dictionarystore/dictionaries/222222222222222222222222?version=1")));
             List<Map<String, Object>> dictionaries = new ArrayList<>();
             dictionaries.add(dictEntry);
             parserStep.getExtensions().put("dictionaries", dictionaries);
@@ -349,7 +350,7 @@ class RestWorkflowStoreCrudTest {
             // Rules step
             var rulesStep = new WorkflowStep();
             rulesStep.setType(URI.create("eddi://ai.labs.rules"));
-            rulesStep.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rule1?version=1")));
+            rulesStep.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/333333333333333333333333?version=1")));
             config.getWorkflowSteps().add(rulesStep);
 
             when(workflowStore.read(WORKFLOW_ID, 1)).thenReturn(config);
@@ -361,17 +362,17 @@ class RestWorkflowStoreCrudTest {
 
             // Mock duplicate responses with valid Location headers
             Response dictDupResponse = Response.created(
-                    URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/newdict1122334455aa?version=1"))
+                    URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/444444444444444444444444?version=1"))
                     .build();
             Response ruleDupResponse = Response.created(
-                    URI.create("eddi://ai.labs.rules/rulestore/rulesets/newrule1122334455aa?version=1"))
+                    URI.create("eddi://ai.labs.rules/rulestore/rulesets/555555555555555555555555?version=1"))
                     .build();
 
             when(resourceClientLibrary.duplicateResource(
-                    URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/dict1?version=1")))
+                    URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/222222222222222222222222?version=1")))
                     .thenReturn(dictDupResponse);
             when(resourceClientLibrary.duplicateResource(
-                    URI.create("eddi://ai.labs.rules/rulestore/rulesets/rule1?version=1")))
+                    URI.create("eddi://ai.labs.rules/rulestore/rulesets/333333333333333333333333?version=1")))
                     .thenReturn(ruleDupResponse);
 
             Response response = sut.duplicateWorkflow(WORKFLOW_ID, 1, true);
@@ -379,9 +380,9 @@ class RestWorkflowStoreCrudTest {
             assertEquals(201, response.getStatus());
             // With deepCopy=true, should duplicate both resources
             verify(resourceClientLibrary).duplicateResource(
-                    URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/dict1?version=1"));
+                    URI.create("eddi://ai.labs.dictionary/dictionarystore/dictionaries/222222222222222222222222?version=1"));
             verify(resourceClientLibrary).duplicateResource(
-                    URI.create("eddi://ai.labs.rules/rulestore/rulesets/rule1?version=1"));
+                    URI.create("eddi://ai.labs.rules/rulestore/rulesets/333333333333333333333333?version=1"));
         }
 
         @Test
@@ -390,7 +391,7 @@ class RestWorkflowStoreCrudTest {
             var config = new WorkflowConfiguration();
             var step = new WorkflowStep();
             step.setType(URI.create("eddi://ai.labs.rules"));
-            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/rule1?version=1")));
+            step.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/333333333333333333333333?version=1")));
             config.getWorkflowSteps().add(step);
 
             when(workflowStore.read(WORKFLOW_ID, 1)).thenReturn(config);
@@ -420,14 +421,14 @@ class RestWorkflowStoreCrudTest {
             WorkflowConfiguration config = new WorkflowConfiguration();
             WorkflowStep ext = new WorkflowStep();
             ext.setType(URI.create("eddi://ai.labs.rules"));
-            ext.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/shared1?version=1")));
+            ext.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.rules/rulestore/rulesets/111111111111111111111111?version=1")));
             config.getWorkflowSteps().add(ext);
 
             when(workflowStore.read("aabbccddeeff112233445566", 1)).thenReturn(config);
 
             // Resource referenced by 3 workflows — should skip
             when(workflowStore.getWorkflowDescriptorsContainingResource(
-                    eq("eddi://ai.labs.rules/rulestore/rulesets/shared1?version=1"), eq(false)))
+                    eq("eddi://ai.labs.rules/rulestore/rulesets/111111111111111111111111?version=1"), eq(false)))
                     .thenReturn(List.of(new DocumentDescriptor(), new DocumentDescriptor(), new DocumentDescriptor()));
 
             sut.deleteWorkflow("aabbccddeeff112233445566", 1, true, true);
@@ -441,7 +442,7 @@ class RestWorkflowStoreCrudTest {
             WorkflowConfiguration config = new WorkflowConfiguration();
             WorkflowStep ext = new WorkflowStep();
             ext.setType(URI.create("eddi://ai.labs.output"));
-            ext.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.output/outputstore/outputsets/out1?version=1")));
+            ext.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.output/outputstore/outputsets/222222222222222222222222?version=1")));
             config.getWorkflowSteps().add(ext);
 
             when(workflowStore.read("aabbccddeeff112233445566", 1)).thenReturn(config);

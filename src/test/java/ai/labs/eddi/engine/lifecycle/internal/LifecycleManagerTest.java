@@ -605,4 +605,367 @@ class LifecycleManagerTest {
             verify(task).execute(eq(memory), any());
         }
     }
+
+    @Nested
+    @DisplayName("Null TaskId Guard")
+    class NullTaskIdTests {
+
+        @Test
+        @DisplayName("task with null id throws LifecycleException")
+        void nullTaskIdThrows() {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(null);
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            var ex = assertThrows(LifecycleException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+            assertTrue(ex.getMessage().contains("null TaskId"));
+        }
+    }
+
+    @Nested
+    @DisplayName("handleTaskFailure — Output Rollback")
+    class OutputRollbackTests {
+
+        @Test
+        @DisplayName("output keys added by failing task are removed")
+        void outputKeysRolledBack() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("llm_task"));
+            when(task.getType()).thenReturn("langchain");
+
+            var conversationOutput = new ai.labs.eddi.engine.memory.model.ConversationOutput();
+            // Pre-existing key that should survive rollback
+            conversationOutput.put("existingKey", "existingValue");
+
+            var currentStep = mock(ConversationStep.class);
+            // Snapshot before: only "existingKey"
+            when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>(java.util.Set.of("existingKey")));
+            when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
+            when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
+            when(currentStep.getConversationOutput()).thenReturn(conversationOutput);
+
+            // Simulate task adding a new key before throwing
+            doAnswer(invocation -> {
+                conversationOutput.put("dirtyKey", "dirtyValue");
+                throw new LifecycleException("LLM timeout");
+            }).when(task).execute(any(), any());
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            var memoryPolicy = new AgentConfiguration.MemoryPolicy();
+            var swd = new AgentConfiguration.StrictWriteDiscipline();
+            swd.setEnabled(true);
+            swd.setOnFailure("exclude_all");
+            memoryPolicy.setStrictWriteDiscipline(swd);
+            when(memory.getMemoryPolicy()).thenReturn(memoryPolicy);
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            assertThrows(LifecycleException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+
+            // "dirtyKey" should have been removed, "existingKey" preserved
+            assertTrue(conversationOutput.containsKey("existingKey"),
+                    "Pre-existing output key should survive rollback");
+            assertFalse(conversationOutput.containsKey("dirtyKey"),
+                    "Output key added by failed task should be removed");
+        }
+    }
+
+    @Nested
+    @DisplayName("handleTaskFailure — Data Uncommit with Overwritten Entries")
+    class DataUncommitOverwriteTests {
+
+        @Test
+        @DisplayName("overwritten data entries are marked uncommitted")
+        void overwrittenEntriesUncommitted() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("llm_task"));
+            when(task.getType()).thenReturn("langchain");
+
+            // Create the "before" IData reference
+            IData<?> originalData = mock(IData.class);
+            when(originalData.getKey()).thenReturn("someKey");
+
+            // Create the "after" IData reference (different object = overwritten)
+            IData<?> overwrittenData = mock(IData.class);
+            when(overwrittenData.getKey()).thenReturn("someKey");
+
+            // Snapshot before: "someKey" -> originalData
+            var beforeSnapshot = new HashMap<String, IData<?>>();
+            beforeSnapshot.put("someKey", originalData);
+
+            var currentStep = mock(ConversationStep.class);
+            when(currentStep.snapshotDataIdentities()).thenReturn(beforeSnapshot);
+            when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>());
+            // After failure: step contains the overwritten entry
+            when(currentStep.getAllElements()).thenReturn(new java.util.LinkedList<>(List.of(overwrittenData)));
+            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+
+            doThrow(new LifecycleException("fail"))
+                    .when(task).execute(any(), any());
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            var memoryPolicy = new AgentConfiguration.MemoryPolicy();
+            var swd = new AgentConfiguration.StrictWriteDiscipline();
+            swd.setEnabled(true);
+            swd.setOnFailure("digest");
+            memoryPolicy.setStrictWriteDiscipline(swd);
+            when(memory.getMemoryPolicy()).thenReturn(memoryPolicy);
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            assertThrows(LifecycleException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+
+            // overwrittenData is a different reference than originalData → uncommitted
+            verify(overwrittenData).setCommitted(false);
+        }
+    }
+
+    @Nested
+    @DisplayName("summarizeException — Edge Cases (via digest mode)")
+    class SummarizeExceptionEdgeCaseTests {
+
+        @Test
+        @DisplayName("null exception message uses class simple name in digest")
+        void nullExceptionMessage() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("llm_task"));
+            when(task.getType()).thenReturn("langchain");
+
+            doThrow(new LifecycleException(null))
+                    .when(task).execute(any(), any());
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(ConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            var memoryPolicy = new AgentConfiguration.MemoryPolicy();
+            var swd = new AgentConfiguration.StrictWriteDiscipline();
+            swd.setEnabled(true);
+            swd.setOnFailure("digest");
+            memoryPolicy.setStrictWriteDiscipline(swd);
+            when(memory.getMemoryPolicy()).thenReturn(memoryPolicy);
+
+            when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
+            when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>());
+            when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
+            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            assertThrows(LifecycleException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+
+            // Verify digest was injected (uses class name since message is null)
+            verify(currentStep).addConversationOutputList(eq("taskErrors"), anyList());
+            verify(currentStep).storeData(argThat(data -> data instanceof Data<?> d && d.getKey().equals("taskError:eddi://llm_task")
+                    && d.getResult().toString().contains("LifecycleException")));
+        }
+
+        @Test
+        @DisplayName("URL in exception message is stripped to [url]")
+        void urlStripping() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("api_task"));
+            when(task.getType()).thenReturn("httpcalls");
+
+            doThrow(new LifecycleException("Connection to https://api.example.com/v1/chat refused"))
+                    .when(task).execute(any(), any());
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(ConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            var memoryPolicy = new AgentConfiguration.MemoryPolicy();
+            var swd = new AgentConfiguration.StrictWriteDiscipline();
+            swd.setEnabled(true);
+            swd.setOnFailure("digest");
+            memoryPolicy.setStrictWriteDiscipline(swd);
+            when(memory.getMemoryPolicy()).thenReturn(memoryPolicy);
+
+            when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
+            when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>());
+            when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
+            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            assertThrows(LifecycleException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+
+            // Verify digest was stored with URL replaced by [url]
+            verify(currentStep).storeData(argThat(data -> data instanceof Data<?> d && d.getKey().equals("taskError:eddi://api_task")
+                    && d.getResult().toString().contains("[url]")
+                    && !d.getResult().toString().contains("https://api.example.com")));
+        }
+
+        @Test
+        @DisplayName("long exception message is truncated to 200 chars + ellipsis")
+        void truncation() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("long_error"));
+            when(task.getType()).thenReturn("custom");
+
+            String longMessage = "A".repeat(300);
+            doThrow(new LifecycleException(longMessage))
+                    .when(task).execute(any(), any());
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(ConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            var memoryPolicy = new AgentConfiguration.MemoryPolicy();
+            var swd = new AgentConfiguration.StrictWriteDiscipline();
+            swd.setEnabled(true);
+            swd.setOnFailure("digest");
+            memoryPolicy.setStrictWriteDiscipline(swd);
+            when(memory.getMemoryPolicy()).thenReturn(memoryPolicy);
+
+            when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
+            when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>());
+            when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
+            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            assertThrows(LifecycleException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+
+            // Verify digest was stored with truncated message ending in "..."
+            verify(currentStep).storeData(argThat(data -> data instanceof Data<?> d && d.getKey().equals("taskError:eddi://long_error")
+                    && d.getResult().toString().endsWith("...")
+                    && d.getResult().toString().length() < 300));
+        }
+    }
+
+    @Nested
+    @DisplayName("resolveOnFailureMode — Unknown Mode")
+    class UnknownOnFailureModeTests {
+
+        @Test
+        @DisplayName("unknown onFailure mode defaults to digest behavior")
+        void unknownModeDefaultsToDigest() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("llm_task"));
+            when(task.getType()).thenReturn("langchain");
+
+            doThrow(new LifecycleException("fail"))
+                    .when(task).execute(any(), any());
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(ConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            var memoryPolicy = new AgentConfiguration.MemoryPolicy();
+            var swd = new AgentConfiguration.StrictWriteDiscipline();
+            swd.setEnabled(true);
+            swd.setOnFailure("bogus_mode"); // unknown mode
+            memoryPolicy.setStrictWriteDiscipline(swd);
+            when(memory.getMemoryPolicy()).thenReturn(memoryPolicy);
+
+            when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
+            when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>());
+            when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
+            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            assertThrows(LifecycleException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+
+            // Unknown mode defaults to "digest" → error digest IS injected
+            verify(currentStep).addConversationOutputList(eq("taskErrors"), anyList());
+            verify(currentStep).storeData(any(Data.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("injectFailureAction — Pre-existing Actions")
+    class InjectFailureActionTests {
+
+        @Test
+        @DisplayName("failure action list includes pre-existing actions + task_failed action")
+        void preExistingActionsPlusFailure() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("llm_task"));
+            when(task.getType()).thenReturn("langchain");
+
+            doThrow(new LifecycleException("fail"))
+                    .when(task).execute(any(), any());
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(ConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            // Set up pre-existing actions before the task runs
+            var preActionData = mock(IData.class);
+            when(preActionData.getResult()).thenReturn(List.of("greet", "search"));
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(preActionData);
+
+            var memoryPolicy = new AgentConfiguration.MemoryPolicy();
+            var swd = new AgentConfiguration.StrictWriteDiscipline();
+            swd.setEnabled(true);
+            swd.setOnFailure("digest");
+            memoryPolicy.setStrictWriteDiscipline(swd);
+            when(memory.getMemoryPolicy()).thenReturn(memoryPolicy);
+
+            when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
+            when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>());
+            when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
+            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            assertThrows(LifecycleException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+
+            // Verify the rebuilt action list contains pre-failure actions + failure action
+            verify(currentStep).set(eq(ACTIONS), argThat(actions -> actions instanceof List<?> list
+                    && list.size() == 3
+                    && list.get(0).equals("greet")
+                    && list.get(1).equals("search")
+                    && list.get(2).equals("task_failed_llm_task")));
+        }
+    }
 }

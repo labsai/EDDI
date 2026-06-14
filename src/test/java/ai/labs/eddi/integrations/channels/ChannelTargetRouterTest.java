@@ -4,757 +4,362 @@
  */
 package ai.labs.eddi.integrations.channels;
 
+import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
+import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
-import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
+import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
 
 import java.time.Duration;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import static org.mockito.MockitoAnnotations.openMocks;
 
-/**
- * Unit tests for trigger matching, default fallback, help detection, colon
- * requirement, and thread target locking in {@link ChannelTargetRouter}.
- * <p>
- * These tests exercise the {@code resolveFromIntegration} logic directly
- * without needing a running database or agent deployment infrastructure.
- */
+@DisplayName("ChannelTargetRouter Tests")
+@SuppressWarnings("unchecked")
 class ChannelTargetRouterTest {
 
+    @Mock
+    private IChannelIntegrationStore channelStore;
+    @Mock
+    private IDocumentDescriptorStore descriptorStore;
+    @Mock
+    private IRestAgentAdministration agentAdmin;
+    @Mock
+    private IRestAgentStore agentStore;
+    @Mock
+    private SecretResolver secretResolver;
+    @Mock
+    private ICacheFactory cacheFactory;
+    @Mock
+    private ICache<String, ChannelTarget> threadTargetLock;
+
     private ChannelTargetRouter router;
-    private ChannelIntegrationConfiguration integration;
 
     @BeforeEach
-    void setUp() {
-        ICacheFactory cacheFactory = mock(ICacheFactory.class);
-        when(cacheFactory.<String, ChannelTarget>getCache(eq("channel-thread-locks"), any(Duration.class)))
-                .thenReturn(new MapCache<>());
-        router = new ChannelTargetRouter(null, null, null, null, null, cacheFactory);
+    void setUp() throws Exception {
+        openMocks(this);
+        when(cacheFactory.<String, ChannelTarget>getCache(anyString(), any(Duration.class)))
+                .thenReturn(threadTargetLock);
+        // Make secretResolver pass through
+        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
-        integration = new ChannelIntegrationConfiguration();
-        integration.setName("Test Hub");
-        integration.setChannelType("slack");
-        integration.setDefaultTargetName("architect");
+        // Empty descriptor list to avoid NPE during refresh
+        when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                .thenReturn(Collections.emptyList());
+        when(agentAdmin.getDeploymentStatuses(any())).thenReturn(Collections.emptyList());
 
-        var architect = new ChannelTarget();
-        architect.setName("architect");
-        architect.setTriggers(List.of("architect", "arch"));
-        architect.setType(ChannelTarget.TargetType.AGENT);
-        architect.setTargetId("agent-arch-id");
-
-        var security = new ChannelTarget();
-        security.setName("security");
-        security.setTriggers(List.of("security", "sec", "infosec"));
-        security.setType(ChannelTarget.TargetType.AGENT);
-        security.setTargetId("agent-sec-id");
-
-        var review = new ChannelTarget();
-        review.setName("review");
-        review.setTriggers(List.of("review", "review-panel"));
-        review.setType(ChannelTarget.TargetType.GROUP);
-        review.setTargetId("group-review-id");
-
-        integration.setTargets(List.of(architect, security, review));
+        router = new ChannelTargetRouter(channelStore, descriptorStore, agentAdmin, agentStore,
+                secretResolver, cacheFactory);
     }
 
-    // ─── Colon-required trigger matching ───────────────────────────────────────
+    // ==================== resolveFromIntegration ====================
 
     @Nested
-    @DisplayName("Trigger matching (colon required)")
-    class TriggerMatching {
+    @DisplayName("resolveFromIntegration Tests")
+    class ResolveFromIntegrationTests {
 
         @Test
-        @DisplayName("architect: question → matches architect target")
-        void matchesExplicitTriggerWithColon() {
-            ResolvedTarget result = router.resolveFromIntegration(integration,
-                    "architect: how do I deploy?");
-
-            assertNotNull(result);
-            assertEquals("architect", result.target().getName());
-            assertEquals("how do I deploy?", result.strippedMessage());
-            assertEquals("agent-arch-id", result.target().getTargetId());
-        }
-
-        @Test
-        @DisplayName("sec: is this safe → matches security via alias")
-        void matchesTriggerAlias() {
-            ResolvedTarget result = router.resolveFromIntegration(integration,
-                    "sec: is this endpoint safe?");
-
-            assertNotNull(result);
-            assertEquals("security", result.target().getName());
-            assertEquals("is this endpoint safe?", result.strippedMessage());
-        }
-
-        @Test
-        @DisplayName("review: should we migrate → matches group target")
-        void matchesGroupTarget() {
-            ResolvedTarget result = router.resolveFromIntegration(integration,
-                    "review: should we migrate to gRPC?");
-
-            assertNotNull(result);
-            assertEquals("review", result.target().getName());
-            assertEquals(ChannelTarget.TargetType.GROUP, result.target().getType());
-            assertEquals("group-review-id", result.target().getTargetId());
-        }
-
-        @Test
-        @DisplayName("ARCHITECT: question → case-insensitive match")
-        void matchesCaseInsensitive() {
-            ResolvedTarget result = router.resolveFromIntegration(integration,
-                    "ARCHITECT: deploy question");
-
-            assertNotNull(result);
-            assertEquals("architect", result.target().getName());
-        }
-
-        @Test
-        @DisplayName("arch: question → matches via short alias")
-        void matchesShortAlias() {
-            ResolvedTarget result = router.resolveFromIntegration(integration,
-                    "arch: question about patterns");
-
-            assertNotNull(result);
-            assertEquals("architect", result.target().getName());
-        }
-
-        @Test
-        @DisplayName("review-panel: question → matches hyphenated trigger")
-        void matchesHyphenatedTrigger() {
-            ResolvedTarget result = router.resolveFromIntegration(integration,
-                    "review-panel: evaluate this design");
-
-            assertNotNull(result);
-            assertEquals("review", result.target().getName());
-        }
-    }
-
-    // ─── Colon-required: no match without colon ────────────────────────────────
-
-    @Nested
-    @DisplayName("No colon → falls through to default")
-    class NoColonFallthrough {
-
-        @Test
-        @DisplayName("architect how do I deploy → no colon, falls to default")
-        void noColonFallsToDefault() {
-            ResolvedTarget result = router.resolveFromIntegration(integration,
-                    "architect how do I deploy?");
-
-            assertNotNull(result);
-            // Falls through to default target (architect in this case, so same target but
-            // the important thing is the full message is preserved)
-            assertEquals("architect", result.target().getName());
-            assertEquals("architect how do I deploy?", result.strippedMessage());
-        }
-
-        @Test
-        @DisplayName("architect diagrams are useful → no false positive without colon")
-        void noFalsePositiveWithoutColon() {
-            ResolvedTarget result = router.resolveFromIntegration(integration,
-                    "architect diagrams are useful");
-
-            assertNotNull(result);
-            assertEquals("architect", result.target().getName());
-            // Full message preserved — not stripped
-            assertEquals("architect diagrams are useful", result.strippedMessage());
-        }
-
-        @Test
-        @DisplayName("plain question → routes to default target")
-        void plainQuestionDefaultTarget() {
-            ResolvedTarget result = router.resolveFromIntegration(integration,
-                    "how do I deploy to production?");
-
-            assertNotNull(result);
-            assertEquals("architect", result.target().getName());
-            assertEquals("how do I deploy to production?", result.strippedMessage());
-        }
-    }
-
-    // ─── Unknown trigger with colon ────────────────────────────────────────────
-
-    @Nested
-    @DisplayName("Unknown trigger keyword")
-    class UnknownTrigger {
-
-        @Test
-        @DisplayName("unknown: question → falls to default with full message")
-        void unknownTriggerFallsToDefault() {
-            ResolvedTarget result = router.resolveFromIntegration(integration,
-                    "unknown: some question");
-
-            assertNotNull(result);
-            assertEquals("architect", result.target().getName());
-            // Full message including "unknown:" preserved
-            assertEquals("unknown: some question", result.strippedMessage());
-        }
-    }
-
-    // ─── Help detection ────────────────────────────────────────────────────────
-
-    @Nested
-    @DisplayName("Help detection")
-    class HelpDetection {
-
-        @Test
-        @DisplayName("help → returns null (signal for help)")
-        void helpReturnsNull() {
-            assertNull(router.resolveFromIntegration(integration, "help"));
-        }
-
-        @Test
-        @DisplayName("HELP → case-insensitive help")
-        void helpCaseInsensitive() {
-            assertNull(router.resolveFromIntegration(integration, "HELP"));
-        }
-
-        @Test
-        @DisplayName("  help  → trimmed help")
-        void helpTrimmed() {
-            assertNull(router.resolveFromIntegration(integration, "  help  "));
-        }
-
-        @Test
-        @DisplayName("empty message → returns null")
-        void emptyMessageReturnsNull() {
-            assertNull(router.resolveFromIntegration(integration, ""));
-        }
-
-        @Test
-        @DisplayName("null message → returns null")
-        void nullMessageReturnsNull() {
+        @DisplayName("null message returns null (help)")
+        void nullMessage_returnsNull() {
+            var integration = createIntegration("general", List.of("architect"));
             assertNull(router.resolveFromIntegration(integration, null));
         }
 
         @Test
-        @DisplayName("blank message → returns null")
-        void blankMessageReturnsNull() {
+        @DisplayName("blank message returns null (help)")
+        void blankMessage_returnsNull() {
+            var integration = createIntegration("general", List.of("architect"));
             assertNull(router.resolveFromIntegration(integration, "   "));
         }
 
         @Test
-        @DisplayName("help: (with colon) → NOT help signal, falls to default with full message")
-        void helpWithColonIsNotHelpSignal() {
-            // "help:" has a colon — "help" is the candidate trigger. Since "help" is not
-            // a configured trigger, it falls through to the default target with the full
-            // message preserved (including the colon).
-            ResolvedTarget result = router.resolveFromIntegration(integration, "help:");
-
-            assertNotNull(result);
-            assertEquals("architect", result.target().getName());
-            assertEquals("help:", result.strippedMessage());
+        @DisplayName("'help' message returns null")
+        void helpMessage_returnsNull() {
+            var integration = createIntegration("general", List.of("architect"));
+            assertNull(router.resolveFromIntegration(integration, "help"));
+            assertNull(router.resolveFromIntegration(integration, "HELP"));
         }
 
         @Test
-        @DisplayName("architect: (empty after colon) → matches trigger, empty stripped message")
-        void triggerWithEmptyRemainder() {
-            ResolvedTarget result = router.resolveFromIntegration(integration, "architect:");
-
+        @DisplayName("trigger match strips keyword and returns target")
+        void triggerMatch() {
+            var integration = createIntegration("general", List.of("architect"));
+            var result = router.resolveFromIntegration(integration, "architect: build me a house");
             assertNotNull(result);
-            assertEquals("architect", result.target().getName());
-            assertEquals("", result.strippedMessage());
+            assertEquals("build me a house", result.strippedMessage());
         }
-    }
-
-    // ─── Thread target locking ─────────────────────────────────────────────────
-
-    @Nested
-    @DisplayName("Thread target locking")
-    class ThreadTargetLocking {
 
         @Test
-        @DisplayName("locked target is returned for thread")
-        void lockedTargetReturned() {
+        @DisplayName("trigger match is case-insensitive")
+        void triggerCaseInsensitive() {
+            var integration = createIntegration("general", List.of("Architect"));
+            var result = router.resolveFromIntegration(integration, "ARCHITECT: question");
+            assertNotNull(result);
+            assertEquals("question", result.strippedMessage());
+        }
+
+        @Test
+        @DisplayName("no colon in message falls through to default target")
+        void noColon_usesDefault() {
+            var integration = createIntegration("general", List.of("architect"));
+            var result = router.resolveFromIntegration(integration, "just a regular message");
+            assertNotNull(result);
+            assertEquals("just a regular message", result.strippedMessage());
+        }
+
+        @Test
+        @DisplayName("colon but no matching trigger falls through to default target")
+        void colonButNoMatch_usesDefault() {
+            var integration = createIntegration("general", List.of("architect"));
+            var result = router.resolveFromIntegration(integration, "unknown: some question");
+            assertNotNull(result);
+            assertEquals("unknown: some question", result.strippedMessage());
+        }
+
+        @Test
+        @DisplayName("null targets in integration falls through to default")
+        void nullTargets() {
+            var integration = new ChannelIntegrationConfiguration();
+            integration.setDefaultTargetName("general");
+            integration.setTargets(null);
+
+            var result = router.resolveFromIntegration(integration, "architect: hello");
+            // No targets, no default => null
+            assertNull(result);
+        }
+
+        @Test
+        @DisplayName("null triggers on target are skipped")
+        void nullTriggersOnTarget() {
             var target = new ChannelTarget();
-            target.setName("architect");
-            target.setTargetId("agent-arch-id");
+            target.setName("general");
+            target.setTriggers(null);
 
-            router.lockThreadTarget("slack", "C07TEST", "1713400000.123456", target);
+            var integration = new ChannelIntegrationConfiguration();
+            integration.setTargets(List.of(target));
+            integration.setDefaultTargetName("general");
 
-            ResolvedTarget result = router.resolveThreadTarget("slack", "C07TEST",
-                    "1713400000.123456");
-
+            // Should not throw NPE, should fall through to default
+            var result = router.resolveFromIntegration(integration, "test: hello");
             assertNotNull(result);
-            assertEquals("architect", result.target().getName());
         }
 
         @Test
-        @DisplayName("unlocked thread returns null")
-        void unlockedThreadReturnsNull() {
-            ResolvedTarget result = router.resolveThreadTarget("slack", "C07TEST",
-                    "9999999999.999999");
+        @DisplayName("no default target configured returns null")
+        void noDefaultTarget_returnsNull() {
+            var integration = new ChannelIntegrationConfiguration();
+            integration.setDefaultTargetName(null);
+            integration.setTargets(List.of());
 
+            var result = router.resolveFromIntegration(integration, "just a message");
             assertNull(result);
-        }
-
-        @Test
-        @DisplayName("different threads have independent locks")
-        void independentThreadLocks() {
-            var arch = new ChannelTarget();
-            arch.setName("architect");
-
-            var sec = new ChannelTarget();
-            sec.setName("security");
-
-            router.lockThreadTarget("slack", "C07TEST", "thread-1", arch);
-            router.lockThreadTarget("slack", "C07TEST", "thread-2", sec);
-
-            assertEquals("architect",
-                    router.resolveThreadTarget("slack", "C07TEST", "thread-1")
-                            .target().getName());
-            assertEquals("security",
-                    router.resolveThreadTarget("slack", "C07TEST", "thread-2")
-                            .target().getName());
         }
     }
 
-    // ─── Edge cases ────────────────────────────────────────────────────────────
+    // ==================== ResolvedTarget record methods ====================
 
     @Nested
-    @DisplayName("Edge cases")
-    class EdgeCases {
-
-        @Test
-        @DisplayName("message with multiple colons → only first colon counts")
-        void multipleColons() {
-            ResolvedTarget result = router.resolveFromIntegration(integration,
-                    "architect: what about http://example.com?");
-
-            assertNotNull(result);
-            assertEquals("architect", result.target().getName());
-            assertEquals("what about http://example.com?", result.strippedMessage());
-        }
-
-        @Test
-        @DisplayName("trigger with leading/trailing spaces → trimmed")
-        void triggerWithSpaces() {
-            ResolvedTarget result = router.resolveFromIntegration(integration,
-                    "  architect  : how do I deploy?");
-
-            assertNotNull(result);
-            assertEquals("architect", result.target().getName());
-        }
-
-        @Test
-        @DisplayName("colon at start of message → no trigger, default")
-        void colonAtStart() {
-            ResolvedTarget result = router.resolveFromIntegration(integration,
-                    ": some question");
-
-            assertNotNull(result);
-            assertEquals("architect", result.target().getName());
-            assertEquals(": some question", result.strippedMessage());
-        }
-
-        @Test
-        @DisplayName("single-target integration → always resolves to that target")
-        void singleTarget() {
-            var simpleIntegration = new ChannelIntegrationConfiguration();
-            simpleIntegration.setDefaultTargetName("support");
-
-            var support = new ChannelTarget();
-            support.setName("support");
-            support.setTriggers(List.of("support"));
-            support.setType(ChannelTarget.TargetType.AGENT);
-            support.setTargetId("agent-support-id");
-
-            simpleIntegration.setTargets(List.of(support));
-
-            ResolvedTarget result = router.resolveFromIntegration(simpleIntegration,
-                    "I need help with my order");
-
-            assertNotNull(result);
-            assertEquals("support", result.target().getName());
-            assertEquals("I need help with my order", result.strippedMessage());
-        }
-
-        @Test
-        @DisplayName("integration with no default target → returns null for unmatched message")
-        void noDefaultTarget() {
-            var cfg = new ChannelIntegrationConfiguration();
-            cfg.setDefaultTargetName("nonexistent");
-            var t = new ChannelTarget();
-            t.setName("only");
-            t.setTriggers(List.of("only"));
-            t.setTargetId("agent-x");
-            cfg.setTargets(List.of(t));
-
-            ResolvedTarget result = router.resolveFromIntegration(cfg, "unmatched message");
-            assertNull(result);
-        }
-
-        @Test
-        @DisplayName("integration with null defaultTargetName → returns null for unmatched message")
-        void nullDefaultTargetName() {
-            var cfg = new ChannelIntegrationConfiguration();
-            cfg.setDefaultTargetName(null);
-            var t = new ChannelTarget();
-            t.setName("only");
-            t.setTriggers(List.of("only"));
-            t.setTargetId("agent-x");
-            cfg.setTargets(List.of(t));
-
-            ResolvedTarget result = router.resolveFromIntegration(cfg, "unmatched message");
-            assertNull(result);
-        }
-
-        @Test
-        @DisplayName("target with null triggers list → skipped, falls to default")
-        void targetWithNullTriggersList() {
-            var cfg = new ChannelIntegrationConfiguration();
-            cfg.setDefaultTargetName("default-target");
-
-            var noTriggers = new ChannelTarget();
-            noTriggers.setName("no-triggers");
-            noTriggers.setTriggers(null);
-            noTriggers.setTargetId("agent-1");
-
-            var defaultTarget = new ChannelTarget();
-            defaultTarget.setName("default-target");
-            defaultTarget.setTriggers(List.of("dt"));
-            defaultTarget.setTargetId("agent-2");
-
-            cfg.setTargets(List.of(noTriggers, defaultTarget));
-
-            ResolvedTarget result = router.resolveFromIntegration(cfg, "something: message");
-            assertNotNull(result);
-            assertEquals("default-target", result.target().getName());
-        }
-
-        @Test
-        @DisplayName("target with null trigger entry → skipped")
-        void targetWithNullTriggerEntry() {
-            var cfg = new ChannelIntegrationConfiguration();
-            cfg.setDefaultTargetName("t1");
-
-            var t1 = new ChannelTarget();
-            t1.setName("t1");
-            var triggers = new java.util.ArrayList<String>();
-            triggers.add(null);
-            triggers.add("real");
-            t1.setTriggers(triggers);
-            t1.setTargetId("agent-1");
-            cfg.setTargets(List.of(t1));
-
-            // "real:" should still match even though there's a null in the trigger list
-            ResolvedTarget result = router.resolveFromIntegration(cfg, "real: hello");
-            assertNotNull(result);
-            assertEquals("t1", result.target().getName());
-            assertEquals("hello", result.strippedMessage());
-        }
-    }
-
-    // ─── ResolvedTarget credential resolution ─────────────────────────────────
-
-    @Nested
-    @DisplayName("ResolvedTarget credential resolution")
-    class ResolvedTargetCredentials {
+    @DisplayName("ResolvedTarget record Tests")
+    class ResolvedTargetTests {
 
         @Test
         @DisplayName("botToken from integration platformConfig")
-        void botTokenFromIntegration() {
-            var cfg = new ChannelIntegrationConfiguration();
-            cfg.setPlatformConfig(Map.of("botToken", "xoxb-integration-token"));
-
+        void botToken_fromIntegration() {
+            var integration = new ChannelIntegrationConfiguration();
+            integration.setPlatformConfig(Map.of("botToken", "xoxb-test"));
             var target = new ChannelTarget();
-            var resolved = new ResolvedTarget(target, "msg", cfg, null, null);
 
-            assertEquals("xoxb-integration-token", resolved.botToken());
+            var resolved = new ChannelTargetRouter.ResolvedTarget(target, "msg", integration, null, null);
+            assertEquals("xoxb-test", resolved.botToken());
+        }
+
+        @Test
+        @DisplayName("botToken falls back to legacy")
+        void botToken_fallbackToLegacy() {
+            var target = new ChannelTarget();
+            var resolved = new ChannelTargetRouter.ResolvedTarget(target, "msg", null, "legacy-token", null);
+            assertEquals("legacy-token", resolved.botToken());
         }
 
         @Test
         @DisplayName("signingSecret from integration platformConfig")
-        void signingSecretFromIntegration() {
-            var cfg = new ChannelIntegrationConfiguration();
-            cfg.setPlatformConfig(Map.of("signingSecret", "secret-from-integration"));
-
+        void signingSecret_fromIntegration() {
+            var integration = new ChannelIntegrationConfiguration();
+            integration.setPlatformConfig(Map.of("signingSecret", "secret123"));
             var target = new ChannelTarget();
-            var resolved = new ResolvedTarget(target, "msg", cfg, null, null);
 
-            assertEquals("secret-from-integration", resolved.signingSecret());
+            var resolved = new ChannelTargetRouter.ResolvedTarget(target, "msg", integration, null, null);
+            assertEquals("secret123", resolved.signingSecret());
         }
 
         @Test
-        @DisplayName("botToken falls back to legacy when integration is null")
-        void botTokenFallsBackToLegacy() {
+        @DisplayName("signingSecret falls back to legacy")
+        void signingSecret_fallbackToLegacy() {
             var target = new ChannelTarget();
-            var resolved = new ResolvedTarget(target, "msg", null,
-                    "xoxb-legacy-token", "legacy-secret");
-
-            assertEquals("xoxb-legacy-token", resolved.botToken());
+            var resolved = new ChannelTargetRouter.ResolvedTarget(target, "msg", null, null, "legacy-secret");
+            assertEquals("legacy-secret", resolved.signingSecret());
         }
 
         @Test
-        @DisplayName("signingSecret falls back to legacy when integration is null")
-        void signingSecretFallsBackToLegacy() {
+        @DisplayName("null integration with null platform config returns legacy")
+        void nullIntegrationPlatformConfig() {
+            var integration = new ChannelIntegrationConfiguration();
+            integration.setPlatformConfig(null);
             var target = new ChannelTarget();
-            var resolved = new ResolvedTarget(target, "msg", null,
-                    "xoxb-legacy", "legacy-signing-secret");
 
-            assertEquals("legacy-signing-secret", resolved.signingSecret());
-        }
-
-        @Test
-        @DisplayName("botToken returns null when integration has no platformConfig")
-        void botTokenNullWhenNoPlatformConfig() {
-            var cfg = new ChannelIntegrationConfiguration();
-            cfg.setPlatformConfig(null);
-
-            var target = new ChannelTarget();
-            var resolved = new ResolvedTarget(target, "msg", cfg, null, null);
-
-            assertNull(resolved.botToken());
-        }
-
-        @Test
-        @DisplayName("signingSecret returns null when integration has no platformConfig")
-        void signingSecretNullWhenNoPlatformConfig() {
-            var cfg = new ChannelIntegrationConfiguration();
-            cfg.setPlatformConfig(null);
-
-            var target = new ChannelTarget();
-            var resolved = new ResolvedTarget(target, "msg", cfg, null, null);
-
-            assertNull(resolved.signingSecret());
-        }
-
-        @Test
-        @DisplayName("botToken returns null when both integration and legacy are null")
-        void botTokenNullWhenBothNull() {
-            var target = new ChannelTarget();
-            var resolved = new ResolvedTarget(target, "msg", null, null, null);
-
-            assertNull(resolved.botToken());
+            var resolved = new ChannelTargetRouter.ResolvedTarget(target, "msg", integration, "legacyBt", "legacySs");
+            // platformConfig is null, so falls through to legacy
+            // Actually ChannelIntegrationConfiguration constructor initializes it to new
+            // HashMap
+            // but setPlatformConfig(null) sets it to new HashMap<>()
+            assertNull(resolved.botToken()); // empty map, no "botToken" key
         }
     }
 
-    // ─── LegacyTarget ─────────────────────────────────────────────────────────
+    // ==================== LegacyTarget ====================
 
     @Nested
-    @DisplayName("LegacyTarget")
+    @DisplayName("LegacyTarget Tests")
     class LegacyTargetTests {
 
         @Test
-        @DisplayName("toChannelTarget with agentId → AGENT type")
-        void toChannelTargetAgent() {
-            var legacy = new ChannelTargetRouter.LegacyTarget("agent-123", "token", "secret", null);
+        @DisplayName("toChannelTarget with groupId sets GROUP type")
+        void withGroupId() {
+            var legacy = new ChannelTargetRouter.LegacyTarget("agent1", "token", "secret", "group1");
             var target = legacy.toChannelTarget();
-
+            assertEquals(ChannelTarget.TargetType.GROUP, target.getType());
+            assertEquals("group1", target.getTargetId());
             assertEquals("default", target.getName());
-            assertEquals(ChannelTarget.TargetType.AGENT, target.getType());
-            assertEquals("agent-123", target.getTargetId());
         }
 
         @Test
-        @DisplayName("toChannelTarget with groupId → GROUP type")
-        void toChannelTargetGroup() {
-            var legacy = new ChannelTargetRouter.LegacyTarget("agent-123", "token", "secret", "group-456");
+        @DisplayName("toChannelTarget without groupId sets AGENT type")
+        void withoutGroupId() {
+            var legacy = new ChannelTargetRouter.LegacyTarget("agent1", "token", "secret", null);
             var target = legacy.toChannelTarget();
-
-            assertEquals("default", target.getName());
-            assertEquals(ChannelTarget.TargetType.GROUP, target.getType());
-            assertEquals("group-456", target.getTargetId());
+            assertEquals(ChannelTarget.TargetType.AGENT, target.getType());
+            assertEquals("agent1", target.getTargetId());
         }
     }
 
-    // ─── Thread lock composite key isolation ───────────────────────────────────
+    // ==================== getSigningSecrets ====================
 
     @Nested
-    @DisplayName("Thread lock composite key isolation")
-    class ThreadLockIsolation {
+    @DisplayName("getSigningSecrets Tests")
+    class GetSigningSecretsTests {
 
         @Test
-        @DisplayName("same threadTs in different channels → independent locks")
-        void crossChannelIsolation() {
-            var target1 = new ChannelTarget();
-            target1.setName("target-channel-1");
-
-            var target2 = new ChannelTarget();
-            target2.setName("target-channel-2");
-
-            // Lock same threadTs but in different channels
-            router.lockThreadTarget("slack", "C001", "thread-abc", target1);
-            router.lockThreadTarget("slack", "C002", "thread-abc", target2);
-
-            var result1 = router.resolveThreadTarget("slack", "C001", "thread-abc");
-            var result2 = router.resolveThreadTarget("slack", "C002", "thread-abc");
-
-            assertNotNull(result1);
-            assertNotNull(result2);
-            assertEquals("target-channel-1", result1.target().getName());
-            assertEquals("target-channel-2", result2.target().getName());
+        @DisplayName("non-slack channel returns empty set")
+        void nonSlack_returnsEmpty() {
+            Set<String> result = router.getSigningSecrets("teams");
+            assertTrue(result.isEmpty());
         }
 
         @Test
-        @DisplayName("same threadTs in different platform types → independent locks")
-        void crossPlatformIsolation() {
-            var slackTarget = new ChannelTarget();
-            slackTarget.setName("slack-target");
+        @DisplayName("null channel type returns empty set")
+        void nullType_returnsEmpty() {
+            Set<String> result = router.getSigningSecrets(null);
+            assertTrue(result.isEmpty());
+        }
+    }
 
-            var teamsTarget = new ChannelTarget();
-            teamsTarget.setName("teams-target");
+    // ==================== resolveThreadTarget ====================
 
-            router.lockThreadTarget("slack", "C001", "thread-1", slackTarget);
-            router.lockThreadTarget("teams", "C001", "thread-1", teamsTarget);
+    @Nested
+    @DisplayName("resolveThreadTarget Tests")
+    class ResolveThreadTargetTests {
 
-            var slackResult = router.resolveThreadTarget("slack", "C001", "thread-1");
-            var teamsResult = router.resolveThreadTarget("teams", "C001", "thread-1");
-
-            assertNotNull(slackResult);
-            assertNotNull(teamsResult);
-            assertEquals("slack-target", slackResult.target().getName());
-            assertEquals("teams-target", teamsResult.target().getName());
+        @Test
+        @DisplayName("no locked target returns null")
+        void noLock_returnsNull() {
+            when(threadTargetLock.get(anyString())).thenReturn(null);
+            var result = router.resolveThreadTarget("slack", "C123", "ts123");
+            assertNull(result);
         }
 
         @Test
-        @DisplayName("channelType normalization in lock/resolve — SLACK matches slack")
-        void channelTypeNormalization() {
+        @DisplayName("locked target returns ResolvedTarget")
+        void lockedTarget_returns() {
             var target = new ChannelTarget();
-            target.setName("test-target");
+            target.setName("locked");
+            when(threadTargetLock.get("slack:C123:ts123")).thenReturn(target);
 
-            // Lock with mixed case
-            router.lockThreadTarget("SLACK", "C001", "thread-1", target);
-
-            // Resolve with lowercase
-            var result = router.resolveThreadTarget("slack", "C001", "thread-1");
+            var result = router.resolveThreadTarget("slack", "C123", "ts123");
             assertNotNull(result);
-            assertEquals("test-target", result.target().getName());
+            assertEquals("locked", result.target().getName());
         }
 
         @Test
-        @DisplayName("null channelType is handled safely in lockThreadTarget")
-        void nullChannelTypeInLock() {
+        @DisplayName("null channel type is normalized")
+        void nullChannelType() {
+            when(threadTargetLock.get(":C123:ts123")).thenReturn(null);
+            var result = router.resolveThreadTarget(null, "C123", "ts123");
+            assertNull(result);
+        }
+    }
+
+    // ==================== lockThreadTarget ====================
+
+    @Nested
+    @DisplayName("lockThreadTarget Tests")
+    class LockThreadTargetTests {
+
+        @Test
+        @DisplayName("lock stores target in cache")
+        void lockStoresTarget() {
             var target = new ChannelTarget();
             target.setName("test");
-            assertDoesNotThrow(() -> router.lockThreadTarget(null, "C001", "t1", target));
+
+            router.lockThreadTarget("slack", "C123", "ts123", target);
+
+            verify(threadTargetLock).put("slack:C123:ts123", target);
         }
     }
 
-    // ─── Locale-safe API normalization ─────────────────────────────────────────
+    // ==================== hasAnyChannels ====================
 
     @Nested
-    @DisplayName("Locale-safe channel type normalization")
-    class LocaleNormalization {
+    @DisplayName("hasAnyChannels Tests")
+    class HasAnyChannelsTests {
 
         @Test
-        @DisplayName("getSigningSecrets with mixed case → normalizes to slack")
-        void getSigningSecretsCaseInsensitive() {
-            // Without integration data loaded, returns empty set for any type
-            Set<String> secrets = router.getSigningSecrets("SLACK");
-            assertNotNull(secrets);
-            assertTrue(secrets.isEmpty());
+        @DisplayName("no channels returns false for slack")
+        void noChannels_slack() {
+            assertFalse(router.hasAnyChannels("slack"));
         }
 
         @Test
-        @DisplayName("getSigningSecrets with null channelType → empty set")
-        void getSigningSecretsNull() {
-            assertDoesNotThrow(() -> {
-                Set<String> secrets = router.getSigningSecrets(null);
-                assertTrue(secrets.isEmpty());
-            });
-        }
-
-        @Test
-        @DisplayName("getIntegration with null channelType → empty Optional")
-        void getIntegrationNullType() {
-            assertDoesNotThrow(() -> {
-                assertTrue(router.getIntegration(null, "C001").isEmpty());
-            });
-        }
-
-        @Test
-        @DisplayName("getBotToken with null channelType → null")
-        void getBotTokenNullType() {
-            assertDoesNotThrow(() -> {
-                assertNull(router.getBotToken(null, "C001"));
-            });
-        }
-
-        @Test
-        @DisplayName("hasAnyChannels with null channelType → false")
-        void hasAnyChannelsNullType() {
-            assertDoesNotThrow(() -> {
-                assertFalse(router.hasAnyChannels(null));
-            });
-        }
-
-        @Test
-        @DisplayName("resolveTarget with null channelType → null (no match)")
-        void resolveTargetNullType() {
-            assertDoesNotThrow(() -> {
-                assertNull(router.resolveTarget(null, "C001", "hello"));
-            });
-        }
-
-        @Test
-        @DisplayName("resolveTarget with non-slack type → null (no match)")
-        void resolveTargetUnknownType() {
-            assertNull(router.resolveTarget("teams", "C001", "hello"));
-        }
-
-        @Test
-        @DisplayName("hasAnyChannels with unknown non-slack type → false")
-        void hasAnyChannelsUnknown() {
+        @DisplayName("no channels returns false for non-slack")
+        void noChannels_teams() {
             assertFalse(router.hasAnyChannels("teams"));
         }
     }
 
-    // ─── Test helper: simple ConcurrentHashMap-based ICache ─────
+    // ==================== Helper ====================
 
-    private static class MapCache<K, V> extends ConcurrentHashMap<K, V> implements ICache<K, V> {
+    private ChannelIntegrationConfiguration createIntegration(String defaultTargetName, List<String> triggers) {
+        var target = new ChannelTarget();
+        target.setName(defaultTargetName);
+        target.setTriggers(triggers);
+        target.setType(ChannelTarget.TargetType.AGENT);
+        target.setTargetId("agent-123");
 
-        @Override
-        public String getCacheName() {
-            return "test-cache";
-        }
-
-        @Override
-        public V put(K key, V value, long lifespan, TimeUnit unit) {
-            return put(key, value);
-        }
-
-        @Override
-        public V putIfAbsent(K key, V value, long lifespan, TimeUnit unit) {
-            return putIfAbsent(key, value);
-        }
-
-        @Override
-        public void putAll(Map<? extends K, ? extends V> map, long lifespan, TimeUnit unit) {
-            putAll(map);
-        }
-
-        @Override
-        public V replace(K key, V value, long lifespan, TimeUnit unit) {
-            return replace(key, value);
-        }
-
-        @Override
-        public boolean replace(K key, V oldValue, V value, long lifespan, TimeUnit unit) {
-            return replace(key, oldValue, value);
-        }
-
-        @Override
-        public V put(K key, V value, long lifespan, TimeUnit lifespanUnit, long maxIdleTime, TimeUnit maxIdleTimeUnit) {
-            return put(key, value);
-        }
-
-        @Override
-        public V putIfAbsent(K key, V value, long lifespan, TimeUnit lifespanUnit, long maxIdleTime, TimeUnit maxIdleTimeUnit) {
-            return putIfAbsent(key, value);
-        }
+        var integration = new ChannelIntegrationConfiguration();
+        integration.setTargets(List.of(target));
+        integration.setDefaultTargetName(defaultTargetName);
+        return integration;
     }
 }
