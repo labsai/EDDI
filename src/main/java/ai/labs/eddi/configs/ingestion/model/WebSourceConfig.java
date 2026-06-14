@@ -84,11 +84,11 @@ public record WebSourceConfig(
          */
         public Scope {
             if (maxPages <= 0) {
-                maxPages = 200;
+                throw new IllegalArgumentException("maxPages must be > 0");
             }
 
             if (maxDepth <= 0) {
-                maxDepth = 3;
+                throw new IllegalArgumentException("maxDepth must be > 0");
             }
 
             if (excludePatterns == null) {
@@ -96,7 +96,7 @@ public record WebSourceConfig(
             }
 
             if (pathPrefix == null) {
-                pathPrefix = "/";
+                throw new IllegalArgumentException("pathPrefix must not be null");
             }
         }
 
@@ -134,16 +134,16 @@ public record WebSourceConfig(
          * Compact constructor — provides safe defaults for Jackson partial JSON.
          */
         public CrawlSettings {
-            if (requestDelayMs <= 0) {
-                requestDelayMs = 500;
+            if (requestDelayMs < 0) {
+                throw new IllegalArgumentException("requestDelayMs must be >= 0");
             }
 
             if (timeoutSeconds <= 0) {
-                timeoutSeconds = 15;
+                throw new IllegalArgumentException("timeoutSeconds must be > 0");
             }
 
             if (userAgent == null) {
-                userAgent = "EDDI-Crawler/1.0";
+                throw new IllegalArgumentException("userAgent must not be null");
             }
         }
 
