@@ -254,13 +254,6 @@ public class WebContentFetcher implements ContentFetcher {
                 }
             }
 
-            // Check fragment-only links (same page anchors)
-            String pathAndQuery = uri.getPath() + (uri.getQuery() != null ? "?" + uri.getQuery() : "");
-            if (pathAndQuery.isEmpty() || pathAndQuery.equals("/")) {
-                // This is likely just a fragment link to the same page
-                return false;
-            }
-
             return true;
         } catch (URISyntaxException e) {
             return false;
