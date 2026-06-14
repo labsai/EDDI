@@ -101,6 +101,10 @@ public class RestRagIngestionSourceStore implements IRestRagIngestionSourceStore
     public Response updateIngestionSource(String id, Integer version, RagIngestionSource source) {
         validateSource(source);
 
+        if (source.schedule() != null && source.schedule().enabled()) {
+            CronParser.validate(source.schedule().cronExpression());
+        }
+
         Response response = restVersionInfo.update(id, version, source);
 
         // Update associated schedule

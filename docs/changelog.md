@@ -4,6 +4,28 @@
 
 ---
 
+## 🐛 Scheduled Ingestion Service — PR Review Fixes: `shouldCrawl` + Cron Validation (2026-06-14)
+
+**Repo:** EDDI (`scheduled-ingest-service`)
+**Branch:** `scheduled-ingest-service`
+**What changed:** Fixed two critical bugs identified during PR #529 review.
+
+### Fix: `shouldCrawl` Rejected Valid Root URLs
+- **Problem:** The fragment-only link detection in `WebContentFetcher.shouldCrawl()` checked `pathAndQuery.isEmpty() || pathAndQuery.equals("/")`, which blocked legitimate root pages like `https://example.com/` from being crawled.
+- **Fix:** Removed the check entirely. Fragment stripping is already handled upstream by `stripFragment()`, and the `visited` set prevents re-crawling.
+- **Files:** `WebContentFetcher.java`
+
+### Fix: Cron Expression Not Validated Before Persisting Source on Update
+- **Problem:** `RestRagIngestionSourceStore.updateIngestionSource()` called `restVersionInfo.update()` first, then validated the cron expression inside `updateScheduleForSource()`. If invalid, the error was logged as a warning and the API still returned `200 OK` — the source was persisted with a broken schedule.
+- **Fix:** Added `CronParser.validate()` guard before `restVersionInfo.update()`, matching the pattern already used in `createScheduleForSource()`. Invalid cron now throws `IllegalArgumentException` → `400 Bad Request` before the source is persisted.
+- **Tests:** 3 new unit tests in `RestRagIngestionSourceStoreTest` — invalid cron + enabled (throws), invalid cron + disabled (no throw), valid cron + enabled (no throw).
+- **Files:** `RestRagIngestionSourceStore.java`, `RestRagIngestionSourceStoreTest.java`
+
+### Verification
+- `./mvnw test -Dtest=RestRagIngestionSourceStoreTest` → 3 tests, 0 failures
+
+---
+
 ## 🐛 Fix: Swagger UI Broken by CSP — Per-Path Filter Override (2026-06-03)
 
 **Repo:** EDDI (`fix/swagger-ui-csp`)
