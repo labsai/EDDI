@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.properties.mongo.MongoUserMemoryStore;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorageFactory;
 import ai.labs.eddi.datastore.postgres.PostgresAuditStore;
 import ai.labs.eddi.datastore.postgres.PostgresAttachmentStore;
+import ai.labs.eddi.datastore.postgres.PostgresContentHashStore;
 import ai.labs.eddi.datastore.postgres.PostgresConversationCheckpointStore;
 import ai.labs.eddi.datastore.postgres.PostgresConversationMemoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresDatabaseLogs;
@@ -43,6 +44,8 @@ import ai.labs.eddi.engine.triggermanagement.IAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.mongo.AgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.mongo.UserConversationStore;
+import ai.labs.eddi.modules.ingestion.IContentHashStore;
+import ai.labs.eddi.modules.ingestion.MongoContentHashStore;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
 import ai.labs.eddi.secrets.persistence.MongoSecretPersistence;
 import ai.labs.eddi.secrets.persistence.PostgresSecretPersistence;
@@ -178,6 +181,14 @@ public class DataStoreProducers {
     public ai.labs.eddi.engine.tenancy.ITenantQuotaStore tenantQuotaStore(
                                                                           Instance<ai.labs.eddi.engine.tenancy.MongoTenantQuotaStore> mongo,
                                                                           Instance<ai.labs.eddi.engine.tenancy.PostgresTenantQuotaStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IContentHashStore contentHashStore(
+                                              Instance<MongoContentHashStore> mongo,
+                                              Instance<PostgresContentHashStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 }

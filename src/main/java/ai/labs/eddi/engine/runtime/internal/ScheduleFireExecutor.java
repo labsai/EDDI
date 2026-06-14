@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.schedule.DirectScheduleExecutor;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
@@ -13,6 +14,7 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -22,15 +24,14 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Executes a scheduled fire by resolving the conversation strategy and calling
- * {@link IConversationService#say}.
+ * Executes a scheduled fire. Dispatches to a {@link DirectScheduleExecutor}
+ * when {@link ScheduleConfiguration#getDirectExecutionType()} is set; otherwise
+ * resolves a conversation and calls {@link IConversationService#say}.
  * <p>
- * All existing guards apply automatically:
- * <ul>
- * <li>{@code TenantQuotaService} — API call and cost quotas</li>
- * <li>{@code AuditLedgerService} — HMAC-SHA256 audit trail</li>
- * <li>{@code ConversationCoordinator} — ordered processing</li>
- * </ul>
+ * The direct execution path bypasses the agent/conversation system entirely,
+ * allowing operational tasks (ingestion, cleanup, reindexing) to use the robust
+ * scheduling infrastructure (cron, cluster-safe claiming, retries, fire logs)
+ * without needing a deployed agent.
  *
  * @author ginccc
  * @since 6.0.0
@@ -46,6 +47,9 @@ public class ScheduleFireExecutor {
     @Inject
     IScheduleStore scheduleStore;
 
+    @Inject
+    Instance<DirectScheduleExecutor> directExecutors;
+
     /**
      * Execute a schedule fire. Returns the fire log entry.
      *
@@ -59,6 +63,58 @@ public class ScheduleFireExecutor {
      * @return the completed fire log
      */
     public ScheduleFireLog fire(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        String directType = schedule.getDirectExecutionType();
+        if (directType != null) {
+            return executeDirectly(schedule, instanceId, attemptNumber, directType);
+        }
+        return executeViaConversation(schedule, instanceId, attemptNumber);
+    }
+
+    private ScheduleFireLog executeDirectly(ScheduleConfiguration schedule, String instanceId,
+                                            int attemptNumber, String directType) {
+        Instant startedAt = Instant.now();
+        String fireLogId = UUID.randomUUID().toString();
+        String errorMessage = null;
+        String status;
+
+        try {
+            // Find the matching executor
+            DirectScheduleExecutor executor = findExecutor(directType);
+            if (executor == null) {
+                throw new IllegalArgumentException(
+                        "No DirectScheduleExecutor found for type '" + directType
+                                + "'. Available types: " + listAvailableExecutors());
+            }
+
+            // Execute the task
+            executor.execute(schedule);
+
+            status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+            LOGGER.infof("[SCHEDULE] Direct execution completed for schedule '%s' (id=%s, type=%s)",
+                    schedule.getName(), schedule.getId(), directType);
+
+        } catch (Exception e) {
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
+            LOGGER.warnf(e, "[SCHEDULE] Direct execution failed for schedule '%s' (id=%s, type=%s): %s",
+                    schedule.getName(), schedule.getId(), directType, errorMessage);
+        }
+
+        // Log the fire attempt (no conversationId for direct execution)
+        ScheduleFireLog fireLog = new ScheduleFireLog(
+                fireLogId, schedule.getId(), schedule.getFireId(), schedule.getNextFire(),
+                startedAt, Instant.now(), status, instanceId, null, errorMessage, attemptNumber, 0.0);
+
+        try {
+            scheduleStore.logFire(fireLog);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Failed to log fire for schedule %s", schedule.getId());
+        }
+
+        return fireLog;
+    }
+
+    private ScheduleFireLog executeViaConversation(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
         Instant startedAt = Instant.now();
         String fireLogId = UUID.randomUUID().toString();
         String conversationId = null;
@@ -91,18 +147,21 @@ public class ScheduleFireExecutor {
             }
 
             status = ScheduleConfiguration.FireStatus.COMPLETED.name();
-            LOGGER.infof("[SCHEDULE] Fired schedule '%s' (id=%s, type=%s) for Agent %s → conversation %s", schedule.getName(), schedule.getId(),
-                    schedule.getTriggerType(), schedule.getAgentId(), conversationId);
+            LOGGER.infof("[SCHEDULE] Fired schedule '%s' (id=%s, type=%s) for Agent %s → conversation %s",
+                    schedule.getName(), schedule.getId(), schedule.getTriggerType(),
+                    schedule.getAgentId(), conversationId);
 
         } catch (Exception e) {
             status = ScheduleConfiguration.FireStatus.FAILED.name();
             errorMessage = e.getClass().getSimpleName() + ": " + e.getMessage();
-            LOGGER.warnf(e, "[SCHEDULE] Fire failed for schedule '%s' (id=%s): %s", schedule.getName(), schedule.getId(), errorMessage);
+            LOGGER.warnf(e, "[SCHEDULE] Fire failed for schedule '%s' (id=%s): %s",
+                    schedule.getName(), schedule.getId(), errorMessage);
         }
 
-        // 4. Log the fire attempt (Fix #4: use caller-provided attemptNumber)
-        ScheduleFireLog fireLog = new ScheduleFireLog(fireLogId, schedule.getId(), schedule.getFireId(), schedule.getNextFire(), startedAt,
-                Instant.now(), status, instanceId, conversationId, errorMessage, attemptNumber, cost);
+        // 4. Log the fire attempt
+        ScheduleFireLog fireLog = new ScheduleFireLog(fireLogId, schedule.getId(), schedule.getFireId(),
+                schedule.getNextFire(), startedAt, Instant.now(), status, instanceId,
+                conversationId, errorMessage, attemptNumber, cost);
 
         try {
             scheduleStore.logFire(fireLog);
@@ -111,6 +170,23 @@ public class ScheduleFireExecutor {
         }
 
         return fireLog;
+    }
+
+    private DirectScheduleExecutor findExecutor(String type) {
+        for (DirectScheduleExecutor executor : directExecutors) {
+            if (executor.getType().equals(type)) {
+                return executor;
+            }
+        }
+        return null;
+    }
+
+    private String listAvailableExecutors() {
+        List<String> types = new ArrayList<>();
+        for (DirectScheduleExecutor executor : directExecutors) {
+            types.add(executor.getType());
+        }
+        return String.join(", ", types);
     }
 
     private String resolveConversation(ScheduleConfiguration schedule, Environment env) throws Exception {
@@ -143,7 +219,8 @@ public class ScheduleFireExecutor {
                 conversationService.readConversation(env, schedule.getAgentId(), conversationId, false, true, List.of());
                 return conversationId;
             } catch (Exception e) {
-                LOGGER.infof("[SCHEDULE] Persistent conversation %s no longer valid for schedule %s, creating new", conversationId, schedule.getId());
+                LOGGER.infof("[SCHEDULE] Persistent conversation %s no longer valid for schedule %s, creating new",
+                        conversationId, schedule.getId());
             }
         }
 
