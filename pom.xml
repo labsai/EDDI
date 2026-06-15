@@ -724,7 +724,7 @@
                     </execution>
                     <!-- Coverage gate (merged UT+IT): the single authoritative threshold.
                          Enforced during `mvn verify` against combined unit + integration test data.
-                         Target: 80/70 for OpenSSF Silver. -->
+                         Target: 90/80 for OpenSSF Gold. -->
                     <execution>
                         <id>merged-check</id>
                         <phase>verify</phase>
@@ -740,12 +740,12 @@
                                         <limit>
                                             <counter>INSTRUCTION</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.70</minimum>
+                                            <minimum>0.90</minimum>
                                         </limit>
                                         <limit>
                                             <counter>BRANCH</counter>
                                             <value>COVEREDRATIO</value>
-                                            <minimum>0.60</minimum>
+                                            <minimum>0.80</minimum>
                                         </limit>
                                     </limits>
                                 </rule>
