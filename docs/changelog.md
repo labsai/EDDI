@@ -541,7 +541,13 @@ Updated `manage.html` asset references to latest EDDI-Manager build. Removed old
 - **Tests:** 3 new unit tests in `RestRagIngestionSourceStoreTest` — invalid cron + enabled (throws), invalid cron + disabled (no throw), valid cron + enabled (no throw).
 - **Files:** `RestRagIngestionSourceStore.java`, `RestRagIngestionSourceStoreTest.java`
 
+### Fix: `matchesGlob` Regex Corruption
+- **Problem:** The `**` → `.*` replacement in `matchesGlob` never fired because `*` → `[^/]*` ran first, consuming both `*` in `**` and leaving nothing for the `**` replacement to match. Patterns like `**/api/**` behaved identically to `*/api/*`.
+- **Fix:** Use a `\u0000` placeholder so `**` is replaced before `*`, then restore the placeholder to `.*` after `*` is handled.
+- **Files:** `WebContentFetcher.java`
+
 ### Verification
+- `./mvnw compile` → clean
 - `./mvnw test -Dtest=RestRagIngestionSourceStoreTest` → 3 tests, 0 failures
 
 ---

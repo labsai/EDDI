@@ -295,12 +295,28 @@ public class WebContentFetcher implements ContentFetcher {
         return idx >= 0 ? url.substring(0, idx) : url;
     }
 
+    /**
+     * Simple glob matching: {@code *} matches any characters within a single path
+     * segment (non-{@code /}), {@code **} matches any characters across segments
+     * (including {@code /}), {@code ?} matches a single character, and dots are
+     * treated as literals.
+     * <p>
+     * Examples with pattern {@code **\/api\/**}: {@code /api/users} → matches,
+     * {@code /v2/api/users/list} → matches, {@code /docs/api} → does NOT match
+     * ({@code **} needs {@code /api/} or {@code /api} suffix). <br>
+     * Examples with pattern {@code *.pdf}: {@code report.pdf} → matches,
+     * {@code docs/report.pdf} → does NOT match ({@code *} does not cross {@code /},
+     * use {@code **} instead). <br>
+     * Examples with pattern {@code *&#47;report.pdf}: {@code docs/report.pdf} →
+     * matches, {@code a/b/report.pdf} → does NOT match ({@code *} only matches one
+     * segment).
+     */
     private boolean matchesGlob(String text, String pattern) {
-        // Simple glob matching: * matches any sequence, ? matches single char
         String regex = pattern
                 .replace(".", "\\.")
-                .replace("**", ".*")
+                .replace("**", "\u0000")
                 .replace("*", "[^/]*")
+                .replace("\u0000", ".*")
                 .replace("?", ".");
         return text.matches(regex);
     }
