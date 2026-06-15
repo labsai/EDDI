@@ -9,7 +9,6 @@ import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import org.junit.jupiter.api.*;
-import org.junit.jupiter.api.Disabled;
 import org.mockito.Mock;
 
 import jakarta.ws.rs.core.Response;
@@ -78,7 +77,7 @@ class RestApiCallsStoreTest {
         @Test
         @DisplayName("specUrl with blank apiBaseUrl — handled gracefully")
         void blankApiBaseUrl() {
-            Response response = store.discoverEndpoints("http://example.com/api.yaml", "  ", null);
+            Response response = store.discoverEndpoints("file:///nonexistent/spec.yaml", "  ", null);
             // Will fail at URL fetch — blank is treated as null
             assertTrue(response.getStatus() >= 400);
         }
@@ -86,7 +85,7 @@ class RestApiCallsStoreTest {
         @Test
         @DisplayName("specUrl with blank apiAuth — handled gracefully")
         void blankApiAuth() {
-            Response response = store.discoverEndpoints("http://example.com/api.yaml", null, "  ");
+            Response response = store.discoverEndpoints("file:///nonexistent/spec.yaml", null, "  ");
             assertTrue(response.getStatus() >= 400);
         }
     }
@@ -116,33 +115,6 @@ class RestApiCallsStoreTest {
             String uri = store.getResourceURI();
             assertNotNull(uri);
             assertTrue(uri.contains("apicalls"));
-        }
-    }
-
-    @Nested
-    @DisplayName("readApiCallsDescriptors")
-    class ReadDescriptorsTests {
-
-        @Test
-        @Disabled("Requires full RestVersionInfo mock chain")
-        @DisplayName("delegates to restVersionInfo")
-        void delegatesToVersionInfo() {
-            // This delegates internally — just ensure no exception
-            assertDoesNotThrow(() -> store.readApiCallsDescriptors("", 0, 10));
-        }
-    }
-
-    @Nested
-    @DisplayName("createApiCalls")
-    class CreateApiCallsTests {
-
-        @Test
-        @Disabled("Requires full RestVersionInfo mock chain")
-        @DisplayName("delegates to restVersionInfo")
-        void delegatesToVersionInfo() {
-            var config = new ApiCallsConfiguration();
-            // This delegates to RestVersionInfo.create which calls the store
-            assertDoesNotThrow(() -> store.createApiCalls(config));
         }
     }
 }

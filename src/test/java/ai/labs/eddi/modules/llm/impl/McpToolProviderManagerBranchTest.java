@@ -55,7 +55,7 @@ class McpToolProviderManagerBranchTest {
         @DisplayName("null server name falls back to URL for logging")
         void nullServerName_fallbackToUrl() {
             var config = new McpServerConfig();
-            config.setUrl("http://unreachable-mcp-server:9999/mcp");
+            config.setUrl("http://127.0.0.1:1/mcp");
             config.setName(null);
             config.setTransport("http");
             config.setTimeoutMs(500L);
@@ -70,7 +70,7 @@ class McpToolProviderManagerBranchTest {
         @DisplayName("server name present uses name for logging")
         void serverNamePresent_usesName() {
             var config = new McpServerConfig();
-            config.setUrl("http://unreachable-mcp-server:9999/mcp");
+            config.setUrl("http://127.0.0.1:1/mcp");
             config.setName("My MCP Server");
             config.setTransport("http");
             config.setTimeoutMs(500L);
@@ -92,7 +92,7 @@ class McpToolProviderManagerBranchTest {
         @DisplayName("null API key skips Authorization header")
         void nullApiKey() {
             var config = new McpServerConfig();
-            config.setUrl("http://unreachable-mcp-server:9999/mcp");
+            config.setUrl("http://127.0.0.1:1/mcp");
             config.setApiKey(null);
             config.setTimeoutMs(500L);
 
@@ -105,7 +105,7 @@ class McpToolProviderManagerBranchTest {
         @DisplayName("empty API key skips Authorization header")
         void emptyApiKey() {
             var config = new McpServerConfig();
-            config.setUrl("http://unreachable-mcp-server:9999/mcp");
+            config.setUrl("http://127.0.0.1:1/mcp");
             config.setApiKey("");
             config.setTimeoutMs(500L);
 
@@ -118,7 +118,7 @@ class McpToolProviderManagerBranchTest {
         @DisplayName("non-empty API key resolves via globalVariableResolver and secretResolver")
         void nonEmptyApiKey() {
             var config = new McpServerConfig();
-            config.setUrl("http://unreachable-mcp-server:9999/mcp");
+            config.setUrl("http://127.0.0.1:1/mcp");
             config.setApiKey("{{vault.my-key}}");
             config.setTimeoutMs(500L);
 
@@ -141,7 +141,7 @@ class McpToolProviderManagerBranchTest {
         @DisplayName("null timeoutMs defaults to 30000")
         void nullTimeoutMs() {
             var config = new McpServerConfig();
-            config.setUrl("http://unreachable-mcp-server:9999/mcp");
+            config.setUrl("http://127.0.0.1:1/mcp");
             config.setTimeoutMs(null);
 
             var result = manager.discoverTools(List.of(config));
@@ -152,7 +152,7 @@ class McpToolProviderManagerBranchTest {
         @DisplayName("custom timeoutMs is used")
         void customTimeoutMs() {
             var config = new McpServerConfig();
-            config.setUrl("http://unreachable-mcp-server-2:9999/mcp");
+            config.setUrl("http://127.0.0.1:2/mcp");
             config.setTimeoutMs(5000L);
 
             var result = manager.discoverTools(List.of(config));
@@ -172,11 +172,11 @@ class McpToolProviderManagerBranchTest {
         @DisplayName("one failing server does not prevent others from being processed")
         void oneFailDoesNotBlockOthers() {
             var config1 = new McpServerConfig();
-            config1.setUrl("http://unreachable-1:9999/mcp");
+            config1.setUrl("http://127.0.0.1:3/mcp");
             config1.setTimeoutMs(500L);
 
             var config2 = new McpServerConfig();
-            config2.setUrl("http://unreachable-2:9999/mcp");
+            config2.setUrl("http://127.0.0.1:4/mcp");
             config2.setTimeoutMs(500L);
 
             var result = manager.discoverTools(List.of(config1, config2));
@@ -213,7 +213,7 @@ class McpToolProviderManagerBranchTest {
         @DisplayName("shutdown after connecting clears all clients")
         void shutdownClearsCache() {
             var config = new McpServerConfig();
-            config.setUrl("http://unreachable-shutdown:9999/mcp");
+            config.setUrl("http://127.0.0.1:5/mcp");
             config.setTimeoutMs(500L);
 
             // This will fail to connect, but the client entry may still be cached

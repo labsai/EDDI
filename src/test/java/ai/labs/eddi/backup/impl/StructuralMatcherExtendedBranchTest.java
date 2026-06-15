@@ -20,7 +20,6 @@ import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -78,12 +77,11 @@ class StructuralMatcherExtendedBranchTest {
     class MatchedWorkflowDiffTests {
 
         @Test
-        @Disabled("Assertion mismatch in structural comparison")
         @DisplayName("same workflow content produces SKIP action")
         void sameWorkflowContent_skip() throws Exception {
             var source = mock(IResourceSource.class);
             var agentConfig = new AgentConfiguration();
-            var wfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1");
+            var wfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aabbccddeeff112233445566?version=1");
             agentConfig.setWorkflows(List.of(wfUri));
 
             var targetConfig = new AgentConfiguration();
@@ -98,22 +96,22 @@ class StructuralMatcherExtendedBranchTest {
             when(source.readWorkflows()).thenReturn(List.of(sourceWf));
 
             // Target agent setup
-            var descriptor = new DocumentDescriptor();
-            descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target1?version=1"));
-            descriptor.setName("Target Agent");
-            when(documentDescriptorStore.readDescriptor("target1", null)).thenReturn(descriptor);
-            when(agentStore.readAgent("target1", 1)).thenReturn(targetConfig);
+            var agentDescriptor = new DocumentDescriptor();
+            agentDescriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/112233445566aabbccddeeff?version=1"));
+            agentDescriptor.setName("Target Agent");
+            when(documentDescriptorStore.readDescriptor("112233445566aabbccddeeff", null)).thenReturn(agentDescriptor);
+            when(agentStore.readAgent("112233445566aabbccddeeff", 1)).thenReturn(targetConfig);
 
             // Target workflow
             var wfDescriptor = new DocumentDescriptor();
             wfDescriptor.setName("Target WF");
-            when(documentDescriptorStore.readDescriptor("wf1", null)).thenReturn(wfDescriptor);
-            when(workflowStore.readWorkflow("wf1", 1)).thenReturn(wfConfig);
+            when(documentDescriptorStore.readDescriptor("aabbccddeeff112233445566", null)).thenReturn(wfDescriptor);
+            when(workflowStore.readWorkflow("aabbccddeeff112233445566", 1)).thenReturn(wfConfig);
 
             // Same content for both
             when(jsonSerialization.serialize(any())).thenReturn("{\"same\":true}");
 
-            ImportPreview preview = matcher.buildPreview(source, "target1", true);
+            ImportPreview preview = matcher.buildPreview(source, "112233445566aabbccddeeff", true);
 
             var wfDiffs = preview.resources().stream()
                     .filter(d -> "workflow".equals(d.resourceType()))
@@ -197,12 +195,11 @@ class StructuralMatcherExtendedBranchTest {
         }
 
         @Test
-        @Disabled("Assertion mismatch in name fallback logic")
         @DisplayName("null source workflow name falls back to target name")
         void nullSourceWorkflowName_fallback() throws Exception {
             var source = mock(IResourceSource.class);
             var agentConfig = new AgentConfiguration();
-            var wfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1");
+            var wfUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/aabbccddeeff112233445566?version=1");
             agentConfig.setWorkflows(List.of(wfUri));
 
             var targetConfig = new AgentConfiguration();
@@ -215,18 +212,18 @@ class StructuralMatcherExtendedBranchTest {
             var sourceWf = new WorkflowSourceData("srcWf1", null, 0, new WorkflowConfiguration(), Map.of());
             when(source.readWorkflows()).thenReturn(List.of(sourceWf));
 
-            var descriptor = new DocumentDescriptor();
-            descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/target1?version=1"));
-            when(documentDescriptorStore.readDescriptor("target1", null)).thenReturn(descriptor);
-            when(agentStore.readAgent("target1", 1)).thenReturn(targetConfig);
+            var agentDescriptor = new DocumentDescriptor();
+            agentDescriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/112233445566aabbccddeeff?version=1"));
+            when(documentDescriptorStore.readDescriptor("112233445566aabbccddeeff", null)).thenReturn(agentDescriptor);
+            when(agentStore.readAgent("112233445566aabbccddeeff", 1)).thenReturn(targetConfig);
 
             var wfDescriptor = new DocumentDescriptor();
             wfDescriptor.setName("TargetWF");
-            when(documentDescriptorStore.readDescriptor("wf1", null)).thenReturn(wfDescriptor);
-            when(workflowStore.readWorkflow("wf1", 1)).thenReturn(new WorkflowConfiguration());
+            when(documentDescriptorStore.readDescriptor("aabbccddeeff112233445566", null)).thenReturn(wfDescriptor);
+            when(workflowStore.readWorkflow("aabbccddeeff112233445566", 1)).thenReturn(new WorkflowConfiguration());
             when(jsonSerialization.serialize(any())).thenReturn("{\"same\":true}");
 
-            ImportPreview preview = matcher.buildPreview(source, "target1", true);
+            ImportPreview preview = matcher.buildPreview(source, "112233445566aabbccddeeff", true);
 
             var wfDiffs = preview.resources().stream()
                     .filter(d -> "workflow".equals(d.resourceType()))
@@ -299,7 +296,6 @@ class StructuralMatcherExtendedBranchTest {
     class SnippetUpdateSkipTests {
 
         @Test
-        @Disabled("Assertion mismatch in snippet comparison")
         @DisplayName("existing snippet with same content produces SKIP")
         void existingSnippet_sameContent_skip() throws Exception {
             var source = mock(IResourceSource.class);
@@ -311,13 +307,13 @@ class StructuralMatcherExtendedBranchTest {
             var snippetData = new SnippetSourceData("snip1", "mode1", snippet);
             when(source.readSnippets()).thenReturn(List.of(snippetData));
 
-            // Existing snippet
+            // Existing snippet — use valid 24-char hex ID
             var desc = new DocumentDescriptor();
-            desc.setResource(URI.create("eddi://ai.labs.snippet/snippetstore/snippets/existSnip?version=1"));
+            desc.setResource(URI.create("eddi://ai.labs.snippet/snippetstore/snippets/aabbccddeeff112233445566?version=1"));
             desc.setName("mode1");
             when(snippetStore.readSnippetDescriptors(anyString(), anyInt(), anyInt()))
                     .thenReturn(List.of(desc));
-            when(snippetStore.readSnippet("existSnip", 1)).thenReturn(snippet);
+            when(snippetStore.readSnippet("aabbccddeeff112233445566", 1)).thenReturn(snippet);
 
             // Same content
             when(jsonSerialization.serialize(any())).thenReturn("{\"same\":true}");

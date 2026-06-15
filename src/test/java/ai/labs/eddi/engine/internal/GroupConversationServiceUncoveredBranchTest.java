@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.groups.IAgentGroupStore;
+import ai.labs.eddi.configs.groups.IGroupConversationStore;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
@@ -12,13 +15,26 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupDepthExceededException;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
-import ai.labs.eddi.modules.output.model.OutputItem;
+import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.runtime.IAgent;
+import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -32,6 +48,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 import static org.mockito.MockitoAnnotations.openMocks;
 
 /**
@@ -52,23 +70,26 @@ import static org.mockito.MockitoAnnotations.openMocks;
  * <li>{@code buildPlainTextFallback} — template rendering</li>
  * <li>{@code errorEntry} — null member handling</li>
  * <li>{@code DiscussionStylePresets} — all 5 styles and default templates</li>
+ * <li>discuss/startAndDiscussAsync — validation branches</li>
+ * <li>deleteGroupConversation — exception handling</li>
+ * <li>Phase execution — SYNTHESIS, CRITIQUE, REVISION, CHALLENGE</li>
  * </ul>
  */
 @DisplayName("GroupConversationService — Uncovered Branch Coverage")
 class GroupConversationServiceUncoveredBranchTest {
 
     @Mock
-    private ai.labs.eddi.configs.groups.IAgentGroupStore groupStore;
+    private IAgentGroupStore groupStore;
     @Mock
-    private ai.labs.eddi.configs.groups.IGroupConversationStore conversationStore;
+    private IGroupConversationStore conversationStore;
     @Mock
-    private ai.labs.eddi.engine.api.IConversationService conversationService;
+    private IConversationService conversationService;
     @Mock
-    private ai.labs.eddi.engine.runtime.IAgentFactory agentFactory;
+    private IAgentFactory agentFactory;
     @Mock
-    private ai.labs.eddi.modules.templating.ITemplatingEngine templatingEngine;
+    private ITemplatingEngine templatingEngine;
     @Mock
-    private ai.labs.eddi.datastore.serialization.IJsonSerialization jsonSerialization;
+    private IJsonSerialization jsonSerialization;
     @Mock
     private ai.labs.eddi.configs.agents.AgentSigningService agentSigningService;
     @Mock
@@ -84,6 +105,10 @@ class GroupConversationServiceUncoveredBranchTest {
 
     private GroupConversationService service;
 
+    private static final String GROUP_ID = "test-group";
+    private static final String USER_ID = "test-user";
+    private static final String QUESTION = "What is best?";
+
     @BeforeEach
     void setUp() {
         openMocks(this);
@@ -94,6 +119,50 @@ class GroupConversationServiceUncoveredBranchTest {
                 agentFactory, templatingEngine, jsonSerialization,
                 meterRegistry, agentSigningService, agentStore,
                 nonceCacheService, "default", 3);
+    }
+
+    // === Helpers ===
+
+    private AgentGroupConfiguration config(DiscussionStyle style, int rounds,
+                                           GroupMember... members) {
+        var c = new AgentGroupConfiguration();
+        c.setName("Test Group");
+        c.setMembers(List.of(members));
+        c.setStyle(style);
+        c.setMaxRounds(rounds);
+        c.setProtocol(new ProtocolConfig(60,
+                ProtocolConfig.MemberFailurePolicy.SKIP, 2,
+                ProtocolConfig.MemberUnavailablePolicy.SKIP));
+        return c;
+    }
+
+    private void setupStore(AgentGroupConfiguration cfg) throws Exception {
+        var rid = mock(IResourceStore.IResourceId.class);
+        when(rid.getVersion()).thenReturn(1);
+        when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(rid);
+        when(groupStore.read(GROUP_ID, 1)).thenReturn(cfg);
+    }
+
+    private void stubAgent(String agentId, String response) throws Exception {
+        when(agentFactory.getLatestReadyAgent(any(Environment.class), eq(agentId)))
+                .thenReturn(mock(IAgent.class));
+
+        when(conversationService.startConversation(any(Environment.class),
+                eq(agentId), anyString(), any()))
+                .thenReturn(new IConversationService.ConversationResult(
+                        "conv-" + agentId, null));
+
+        doAnswer(inv -> {
+            ConversationResponseHandler handler = inv.getArgument(8);
+            var snapshot = new SimpleConversationMemorySnapshot();
+            var output = new ConversationOutput();
+            output.put("output", List.of(response));
+            snapshot.setConversationOutputs(new ArrayList<>(List.of(output)));
+            handler.onComplete(snapshot);
+            return null;
+        }).when(conversationService).say(any(Environment.class), eq(agentId),
+                anyString(), any(), any(), any(), any(InputData.class),
+                anyBoolean(), any(ConversationResponseHandler.class));
     }
 
     // =========================================================
@@ -156,7 +225,6 @@ class GroupConversationServiceUncoveredBranchTest {
         }
 
         @Test
-        @Disabled("Assertion mismatch in output extraction")
         @DisplayName("output array with Map items without text key is ignored")
         void outputArrayMapsWithoutText() throws Exception {
             var output = new ConversationOutput();
@@ -164,20 +232,22 @@ class GroupConversationServiceUncoveredBranchTest {
             output.put("reply", "has output key"); // so hasAnyOutput is true
             var snapshot = createSnapshot(output);
             // output array list is traversed but no text found, falls through
+            // to fallback serialization via jsonSerialization.serialize()
+            doReturn("{\"output\":[{\"nottext\":\"value\"}]}").when(jsonSerialization).serialize(any());
             String result = invokeExtractResponse(snapshot);
             assertNotNull(result);
         }
 
         @Test
-        @Disabled("Assertion mismatch in output extraction")
         @DisplayName("output is not a list — falls through to Format 2")
         void outputNotList() throws Exception {
             var output = new ConversationOutput();
             output.put("output", "just a string, not a list");
             var snapshot = createSnapshot(output);
-            String result = invokeExtractResponse(snapshot);
             // Falls through to flat key check, then hasAnyOutput=true → fallback
-            // serialization
+            // serialization via jsonSerialization.serialize()
+            doReturn("{\"output\":\"just a string\"}").when(jsonSerialization).serialize(any());
+            String result = invokeExtractResponse(snapshot);
             assertNotNull(result);
         }
     }
@@ -258,12 +328,13 @@ class GroupConversationServiceUncoveredBranchTest {
         }
 
         @Test
-        @Disabled("Assertion mismatch in reply extraction")
         @DisplayName("has reply key but no text — fallback serialization")
         void hasReplyKeyNoText() throws Exception {
             var output = new ConversationOutput();
             output.put("reply", Map.of("data", "some reply"));
             var snapshot = createSnapshot(output);
+            // hasAnyOutput=true (key "reply") → fallback jsonSerialization.serialize()
+            doReturn("{\"reply\":{\"data\":\"some reply\"}}").when(jsonSerialization).serialize(any());
             String result = invokeExtractResponse(snapshot);
             assertNotNull(result);
         }
@@ -752,6 +823,384 @@ class GroupConversationServiceUncoveredBranchTest {
                     "filterByScope", List.class, ContextScope.class, int.class, GroupMember.class);
             method.setAccessible(true);
             return (List<Map<String, Object>>) method.invoke(service, transcript, scope, phaseIdx, speaker);
+        }
+    }
+
+    // =========================================================
+    // discuss — validation branches (from Round 5)
+    // =========================================================
+
+    @Nested
+    @DisplayName("discuss — validation branches")
+    class DiscussValidation {
+
+        @Test
+        @DisplayName("null groupId throws IllegalArgumentException")
+        void nullGroupId() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.discuss(null, QUESTION, USER_ID, 0));
+        }
+
+        @Test
+        @DisplayName("depth exceeding max throws GroupDepthExceededException")
+        void depthExceeded() {
+            assertThrows(GroupDepthExceededException.class,
+                    () -> service.discuss(GROUP_ID, QUESTION, USER_ID, 10));
+        }
+
+        @Test
+        @DisplayName("null group config throws ResourceNotFoundException")
+        void nullConfig() throws Exception {
+            var rid = mock(IResourceStore.IResourceId.class);
+            when(rid.getVersion()).thenReturn(1);
+            when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(rid);
+            when(groupStore.read(GROUP_ID, 1)).thenReturn(null);
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> service.discuss(GROUP_ID, QUESTION, USER_ID, 0));
+        }
+
+        @Test
+        @DisplayName("null currentGroupId throws ResourceNotFoundException")
+        void nullCurrentGroupId() throws Exception {
+            when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(null);
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> service.discuss(GROUP_ID, QUESTION, USER_ID, 0));
+        }
+
+        @Test
+        @DisplayName("empty phases throws GroupDiscussionException")
+        void emptyPhases() throws Exception {
+            var cfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember("a1", "Alice", 1, null));
+            cfg.setPhases(List.of());
+            setupStore(cfg);
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.discuss(GROUP_ID, QUESTION, USER_ID, 0));
+        }
+    }
+
+    // =========================================================
+    // startAndDiscussAsync — validation (from Round 5)
+    // =========================================================
+
+    @Nested
+    @DisplayName("startAndDiscussAsync — validation")
+    class AsyncValidation {
+
+        @Test
+        @DisplayName("null groupId throws IllegalArgumentException")
+        void nullGroupId() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.startAndDiscussAsync(null, QUESTION, USER_ID, null));
+        }
+
+        @Test
+        @DisplayName("null currentGroupId throws ResourceNotFoundException")
+        void nullCurrentGroupId() throws Exception {
+            when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(null);
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> service.startAndDiscussAsync(GROUP_ID, QUESTION, USER_ID, null));
+        }
+
+        @Test
+        @DisplayName("null config throws ResourceNotFoundException")
+        void nullConfig() throws Exception {
+            var rid = mock(IResourceStore.IResourceId.class);
+            when(rid.getVersion()).thenReturn(1);
+            when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(rid);
+            when(groupStore.read(GROUP_ID, 1)).thenReturn(null);
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class,
+                    () -> service.startAndDiscussAsync(GROUP_ID, QUESTION, USER_ID, null));
+        }
+
+        @Test
+        @DisplayName("empty phases throws GroupDiscussionException")
+        void emptyPhases() throws Exception {
+            var cfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember("a1", "Alice", 1, null));
+            cfg.setPhases(List.of());
+            setupStore(cfg);
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.startAndDiscussAsync(GROUP_ID, QUESTION, USER_ID, null));
+        }
+    }
+
+    // =========================================================
+    // deleteGroupConversation — branches (from Round 5)
+    // =========================================================
+
+    @Nested
+    @DisplayName("deleteGroupConversation")
+    class DeleteGroupConversation {
+
+        @Test
+        @DisplayName("not found is handled gracefully")
+        void notFound() throws Exception {
+            when(conversationStore.read("gc-missing"))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
+
+            // Should not throw
+            service.deleteGroupConversation("gc-missing");
+            verify(conversationStore, never()).delete(anyString());
+        }
+
+        @Test
+        @DisplayName("ends private conversations before deleting")
+        void endsPrivateConversations() throws Exception {
+            when(conversationStore.create(any())).thenReturn("gc-1");
+            var gc = new GroupConversation();
+            gc.setMemberConversationIds(new LinkedHashMap<>(Map.of("a1", "conv-1", "a2", "conv-2")));
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+
+            service.deleteGroupConversation("gc-1");
+
+            verify(conversationService).endConversation("conv-1");
+            verify(conversationService).endConversation("conv-2");
+            verify(conversationStore).delete("gc-1");
+        }
+
+        @Test
+        @DisplayName("failed endConversation is handled gracefully")
+        void endConversationFailure() throws Exception {
+            when(conversationStore.create(any())).thenReturn("gc-1");
+            var gc = new GroupConversation();
+            gc.setMemberConversationIds(new LinkedHashMap<>(Map.of("a1", "conv-1")));
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+            doThrow(new RuntimeException("end failed"))
+                    .when(conversationService).endConversation("conv-1");
+
+            // Should not throw
+            service.deleteGroupConversation("gc-1");
+            verify(conversationStore).delete("gc-1");
+        }
+    }
+
+    // =========================================================
+    // listGroupConversations (from Round 5)
+    // =========================================================
+
+    @Nested
+    @DisplayName("listGroupConversations")
+    class ListGroupConversations {
+
+        @Test
+        @DisplayName("delegates to store")
+        void delegates() throws Exception {
+            when(conversationStore.listByGroupId("grp1", 0, 10))
+                    .thenReturn(List.of());
+
+            var result = service.listGroupConversations("grp1", 0, 10);
+            assertNotNull(result);
+            assertTrue(result.isEmpty());
+        }
+    }
+
+    // =========================================================
+    // readGroupConversation (from Round 5)
+    // =========================================================
+
+    @Nested
+    @DisplayName("readGroupConversation")
+    class ReadGroupConversation {
+
+        @Test
+        @DisplayName("delegates to store")
+        void delegates() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            when(conversationStore.read("gc-1")).thenReturn(gc);
+
+            var result = service.readGroupConversation("gc-1");
+            assertEquals("gc-1", result.getId());
+        }
+    }
+
+    // =========================================================
+    // Agent ERROR state response handling (from Round 5)
+    // =========================================================
+
+    @Nested
+    @DisplayName("Agent ERROR state response")
+    class AgentErrorState {
+
+        @Test
+        @DisplayName("ERROR state with null response produces error message")
+        void errorStateProducesMessage() throws Exception {
+            var cfg = config(DiscussionStyle.ROUND_TABLE, 1,
+                    new GroupMember("a1", "Alice", 1, null));
+            cfg.setModeratorAgentId("mod");
+            setupStore(cfg);
+
+            when(conversationStore.create(any())).thenReturn("gc-1");
+
+            // Agent returns snapshot with ERROR state
+            when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("a1")))
+                    .thenReturn(mock(IAgent.class));
+            when(conversationService.startConversation(any(), eq("a1"), any(), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-a1", null));
+            doAnswer(inv -> {
+                ConversationResponseHandler handler = inv.getArgument(8);
+                var snapshot = new SimpleConversationMemorySnapshot();
+                snapshot.setConversationState(ConversationState.ERROR);
+                // Empty outputs to trigger the null response path
+                snapshot.setConversationOutputs(new ArrayList<>(List.of(
+                        new ConversationOutput() {
+                            {
+                                put("actions", List.of("greet"));
+                            }
+                        })));
+                handler.onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(any(Environment.class), eq("a1"),
+                    anyString(), any(), any(), any(), any(InputData.class),
+                    anyBoolean(), any(ConversationResponseHandler.class));
+            stubAgent("mod", "Synthesis");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+        }
+    }
+
+    // =========================================================
+    // SYNTHESIS phase (from Round 5)
+    // =========================================================
+
+    @Nested
+    @DisplayName("SYNTHESIS phase")
+    class SynthesisPhase {
+
+        @Test
+        @DisplayName("SYNTHESIS phase enters SYNTHESIZING state")
+        void synthesizingState() throws Exception {
+            var cfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember("a1", "Alice", 1, null));
+            cfg.setModeratorAgentId("mod");
+            cfg.setPhases(List.of(
+                    new DiscussionPhase("Opinion", PhaseType.OPINION),
+                    new DiscussionPhase("Synthesis", PhaseType.SYNTHESIS,
+                            "MODERATOR", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1)));
+
+            // Setup moderator
+            var rid = mock(IResourceStore.IResourceId.class);
+            when(rid.getVersion()).thenReturn(1);
+            when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(rid);
+            when(groupStore.read(GROUP_ID, 1)).thenReturn(cfg);
+            when(conversationStore.create(any())).thenReturn("gc-1");
+
+            stubAgent("a1", "Opinion response");
+            stubAgent("mod", "Final synthesis");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            assertNotNull(result.getSynthesizedAnswer());
+        }
+    }
+
+    // =========================================================
+    // CRITIQUE phase with targetEachPeer (from Round 5)
+    // =========================================================
+
+    @Nested
+    @DisplayName("CRITIQUE phase — peer targeting")
+    class CritiquePhase {
+
+        @Test
+        @DisplayName("CRITIQUE phase builds target context")
+        void critiqueTarget() throws Exception {
+            var cfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember("a1", "Alice", 1, null),
+                    new GroupMember("a2", "Bob", 2, null));
+            cfg.setPhases(List.of(
+                    new DiscussionPhase("Opinion", PhaseType.OPINION),
+                    new DiscussionPhase("Critique", PhaseType.CRITIQUE,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, true, null, 1)));
+            setupStore(cfg);
+            when(conversationStore.create(any())).thenReturn("gc-1");
+            stubAgent("a1", "Opinion A");
+            stubAgent("a2", "Critique of Alice");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.CRITIQUE));
+        }
+    }
+
+    // =========================================================
+    // REVISION phase with feedback (from Round 5)
+    // =========================================================
+
+    @Nested
+    @DisplayName("REVISION phase")
+    class RevisionPhase {
+
+        @Test
+        @DisplayName("REVISION phase provides original response and feedback")
+        void revisionWithFeedback() throws Exception {
+            var cfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember("a1", "Alice", 1, null),
+                    new GroupMember("a2", "Bob", 2, null));
+            cfg.setPhases(List.of(
+                    new DiscussionPhase("Opinion", PhaseType.OPINION),
+                    new DiscussionPhase("Revision", PhaseType.REVISION)));
+            setupStore(cfg);
+            when(conversationStore.create(any())).thenReturn("gc-1");
+            stubAgent("a1", "Initial opinion");
+            stubAgent("a2", "Revised opinion");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.REVISION));
+        }
+    }
+
+    // =========================================================
+    // CHALLENGE phase (from Round 5)
+    // =========================================================
+
+    @Nested
+    @DisplayName("CHALLENGE phase")
+    class ChallengePhase {
+
+        @Test
+        @DisplayName("CHALLENGE phase collects all opinions")
+        void challengeCollectsOpinions() throws Exception {
+            var cfg = config(DiscussionStyle.CUSTOM, 1,
+                    new GroupMember("a1", "Alice", 1, null));
+            cfg.setPhases(List.of(
+                    new DiscussionPhase("Opinion", PhaseType.OPINION),
+                    new DiscussionPhase("Challenge", PhaseType.CHALLENGE)));
+            setupStore(cfg);
+            when(conversationStore.create(any())).thenReturn("gc-1");
+            stubAgent("a1", "Challenge response");
+
+            var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
+            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            assertTrue(result.getTranscript().stream()
+                    .anyMatch(e -> e.type() == TranscriptEntryType.CHALLENGE));
+        }
+    }
+
+    // =========================================================
+    // shutdown (from Round 5)
+    // =========================================================
+
+    @Nested
+    @DisplayName("shutdown")
+    class Shutdown {
+
+        @Test
+        @DisplayName("shutdown completes without error")
+        void shutdownCompletes() {
+            // Just verify no exceptions
+            service.shutdown();
         }
     }
 
