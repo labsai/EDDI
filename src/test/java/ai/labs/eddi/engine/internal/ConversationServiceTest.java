@@ -567,6 +567,237 @@ class ConversationServiceTest {
     }
 
     // =========================================================================
+    // readConversationLog — additional branches
+    // =========================================================================
+
+    @Nested
+    @DisplayName("readConversationLog — additional branches")
+    class ReadConversationLogBranches {
+
+        @Test
+        @DisplayName("logSize non-null → passed to generator")
+        void logSizeNonNull_passedToGenerator() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            IConversationService.ConversationLogResult result = conversationService.readConversationLog(CONVERSATION_ID, "json", 5);
+
+            assertNotNull(result);
+            assertEquals("application/json", result.mediaType());
+        }
+
+        @Test
+        @DisplayName("empty outputType → isNullOrEmpty true branch → TEXT_PLAIN")
+        void emptyOutputType_returnsTextPlain() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            IConversationService.ConversationLogResult result = conversationService.readConversationLog(CONVERSATION_ID, "", null);
+
+            assertNotNull(result);
+            assertEquals("text/plain", result.mediaType());
+        }
+    }
+
+    // =========================================================================
+    // Single-arg say / sayStreaming
+    // =========================================================================
+
+    @Nested
+    @DisplayName("say(conversationId, ...) — single-arg overload")
+    class SaySingleArg {
+
+        @Test
+        @DisplayName("loads snapshot and delegates to env-based say")
+        void delegatesToEnvBasedSay() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            snapshot.setEnvironment(ENV);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            var inputData = new ai.labs.eddi.engine.model.InputData("hello", new LinkedHashMap<>());
+
+            // The env-based say will fail because no agent is deployed.
+            // We just verify the snapshot was loaded by the single-arg overload.
+            assertThrows(IConversationService.AgentNotReadyException.class,
+                    () -> conversationService.say(CONVERSATION_ID, false, false, null, inputData, false, (s) -> {
+                    }));
+
+            verify(conversationMemoryStore, atLeastOnce()).loadConversationMemorySnapshot(CONVERSATION_ID);
+        }
+    }
+
+    @Nested
+    @DisplayName("sayStreaming(conversationId, ...) — single-arg overload")
+    class SayStreamingSingleArg {
+
+        @Test
+        @DisplayName("loads snapshot and delegates to env-based sayStreaming")
+        void delegatesToEnvBasedSayStreaming() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            snapshot.setEnvironment(ENV);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            var inputData = new ai.labs.eddi.engine.model.InputData("hello", new LinkedHashMap<>());
+
+            assertThrows(IConversationService.AgentNotReadyException.class,
+                    () -> conversationService.sayStreaming(CONVERSATION_ID, false, false, null, inputData, null));
+
+            verify(conversationMemoryStore, atLeastOnce()).loadConversationMemorySnapshot(CONVERSATION_ID);
+        }
+    }
+
+    // =========================================================================
+    // Single-arg isUndoAvailable / isRedoAvailable
+    // =========================================================================
+
+    @Nested
+    @DisplayName("isUndoAvailable(conversationId) — single-arg overload")
+    class IsUndoAvailableSingleArg {
+
+        @Test
+        @DisplayName("loads snapshot and delegates — multiple steps → true")
+        void multipleSteps_returnsTrue() throws Exception {
+            var snapshot = createSnapshotWithMultipleSteps(AGENT_ID);
+            snapshot.setEnvironment(ENV);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            Boolean result = conversationService.isUndoAvailable(CONVERSATION_ID);
+
+            assertTrue(result);
+        }
+
+        @Test
+        @DisplayName("loads snapshot and delegates — single step → false")
+        void singleStep_returnsFalse() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            snapshot.setEnvironment(ENV);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            Boolean result = conversationService.isUndoAvailable(CONVERSATION_ID);
+
+            assertFalse(result);
+        }
+    }
+
+    @Nested
+    @DisplayName("isRedoAvailable(conversationId) — single-arg overload")
+    class IsRedoAvailableSingleArg {
+
+        @Test
+        @DisplayName("loads snapshot and delegates — redo cache present → true")
+        void redoCachePresent_returnsTrue() throws Exception {
+            var snapshot = createSnapshotWithRedoCache(AGENT_ID);
+            snapshot.setEnvironment(ENV);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            Boolean result = conversationService.isRedoAvailable(CONVERSATION_ID);
+
+            assertTrue(result);
+        }
+
+        @Test
+        @DisplayName("loads snapshot and delegates — empty redo cache → false")
+        void emptyRedoCache_returnsFalse() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            snapshot.setEnvironment(ENV);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            Boolean result = conversationService.isRedoAvailable(CONVERSATION_ID);
+
+            assertFalse(result);
+        }
+    }
+
+    // =========================================================================
+    // Single-arg undo / redo
+    // =========================================================================
+
+    @Nested
+    @DisplayName("undo(conversationId) — single-arg overload")
+    class UndoSingleArg {
+
+        @Test
+        @DisplayName("happy path — undo available → returns true")
+        void undoAvailable_returnsTrue() throws Exception {
+            var snapshot = createSnapshotWithMultipleSteps(AGENT_ID);
+            snapshot.setEnvironment(ENV);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+
+            boolean result = conversationService.undo(CONVERSATION_ID);
+
+            assertTrue(result);
+            verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+        }
+
+        @Test
+        @DisplayName("undo not available → returns false")
+        void undoNotAvailable_returnsFalse() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            snapshot.setEnvironment(ENV);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            boolean result = conversationService.undo(CONVERSATION_ID);
+
+            assertFalse(result);
+        }
+    }
+
+    @Nested
+    @DisplayName("redo(conversationId) — single-arg overload")
+    class RedoSingleArg {
+
+        @Test
+        @DisplayName("happy path — redo available → returns true")
+        void redoAvailable_returnsTrue() throws Exception {
+            var snapshot = createSnapshotWithRedoCache(AGENT_ID);
+            snapshot.setEnvironment(ENV);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+
+            boolean result = conversationService.redo(CONVERSATION_ID);
+
+            assertTrue(result);
+            verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+        }
+
+        @Test
+        @DisplayName("redo not available → returns false")
+        void redoNotAvailable_returnsFalse() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            snapshot.setEnvironment(ENV);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            boolean result = conversationService.redo(CONVERSATION_ID);
+
+            assertFalse(result);
+        }
+    }
+
+    // =========================================================================
+    // startConversation — ServiceException branch
+    // =========================================================================
+
+    @Nested
+    @DisplayName("startConversation — ServiceException catch block")
+    class StartConversationServiceException {
+
+        @Test
+        @DisplayName("agentFactory throws ServiceException → wrapped as ResourceStoreException")
+        void serviceException_wrappedAsResourceStoreException() throws Exception {
+            doReturn(USER_ID).when(conversationSetup).computeAnonymousUserIdIfEmpty(eq(USER_ID), isNull());
+            doReturn(false).when(gdprComplianceService).isProcessingRestricted(USER_ID);
+            doReturn(new HashMap<>()).when(contextLogger).createLoggingContext(any(), any(), any(), any());
+            doThrow(new ai.labs.eddi.engine.runtime.service.ServiceException("agent factory boom"))
+                    .when(agentFactory).getLatestReadyAgent(ENV, AGENT_ID);
+
+            var ex = assertThrows(ResourceStoreException.class,
+                    () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, null));
+            assertTrue(ex.getMessage().contains("agent factory boom"));
+        }
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 

@@ -798,4 +798,313 @@ class RestConversationStoreTest {
             verify(attachmentStorage).deleteByConversation("conv-old");
         }
     }
+
+    @Nested
+    @DisplayName("readConversationDescriptors — descriptor exception skips gracefully")
+    class DescriptorExceptionHandling {
+
+        @Test
+        @DisplayName("should skip descriptor that throws RuntimeException during processing")
+        void skipsDescriptorOnException() throws Exception {
+            var goodDescriptor = new ConversationDescriptor();
+            goodDescriptor.setResource(URI.create("eddi://conv/conversationstore/conversations/aaaaaaaaaaaaaaaaaaaaaaaa?version=1"));
+            goodDescriptor.setLastModifiedOn(new Date());
+
+            var badDescriptor = new ConversationDescriptor();
+            badDescriptor.setResource(URI.create("eddi://conv/conversationstore/conversations/bbbbbbbbbbbbbbbbbbbbbbbb?version=1"));
+            badDescriptor.setLastModifiedOn(new Date());
+
+            when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean()))
+                    .thenReturn(List.of(badDescriptor, goodDescriptor))
+                    .thenReturn(List.of());
+
+            // Bad descriptor throws on snapshot load
+            when(conversationMemoryStore.loadConversationMemorySnapshot("bbbbbbbbbbbbbbbbbbbbbbbb"))
+                    .thenThrow(new RuntimeException("Corrupted data"));
+
+            // Good descriptor loads fine
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            snapshot.setAgentId("212121212121212121212121");
+            snapshot.setAgentVersion(1);
+            snapshot.setConversationSteps(new ArrayList<>());
+            when(conversationMemoryStore.loadConversationMemorySnapshot("aaaaaaaaaaaaaaaaaaaaaaaa"))
+                    .thenReturn(snapshot);
+
+            var docDesc = new DocumentDescriptor();
+            docDesc.setName("Agent");
+            when(documentDescriptorStore.readDescriptor("212121212121212121212121", 1)).thenReturn(docDesc);
+
+            List<ConversationDescriptor> result = restConversationStore.readConversationDescriptors(
+                    0, 20, null, null, null, null, null, null);
+
+            // Only the good descriptor should be returned
+            assertEquals(1, result.size());
+        }
+    }
+
+    @Nested
+    @DisplayName("populateDataToDescriptor — memorySnapshot is null")
+    class PopulateDataSnapshotNull {
+
+        @Test
+        @DisplayName("should handle null memorySnapshot gracefully (orphaned descriptor)")
+        void handlesNullSnapshot() throws Exception {
+            var descriptor = new ConversationDescriptor();
+            descriptor.setResource(URI.create("eddi://conv/conversationstore/conversations/cccccccccccccccccccccccc?version=1"));
+            descriptor.setLastModifiedOn(new Date());
+
+            when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean()))
+                    .thenReturn(List.of(descriptor))
+                    .thenReturn(List.of());
+
+            when(conversationMemoryStore.loadConversationMemorySnapshot("cccccccccccccccccccccccc"))
+                    .thenReturn(null);
+
+            List<ConversationDescriptor> result = restConversationStore.readConversationDescriptors(
+                    0, 20, null, null, null, null, null, null);
+
+            // Descriptor with null snapshot should still be added (populateDataToDescriptor
+            // returns early)
+            assertEquals(1, result.size());
+        }
+    }
+
+    @Nested
+    @DisplayName("populateDataToDescriptor — userId already set on descriptor")
+    class PopulateDataUserIdPreSet {
+
+        @Test
+        @DisplayName("should NOT overwrite userId when descriptor already has one")
+        void keepsExistingUserId() throws Exception {
+            var descriptor = new ConversationDescriptor();
+            descriptor.setResource(URI.create("eddi://conv/conversationstore/conversations/dddddddddddddddddddddddd?version=1"));
+            descriptor.setLastModifiedOn(new Date());
+            descriptor.setUserId("pre-existing-user");
+
+            when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean()))
+                    .thenReturn(List.of(descriptor))
+                    .thenReturn(List.of());
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            snapshot.setAgentId("212121212121212121212121");
+            snapshot.setAgentVersion(1);
+            snapshot.setUserId("snapshot-user-id");
+            snapshot.setConversationSteps(new ArrayList<>());
+            when(conversationMemoryStore.loadConversationMemorySnapshot("dddddddddddddddddddddddd"))
+                    .thenReturn(snapshot);
+
+            var docDesc = new DocumentDescriptor();
+            docDesc.setName("Agent");
+            when(documentDescriptorStore.readDescriptor("212121212121212121212121", 1)).thenReturn(docDesc);
+
+            List<ConversationDescriptor> result = restConversationStore.readConversationDescriptors(
+                    0, 20, null, null, null, null, null, null);
+
+            assertEquals(1, result.size());
+            assertEquals("pre-existing-user", result.get(0).getUserId());
+        }
+    }
+
+    @Nested
+    @DisplayName("populateDataToDescriptor — agentName already set")
+    class PopulateDataAgentNamePreSet {
+
+        @Test
+        @DisplayName("should NOT lookup document descriptor when agentName is already set")
+        void skipsDocDescriptorLookup() throws Exception {
+            var descriptor = new ConversationDescriptor();
+            descriptor.setResource(URI.create("eddi://conv/conversationstore/conversations/eeeeeeeeeeeeeeeeeeeeeeee?version=1"));
+            descriptor.setLastModifiedOn(new Date());
+            descriptor.setAgentName("Already Set Agent");
+
+            when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean()))
+                    .thenReturn(List.of(descriptor))
+                    .thenReturn(List.of());
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            snapshot.setAgentId("212121212121212121212121");
+            snapshot.setAgentVersion(1);
+            snapshot.setConversationSteps(new ArrayList<>());
+            when(conversationMemoryStore.loadConversationMemorySnapshot("eeeeeeeeeeeeeeeeeeeeeeee"))
+                    .thenReturn(snapshot);
+
+            List<ConversationDescriptor> result = restConversationStore.readConversationDescriptors(
+                    0, 20, null, null, null, null, null, null);
+
+            assertEquals(1, result.size());
+            assertEquals("Already Set Agent", result.get(0).getAgentName());
+            // documentDescriptorStore.readDescriptor should NOT have been called for agent
+            // name lookup
+            verify(documentDescriptorStore, never()).readDescriptor(eq("212121212121212121212121"), anyInt());
+        }
+    }
+
+    @Nested
+    @DisplayName("readConversationDescriptors — conversationState filter matches")
+    class DescriptorsConversationStateMatches {
+
+        @Test
+        @DisplayName("should include descriptor when conversationState matches filter")
+        void includesMatchingConversationState() throws Exception {
+            var descriptor = new ConversationDescriptor();
+            descriptor.setResource(URI.create("eddi://conv/conversationstore/conversations/111111111111111111111111?version=1"));
+            descriptor.setLastModifiedOn(new Date());
+
+            when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean()))
+                    .thenReturn(List.of(descriptor))
+                    .thenReturn(List.of());
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            snapshot.setAgentId("212121212121212121212121");
+            snapshot.setAgentVersion(1);
+            snapshot.setConversationSteps(new ArrayList<>());
+            when(conversationMemoryStore.loadConversationMemorySnapshot("111111111111111111111111"))
+                    .thenReturn(snapshot);
+
+            var docDesc = new DocumentDescriptor();
+            docDesc.setName("Agent Name");
+            when(documentDescriptorStore.readDescriptor("212121212121212121212121", 1)).thenReturn(docDesc);
+
+            // Filter by READY state — snapshot IS READY, so it should pass
+            List<ConversationDescriptor> result = restConversationStore.readConversationDescriptors(
+                    0, 20, null, null, null, null, ConversationState.READY, null);
+
+            assertEquals(1, result.size());
+            assertEquals(ConversationState.READY, result.get(0).getConversationState());
+        }
+    }
+
+    @Nested
+    @DisplayName("readConversationDescriptors — viewState filter matches")
+    class DescriptorsViewStateMatches {
+
+        @Test
+        @DisplayName("should include descriptor when viewState matches filter")
+        void includesMatchingViewState() throws Exception {
+            var descriptor = new ConversationDescriptor();
+            descriptor.setResource(URI.create("eddi://conv/conversationstore/conversations/111111111111111111111111?version=1"));
+            descriptor.setViewState(ConversationDescriptor.ViewState.UNSEEN);
+            descriptor.setLastModifiedOn(new Date());
+
+            when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean()))
+                    .thenReturn(List.of(descriptor))
+                    .thenReturn(List.of());
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            snapshot.setAgentId("212121212121212121212121");
+            snapshot.setAgentVersion(1);
+            snapshot.setConversationSteps(new ArrayList<>());
+            when(conversationMemoryStore.loadConversationMemorySnapshot("111111111111111111111111"))
+                    .thenReturn(snapshot);
+
+            var docDesc = new DocumentDescriptor();
+            docDesc.setName("Agent Name");
+            when(documentDescriptorStore.readDescriptor("212121212121212121212121", 1)).thenReturn(docDesc);
+
+            // Filter by UNSEEN — descriptor viewState is UNSEEN, so it should pass
+            List<ConversationDescriptor> result = restConversationStore.readConversationDescriptors(
+                    0, 20, null, null, null, null, null, ConversationDescriptor.ViewState.UNSEEN);
+
+            assertEquals(1, result.size());
+            assertEquals(ConversationDescriptor.ViewState.UNSEEN, result.get(0).getViewState());
+        }
+    }
+
+    @Nested
+    @DisplayName("endActiveConversations — exception path")
+    class EndActiveConversationsException {
+
+        @Test
+        @DisplayName("should sneakyThrow when conversationDescriptorStore.readDescriptor throws ResourceStoreException")
+        void throwsOnResourceStoreException() throws Exception {
+            var status = new ConversationStatus();
+            status.setConversationId("conv-err");
+
+            when(conversationDescriptorStore.readDescriptor("conv-err", 0))
+                    .thenThrow(new IResourceStore.ResourceStoreException("DB error"));
+
+            assertThrows(IResourceStore.ResourceStoreException.class,
+                    () -> restConversationStore.endActiveConversations(List.of(status)));
+        }
+    }
+
+    @Nested
+    @DisplayName("deleteConversationLog — deletePermanently=false with attachments configured")
+    class DeleteNonPermanentWithAttachments {
+
+        @Test
+        @DisplayName("should NOT delete attachments when deletePermanently is false")
+        void noAttachmentDeletionOnNonPermanent() throws Exception {
+            when(attachmentStorageInstance.isResolvable()).thenReturn(true);
+            when(attachmentStorageInstance.get()).thenReturn(attachmentStorage);
+
+            var store = new RestConversationStore(
+                    documentDescriptorStore, conversationDescriptorStore,
+                    conversationMemoryStore, userMemoryStore, runtime,
+                    30, 90, attachmentStorageInstance);
+
+            store.deleteConversationLog("conv-1", false);
+
+            verify(attachmentStorage, never()).deleteByConversation(anyString());
+            verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot(anyString());
+        }
+    }
+
+    @Nested
+    @DisplayName("readConversationDescriptors — negative limit clamped to 20")
+    class NegativeLimitClamped {
+
+        @Test
+        @DisplayName("should clamp negative limit to 20")
+        void negativeLimitClampedTo20() throws Exception {
+            when(conversationDescriptorStore.readDescriptors(anyString(), any(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+
+            restConversationStore.readConversationDescriptors(
+                    0, -5, null, null, null, null, null, null);
+
+            verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean());
+        }
+    }
+
+    @Nested
+    @DisplayName("readConversationDescriptors — null agentResourceUri with agentId filter")
+    class NullAgentResourceWithFilter {
+
+        @Test
+        @DisplayName("should skip descriptor with null agentResource when agentId filter is set")
+        void skipsNullAgentResource() throws Exception {
+            var descriptor = new ConversationDescriptor();
+            descriptor.setResource(URI.create("eddi://conv/conversationstore/conversations/111111111111111111111111?version=1"));
+            descriptor.setAgentResource(null); // no agentResource
+            descriptor.setLastModifiedOn(new Date());
+
+            when(conversationDescriptorStore.readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean()))
+                    .thenReturn(List.of(descriptor))
+                    .thenReturn(List.of());
+
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            snapshot.setAgentId("212121212121212121212121");
+            snapshot.setAgentVersion(1);
+            snapshot.setConversationSteps(new ArrayList<>());
+            when(conversationMemoryStore.loadConversationMemorySnapshot("111111111111111111111111"))
+                    .thenReturn(snapshot);
+
+            var docDesc = new DocumentDescriptor();
+            docDesc.setName("Agent");
+            when(documentDescriptorStore.readDescriptor("212121212121212121212121", 1)).thenReturn(docDesc);
+
+            // Filter by agentId — descriptor has null agentResource, should be skipped
+            List<ConversationDescriptor> result = restConversationStore.readConversationDescriptors(
+                    0, 20, null, null, "212121212121212121212121", null, null, null);
+
+            assertEquals(0, result.size());
+        }
+    }
 }
