@@ -968,4 +968,293 @@ class LifecycleManagerTest {
                     && list.get(2).equals("task_failed_llm_task")));
         }
     }
+
+    @Nested
+    @DisplayName("buildTaskSummary — Actions, ToolTrace, Confidence")
+    class BuildTaskSummaryTests {
+
+        @Test
+        @DisplayName("task summary includes actions when present")
+        void summaryWithActions() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("behavior"));
+            when(task.getType()).thenReturn("behavior_rules");
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            var eventSink = mock(ai.labs.eddi.engine.lifecycle.ConversationEventSink.class);
+            when(memory.getEventSink()).thenReturn(eventSink);
+
+            // Set up actions data
+            var actionData = mock(IData.class);
+            when(actionData.getResult()).thenReturn(List.of("greet", "search"));
+            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            lifecycleManager.executeLifecycle(memory, null);
+
+            verify(eventSink).onTaskComplete(eq(new TaskId("behavior")), eq("behavior_rules"), anyLong(),
+                    argThat(summary -> summary.containsKey("actions")));
+        }
+
+        @Test
+        @DisplayName("task summary includes toolTrace when present")
+        void summaryWithToolTrace() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("llm"));
+            when(task.getType()).thenReturn("langchain");
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            var eventSink = mock(ai.labs.eddi.engine.lifecycle.ConversationEventSink.class);
+            when(memory.getEventSink()).thenReturn(eventSink);
+
+            // Set up tool trace data
+            var traceData = mock(IData.class);
+            when(traceData.getResult()).thenReturn("trace-data");
+            when(currentStep.getLatestData("langchain:trace:llm")).thenReturn(traceData);
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            lifecycleManager.executeLifecycle(memory, null);
+
+            verify(eventSink).onTaskComplete(eq(new TaskId("llm")), eq("langchain"), anyLong(),
+                    argThat(summary -> summary.containsKey("toolTrace")));
+        }
+
+        @Test
+        @DisplayName("task summary includes confidence when present")
+        void summaryWithConfidence() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("llm"));
+            when(task.getType()).thenReturn("langchain");
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            var eventSink = mock(ai.labs.eddi.engine.lifecycle.ConversationEventSink.class);
+            when(memory.getEventSink()).thenReturn(eventSink);
+
+            // Set up confidence data
+            IData<Double> confidenceData = mock(IData.class);
+            when(confidenceData.getResult()).thenReturn(0.95);
+            doReturn(confidenceData).when(currentStep).getLatestData("audit:confidence");
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            lifecycleManager.executeLifecycle(memory, null);
+
+            verify(eventSink).onTaskComplete(eq(new TaskId("llm")), eq("langchain"), anyLong(),
+                    argThat(summary -> summary.containsKey("confidence")));
+        }
+    }
+
+    @Nested
+    @DisplayName("buildAuditEntry — Input/Output/LLM Details")
+    class BuildAuditEntryDetailTests {
+
+        @Test
+        @DisplayName("audit entry populates input and output data")
+        void auditEntryWithInputOutput() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("behavior"));
+            when(task.getType()).thenReturn("behavior_rules");
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+            when(memory.getAgentVersion()).thenReturn(1);
+            when(memory.size()).thenReturn(1);
+
+            // Set up input data
+            IData<String> inputData = mock(IData.class);
+            when(inputData.getResult()).thenReturn("Hello!");
+            doReturn(inputData).when(currentStep).getLatestData("input");
+
+            // Set up output data
+            IData<List<String>> outputData = mock(IData.class);
+            when(outputData.getResult()).thenReturn(List.of("Hi there!"));
+            doReturn(outputData).when(currentStep).getLatestData("output");
+
+            var auditCollector = mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class);
+            when(memory.getAuditCollector()).thenReturn(auditCollector);
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            lifecycleManager.executeLifecycle(memory, null);
+
+            verify(auditCollector).collect(argThat(entry -> {
+                assertNotNull(entry.input());
+                assertNotNull(entry.output());
+                return true;
+            }));
+        }
+
+        @Test
+        @DisplayName("audit entry populates LLM details when compiled_prompt present")
+        void auditEntryWithLlmDetails() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("llm_task"));
+            when(task.getType()).thenReturn("langchain");
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+            when(memory.getAgentVersion()).thenReturn(1);
+            when(memory.size()).thenReturn(1);
+
+            // Set up LLM detail data
+            IData<String> promptData = mock(IData.class);
+            when(promptData.getResult()).thenReturn("You are a helpful assistant");
+            doReturn(promptData).when(currentStep).getLatestData("audit:compiled_prompt");
+
+            IData<String> responseData = mock(IData.class);
+            when(responseData.getResult()).thenReturn("Hello, how can I help?");
+            doReturn(responseData).when(currentStep).getLatestData("audit:model_response");
+
+            IData<String> modelData = mock(IData.class);
+            when(modelData.getResult()).thenReturn("gpt-4");
+            doReturn(modelData).when(currentStep).getLatestData("audit:model_name");
+
+            IData<java.util.Map<String, Object>> tokenData = mock(IData.class);
+            when(tokenData.getResult()).thenReturn(java.util.Map.of("input", 10, "output", 20));
+            doReturn(tokenData).when(currentStep).getLatestData("audit:token_usage");
+
+            var auditCollector = mock(ai.labs.eddi.engine.audit.IAuditEntryCollector.class);
+            when(memory.getAuditCollector()).thenReturn(auditCollector);
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            lifecycleManager.executeLifecycle(memory, null);
+
+            verify(auditCollector).collect(argThat(entry -> {
+                assertNotNull(entry.llmDetail());
+                assertTrue(entry.llmDetail().containsKey("compiledPrompt"));
+                assertTrue(entry.llmDetail().containsKey("modelResponse"));
+                assertTrue(entry.llmDetail().containsKey("modelName"));
+                assertTrue(entry.llmDetail().containsKey("tokenUsage"));
+                return true;
+            }));
+        }
+    }
+
+    @Nested
+    @DisplayName("resolveOnFailureMode — Null SWD")
+    class ResolveOnFailureModeNullSwdTests {
+
+        @Test
+        @DisplayName("null onFailure value in SWD — defaults to digest")
+        void nullOnFailure() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("llm_task"));
+            when(task.getType()).thenReturn("langchain");
+
+            doThrow(new LifecycleException("fail"))
+                    .when(task).execute(any(), any());
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(ConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            var memoryPolicy = new AgentConfiguration.MemoryPolicy();
+            var swd = new AgentConfiguration.StrictWriteDiscipline();
+            swd.setEnabled(true);
+            swd.setOnFailure(null); // null onFailure
+            memoryPolicy.setStrictWriteDiscipline(swd);
+            when(memory.getMemoryPolicy()).thenReturn(memoryPolicy);
+
+            when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
+            when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>());
+            when(currentStep.getAllElements()).thenReturn(new LinkedList<>());
+            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            assertThrows(LifecycleException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+
+            // null onFailure defaults to "digest" → error digest IS injected
+            verify(currentStep).addConversationOutputList(eq("taskErrors"), anyList());
+        }
+    }
+
+    @Nested
+    @DisplayName("handleTaskFailure — New Key Uncommit")
+    class NewKeyUncommitTests {
+
+        @Test
+        @DisplayName("brand new key added by failed task is marked uncommitted")
+        void newKeyUncommitted() throws Exception {
+            var task = mock(ILifecycleTask.class);
+            when(task.getId()).thenReturn(new TaskId("api_task"));
+            when(task.getType()).thenReturn("httpcalls");
+
+            // New data entry added by the failed task
+            IData<?> newData = mock(IData.class);
+            when(newData.getKey()).thenReturn("newKey");
+
+            var currentStep = mock(ConversationStep.class);
+            // Before snapshot: empty (no pre-existing keys)
+            when(currentStep.snapshotDataIdentities()).thenReturn(new HashMap<>());
+            when(currentStep.snapshotOutputKeys()).thenReturn(new java.util.LinkedHashSet<>());
+            // After failure: step contains the new entry
+            when(currentStep.getAllElements()).thenReturn(new java.util.LinkedList<>(List.of(newData)));
+            when(currentStep.getConversationOutput()).thenReturn(new ai.labs.eddi.engine.memory.model.ConversationOutput());
+
+            doThrow(new LifecycleException("timeout"))
+                    .when(task).execute(any(), any());
+
+            lifecycleManager.addLifecycleTask(task);
+
+            var memory = mock(IConversationMemory.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            when(memory.getConversationId()).thenReturn("conv1");
+            when(memory.getAgentId()).thenReturn("agent1");
+
+            var memoryPolicy = new AgentConfiguration.MemoryPolicy();
+            var swd = new AgentConfiguration.StrictWriteDiscipline();
+            swd.setEnabled(true);
+            swd.setOnFailure("exclude_all");
+            memoryPolicy.setStrictWriteDiscipline(swd);
+            when(memory.getMemoryPolicy()).thenReturn(memoryPolicy);
+
+            when(componentCache.getComponentMap(anyString())).thenReturn(new HashMap<>());
+
+            assertThrows(LifecycleException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+
+            // New key not in before snapshot → marked uncommitted
+            verify(newData).setCommitted(false);
+        }
+    }
 }

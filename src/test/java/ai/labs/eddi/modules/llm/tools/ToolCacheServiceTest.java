@@ -249,4 +249,158 @@ class ToolCacheServiceTest {
         field.setAccessible(true);
         field.set(target, value);
     }
+
+    // ==================== Additional Smart TTL ====================
+
+    @Nested
+    @DisplayName("Smart TTL — Additional Entries")
+    class SmartTTLAdditionalTests {
+
+        @Test
+        @DisplayName("news tool gets 600s TTL")
+        void newsTTL() {
+            assertEquals(600L, service.getConfiguredTTL("news"));
+        }
+
+        @Test
+        @DisplayName("webscraper tool gets 3600s TTL")
+        void webscraperTTL() {
+            assertEquals(3600L, service.getConfiguredTTL("webscraper"));
+        }
+
+        @Test
+        @DisplayName("dataformatter tool gets 86400s TTL")
+        void dataformatterTTL() {
+            assertEquals(86400L, service.getConfiguredTTL("dataformatter"));
+        }
+
+        @Test
+        @DisplayName("textsummarizer tool gets 86400s TTL")
+        void textsummarizerTTL() {
+            assertEquals(86400L, service.getConfiguredTTL("textsummarizer"));
+        }
+    }
+
+    // ==================== Cache Hit Path ====================
+
+    @Nested
+    @DisplayName("Cache Hit Path")
+    class CacheHitTests {
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("get returns result on cache hit (via captured put)")
+        void get_cacheHit_returnsResult() {
+            // Use ArgumentCaptor to capture what put stores, then return it for get
+            org.mockito.ArgumentCaptor<Object> valueCaptor = org.mockito.ArgumentCaptor.forClass(Object.class);
+
+            service.put("calculator", "2+2", "4");
+
+            verify(cache).put(eq("calculator:2+2"), valueCaptor.capture(), anyLong(), any());
+            Object storedValue = valueCaptor.getValue();
+
+            // Now mock cache.get to return the captured value
+            when(cache.get("calculator:2+2")).thenReturn(storedValue);
+
+            String result = service.get("calculator", "2+2");
+
+            assertEquals("4", result);
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("cache hit increments hit counter")
+        void cacheHit_incrementsCounter() {
+            org.mockito.ArgumentCaptor<Object> valueCaptor = org.mockito.ArgumentCaptor.forClass(Object.class);
+
+            service.put("calc", "1+1", "2");
+            verify(cache).put(eq("calc:1+1"), valueCaptor.capture(), anyLong(), any());
+
+            when(cache.get("calc:1+1")).thenReturn(valueCaptor.getValue());
+            service.get("calc", "1+1");
+
+            var stats = service.getStats();
+            assertEquals(1, stats.hits);
+        }
+    }
+
+    // ==================== Statistics — Additional ====================
+
+    @Nested
+    @DisplayName("Statistics — Additional")
+    class StatsAdditionalTests {
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("hit rate calculated correctly: 1 hit + 1 miss = 50%")
+        void hitRateCalculation() {
+            // First, a miss
+            when(cache.get(anyString())).thenReturn(null);
+            service.get("tool1", "args1");
+
+            // Capture a put value
+            org.mockito.ArgumentCaptor<Object> valueCaptor = org.mockito.ArgumentCaptor.forClass(Object.class);
+            service.put("tool1", "args2", "result");
+            verify(cache).put(eq("tool1:args2"), valueCaptor.capture(), anyLong(), any());
+
+            // Then a hit
+            when(cache.get("tool1:args2")).thenReturn(valueCaptor.getValue());
+            service.get("tool1", "args2");
+
+            var stats = service.getStats();
+            assertEquals(1, stats.hits);
+            assertEquals(1, stats.misses);
+            assertEquals(50.0, stats.hitRate, 0.1);
+        }
+
+        @Test
+        @DisplayName("getToolStats returns non-null after access")
+        void getToolStatsAfterAccess() {
+            when(cache.get(anyString())).thenReturn(null);
+            service.get("myCustomTool", "args");
+
+            assertNotNull(service.getToolStats("myCustomTool"));
+        }
+
+        @Test
+        @DisplayName("CacheStats toString without per-tool stats omits Per-Tool section")
+        void cacheStatsToString_noPerToolStats() {
+            var stats = new ToolCacheService.CacheStats(0, 0, 0, 0.0, java.util.Map.of());
+            String str = stats.toString();
+
+            assertTrue(str.contains("Cache Stats"));
+            assertFalse(str.contains("Per-Tool Stats"));
+        }
+    }
+
+    // ==================== Build Key — Threshold ====================
+
+    @Nested
+    @DisplayName("Build Key — Threshold")
+    class BuildKeyThresholdTests {
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("exactly 2048 chars uses readable key (not hashed)")
+        void exactThreshold_readable() {
+            String exactArgs = "x".repeat(2048);
+            service.put("tool", exactArgs, "result");
+
+            // 2048 chars exactly → should NOT be hashed → key is "tool:" + args
+            verify(cache).put(eq("tool:" + exactArgs), any(), anyLong(), any());
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("2049 chars uses SHA-256 hash key")
+        void overThreshold_hashed() {
+            String longArgs = "x".repeat(2049);
+            service.put("tool", longArgs, "result");
+
+            verify(cache).put(argThat(key -> {
+                String k = (String) key;
+                return k.startsWith("tool:") && k.length() < 200;
+            }), any(), anyLong(), any());
+        }
+    }
 }
