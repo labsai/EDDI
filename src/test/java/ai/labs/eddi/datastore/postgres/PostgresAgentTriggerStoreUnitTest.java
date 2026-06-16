@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import jakarta.enterprise.inject.Instance;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -41,16 +42,24 @@ class PostgresAgentTriggerStoreUnitTest {
     private IJsonSerialization jsonSerialization;
 
     private PostgresAgentTriggerStore store;
+    private AutoCloseable mocks;
 
     @BeforeEach
     void setUp() throws Exception {
-        MockitoAnnotations.openMocks(this);
+        mocks = MockitoAnnotations.openMocks(this);
         lenient().when(dataSourceInstance.get()).thenReturn(dataSource);
         lenient().when(dataSource.getConnection()).thenReturn(connection);
         lenient().when(connection.createStatement()).thenReturn(statement);
         lenient().when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
 
         store = new PostgresAgentTriggerStore(dataSourceInstance, jsonSerialization);
+    }
+
+    @AfterEach
+    void tearDown() throws Exception {
+        if (mocks != null) {
+            mocks.close();
+        }
     }
 
     // ─── readAllAgentTriggers ───
@@ -66,6 +75,7 @@ class PostgresAgentTriggerStoreUnitTest {
 
         List<AgentTriggerConfiguration> triggers = store.readAllAgentTriggers();
         assertEquals(2, triggers.size());
+        verify(resultSet).close();
     }
 
     @Test
@@ -75,6 +85,7 @@ class PostgresAgentTriggerStoreUnitTest {
 
         List<AgentTriggerConfiguration> triggers = store.readAllAgentTriggers();
         assertTrue(triggers.isEmpty());
+        verify(resultSet).close();
     }
 
     @Test
@@ -97,6 +108,7 @@ class PostgresAgentTriggerStoreUnitTest {
 
         AgentTriggerConfiguration result = store.readAgentTrigger("greet");
         assertEquals("greet", result.getIntent());
+        verify(resultSet).close();
     }
 
     @Test
@@ -105,6 +117,7 @@ class PostgresAgentTriggerStoreUnitTest {
         when(resultSet.next()).thenReturn(false);
 
         assertThrows(IResourceStore.ResourceNotFoundException.class, () -> store.readAgentTrigger("missing"));
+        verify(resultSet).close();
     }
 
     @Test
@@ -157,6 +170,7 @@ class PostgresAgentTriggerStoreUnitTest {
         AgentTriggerConfiguration config = new AgentTriggerConfiguration();
         config.setIntent("newIntent");
         assertDoesNotThrow(() -> store.createAgentTrigger(config));
+        verify(resultSet).close();
     }
 
     @Test
@@ -167,6 +181,7 @@ class PostgresAgentTriggerStoreUnitTest {
         AgentTriggerConfiguration config = new AgentTriggerConfiguration();
         config.setIntent("existing");
         assertThrows(IResourceStore.ResourceAlreadyExistsException.class, () -> store.createAgentTrigger(config));
+        verify(resultSet).close();
     }
 
     @Test
