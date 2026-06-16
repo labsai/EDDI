@@ -34,7 +34,6 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -318,22 +317,29 @@ class ConversationServiceDeepBranchTest {
         }
 
         @Test
-        @Disabled("startConversation requires deep internal memory state mocking")
         @DisplayName("null context is replaced with empty map")
         void nullContext() throws Exception {
             when(conversationSetup.computeAnonymousUserIdIfEmpty(any(), any()))
                     .thenReturn(USER_ID);
             IAgent mockAgent = mock(IAgent.class);
             when(agentFactory.getLatestReadyAgent(ENV, AGENT_ID)).thenReturn(mockAgent);
+            when(mockAgent.getUserMemoryConfig()).thenReturn(null);
             IConversation conversation = mock(IConversation.class);
             IConversationMemory conversationMemory = mock(IConversationMemory.class);
             when(conversation.getConversationMemory()).thenReturn(conversationMemory);
             when(conversationMemory.getConversationState()).thenReturn(ConversationState.READY);
             when(conversationMemory.getConversationId()).thenReturn(CONVERSATION_ID);
+            when(conversationMemory.getUserId()).thenReturn(USER_ID);
+            when(conversationMemory.getAgentId()).thenReturn(AGENT_ID);
+            when(conversationMemory.getAgentVersion()).thenReturn(1);
             when(conversationMemory.getRedoCache()).thenReturn(new java.util.Stack<>());
             var stepStack = mock(IConversationMemory.IConversationStepStack.class);
             when(stepStack.size()).thenReturn(0);
             when(conversationMemory.getAllSteps()).thenReturn(stepStack);
+            when(conversationMemory.getConversationOutputs()).thenReturn(new ArrayList<>());
+            var conversationProperties = mock(ai.labs.eddi.engine.memory.model.ConversationProperties.class);
+            doReturn(new java.util.HashSet<>()).when(conversationProperties).entrySet();
+            when(conversationMemory.getConversationProperties()).thenReturn(conversationProperties);
             when(mockAgent.startConversation(any(), any(), any(), any())).thenReturn(conversation);
             when(conversationMemoryStore.storeConversationMemorySnapshot(any()))
                     .thenReturn(CONVERSATION_ID);

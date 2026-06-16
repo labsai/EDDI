@@ -7,625 +7,927 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
-import ai.labs.eddi.configs.apicalls.model.ApiCall;
-import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
-import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.memory.MemorySnapshotService;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.ToolLoadingStrategy;
+import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
+import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
 import ai.labs.eddi.modules.llm.tools.impl.*;
+import dev.langchain4j.agent.tool.ToolSpecification;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.DisplayName;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 
-import java.net.URI;
-import java.util.List;
-import java.util.Map;
+import java.lang.reflect.Method;
+import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Unit tests for AgentOrchestrator — tool collection and agent mode behavior.
+ * Comprehensive unit tests for {@link AgentOrchestrator}.
+ * <p>
+ * This test class is in the same package as the target class (package-private
+ * access).
  */
 class AgentOrchestratorTest {
 
-    private AgentOrchestrator orchestrator;
-
+    // --- Built-in tool mocks ---
+    @Mock
     private CalculatorTool calculatorTool;
+    @Mock
     private DateTimeTool dateTimeTool;
+    @Mock
     private WebSearchTool webSearchTool;
+    @Mock
     private DataFormatterTool dataFormatterTool;
+    @Mock
     private WebScraperTool webScraperTool;
+    @Mock
     private TextSummarizerTool textSummarizerTool;
+    @Mock
     private PdfReaderTool pdfReaderTool;
+    @Mock
     private WeatherTool weatherTool;
-    private IConversationMemory mockMemory;
+    @Mock
+    private FetchToolResponsePageTool fetchToolResponsePageTool;
+
+    // --- Service mocks ---
+    @Mock
+    private ToolExecutionService toolExecutionService;
+    @Mock
+    private McpToolProviderManager mcpToolProviderManager;
+    @Mock
+    private A2AToolProviderManager a2aToolProviderManager;
+    @Mock
+    private IRestAgentStore restAgentStore;
+    @Mock
+    private IRestWorkflowStore restWorkflowStore;
+    @Mock
+    private IResourceClientLibrary resourceClientLibrary;
+    @Mock
+    private IApiCallExecutor apiCallExecutor;
+    @Mock
+    private IJsonSerialization jsonSerialization;
+    @Mock
+    private IMemoryItemConverter memoryItemConverter;
+    @Mock
+    private IUserMemoryStore userMemoryStore;
+    @Mock
+    private ToolResponseTruncator toolResponseTruncator;
+    @Mock
+    private TenantQuotaService tenantQuotaService;
+    @Mock
+    private MemorySnapshotService memorySnapshotService;
+
+    // --- Memory mock ---
+    @Mock
+    private IConversationMemory memory;
+    @Mock
+    private IConversationMemory.IConversationProperties conversationProperties;
+
+    private AgentOrchestrator orchestrator;
 
     @BeforeEach
     void setUp() {
-        calculatorTool = mock(CalculatorTool.class);
-        dateTimeTool = mock(DateTimeTool.class);
-        webSearchTool = mock(WebSearchTool.class);
-        dataFormatterTool = mock(DataFormatterTool.class);
-        webScraperTool = mock(WebScraperTool.class);
-        textSummarizerTool = mock(TextSummarizerTool.class);
-        pdfReaderTool = mock(PdfReaderTool.class);
-        weatherTool = mock(WeatherTool.class);
-
-        orchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool, textSummarizerTool,
-                pdfReaderTool, weatherTool, mock(FetchToolResponsePageTool.class), mock(ToolExecutionService.class),
-                mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
-                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class),
-                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class), mock(ToolResponseTruncator.class),
-                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class), null);
-
-        // Mock memory for collectEnabledTools (no user memory config = no
-        // UserMemoryTool added)
-        mockMemory = mock(IConversationMemory.class);
-        when(mockMemory.getUserMemoryConfig()).thenReturn(null);
+        MockitoAnnotations.openMocks(this);
+        orchestrator = new AgentOrchestrator(
+                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
+                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
+                fetchToolResponsePageTool,
+                toolExecutionService, mcpToolProviderManager, a2aToolProviderManager,
+                restAgentStore, restWorkflowStore, resourceClientLibrary,
+                apiCallExecutor, jsonSerialization, memoryItemConverter,
+                userMemoryStore, toolResponseTruncator, tenantQuotaService,
+                memorySnapshotService);
     }
 
-    // ==================== Tool Collection Tests ====================
+    // ═══════════════════════════════════════════════════════════════════
+    // 1. collectEnabledTools — enableBuiltInTools null/false/true
+    // ═══════════════════════════════════════════════════════════════════
 
     @Test
-    @DisplayName("collectEnabledTools should return empty list when tools disabled")
-    void testCollectEnabledTools_Disabled() {
-        var task = new LlmConfiguration.Task();
-        task.setEnableBuiltInTools(false);
-
-        List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
-
-        assertTrue(tools.isEmpty(), "Should return empty list when tools disabled");
-    }
-
-    @Test
-    @DisplayName("collectEnabledTools should return empty list when enableBuiltInTools is null")
-    void testCollectEnabledTools_NullEnableBuiltInTools() {
+    void collectEnabledTools_enableBuiltInToolsNull_returnsEmpty() {
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(null);
 
-        List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
 
-        assertTrue(tools.isEmpty(), "Should return empty list when enableBuiltInTools is null");
+        assertTrue(result.isEmpty());
     }
 
     @Test
-    @DisplayName("collectEnabledTools should return all tools when enabled without whitelist")
-    void testCollectEnabledTools_AllToolsEnabled() {
+    void collectEnabledTools_enableBuiltInToolsFalse_returnsEmpty() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(false);
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void collectEnabledTools_trueNoWhitelist_returnsAllBuiltInTools() {
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
-        task.setBuiltInToolsWhitelist(null);
 
-        List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
+        // Memory stubs for addUserMemoryToolIfEnabled /
+        // addConversationRecallToolIfEnabled
+        doReturn(null).when(memory).getUserMemoryConfig();
 
-        assertEquals(9, tools.size(), "Should return all 9 tools");
-        assertTrue(tools.contains(calculatorTool));
-        assertTrue(tools.contains(dateTimeTool));
-        assertTrue(tools.contains(webSearchTool));
-        assertTrue(tools.contains(dataFormatterTool));
-        assertTrue(tools.contains(webScraperTool));
-        assertTrue(tools.contains(textSummarizerTool));
-        assertTrue(tools.contains(pdfReaderTool));
-        assertTrue(tools.contains(weatherTool));
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        // 9 built-in tools (calculator, datetime, websearch, dataformatter, webscraper,
+        // textsummarizer, pdfreader, weather, fetchToolResponsePage)
+        // UserMemory returns early (null config), ConversationRecall returns early
+        // (null summary config)
+        assertEquals(9, result.size());
+        assertTrue(result.contains(calculatorTool));
+        assertTrue(result.contains(dateTimeTool));
+        assertTrue(result.contains(webSearchTool));
+        assertTrue(result.contains(dataFormatterTool));
+        assertTrue(result.contains(webScraperTool));
+        assertTrue(result.contains(textSummarizerTool));
+        assertTrue(result.contains(pdfReaderTool));
+        assertTrue(result.contains(weatherTool));
+        assertTrue(result.contains(fetchToolResponsePageTool));
     }
 
     @Test
-    @DisplayName("collectEnabledTools should return all tools when whitelist is empty")
-    void testCollectEnabledTools_EmptyWhitelist() {
+    void collectEnabledTools_trueWithWhitelist_filtersCorrectly() {
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
-        task.setBuiltInToolsWhitelist(List.of());
+        task.setBuiltInToolsWhitelist(List.of("calculator", "weather"));
 
-        List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
 
-        assertEquals(9, tools.size(), "Should return all tools when whitelist is empty");
+        assertEquals(2, result.size());
+        assertTrue(result.contains(calculatorTool));
+        assertTrue(result.contains(weatherTool));
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // 2. collectEnabledTools — LAZY strategy adds DiscoverToolsTool
+    // ═══════════════════════════════════════════════════════════════════
+
     @Test
-    @DisplayName("collectEnabledTools should filter by whitelist")
-    void testCollectEnabledTools_WithWhitelist() {
+    void collectEnabledTools_lazyStrategy_addsDiscoverToolsTool() {
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
-        task.setBuiltInToolsWhitelist(List.of("calculator", "datetime"));
+        task.setToolLoadingStrategy(ToolLoadingStrategy.LAZY);
+        task.setBuiltInToolsWhitelist(List.of("calculator"));
 
-        List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
 
-        assertEquals(2, tools.size(), "Should return only whitelisted tools");
-        assertTrue(tools.contains(calculatorTool));
-        assertTrue(tools.contains(dateTimeTool));
-        assertFalse(tools.contains(webSearchTool));
-        assertFalse(tools.contains(weatherTool));
+        // calculator + DiscoverToolsTool
+        assertEquals(2, result.size());
+        assertTrue(result.contains(calculatorTool));
+        assertTrue(result.stream().anyMatch(t -> t instanceof DiscoverToolsTool));
     }
 
     @Test
-    @DisplayName("collectEnabledTools should handle single tool in whitelist")
-    void testCollectEnabledTools_SingleToolWhitelist() {
+    void collectEnabledTools_eagerStrategy_doesNotAddDiscoverToolsTool() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setToolLoadingStrategy(ToolLoadingStrategy.EAGER);
+        task.setBuiltInToolsWhitelist(List.of("calculator"));
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertEquals(1, result.size());
+        assertTrue(result.contains(calculatorTool));
+        assertTrue(result.stream().noneMatch(t -> t instanceof DiscoverToolsTool));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 3. executeIfToolsEnabled — returns null when no tools enabled
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Test
+    void executeIfToolsEnabled_noToolsEnabled_returnsNull() throws Exception {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(false);
+        task.setEnableHttpCallTools(false);
+        task.setEnableMcpCallTools(false);
+        task.setA2aAgents(null);
+
+        var result = orchestrator.executeIfToolsEnabled(null, "sys", List.of(), task, memory);
+
+        assertNull(result);
+    }
+
+    @Test
+    void executeIfToolsEnabled_emptyBuiltInAndNoExternal_returnsNull() throws Exception {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(null);
+        task.setEnableHttpCallTools(false);
+        task.setEnableMcpCallTools(false);
+        task.setA2aAgents(List.of());
+
+        var result = orchestrator.executeIfToolsEnabled(null, "sys", List.of(), task, memory);
+
+        assertNull(result);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 4. activateDiscoveredTools — via reflection (private method)
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Test
+    void activateDiscoveredTools_validJson_activatesMatchingSpecs() throws Exception {
+        Method method = AgentOrchestrator.class.getDeclaredMethod(
+                "activateDiscoveredTools", String.class, List.class, List.class);
+        method.setAccessible(true);
+
+        ToolSpecification calcSpec = ToolSpecification.builder()
+                .name("calculate").description("math").build();
+        ToolSpecification weatherSpec = ToolSpecification.builder()
+                .name("get_weather").description("weather").build();
+        ToolSpecification discoverSpec = ToolSpecification.builder()
+                .name("discover_tools").description("discover").build();
+
+        List<ToolSpecification> builtInSpecs = List.of(calcSpec, weatherSpec, discoverSpec);
+        List<ToolSpecification> activeSpecs = new ArrayList<>();
+        activeSpecs.add(discoverSpec);
+
+        String discoverResult = "{\"tools\": [{\"name\": \"calculate\"}, {\"name\": \"get_weather\"}]}";
+
+        method.invoke(orchestrator, discoverResult, builtInSpecs, activeSpecs);
+
+        // discover_tools was already active, calculate and get_weather should be added
+        assertEquals(3, activeSpecs.size());
+        assertTrue(activeSpecs.stream().anyMatch(s -> "calculate".equals(s.name())));
+        assertTrue(activeSpecs.stream().anyMatch(s -> "get_weather".equals(s.name())));
+    }
+
+    @Test
+    void activateDiscoveredTools_invalidJson_handledGracefully() throws Exception {
+        Method method = AgentOrchestrator.class.getDeclaredMethod(
+                "activateDiscoveredTools", String.class, List.class, List.class);
+        method.setAccessible(true);
+
+        List<ToolSpecification> builtInSpecs = List.of();
+        List<ToolSpecification> activeSpecs = new ArrayList<>();
+
+        // Should not throw — invalid JSON is caught internally
+        assertDoesNotThrow(() -> method.invoke(orchestrator, "not valid json {{{", builtInSpecs, activeSpecs));
+        assertTrue(activeSpecs.isEmpty());
+    }
+
+    @Test
+    void activateDiscoveredTools_toolsArrayMissing_noActivation() throws Exception {
+        Method method = AgentOrchestrator.class.getDeclaredMethod(
+                "activateDiscoveredTools", String.class, List.class, List.class);
+        method.setAccessible(true);
+
+        ToolSpecification calcSpec = ToolSpecification.builder()
+                .name("calculate").description("math").build();
+        List<ToolSpecification> builtInSpecs = List.of(calcSpec);
+        List<ToolSpecification> activeSpecs = new ArrayList<>();
+
+        // JSON with no "tools" key
+        String discoverResult = "{\"categories\": [\"math\"]}";
+
+        method.invoke(orchestrator, discoverResult, builtInSpecs, activeSpecs);
+
+        assertTrue(activeSpecs.isEmpty());
+    }
+
+    @Test
+    void activateDiscoveredTools_alreadyActive_noDuplicates() throws Exception {
+        Method method = AgentOrchestrator.class.getDeclaredMethod(
+                "activateDiscoveredTools", String.class, List.class, List.class);
+        method.setAccessible(true);
+
+        ToolSpecification calcSpec = ToolSpecification.builder()
+                .name("calculate").description("math").build();
+        List<ToolSpecification> builtInSpecs = List.of(calcSpec);
+        List<ToolSpecification> activeSpecs = new ArrayList<>();
+        activeSpecs.add(calcSpec); // already active
+
+        String discoverResult = "{\"tools\": [{\"name\": \"calculate\"}]}";
+
+        method.invoke(orchestrator, discoverResult, builtInSpecs, activeSpecs);
+
+        // Should not duplicate — still 1
+        assertEquals(1, activeSpecs.size());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 5. collectAllBuiltInTools whitelist variations
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Test
+    void collectEnabledTools_whitelistCalculator_onlyCalculator() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("calculator"));
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertEquals(1, result.size());
+        assertSame(calculatorTool, result.get(0));
+    }
+
+    @Test
+    void collectEnabledTools_whitelistDatetime_onlyDatetime() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("datetime"));
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertEquals(1, result.size());
+        assertSame(dateTimeTool, result.get(0));
+    }
+
+    @Test
+    void collectEnabledTools_whitelistWebsearch_onlyWebsearch() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("websearch"));
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertEquals(1, result.size());
+        assertSame(webSearchTool, result.get(0));
+    }
+
+    @Test
+    void collectEnabledTools_whitelistDataformatter_onlyDataformatter() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("dataformatter"));
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertEquals(1, result.size());
+        assertSame(dataFormatterTool, result.get(0));
+    }
+
+    @Test
+    void collectEnabledTools_whitelistWebscraper_onlyWebscraper() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("webscraper"));
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertEquals(1, result.size());
+        assertSame(webScraperTool, result.get(0));
+    }
+
+    @Test
+    void collectEnabledTools_whitelistTextsummarizer_onlyTextsummarizer() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("textsummarizer"));
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertEquals(1, result.size());
+        assertSame(textSummarizerTool, result.get(0));
+    }
+
+    @Test
+    void collectEnabledTools_whitelistPdfreader_onlyPdfreader() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("pdfreader"));
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertEquals(1, result.size());
+        assertSame(pdfReaderTool, result.get(0));
+    }
+
+    @Test
+    void collectEnabledTools_whitelistWeather_onlyWeather() {
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
         task.setBuiltInToolsWhitelist(List.of("weather"));
 
-        List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
 
-        assertEquals(1, tools.size(), "Should return only weather tool");
-        assertTrue(tools.contains(weatherTool));
+        assertEquals(1, result.size());
+        assertSame(weatherTool, result.get(0));
     }
 
     @Test
-    @DisplayName("collectEnabledTools should handle all tools in whitelist")
-    void testCollectEnabledTools_AllToolsInWhitelist() {
+    void collectEnabledTools_whitelistFetchPage_addsFetchTool() {
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
-        task.setBuiltInToolsWhitelist(
-                List.of("calculator", "datetime", "websearch", "dataformatter", "webscraper", "textsummarizer", "pdfreader", "weather"));
+        task.setBuiltInToolsWhitelist(List.of("fetch_page"));
 
-        List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
 
-        assertEquals(8, tools.size(), "Should return all 8 whitelisted tools");
+        assertEquals(1, result.size());
+        assertSame(fetchToolResponsePageTool, result.get(0));
     }
 
     @Test
-    @DisplayName("collectEnabledTools should ignore unknown tools in whitelist")
-    void testCollectEnabledTools_UnknownToolInWhitelist() {
+    void collectEnabledTools_whitelistFetchToolResponsePage_addsFetchTool() {
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
-        task.setBuiltInToolsWhitelist(List.of("calculator", "unknown_tool", "weather"));
+        task.setBuiltInToolsWhitelist(List.of("fetch_tool_response_page"));
 
-        List<Object> tools = orchestrator.collectEnabledTools(task, mockMemory);
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
 
-        assertEquals(2, tools.size(), "Should return only known whitelisted tools");
-        assertTrue(tools.contains(calculatorTool));
-        assertTrue(tools.contains(weatherTool));
-    }
-
-    // ==================== isAgentMode Tests (on Task itself) ====================
-
-    @Test
-    @DisplayName("isAgentMode should return false when no tools configured")
-    void testIsAgentMode_False() {
-        var task = new LlmConfiguration.Task();
-        task.setEnableBuiltInTools(false);
-        task.setEnableHttpCallTools(false);
-        task.setTools(null);
-
-        assertFalse(task.isAgentMode());
+        assertEquals(1, result.size());
+        assertSame(fetchToolResponsePageTool, result.get(0));
     }
 
     @Test
-    @DisplayName("isAgentMode should return true when builtin tools enabled")
-    void testIsAgentMode_TrueWithBuiltInTools() {
+    void collectEnabledTools_whitelistUsermemory_addsUserMemoryTool() {
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("usermemory"));
 
-        assertTrue(task.isAgentMode());
+        var config = new AgentConfiguration.UserMemoryConfig();
+        doReturn(config).when(memory).getUserMemoryConfig();
+        doReturn(conversationProperties).when(memory).getConversationProperties();
+        doReturn("user-1").when(memory).getUserId();
+        doReturn("agent-1").when(memory).getAgentId();
+        doReturn("conv-1").when(memory).getConversationId();
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertEquals(1, result.size());
+        assertTrue(result.get(0) instanceof UserMemoryTool);
     }
 
     @Test
-    @DisplayName("isAgentMode should return true when custom tools configured")
-    void testIsAgentMode_TrueWithCustomTools() {
+    void collectEnabledTools_whitelistConversationRecall_addsRecallTool() {
         var task = new LlmConfiguration.Task();
-        task.setEnableBuiltInTools(false);
-        task.setTools(List.of("eddi://ai.labs.apicalls/weather?version=1"));
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("conversationRecall"));
 
-        assertTrue(task.isAgentMode());
+        var summaryConfig = new LlmConfiguration.ConversationSummaryConfig();
+        summaryConfig.setEnabled(true);
+        task.setConversationSummary(summaryConfig);
+
+        // Set up memory to have a summary
+        doReturn(conversationProperties).when(memory).getConversationProperties();
+        var summaryProp = new Property("conversation:running_summary", "Some summary", Property.Scope.conversation);
+        doReturn(summaryProp).when(conversationProperties).get("conversation:running_summary");
+        var throughStepProp = new Property("conversation:summary_through_step", 5, Property.Scope.conversation);
+        doReturn(throughStepProp).when(conversationProperties).get("conversation:summary_through_step");
+        doReturn(List.of(new ConversationOutput())).when(memory).getConversationOutputs();
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertEquals(1, result.size());
+        assertTrue(result.get(0) instanceof ConversationRecallTool);
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // 6. addUserMemoryToolIfEnabled — null config, null store, groupId
+    // ═══════════════════════════════════════════════════════════════════
+
     @Test
-    @DisplayName("isAgentMode should return false when tools list is empty")
-    void testIsAgentMode_FalseWithEmptyToolsList() {
+    void collectEnabledTools_userMemoryNullConfig_notAdded() {
         var task = new LlmConfiguration.Task();
-        task.setEnableBuiltInTools(false);
-        task.setTools(List.of());
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("usermemory"));
 
-        assertFalse(task.isAgentMode());
-    }
+        doReturn(null).when(memory).getUserMemoryConfig();
 
-    // ==================== McpServerConfig Tests ====================
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
 
-    @Test
-    @DisplayName("McpServerConfig should have sensible defaults")
-    void testMcpServerConfig_Defaults() {
-        var config = new LlmConfiguration.McpServerConfig();
-        assertEquals("http", config.getTransport());
-        assertEquals(30000L, config.getTimeoutMs());
-        assertNull(config.getUrl());
-        assertNull(config.getName());
-        assertNull(config.getApiKey());
+        assertTrue(result.isEmpty());
     }
 
     @Test
-    @DisplayName("McpServerConfig should store all fields")
-    void testMcpServerConfig_AllFields() {
-        var config = new LlmConfiguration.McpServerConfig();
-        config.setUrl("http://localhost:8080/mcp");
-        config.setName("my-server");
-        config.setTransport("sse");
-        config.setApiKey("${vault:my-key}");
-        config.setTimeoutMs(60000L);
+    void collectEnabledTools_userMemoryNullStore_notAdded() {
+        // Create orchestrator with null userMemoryStore
+        var orchestratorNoStore = new AgentOrchestrator(
+                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
+                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
+                fetchToolResponsePageTool,
+                toolExecutionService, mcpToolProviderManager, a2aToolProviderManager,
+                restAgentStore, restWorkflowStore, resourceClientLibrary,
+                apiCallExecutor, jsonSerialization, memoryItemConverter,
+                null, // null userMemoryStore
+                toolResponseTruncator, tenantQuotaService, memorySnapshotService);
 
-        assertEquals("http://localhost:8080/mcp", config.getUrl());
-        assertEquals("my-server", config.getName());
-        assertEquals("sse", config.getTransport());
-        assertEquals("${vault:my-key}", config.getApiKey());
-        assertEquals(60000L, config.getTimeoutMs());
-    }
-
-    // ==================== getSystemMessage Tests ====================
-
-    @Test
-    @DisplayName("getSystemMessage should return null when parameters is null")
-    void testGetSystemMessage_NullParameters() {
         var task = new LlmConfiguration.Task();
-        task.setParameters(null);
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("usermemory"));
 
-        assertNull(task.getSystemMessage());
+        var config = new AgentConfiguration.UserMemoryConfig();
+        doReturn(config).when(memory).getUserMemoryConfig();
+
+        List<Object> result = orchestratorNoStore.collectEnabledTools(task, memory);
+
+        assertTrue(result.isEmpty());
     }
 
     @Test
-    @DisplayName("getSystemMessage should return null when systemMessage not in parameters")
-    void testGetSystemMessage_NoSystemMessage() {
+    void collectEnabledTools_userMemoryWithGroupIdProperty_addsToolWithGroupIds() {
         var task = new LlmConfiguration.Task();
-        task.setParameters(java.util.Map.of("otherKey", "value"));
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("usermemory"));
 
-        assertNull(task.getSystemMessage());
+        var config = new AgentConfiguration.UserMemoryConfig();
+        doReturn(config).when(memory).getUserMemoryConfig();
+        doReturn(conversationProperties).when(memory).getConversationProperties();
+        doReturn("user-1").when(memory).getUserId();
+        doReturn("agent-1").when(memory).getAgentId();
+        doReturn("conv-1").when(memory).getConversationId();
+
+        var groupIdProp = new Property("groupId", "group-42", Property.Scope.longTerm);
+        doReturn(groupIdProp).when(conversationProperties).get("groupId");
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertEquals(1, result.size());
+        assertTrue(result.get(0) instanceof UserMemoryTool);
     }
 
     @Test
-    @DisplayName("getSystemMessage should return systemMessage from parameters")
-    void testGetSystemMessage_ReturnsSystemMessage() {
+    void collectEnabledTools_userMemoryNoGroupIdProperty_addsToolWithEmptyGroupIds() {
         var task = new LlmConfiguration.Task();
-        task.setParameters(java.util.Map.of("systemMessage", "You are a helpful assistant"));
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("usermemory"));
 
-        assertEquals("You are a helpful assistant", task.getSystemMessage());
+        var config = new AgentConfiguration.UserMemoryConfig();
+        doReturn(config).when(memory).getUserMemoryConfig();
+        doReturn(conversationProperties).when(memory).getConversationProperties();
+        doReturn("user-1").when(memory).getUserId();
+        doReturn("agent-1").when(memory).getAgentId();
+        doReturn("conv-1").when(memory).getConversationId();
+        doReturn(null).when(conversationProperties).get("groupId");
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertEquals(1, result.size());
+        assertTrue(result.get(0) instanceof UserMemoryTool);
     }
 
-    // ==================== CDI Proxy Tool Spec Extraction Tests
-    // ====================
-    // Regression tests for: CDI proxy classes don't carry @Tool annotations,
-    // so ToolSpecifications.toolSpecificationsFrom() returns empty list.
-    // The fix resolves proxy classes to their superclass before extraction.
+    // ═══════════════════════════════════════════════════════════════════
+    // 7. addConversationRecallToolIfEnabled — null/disabled/enabled
+    // ═══════════════════════════════════════════════════════════════════
 
-    /**
-     * Simulates a real @Tool-annotated CDI bean.
-     */
-    static class SampleToolBean {
-        @dev.langchain4j.agent.tool.Tool("Sample tool for testing")
-        public String sampleAction(@dev.langchain4j.agent.tool.P("input value") String input) {
-            return "result: " + input;
-        }
-    }
+    @Test
+    void collectEnabledTools_conversationRecall_nullSummaryConfig_notAdded() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("conversationRecall"));
+        task.setConversationSummary(null);
 
-    /**
-     * Simulates a CDI ClientProxy — a subclass whose name contains "_ClientProxy".
-     * CDI proxies do NOT carry the @Tool annotations from their parent class.
-     */
-    static class SampleToolBean_ClientProxy extends SampleToolBean {
-        // CDI proxies are empty subclasses — no @Tool annotations here
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertTrue(result.isEmpty());
     }
 
     @Test
-    @DisplayName("Tool specs should be extracted from real (non-proxy) tool bean")
-    void testToolSpecExtraction_RealBean() {
-        var tool = new SampleToolBean();
-        Class<?> toolClass = tool.getClass();
+    void collectEnabledTools_conversationRecall_disabledSummaryConfig_notAdded() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("conversationRecall"));
 
-        assertFalse(toolClass.getName().contains("_ClientProxy"));
+        var summaryConfig = new LlmConfiguration.ConversationSummaryConfig();
+        summaryConfig.setEnabled(false);
+        task.setConversationSummary(summaryConfig);
 
-        var specs = dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationsFrom(toolClass);
-        assertEquals(1, specs.size(), "Should find 1 @Tool method");
-        assertEquals("sampleAction", specs.get(0).name());
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertTrue(result.isEmpty());
     }
 
     @Test
-    @DisplayName("Tool specs should be extracted from CDI proxy via superclass resolution")
-    void testToolSpecExtraction_CdiProxy() {
-        var proxy = new SampleToolBean_ClientProxy();
-        Class<?> toolClass = proxy.getClass();
+    void collectEnabledTools_conversationRecall_enabledNoSummary_notAdded() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("conversationRecall"));
 
-        // Proxy class should match the detection pattern
-        assertTrue(toolClass.getName().contains("_ClientProxy"), "Test setup: proxy class name must contain '_ClientProxy'");
+        var summaryConfig = new LlmConfiguration.ConversationSummaryConfig();
+        summaryConfig.setEnabled(true);
+        task.setConversationSummary(summaryConfig);
 
-        // Without the fix: extracting from proxy class returns empty
-        var specsFromProxy = dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationsFrom(toolClass);
-        assertTrue(specsFromProxy.isEmpty(), "CDI proxy class should NOT have @Tool annotations (this is the bug scenario)");
+        // readSummary calls
+        // memory.getConversationProperties().get(PROP_RUNNING_SUMMARY) → null
+        doReturn(conversationProperties).when(memory).getConversationProperties();
+        doReturn(null).when(conversationProperties).get("conversation:running_summary");
 
-        // With the fix: resolve to superclass first
-        if (toolClass.getName().contains("_ClientProxy") || toolClass.getName().contains("$$")) {
-            toolClass = toolClass.getSuperclass();
-        }
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
 
-        var specsFromSuperclass = dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationsFrom(toolClass);
-        assertEquals(1, specsFromSuperclass.size(), "Superclass should have @Tool annotations after proxy resolution");
-        assertEquals("sampleAction", specsFromSuperclass.get(0).name());
+        assertTrue(result.isEmpty());
     }
 
     @Test
-    @DisplayName("Tool executor should use proxy instance but superclass method")
-    void testToolExecutor_CdiProxy() throws Exception {
-        var proxy = new SampleToolBean_ClientProxy();
-        Class<?> toolClass = proxy.getClass();
+    void collectEnabledTools_conversationRecall_enabledWithSummary_added() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("conversationRecall"));
 
-        // Resolve proxy to superclass
-        if (toolClass.getName().contains("_ClientProxy")) {
-            toolClass = toolClass.getSuperclass();
-        }
+        var summaryConfig = new LlmConfiguration.ConversationSummaryConfig();
+        summaryConfig.setEnabled(true);
+        task.setConversationSummary(summaryConfig);
 
-        // Find @Tool method on the superclass
-        java.lang.reflect.Method toolMethod = null;
-        for (var method : toolClass.getDeclaredMethods()) {
-            if (method.isAnnotationPresent(dev.langchain4j.agent.tool.Tool.class)) {
-                toolMethod = method;
-                break;
-            }
-        }
+        doReturn(conversationProperties).when(memory).getConversationProperties();
+        var summaryProp = new Property("conversation:running_summary", "Previous summary", Property.Scope.conversation);
+        doReturn(summaryProp).when(conversationProperties).get("conversation:running_summary");
+        var throughStepProp = new Property("conversation:summary_through_step", 10, Property.Scope.conversation);
+        doReturn(throughStepProp).when(conversationProperties).get("conversation:summary_through_step");
+        doReturn(List.of(new ConversationOutput())).when(memory).getConversationOutputs();
 
-        assertNotNull(toolMethod, "Should find @Tool method on superclass");
-        assertEquals("sampleAction", toolMethod.getName());
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
 
-        // Execute via the proxy instance — method should be callable on the proxy
-        String result = (String) toolMethod.invoke(proxy, "test-input");
-        assertEquals("result: test-input", result, "Method from superclass should be invocable on proxy instance");
+        assertEquals(1, result.size());
+        assertTrue(result.get(0) instanceof ConversationRecallTool);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 8. safeTemplateMerge — reserved keys blocked, normal keys merged
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Test
+    void safeTemplateMerge_reservedKeysBlocked() throws Exception {
+        Method method = AgentOrchestrator.class.getDeclaredMethod(
+                "safeTemplateMerge", Map.class, Map.class);
+        method.setAccessible(true);
+
+        Map<String, Object> templateData = new HashMap<>();
+        templateData.put("context", "original-context");
+        templateData.put("properties", "original-properties");
+        templateData.put("memory", "original-memory");
+        templateData.put("userInfo", "original-userInfo");
+        templateData.put("conversationInfo", "original-conversationInfo");
+        templateData.put("conversationLog", "original-conversationLog");
+
+        Map<String, Object> args = new LinkedHashMap<>();
+        args.put("context", "INJECTED");
+        args.put("properties", "INJECTED");
+        args.put("memory", "INJECTED");
+        args.put("userInfo", "INJECTED");
+        args.put("conversationInfo", "INJECTED");
+        args.put("conversationLog", "INJECTED");
+
+        method.invoke(null, templateData, args);
+
+        // All reserved keys should retain their original values
+        assertEquals("original-context", templateData.get("context"));
+        assertEquals("original-properties", templateData.get("properties"));
+        assertEquals("original-memory", templateData.get("memory"));
+        assertEquals("original-userInfo", templateData.get("userInfo"));
+        assertEquals("original-conversationInfo", templateData.get("conversationInfo"));
+        assertEquals("original-conversationLog", templateData.get("conversationLog"));
     }
 
     @Test
-    @DisplayName("Mockito mocks should resolve to original class via proxy resolution")
-    void testMockitoProxy_Resolution() {
-        var mockTool = mock(SampleToolBean.class);
-        Class<?> mockClass = mockTool.getClass();
+    void safeTemplateMerge_normalKeysMerged() throws Exception {
+        Method method = AgentOrchestrator.class.getDeclaredMethod(
+                "safeTemplateMerge", Map.class, Map.class);
+        method.setAccessible(true);
 
-        // Mockito mock must be an instance of the original class
-        assertInstanceOf(SampleToolBean.class, mockTool, "Mockito mock should be an instance of the original bean class");
+        Map<String, Object> templateData = new HashMap<>();
+        templateData.put("existingKey", "existing");
 
-        // The proxy resolution logic should work for any proxy pattern.
-        // Resolve using Mockito's own API for mock detection, then fall back to
-        // class-name heuristics for CDI proxies.
-        Class<?> resolvedClass = mockClass;
-        if (org.mockito.Mockito.mockingDetails(mockTool).isMock()) {
-            // Mockito inline mocks may not create subclasses — use the mocked type
-            resolvedClass = org.mockito.Mockito.mockingDetails(mockTool).getMockCreationSettings().getTypeToMock();
-        } else if (resolvedClass.getName().contains("_ClientProxy") || resolvedClass.getName().contains("$$")) {
-            resolvedClass = resolvedClass.getSuperclass();
-        }
+        Map<String, Object> args = new LinkedHashMap<>();
+        args.put("city", "Vienna");
+        args.put("language", "German");
 
-        assertEquals(SampleToolBean.class, resolvedClass, "Proxy resolution should resolve to the original bean class");
+        method.invoke(null, templateData, args);
 
-        // Verify tool specs can be extracted from resolved class
-        var specs = dev.langchain4j.agent.tool.ToolSpecifications.toolSpecificationsFrom(resolvedClass);
-        assertEquals(1, specs.size(), "Should find @Tool methods on resolved class");
+        assertEquals("existing", templateData.get("existingKey"));
+        assertEquals("Vienna", templateData.get("city"));
+        assertEquals("German", templateData.get("language"));
     }
 
-    // ==================== discoverHttpCallTools Tests ====================
+    @Test
+    void safeTemplateMerge_mixedReservedAndNormal_onlyNormalMerged() throws Exception {
+        Method method = AgentOrchestrator.class.getDeclaredMethod(
+                "safeTemplateMerge", Map.class, Map.class);
+        method.setAccessible(true);
+
+        Map<String, Object> templateData = new HashMap<>();
+        templateData.put("context", "protected");
+
+        Map<String, Object> args = new LinkedHashMap<>();
+        args.put("context", "hacked");
+        args.put("query", "find restaurants");
+
+        method.invoke(null, templateData, args);
+
+        assertEquals("protected", templateData.get("context"));
+        assertEquals("find restaurants", templateData.get("query"));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 9. HttpCallToolsResult and ExecutionResult record creation
+    // ═══════════════════════════════════════════════════════════════════
 
     @Test
-    @DisplayName("discoverHttpCallTools should return empty when agentId is null")
-    void testDiscoverHttpCallTools_NullAgentId() {
-        var memory = mock(IConversationMemory.class);
-        when(memory.getAgentId()).thenReturn(null);
-        when(memory.getAgentVersion()).thenReturn(1);
+    void httpCallToolsResult_recordCreation() {
+        ToolSpecification spec = ToolSpecification.builder()
+                .name("test_tool").description("desc").build();
+        List<ToolSpecification> specs = List.of(spec);
+        Map<String, dev.langchain4j.service.tool.ToolExecutor> executors = Map.of();
 
-        var result = orchestrator.discoverHttpCallTools(memory);
+        var result = new AgentOrchestrator.HttpCallToolsResult(specs, executors);
 
         assertNotNull(result);
+        assertEquals(1, result.toolSpecs().size());
+        assertEquals("test_tool", result.toolSpecs().get(0).name());
+        assertTrue(result.executors().isEmpty());
+    }
+
+    @Test
+    void executionResult_recordCreation() {
+        Map<String, Object> traceEntry = Map.of("type", "tool_call", "tool", "calc");
+        List<Map<String, Object>> trace = List.of(traceEntry);
+
+        var result = new AgentOrchestrator.ExecutionResult("Hello world", trace);
+
+        assertEquals("Hello world", result.response());
+        assertEquals(1, result.trace().size());
+        assertEquals("tool_call", result.trace().get(0).get("type"));
+    }
+
+    @Test
+    void executionResult_nullValues() {
+        var result = new AgentOrchestrator.ExecutionResult(null, null);
+
+        assertNull(result.response());
+        assertNull(result.trace());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Edge cases and combinations
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Test
+    void collectEnabledTools_emptyWhitelist_returnsAllTools() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of()); // empty list
+
+        doReturn(null).when(memory).getUserMemoryConfig();
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        // Empty whitelist is treated same as null — returns all built-in tools
+        assertEquals(9, result.size());
+    }
+
+    @Test
+    void collectEnabledTools_whitelistMultipleTools_returnsAll() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("calculator", "datetime", "websearch", "pdfreader"));
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertEquals(4, result.size());
+        assertTrue(result.contains(calculatorTool));
+        assertTrue(result.contains(dateTimeTool));
+        assertTrue(result.contains(webSearchTool));
+        assertTrue(result.contains(pdfReaderTool));
+    }
+
+    @Test
+    void collectEnabledTools_whitelistUnknownTool_returnsEmpty() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("nonexistent_tool"));
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void collectEnabledTools_lazyWithNoWhitelist_includesAllPlusDiscoverTool() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setToolLoadingStrategy(ToolLoadingStrategy.LAZY);
+        // No whitelist
+
+        doReturn(null).when(memory).getUserMemoryConfig();
+
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
+
+        // 9 built-in + DiscoverToolsTool = 10
+        assertEquals(10, result.size());
+        assertTrue(result.stream().anyMatch(t -> t instanceof DiscoverToolsTool));
+    }
+
+    @Test
+    void activateDiscoveredTools_toolsArrayNotArray_noActivation() throws Exception {
+        Method method = AgentOrchestrator.class.getDeclaredMethod(
+                "activateDiscoveredTools", String.class, List.class, List.class);
+        method.setAccessible(true);
+
+        ToolSpecification calcSpec = ToolSpecification.builder()
+                .name("calculate").description("math").build();
+        List<ToolSpecification> builtInSpecs = List.of(calcSpec);
+        List<ToolSpecification> activeSpecs = new ArrayList<>();
+
+        // "tools" key exists but is not an array
+        String discoverResult = "{\"tools\": \"not_an_array\"}";
+
+        method.invoke(orchestrator, discoverResult, builtInSpecs, activeSpecs);
+
+        assertTrue(activeSpecs.isEmpty());
+    }
+
+    @Test
+    void activateDiscoveredTools_toolEntryWithoutName_skipped() throws Exception {
+        Method method = AgentOrchestrator.class.getDeclaredMethod(
+                "activateDiscoveredTools", String.class, List.class, List.class);
+        method.setAccessible(true);
+
+        ToolSpecification calcSpec = ToolSpecification.builder()
+                .name("calculate").description("math").build();
+        List<ToolSpecification> builtInSpecs = List.of(calcSpec);
+        List<ToolSpecification> activeSpecs = new ArrayList<>();
+
+        // Tool entry has no "name" field
+        String discoverResult = "{\"tools\": [{\"description\": \"no name here\"}]}";
+
+        method.invoke(orchestrator, discoverResult, builtInSpecs, activeSpecs);
+
+        assertTrue(activeSpecs.isEmpty());
+    }
+
+    @Test
+    void activateDiscoveredTools_noMatchingBuiltIn_noActivation() throws Exception {
+        Method method = AgentOrchestrator.class.getDeclaredMethod(
+                "activateDiscoveredTools", String.class, List.class, List.class);
+        method.setAccessible(true);
+
+        ToolSpecification calcSpec = ToolSpecification.builder()
+                .name("calculate").description("math").build();
+        List<ToolSpecification> builtInSpecs = List.of(calcSpec);
+        List<ToolSpecification> activeSpecs = new ArrayList<>();
+
+        // Discovered tool name doesn't match any built-in
+        String discoverResult = "{\"tools\": [{\"name\": \"totally_different\"}]}";
+
+        method.invoke(orchestrator, discoverResult, builtInSpecs, activeSpecs);
+
+        assertTrue(activeSpecs.isEmpty());
+    }
+
+    @Test
+    void safeTemplateMerge_emptyArgs_noChange() throws Exception {
+        Method method = AgentOrchestrator.class.getDeclaredMethod(
+                "safeTemplateMerge", Map.class, Map.class);
+        method.setAccessible(true);
+
+        Map<String, Object> templateData = new HashMap<>();
+        templateData.put("context", "original");
+
+        method.invoke(null, templateData, Map.of());
+
+        assertEquals(1, templateData.size());
+        assertEquals("original", templateData.get("context"));
+    }
+
+    @Test
+    void httpCallToolsResult_emptySpecs() {
+        var result = new AgentOrchestrator.HttpCallToolsResult(List.of(), Map.of());
+
         assertTrue(result.toolSpecs().isEmpty());
         assertTrue(result.executors().isEmpty());
     }
 
     @Test
-    @DisplayName("discoverHttpCallTools should return empty when agentVersion is null")
-    void testDiscoverHttpCallTools_NullAgentVersion() {
-        var memory = mock(IConversationMemory.class);
-        when(memory.getAgentId()).thenReturn("agent-1");
-        when(memory.getAgentVersion()).thenReturn(null);
+    void executionResult_emptyTrace() {
+        var result = new AgentOrchestrator.ExecutionResult("response text", List.of());
 
-        var result = orchestrator.discoverHttpCallTools(memory);
-
-        assertNotNull(result);
-        assertTrue(result.toolSpecs().isEmpty());
+        assertEquals("response text", result.response());
+        assertTrue(result.trace().isEmpty());
     }
 
     @Test
-    @DisplayName("discoverHttpCallTools should return empty when agent has no workflows")
-    void testDiscoverHttpCallTools_NoWorkflows() {
-        var restAgentStore = mock(IRestAgentStore.class);
-        var restWorkflowStore = mock(IRestWorkflowStore.class);
-        var resourceClientLibrary = mock(IResourceClientLibrary.class);
+    void collectEnabledTools_userMemoryPropsNull_addsToolWithEmptyGroupIds() {
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        task.setBuiltInToolsWhitelist(List.of("usermemory"));
 
-        var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, mock(FetchToolResponsePageTool.class), mock(ToolExecutionService.class),
-                mock(McpToolProviderManager.class),
-                mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
-                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class), mock(ToolResponseTruncator.class),
-                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class), null);
+        var config = new AgentConfiguration.UserMemoryConfig();
+        doReturn(config).when(memory).getUserMemoryConfig();
+        doReturn(null).when(memory).getConversationProperties();
+        doReturn("user-1").when(memory).getUserId();
+        doReturn("agent-1").when(memory).getAgentId();
+        doReturn("conv-1").when(memory).getConversationId();
 
-        var memory = mock(IConversationMemory.class);
-        when(memory.getAgentId()).thenReturn("agent-1");
-        when(memory.getAgentVersion()).thenReturn(1);
+        List<Object> result = orchestrator.collectEnabledTools(task, memory);
 
-        var agentConfig = new AgentConfiguration();
-        agentConfig.setWorkflows(List.of());
-        when(restAgentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
-
-        var result = testOrchestrator.discoverHttpCallTools(memory);
-
-        assertNotNull(result);
-        assertTrue(result.toolSpecs().isEmpty());
-    }
-
-    @Test
-    @DisplayName("discoverHttpCallTools should discover httpcall tools from workflow")
-    void testDiscoverHttpCallTools_HappyPath() throws Exception {
-        var restAgentStore = mock(IRestAgentStore.class);
-        var restWorkflowStore = mock(IRestWorkflowStore.class);
-        var resourceClientLibrary = mock(IResourceClientLibrary.class);
-
-        var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, mock(FetchToolResponsePageTool.class), mock(ToolExecutionService.class),
-                mock(McpToolProviderManager.class),
-                mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
-                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class), mock(ToolResponseTruncator.class),
-                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class), null);
-
-        var memory = mock(IConversationMemory.class);
-        when(memory.getAgentId()).thenReturn("agent-1");
-        when(memory.getAgentVersion()).thenReturn(1);
-
-        // Build workflow with httpcall step
-        var step = new WorkflowConfiguration.WorkflowStep();
-        step.setType(URI.create("eddi://ai.labs.httpcalls"));
-        step.setConfig(Map.of("uri", "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/hc-1?version=1"));
-
-        var workflowConfig = new WorkflowConfiguration();
-        workflowConfig.setWorkflowSteps(List.of(step));
-
-        // Build agent config with workflow URI
-        var agentConfig = new AgentConfiguration();
-        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
-        when(restAgentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
-        when(restWorkflowStore.readWorkflow("wf-1", 1)).thenReturn(workflowConfig);
-
-        // Build httpcall config with one API call
-        var apiCall = new ApiCall();
-        apiCall.setName("getWeather");
-        apiCall.setDescription("Get weather for a city");
-
-        var httpCallsConfig = new ApiCallsConfiguration();
-        httpCallsConfig.setTargetServerUrl("https://api.weather.com");
-        httpCallsConfig.setHttpCalls(List.of(apiCall));
-
-        when(resourceClientLibrary.getResource(URI.create("eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/hc-1?version=1"),
-                ApiCallsConfiguration.class)).thenReturn(httpCallsConfig);
-
-        var result = testOrchestrator.discoverHttpCallTools(memory);
-
-        assertEquals(1, result.toolSpecs().size());
-        assertEquals("getWeather", result.toolSpecs().get(0).name());
-        assertEquals("Get weather for a city", result.toolSpecs().get(0).description());
-        assertNotNull(result.executors().get("getWeather"));
-    }
-
-    @Test
-    @DisplayName("discoverHttpCallTools should generate JSON schema from parameters")
-    void testDiscoverHttpCallTools_WithParameters() throws Exception {
-        var restAgentStore = mock(IRestAgentStore.class);
-        var restWorkflowStore = mock(IRestWorkflowStore.class);
-        var resourceClientLibrary = mock(IResourceClientLibrary.class);
-
-        var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, mock(FetchToolResponsePageTool.class), mock(ToolExecutionService.class),
-                mock(McpToolProviderManager.class),
-                mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
-                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class), mock(ToolResponseTruncator.class),
-                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class), null);
-
-        var memory = mock(IConversationMemory.class);
-        when(memory.getAgentId()).thenReturn("agent-1");
-        when(memory.getAgentVersion()).thenReturn(1);
-
-        var step = new WorkflowConfiguration.WorkflowStep();
-        step.setType(URI.create("eddi://ai.labs.httpcalls"));
-        step.setConfig(Map.of("uri", "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/hc-1?version=1"));
-
-        var workflowConfig = new WorkflowConfiguration();
-        workflowConfig.setWorkflowSteps(List.of(step));
-
-        var agentConfig = new AgentConfiguration();
-        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
-        when(restAgentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
-        when(restWorkflowStore.readWorkflow("wf-1", 1)).thenReturn(workflowConfig);
-
-        var apiCall = new ApiCall();
-        apiCall.setName("searchUsers");
-        apiCall.setDescription("Search for users");
-        apiCall.setParameters(Map.of("query", "Search term", "limit", "Max results"));
-
-        var httpCallsConfig = new ApiCallsConfiguration();
-        httpCallsConfig.setTargetServerUrl("https://api.example.com");
-        httpCallsConfig.setHttpCalls(List.of(apiCall));
-
-        when(resourceClientLibrary.getResource(any(URI.class), eq(ApiCallsConfiguration.class))).thenReturn(httpCallsConfig);
-
-        var result = testOrchestrator.discoverHttpCallTools(memory);
-
-        assertEquals(1, result.toolSpecs().size());
-        var spec = result.toolSpecs().get(0);
-        assertNotNull(spec.parameters(), "Should have parameters schema");
-    }
-
-    @Test
-    @DisplayName("discoverHttpCallTools should skip workflow with null query string")
-    void testDiscoverHttpCallTools_MalformedWorkflowUri() {
-        var restAgentStore = mock(IRestAgentStore.class);
-
-        var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, mock(FetchToolResponsePageTool.class), mock(ToolExecutionService.class),
-                mock(McpToolProviderManager.class),
-                mock(A2AToolProviderManager.class), restAgentStore, mock(IRestWorkflowStore.class), mock(IResourceClientLibrary.class),
-                mock(IApiCallExecutor.class), mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class),
-                mock(ToolResponseTruncator.class), mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class), null);
-
-        var memory = mock(IConversationMemory.class);
-        when(memory.getAgentId()).thenReturn("agent-1");
-        when(memory.getAgentVersion()).thenReturn(1);
-
-        var agentConfig = new AgentConfiguration();
-        // URI without ?version= query
-        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1")));
-        when(restAgentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
-
-        // Should not throw, should return empty
-        var result = testOrchestrator.discoverHttpCallTools(memory);
-
-        assertNotNull(result);
-        assertTrue(result.toolSpecs().isEmpty());
-    }
-
-    @Test
-    @DisplayName("discoverHttpCallTools should skip ApiCalls with blank names")
-    void testDiscoverHttpCallTools_SkipsBlankName() throws Exception {
-        var restAgentStore = mock(IRestAgentStore.class);
-        var restWorkflowStore = mock(IRestWorkflowStore.class);
-        var resourceClientLibrary = mock(IResourceClientLibrary.class);
-
-        var testOrchestrator = new AgentOrchestrator(calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool,
-                textSummarizerTool, pdfReaderTool, weatherTool, mock(FetchToolResponsePageTool.class), mock(ToolExecutionService.class),
-                mock(McpToolProviderManager.class),
-                mock(A2AToolProviderManager.class), restAgentStore, restWorkflowStore, resourceClientLibrary, mock(IApiCallExecutor.class),
-                mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), mock(IUserMemoryStore.class), mock(ToolResponseTruncator.class),
-                mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class), null);
-
-        var memory = mock(IConversationMemory.class);
-        when(memory.getAgentId()).thenReturn("agent-1");
-        when(memory.getAgentVersion()).thenReturn(1);
-
-        var step = new WorkflowConfiguration.WorkflowStep();
-        step.setType(URI.create("eddi://ai.labs.httpcalls"));
-        step.setConfig(Map.of("uri", "eddi://ai.labs.httpcalls/httpcallsstore/httpcalls/hc-1?version=1"));
-
-        var workflowConfig = new WorkflowConfiguration();
-        workflowConfig.setWorkflowSteps(List.of(step));
-
-        var agentConfig = new AgentConfiguration();
-        agentConfig.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1")));
-        when(restAgentStore.readAgent("agent-1", 1)).thenReturn(agentConfig);
-        when(restWorkflowStore.readWorkflow("wf-1", 1)).thenReturn(workflowConfig);
-
-        // ApiCall with blank name — should be skipped
-        var apiCall = new ApiCall();
-        apiCall.setName("  ");
-
-        var httpCallsConfig = new ApiCallsConfiguration();
-        httpCallsConfig.setTargetServerUrl("https://api.example.com");
-        httpCallsConfig.setHttpCalls(List.of(apiCall));
-
-        when(resourceClientLibrary.getResource(any(URI.class), eq(ApiCallsConfiguration.class))).thenReturn(httpCallsConfig);
-
-        var result = testOrchestrator.discoverHttpCallTools(memory);
-
-        assertTrue(result.toolSpecs().isEmpty(), "ApiCalls with blank names should be skipped");
+        assertEquals(1, result.size());
+        assertTrue(result.get(0) instanceof UserMemoryTool);
     }
 }

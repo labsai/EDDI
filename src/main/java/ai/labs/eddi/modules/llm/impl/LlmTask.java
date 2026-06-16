@@ -446,7 +446,9 @@ public class LlmTask implements ILifecycleTask {
                     var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
                     responseContent = chatResult.response();
                     responseMetadata = chatResult.responseMetadata();
-                    eventSink.onToken(responseContent);
+                    if (!addToOutputExplicitlyFalse) {
+                        eventSink.onToken(responseContent);
+                    }
                 }
             } else {
                 // Standard non-streaming legacy mode

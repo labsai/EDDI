@@ -28,7 +28,6 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import jakarta.inject.Provider;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -236,7 +235,6 @@ class LlmTaskExtendedBranchTest {
     class AddToOutputFalseTests {
 
         @Test
-        @Disabled("Assertion mismatch in streaming suppression")
         @DisplayName("addToOutput=false suppresses eventSink.onToken")
         void addToOutputFalseSuppressesStreaming() throws Exception {
             var memory = setupMemory(List.of("action1"));
@@ -249,8 +247,7 @@ class LlmTaskExtendedBranchTest {
             var task = createTask(Map.of("apiKey", "key", "addToOutput", "false"));
             llmTask.execute(memory, new LlmConfiguration(List.of(task)));
 
-            // Should NOT call onToken when addToOutput is explicitly false
-            // (sync fallback path + addToOutputExplicitlyFalse check)
+            // Sync fallback path now respects addToOutputExplicitlyFalse
             verify(eventSink, never()).onToken(anyString());
         }
     }

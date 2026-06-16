@@ -96,9 +96,12 @@ jobs:
       - name: Coverage summary
         if: always()
         run: |
+          # Helper: write to both stdout (visible in logs) and GITHUB_STEP_SUMMARY
+          out() { echo "$1"; echo "$1" >> $GITHUB_STEP_SUMMARY; }
+
           CSV="target/site/jacoco/jacoco.csv"
           if [ ! -f "$CSV" ]; then
-            echo "### ⚠️ No coverage report found" >> $GITHUB_STEP_SUMMARY
+            out "### ⚠️ No coverage report found"
             exit 0
           fi
 
@@ -123,29 +126,33 @@ jobs:
           # Count tests from surefire reports (match only <testsuite lines)
           TOTAL_TESTS=$(grep -rh '<testsuite ' target/surefire-reports/*.xml 2>/dev/null | sed 's/.*tests="\([0-9]*\)".*/\1/' | awk '{s+=$1} END {print s+0}')
 
-          echo "### 📊 Unit Test Coverage ($TOTAL_TESTS tests)" >> $GITHUB_STEP_SUMMARY
-          echo "| Metric | Covered | Total | Percentage | |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|---------|-------|------------|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| Instruction | $IC | $((IM+IC)) | **${INST_PCT}%** | $(icon $INST_PCT) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Branch | $BC | $((BM+BC)) | **${BRANCH_PCT}%** | $(icon $BRANCH_PCT) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Line | $LC | $((LM+LC)) | **${LINE_PCT}%** | $(icon $LINE_PCT) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Method | $MC | $((MM+MC)) | **${METHOD_PCT}%** | $(icon $METHOD_PCT) |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          out "### 📊 Unit Test Coverage ($TOTAL_TESTS tests)"
+          out "| Metric | Covered | Total | Percentage | |"
+          out "|--------|---------|-------|------------|---|"
+          out "| Instruction | $IC | $((IM+IC)) | **${INST_PCT}%** | $(icon $INST_PCT) |"
+          out "| Branch | $BC | $((BM+BC)) | **${BRANCH_PCT}%** | $(icon $BRANCH_PCT) |"
+          out "| Line | $LC | $((LM+LC)) | **${LINE_PCT}%** | $(icon $LINE_PCT) |"
+          out "| Method | $MC | $((MM+MC)) | **${METHOD_PCT}%** | $(icon $METHOD_PCT) |"
+          out ""
 
-          # Top 10 least-covered packages (by instruction coverage)
-          echo "<details><summary>📦 Bottom 10 packages by instruction coverage</summary>" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Package | Instructions | Coverage |" >> $GITHUB_STEP_SUMMARY
-          echo "|---------|-------------|----------|" >> $GITHUB_STEP_SUMMARY
+          # Bottom 10 packages by instruction coverage (aggregated by package)
+          out "<details><summary>📦 Bottom 10 packages by instruction coverage</summary>"
+          out ""
+          out "| Package | Instructions | Coverage |"
+          out "|---------|-------------|----------|"
           awk -F',' 'NR>1 {
-            pkg=$2; im=$4; ic=$5; total=im+ic
-            if (total > 0) { pct=ic/total*100 } else { pct=100 }
-            printf "| %s | %d/%d | %.1f%% |\n", pkg, ic, total, pct
-          }' "$CSV" | { sort -t'|' -k4 -n 2>/dev/null || true; } | head -10 >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "</details>" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "> ℹ️ Unit tests only. See **Integration Tests** job for merged UT+IT coverage." >> $GITHUB_STEP_SUMMARY
+            im[$2]+=$4; ic[$2]+=$5
+          } END {
+            for (pkg in im) {
+              total=im[pkg]+ic[pkg]
+              if (total > 0) pct=ic[pkg]/total*100; else pct=100
+              printf "| %s | %d/%d | %.1f%% |\n", pkg, ic[pkg], total, pct
+            }
+          }' "$CSV" | sort -t'|' -k4 -n | head -10 | while IFS= read -r line; do out "$line"; done
+          out ""
+          out "</details>"
+          out ""
+          out "> ℹ️ Unit tests only. See **Integration Tests** job for merged UT+IT coverage."
 
   # ─── Job 2: Integration Tests ─────────────────────────────────
   integration-test:
@@ -202,17 +209,17 @@ jobs:
       - name: Coverage summary (UT + IT + Merged)
         if: always()
         run: |
-          # Helper functions
+          # Helper: write to both stdout (visible in logs) and GITHUB_STEP_SUMMARY
+          out() { echo "$1"; echo "$1" >> $GITHUB_STEP_SUMMARY; }
+
           pct() { [ $(($1+$2)) -gt 0 ] && awk "BEGIN {printf \"%.1f\", ($2/($1+$2))*100}" || echo "0.0"; }
           icon() { local p=$(echo "$1" | awk '{printf "%d", $1}'); [ $p -ge 90 ] && echo "🟢" || { [ $p -ge 80 ] && echo "🟡" || echo "🔴"; }; }
 
           # Parse a JaCoCo CSV and emit a markdown table
-          # Columns: $4=INST_MISSED, $5=INST_COVERED, $6=BRANCH_MISSED, $7=BRANCH_COVERED,
-          #          $8=LINE_MISSED, $9=LINE_COVERED, $12=METHOD_MISSED, $13=METHOD_COVERED
           emit_table() {
             local csv="$1" title="$2"
             if [ ! -f "$csv" ]; then
-              echo "### ⚠️ ${title}: report not found" >> $GITHUB_STEP_SUMMARY
+              out "### ⚠️ ${title}: report not found"
               return
             fi
             read IM IC LM LC BM BC MM MC <<< $(awk -F',' 'NR>1 {
@@ -224,14 +231,14 @@ jobs:
             local LINE_PCT=$(pct $LM $LC)
             local BRANCH_PCT=$(pct $BM $BC)
             local METHOD_PCT=$(pct $MM $MC)
-            echo "#### ${title}" >> $GITHUB_STEP_SUMMARY
-            echo "| Metric | Covered | Total | Percentage | |" >> $GITHUB_STEP_SUMMARY
-            echo "|--------|---------|-------|------------|---|" >> $GITHUB_STEP_SUMMARY
-            echo "| Instruction | $IC | $((IM+IC)) | **${INST_PCT}%** | $(icon $INST_PCT) |" >> $GITHUB_STEP_SUMMARY
-            echo "| Branch | $BC | $((BM+BC)) | **${BRANCH_PCT}%** | $(icon $BRANCH_PCT) |" >> $GITHUB_STEP_SUMMARY
-            echo "| Line | $LC | $((LM+LC)) | **${LINE_PCT}%** | $(icon $LINE_PCT) |" >> $GITHUB_STEP_SUMMARY
-            echo "| Method | $MC | $((MM+MC)) | **${METHOD_PCT}%** | $(icon $METHOD_PCT) |" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
+            out "#### ${title}"
+            out "| Metric | Covered | Total | Percentage | |"
+            out "|--------|---------|-------|------------|---|"
+            out "| Instruction | $IC | $((IM+IC)) | **${INST_PCT}%** | $(icon $INST_PCT) |"
+            out "| Branch | $BC | $((BM+BC)) | **${BRANCH_PCT}%** | $(icon $BRANCH_PCT) |"
+            out "| Line | $LC | $((LM+LC)) | **${LINE_PCT}%** | $(icon $LINE_PCT) |"
+            out "| Method | $MC | $((MM+MC)) | **${METHOD_PCT}%** | $(icon $METHOD_PCT) |"
+            out ""
           }
 
           # Count tests
@@ -239,29 +246,33 @@ jobs:
           IT_COUNT=$(grep -rh '<testsuite ' target/failsafe-reports/*.xml 2>/dev/null | sed 's/.*tests="\([0-9]*\)".*/\1/' | awk '{s+=$1} END {print s+0}')
           TOTAL=$((UT_COUNT + IT_COUNT))
 
-          echo "### 📊 Test Coverage Report ($TOTAL tests: $UT_COUNT UT + $IT_COUNT IT)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          out "### 📊 Test Coverage Report ($TOTAL tests: $UT_COUNT UT + $IT_COUNT IT)"
+          out ""
 
           # Emit all three tables
           emit_table "target/site/jacoco/jacoco.csv" "Unit Tests Only"
           emit_table "target/site/jacoco-it/jacoco.csv" "Integration Tests Only"
           emit_table "target/site/jacoco-merged/jacoco.csv" "✅ Merged (UT + IT)"
 
-          # Bottom 10 packages from merged (or UT-only fallback)
+          # Bottom 10 packages from merged (or UT-only fallback), aggregated by package
           BEST_CSV="target/site/jacoco-merged/jacoco.csv"
           [ ! -f "$BEST_CSV" ] && BEST_CSV="target/site/jacoco/jacoco.csv"
           if [ -f "$BEST_CSV" ]; then
-            echo "<details><summary>📦 Bottom 10 packages by instruction coverage</summary>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "| Package | Instructions | Coverage |" >> $GITHUB_STEP_SUMMARY
-            echo "|---------|-------------|----------|" >> $GITHUB_STEP_SUMMARY
+            out "<details><summary>📦 Bottom 10 packages by instruction coverage</summary>"
+            out ""
+            out "| Package | Instructions | Coverage |"
+            out "|---------|-------------|----------|"
             awk -F',' 'NR>1 {
-              pkg=$2; im=$4; ic=$5; total=im+ic
-              if (total > 0) { pct=ic/total*100 } else { pct=100 }
-              printf "| %s | %d/%d | %.1f%% |\n", pkg, ic, total, pct
-            }' "$BEST_CSV" | { sort -t'|' -k4 -n 2>/dev/null || true; } | head -10 >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "</details>" >> $GITHUB_STEP_SUMMARY
+              im[$2]+=$4; ic[$2]+=$5
+            } END {
+              for (pkg in im) {
+                total=im[pkg]+ic[pkg]
+                if (total > 0) pct=ic[pkg]/total*100; else pct=100
+                printf "| %s | %d/%d | %.1f%% |\n", pkg, ic[pkg], total, pct
+              }
+            }' "$BEST_CSV" | sort -t'|' -k4 -n | head -10 | while IFS= read -r line; do out "$line"; done
+            out ""
+            out "</details>"
           fi
 
   # ─── Job 2b: CodeQL SAST ───────────────────────────────────────

@@ -16,7 +16,6 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -214,32 +213,6 @@ class ApiCallExecutorBranchCoverageTest {
     @Nested
     @DisplayName("retryCall — http code matching")
     class RetryHttpCodeMatch {
-
-        @Test
-        @Disabled("Retry logic uses recursive executeRequest() which requires complex mock setup")
-        @DisplayName("retryOnHttpCodes contains current code → retries then succeeds")
-        void retryOnMatchingHttpCode() throws Exception {
-            ApiCall call = createCall("retry-call", false);
-            HttpPostResponse postResponse = new HttpPostResponse();
-            RetryApiCallInstruction retry = new RetryApiCallInstruction();
-            retry.setMaxRetries(2);
-            retry.setRetryOnHttpCodes(List.of(503));
-            retry.setExponentialBackoffDelayInMillis(0);
-            postResponse.setRetryApiCallInstruction(retry);
-            call.setPostResponse(postResponse);
-
-            // getHttpCode() is called 3 times per iteration:
-            // - twice in: response.getHttpCode() >= 200 && response.getHttpCode() < 300
-            // - once in: retryCall(..., response.getHttpCode(), ...)
-            // First iteration: 503 (×3), second iteration: 200 (×3)
-            when(mockResponse.getHttpCode()).thenReturn(503, 503, 503, 200, 200, 200);
-            when(mockResponse.getContentAsString()).thenReturn("err", "err", "ok", "ok");
-            when(mockResponse.getHttpCodeMessage()).thenReturn("Unavailable", "OK");
-            when(mockResponse.getHttpHeader()).thenReturn(new HashMap<>());
-
-            Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
-            verify(mockRequest, times(2)).send();
-        }
 
         @Test
         @DisplayName("retryOnHttpCodes doesn't match → no retry")

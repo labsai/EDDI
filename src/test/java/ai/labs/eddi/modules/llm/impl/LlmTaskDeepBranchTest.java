@@ -10,7 +10,6 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
-import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
@@ -30,7 +29,6 @@ import dev.langchain4j.model.chat.response.ChatResponse;
 import jakarta.inject.Provider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
@@ -441,26 +439,6 @@ class LlmTaskDeepBranchTest {
             // task.getId()` → still null
             // Then it tries to use null as the response key
             assertDoesNotThrow(() -> llmTask.execute(memory, new LlmConfiguration(List.of(task))));
-        }
-    }
-
-    // ==================== LifecycleException wrapping ====================
-
-    @Nested
-    @DisplayName("Exception Wrapping")
-    class ExceptionWrappingTests {
-
-        @Test
-        @Disabled("TemplateEngineException from converter is caught internally before reaching LifecycleException wrapper")
-        @DisplayName("TemplateEngineException wraps in LifecycleException")
-        void templateEngineException() throws Exception {
-            var memory = setupMemory(List.of("action1"));
-            when(memoryItemConverter.convert(memory)).thenThrow(
-                    new ITemplatingEngine.TemplateEngineException("bad template", new RuntimeException()));
-
-            var task = createTask(Map.of("apiKey", "key"));
-            assertThrows(LifecycleException.class,
-                    () -> llmTask.execute(memory, new LlmConfiguration(List.of(task))));
         }
     }
 
