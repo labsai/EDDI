@@ -6,17 +6,19 @@
 # To get a fingerprint, run: gitleaks detect --report-format json
 # and copy the "Fingerprint" field from the finding.
 #
-# Format:
-#   <fingerprint>  # <reason for suppression>
+# Format: one fingerprint per line, comments on separate lines.
 #
 # Review this file periodically to ensure suppressions are still valid.
 # ─────────────────────────────────────────────────────────────────
 
 # Unit test dummy values — not real secrets
-8c788f276b364f9257451f8620ff0439d0916f60:src/test/java/ai/labs/eddi/engine/audit/AuditLedgerServiceTest.java:generic-api-key:155  # test fixture: Map.of("apiKey", "REDACTED")
-8c788f276b364f9257451f8620ff0439d0916f60:src/test/java/ai/labs/eddi/engine/audit/AuditLedgerServiceExtendedTest.java:generic-api-key:68  # test fixture: innerMap.put("apiKey", "REDACTED")
-8c788f276b364f9257451f8620ff0439d0916f60:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:404  # test fixture: KekRotationRequest("oldkey123", "newkey456")
-8c788f276b364f9257451f8620ff0439d0916f60:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:413  # test fixture: KekRotationRequest("oldkey123", "newkey456")
-8c788f276b364f9257451f8620ff0439d0916f60:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:423  # test fixture: rotateKek("oldkey123", "newkey456")
-8c788f276b364f9257451f8620ff0439d0916f60:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:427  # test fixture: KekRotationRequest("oldkey123", "newkey456")
-8c788f276b364f9257451f8620ff0439d0916f60:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:445  # test fixture: KekRotationRequest("oldkey123", "newkey456")
+# AuditLedgerServiceTest: Map.of("apiKey", "REDACTED")
+8c788f276b364f9257451f8620ff0439d0916f60:src/test/java/ai/labs/eddi/engine/audit/AuditLedgerServiceTest.java:generic-api-key:155
+# AuditLedgerServiceExtendedTest: innerMap.put("apiKey", "REDACTED")
+8c788f276b364f9257451f8620ff0439d0916f60:src/test/java/ai/labs/eddi/engine/audit/AuditLedgerServiceExtendedTest.java:generic-api-key:68
+# RestSecretStoreTest: KekRotationRequest with dummy test keys
+8c788f276b364f9257451f8620ff0439d0916f60:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:404
+8c788f276b364f9257451f8620ff0439d0916f60:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:413
+8c788f276b364f9257451f8620ff0439d0916f60:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:423
+8c788f276b364f9257451f8620ff0439d0916f60:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:427
+8c788f276b364f9257451f8620ff0439d0916f60:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:445
