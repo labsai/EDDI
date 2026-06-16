@@ -11,13 +11,12 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
-import jakarta.ws.rs.core.Response;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-import java.net.URI;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -111,11 +110,7 @@ class RestAgentGroupStoreExtendedTest {
             when(groupStore.getCurrentResourceId("newGroupId")).thenReturn(resourceId);
             when(documentDescriptorStore.readDescriptor("newGroupId", 1))
                     .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
-            when(groupStore.create(any())).thenReturn(resourceId);
 
-            // Create triggers syncDescriptor with a created URI
-            URI location = URI.create("eddi://ai.labs.group/groupstore/groups/newGroupId?version=1");
-            Response mockResponse = Response.created(location).build();
             when(groupStore.create(any())).thenReturn(resourceId);
 
             // Trigger via updateGroup (which calls syncDescriptor)
@@ -197,7 +192,6 @@ class RestAgentGroupStoreExtendedTest {
 
             String newId = "newGroupId123456789012";
             IResourceId newResId = createResourceId(newId, 1);
-            URI location = URI.create("eddi://ai.labs.group/groupstore/groups/" + newId + "?version=1");
 
             when(groupStore.create(any())).thenReturn(newResId);
             when(groupStore.getCurrentResourceId(newId)).thenReturn(newResId);

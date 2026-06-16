@@ -419,7 +419,6 @@ class V6RenameMigrationTest {
         @DisplayName("should rewrite URIs nested in sub-documents")
         void rewriteNestedDocuments() {
             Document inner = new Document("ref", "eddi://ai.labs.bot/botstore/bots/b1?version=1");
-            Document outer = new Document("child", inner);
 
             // rewriteUriString is package-private but rewriteUrisInDocument is private
             // We test transitively by verifying rewriteUriString on nested values

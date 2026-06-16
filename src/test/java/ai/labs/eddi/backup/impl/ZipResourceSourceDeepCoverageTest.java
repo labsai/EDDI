@@ -204,7 +204,7 @@ class ZipResourceSourceDeepCoverageTest {
     @Test
     @DisplayName("close — deletes temp dir")
     void closeDeletesTempDir() throws Exception {
-        Path subFile = Files.createFile(tempDir.resolve("dummy.txt"));
+        Files.createFile(tempDir.resolve("dummy.txt"));
         ZipResourceSource source = new ZipResourceSource(tempDir, jsonSerialization);
 
         source.close();

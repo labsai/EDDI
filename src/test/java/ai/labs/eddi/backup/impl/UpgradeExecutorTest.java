@@ -913,8 +913,7 @@ class UpgradeExecutorTest {
         void dispatchDictionary() throws Exception {
             verifyDispatchUpdate("regulardictionary", "ai.labs.parser",
                     ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration.class,
-                    ai.labs.eddi.configs.dictionary.IRestDictionaryStore.class,
-                    "updateRegularDictionary");
+                    ai.labs.eddi.configs.dictionary.IRestDictionaryStore.class);
         }
 
         @Test
@@ -923,8 +922,7 @@ class UpgradeExecutorTest {
         void dispatchRuleSet() throws Exception {
             verifyDispatchUpdate("behavior", "ai.labs.behavior",
                     ai.labs.eddi.configs.rules.model.RuleSetConfiguration.class,
-                    ai.labs.eddi.configs.rules.IRestRuleSetStore.class,
-                    "updateRuleSet");
+                    ai.labs.eddi.configs.rules.IRestRuleSetStore.class);
         }
 
         @Test
@@ -933,8 +931,7 @@ class UpgradeExecutorTest {
         void dispatchApiCalls() throws Exception {
             verifyDispatchUpdate("httpcalls", "ai.labs.httpcalls",
                     ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration.class,
-                    ai.labs.eddi.configs.apicalls.IRestApiCallsStore.class,
-                    "updateApiCalls");
+                    ai.labs.eddi.configs.apicalls.IRestApiCallsStore.class);
         }
 
         @Test
@@ -943,8 +940,7 @@ class UpgradeExecutorTest {
         void dispatchPropertySetter() throws Exception {
             verifyDispatchUpdate("property", "ai.labs.property",
                     ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration.class,
-                    ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore.class,
-                    "updatePropertySetter");
+                    ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore.class);
         }
 
         @Test
@@ -953,8 +949,7 @@ class UpgradeExecutorTest {
         void dispatchOutput() throws Exception {
             verifyDispatchUpdate("output", "ai.labs.output",
                     ai.labs.eddi.configs.output.model.OutputConfigurationSet.class,
-                    ai.labs.eddi.configs.output.IRestOutputStore.class,
-                    "updateOutputSet");
+                    ai.labs.eddi.configs.output.IRestOutputStore.class);
         }
 
         @Test
@@ -963,14 +958,12 @@ class UpgradeExecutorTest {
         void dispatchMcpCalls() throws Exception {
             verifyDispatchUpdate("mcpcalls", "ai.labs.mcpcalls",
                     ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration.class,
-                    ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore.class,
-                    "updateMcpCalls");
+                    ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore.class);
         }
 
         @SuppressWarnings({"unchecked", "rawtypes"})
         private void verifyDispatchUpdate(String extensionType, String stepType,
-                                          Class<?> configClass, Class<?> restStoreClass,
-                                          String updateMethodName)
+                                          Class<?> configClass, Class<?> restStoreClass)
                 throws Exception {
             String wfId = "aabbccddeeff112233445566";
             String extId = "bbbbbbbbbbbbbbbbbbbbbbbb";

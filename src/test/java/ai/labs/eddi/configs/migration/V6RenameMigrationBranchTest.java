@@ -5,9 +5,9 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
-import com.mongodb.MongoCommandException;
+
 import com.mongodb.MongoNamespace;
-import com.mongodb.ServerAddress;
+
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
@@ -363,8 +363,6 @@ class V6RenameMigrationBranchTest {
             MongoCollection<Document> collection = mock(MongoCollection.class);
             when(collection.estimatedDocumentCount()).thenReturn(5L);
 
-            MongoCommandException exception = new MongoCommandException(
-                    new BsonDocument(), new ServerAddress());
             // Code 48 = NamespaceExists
             // We can't easily construct a MongoCommandException with code 48,
             // so we test via the general exception path
