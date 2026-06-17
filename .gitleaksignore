@@ -13,8 +13,8 @@
 # ─────────────────────────────────────────────────────────────────
 
 # RestSecretStoreTest rotateKek tests — dummy KEK rotation fixture values (not real secrets)
-06ef33aafb04c721429fef1998eb4727308bae7b:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:404
-06ef33aafb04c721429fef1998eb4727308bae7b:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:413
-06ef33aafb04c721429fef1998eb4727308bae7b:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:423
-06ef33aafb04c721429fef1998eb4727308bae7b:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:427
-06ef33aafb04c721429fef1998eb4727308bae7b:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:445
+06ef33aafb04c721429fef1998eb4727308bae7b:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:404  # rotateKek test fixture value
+06ef33aafb04c721429fef1998eb4727308bae7b:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:413  # rotateKek test fixture value
+06ef33aafb04c721429fef1998eb4727308bae7b:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:423  # rotateKek test fixture value
+06ef33aafb04c721429fef1998eb4727308bae7b:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:427  # rotateKek test fixture value
+06ef33aafb04c721429fef1998eb4727308bae7b:src/test/java/ai/labs/eddi/secrets/rest/RestSecretStoreTest.java:generic-api-key:445  # rotateKek test fixture value
