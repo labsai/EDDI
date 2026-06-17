@@ -411,6 +411,28 @@ class VaultSecretProviderBranchTest {
         }
 
         @Test
+        @DisplayName("partial delete — count excludes failed deletes")
+        void partialDelete() throws Exception {
+            VaultSecretProvider provider = createAvailableProvider();
+
+            byte[] dek = EnvelopeCrypto.generateDek();
+            EncryptedSecret secret1 = createEncryptedSecret("val1", dek);
+            EncryptedSecret secret2 = createEncryptedSecret("val2", dek);
+            secret1.setKeyName("key-ok");
+            secret2.setKeyName("key-gone");
+
+            when(persistence.listSecretsByTenant(TENANT_ID))
+                    .thenReturn(List.of(secret1, secret2));
+            when(persistence.deleteSecret(TENANT_ID, "key-ok")).thenReturn(true);
+            when(persistence.deleteSecret(TENANT_ID, "key-gone")).thenReturn(false);
+
+            int result = provider.resetTenant(TENANT_ID);
+
+            assertEquals(1, result, "Should count only successful deletes");
+            verify(persistence).deleteDek(TENANT_ID);
+        }
+
+        @Test
         @DisplayName("persistence failure wraps as SecretProviderException")
         void persistenceFailure() {
             VaultSecretProvider provider = createAvailableProvider();

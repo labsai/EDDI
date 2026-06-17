@@ -26,6 +26,8 @@ import java.time.Instant;
 import java.util.*;
 import java.util.AbstractMap.SimpleEntry;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Production-grade {@link ISecretProvider} using envelope encryption with
  * persistent storage.
@@ -407,10 +409,10 @@ public class VaultSecretProvider implements ISecretProvider {
             }
             persistence.deleteDek(tenantId);
 
-            LOGGER.infof("[VAULT] Tenant '%s' reset: %d secret(s) deleted, DEK removed.", tenantId, deletedCount);
+            LOGGER.infof("[VAULT] Tenant '%s' reset: %d secret(s) deleted, DEK removed.", sanitize(tenantId), deletedCount);
             return deletedCount;
         } catch (PersistenceException e) {
-            throw new SecretProviderException("Failed to reset vault for tenant " + tenantId, e);
+            throw new SecretProviderException("Failed to reset vault for tenant " + sanitize(tenantId), e);
         }
     }
 
