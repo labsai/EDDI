@@ -136,6 +136,28 @@ public interface IRestSecretStore {
     Response rotateKek(KekRotationRequest body);
 
     /**
+     * Reset the vault for a specific tenant. Deletes ALL secrets and the DEK for
+     * the tenant, allowing the vault to start fresh with the current master key.
+     * <p>
+     * This is a destructive operation — all encrypted secrets for the tenant will
+     * be permanently deleted. Use this when the master key has changed and the old
+     * key is not available.
+     *
+     * @param tenantId
+     *            the tenant to reset
+     * @return 200 with details of what was deleted
+     */
+    @POST
+    @Path("/{tenantId}/reset")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed("eddi-admin")
+    @Operation(summary = "Reset vault for a tenant",
+               description = "Deletes ALL secrets and the Data Encryption Key for the tenant. "
+                       + "Use this when the master key has changed and recovery is not possible. "
+                       + "WARNING: This permanently destroys all encrypted secrets for the tenant.")
+    Response resetTenant(@PathParam("tenantId") String tenantId);
+
+    /**
      * Request body for storing a secret. Includes the plaintext value, an optional
      * description, and an optional allowed-agents list.
      *

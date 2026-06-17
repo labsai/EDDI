@@ -111,6 +111,22 @@ public interface ISecretProvider {
     int rotateDek(String tenantId) throws SecretProviderException;
 
     /**
+     * Reset the vault for a specific tenant. Deletes ALL secrets and the DEK,
+     * allowing the vault to start fresh with the current master key.
+     * <p>
+     * This is a <b>destructive</b> operation — all encrypted secrets for the tenant
+     * will be permanently deleted. This bypasses DEK decryption entirely, making it
+     * safe to call even when the master key has changed.
+     *
+     * @param tenantId
+     *            the tenant to reset
+     * @return the number of secrets that were deleted
+     * @throws SecretProviderException
+     *             if the reset fails
+     */
+    int resetTenant(String tenantId) throws SecretProviderException;
+
+    /**
      * Check if the secret provider is properly configured and operational.
      *
      * @return true if the provider can resolve secrets
