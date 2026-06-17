@@ -179,6 +179,12 @@ class AgentSigningServiceTest {
         }
 
         @Override
+        public int resetTenant(String tenantId) {
+            store.entrySet().removeIf(e -> e.getKey().startsWith(tenantId + ":"));
+            return 0;
+        }
+
+        @Override
         public boolean isAvailable() {
             return true;
         }
