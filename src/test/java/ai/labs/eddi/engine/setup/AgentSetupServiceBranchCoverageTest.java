@@ -736,5 +736,27 @@ class AgentSetupServiceBranchCoverageTest {
             assertEquals("   ", result);
             verifyNoInteractions(secretProvider);
         }
+
+        @Test
+        @DisplayName("legacy ${eddivault:...} reference is passed through as-is")
+        void passthroughLegacyVaultReference() throws Exception {
+            String legacyRef = "${eddivault:old-api-key}";
+
+            String result = invokeVaultApiKey(legacyRef, "LegacyAgent");
+
+            assertEquals(legacyRef, result, "Legacy eddivault reference should be returned unchanged");
+            verifyNoInteractions(secretProvider);
+        }
+
+        @Test
+        @DisplayName("full-form ${vault:tenant/key} reference is passed through as-is")
+        void passthroughFullFormVaultReference() throws Exception {
+            String fullRef = "${vault:my-tenant/my-api-key}";
+
+            String result = invokeVaultApiKey(fullRef, "MultiTenantAgent");
+
+            assertEquals(fullRef, result, "Full-form vault reference should be returned unchanged");
+            verifyNoInteractions(secretProvider);
+        }
     }
 }

@@ -180,8 +180,9 @@ class AgentSigningServiceTest {
 
         @Override
         public int resetTenant(String tenantId) {
+            int before = store.size();
             store.entrySet().removeIf(e -> e.getKey().startsWith(tenantId + ":"));
-            return 0;
+            return before - store.size();
         }
 
         @Override

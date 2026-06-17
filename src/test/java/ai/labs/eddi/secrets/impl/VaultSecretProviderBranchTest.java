@@ -384,6 +384,8 @@ class VaultSecretProviderBranchTest {
 
             when(persistence.listSecretsByTenant(TENANT_ID))
                     .thenReturn(List.of(secret1, secret2));
+            when(persistence.deleteSecret(eq(TENANT_ID), anyString()))
+                    .thenReturn(true);
 
             int result = provider.resetTenant(TENANT_ID);
 

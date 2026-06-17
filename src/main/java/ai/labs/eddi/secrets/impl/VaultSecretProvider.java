@@ -398,15 +398,17 @@ public class VaultSecretProvider implements ISecretProvider {
         try {
             // Delete all secrets first, then the DEK
             var secrets = persistence.listSecretsByTenant(tenantId);
-            int secretCount = secrets.size();
+            int deletedCount = 0;
 
             for (var secret : secrets) {
-                persistence.deleteSecret(secret.getTenantId(), secret.getKeyName());
+                if (persistence.deleteSecret(tenantId, secret.getKeyName())) {
+                    deletedCount++;
+                }
             }
             persistence.deleteDek(tenantId);
 
-            LOGGER.infof("[VAULT] Tenant '%s' reset: %d secret(s) deleted, DEK removed.", tenantId, secretCount);
-            return secretCount;
+            LOGGER.infof("[VAULT] Tenant '%s' reset: %d secret(s) deleted, DEK removed.", tenantId, deletedCount);
+            return deletedCount;
         } catch (PersistenceException e) {
             throw new SecretProviderException("Failed to reset vault for tenant " + tenantId, e);
         }
