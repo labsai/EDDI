@@ -569,4 +569,5 @@ class VaultSecretProviderBranchTest {
             verify(persistence).upsertSecret(any(EncryptedSecret.class));
         }
     }
+
 }

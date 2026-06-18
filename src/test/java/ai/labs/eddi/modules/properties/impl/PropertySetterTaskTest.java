@@ -1169,6 +1169,21 @@ class PropertySetterTaskTest {
         }
 
         @Test
+        @DisplayName("setOnActions with actionsObj as String — wraps in list")
+        void actionsAsString() throws Exception {
+            var config = new HashMap<String, Object>();
+            config.put("setOnActions", List.of(
+                    Map.of("actions", "single_action",
+                            "setProperties", List.of(
+                                    Map.of("name", "prop", "valueString", "val", "scope", "conversation")))));
+
+            var result = task.configure(config, Map.of());
+
+            assertNotNull(result);
+            assertInstanceOf(IPropertySetter.class, result);
+        }
+
+        @Test
         @DisplayName("URI based config loading — calls resourceClientLibrary.getResource")
         void uriBasedConfigLoading() throws Exception {
             var propertySetterConfig = new PropertySetterConfiguration();
@@ -1188,6 +1203,96 @@ class PropertySetterTaskTest {
             assertNotNull(result);
             assertInstanceOf(IPropertySetter.class, result);
             verify(resourceClientLibrary).getResource(any(URI.class), eq(PropertySetterConfiguration.class));
+        }
+
+        @Test
+        @DisplayName("setOnActions with valueObject — parses correctly")
+        void valueObjectConfig() throws Exception {
+            var config = new HashMap<String, Object>();
+            config.put("setOnActions", List.of(
+                    Map.of("actions", List.of("action1"),
+                            "setProperties", List.of(
+                                    Map.of("name", "obj_prop",
+                                            "valueObject", Map.of("nested", "value"),
+                                            "scope", "conversation")))));
+
+            var result = task.configure(config, Map.of());
+
+            assertNotNull(result);
+        }
+
+        @Test
+        @DisplayName("setOnActions with valueInt — parses correctly")
+        void valueIntConfig() throws Exception {
+            var config = new HashMap<String, Object>();
+            config.put("setOnActions", List.of(
+                    Map.of("actions", List.of("action1"),
+                            "setProperties", List.of(
+                                    Map.of("name", "int_prop", "valueInt", 42, "scope", "conversation")))));
+
+            var result = task.configure(config, Map.of());
+
+            assertNotNull(result);
+        }
+
+        @Test
+        @DisplayName("setOnActions with valueFloat — parses correctly")
+        void valueFloatConfig() throws Exception {
+            var config = new HashMap<String, Object>();
+            config.put("setOnActions", List.of(
+                    Map.of("actions", List.of("action1"),
+                            "setProperties", List.of(
+                                    Map.of("name", "float_prop", "valueFloat", 3.14f, "scope", "conversation")))));
+
+            var result = task.configure(config, Map.of());
+
+            assertNotNull(result);
+        }
+
+        @Test
+        @DisplayName("setOnActions with valueBoolean — parses correctly")
+        void valueBooleanConfig() throws Exception {
+            var config = new HashMap<String, Object>();
+            config.put("setOnActions", List.of(
+                    Map.of("actions", List.of("action1"),
+                            "setProperties", List.of(
+                                    Map.of("name", "bool_prop", "valueBoolean", true, "scope", "conversation")))));
+
+            var result = task.configure(config, Map.of());
+
+            assertNotNull(result);
+        }
+
+        @Test
+        @DisplayName("setOnActions with valueList — parses correctly")
+        void valueListConfig() throws Exception {
+            var config = new HashMap<String, Object>();
+            config.put("setOnActions", List.of(
+                    Map.of("actions", List.of("action1"),
+                            "setProperties", List.of(
+                                    Map.of("name", "list_prop",
+                                            "valueList", List.of("a", "b", "c"),
+                                            "scope", "conversation")))));
+
+            var result = task.configure(config, Map.of());
+
+            assertNotNull(result);
+        }
+
+        @Test
+        @DisplayName("setOnActions with fromObjectPath — parses correctly")
+        void fromObjectPathConfig() throws Exception {
+            var config = new HashMap<String, Object>();
+            config.put("setOnActions", List.of(
+                    Map.of("actions", List.of("action1"),
+                            "setProperties", List.of(
+                                    Map.of("name", "path_prop",
+                                            "fromObjectPath", "memory.current.input",
+                                            "scope", "longTerm")))));
+
+            var result = task.configure(config, Map.of());
+
+            assertNotNull(result);
         }
 
         @Test

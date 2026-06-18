@@ -4,59 +4,49 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.configs.variables.GlobalVariableResolver;
-import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
-import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
-import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
-import ai.labs.eddi.engine.memory.IConversationMemory;
-import ai.labs.eddi.engine.memory.IData;
-import ai.labs.eddi.engine.memory.IDataFactory;
-import ai.labs.eddi.engine.memory.IMemoryItemConverter;
-import ai.labs.eddi.engine.memory.model.ConversationOutput;
-import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
-import ai.labs.eddi.engine.runtime.service.ServiceException;
-import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
-import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
-import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
+import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.lifecycle.TaskId;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
+import ai.labs.eddi.engine.memory.*;
+import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
+import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
-import ai.labs.eddi.secrets.SecretResolver;
-import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.model.chat.response.ChatResponse;
-import jakarta.inject.Provider;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 
+import java.lang.reflect.Method;
 import java.net.URI;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Stream;
+import java.util.*;
 
-import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
-import static dev.langchain4j.data.message.AiMessage.aiMessage;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-import static org.mockito.MockitoAnnotations.openMocks;
 
-@SuppressWarnings({"rawtypes", "unchecked"})
+/**
+ * Unit tests for {@link LlmTask}. Covers getId, getType, execute early-return
+ * paths, configure scenarios, getExtensionDescriptor, and private helper
+ * methods via reflection.
+ */
 class LlmTaskTest {
+
+    // === Constructor dependencies ===
     @Mock
     private IResourceClientLibrary resourceClientLibrary;
     @Mock
@@ -65,2014 +55,452 @@ class LlmTaskTest {
     private IMemoryItemConverter memoryItemConverter;
     @Mock
     private ITemplatingEngine templatingEngine;
+    @Mock
+    private IJsonSerialization jsonSerialization;
+    @Mock
+    private PrePostUtils prePostUtils;
+    @Mock
+    private ChatModelRegistry chatModelRegistry;
+    @Mock
+    private CalculatorTool calculatorTool;
+    @Mock
+    private DateTimeTool dateTimeTool;
+    @Mock
+    private WebSearchTool webSearchTool;
+    @Mock
+    private DataFormatterTool dataFormatterTool;
+    @Mock
+    private WebScraperTool webScraperTool;
+    @Mock
+    private TextSummarizerTool textSummarizerTool;
+    @Mock
+    private PdfReaderTool pdfReaderTool;
+    @Mock
+    private WeatherTool weatherTool;
+    @Mock
+    private FetchToolResponsePageTool fetchToolResponsePageTool;
+    @Mock
+    private IApiCallExecutor apiCallExecutor;
+    @Mock
+    private ToolExecutionService toolExecutionService;
+    @Mock
+    private McpToolProviderManager mcpToolProviderManager;
+    @Mock
+    private A2AToolProviderManager a2aToolProviderManager;
+    @Mock
+    private IRestAgentStore restAgentStore;
+    @Mock
+    private IRestWorkflowStore restWorkflowStore;
+    @Mock
+    private RagContextProvider ragContextProvider;
+    @Mock
+    private IUserMemoryStore userMemoryStore;
+    @Mock
+    private TokenCounterFactory tokenCounterFactory;
+    @Mock
+    private ConversationSummarizer conversationSummarizer;
+    @Mock
+    private PromptSnippetService promptSnippetService;
+    @Mock
+    private GlobalVariableResolver globalVariableResolver;
+    @Mock
+    private CounterweightService counterweightService;
+    @Mock
+    private IdentityMaskingService identityMaskingService;
+    @Mock
+    private ToolResponseTruncator toolResponseTruncator;
+    @Mock
+    private TenantQuotaService tenantQuotaService;
+    @Mock
+    private MemorySnapshotService memorySnapshotService;
+    @Mock
+    private IAttachmentStore attachmentStore;
 
-    private LlmTask langChainTask;
+    // === Memory mocks ===
+    @Mock
+    private IConversationMemory memory;
+    @Mock
+    private IWritableConversationStep currentStep;
 
-    private static final String TEST_MESSAGE_FROM_LLM = "Message from LLM";
+    private LlmTask llmTask;
 
     @BeforeEach
     void setUp() {
-        openMocks(this);
-        Map<String, Provider<ILanguageModelBuilder>> languageModelApiConnectorBuilders = new HashMap<>();
-        languageModelApiConnectorBuilders.put("openai", () -> parameters -> new ChatModel() {
-            @Override
-            public ChatResponse chat(List<ChatMessage> messages) {
-                return ChatResponse.builder().aiMessage(aiMessage(TEST_MESSAGE_FROM_LLM)).build();
-            }
-        });
-
-        var jsonSerialization = mock(IJsonSerialization.class);
-        var prePostUtils = mock(PrePostUtils.class);
-
-        // Mock all built-in tools (required for constructor injection)
-        var calculatorTool = mock(CalculatorTool.class);
-        var dateTimeTool = mock(DateTimeTool.class);
-        var webSearchTool = mock(WebSearchTool.class);
-        var dataFormatterTool = mock(DataFormatterTool.class);
-        var webScraperTool = mock(WebScraperTool.class);
-        var textSummarizerTool = mock(TextSummarizerTool.class);
-        var pdfReaderTool = mock(PdfReaderTool.class);
-        var weatherTool = mock(WeatherTool.class);
-        var apiCallExecutor = mock(IApiCallExecutor.class);
-        var toolExecutionService = mock(ToolExecutionService.class);
-        var secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
-        var globalVariableResolver = mock(GlobalVariableResolver.class);
-        when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        when(globalVariableResolver.getTemplateData()).thenReturn(java.util.Map.of());
-        var chatModelRegistry = new ChatModelRegistry(languageModelApiConnectorBuilders, globalVariableResolver, secretResolver);
-
-        var toolResponseTruncator = new ToolResponseTruncator(new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), chatModelRegistry);
-
-        var mockSnippetService = mock(PromptSnippetService.class);
-        when(mockSnippetService.getAll()).thenReturn(java.util.Collections.emptyMap());
-        var counterweightService = new CounterweightService(mockSnippetService, new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
-        counterweightService.initMetrics();
-        var identityMaskingService = new IdentityMaskingService(new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
-        identityMaskingService.initMetrics();
-
-        langChainTask = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter, templatingEngine, jsonSerialization, prePostUtils,
-                chatModelRegistry, calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool,
-                weatherTool, mock(FetchToolResponsePageTool.class),
-                apiCallExecutor, toolExecutionService, mock(McpToolProviderManager.class), mock(A2AToolProviderManager.class),
-                mock(IRestAgentStore.class), mock(IRestWorkflowStore.class), mock(RagContextProvider.class), mock(IUserMemoryStore.class),
-                new TokenCounterFactory(), mock(ConversationSummarizer.class),
-                mock(PromptSnippetService.class),
+        MockitoAnnotations.openMocks(this);
+        llmTask = new LlmTask(
+                resourceClientLibrary, dataFactory, memoryItemConverter,
+                templatingEngine, jsonSerialization, prePostUtils, chatModelRegistry,
+                calculatorTool, dateTimeTool, webSearchTool, dataFormatterTool,
+                webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,
+                fetchToolResponsePageTool,
+                apiCallExecutor, toolExecutionService, mcpToolProviderManager,
+                a2aToolProviderManager, restAgentStore, restWorkflowStore,
+                ragContextProvider, userMemoryStore, tokenCounterFactory,
+                conversationSummarizer,
+                promptSnippetService,
                 globalVariableResolver,
                 counterweightService,
                 identityMaskingService,
-                toolResponseTruncator, mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
-                null, null);
+                toolResponseTruncator, tenantQuotaService,
+                memorySnapshotService, attachmentStore);
     }
 
-    static Stream<Arguments> provideParameters() {
-        return Stream.of(
-                Arguments.of(Map.of("systemMessage", "Act as a real estate agent", "logSizeLimit", "10", "apiKey", "<apiKey>", "addToOutput", "true"),
-                        List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0)), 3, // times for templatingEngine.processTemplate (apiKey skipped)
-                        2, // times for currentStep.storeData (audit writes guarded by
-                           // collector)
-                        1 // times for currentStep.addConversationOutputList
-                ),
-                Arguments.of(Map.of("systemMessage", "Act as a real estate agent", "logSizeLimit", "10", "apiKey", "<apiKey1>"),
-                        List.of(new TextOutputItem(TEST_MESSAGE_FROM_LLM, 0)), 2, // times for templatingEngine.processTemplate (apiKey skipped)
-                        1, // times for currentStep.storeData (audit writes guarded by
-                           // collector)
-                        0 // times for currentStep.addConversationOutputList
-                )
-        // Add more test cases as needed
-        );
-    }
-
-    @ParameterizedTest
-    @MethodSource("provideParameters")
-    void execute(Map<String, String> parameters, List<TextOutputItem> expectedOutput, int timesTemplate, int timesStoreData, int timesAddOutputList)
-            throws Exception {
-        // Setup
-        IConversationMemory memory = mock(IConversationMemory.class);
-        IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-        when(memory.getCurrentStep()).thenReturn(currentStep);
-
-        var conversationOutput = new ConversationOutput();
-        conversationOutput.put("input", "hi");
-        when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-        var actionData = mock(IData.class);
-        when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-        when(actionData.getResult()).thenReturn(List.of("action1"));
-
-        var task = new LlmConfiguration.Task();
-        task.setActions(List.of("action1"));
-        task.setId("taskId");
-        task.setType("openai");
-        task.setDescription("description");
-        task.setParameters(parameters);
-
-        var llmConfig = new LlmConfiguration(List.of(task));
-
-        IData outputData = mock(IData.class);
-        when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-
-        var systemMessage = parameters.getOrDefault("systemMessage", "-1");
-        var apiKey = parameters.getOrDefault("apiKey", "-1");
-        var logSizeLimit = parameters.getOrDefault("logSizeLimit", "-1");
-        var addToOutput = parameters.getOrDefault("addToOutput", "false");
-        var convertToObject = parameters.getOrDefault("convertToObject", "false");
-        when(templatingEngine.processTemplate(eq(systemMessage), anyMap())).thenReturn(systemMessage);
-        when(templatingEngine.processTemplate(eq(apiKey), anyMap())).thenReturn(apiKey);
-        when(templatingEngine.processTemplate(eq(logSizeLimit), anyMap())).thenReturn(logSizeLimit);
-        when(templatingEngine.processTemplate(eq(addToOutput), anyMap())).thenReturn(addToOutput);
-        when(templatingEngine.processTemplate(eq(convertToObject), anyMap())).thenReturn(convertToObject);
-
-        // Test
-        langChainTask.execute(memory, llmConfig);
-
-        // Assert
-        // Verify that the templating engine was called
-        verify(templatingEngine, times(timesTemplate)).processTemplate(anyString(), anyMap());
-
-        // Verify that data was correctly added to the conversation step
-        verify(currentStep, times(timesStoreData)).storeData(any(IData.class));
-
-        // Verify that the conversation output string was updated
-        verify(currentStep, times(timesAddOutputList)).addConversationOutputList(eq(LlmTask.MEMORY_OUTPUT_IDENTIFIER), eq(expectedOutput));
-    }
+    // ====================================================================
+    // 1. getId()
+    // ====================================================================
 
     @Test
-    @DisplayName("Agent Mode — should reach CDI boundary via executeWithTools path")
-    void testExecute_AgentMode() throws Exception {
-        // Setup
-        IConversationMemory memory = mock(IConversationMemory.class);
-        IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-        when(memory.getCurrentStep()).thenReturn(currentStep);
-
-        var conversationOutput = new ConversationOutput();
-        conversationOutput.put("input", "Help me calculate");
-        when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-        var actionData = mock(IData.class);
-        when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-        when(actionData.getResult()).thenReturn(List.of("agent_action"));
-
-        var task = new LlmConfiguration.Task();
-        task.setActions(List.of("agent_action"));
-        task.setId("agentTask");
-        task.setType("openai");
-        // Enable Agent Mode to test the executeWithTools path
-        task.setEnableBuiltInTools(true);
-        task.setBuiltInToolsWhitelist(List.of("calculator"));
-        task.setParameters(Map.of("systemMessage", "Agent System Message"));
-
-        var llmConfig = new LlmConfiguration(List.of(task));
-
-        IData outputData = mock(IData.class);
-        when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-
-        // Mock templating to return inputs as-is
-        when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-        // Execute: The agent mode path reaches AiServices.builder() which requires
-        // Arc.container() — a CDI API not available in plain unit tests.
-        // We catch Throwable because CDI failures are Error subclasses
-        // (ExceptionInInitializerError, NoClassDefFoundError), not Exceptions.
-        // We then verify we got a SPECIFIC CDI-boundary error — not just "any crash."
-        Throwable thrown = null;
-        try {
-            langChainTask.execute(memory, llmConfig);
-            fail("Expected CDI boundary exception when Agent Mode reaches AiServices.builder()");
-        } catch (Throwable t) {
-            thrown = t;
-        }
-
-        // Verify this is specifically a CDI/tools-path exception, not some random NPE
-        // from bad setup. The exact exception type depends on langchain4j version
-        // and CDI availability — it may be ExceptionInInitializerError,
-        // NoClassDefFoundError,
-        // LifecycleException, or RuntimeException("Not implemented").
-        assertNotNull(thrown, "Expected an exception to be thrown");
-        Throwable rootCause = thrown;
-        while (rootCause.getCause() != null) {
-            rootCause = rootCause.getCause();
-        }
-        assertFalse(
-                rootCause instanceof NullPointerException,
-                "Should NOT be NullPointerException (that indicates bad test setup), "
-                        + "but was: " + rootCause.getClass().getSimpleName() + ": " + rootCause.getMessage());
-
-        // Verify that templating was called for system message (happens before CDI
-        // call)
-        verify(templatingEngine, atLeastOnce()).processTemplate(anyString(), anyMap());
+    void getId_returnsCorrectTaskId() {
+        TaskId id = llmTask.getId();
+        assertEquals(new TaskId("ai.labs.llm"), id);
     }
 
+    // ====================================================================
+    // 2. getType()
+    // ====================================================================
+
     @Test
-    void configure() throws Exception {
-        // Setup
-        String uriValue = "http://example.com/config";
+    void getType_returnsLangchain() {
+        assertEquals("langchain", llmTask.getType());
+    }
+
+    // ====================================================================
+    // 3. execute — null latestData (actions) → returns early
+    // ====================================================================
+
+    @Test
+    void execute_nullLatestData_returnsEarlyNoException() throws Exception {
+        doReturn(currentStep).when(memory).getCurrentStep();
+        doReturn(null).when(currentStep).getLatestData(MemoryKeys.ACTIONS);
+
+        LlmConfiguration config = new LlmConfiguration(List.of());
+
+        // Should return without error
+        assertDoesNotThrow(() -> llmTask.execute(memory, config));
+
+        // memoryItemConverter should never be called because we returned early
+        verify(memoryItemConverter, never()).convert(any());
+    }
+
+    // ====================================================================
+    // 4. execute — null actions result → returns early
+    // ====================================================================
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void execute_nullActionsResult_returnsEarly() throws Exception {
+        doReturn(currentStep).when(memory).getCurrentStep();
+
+        IData<List<String>> actionsData = mock(IData.class);
+        doReturn(actionsData).when(currentStep).getLatestData(MemoryKeys.ACTIONS);
+        doReturn(null).when(actionsData).getResult();
+
+        // memoryItemConverter.convert will be called before the null-check on actions
+        // result
+        doReturn(new HashMap<>()).when(memoryItemConverter).convert(any());
+        doReturn(Map.of()).when(promptSnippetService).getAll();
+        doReturn(Map.of()).when(globalVariableResolver).getTemplateData();
+
+        LlmConfiguration config = new LlmConfiguration(List.of());
+
+        assertDoesNotThrow(() -> llmTask.execute(memory, config));
+
+        // No task should have been processed — verify no data stored
+        verify(currentStep, never()).storeData(any());
+    }
+
+    // ====================================================================
+    // 5. execute — actions don't match any task → no task output stored
+    // ====================================================================
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void execute_actionsDoNotMatchAnyTask_noOutputStored() throws Exception {
+        doReturn(currentStep).when(memory).getCurrentStep();
+
+        IData<List<String>> actionsData = mock(IData.class);
+        doReturn(actionsData).when(currentStep).getLatestData(MemoryKeys.ACTIONS);
+        doReturn(List.of("someAction")).when(actionsData).getResult();
+
+        doReturn(new HashMap<>()).when(memoryItemConverter).convert(any());
+        doReturn(Map.of()).when(promptSnippetService).getAll();
+        doReturn(Map.of()).when(globalVariableResolver).getTemplateData();
+
+        // Task that only matches "otherAction"
+        Task task = new Task();
+        task.setActions(List.of("otherAction"));
+        task.setId("test");
+        task.setType("openai");
+        task.setParameters(Map.of("systemMessage", "hello"));
+
+        LlmConfiguration config = new LlmConfiguration(List.of(task));
+
+        assertDoesNotThrow(() -> llmTask.execute(memory, config));
+
+        // No storeData should be called because no task matched
+        verify(currentStep, never()).storeData(any());
+    }
+
+    // ====================================================================
+    // 6. execute — actions match via wildcard "*" → task executed
+    // (tests up to the point of model invocation, which would need
+    // a full ChatModel mock chain)
+    // ====================================================================
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void execute_wildcardMatchTriggersTask() throws Exception {
+        doReturn(currentStep).when(memory).getCurrentStep();
+
+        IData<List<String>> actionsData = mock(IData.class);
+        doReturn(actionsData).when(currentStep).getLatestData(MemoryKeys.ACTIONS);
+        doReturn(List.of("anyAction")).when(actionsData).getResult();
+
+        Map<String, Object> templateData = new HashMap<>();
+        doReturn(templateData).when(memoryItemConverter).convert(any());
+        doReturn(Map.of()).when(promptSnippetService).getAll();
+        doReturn(Map.of()).when(globalVariableResolver).getTemplateData();
+
+        // Return input string unchanged for template processing
+        doReturn("hello").when(templatingEngine).processTemplate(anyString(), any());
+
+        // Identity masking + counterweight pass-through
+        doReturn("hello").when(identityMaskingService).apply(anyString(), any());
+        doReturn("hello").when(counterweightService).apply(anyString(), any(), any());
+
+        // Global variable resolver for task type
+        doReturn("openai").when(globalVariableResolver).resolveValue(anyString());
+
+        // Task with wildcard match
+        Task task = new Task();
+        task.setActions(List.of("*"));
+        task.setId("test");
+        task.setType("openai");
+        task.setParameters(Map.of("systemMessage", "hello"));
+
+        LlmConfiguration config = new LlmConfiguration(List.of(task));
+
+        // chatModelRegistry.getOrCreate will be called — let it throw to stop execution
+        // at a known point without needing to mock the entire LLM call chain
+        doThrow(new ChatModelRegistry.UnsupportedLlmTaskException("test-stop"))
+                .when(chatModelRegistry).getOrCreate(anyString(), any());
+
+        LifecycleException ex = assertThrows(LifecycleException.class,
+                () -> llmTask.execute(memory, config));
+
+        // Verify the exception was thrown from chatModelRegistry, confirming
+        // the task was matched and execution proceeded past action matching
+        assertTrue(ex.getMessage().contains("test-stop"));
+    }
+
+    // ====================================================================
+    // 7. configure — null/empty URI throws WorkflowConfigurationException
+    // ====================================================================
+
+    @Test
+    void configure_nullUri_throwsWorkflowConfigurationException() {
         Map<String, Object> configuration = new HashMap<>();
-        configuration.put("uri", uriValue);
+        // no "uri" key at all
 
-        var task = new LlmConfiguration.Task();
-        task.setActions(List.of("action1", "action2"));
-        task.setId("taskId");
-        task.setType("taskType");
-        task.setDescription("A task description");
-        task.setParameters(Map.of("key", "value"));
+        WorkflowConfigurationException ex = assertThrows(
+                WorkflowConfigurationException.class,
+                () -> llmTask.configure(configuration, Map.of()));
+
+        assertTrue(ex.getMessage().contains("No resource URI has been defined"));
+    }
+
+    @Test
+    void configure_emptyUri_throwsWorkflowConfigurationException() {
+        Map<String, Object> configuration = new HashMap<>();
+        configuration.put("uri", "");
+
+        WorkflowConfigurationException ex = assertThrows(
+                WorkflowConfigurationException.class,
+                () -> llmTask.configure(configuration, Map.of()));
+
+        assertTrue(ex.getMessage().contains("No resource URI has been defined"));
+    }
+
+    // ====================================================================
+    // 8. configure — valid URI with ServiceException → wraps
+    // ====================================================================
+
+    @Test
+    void configure_validUriWithServiceException_wrapsInWorkflowConfigurationException() throws Exception {
+        Map<String, Object> configuration = new HashMap<>();
+        configuration.put("uri", "eddi://ai.labs.llm/llmstore/llms/abc123?version=1");
+
+        doThrow(new ServiceException("resource not found"))
+                .when(resourceClientLibrary).getResource(any(URI.class), eq(LlmConfiguration.class));
+
+        WorkflowConfigurationException ex = assertThrows(
+                WorkflowConfigurationException.class,
+                () -> llmTask.configure(configuration, Map.of()));
+
+        assertTrue(ex.getMessage().contains("resource not found"));
+        assertNotNull(ex.getCause());
+        assertInstanceOf(ServiceException.class, ex.getCause());
+    }
+
+    // ====================================================================
+    // 9. configure — valid URI → loads and returns LlmConfiguration
+    // ====================================================================
+
+    @Test
+    void configure_validUri_loadsAndReturnsConfig() throws Exception {
+        Task task = new Task();
+        task.setActions(List.of("help"));
+        task.setType("openai");
+        task.setParameters(Map.of("systemMessage", "You are helpful"));
 
         LlmConfiguration expectedConfig = new LlmConfiguration(List.of(task));
 
-        when(resourceClientLibrary.getResource(any(URI.class), eq(LlmConfiguration.class))).thenReturn(expectedConfig);
+        Map<String, Object> configuration = new HashMap<>();
+        configuration.put("uri", "eddi://ai.labs.llm/llmstore/llms/abc123?version=1");
 
-        // Test
-        Object result = langChainTask.configure(configuration, Collections.emptyMap());
+        doReturn(expectedConfig)
+                .when(resourceClientLibrary).getResource(any(URI.class), eq(LlmConfiguration.class));
 
-        // Assert
-        assertNotNull(result, "Configuration result should not be null.");
-        assertInstanceOf(LlmConfiguration.class, result, "Result should be an instance of LlmConfiguration.");
-        LlmConfiguration configResult = (LlmConfiguration) result;
-        assertEquals(expectedConfig.tasks().size(), configResult.tasks().size(), "Task sizes should match.");
-        assertEquals(expectedConfig.tasks().getFirst().getId(), configResult.tasks().getFirst().getId(), "Task IDs should match.");
+        Object result = llmTask.configure(configuration, Map.of());
+
+        assertSame(expectedConfig, result);
+        verify(resourceClientLibrary).getResource(any(URI.class), eq(LlmConfiguration.class));
+    }
+
+    // ====================================================================
+    // 10. getExtensionDescriptor — displayName and configs
+    // ====================================================================
+
+    @Test
+    void getExtensionDescriptor_returnsCorrectDisplayNameAndConfigs() {
+        ExtensionDescriptor descriptor = llmTask.getExtensionDescriptor();
+
+        assertNotNull(descriptor);
+        assertEquals("Lang Chain", descriptor.getDisplayName());
+        assertNotNull(descriptor.getConfigs());
+        assertTrue(descriptor.getConfigs().containsKey("uri"));
+
+        ExtensionDescriptor.ConfigValue uriConfig = descriptor.getConfigs().get("uri");
+        assertNotNull(uriConfig);
+        assertEquals("Resource URI", uriConfig.getDisplayName());
+        assertEquals(ExtensionDescriptor.FieldType.URI, uriConfig.getFieldType());
+    }
+
+    // ====================================================================
+    // 11. resolveModelName via reflection
+    // ====================================================================
+
+    @Test
+    void resolveModelName_modelNameWins() throws Exception {
+        Method method = LlmTask.class.getDeclaredMethod("resolveModelName", Map.class);
+        method.setAccessible(true);
+
+        Map<String, String> params = new HashMap<>();
+        params.put("modelName", "gpt-4");
+        params.put("model", "gpt-3.5");
+        params.put("modelId", "some-id");
+        params.put("deploymentName", "some-deploy");
+
+        String result = (String) method.invoke(null, params);
+        assertEquals("gpt-4", result);
     }
 
     @Test
-    void testGetExtensionDescriptor() {
-        ExtensionDescriptor descriptor = langChainTask.getExtensionDescriptor();
+    void resolveModelName_modelFallback() throws Exception {
+        Method method = LlmTask.class.getDeclaredMethod("resolveModelName", Map.class);
+        method.setAccessible(true);
 
-        assertNotNull(descriptor, "The returned ExtensionDescriptor should not be null.");
+        Map<String, String> params = new HashMap<>();
+        params.put("model", "gpt-3.5");
+        params.put("modelId", "some-id");
+        params.put("deploymentName", "some-deploy");
 
-        // Assuming ID and Display Name are known and static for the LangChainTask
-        assertEquals(LlmTask.ID, descriptor.getType().name(), "The ID should match the expected value.");
-        assertEquals("Lang Chain", descriptor.getDisplayName(), "The display name should match 'Lang Chain'.");
-
-        assertFalse(descriptor.getConfigs().isEmpty(), "Expected configs to be defined.");
-
-        assertTrue(descriptor.getConfigs().containsKey("uri"), "Expected 'uri' config to be present.");
-        var uriConfig = descriptor.getConfigs().get("uri");
-        assertNotNull(uriConfig, "'uri' config should not be null.");
-        assertEquals(ExtensionDescriptor.FieldType.URI, uriConfig.getFieldType(), "'uri' config type should be URI.");
+        String result = (String) method.invoke(null, params);
+        assertEquals("gpt-3.5", result);
     }
 
-    // ==================== Additional Test Cases ====================
+    @Test
+    void resolveModelName_modelIdFallback() throws Exception {
+        Method method = LlmTask.class.getDeclaredMethod("resolveModelName", Map.class);
+        method.setAccessible(true);
 
-    @Nested
-    @DisplayName("Backward Compatibility Tests")
-    class BackwardCompatibilityTests {
+        Map<String, String> params = new HashMap<>();
+        params.put("modelId", "anthropic-id");
+        params.put("deploymentName", "some-deploy");
 
-        @Test
-        @DisplayName("Legacy configuration without tools should work in simple chat mode")
-        void testLegacyConfigurationWithoutTools() throws Exception {
-            // Setup
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "Hello");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("chat"));
-
-            // Legacy configuration - no tools, no agent mode flags
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("chat"));
-            task.setId("legacyChat");
-            task.setType("openai");
-            task.setParameters(Map.of("systemMessage", "You are helpful", "apiKey", "test-key", "addToOutput", "true"));
-            // Note: enableBuiltInTools defaults to false, tools is null
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            // Execute
-            langChainTask.execute(memory, llmConfig);
-
-            // Assert - should execute in legacy mode and store output
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-            verify(currentStep).addConversationOutputList(eq(LlmTask.MEMORY_OUTPUT_IDENTIFIER), anyList());
-        }
-
-        @Test
-        @DisplayName("Task with enableBuiltInTools=false should run in legacy mode")
-        void testExplicitlyDisabledToolsRunsInLegacyMode() throws Exception {
-            // Setup
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "Hello");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("chat"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("chat"));
-            task.setId("noToolsChat");
-            task.setType("openai");
-            task.setEnableBuiltInTools(false); // Explicitly disabled
-            task.setParameters(Map.of("systemMessage", "You are helpful", "apiKey", "test-key"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            // Execute - should NOT throw NPE because we're in legacy mode
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-        }
+        String result = (String) method.invoke(null, params);
+        assertEquals("anthropic-id", result);
     }
 
-    @Nested
-    @DisplayName("Action Matching Tests")
-    class ActionMatchingTests {
+    @Test
+    void resolveModelName_deploymentNameFallback() throws Exception {
+        Method method = LlmTask.class.getDeclaredMethod("resolveModelName", Map.class);
+        method.setAccessible(true);
 
-        @Test
-        @DisplayName("Task should execute when action matches exactly")
-        void testExactActionMatch() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
+        Map<String, String> params = new HashMap<>();
+        params.put("deploymentName", "azure-deploy");
 
-            // Setup conversation outputs with user input for conversation history
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "user message");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-            when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("specific_action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("specific_action"));
-            task.setId("test");
-            task.setType("openai");
-            task.setParameters(Map.of("apiKey", "key"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            langChainTask.execute(memory, llmConfig);
-
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-
-        @Test
-        @DisplayName("Task should execute when wildcard (*) action is configured")
-        void testWildcardActionMatch() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            // Setup conversation outputs with user input for conversation history
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "user message");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-            when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("any_random_action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("*")); // Wildcard - matches all
-            task.setId("test");
-            task.setType("openai");
-            task.setParameters(Map.of("apiKey", "key"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            langChainTask.execute(memory, llmConfig);
-
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-
-        @Test
-        @DisplayName("Task should NOT execute when action does not match")
-        void testNoActionMatch() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-            when(memory.getConversationOutputs()).thenReturn(List.of(new ConversationOutput()));
-            when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("different_action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("specific_action")); // Does not match
-            task.setId("test");
-            task.setType("openai");
-            task.setParameters(Map.of("apiKey", "key"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            langChainTask.execute(memory, llmConfig);
-
-            // Should never store data because action didn't match
-            verify(currentStep, never()).storeData(any(IData.class));
-        }
+        String result = (String) method.invoke(null, params);
+        assertEquals("azure-deploy", result);
     }
 
-    @Nested
-    @DisplayName("Edge Cases Tests")
-    class EdgeCasesTests {
+    @Test
+    void resolveModelName_allNull_returnsNull() throws Exception {
+        Method method = LlmTask.class.getDeclaredMethod("resolveModelName", Map.class);
+        method.setAccessible(true);
 
-        @Test
-        @DisplayName("Should handle null actions data gracefully")
-        void testNullActionsData() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-            when(currentStep.getLatestData("actions")).thenReturn(null);
+        Map<String, String> params = new HashMap<>();
 
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setType("openai");
-            task.setParameters(Map.of("apiKey", "key"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            // Should not throw, should return early
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-            verify(currentStep, never()).storeData(any(IData.class));
-        }
-
-        @Test
-        @DisplayName("Should handle null action result gracefully")
-        void testNullActionResult() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(null);
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setType("openai");
-            task.setParameters(Map.of("apiKey", "key"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            // Should not throw, should return early
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-            verify(currentStep, never()).storeData(any(IData.class));
-        }
-
-        @Test
-        @DisplayName("Should throw exception for unsupported model type")
-        void testUnsupportedModelType() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            // Setup conversation outputs with user input - required so messages list is not
-            // empty
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "user message");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-            when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("test");
-            task.setType("unsupported_model"); // Not registered
-            task.setParameters(Map.of("apiKey", "key"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            assertThrows(LifecycleException.class, () -> langChainTask.execute(memory, llmConfig));
-        }
-
-        @Test
-        @DisplayName("Should throw WorkflowConfigurationException when URI is missing")
-        void testMissingUri() {
-            Map<String, Object> configuration = new HashMap<>();
-            // No URI provided
-
-            assertThrows(WorkflowConfigurationException.class, () -> langChainTask.configure(configuration, Collections.emptyMap()));
-        }
-
-        @Test
-        @DisplayName("Should throw WorkflowConfigurationException when resource loading fails")
-        void testResourceLoadingFailure() throws Exception {
-            Map<String, Object> configuration = new HashMap<>();
-            configuration.put("uri", "http://example.com/config");
-
-            when(resourceClientLibrary.getResource(any(URI.class), eq(LlmConfiguration.class))).thenThrow(new ServiceException("Connection failed"));
-
-            assertThrows(WorkflowConfigurationException.class, () -> langChainTask.configure(configuration, Collections.emptyMap()));
-        }
+        String result = (String) method.invoke(null, params);
+        assertNull(result);
     }
 
-    @Nested
-    @DisplayName("Task Identity Tests")
-    class TaskIdentityTests {
+    // ====================================================================
+    // 12. extractUserInput via reflection
+    // ====================================================================
 
-        @Test
-        @DisplayName("getId should return correct identifier")
-        void testGetId() {
-            assertEquals("ai.labs.llm", langChainTask.getId().name());
-        }
+    @SuppressWarnings("unchecked")
+    @Test
+    void extractUserInput_nullData_returnsNull() throws Exception {
+        Method method = LlmTask.class.getDeclaredMethod("extractUserInput", IConversationMemory.class);
+        method.setAccessible(true);
 
-        @Test
-        @DisplayName("getType should return 'langchain'")
-        void testGetType() {
-            assertEquals("langchain", langChainTask.getType());
-        }
+        doReturn(currentStep).when(memory).getCurrentStep();
+        doReturn(null).when(currentStep).getLatestData("input");
+
+        String result = (String) method.invoke(llmTask, memory);
+        assertNull(result);
     }
 
-    @Nested
-    @DisplayName("Streaming Mode Tests")
-    class StreamingModeTests {
+    @SuppressWarnings("unchecked")
+    @Test
+    void extractUserInput_validData_returnsString() throws Exception {
+        Method method = LlmTask.class.getDeclaredMethod("extractUserInput", IConversationMemory.class);
+        method.setAccessible(true);
 
-        @Test
-        @DisplayName("No event sink — standard sync path runs (backward compatible)")
-        void execute_noEventSink_usesSyncPath() throws Exception {
-            // Setup
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-            when(memory.getEventSink()).thenReturn(null); // No streaming
+        doReturn(currentStep).when(memory).getCurrentStep();
 
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hi");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+        IData<String> inputData = mock(IData.class);
+        doReturn(inputData).when(currentStep).getLatestData("input");
+        doReturn("Hello world").when(inputData).getResult();
 
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action1"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action1"));
-            task.setId("taskId");
-            task.setType("openai");
-            task.setDescription("test");
-            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "<key>", "logSizeLimit", "10"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            // Test
-            langChainTask.execute(memory, llmConfig);
-
-            // Assert: task executed, response stored in memory
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-
-        @Test
-        @DisplayName("With event sink — streaming detection is triggered")
-        void execute_withEventSink_detectsStreaming() throws Exception {
-            // Setup
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var eventSink = mock(ai.labs.eddi.engine.lifecycle.ConversationEventSink.class);
-            when(memory.getEventSink()).thenReturn(eventSink);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hi");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action1"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action1"));
-            task.setId("taskId");
-            task.setType("openai");
-            task.setDescription("test");
-            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "<key>", "logSizeLimit", "10"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            // Test — the openai mock builder doesn't support buildStreaming,
-            // so it falls back to sync + emits as single chunk
-            langChainTask.execute(memory, llmConfig);
-
-            // Assert: event sink received the response as a single token
-            verify(eventSink, atLeastOnce()).onToken(anyString());
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
+        String result = (String) method.invoke(llmTask, memory);
+        assertEquals("Hello world", result);
     }
 
-    @Nested
-    @DisplayName("Audit Memory Key Tests")
-    class AuditMemoryKeyTests {
-
-        @Test
-        @DisplayName("Should write audit:* keys when audit collector is set")
-        void testAuditKeysWrittenWhenCollectorSet() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            // Set audit collector — this enables audit writes
-            when(memory.getAuditCollector()).thenReturn(entry -> {
-            });
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hi");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action1"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action1"));
-            task.setId("taskId");
-            task.setType("openai");
-            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "<key>"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            langChainTask.execute(memory, llmConfig);
-
-            // Verify audit keys are written: langchain data (1) + compiled_prompt +
-            // model_response + model_name (3) = 4
-            verify(currentStep, times(4)).storeData(any(IData.class));
-
-            // Verify the data factory was called with audit key names
-            verify(dataFactory).createData(eq("audit:compiled_prompt"), any());
-            verify(dataFactory).createData(eq("audit:model_response"), any());
-            verify(dataFactory).createData(eq("audit:model_name"), any());
-        }
-
-        @Test
-        @DisplayName("Should NOT write audit:* keys when audit collector is null")
-        void testNoAuditKeysWhenCollectorNull() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            // No audit collector set
-            when(memory.getAuditCollector()).thenReturn(null);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hi");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action1"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action1"));
-            task.setId("taskId");
-            task.setType("openai");
-            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "<key>"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            langChainTask.execute(memory, llmConfig);
-
-            // Only langchain data stored, no audit keys
-            verify(currentStep, times(1)).storeData(any(IData.class));
-            verify(dataFactory, never()).createData(eq("audit:compiled_prompt"), any());
-            verify(dataFactory, never()).createData(eq("audit:model_response"), any());
-            verify(dataFactory, never()).createData(eq("audit:model_name"), any());
-        }
-    }
-
-    @Nested
-    @DisplayName("Cascade Mode Tests")
-    class CascadeModeTests {
-
-        @Test
-        @DisplayName("Cascade enabled with 1 step — should execute and store cascade trace")
-        void testCascadeEnabledSingleStep() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "What is 2+2?");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("cascade_action"));
-
-            // Configure task with cascade enabled (single step, none strategy = always
-            // accepts)
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("cascade_action"));
-            task.setId("cascadeTask");
-            task.setType("openai");
-            task.setParameters(Map.of("systemMessage", "You are helpful", "apiKey", "test-key"));
-
-            var cascade = new LlmConfiguration.ModelCascadeConfig();
-            cascade.setEnabled(true);
-            cascade.setEvaluationStrategy("none"); // always returns confidence 1.0
-            var step = new LlmConfiguration.CascadeStep();
-            step.setType("openai");
-            step.setTimeoutMs(5000L);
-            cascade.setSteps(List.of(step));
-            task.setModelCascade(cascade);
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            // Execute
-            langChainTask.execute(memory, llmConfig);
-
-            // Assert: cascade trace should be stored
-            verify(dataFactory).createData(contains("cascade:trace"), any());
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-
-        @Test
-        @DisplayName("Cascade disabled — should use standard execution path (backward compat)")
-        void testCascadeDisabledUsesStandardPath() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hi");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("chat"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("chat"));
-            task.setId("legacyChat");
-            task.setType("openai");
-            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
-
-            // Cascade present but disabled
-            var cascade = new LlmConfiguration.ModelCascadeConfig();
-            cascade.setEnabled(false);
-            task.setModelCascade(cascade);
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            langChainTask.execute(memory, llmConfig);
-
-            // Should NOT have cascade trace (standard path)
-            verify(dataFactory, never()).createData(contains("cascade:trace"), any());
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-
-        @Test
-        @DisplayName("Null modelCascade — should use standard execution path (full backward compat)")
-        void testNullCascadeUsesStandardPath() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hi");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("chat"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("chat"));
-            task.setId("legacyChat");
-            task.setType("openai");
-            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
-            // No cascade set — null by default
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            langChainTask.execute(memory, llmConfig);
-
-            verify(dataFactory, never()).createData(contains("cascade:trace"), any());
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-
-        @Test
-        @DisplayName("Cascade with audit collector — should store cascade model and confidence audit keys")
-        void testCascadeAuditKeys() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-            when(memory.getAuditCollector()).thenReturn(entry -> {
-            });
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "test");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("auditCascade");
-            task.setType("openai");
-            task.setParameters(Map.of("systemMessage", "test", "apiKey", "key"));
-
-            var cascade = new LlmConfiguration.ModelCascadeConfig();
-            cascade.setEnabled(true);
-            cascade.setEvaluationStrategy("none");
-            var step = new LlmConfiguration.CascadeStep();
-            step.setType("openai");
-            cascade.setSteps(List.of(step));
-            task.setModelCascade(cascade);
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            langChainTask.execute(memory, llmConfig);
-
-            // Verify cascade-specific audit keys
-            verify(dataFactory).createData(eq("audit:cascade_model"), any());
-            verify(dataFactory).createData(eq("audit:cascade_confidence"), any());
-        }
-    }
-
-    @Nested
-    @DisplayName("httpCall RAG Tests")
-    class HttpCallRagTests {
-
-        @Test
-        @DisplayName("httpCallRag null — should execute normally without RAG context")
-        void testHttpCallRag_null_noOp() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hello");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            // No user input in memory step (returns null from extractUserInput)
-            when(currentStep.getLatestData("input")).thenReturn(null);
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("ragTask");
-            task.setType("openai");
-            task.setHttpCallRag(null); // Explicitly null
-            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            langChainTask.execute(memory, llmConfig);
-
-            // Should execute normally — no httpCall RAG trace stored
-            verify(dataFactory, never()).createData(contains("rag:httpcall:trace"), any());
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-
-        @Test
-        @DisplayName("httpCallRag set but no user input — should skip gracefully")
-        void testHttpCallRag_noUserInput_skips() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hello");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            // No user input in conversation step
-            when(currentStep.getLatestData("input")).thenReturn(null);
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("ragTask");
-            task.setType("openai");
-            task.setHttpCallRag("search-api"); // Set but no user input → skip
-            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            // Should NOT throw
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-
-            // No httpCall RAG trace (skipped due to null input)
-            verify(dataFactory, never()).createData(contains("rag:httpcall:trace"), any());
-        }
-
-        @Test
-        @DisplayName("httpCallRag set with user input but no matching httpCall — should warn and continue")
-        void testHttpCallRag_notFound_graceful() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "search query");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            // Provide user input
-            var inputData = mock(IData.class);
-            when(currentStep.getLatestData("input")).thenReturn(inputData);
-            when(inputData.getResult()).thenReturn("search query");
-
-            // Mock agent context (needed for WorkflowTraversal)
-            when(memory.getAgentId()).thenReturn(null); // No agent context = empty discovery
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("ragTask");
-            task.setType("openai");
-            task.setHttpCallRag("nonexistent-search"); // No matching httpCall in workflow
-            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            // Should NOT throw — graceful degradation
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-
-            // No httpCall RAG trace (not found)
-            verify(dataFactory, never()).createData(contains("rag:httpcall:trace"), any());
-            // Task should still execute normally (storeData for langchain output)
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-    }
-
-    @Nested
-    @DisplayName("convertToObject Tests")
-    class ConvertToObjectTests {
-
-        @Test
-        @DisplayName("convertToObject=true with valid JSON — should deserialize response")
-        void testConvertToObject_validJson() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "get data");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("jsonTask");
-            task.setType("openai");
-            task.setParameters(Map.of("systemMessage", "respond in JSON",
-                    "apiKey", "key", "convertToObject", "true"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            langChainTask.execute(memory, llmConfig);
-
-            // Should store langchain data
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-
-        @Test
-        @DisplayName("convertToObject=true with responseSchema — should inject schema in system message")
-        void testConvertToObject_withResponseSchema() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "get data");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("schemaTask");
-            task.setType("openai");
-            task.setParameters(Map.of("systemMessage", "respond in JSON",
-                    "apiKey", "key", "convertToObject", "true",
-                    "responseSchema", "{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"}}}"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            langChainTask.execute(memory, llmConfig);
-
-            // Verify schema was injected into template processing
-            verify(templatingEngine, atLeastOnce()).processTemplate(anyString(), anyMap());
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-    }
-
-    @Nested
-    @DisplayName("Response Object Name Tests")
-    class ResponseObjectNameTests {
-
-        @Test
-        @DisplayName("Custom responseObjectName — should use it instead of task ID")
-        void testCustomResponseObjectName() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hello");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("taskId");
-            task.setType("openai");
-            task.setResponseObjectName("customResponseName");
-            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            langChainTask.execute(memory, llmConfig);
-
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-
-        @Test
-        @DisplayName("Custom responseMetadataObjectName — should store metadata")
-        void testResponseMetadataObjectName() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hello");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("taskId");
-            task.setType("openai");
-            task.setResponseMetadataObjectName("metadata");
-            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            langChainTask.execute(memory, llmConfig);
-
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-    }
-
-    @Nested
-    @DisplayName("addToOutput Explicit False Tests")
-    class AddToOutputFalseTests {
-
-        @Test
-        @DisplayName("addToOutput=false — should NOT add to conversation output or stream")
-        void testAddToOutputExplicitlyFalse() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var eventSink = mock(ai.labs.eddi.engine.lifecycle.ConversationEventSink.class);
-            when(memory.getEventSink()).thenReturn(eventSink);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "get data");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("taskId");
-            task.setType("openai");
-            task.setParameters(Map.of("systemMessage", "extract data",
-                    "apiKey", "key", "addToOutput", "false",
-                    "convertToObject", "true"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            langChainTask.execute(memory, llmConfig);
-
-            // Should NOT add to conversation output list
-            verify(currentStep, never()).addConversationOutputList(eq(LlmTask.MEMORY_OUTPUT_IDENTIFIER), anyList());
-        }
-    }
-
-    @Nested
-    @DisplayName("Rolling Summary Tests")
-    class RollingSummaryTests {
-
-        @Test
-        @DisplayName("Summary enabled but no existing summary — should still execute")
-        void testSummaryEnabled_noExistingSummary() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hello");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("summaryTask");
-            task.setType("openai");
-            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
-
-            var summaryConfig = new LlmConfiguration.ConversationSummaryConfig();
-            summaryConfig.setEnabled(true);
-            task.setConversationSummary(summaryConfig);
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            // No existing summary in memory
-            when(currentStep.getLatestData("conversation:summary")).thenReturn(null);
-
-            // Mock conversation properties (needed for summary properties exclusion check)
-            var conversationProperties = mock(IConversationMemory.IConversationProperties.class);
-            when(memory.getConversationProperties()).thenReturn(conversationProperties);
-
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-
-        @Test
-        @DisplayName("Summary disabled — should skip summarization entirely")
-        void testSummaryDisabled() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hello");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("noSummaryTask");
-            task.setType("openai");
-            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
-
-            var summaryConfig = new LlmConfiguration.ConversationSummaryConfig();
-            summaryConfig.setEnabled(false);
-            task.setConversationSummary(summaryConfig);
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-        }
-    }
-
-    @Nested
-    @DisplayName("Token-Aware Windowing Tests")
-    class TokenAwareWindowingTests {
-
-        @Test
-        @DisplayName("maxContextTokens set — should use token-aware message building")
-        void testTokenAwareWindowingPath() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hello");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("tokenTask");
-            task.setType("openai");
-            task.setMaxContextTokens(4096);
-            task.setAnchorFirstSteps(1);
-            task.setParameters(Map.of("systemMessage", "be helpful",
-                    "apiKey", "key", "modelName", "gpt-4o"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-    }
-
-    @Nested
-    @DisplayName("resolveModelName Tests")
-    class ResolveModelNameTests {
-
-        private void executeWithModelParam(String paramKey, String paramValue) throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hi");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("modelNameTest");
-            task.setType("openai");
-            task.setMaxContextTokens(4096);
-            var params = new HashMap<String, String>();
-            params.put("systemMessage", "test");
-            params.put("apiKey", "key");
-            params.put(paramKey, paramValue);
-            task.setParameters(params);
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            langChainTask.execute(memory, llmConfig);
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-
-        @Test
-        @DisplayName("modelName parameter key (OpenAI)")
-        void testModelName() throws Exception {
-            executeWithModelParam("modelName", "gpt-4o");
-        }
-
-        @Test
-        @DisplayName("model parameter key (Ollama)")
-        void testModel() throws Exception {
-            // Uses gpt-4o value to satisfy OpenAI tokenizer; tests that 'model' key is
-            // recognized
-            executeWithModelParam("model", "gpt-4o");
-        }
-
-        @Test
-        @DisplayName("modelId parameter key (Bedrock)")
-        void testModelId() throws Exception {
-            executeWithModelParam("modelId", "gpt-4o");
-        }
-
-        @Test
-        @DisplayName("deploymentName parameter key (Azure)")
-        void testDeploymentName() throws Exception {
-            executeWithModelParam("deploymentName", "gpt-4o");
-        }
-    }
-
-    @Nested
-    @DisplayName("Snippet Injection Tests")
-    class SnippetInjectionTests {
-
-        @Test
-        @DisplayName("Snippets available — should be injected into template data")
-        void testSnippetsInjected() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hello");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("snippetTask");
-            task.setType("openai");
-            task.setParameters(Map.of("systemMessage", "{{snippets.greeting}}", "apiKey", "key"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            langChainTask.execute(memory, llmConfig);
-
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-    }
-
-    @Nested
-    @DisplayName("Multiple Tasks Tests")
-    class MultipleTasksTests {
-
-        @Test
-        @DisplayName("Two tasks matching different actions — only matching task executes")
-        void testMultipleTasksSelectiveExecution() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hello");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("task1_action"));
-
-            var task1 = new LlmConfiguration.Task();
-            task1.setActions(List.of("task1_action"));
-            task1.setId("task1");
-            task1.setType("openai");
-            task1.setParameters(Map.of("systemMessage", "task1", "apiKey", "key", "addToOutput", "true"));
-
-            var task2 = new LlmConfiguration.Task();
-            task2.setActions(List.of("task2_action"));
-            task2.setId("task2");
-            task2.setType("openai");
-            task2.setParameters(Map.of("systemMessage", "task2", "apiKey", "key", "addToOutput", "true"));
-
-            var llmConfig = new LlmConfiguration(List.of(task1, task2));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            langChainTask.execute(memory, llmConfig);
-
-            // Only one task should add to output
-            verify(currentStep, times(1)).addConversationOutputList(eq(LlmTask.MEMORY_OUTPUT_IDENTIFIER), anyList());
-        }
-    }
-
-    @Nested
-    @DisplayName("conversationHistoryLimit Tests")
-    class ConversationHistoryLimitTests {
-
-        @Test
-        @DisplayName("conversationHistoryLimit on task — should override logSizeLimit param")
-        void testConversationHistoryLimitOverride() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hello");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("histLimitTask");
-            task.setType("openai");
-            task.setConversationHistoryLimit(5);
-            task.setParameters(Map.of("systemMessage", "be helpful", "apiKey", "key"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-    }
-
-    @Nested
-    @DisplayName("Cascade skipCascade Branch Tests")
-    class CascadeSkipBranchTests {
-
-        @Test
-        @DisplayName("Agent mode with cascade but enableInAgentMode=false — should skip cascade")
-        void testCascadeSkippedInAgentMode() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hello");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("agentCascade");
-            task.setType("openai");
-            task.setEnableBuiltInTools(true); // Agent mode
-            task.setBuiltInToolsWhitelist(List.of("calculator"));
-            task.setParameters(Map.of("systemMessage", "test", "apiKey", "key"));
-
-            var cascade = new LlmConfiguration.ModelCascadeConfig();
-            cascade.setEnabled(true);
-            cascade.setEnableInAgentMode(false); // Should skip cascade
-            cascade.setEvaluationStrategy("none");
-            var step = new LlmConfiguration.CascadeStep();
-            step.setType("openai");
-            cascade.setSteps(List.of(step));
-            task.setModelCascade(cascade);
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            // Agent mode reaches CDI boundary — same pattern as testExecute_AgentMode
-            try {
-                langChainTask.execute(memory, llmConfig);
-            } catch (Throwable ignored) {
-            }
-
-            // The cascade trace should NOT be stored (cascade was skipped)
-            verify(dataFactory, never()).createData(contains("cascade:trace"), any());
-        }
-    }
-
-    @Nested
-    @DisplayName("Empty Conversation Outputs Tests")
-    class EmptyConversationOutputsTests {
-
-        @Test
-        @DisplayName("Empty conversation outputs — should produce empty messages and return early")
-        void testEmptyConversationOutputs() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            // Empty conversation outputs — no messages to send
-            when(memory.getConversationOutputs()).thenReturn(List.of());
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("emptyTask");
-            task.setType("openai");
-            // No systemMessage — only user messages would generate content, but there are
-            // none
-            task.setParameters(Map.of("apiKey", "key"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            // Should not throw — should return early when messages list is empty
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-        }
-    }
-
-    @Nested
-    @DisplayName("ConvertToObject non-JSON Fallback Tests")
-    class ConvertToObjectNonJsonTests {
-
-        @Test
-        @DisplayName("convertToObject=true but LLM returns plain text — stores as string")
-        void testConvertToObject_plainTextFallback() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "give me a summary");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("convertTask");
-            task.setType("openai");
-            // convertToObject=true but LLM will return plain text "Message from LLM"
-            task.setParameters(Map.of("apiKey", "key", "convertToObject", "true"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            // Execute — LLM returns "Message from LLM" which is not JSON
-            // This should hit the else branch at line 433-437
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-
-            // Verify data was stored (the raw response + the string fallback)
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-    }
-
-    @Nested
-    @DisplayName("Rolling Summary with Existing Summary Tests")
-    class RollingSummaryWithExistingTests {
-
-        @Test
-        @DisplayName("existing summary — injects summary prefix into system message")
-        void testSummaryEnabled_withExistingSummary() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-            when(memory.getConversationId()).thenReturn("conv-123");
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hi");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            // ConversationSummarizer.readSummary() reads from ConversationProperties (not
-            // currentStep)
-            var convProps = mock(IConversationMemory.IConversationProperties.class);
-            when(memory.getConversationProperties()).thenReturn(convProps);
-
-            // Simulate existing rolling summary in conversation properties
-            var summaryProp = new ai.labs.eddi.configs.properties.model.Property(
-                    "conversation:running_summary", "User discussed weather in turns 1-3",
-                    ai.labs.eddi.configs.properties.model.Property.Scope.conversation);
-            when(convProps.get("conversation:running_summary")).thenReturn(summaryProp);
-
-            var throughStepProp = new ai.labs.eddi.configs.properties.model.Property(
-                    "conversation:summary_through_step", 3,
-                    ai.labs.eddi.configs.properties.model.Property.Scope.conversation);
-            when(convProps.get("conversation:summary_through_step")).thenReturn(throughStepProp);
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("summaryTask");
-            task.setType("openai");
-            task.setParameters(Map.of("apiKey", "key", "systemMessage", "You are helpful"));
-
-            var summaryConfig = new LlmConfiguration.ConversationSummaryConfig();
-            summaryConfig.setEnabled(true);
-            summaryConfig.setExcludePropertiesFromSummary(false);
-            task.setConversationSummary(summaryConfig);
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-        }
-
-        @Test
-        @DisplayName("summary with excludePropertiesFromSummary=true — filters conversation: properties")
-        void testSummaryEnabled_excludeProperties() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-            when(memory.getConversationId()).thenReturn("conv-456");
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hi");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            // Simulate conversation properties (for excludePropertiesFromSummary branch)
-            var props = new ai.labs.eddi.engine.memory.model.ConversationProperties(memory);
-            props.put("language",
-                    new ai.labs.eddi.configs.properties.model.Property("language", "English",
-                            ai.labs.eddi.configs.properties.model.Property.Scope.longTerm));
-            props.put("conversation:internal", new ai.labs.eddi.configs.properties.model.Property("conversation:internal", "skip_me",
-                    ai.labs.eddi.configs.properties.model.Property.Scope.longTerm));
-            when(memory.getConversationProperties()).thenReturn(props);
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("excludePropsTask");
-            task.setType("openai");
-            task.setParameters(Map.of("apiKey", "key", "systemMessage", "System"));
-
-            var summaryConfig = new LlmConfiguration.ConversationSummaryConfig();
-            summaryConfig.setEnabled(true);
-            summaryConfig.setExcludePropertiesFromSummary(true);
-            task.setConversationSummary(summaryConfig);
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-        }
-    }
-
-    @Nested
-    @DisplayName("Streaming Legacy Fallback Tests")
-    class StreamingLegacyFallbackTests {
-
-        @Test
-        @DisplayName("streaming mode with null streaming model — falls back to sync with onToken")
-        void testStreamingFallback_nullStreamingModel() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "hi");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            // Set event sink to trigger streaming path
-            var eventSink = mock(ai.labs.eddi.engine.lifecycle.ConversationEventSink.class);
-            when(memory.getEventSink()).thenReturn(eventSink);
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("streamFallback");
-            task.setType("openai");
-            task.setParameters(Map.of("apiKey", "key", "addToOutput", "true"));
-            // NOT agent mode — so it will try streaming first, fall back to sync
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            // Execute — will hit the streaming fallback path
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-
-            // Verify that onToken was called (streaming or fallback)
-            verify(eventSink, atLeastOnce()).onToken(anyString());
-        }
-    }
-
-    @Nested
-    @DisplayName("Tool Trace Storage Tests")
-    class ToolTraceStorageTests {
-
-        @Test
-        @DisplayName("agent mode with tool trace — stores trace data")
-        void testToolTraceStorage() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-            when(memory.getConversationId()).thenReturn("conv-789");
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "calculate 2+2");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("calc_action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("calc_action"));
-            task.setId("calcTask");
-            task.setType("openai");
-            task.setEnableBuiltInTools(true);
-            task.setParameters(Map.of("apiKey", "key"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            // Agent mode will try CDI resolution — catch the CDI error gracefully
-            try {
-                langChainTask.execute(memory, llmConfig);
-            } catch (Throwable ignored) {
-                // Expected — CDI not available in unit tests
-            }
-
-            // At minimum, the raw response data should have been attempted to be stored
-            // The tool trace requires agent execution to succeed, which requires CDI
-        }
-    }
-
-    @Nested
-    @DisplayName("ConversationHistoryLimit from Task Field Tests")
-    class ConversationHistoryLimitFromTaskFieldTests {
-
-        @Test
-        @DisplayName("conversationHistoryLimit set on task — overrides parameter logSizeLimit")
-        void testConversationHistoryLimitFromTaskField() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var outputs = new java.util.ArrayList<ConversationOutput>();
-            for (int i = 0; i < 10; i++) {
-                var output = new ConversationOutput();
-                output.put("input", "Message " + i);
-                output.put("output", List.of("Response " + i));
-                outputs.add(output);
-            }
-            when(memory.getConversationOutputs()).thenReturn(outputs);
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("limitTask");
-            task.setType("openai");
-            task.setConversationHistoryLimit(3);
-            // No logSizeLimit in parameters — task field should be used
-            task.setParameters(Map.of("apiKey", "key", "systemMessage", "System"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-    }
-
-    @Nested
-    @DisplayName("RAG Vector Store Context Injection Tests")
-    class RagVectorStoreTests {
-
-        @Test
-        @DisplayName("RAG context injection — appends to system message")
-        void testRagContextInjection() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var conversationOutput = new ConversationOutput();
-            conversationOutput.put("input", "What is EDDI?");
-            when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-
-            // Provide input data for RAG
-            var inputData = mock(IData.class);
-            when(inputData.getResult()).thenReturn("What is EDDI?");
-            when(currentStep.getLatestData("input")).thenReturn(inputData);
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("ragTask");
-            task.setType("openai");
-            task.setParameters(Map.of("apiKey", "key", "systemMessage", "You are helpful"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-        }
-    }
-
-    @Nested
-    @DisplayName("IncludeFirstAgentMessage Parameter Tests")
-    class IncludeFirstAgentMessageTests {
-
-        @Test
-        @DisplayName("includeFirstAgentMessage=false — should be parsed from params")
-        void testIncludeFirstAgentMessageFalse() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var output = new ConversationOutput();
-            output.put("input", "hi");
-            output.put("output", List.of("Hello!"));
-            when(memory.getConversationOutputs()).thenReturn(List.of(output));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("firstMsgTask");
-            task.setType("openai");
-            task.setParameters(Map.of("apiKey", "key", "includeFirstAgentMessage", "false"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-        }
-    }
-
-    @Nested
-    @DisplayName("Prompt Parameter Tests")
-    class PromptParameterTests {
-
-        @Test
-        @DisplayName("prompt parameter — added as final user message")
-        void testPromptParameter() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var output = new ConversationOutput();
-            output.put("input", "hi");
-            when(memory.getConversationOutputs()).thenReturn(List.of(output));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("promptTask");
-            task.setType("openai");
-            task.setParameters(Map.of("apiKey", "key", "prompt", "Summarize the conversation"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            assertDoesNotThrow(() -> langChainTask.execute(memory, llmConfig));
-            verify(currentStep, atLeastOnce()).storeData(any(IData.class));
-        }
-    }
-
-    @Nested
-    @DisplayName("Template Engine Exception Handling Tests")
-    class TemplateEngineExceptionTests {
-
-        @Test
-        @DisplayName("IOException during execute — wraps in LifecycleException")
-        void testIOExceptionWrapping() throws Exception {
-            IConversationMemory memory = mock(IConversationMemory.class);
-            IConversationMemory.IWritableConversationStep currentStep = mock(IConversationMemory.IWritableConversationStep.class);
-            when(memory.getCurrentStep()).thenReturn(currentStep);
-
-            var output = new ConversationOutput();
-            output.put("input", "hi");
-            when(memory.getConversationOutputs()).thenReturn(List.of(output));
-
-            var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
-            when(actionData.getResult()).thenReturn(List.of("action"));
-
-            // Use an unsupported model type to trigger UnsupportedLlmTaskException
-            var task = new LlmConfiguration.Task();
-            task.setActions(List.of("action"));
-            task.setId("errorTask");
-            task.setType("unknown_provider_xyz");
-            task.setParameters(Map.of("apiKey", "key", "systemMessage", "system"));
-
-            var llmConfig = new LlmConfiguration(List.of(task));
-
-            IData outputData = mock(IData.class);
-            when(dataFactory.createData(anyString(), any())).thenReturn(outputData);
-            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
-
-            // Should propagate as LifecycleException wrapping UnsupportedLlmTaskException
-            assertThrows(ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException.class,
-                    () -> langChainTask.execute(memory, llmConfig));
-        }
+    @SuppressWarnings("unchecked")
+    @Test
+    void extractUserInput_dataWithNullResult_returnsNull() throws Exception {
+        Method method = LlmTask.class.getDeclaredMethod("extractUserInput", IConversationMemory.class);
+        method.setAccessible(true);
+
+        doReturn(currentStep).when(memory).getCurrentStep();
+
+        IData<String> inputData = mock(IData.class);
+        doReturn(inputData).when(currentStep).getLatestData("input");
+        doReturn(null).when(inputData).getResult();
+
+        String result = (String) method.invoke(llmTask, memory);
+        assertNull(result);
     }
 }

@@ -258,4 +258,336 @@ class McpAdminToolsTest {
         assertTrue(result.contains("error"));
         assertTrue(result.contains("Not found"));
     }
+
+    // --- createAgent validation ---
+
+    @Test
+    void createAgent_blankName_returnsError() {
+        String result = tools.createAgent(null, "desc", null);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void createAgent_emptyName_returnsError() {
+        String result = tools.createAgent("  ", "desc", null);
+        assertTrue(result.contains("error"));
+    }
+
+    // --- updateAgent ---
+
+    @Test
+    void updateAgent_blankAgentId_returnsError() {
+        String result = tools.updateAgent(null, 1, "name", null, null, null);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void updateAgent_emptyAgentId_returnsError() {
+        String result = tools.updateAgent("  ", 1, "name", null, null, null);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void updateAgent_withNameAndDescription_patchesDescriptor() throws IOException {
+        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"updated\"}");
+
+        String result = tools.updateAgent(AGENT_ID, 1, "New Name", "New Desc", null, null);
+
+        assertNotNull(result);
+        verify(descriptorStore).patchDescriptor(eq(AGENT_ID), eq(1), any());
+    }
+
+    @Test
+    void updateAgent_withRedeploy_callsDeployAgent() throws IOException {
+        when(agentAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
+        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"updated\"}");
+
+        tools.updateAgent(AGENT_ID, 1, null, null, true, "production");
+
+        verify(agentAdmin).deployAgent(any(), eq(AGENT_ID), eq(1), eq(true), eq(true));
+    }
+
+    @Test
+    void updateAgent_redeployFails_stillReturnsResult() throws IOException {
+        when(agentAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean()))
+                .thenThrow(new RuntimeException("Deploy failed"));
+        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"updated\",\"redeployed\":false}");
+
+        String result = tools.updateAgent(AGENT_ID, 1, null, null, true, null);
+
+        assertNotNull(result);
+    }
+
+    @Test
+    void updateAgent_handlesException() {
+        doThrow(new RuntimeException("patch fail")).when(descriptorStore).patchDescriptor(any(), anyInt(), any());
+
+        String result = tools.updateAgent(AGENT_ID, 1, "name", null, null, null);
+
+        assertTrue(result.contains("error"));
+    }
+
+    // --- readWorkflow ---
+
+    @Test
+    void readWorkflow_blankId_returnsError() {
+        String result = tools.readWorkflow(null, 1);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void readWorkflow_emptyId_returnsError() {
+        String result = tools.readWorkflow("  ", 1);
+        assertTrue(result.contains("error"));
+    }
+
+    // --- readResource ---
+
+    @Test
+    void readResource_blankType_returnsError() {
+        String result = tools.readResource(null, "id", 1);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void readResource_blankId_returnsError() {
+        String result = tools.readResource("behavior", null, 1);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void readResource_emptyId_returnsError() {
+        String result = tools.readResource("behavior", "  ", 1);
+        assertTrue(result.contains("error"));
+    }
+
+    // --- updateResource ---
+
+    @Test
+    void updateResource_blankType_returnsError() {
+        String result = tools.updateResource(null, "id", 1, "{}");
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void updateResource_blankId_returnsError() {
+        String result = tools.updateResource("behavior", null, 1, "{}");
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void updateResource_blankConfig_returnsError() {
+        String result = tools.updateResource("behavior", "id", 1, null);
+        assertTrue(result.contains("error"));
+    }
+
+    // --- createResource ---
+
+    @Test
+    void createResource_blankType_returnsError() {
+        String result = tools.createResource(null, "{}");
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void createResource_blankConfig_returnsError() {
+        String result = tools.createResource("behavior", null);
+        assertTrue(result.contains("error"));
+    }
+
+    // --- deleteResource ---
+
+    @Test
+    void deleteResource_blankType_returnsError() {
+        String result = tools.deleteResource(null, "id", 1, false);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void deleteResource_blankId_returnsError() {
+        String result = tools.deleteResource("behavior", null, 1, false);
+        assertTrue(result.contains("error"));
+    }
+
+    // --- applyAgentChanges ---
+
+    @Test
+    void applyAgentChanges_blankAgentId_returnsError() {
+        String result = tools.applyAgentChanges(null, 1, "[{}]", false, null);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void applyAgentChanges_blankMappings_returnsError() {
+        String result = tools.applyAgentChanges(AGENT_ID, 1, null, false, null);
+        assertTrue(result.contains("error"));
+    }
+
+    // --- listAgentResources ---
+
+    @Test
+    void listAgentResources_blankAgentId_returnsError() {
+        String result = tools.listAgentResources(null, 1);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void listAgentResources_emptyAgentId_returnsError() {
+        String result = tools.listAgentResources("  ", 1);
+        assertTrue(result.contains("error"));
+    }
+
+    // --- Agent Trigger CRUD validation ---
+
+    @Test
+    void createAgentTrigger_blankConfig_returnsError() {
+        String result = tools.createAgentTrigger(null);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void createAgentTrigger_emptyConfig_returnsError() {
+        String result = tools.createAgentTrigger("  ");
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void updateAgentTrigger_blankIntent_returnsError() {
+        String result = tools.updateAgentTrigger(null, "{}");
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void updateAgentTrigger_blankConfig_returnsError() {
+        String result = tools.updateAgentTrigger("intent1", null);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void deleteAgentTrigger_blankIntent_returnsError() {
+        String result = tools.deleteAgentTrigger(null);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void deleteAgentTrigger_emptyIntent_returnsError() {
+        String result = tools.deleteAgentTrigger("  ");
+        assertTrue(result.contains("error"));
+    }
+
+    // --- Schedule management validation ---
+
+    @Test
+    void deleteSchedule_blankId_returnsError() {
+        String result = tools.deleteSchedule(null);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void deleteSchedule_emptyId_returnsError() {
+        String result = tools.deleteSchedule("  ");
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void fireScheduleNow_blankId_returnsError() {
+        String result = tools.fireScheduleNow(null);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void retryFailedSchedule_blankId_returnsError() {
+        String result = tools.retryFailedSchedule(null);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void readSchedule_blankId_returnsError() {
+        String result = tools.readSchedule(null);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void readSchedule_emptyId_returnsError() {
+        String result = tools.readSchedule("  ");
+        assertTrue(result.contains("error"));
+    }
+
+    // --- Channel integration validation ---
+
+    @Test
+    void readChannelIntegration_blankResourceId_returnsError() {
+        String result = tools.readChannelIntegration(null, 1);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void createChannelIntegration_blankConfig_returnsError() {
+        String result = tools.createChannelIntegration(null);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void updateChannelIntegration_blankResourceId_returnsError() {
+        String result = tools.updateChannelIntegration(null, 1, "{}");
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void updateChannelIntegration_blankConfig_returnsError() {
+        String result = tools.updateChannelIntegration("id", 1, null);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void deleteChannelIntegration_blankResourceId_returnsError() {
+        String result = tools.deleteChannelIntegration(null, 1, false);
+        assertTrue(result.contains("error"));
+    }
+
+    // --- null defaults ---
+
+    @Test
+    void deployAgent_nullVersion_defaultsTo1() throws IOException {
+        when(agentAdmin.deployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
+        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deployed\"}");
+
+        tools.deployAgent(AGENT_ID, null, "production");
+
+        verify(agentAdmin).deployAgent(any(), eq(AGENT_ID), eq(1), eq(true), eq(true));
+    }
+
+    @Test
+    void undeployAgent_nullVersion_defaultsTo1() throws IOException {
+        when(agentAdmin.undeployAgent(any(), any(), anyInt(), anyBoolean(), anyBoolean())).thenReturn(Response.ok().build());
+        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"undeployed\"}");
+
+        tools.undeployAgent(AGENT_ID, null, "production", null);
+
+        verify(agentAdmin).undeployAgent(any(), eq(AGENT_ID), eq(1), eq(false), eq(false));
+    }
+
+    @Test
+    void deleteAgent_nullBooleans_defaultToFalse() throws IOException {
+        when(AgentStore.deleteAgent(AGENT_ID, 1, false, false)).thenReturn(Response.ok().build());
+        when(jsonSerialization.serialize(any())).thenReturn("{\"action\":\"deleted\"}");
+
+        tools.deleteAgent(AGENT_ID, 1, null, null);
+
+        verify(AgentStore).deleteAgent(AGENT_ID, 1, false, false);
+    }
+
+    // --- createSchedule validation ---
+
+    @Test
+    void createSchedule_blankAgentId_returnsError() {
+        String result = tools.createSchedule(null, null, null, null, null, "name", null, null, null, null);
+        assertTrue(result.contains("error"));
+    }
+
+    @Test
+    void createSchedule_blankName_returnsError() {
+        String result = tools.createSchedule(AGENT_ID, null, null, null, null, null, null, null, null, null);
+        assertTrue(result.contains("error"));
+    }
 }

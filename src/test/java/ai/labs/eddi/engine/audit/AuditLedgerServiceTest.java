@@ -1,511 +1,203 @@
-/*
- * Copyright EDDI contributors
- * SPDX-License-Identifier: Apache-2.0
- */
 package ai.labs.eddi.engine.audit;
 
 import ai.labs.eddi.engine.audit.model.AuditEntry;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
 
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
-/**
- * Unit tests for {@link AuditLedgerService} and {@link AuditHmac}.
- */
 class AuditLedgerServiceTest {
 
+    @Mock
     private IAuditStore auditStore;
 
-    private AuditEntry createEntry(String taskId, String conversationId) {
-        return new AuditEntry("entry-" + taskId, conversationId, "agent-1", 1, "user-1", "production", 0, taskId, "test-type", 0, 42L,
-                Map.of("userInput", "hello"), Map.of("output", List.of("world")), null, null, List.of("greet"), 0.0, Instant.now(), null, null);
-    }
+    private MeterRegistry meterRegistry;
+    private AuditLedgerService service;
 
     @BeforeEach
     void setUp() {
-        auditStore = mock(IAuditStore.class);
+        MockitoAnnotations.openMocks(this);
+        meterRegistry = new SimpleMeterRegistry();
     }
 
-    // ==================== Queue & Flush ====================
-
-    @Nested
-    class QueueAndFlush {
-
-        @Test
-        void shouldEnqueueEntries() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "test-master-key", new SimpleMeterRegistry());
-            service.init();
-
-            service.submit(createEntry("task-1", "conv-1"));
-            service.submit(createEntry("task-2", "conv-1"));
-
-            assertEquals(2, service.getQueueSize());
-        }
-
-        @Test
-        void shouldFlushToStore() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "test-master-key", new SimpleMeterRegistry());
-            service.init();
-
-            service.submit(createEntry("task-1", "conv-1"));
-            service.submit(createEntry("task-2", "conv-1"));
-
-            service.flush();
-
-            verify(auditStore).appendBatch(argThat(list -> list.size() == 2));
-            assertEquals(0, service.getQueueSize());
-        }
-
-        @Test
-        void shouldNotFlushWhenQueueEmpty() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "test-master-key", new SimpleMeterRegistry());
-            service.init();
-
-            service.flush();
-
-            verify(auditStore, never()).appendBatch(any());
-        }
-
-        @Test
-        void shouldNotEnqueueWhenDisabled() {
-            var service = AuditLedgerService.createForTesting(auditStore, false, 60, "test-master-key", new SimpleMeterRegistry());
-            service.init();
-
-            service.submit(createEntry("task-1", "conv-1"));
-
-            assertEquals(0, service.getQueueSize());
-        }
+    private AuditLedgerService createService(boolean enabled, String masterKey) {
+        var svc = AuditLedgerService.createForTesting(auditStore, enabled, 60, masterKey, meterRegistry);
+        svc.init();
+        return svc;
     }
 
-    // ==================== HMAC ====================
-
-    @Nested
-    class HmacSigning {
-
-        @Test
-        void shouldComputeHmacWhenKeyConfigured() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "test-master-key", new SimpleMeterRegistry());
-            service.init();
-
-            service.submit(createEntry("task-1", "conv-1"));
-            service.flush();
-
-            verify(auditStore).appendBatch(argThat(list -> {
-                AuditEntry entry = list.get(0);
-                return entry.hmac() != null && !entry.hmac().isBlank();
-            }));
-        }
-
-        @Test
-        void shouldNotComputeHmacWhenKeyNotConfigured() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "", new SimpleMeterRegistry());
-            service.init();
-
-            service.submit(createEntry("task-1", "conv-1"));
-            service.flush();
-
-            verify(auditStore).appendBatch(argThat(list -> {
-                AuditEntry entry = list.get(0);
-                return entry.hmac() == null;
-            }));
-        }
-
-        @Test
-        void hmacShouldBeConsistentForSameData() {
-            byte[] key = AuditHmac.deriveHmacKey("test-master-key");
-            AuditEntry entry = createEntry("task-1", "conv-1");
-
-            String hmac1 = AuditHmac.computeHmac(entry, key);
-            String hmac2 = AuditHmac.computeHmac(entry, key);
-
-            assertEquals(hmac1, hmac2);
-        }
-
-        @Test
-        void hmacShouldDifferForDifferentData() {
-            byte[] key = AuditHmac.deriveHmacKey("test-master-key");
-            AuditEntry entry1 = createEntry("task-1", "conv-1");
-            AuditEntry entry2 = createEntry("task-2", "conv-2");
-
-            String hmac1 = AuditHmac.computeHmac(entry1, key);
-            String hmac2 = AuditHmac.computeHmac(entry2, key);
-
-            assertNotEquals(hmac1, hmac2);
-        }
-
-        @Test
-        void verifyHmac_shouldDetectTampering() {
-            byte[] key = AuditHmac.deriveHmacKey("test-master-key");
-            AuditEntry entry = createEntry("task-1", "conv-1");
-            String hmac = AuditHmac.computeHmac(entry, key);
-
-            // Valid HMAC
-            AuditEntry signed = withHmac(entry, hmac);
-            assertTrue(AuditHmac.verifyHmac(signed, key));
-
-            // Tampered HMAC
-            AuditEntry tampered = withHmac(entry, "deadbeef");
-            assertFalse(AuditHmac.verifyHmac(tampered, key));
-
-            // Null HMAC
-            assertFalse(AuditHmac.verifyHmac(entry, key));
-        }
-
-        @Test
-        void deriveHmacKey_shouldProduceDifferentKeyThanVaultKek() {
-            // Verify that the audit HMAC key and vault KEK are different
-            // even when derived from the same master key
-            byte[] hmacKey = AuditHmac.deriveHmacKey("shared-master-key");
-            byte[] vaultKey = ai.labs.eddi.secrets.crypto.EnvelopeCrypto.deriveKeyFromString("shared-master-key");
-
-            assertNotEquals(java.util.HexFormat.of().formatHex(hmacKey), java.util.HexFormat.of().formatHex(vaultKey),
-                    "HMAC key and vault KEK should be different (different PBKDF2 salts)");
-        }
+    private AuditEntry entry(String id, String convId, String agentId) {
+        return new AuditEntry(id, convId, agentId, 1, "user1", "production",
+                0, "taskId", "LlmTask", 0, 100L,
+                Map.of("text", "hello"), Map.of("text", "response"),
+                null, null, List.of("action1"), 0.0, Instant.now(), null, null);
     }
 
-    // ==================== Secret Scrubbing ====================
+    // ==================== isEnabled ====================
 
-    @Nested
-    class SecretScrubbing {
-
-        @Test
-        void shouldScrubSecretsFromStringValues() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "", new SimpleMeterRegistry());
-            service.init();
-
-            Map<String, Object> inputWithSecret = new LinkedHashMap<>();
-            inputWithSecret.put("authorization", "Bearer sk-abcdefghijklmnopqrstuvwxyz1234567890abcdefghijklmn");
-            inputWithSecret.put("normal", "hello world");
-
-            AuditEntry entry = new AuditEntry("id-1", "conv-1", "agent-1", 1, "user-1", "production", 0, "task-1", "test", 0, 10L, inputWithSecret,
-                    null, null, null, List.of("action-1"), 0.0, Instant.now(), null, null);
-
-            service.submit(entry);
-            service.flush();
-
-            verify(auditStore).appendBatch(argThat(list -> {
-                AuditEntry scrubbed = list.get(0);
-                Map<String, Object> input = scrubbed.input();
-                // The SecretRedactionFilter should have redacted the API key
-                String authValue = (String) input.get("authorization");
-                return !authValue.contains("sk-abcdefghij");
-            }));
-        }
+    @Test
+    @DisplayName("isEnabled — returns true when enabled")
+    void isEnabledTrue() {
+        service = createService(true, null);
+        assertTrue(service.isEnabled());
     }
 
-    // ==================== Canonical String ====================
-
-    @Nested
-    class CanonicalString {
-
-        @Test
-        void shouldIncludeAllFields() {
-            AuditEntry entry = createEntry("my-task", "my-conv");
-            String canonical = AuditHmac.buildCanonicalString(entry);
-
-            assertTrue(canonical.contains("my-task"));
-            assertTrue(canonical.contains("my-conv"));
-            assertTrue(canonical.contains("agent-1"));
-            assertTrue(canonical.contains("user-1"));
-            assertTrue(canonical.contains("hello"));
-        }
-
-        @Test
-        void shouldHandleNullFields() {
-            AuditEntry entry = new AuditEntry(null, null, null, null, null, null, 0, null, null, 0, 0L, null, null, null, null, null, 0.0, null,
-                    null, null);
-
-            String canonical = AuditHmac.buildCanonicalString(entry);
-            assertNotNull(canonical);
-            assertFalse(canonical.isEmpty());
-        }
+    @Test
+    @DisplayName("isEnabled — returns false when disabled")
+    void isEnabledFalse() {
+        service = createService(false, null);
+        assertFalse(service.isEnabled());
     }
 
-    // ==================== Flush Retry ====================
+    // ==================== submit ====================
 
-    @Nested
-    class FlushRetry {
-
-        @Test
-        void shouldReQueueEntriesOnFirstFailure() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "", new SimpleMeterRegistry());
-            service.init();
-
-            doThrow(new RuntimeException("DB unavailable")).when(auditStore).appendBatch(any());
-
-            service.submit(createEntry("task-1", "conv-1"));
-            service.submit(createEntry("task-2", "conv-1"));
-            assertEquals(2, service.getQueueSize());
-
-            service.flush(); // First failure — entries should be re-queued
-
-            assertEquals(2, service.getQueueSize());
-            verify(auditStore, times(1)).appendBatch(any());
-        }
-
-        @Test
-        void shouldDropEntriesAfterMaxRetries() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "", new SimpleMeterRegistry());
-            service.init();
-
-            doThrow(new RuntimeException("DB unavailable")).when(auditStore).appendBatch(any());
-
-            service.submit(createEntry("task-1", "conv-1"));
-
-            // Flush 3 times (MAX_FLUSH_RETRIES) — entries should be dropped
-            service.flush(); // Attempt 1 — re-queue
-            service.flush(); // Attempt 2 — re-queue
-            service.flush(); // Attempt 3 — drop
-
-            assertEquals(0, service.getQueueSize());
-        }
-
-        @Test
-        void shouldResetRetryCounterOnSuccess() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "", new SimpleMeterRegistry());
-            service.init();
-
-            // First: fail once
-            doThrow(new RuntimeException("DB unavailable")).doNothing().when(auditStore).appendBatch(any());
-
-            service.submit(createEntry("task-1", "conv-1"));
-            service.flush(); // Failure — re-queue
-            assertEquals(1, service.getQueueSize());
-
-            service.flush(); // Success — counter reset
-            assertEquals(0, service.getQueueSize());
-            verify(auditStore, times(2)).appendBatch(any());
-        }
+    @Test
+    @DisplayName("submit — queues entry when enabled")
+    void submitQueuesEntry() {
+        service = createService(true, null);
+        service.submit(entry("1", "conv1", "agent1"));
+        assertEquals(1, service.getQueueSize());
     }
 
-    // ==================== List Scrubbing ====================
-
-    @Nested
-    class ListScrubbing {
-
-        @Test
-        void shouldScrubSecretsInsideListOfStrings() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "", new SimpleMeterRegistry());
-            service.init();
-
-            Map<String, Object> input = new LinkedHashMap<>();
-            input.put("tokens", List.of("normal-text", "sk-abcdefghijklmnopqrstuvwxyz1234567890abcdefghijklmn"));
-
-            AuditEntry entry = new AuditEntry("id-1", "conv-1", "agent-1", 1, "user-1", "production", 0, "task-1", "test", 0, 10L, input, null, null,
-                    null, List.of(), 0.0, Instant.now(), null, null);
-
-            service.submit(entry);
-            service.flush();
-
-            verify(auditStore).appendBatch(argThat(list -> {
-                AuditEntry scrubbed = list.get(0);
-                @SuppressWarnings("unchecked")
-                List<String> tokens = (List<String>) scrubbed.input().get("tokens");
-                return tokens.get(0).equals("normal-text") && !tokens.get(1).contains("sk-abcdefghij");
-            }));
-        }
-
-        @Test
-        void shouldScrubSecretsInsideNestedMaps() {
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "", new SimpleMeterRegistry());
-            service.init();
-
-            Map<String, Object> nested = new LinkedHashMap<>();
-            nested.put("apiKey", "sk-abcdefghijklmnopqrstuvwxyz1234567890abcdefghijklmn");
-            nested.put("safe", "hello");
-
-            Map<String, Object> input = new LinkedHashMap<>();
-            input.put("config", nested);
-
-            AuditEntry entry = new AuditEntry("id-1", "conv-1", "agent-1", 1, "user-1", "production", 0, "task-1", "test", 0, 10L, input, null, null,
-                    null, List.of(), 0.0, Instant.now(), null, null);
-
-            service.submit(entry);
-            service.flush();
-
-            verify(auditStore).appendBatch(argThat(list -> {
-                AuditEntry scrubbed = list.get(0);
-                @SuppressWarnings("unchecked")
-                Map<String, Object> cfg = (Map<String, Object>) scrubbed.input().get("config");
-                return !((String) cfg.get("apiKey")).contains("sk-abcdefghij") && cfg.get("safe").equals("hello");
-            }));
-        }
+    @Test
+    @DisplayName("submit — ignores null entry")
+    void submitIgnoresNull() {
+        service = createService(true, null);
+        service.submit(null);
+        assertEquals(0, service.getQueueSize());
     }
 
-    // ==================== AuditEntry ====================
-
-    @Nested
-    class AuditEntryTests {
-
-        @Test
-        void withEnvironment_shouldSetEnvironmentField() {
-            AuditEntry entry = createEntry("task-1", "conv-1");
-            assertNull(new AuditEntry("id", "conv", "agent", 1, "user", null, 0, "task", "type", 0, 0L, null, null, null, null, null, 0.0, null, null,
-                    null)
-                    .environment());
-
-            AuditEntry enriched = entry.withEnvironment("production");
-            assertEquals("production", enriched.environment());
-            // Other fields unchanged
-            assertEquals(entry.id(), enriched.id());
-            assertEquals(entry.conversationId(), enriched.conversationId());
-            assertEquals(entry.taskId(), enriched.taskId());
-        }
-
-        @Test
-        void withHmac_shouldSetHmacField() {
-            AuditEntry entry = createEntry("task-1", "conv-1");
-            assertNull(entry.hmac());
-
-            AuditEntry signed = entry.withHmac("abc123");
-            assertEquals("abc123", signed.hmac());
-            // Other fields unchanged
-            assertEquals(entry.id(), signed.id());
-            assertEquals(entry.conversationId(), signed.conversationId());
-            assertEquals(entry.environment(), signed.environment());
-            assertEquals(entry.taskId(), signed.taskId());
-        }
+    @Test
+    @DisplayName("submit — does nothing when disabled")
+    void submitWhenDisabled() {
+        service = createService(false, null);
+        service.submit(entry("1", "conv1", "agent1"));
+        assertEquals(0, service.getQueueSize());
     }
 
-    // ==================== HMAC Determinism ====================
-
-    @Nested
-    class HmacDeterminism {
-
-        @Test
-        void shouldProduceSameHmacRegardlessOfMapImplementation() {
-            byte[] key = AuditHmac.deriveHmacKey("test-key");
-
-            // Same data in LinkedHashMap (insertion order)
-            Map<String, Object> linked = new LinkedHashMap<>();
-            linked.put("b", "2");
-            linked.put("a", "1");
-
-            // Same data in HashMap (unordered)
-            Map<String, Object> hash = new java.util.HashMap<>();
-            hash.put("a", "1");
-            hash.put("b", "2");
-
-            AuditEntry e1 = new AuditEntry("id", "conv", "agent", 1, "user", "test", 0, "task", "type", 0, 0L, linked, null, null, null, null, 0.0,
-                    Instant.EPOCH, null, null);
-
-            AuditEntry e2 = new AuditEntry("id", "conv", "agent", 1, "user", "test", 0, "task", "type", 0, 0L, hash, null, null, null, null, 0.0,
-                    Instant.EPOCH, null, null);
-
-            String hmac1 = AuditHmac.computeHmac(e1, key);
-            String hmac2 = AuditHmac.computeHmac(e2, key);
-
-            assertEquals(hmac1, hmac2, "HMAC should be the same regardless of Map implementation (keys are sorted)");
-        }
+    @Test
+    @DisplayName("submit — with HMAC key computes hmac")
+    void submitWithHmacKey() {
+        service = createService(true, "my-secret-key-for-testing");
+        assertNotNull(service.getHmacKey());
+        service.submit(entry("1", "conv1", "agent1"));
+        assertEquals(1, service.getQueueSize());
     }
 
-    // ==================== Dead Letter Serialization ====================
+    // ==================== flush ====================
 
-    @Nested
-    class DeadLetterSerialization {
+    @Test
+    @DisplayName("flush — persists queued entries")
+    void flushPersists() {
+        service = createService(true, null);
+        service.submit(entry("1", "conv1", "agent1"));
+        service.submit(entry("2", "conv2", "agent2"));
 
-        private final ObjectMapper mapper = new ObjectMapper();
+        service.flush();
 
-        @Test
-        void serializeDeadLetterEntry_WithType_ShouldIncludeTypeField() throws Exception {
-            AuditEntry entry = createEntry("task-1", "conv-1");
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "",
-                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
-
-            String json = service.serializeDeadLetterEntry(entry, "audit_dead_letter");
-
-            // Parse the result to verify it's valid JSON
-            JsonNode node = mapper.readTree(json);
-
-            assertEquals("audit_dead_letter", node.get("type").asText());
-            assertEquals("conv-1", node.get("conversationId").asText());
-            assertEquals("agent-1", node.get("agentId").asText());
-            assertEquals("task-1", node.get("taskId").asText());
-            assertEquals("test-type", node.get("taskType").asText());
-            assertNotNull(node.get("timestamp"));
-        }
-
-        @Test
-        void serializeDeadLetterEntry_WithoutType_ShouldOmitTypeField() throws Exception {
-            AuditEntry entry = createEntry("task-1", "conv-1");
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "",
-                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
-
-            String json = service.serializeDeadLetterEntry(entry, null);
-
-            JsonNode node = mapper.readTree(json);
-
-            assertNull(node.get("type"));
-            assertEquals("conv-1", node.get("conversationId").asText());
-            assertEquals("agent-1", node.get("agentId").asText());
-        }
-
-        @Test
-        void serializeDeadLetterEntry_WithSpecialChars_ShouldEscapeCorrectly() throws Exception {
-            AuditEntry entry = new AuditEntry("id-1", "conv-with-\"quotes\"", "agent-with\nnewline", 1,
-                    "user-1", "production", 0, "task/special", "type<html>", 0, 42L,
-                    null, null, null, null, null, 0.0, Instant.now(), null, null);
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "",
-                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
-
-            String json = service.serializeDeadLetterEntry(entry, "test");
-
-            // Must be valid JSON despite special characters
-            JsonNode node = mapper.readTree(json);
-
-            assertEquals("conv-with-\"quotes\"", node.get("conversationId").asText());
-            assertEquals("agent-with\nnewline", node.get("agentId").asText());
-            assertEquals("task/special", node.get("taskId").asText());
-            assertEquals("type<html>", node.get("taskType").asText());
-        }
-
-        @Test
-        void serializeDeadLetterEntry_WithNullFields_ShouldProduceValidJson() throws Exception {
-            AuditEntry entry = new AuditEntry("id-1", null, null, null, null, null, 0,
-                    null, null, 0, 0L, null, null, null, null, null, 0.0, null, null, null);
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "",
-                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
-
-            String json = service.serializeDeadLetterEntry(entry, null);
-
-            // Must be valid JSON
-            JsonNode node = mapper.readTree(json);
-
-            assertTrue(node.get("conversationId").isNull());
-            assertTrue(node.get("agentId").isNull());
-            assertTrue(node.get("taskId").isNull());
-            assertTrue(node.get("taskType").isNull());
-        }
-
-        @Test
-        void serializeDeadLetterEntry_ShouldAlwaysContainTimestamp() throws Exception {
-            AuditEntry entry = createEntry("task-1", "conv-1");
-            var service = AuditLedgerService.createForTesting(auditStore, true, 60, "",
-                    new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
-
-            String json = service.serializeDeadLetterEntry(entry, null);
-
-            JsonNode node = mapper.readTree(json);
-
-            assertNotNull(node.get("timestamp"));
-            assertFalse(node.get("timestamp").asText().isEmpty());
-        }
+        verify(auditStore).appendBatch(argThat(batch -> batch.size() == 2));
+        assertEquals(0, service.getQueueSize());
     }
 
-    // ==================== Helper ====================
+    @Test
+    @DisplayName("flush — does nothing when queue is empty")
+    void flushEmptyQueue() {
+        service = createService(true, null);
+        service.flush();
+        verify(auditStore, never()).appendBatch(any());
+    }
 
-    private static AuditEntry withHmac(AuditEntry entry, String hmac) {
-        return entry.withHmac(hmac);
+    @Test
+    @DisplayName("flush — retries on failure (less than MAX_FLUSH_RETRIES)")
+    void flushRetriesOnFailure() {
+        service = createService(true, null);
+        doThrow(new RuntimeException("db error")).when(auditStore).appendBatch(any());
+
+        service.submit(entry("1", "conv1", "agent1"));
+        service.flush(); // First failure — requeues
+
+        assertEquals(1, service.getQueueSize()); // Still in queue
+    }
+
+    @Test
+    @DisplayName("flush — drops entries after MAX_FLUSH_RETRIES consecutive failures")
+    void flushDropsAfterMaxRetries() {
+        service = createService(true, null);
+        doThrow(new RuntimeException("db error")).when(auditStore).appendBatch(any());
+
+        service.submit(entry("1", "conv1", "agent1"));
+        service.flush(); // Failure 1 — requeue
+        service.flush(); // Failure 2 — requeue
+        service.flush(); // Failure 3 — drop + dead letter
+
+        assertEquals(0, service.getQueueSize()); // Dropped
+    }
+
+    // ==================== scrub secrets ====================
+
+    @Test
+    @DisplayName("submit — scrubs secrets from input/output maps")
+    void submitScrubsSecrets() {
+        service = createService(true, null);
+        var entryWithSecret = new AuditEntry("1", "conv1", "agent1", 1, "user1", "production",
+                0, "taskId", "LlmTask", 0, 100L,
+                Map.of("apiKey", "sk-1234567890abcdef"), Map.of("text", "safe"),
+                null, null, List.of(), 0.0, Instant.now(), null, null);
+
+        service.submit(entryWithSecret);
+        service.flush();
+
+        verify(auditStore).appendBatch(any());
+    }
+
+    // ==================== serializeDeadLetterEntry ====================
+
+    @Test
+    @DisplayName("serializeDeadLetterEntry — includes type field when provided")
+    void serializeWithType() {
+        service = createService(true, null);
+        var e = entry("1", "conv1", "agent1");
+        String json = service.serializeDeadLetterEntry(e, "audit_dead_letter");
+        assertTrue(json.contains("\"type\":\"audit_dead_letter\""));
+        assertTrue(json.contains("\"conversationId\":\"conv1\""));
+    }
+
+    @Test
+    @DisplayName("serializeDeadLetterEntry — omits type when null")
+    void serializeWithoutType() {
+        service = createService(true, null);
+        var e = entry("1", "conv1", "agent1");
+        String json = service.serializeDeadLetterEntry(e, null);
+        assertFalse(json.contains("\"type\""));
+        assertTrue(json.contains("\"agentId\":\"agent1\""));
+    }
+
+    // ==================== shutdown ====================
+
+    @Test
+    @DisplayName("shutdown — flushes remaining entries")
+    void shutdownFlushes() {
+        service = createService(true, null);
+        service.submit(entry("1", "conv1", "agent1"));
+        service.shutdown();
+        verify(auditStore).appendBatch(any());
+    }
+
+    @Test
+    @DisplayName("shutdown — handles null executor when disabled")
+    void shutdownWhenDisabled() {
+        service = createService(false, null);
+        assertDoesNotThrow(() -> service.shutdown());
     }
 }

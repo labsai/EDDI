@@ -43,6 +43,24 @@ class InputParserTest {
             var parser = new InputParser(List.of(), List.of(), List.of(), config);
             assertEquals(config, parser.getConfig());
         }
+
+        @Test
+        @DisplayName("two-arg constructor sets empty corrections and default config")
+        void twoArgConstructor() {
+            var dictionary = mock(IDictionary.class);
+            when(dictionary.getPhrases()).thenReturn(List.of());
+            var parser = new InputParser(List.of(dictionary), List.of());
+            assertNotNull(parser.getConfig());
+            assertTrue(parser.getConfig().isAppendExpressions());
+        }
+
+        @Test
+        @DisplayName("single-arg constructor sets empty corrections and default config")
+        void singleArgConstructor() {
+            var parser = new InputParser(List.of());
+            assertNotNull(parser.getConfig());
+            assertTrue(parser.getConfig().isIncludeUnknown());
+        }
     }
 
     @Nested
@@ -82,6 +100,18 @@ class InputParserTest {
         }
 
         @Test
+        @DisplayName("empty language defaults to 'en'")
+        void emptyLanguageDefault() throws Exception {
+            var normalizer = mock(INormalizer.class);
+            when(normalizer.normalize("test", "en")).thenReturn("test");
+
+            var parser = new InputParser(List.of(normalizer), List.of(), List.of(), new IInputParser.Config());
+            parser.normalize("test", "");
+
+            verify(normalizer).normalize("test", "en");
+        }
+
+        @Test
         @DisplayName("multiple normalizers are chained")
         void chainedNormalizers() throws Exception {
             var n1 = mock(INormalizer.class);
@@ -94,6 +124,32 @@ class InputParserTest {
             String result = parser.normalize("hello!", "en");
 
             assertEquals("hi", result);
+        }
+
+        @Test
+        @DisplayName("tab characters are collapsed into single space")
+        void tabsCollapsed() throws Exception {
+            var parser = new InputParser(List.of());
+            // tabs are not spaces, so normalizeWhitespaces only collapses spaces
+            // the trim+regex replaces multiple spaces
+            String result = parser.normalize("  hello  world  ", "en");
+            assertEquals("hello world", result);
+        }
+
+        @Test
+        @DisplayName("thread interruption during normalization throws InterruptedException")
+        void threadInterruption() {
+            var normalizer = mock(INormalizer.class);
+            var parser = new InputParser(List.of(normalizer, mock(INormalizer.class)),
+                    List.of(), List.of(), new IInputParser.Config());
+
+            Thread.currentThread().interrupt();
+            try {
+                assertThrows(InterruptedException.class, () -> parser.normalize("test", "en"));
+            } finally {
+                // Clear interrupted status if not already consumed
+                Thread.interrupted();
+            }
         }
     }
 
@@ -162,6 +218,34 @@ class InputParserTest {
         }
 
         @Test
+        @DisplayName("dictionary with null language code is always used")
+        void nullLanguageCodeUsed() throws Exception {
+            var dictionary = mock(IDictionary.class);
+            when(dictionary.getLanguageCode()).thenReturn(null);
+            when(dictionary.getPhrases()).thenReturn(List.of());
+            when(dictionary.lookupTerm("test")).thenReturn(List.of());
+
+            var parser = new InputParser(List.of(dictionary));
+            parser.parse("test", "fr", Collections.emptyList());
+
+            verify(dictionary).lookupTerm("test");
+        }
+
+        @Test
+        @DisplayName("dictionary with empty language code is always used")
+        void emptyLanguageCodeUsed() throws Exception {
+            var dictionary = mock(IDictionary.class);
+            when(dictionary.getLanguageCode()).thenReturn("");
+            when(dictionary.getPhrases()).thenReturn(List.of());
+            when(dictionary.lookupTerm("test")).thenReturn(List.of());
+
+            var parser = new InputParser(List.of(dictionary));
+            parser.parse("test", "fr", Collections.emptyList());
+
+            verify(dictionary).lookupTerm("test");
+        }
+
+        @Test
         @DisplayName("correction is applied when word is unknown")
         void correctionApplied() throws Exception {
             var dictionary = mock(IDictionary.class);
@@ -188,6 +272,56 @@ class InputParserTest {
         }
 
         @Test
+        @DisplayName("correction with lookupIfKnown=true is still applied even when word is known")
+        void correctionLookupIfKnown() throws Exception {
+            var dictionary = mock(IDictionary.class);
+            when(dictionary.getLanguageCode()).thenReturn(null);
+            when(dictionary.getPhrases()).thenReturn(List.of());
+
+            var foundWord = mock(IDictionary.IFoundWord.class);
+            var word = mock(IDictionary.IWord.class);
+            when(foundWord.getFoundWord()).thenReturn(word);
+            when(word.isPartOfPhrase()).thenReturn(false);
+            when(foundWord.isPhrase()).thenReturn(false);
+            when(dictionary.lookupTerm("hello")).thenReturn(List.of(foundWord));
+
+            var correction = mock(ICorrection.class);
+            when(correction.lookupIfKnown()).thenReturn(true);
+            when(correction.correctWord(eq("hello"), eq("en"), anyList())).thenReturn(List.of());
+
+            var parser = new InputParser(List.of(dictionary), List.of(correction));
+            parser.parse("hello", "en", Collections.emptyList());
+
+            // With lookupIfKnown=true, correction is still called even though word was
+            // found
+            verify(correction).correctWord(eq("hello"), eq("en"), anyList());
+        }
+
+        @Test
+        @DisplayName("correction with lookupIfKnown=false is skipped when word is known")
+        void correctionSkippedWhenKnown() throws Exception {
+            var dictionary = mock(IDictionary.class);
+            when(dictionary.getLanguageCode()).thenReturn(null);
+            when(dictionary.getPhrases()).thenReturn(List.of());
+
+            var foundWord = mock(IDictionary.IFoundWord.class);
+            var word = mock(IDictionary.IWord.class);
+            when(foundWord.getFoundWord()).thenReturn(word);
+            when(word.isPartOfPhrase()).thenReturn(false);
+            when(foundWord.isPhrase()).thenReturn(false);
+            when(dictionary.lookupTerm("hello")).thenReturn(List.of(foundWord));
+
+            var correction = mock(ICorrection.class);
+            when(correction.lookupIfKnown()).thenReturn(false);
+
+            var parser = new InputParser(List.of(dictionary), List.of(correction));
+            parser.parse("hello", "en", Collections.emptyList());
+
+            // With lookupIfKnown=false and word found in dict, correction should be skipped
+            verify(correction, never()).correctWord(anyString(), anyString(), anyList());
+        }
+
+        @Test
         @DisplayName("multiple words — each is looked up independently")
         void multipleWords() throws Exception {
             var dictionary = mock(IDictionary.class);
@@ -200,6 +334,65 @@ class InputParserTest {
 
             verify(dictionary).lookupTerm("hello");
             verify(dictionary).lookupTerm("world");
+        }
+
+        @Test
+        @DisplayName("parse with no-arg defaults to 'en' and empty temp dictionaries")
+        void parseNoArg() throws Exception {
+            var dictionary = mock(IDictionary.class);
+            when(dictionary.getLanguageCode()).thenReturn("en");
+            when(dictionary.getPhrases()).thenReturn(List.of());
+            when(dictionary.lookupTerm("hi")).thenReturn(List.of());
+
+            var parser = new InputParser(List.of(dictionary));
+            List<RawSolution> solutions = parser.parse("hi");
+
+            assertNotNull(solutions);
+            verify(dictionary).lookupTerm("hi");
+        }
+
+        @Test
+        @DisplayName("temporary dictionaries are searched alongside permanent ones")
+        void temporaryDictionaries() throws Exception {
+            var permanentDict = mock(IDictionary.class);
+            when(permanentDict.getLanguageCode()).thenReturn(null);
+            when(permanentDict.getPhrases()).thenReturn(List.of());
+            when(permanentDict.lookupTerm("word")).thenReturn(List.of());
+
+            var tempDict = mock(IDictionary.class);
+            when(tempDict.getLanguageCode()).thenReturn(null);
+            when(tempDict.getPhrases()).thenReturn(List.of());
+
+            var foundWord = mock(IDictionary.IFoundWord.class);
+            var word = mock(IDictionary.IWord.class);
+            when(foundWord.getFoundWord()).thenReturn(word);
+            when(word.isPartOfPhrase()).thenReturn(false);
+            when(foundWord.isPhrase()).thenReturn(false);
+            when(tempDict.lookupTerm("word")).thenReturn(List.of(foundWord));
+
+            var parser = new InputParser(List.of(permanentDict));
+            List<RawSolution> solutions = parser.parse("word", "en", List.of(tempDict));
+
+            assertFalse(solutions.isEmpty());
+            verify(tempDict).lookupTerm("word");
+        }
+
+        @Test
+        @DisplayName("thread interruption during parse throws InterruptedException")
+        void threadInterruptionDuringParse() {
+            var dictionary = mock(IDictionary.class);
+            when(dictionary.getLanguageCode()).thenReturn(null);
+            when(dictionary.getPhrases()).thenReturn(List.of());
+
+            var parser = new InputParser(List.of(dictionary));
+
+            Thread.currentThread().interrupt();
+            try {
+                assertThrows(InterruptedException.class,
+                        () -> parser.parse("test", "en", Collections.emptyList()));
+            } finally {
+                Thread.interrupted();
+            }
         }
     }
 
@@ -217,6 +410,43 @@ class InputParserTest {
             assertEquals(c1, c2);
             assertEquals(c1.hashCode(), c2.hashCode());
             assertNotEquals(c1, c3);
+        }
+
+        @Test
+        @DisplayName("equals returns false for null")
+        void equalsNull() {
+            var config = new IInputParser.Config();
+            assertNotEquals(null, config);
+        }
+
+        @Test
+        @DisplayName("equals returns false for different type")
+        void equalsDifferentType() {
+            var config = new IInputParser.Config();
+            assertNotEquals("not a config", config);
+        }
+
+        @Test
+        @DisplayName("equals returns true for same instance")
+        void equalsSameInstance() {
+            var config = new IInputParser.Config();
+            assertEquals(config, config);
+        }
+
+        @Test
+        @DisplayName("configs differ by includeUnused")
+        void differByIncludeUnused() {
+            var c1 = new IInputParser.Config(true, true, true);
+            var c2 = new IInputParser.Config(true, false, true);
+            assertNotEquals(c1, c2);
+        }
+
+        @Test
+        @DisplayName("configs differ by includeUnknown")
+        void differByIncludeUnknown() {
+            var c1 = new IInputParser.Config(true, true, true);
+            var c2 = new IInputParser.Config(true, true, false);
+            assertNotEquals(c1, c2);
         }
 
         @Test
