@@ -26,6 +26,8 @@ import java.time.Instant;
 import java.util.*;
 import java.util.AbstractMap.SimpleEntry;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Production-grade {@link ISecretProvider} using envelope encryption with
  * persistent storage.
@@ -391,6 +393,29 @@ public class VaultSecretProvider implements ISecretProvider {
         }
     }
 
+    @Override
+    public int resetTenant(String tenantId) throws SecretProviderException {
+        ensureAvailable();
+
+        try {
+            // Delete all secrets first, then the DEK
+            var secrets = persistence.listSecretsByTenant(tenantId);
+            int deletedCount = 0;
+
+            for (var secret : secrets) {
+                if (persistence.deleteSecret(tenantId, secret.getKeyName())) {
+                    deletedCount++;
+                }
+            }
+            persistence.deleteDek(tenantId);
+
+            LOGGER.infof("[VAULT] Tenant '%s' reset: %d secret(s) deleted, DEK removed.", sanitize(tenantId), deletedCount);
+            return deletedCount;
+        } catch (PersistenceException e) {
+            throw new SecretProviderException("Failed to reset vault for tenant " + sanitize(tenantId), e);
+        }
+    }
+
     // === Private helpers ===
 
     private byte[] getOrCreateDek(String tenantId) throws SecretProviderException {
@@ -398,21 +423,62 @@ public class VaultSecretProvider implements ISecretProvider {
             var dekOpt = persistence.findDek(tenantId);
             if (dekOpt.isPresent()) {
                 EncryptedDek encryptedDek = dekOpt.get();
-                return EnvelopeCrypto.decryptDek(encryptedDek.getEncryptedDek(), encryptedDek.getIv(), kek);
+                try {
+                    return EnvelopeCrypto.decryptDek(encryptedDek.getEncryptedDek(), encryptedDek.getIv(), kek);
+                } catch (EnvelopeCrypto.CryptoException e) {
+                    return handleDekDecryptionFailure(tenantId, e);
+                }
             }
 
-            // Generate a new DEK for this tenant
-            byte[] newDek = EnvelopeCrypto.generateDek();
-            EnvelopeCrypto.EncryptionResult encResult = EnvelopeCrypto.encryptDek(newDek, kek);
-
-            EncryptedDek dek = new EncryptedDek(UUID.randomUUID().toString(), tenantId, encResult.ciphertext(), encResult.iv(), Instant.now());
-
-            persistence.upsertDek(dek);
-            LOGGER.infof("Generated new DEK for tenant: %s", tenantId);
-            return newDek;
+            return generateAndPersistDek(tenantId);
         } catch (PersistenceException e) {
             throw new SecretProviderException("Persistence failure while managing DEK for tenant " + tenantId, e);
         }
+    }
+
+    /**
+     * Handles the case where an existing DEK cannot be decrypted — typically
+     * because EDDI_VAULT_MASTER_KEY changed since the DEK was created.
+     * <p>
+     * Never auto-recovers. Always fails with a clear, actionable error so the user
+     * can choose the appropriate recovery path.
+     */
+    private byte[] handleDekDecryptionFailure(String tenantId, EnvelopeCrypto.CryptoException cause) throws SecretProviderException {
+        int secretCount;
+        try {
+            secretCount = persistence.listSecretsByTenant(tenantId).size();
+        } catch (PersistenceException e) {
+            secretCount = -1; // unknown
+        }
+
+        String secretInfo = secretCount == 0
+                ? "No secrets are stored for this tenant, so no data would be lost by resetting."
+                : secretCount > 0
+                        ? secretCount + " secret(s) are stored for this tenant and would be permanently lost if you reset."
+                        : "Unable to determine how many secrets are stored for this tenant.";
+
+        throw new SecretProviderException(
+                "Cannot decrypt the Data Encryption Key (DEK) for tenant '" + tenantId + "'. "
+                        + "This means the EDDI_VAULT_MASTER_KEY has changed since the DEK was created. "
+                        + secretInfo + " "
+                        + "Recovery options: "
+                        + "(1) Set EDDI_VAULT_MASTER_KEY back to the original value and restart. "
+                        + "(2) If you have both old and new keys, use POST /secretstore/secrets/admin/rotate-kek "
+                        + "to migrate all encrypted data to the new key. "
+                        + "(3) To start fresh (deletes all secrets for this tenant), use "
+                        + "POST /secretstore/secrets/" + tenantId + "/reset to clear the vault for this tenant.",
+                cause);
+    }
+
+    private byte[] generateAndPersistDek(String tenantId) {
+        byte[] newDek = EnvelopeCrypto.generateDek();
+        EnvelopeCrypto.EncryptionResult encResult = EnvelopeCrypto.encryptDek(newDek, kek);
+
+        EncryptedDek dek = new EncryptedDek(UUID.randomUUID().toString(), tenantId, encResult.ciphertext(), encResult.iv(), Instant.now());
+
+        persistence.upsertDek(dek);
+        LOGGER.infof("Generated new DEK for tenant: %s", tenantId);
+        return newDek;
     }
 
     private void ensureAvailable() throws SecretProviderException {
