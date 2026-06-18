@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents;
 
+import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretReference;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -133,6 +135,149 @@ class AgentSigningServiceTest {
         assertFalse(signingService.verify(publicKey1, "message", sig2));
     }
 
+    // ==================== Versioned Key Tests ====================
+
+    @Test
+    void generateKeyPairVersioned_returnsPublicKey() throws Exception {
+        String publicKey = signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
+        assertNotNull(publicKey);
+        assertFalse(publicKey.isBlank());
+    }
+
+    @Test
+    void generateKeyPairVersioned_throwsForNonPositiveVersion() {
+        var ex = assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> signingService.generateKeyPairVersioned("t1", "a1", 0));
+        assertTrue(ex.getMessage().contains("positive"));
+    }
+
+    @Test
+    void generateKeyPairVersioned_throwsForNegativeVersion() {
+        var ex = assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> signingService.generateKeyPairVersioned("t1", "a1", -1));
+        assertTrue(ex.getMessage().contains("positive"));
+    }
+
+    @Test
+    void generateKeyPairVersioned_throwsWhenVaultFails() {
+        var failingProvider = new InMemorySecretProvider() {
+            @Override
+            public void store(SecretReference reference, String plaintext,
+                              String description, List<String> allowedAgents)
+                    throws SecretProviderException {
+                throw new SecretProviderException("Vault unavailable");
+            }
+        };
+        var failService = new AgentSigningService(failingProvider, new SimpleMeterRegistry());
+        failService.initMetrics();
+
+        assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> failService.generateKeyPairVersioned("t1", "a1", 1));
+    }
+
+    // ==================== rotateKey Tests ====================
+
+    @Test
+    void rotateKey_generatesNewVersionedKey() throws Exception {
+        String publicKey = signingService.rotateKey("tenant-1", "agent-1", 2);
+        assertNotNull(publicKey);
+        assertFalse(publicKey.isBlank());
+    }
+
+    @Test
+    void rotateKey_throwsForNonPositiveVersion() {
+        var ex = assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> signingService.rotateKey("t1", "a1", 0));
+        assertTrue(ex.getMessage().contains("positive"));
+    }
+
+    @Test
+    void rotateKey_throwsForNegativeVersion() {
+        assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> signingService.rotateKey("t1", "a1", -5));
+    }
+
+    // ==================== Envelope signing/verification ====================
+
+    @Test
+    void signEnvelope_andVerify_roundTrip() throws Exception {
+        String publicKey = signingService.generateKeyPair("tenant-1", "agent-1");
+        var envelope = SignedEnvelope.forSigning("agent-1", "agent-2", Map.of("message", "hello"));
+
+        var signed = signingService.signEnvelope("tenant-1", "agent-1", envelope, 0);
+
+        assertNotNull(signed.signature());
+        assertTrue(signingService.verifyEnvelope(signed, publicKey));
+    }
+
+    @Test
+    void signEnvelope_withVersionedKey() throws Exception {
+        String publicKey = signingService.generateKeyPairVersioned("tenant-1", "agent-1", 3);
+        var envelope = SignedEnvelope.forSigning("agent-1", "agent-2", Map.of("data", "test"));
+
+        var signed = signingService.signEnvelope("tenant-1", "agent-1", envelope, 3);
+
+        assertNotNull(signed.signature());
+        assertEquals(3, signed.keyVersion());
+        assertTrue(signingService.verifyEnvelope(signed, publicKey));
+    }
+
+    @Test
+    void signEnvelope_throwsWhenKeyNotFound() {
+        var envelope = SignedEnvelope.forSigning("agent-1", "agent-2", Map.of("data", "test"));
+
+        assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> signingService.signEnvelope("t1", "nonexistent", envelope, 0));
+    }
+
+    @Test
+    void verifyEnvelope_returnsFalseOnTamperedPayload() throws Exception {
+        String publicKey = signingService.generateKeyPair("tenant-1", "agent-1");
+        var envelope = SignedEnvelope.forSigning("agent-1", "agent-2", Map.of("message", "original"));
+        var signed = signingService.signEnvelope("tenant-1", "agent-1", envelope, 0);
+
+        // Create a tampered envelope with different payload but same signature
+        var tampered = new SignedEnvelope("agent-1", "agent-2",
+                Map.of("message", "tampered"), signed.nonce(), signed.timestampMs(),
+                signed.signature(), signed.keyVersion());
+
+        assertFalse(signingService.verifyEnvelope(tampered, publicKey));
+    }
+
+    @Test
+    void verifyEnvelope_returnsFalseOnInvalidPublicKey() throws Exception {
+        signingService.generateKeyPair("tenant-1", "agent-1");
+        var envelope = SignedEnvelope.forSigning("agent-1", "agent-2", Map.of("msg", "test"));
+        var signed = signingService.signEnvelope("tenant-1", "agent-1", envelope, 0);
+
+        assertFalse(signingService.verifyEnvelope(signed, "invalid-key"));
+    }
+
+    // ==================== deleteKeyPair with versioned keys ====================
+
+    @Test
+    void deleteKeyPair_alsoDeletesVersionedKeys() throws Exception {
+        signingService.generateKeyPair("tenant-1", "agent-1");
+        signingService.generateKeyPairVersioned("tenant-1", "agent-1", 1);
+
+        signingService.deleteKeyPair("tenant-1", "agent-1");
+
+        // Both legacy and versioned key should be gone
+        assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> signingService.sign("tenant-1", "agent-1", "payload"));
+    }
+
+    // ==================== sign error path with SecretNotFoundException
+    // ====================
+
+    @Test
+    void sign_throwsWithSecretNotFoundCauseMessage() {
+        // Agent was never generated — SecretNotFoundException is the cause
+        var ex = assertThrows(AgentSigningService.AgentSigningException.class,
+                () -> signingService.sign("t1", "missing-agent", "payload"));
+        assertTrue(ex.getMessage().contains("No signing key found") || ex.getMessage().contains("Failed to load"));
+    }
+
     /**
      * Simple in-memory secret provider for testing.
      */
@@ -176,6 +321,13 @@ class AgentSigningServiceTest {
         @Override
         public int rotateDek(String tenantId) {
             return 0;
+        }
+
+        @Override
+        public int resetTenant(String tenantId) {
+            int before = store.size();
+            store.entrySet().removeIf(e -> e.getKey().startsWith(tenantId + ":"));
+            return before - store.size();
         }
 
         @Override

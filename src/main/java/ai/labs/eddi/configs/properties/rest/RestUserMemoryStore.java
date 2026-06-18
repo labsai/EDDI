@@ -8,6 +8,8 @@ import ai.labs.eddi.configs.properties.IRestUserMemoryStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.identity.SecurityIdentity;
 import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -28,16 +30,23 @@ import java.util.Map;
 public class RestUserMemoryStore implements IRestUserMemoryStore {
 
     private final IUserMemoryStore userMemoryStore;
+    private final SecurityIdentity identity;
+    private final OwnershipValidator ownershipValidator;
 
     private static final Logger LOGGER = Logger.getLogger(RestUserMemoryStore.class);
 
     @Inject
-    public RestUserMemoryStore(IUserMemoryStore userMemoryStore) {
+    public RestUserMemoryStore(IUserMemoryStore userMemoryStore,
+            SecurityIdentity identity,
+            OwnershipValidator ownershipValidator) {
         this.userMemoryStore = userMemoryStore;
+        this.identity = identity;
+        this.ownershipValidator = ownershipValidator;
     }
 
     @Override
     public List<UserMemoryEntry> getAllMemories(String userId) {
+        ownershipValidator.validateUserAccess(identity, userId);
         try {
             return userMemoryStore.getAllEntries(userId);
         } catch (IResourceStore.ResourceStoreException e) {
@@ -48,6 +57,7 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
 
     @Override
     public List<UserMemoryEntry> getVisibleMemories(String userId, String agentId, List<String> groupIds, String recallOrder, int maxEntries) {
+        ownershipValidator.validateUserAccess(identity, userId);
         try {
             return userMemoryStore.getVisibleEntries(userId, agentId, groupIds != null ? groupIds : List.of(), recallOrder, maxEntries);
         } catch (IResourceStore.ResourceStoreException e) {
@@ -58,6 +68,7 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
 
     @Override
     public List<UserMemoryEntry> searchMemories(String userId, String query) {
+        ownershipValidator.validateUserAccess(identity, userId);
         try {
             return userMemoryStore.filterEntries(userId, query);
         } catch (IResourceStore.ResourceStoreException e) {
@@ -68,6 +79,7 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
 
     @Override
     public List<UserMemoryEntry> getMemoriesByCategory(String userId, String category) {
+        ownershipValidator.validateUserAccess(identity, userId);
         try {
             return userMemoryStore.getEntriesByCategory(userId, category);
         } catch (IResourceStore.ResourceStoreException e) {
@@ -78,6 +90,7 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
 
     @Override
     public Response getMemoryByKey(String userId, String key) {
+        ownershipValidator.validateUserAccess(identity, userId);
         try {
             var entry = userMemoryStore.getByKey(userId, key);
             if (entry.isPresent()) {
@@ -105,6 +118,7 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
         if (entry.key().length() > 255) {
             return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", "key must not exceed 255 characters")).build();
         }
+        ownershipValidator.validateUserAccess(identity, entry.userId());
         try {
             String id = userMemoryStore.upsert(entry);
             return Response.ok(Map.of("id", id)).build();
@@ -117,8 +131,15 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
     @Override
     public Response deleteMemory(String entryId) {
         try {
+            var entry = userMemoryStore.findEntryById(entryId);
+            if (entry.isEmpty()) {
+                throw new NotFoundException("Memory entry not found: " + entryId);
+            }
+            ownershipValidator.validateUserAccess(identity, entry.get().userId());
             userMemoryStore.deleteEntry(entryId);
             return Response.noContent().build();
+        } catch (NotFoundException e) {
+            throw e;
         } catch (IResourceStore.ResourceStoreException e) {
             LOGGER.error("Failed to delete memory entry: " + entryId, e);
             throw new InternalServerErrorException(e.getLocalizedMessage());
@@ -127,6 +148,7 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
 
     @Override
     public Response deleteAllForUser(String userId) {
+        ownershipValidator.validateUserAccess(identity, userId);
         try {
             userMemoryStore.deleteAllForUser(userId);
             return Response.noContent().build();
@@ -138,6 +160,7 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
 
     @Override
     public Response countMemories(String userId) {
+        ownershipValidator.validateUserAccess(identity, userId);
         try {
             long count = userMemoryStore.countEntries(userId);
             return Response.ok(Map.of("userId", userId, "count", count)).build();

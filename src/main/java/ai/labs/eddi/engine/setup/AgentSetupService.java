@@ -496,6 +496,14 @@ public class AgentSetupService {
             return apiKey;
         }
 
+        // Already a vault reference — use it directly, don't re-vault (supports legacy
+        // ${eddivault:...})
+        if (SecretReference.isVaultReference(apiKey)
+                && SecretReference.compiledPattern().matcher(apiKey).matches()) {
+            LOGGER.infof("API key for agent '%s' is already a vault reference — using as-is.", agentName);
+            return apiKey;
+        }
+
         if (!secretProvider.isAvailable()) {
             LOGGER.warn("Secrets Vault is not configured — API key will be stored in plaintext. "
                     + "Set EDDI_VAULT_MASTER_KEY to enable encrypted storage.");

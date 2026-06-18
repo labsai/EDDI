@@ -9,10 +9,15 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
+import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.ForbiddenException;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.core.Response;
@@ -35,12 +40,22 @@ import static org.mockito.Mockito.*;
 class RestAgentEngineTest {
 
     private IConversationService conversationService;
+    private IConversationDescriptorStore descriptorStore;
+    private SecurityIdentity identity;
+    private OwnershipValidator ownershipValidator;
     private RestAgentEngine restAgentEngine;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         conversationService = mock(IConversationService.class);
-        restAgentEngine = new RestAgentEngine(conversationService, 30);
+        descriptorStore = mock(IConversationDescriptorStore.class);
+        identity = mock(SecurityIdentity.class);
+        ownershipValidator = mock(OwnershipValidator.class);
+        when(ownershipValidator.validateAndResolveUserId(any(), any())).thenAnswer(inv -> inv.getArgument(1));
+        // Default: descriptor not found → ownership check skipped gracefully
+        when(descriptorStore.readDescriptor(anyString(), anyInt()))
+                .thenThrow(new ResourceNotFoundException("test default"));
+        restAgentEngine = new RestAgentEngine(conversationService, descriptorStore, identity, ownershipValidator, 30);
     }
 
     @Nested
@@ -516,6 +531,81 @@ class RestAgentEngineTest {
 
             assertThrows(InternalServerErrorException.class,
                     () -> restAgentEngine.redo("conv-1"));
+        }
+    }
+
+    @Nested
+    @DisplayName("OwnershipValidation")
+    class OwnershipValidation {
+
+        @Test
+        @DisplayName("should pass resolved userId to startConversation")
+        void startConversation_resolvesUserId() throws Exception {
+            when(ownershipValidator.validateAndResolveUserId(identity, "user-1"))
+                    .thenReturn("admin-resolved");
+            var result = new IConversationService.ConversationResult("conv-1", URI.create("/conversations/conv-1"));
+            when(conversationService.startConversation(any(), anyString(), eq("admin-resolved"), any()))
+                    .thenReturn(result);
+
+            Response response = restAgentEngine.startConversation("agent-1",
+                    Deployment.Environment.production, "user-1");
+
+            assertEquals(201, response.getStatus());
+            verify(conversationService).startConversation(
+                    Deployment.Environment.production, "agent-1", "admin-resolved", Map.of());
+        }
+
+        @Test
+        @DisplayName("should throw ForbiddenException when caller tries to impersonate")
+        void startConversation_rejectsImpersonation() {
+            when(ownershipValidator.validateAndResolveUserId(identity, "other-user"))
+                    .thenThrow(new ForbiddenException("Access denied"));
+
+            assertThrows(ForbiddenException.class,
+                    () -> restAgentEngine.startConversation("agent-1",
+                            Deployment.Environment.production, "other-user"));
+        }
+
+        @Test
+        @DisplayName("should throw ForbiddenException when caller does not own conversation (read)")
+        void readConversation_rejectsNonOwner() throws Exception {
+            var descriptor = mock(ConversationDescriptor.class);
+            when(descriptor.getUserId()).thenReturn("other-user");
+            doReturn(descriptor).when(descriptorStore).readDescriptor("conv-1", 0);
+            doThrow(new ForbiddenException("Access denied"))
+                    .when(ownershipValidator).requireOwnerOrAdmin(identity, "other-user", "conversation");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restAgentEngine.readConversation("conv-1", false, false, List.of()));
+        }
+
+        @Test
+        @DisplayName("should throw ForbiddenException when caller does not own conversation (end)")
+        void endConversation_rejectsNonOwner() throws Exception {
+            var descriptor = mock(ConversationDescriptor.class);
+            when(descriptor.getUserId()).thenReturn("other-user");
+            doReturn(descriptor).when(descriptorStore).readDescriptor("conv-1", 0);
+            doThrow(new ForbiddenException("Access denied"))
+                    .when(ownershipValidator).requireOwnerOrAdmin(identity, "other-user", "conversation");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restAgentEngine.endConversation("conv-1"));
+        }
+
+        @Test
+        @DisplayName("should skip ownership check when descriptor not found")
+        void descriptorNotFound_skipsCheck() throws Exception {
+            // Default stub already throws ResourceNotFoundException — just verify behavior
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            when(conversationService.readConversation("conv-1", false, false, List.of()))
+                    .thenReturn(snapshot);
+
+            SimpleConversationMemorySnapshot result = restAgentEngine
+                    .readConversation("conv-1", false, false, List.of());
+
+            assertEquals(ConversationState.READY, result.getConversationState());
+            verify(ownershipValidator, never()).requireOwnerOrAdmin(any(), any(), any());
         }
     }
 }

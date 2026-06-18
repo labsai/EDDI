@@ -4,6 +4,16 @@
 
 ---
 
+## 🔒 OpenSSF Scorecard — SAST on All Commits (2026-06-18)
+
+**Repo:** EDDI (`fix/code-review-bugs`)
+**What changed:** Changed the CodeQL SAST job gate in `ci.yml` from a pure path-filter condition to a hybrid: always run on `push` to `main`, but still skip docs-only PRs. The previous `if: needs.detect-changes.outputs.code == 'true'` condition was causing CodeQL to be skipped on Dependabot merge commits, resulting in OpenSSF Scorecard warning: "28 commits out of 30 are checked with a SAST tool."
+
+- **File:** `.github/workflows/ci.yml` — `codeql` job now uses `github.event_name == 'push' || needs.detect-changes.outputs.code == 'true'`
+- **Rationale:** OpenSSF Scorecard only checks commits on the default branch (push events), so CodeQL must always run on push. For PRs, the path filter still saves ~3 min of CI time on docs-only changes since PR checks don't affect the scorecard.
+
+---
+
 ## 🐛 Bug Fixes from Code Review — 4 Concurrency & Null Safety Issues (2026-06-10)
 
 **Repo:** EDDI (`fix/code-review-bugs`)
@@ -47,6 +57,88 @@
 
 ---
 
+## 🛡️ Security Audit Remediation — IDOR Prevention & Ownership Validation (2026-06-10)
+
+**Repo:** EDDI (`fix/security-audit-idor-remediation`)
+**What changed:** Addressed 5 findings from a comprehensive security audit. Added resource ownership validation across all conversation, user memory, and group conversation REST endpoints. Hardened GDPR, A2A, and MCP annotations.
+
+### Finding: IDOR — Conversations (HIGH → FIXED)
+- **Problem:** Any authenticated user with `eddi-user` role could read/modify ANY conversation by guessing the conversationId. No ownership validation existed despite `ConversationDescriptor` having a `userId` field.
+- **Fix:** `RestAgentEngine` now injects `SecurityIdentity`, `OwnershipValidator`, and `IConversationDescriptorStore`. All conversation-scoped endpoints (`readConversation`, `say`, `endConversation`, `undo`, `redo`, `rerun`, `readConversationLog`, `getConversationState`) validate that the caller owns the conversation. `startConversation` validates that the provided `userId` matches the caller's identity (admins can set any userId).
+
+### Finding: IDOR — User Memory (HIGH → FIXED)
+- **Problem:** Any authenticated user could read/delete another user's persistent memories via the `/usermemorystore/memories/{userId}` endpoints.
+- **Fix:** `RestUserMemoryStore` now injects `SecurityIdentity` and `OwnershipValidator`. All endpoints validate that the `{userId}` path parameter matches the authenticated caller. `upsertMemory` validates against the `userId` in the request body.
+
+### Finding: IDOR — Group Conversations (HIGH → FIXED)
+- **Problem:** Any authenticated user could read/delete any group conversation.
+- **Fix:** `RestGroupConversation` now validates ownership on `readGroupConversation` and `deleteGroupConversation`. `listGroupConversations` filters results to only the caller's conversations. `discuss`/`discussStreaming` validate the provided userId.
+
+### Finding: GDPR Annotation on Implementation Only (MEDIUM → FIXED)
+- **Problem:** `@RolesAllowed("eddi-admin")` was only on `RestGdprAdmin` implementation, not the `IRestGdprAdmin` interface. Fragile to refactoring.
+- **Fix:** Moved `@RolesAllowed("eddi-admin")` to the interface level.
+
+### Finding: A2A Endpoint Annotation Clarity (MEDIUM → FIXED)
+- **Problem:** A2A GET discovery endpoints had no explicit security annotations, making intent unclear.
+- **Fix:** Added `@PermitAll` to all 5 GET discovery endpoints to document intentional public access per A2A protocol spec.
+
+### Finding: MCP Memory Ownership (NEW → FIXED)
+- **Problem:** MCP memory read tools (`list_user_memories`, `get_visible_memories`, etc.) accepted `userId` as a tool parameter without validating against the caller's identity.
+- **Fix:** `McpMemoryTools` now injects `OwnershipValidator` and calls `validateUserAccess()` in all 5 read-only MCP memory tools (initially via `McpToolUtils.requireOwnerOrAdmin()`, consolidated to direct `OwnershipValidator` use in code review hardening below).
+
+### New Component: OwnershipValidator
+- Centralized `@ApplicationScoped` utility for ownership checks
+- Three methods: `validateUserAccess()`, `validateAndResolveUserId()`, `requireOwnerOrAdmin()`
+- All checks are no-ops when `authorization.enabled=false` (dev mode)
+- `eddi-admin` role bypasses all ownership checks
+- Legacy data without ownership (null/blank userId) is allowed through gracefully
+- WARN-level audit logging on all ownership check failures
+
+### Dropped Finding: MCP Unauthenticated by Default
+- **Rationale:** When OIDC is disabled, ALL endpoints are unauthenticated — MCP is not uniquely vulnerable. `AuthStartupGuard` already prevents accidental unauthenticated production deployments. Not a finding.
+
+**Files:** `OwnershipValidator.java` [NEW], `RestAgentEngine.java`, `RestUserMemoryStore.java`, `RestGroupConversation.java`, `IRestGdprAdmin.java`, `RestGdprAdmin.java`, `RestA2AEndpoint.java`, `McpToolUtils.java`, `McpMemoryTools.java`
+
+### Code Review Hardening (2026-06-10)
+
+**Repo:** EDDI (`fix/security-audit-idor-remediation`)
+**What changed:** Addressed all findings from the post-implementation code review.
+
+- **M1 — MCP ownership consolidation:** Removed duplicate `requireOwnerOrAdmin` static method from `McpToolUtils`. `McpMemoryTools` now injects `OwnershipValidator` directly and calls `validateUserAccess()` — single source of truth for ownership logic.
+- **M3 — PII in WARN logs:** `OwnershipValidator` WARN messages no longer include caller/user IDs. Full details are logged at DEBUG level only, reducing compliance risk.
+- **M4 — Narrow catch clause:** `RestAgentEngine.validateConversationOwnership()` now catches `ResourceNotFoundException` and `ResourceStoreException` specifically instead of generic `Exception`, preventing unexpected errors from being silently swallowed.
+- **BUG-2 — deleteMemory ownership:** Added `findEntryById(String entryId)` to `IUserMemoryStore` with MongoDB and PostgreSQL implementations. `RestUserMemoryStore.deleteMemory()` now looks up the entry, validates ownership via `validateUserAccess()`, and returns 404 if not found.
+
+**Files:** `OwnershipValidator.java`, `RestAgentEngine.java`, `RestUserMemoryStore.java`, `McpToolUtils.java`, `McpMemoryTools.java`, `IUserMemoryStore.java`, `MongoUserMemoryStore.java`, `PostgresUserMemoryStore.java`
+
+### Test Coverage for Security Fixes (2026-06-10)
+
+**Repo:** EDDI (`fix/security-audit-idor-remediation`)
+**What changed:** Added 36 new tests covering all security-critical ownership validation logic.
+
+- **OwnershipValidatorTest [NEW]:** 24 tests across 4 nested groups — `validateUserAccess`, `validateAndResolveUserId`, `requireOwnerOrAdmin`, `isAuthEnabled`. Covers auth on/off, admin bypass, legacy null owner, caller mismatch → ForbiddenException.
+- **RestAgentEngineTest — OwnershipValidation:** 5 tests — admin userId override, impersonation rejection, non-owner read/end, descriptor-not-found graceful skip.
+- **RestUserMemoryStoreTest — DeleteMemory:** 3 tests — owner match → 204, not found → 404, non-owner → ForbiddenException.
+- **RestGroupConversationTest — OwnershipValidation:** 4 tests — non-owner read/delete, userId resolution in discuss, list filtering for non-admin.
+- **Existing test fixes:** Updated `RestAgentEngineTest`, `RestGroupConversationTest`, `McpMemoryToolsTest` stubs for new constructor parameters and ownership lookup patterns.
+
+**Total:** 184 security-related tests, 0 failures, 0 errors.
+**Files:** `OwnershipValidatorTest.java` [NEW], `RestAgentEngineTest.java`, `RestUserMemoryStoreTest.java`, `RestGroupConversationTest.java`, `McpMemoryToolsTest.java`
+
+### GitHub Advanced Security / CodeQL Remediation (2026-06-10)
+
+**Repo:** EDDI (`fix/security-audit-idor-remediation`)
+**What changed:** Addressed 12 CodeQL "Log Injection" findings and 5 Copilot validation-order findings from automated PR review.
+
+- **Log Injection — RestAgentEngine:** `validateConversationOwnership()` now sanitizes `conversationId` via `LogSanitizer.sanitize()` before logging.
+- **Log Injection — OwnershipValidator:** All 3 debug-level log statements (`validateUserAccess`, `validateAndResolveUserId`, `requireOwnerOrAdmin`) now sanitize user-provided values (`callerId`, `requestedUserId`, `resourceOwnerId`, `resourceType`) via `LogSanitizer.sanitize()`.
+- **Fail-closed ownership check:** `RestAgentEngine.validateConversationOwnership()` now throws `ForbiddenException` on `ResourceStoreException` instead of silently skipping the ownership check. Previous fail-open behavior could allow unauthorized access during transient DB errors.
+- **MCP validation order:** In `McpMemoryTools`, all 5 read-only tools (`listUserMemories`, `getVisibleMemories`, `searchUserMemories`, `getMemoryByKey`, `countUserMemories`) now validate `userId` is non-null/non-blank **before** calling `ownershipValidator.validateUserAccess()`. Previously, a missing `userId` with auth enabled would throw `ForbiddenException` instead of the intended `"userId is required"` error JSON.
+- **Changelog clarity:** Updated MCP ownership entry (line 32-35) to reflect final state — `OwnershipValidator.validateUserAccess()` is the sole mechanism, not `requireOwnerOrAdmin()` in `McpToolUtils`.
+
+**Files:** `RestAgentEngine.java`, `OwnershipValidator.java`, `McpMemoryTools.java`, `docs/changelog.md`
+
+---
 
 ## 🐛 Fix: Swagger UI Broken by CSP — Per-Path Filter Override (2026-06-03)
 

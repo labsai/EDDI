@@ -489,4 +489,130 @@ class ApiCallExecutorTest {
         when(mockResponse.getContentAsString()).thenReturn(body);
         when(mockResponse.getHttpHeader()).thenReturn(headers);
     }
+
+    // ==================== Non-text, non-JSON Content Type Tests
+    // ====================
+
+    @Test
+    void execute_nonTextNonJsonContentType_logsWarningAndStoresAsString() throws Exception {
+        // Given: response with "application/xml" content type (not text, not JSON)
+        ApiCall call = createSimpleApiCall("xml-call", true);
+        setupSuccessResponse(200, "<root>data</root>", "application/xml");
+
+        // When
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        // Then: should NOT attempt JSON deserialization, stores raw string
+        verify(jsonSerialization, never()).deserialize(any(), any());
+        assertEquals("<root>data</root>", result.get("body"));
+    }
+
+    // ==================== saveResponse=false Tests ====================
+
+    @Test
+    void execute_saveResponseFalse_doesNotStoreBody() throws Exception {
+        ApiCall call = createSimpleApiCall("no-save", false); // saveResponse = false
+        setupSuccessResponse(200, "response data", "text/plain");
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        // Body should NOT be in result when saveResponse is false
+        assertFalse(result.containsKey("body"));
+    }
+
+    // ==================== PreRequest Delay Tests ====================
+
+    @Test
+    void execute_preRequestDelay_schedulesWithDelay() throws Exception {
+        ApiCall call = createSimpleApiCall("delay-call", false);
+        var preRequest = new HttpPreRequest();
+        preRequest.setDelayBeforeExecutingInMillis(100);
+        call.setPreRequest(preRequest);
+
+        var scheduledExecutor = mock(java.util.concurrent.ScheduledExecutorService.class);
+        @SuppressWarnings("unchecked")
+        var future = mock(java.util.concurrent.ScheduledFuture.class);
+        when(future.get()).thenReturn(mockResponse);
+        when(scheduledExecutor.schedule(any(java.util.concurrent.Callable.class), eq(100L), eq(java.util.concurrent.TimeUnit.MILLISECONDS)))
+                .thenReturn(future);
+        when(runtime.getScheduledExecutorService()).thenReturn(scheduledExecutor);
+
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        verify(scheduledExecutor).schedule(any(java.util.concurrent.Callable.class), eq(100L), eq(java.util.concurrent.TimeUnit.MILLISECONDS));
+    }
+
+    // ==================== Retry with Exponential Backoff Tests
+    // ====================
+
+    @Test
+    void execute_retryExponentialBackoff_usesDelay() throws Exception {
+        ApiCall call = createSimpleApiCall("backoff-call", false);
+        HttpPostResponse postResponse = new HttpPostResponse();
+        RetryApiCallInstruction retryInstruction = new RetryApiCallInstruction();
+        retryInstruction.setMaxRetries(2);
+        retryInstruction.setRetryOnHttpCodes(List.of(503));
+        retryInstruction.setExponentialBackoffDelayInMillis(50);
+        postResponse.setRetryApiCallInstruction(retryInstruction);
+        call.setPostResponse(postResponse);
+
+        var scheduledExecutor = mock(java.util.concurrent.ScheduledExecutorService.class);
+        @SuppressWarnings("unchecked")
+        var future = mock(java.util.concurrent.ScheduledFuture.class);
+        when(runtime.getScheduledExecutorService()).thenReturn(scheduledExecutor);
+
+        // Use a flag to switch from 503 to 200; toggled when the scheduler is invoked.
+        var retried = new java.util.concurrent.atomic.AtomicBoolean(false);
+        when(mockResponse.getHttpCode()).thenAnswer(inv -> retried.get() ? 200 : 503);
+        when(mockResponse.getContentAsString()).thenAnswer(inv -> retried.get() ? "ok" : "retry");
+        when(mockResponse.getHttpCodeMessage()).thenAnswer(inv -> retried.get() ? "OK" : "Service Unavailable");
+        when(mockResponse.getHttpHeader()).thenReturn(new HashMap<>());
+
+        // When the scheduled executor is invoked (retry with delay), flip the flag,
+        // execute the callable, and return a future whose get() yields the result.
+        doAnswer(inv -> {
+            retried.set(true);
+            @SuppressWarnings("unchecked")
+            java.util.concurrent.Callable<IResponse> callable = inv.getArgument(0);
+            IResponse result = callable.call();
+            when(future.get()).thenReturn(result);
+            return future;
+        }).when(scheduledExecutor).schedule(any(java.util.concurrent.Callable.class), anyLong(), any());
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        verify(scheduledExecutor, times(1)).schedule(
+                any(java.util.concurrent.Callable.class), eq(50L),
+                eq(java.util.concurrent.TimeUnit.MILLISECONDS));
+    }
+
+    // ==================== Null PostResponse RetryInstruction Tests
+    // ====================
+
+    @Test
+    void execute_postResponseWithNullRetryInstruction_noRetry() throws Exception {
+        ApiCall call = createSimpleApiCall("no-retry", false);
+        HttpPostResponse postResponse = new HttpPostResponse();
+        postResponse.setRetryApiCallInstruction(null);
+        call.setPostResponse(postResponse);
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+
+        // Only one send() call — no retry
+        verify(mockRequest, times(1)).send();
+    }
+
+    // ==================== Exception from request.send() Tests ====================
+
+    @Test
+    void execute_requestSendThrowsException_wrapsInLifecycleException() throws Exception {
+        ApiCall call = createSimpleApiCall("err-call", false);
+        when(mockRequest.send()).thenThrow(new ai.labs.eddi.engine.httpclient.IRequest.HttpRequestException("Connection refused"));
+
+        assertThrows(ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException.class,
+                () -> executor.execute(call, memory, new HashMap<>(), "http://example.com"));
+    }
 }
