@@ -127,6 +127,7 @@ export const EXTENSION_TO_RESOURCE_SLUG: Record<string, string> = {
   "eddi://ai.labs.rag": "rag",
   "eddi://ai.labs.snippet": "snippets",
   "eddi://ai.labs.snippets": "snippets",
+  "eddi://ai.labs.parser": "parser",
 };
 
 /** Check if an extension type has a standalone resource config store */

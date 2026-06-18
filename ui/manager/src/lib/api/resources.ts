@@ -89,6 +89,14 @@ export const RESOURCE_TYPES: ResourceTypeConfig[] = [
     labelKey: "resources.types.snippets",
     icon: "Puzzle",
   },
+  {
+    slug: "parser",
+    store: "parserstore",
+    plural: "parsers",
+    extension: "ai.labs.parser",
+    labelKey: "resources.types.parser",
+    icon: "FileText",
+  },
 ];
 
 /** Look up a resource type config by slug */

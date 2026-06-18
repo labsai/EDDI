@@ -40,10 +40,11 @@ describe("RESOURCE_TYPES — extension field alignment with backend", () => {
     mcpcalls: "ai.labs.mcpcalls",
     rag: "ai.labs.rag",
     snippets: "ai.labs.snippet",
+    parser: "ai.labs.parser",
   };
 
-  it("has 9 resource types", () => {
-    expect(RESOURCE_TYPES).toHaveLength(9);
+  it("has 10 resource types", () => {
+    expect(RESOURCE_TYPES).toHaveLength(10);
   });
 
   it("every resource type has an extension field", () => {
@@ -76,7 +77,7 @@ describe("RESOURCE_TYPES — extension field alignment with backend", () => {
 });
 
 describe("EXTENSION_TO_RESOURCE_SLUG — completeness", () => {
-  it("has entries for all 9 resource types", () => {
+  it("has entries for all 10 resource types", () => {
     const requiredExtensions = [
       "eddi://ai.labs.rules",
       "eddi://ai.labs.apicalls",
@@ -87,6 +88,7 @@ describe("EXTENSION_TO_RESOURCE_SLUG — completeness", () => {
       "eddi://ai.labs.mcpcalls",
       "eddi://ai.labs.rag",
       "eddi://ai.labs.snippet",
+      "eddi://ai.labs.parser",
     ];
 
     for (const ext of requiredExtensions) {
@@ -121,8 +123,8 @@ describe("EXTENSION_TO_RESOURCE_SLUG — completeness", () => {
     expect(hasResourceStore("eddi://ai.labs.snippet")).toBe(true);
   });
 
-  it("hasResourceStore returns false for parser", () => {
-    expect(hasResourceStore("eddi://ai.labs.parser")).toBe(false);
+  it("hasResourceStore returns true for parser", () => {
+    expect(hasResourceStore("eddi://ai.labs.parser")).toBe(true);
   });
 });
 
@@ -202,7 +204,7 @@ describe("sortExtensionTypes", () => {
 });
 
 describe("EXTENSION_TO_RESOURCE_SLUG — cross-reference with EXTENSION_TYPE_INFO", () => {
-  // snippet/snippets has no EXTENSION_TYPE_INFO entry (no pipeline editor for snippets)
+  // snippet/snippets has no EXTENSION_TYPE_INFO entry (no pipeline editor type info)
   const SKIP = new Set(["eddi://ai.labs.snippet", "eddi://ai.labs.snippets"]);
 
   it("all resource-slug extensions (except snippets) have matching EXTENSION_TYPE_INFO entries", () => {
