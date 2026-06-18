@@ -27,7 +27,7 @@ describe("WorkflowDetailPage", () => {
     renderWorkflow();
 
     await waitFor(() => {
-      // MSW returns a 5-step pipeline (parser → rules → property → llm → output)
+      // MSW returns a 6-step pipeline (parser ×2 → rules → property → llm → output)
       expect(screen.getByText("Rules")).toBeInTheDocument();
       expect(screen.getByText("LLM")).toBeInTheDocument();
       expect(screen.getByText("Output")).toBeInTheDocument();
