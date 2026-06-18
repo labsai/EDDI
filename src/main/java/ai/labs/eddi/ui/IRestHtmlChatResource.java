@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.ui;
 
+import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.GET;
@@ -25,10 +26,12 @@ public interface IRestHtmlChatResource {
 
     @GET
     @Cache(noCache = true, mustRevalidate = true)
+    @Operation(summary = "View default chat page", description = "Render the default embedded chat UI.")
     Response viewDefault();
 
     @GET
     @Cache(noCache = true, mustRevalidate = true)
     @Path("{path:.*}")
+    @Operation(summary = "View chat resource", description = "Serve a requested chat UI resource by path.")
     Response viewHtml(@PathParam("path") String path);
 }
