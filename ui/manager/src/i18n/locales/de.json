@@ -481,6 +481,10 @@
       "snippets": {
         "name": "Prompt-Snippets",
         "description": "Wiederverwendbare Systemprompt-Bausteine fuer die Vorlagenkomposition"
+      },
+      "parser": {
+        "name": "Parser",
+        "description": "NLP-Eingabeverarbeitung und Wörterbuch-Konfiguration"
       }
     },
     "emptyDescription": "Erstellen Sie Ihre erste {{type}}, um sie in Workflows zu verwenden."
@@ -750,6 +754,47 @@
     "expressionPlaceholder": "z.B. greeting(hello)",
     "frequency": "Häufigkeit",
     "none": "Keine definiert"
+  },
+  "parserEditor": {
+    "title": "Parser-Konfiguration",
+    "configure": "Konfigurieren",
+    "config": "Konfiguration",
+    "appendExpressions": "Ausdrücke anhängen",
+    "includeUnused": "Unbenutzte Ausdrücke einschließen",
+    "includeUnknown": "Unbekannte Ausdrücke einschließen",
+    "dictionaries": "Wörterbücher",
+    "builtInDicts": "Integrierte Wörterbücher",
+    "regularDicts": "Reguläre Wörterbücher",
+    "addDict": "Hinzufügen",
+    "removeDict": "Wörterbuch entfernen",
+    "noRegularDicts": "Keine regulären Wörterbücher konfiguriert",
+    "regularDictLabel": "Reguläres Wörterbuch",
+    "dictUri": "Wörterbuch-Ressourcen-URI",
+    "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
+    "corrections": "Korrekturen",
+    "distance": "Distanz",
+    "normalizers": "Normalisierer",
+    "removePunctuation": "Interpunktion entfernen",
+    "regexPattern": "Muster",
+    "dict": {
+      "integer": "Ganzzahl-Wörterbuch",
+      "decimal": "Dezimal-Wörterbuch",
+      "punctuation": "Interpunktions-Wörterbuch",
+      "email": "E-Mail-Wörterbuch",
+      "time": "Zeitausdruck-Wörterbuch",
+      "ordinalNumber": "Ordnungszahl-Wörterbuch"
+    },
+    "corr": {
+      "levenshtein": "Levenshtein-Korrektur",
+      "phonetic": "Phonetische Korrektur",
+      "mergedTerms": "Zusammengesetzte Terme Korrektur"
+    },
+    "norm": {
+      "punctuation": "Interpunktions-Normalisierer",
+      "specialCharacter": "Sonderzeichen-Normalisierer",
+      "contractedWords": "Kontraktions-Normalisierer",
+      "allowedCharacter": "Erlaubte-Zeichen-Normalisierer"
+    }
   },
   "coordinator": {
     "title": "Koordinator-Dashboard",

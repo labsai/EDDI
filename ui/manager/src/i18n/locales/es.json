@@ -481,6 +481,10 @@
       "snippets": {
         "name": "Fragmentos de prompt",
         "description": "Bloques reutilizables para la composicion de prompts del sistema"
+      },
+      "parser": {
+        "name": "Analizadores",
+        "description": "Análisis NLP de entradas y configuración de diccionarios"
       }
     },
     "emptyDescription": "Cree su primer(a) {{type}} para usarlo en workflows."
@@ -750,6 +754,47 @@
     "expressionPlaceholder": "ej. greeting(hello)",
     "frequency": "Frecuencia",
     "none": "Ninguna definida"
+  },
+  "parserEditor": {
+    "title": "Configuración del analizador",
+    "configure": "Configurar",
+    "config": "Configuración",
+    "appendExpressions": "Añadir expresiones",
+    "includeUnused": "Incluir expresiones no utilizadas",
+    "includeUnknown": "Incluir expresiones desconocidas",
+    "dictionaries": "Diccionarios",
+    "builtInDicts": "Diccionarios integrados",
+    "regularDicts": "Diccionarios regulares",
+    "addDict": "Añadir",
+    "removeDict": "Eliminar diccionario",
+    "noRegularDicts": "No hay diccionarios regulares configurados",
+    "regularDictLabel": "Diccionario regular",
+    "dictUri": "URI del recurso de diccionario",
+    "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
+    "corrections": "Correcciones",
+    "distance": "Distancia",
+    "normalizers": "Normalizadores",
+    "removePunctuation": "Eliminar puntuación",
+    "regexPattern": "Patrón",
+    "dict": {
+      "integer": "Diccionario de enteros",
+      "decimal": "Diccionario de decimales",
+      "punctuation": "Diccionario de puntuación",
+      "email": "Diccionario de correo electrónico",
+      "time": "Diccionario de expresiones temporales",
+      "ordinalNumber": "Diccionario de números ordinales"
+    },
+    "corr": {
+      "levenshtein": "Corrección de Levenshtein",
+      "phonetic": "Corrección fonética",
+      "mergedTerms": "Corrección de términos fusionados"
+    },
+    "norm": {
+      "punctuation": "Normalizador de puntuación",
+      "specialCharacter": "Normalizador de caracteres especiales",
+      "contractedWords": "Normalizador de palabras contraídas",
+      "allowedCharacter": "Normalizador de caracteres permitidos"
+    }
   },
   "coordinator": {
     "title": "Panel del coordinador",

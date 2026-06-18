@@ -481,6 +481,10 @@
       "snippets": {
         "name": "プロンプトスニペット",
         "description": "Reusable system prompt building blocks"
+      },
+      "parser": {
+        "name": "パーサー",
+        "description": "NLP入力解析と辞書設定"
       }
     },
     "emptyDescription": "最初の {{type}} を作成してワークフローで使用しましょう。"
@@ -750,6 +754,47 @@
     "expressionPlaceholder": "例: greeting(hello)",
     "frequency": "頻度",
     "none": "定義なし"
+  },
+  "parserEditor": {
+    "title": "パーサー設定",
+    "configure": "設定",
+    "config": "設定",
+    "appendExpressions": "式を追加",
+    "includeUnused": "未使用の式を含む",
+    "includeUnknown": "不明な式を含む",
+    "dictionaries": "辞書",
+    "builtInDicts": "組み込み辞書",
+    "regularDicts": "通常辞書",
+    "addDict": "追加",
+    "removeDict": "辞書を削除",
+    "noRegularDicts": "通常辞書が設定されていません",
+    "regularDictLabel": "通常辞書",
+    "dictUri": "辞書リソース URI",
+    "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
+    "corrections": "補正",
+    "distance": "距離",
+    "normalizers": "正規化器",
+    "removePunctuation": "句読点を削除",
+    "regexPattern": "パターン",
+    "dict": {
+      "integer": "整数辞書",
+      "decimal": "小数辞書",
+      "punctuation": "句読点辞書",
+      "email": "メール辞書",
+      "time": "時間表現辞書",
+      "ordinalNumber": "序数辞書"
+    },
+    "corr": {
+      "levenshtein": "レーベンシュタイン補正",
+      "phonetic": "音声補正",
+      "mergedTerms": "結合語補正"
+    },
+    "norm": {
+      "punctuation": "句読点正規化器",
+      "specialCharacter": "特殊文字正規化器",
+      "contractedWords": "省略語正規化器",
+      "allowedCharacter": "許可文字正規化器"
+    }
   },
   "coordinator": {
     "title": "コーディネーターダッシュボード",

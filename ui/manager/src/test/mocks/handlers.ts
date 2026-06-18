@@ -860,6 +860,22 @@ export const handlers = [
           config: { uri: "eddi://ai.labs.parser/parserstore/parsers/parser1?version=1" },
         },
         {
+          type: "eddi://ai.labs.parser",
+          extensions: {
+            dictionaries: [
+              { type: "eddi://ai.labs.parser.dictionaries.integer" },
+              { type: "eddi://ai.labs.parser.dictionaries.decimal" },
+            ],
+            corrections: [],
+            normalizer: [],
+          },
+          config: {
+            appendExpressions: true,
+            includeUnused: true,
+            includeUnknown: true,
+          },
+        },
+        {
           type: "eddi://ai.labs.rules",
           extensions: {},
           config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1" },
@@ -2148,6 +2164,39 @@ export const handlers = [
       content: "## Response Guidelines\n\nYou must follow these rules at all times:\n\n1. **Accuracy First**: When uncertain about facts, explicitly state your uncertainty. Say \"I believe\" or \"Based on available information\" rather than making definitive claims.\n2. **No Financial/Legal Advice**: Never provide specific financial, legal, or medical recommendations. Instead, direct users to qualified professionals.\n3. **Source Attribution**: When citing data, reference the source document or knowledge base entry.\n4. **Hedging Language**: Use phrases like \"typically\", \"in most cases\", \"generally speaking\" for statements that may not apply universally.\n5. **Escalation Trigger**: If confidence drops below 70% on a user question, offer to connect with a human specialist.\n\n{#if properties.regulated_domain}\n⚠️ This conversation involves a regulated domain ({properties.regulated_domain}). Apply maximum caution.\n{/if}",
       tags: ["safety", "production", "enterprise", "compliance", "regulated"],
       templateEnabled: true,
+    });
+  }),
+
+  // Parser config mock data (BEFORE generic handlers)
+  http.get("*/parserstore/parsers/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (url.pathname.endsWith("/descriptors") || includePrevious) return;
+    return HttpResponse.json({
+      config: {
+        appendExpressions: true,
+        includeUnused: true,
+        includeUnknown: true,
+      },
+      extensions: {
+        dictionaries: [
+          { type: "eddi://ai.labs.parser.dictionaries.integer" },
+          { type: "eddi://ai.labs.parser.dictionaries.decimal" },
+          { type: "eddi://ai.labs.parser.dictionaries.punctuation" },
+          { type: "eddi://ai.labs.parser.dictionaries.email" },
+          { type: "eddi://ai.labs.parser.dictionaries.time" },
+          { type: "eddi://ai.labs.parser.dictionaries.ordinalNumber" },
+          {
+            type: "eddi://ai.labs.parser.dictionaries.regular",
+            config: { uri: "eddi://ai.labs.dictionary/dictionarystore/dictionaries/dict1?version=1" },
+          },
+        ],
+        corrections: [
+          { type: "eddi://ai.labs.parser.corrections.levenshtein", config: { distance: "2" } },
+          { type: "eddi://ai.labs.parser.corrections.mergedTerms" },
+        ],
+        normalizer: [],
+      },
     });
   }),
 

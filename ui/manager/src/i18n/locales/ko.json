@@ -481,6 +481,10 @@
       "snippets": {
         "name": "프롬프트 스니펫",
         "description": "Reusable system prompt building blocks"
+      },
+      "parser": {
+        "name": "파서",
+        "description": "NLP 입력 구문 분석 및 사전 구성"
       }
     },
     "emptyDescription": "워크플로에서 사용할 첫 번째 {{type}}을(를) 만드세요."
@@ -750,6 +754,47 @@
     "expressionPlaceholder": "예: greeting(hello)",
     "frequency": "빈도",
     "none": "정의되지 않음"
+  },
+  "parserEditor": {
+    "title": "파서 구성",
+    "configure": "구성",
+    "config": "구성",
+    "appendExpressions": "표현식 추가",
+    "includeUnused": "미사용 표현식 포함",
+    "includeUnknown": "알 수 없는 표현식 포함",
+    "dictionaries": "사전",
+    "builtInDicts": "내장 사전",
+    "regularDicts": "일반 사전",
+    "addDict": "추가",
+    "removeDict": "사전 제거",
+    "noRegularDicts": "구성된 일반 사전이 없습니다",
+    "regularDictLabel": "일반 사전",
+    "dictUri": "사전 리소스 URI",
+    "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
+    "corrections": "교정",
+    "distance": "거리",
+    "normalizers": "정규화기",
+    "removePunctuation": "구두점 제거",
+    "regexPattern": "패턴",
+    "dict": {
+      "integer": "정수 사전",
+      "decimal": "소수 사전",
+      "punctuation": "구두점 사전",
+      "email": "이메일 사전",
+      "time": "시간 표현 사전",
+      "ordinalNumber": "서수 사전"
+    },
+    "corr": {
+      "levenshtein": "레벤슈타인 교정",
+      "phonetic": "음성 교정",
+      "mergedTerms": "병합 용어 교정"
+    },
+    "norm": {
+      "punctuation": "구두점 정규화기",
+      "specialCharacter": "특수문자 정규화기",
+      "contractedWords": "축약어 정규화기",
+      "allowedCharacter": "허용 문자 정규화기"
+    }
   },
   "coordinator": {
     "title": "코디네이터 대시보드",

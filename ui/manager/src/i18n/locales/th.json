@@ -481,6 +481,10 @@
       "snippets": {
         "name": "ตัวอย่างพรอมต์",
         "description": "Reusable system prompt building blocks"
+      },
+      "parser": {
+        "name": "ตัววิเคราะห์",
+        "description": "การวิเคราะห์อินพุต NLP และการกำหนดค่าพจนานุกรม"
       }
     },
     "emptyDescription": "สร้าง {{type}} แรกของคุณเพื่อใช้ใน Workflow"
@@ -750,6 +754,47 @@
     "expressionPlaceholder": "เช่น greeting(hello)",
     "frequency": "ความถี่",
     "none": "ไม่มีที่กำหนด"
+  },
+  "parserEditor": {
+    "title": "การกำหนดค่าตัววิเคราะห์",
+    "configure": "กำหนดค่า",
+    "config": "การกำหนดค่า",
+    "appendExpressions": "เพิ่มนิพจน์",
+    "includeUnused": "รวมนิพจน์ที่ไม่ได้ใช้",
+    "includeUnknown": "รวมนิพจน์ที่ไม่รู้จัก",
+    "dictionaries": "พจนานุกรม",
+    "builtInDicts": "พจนานุกรมในตัว",
+    "regularDicts": "พจนานุกรมทั่วไป",
+    "addDict": "เพิ่ม",
+    "removeDict": "ลบพจนานุกรม",
+    "noRegularDicts": "ไม่มีพจนานุกรมทั่วไปที่กำหนดค่า",
+    "regularDictLabel": "พจนานุกรมทั่วไป",
+    "dictUri": "URI ทรัพยากรพจนานุกรม",
+    "dictUriPlaceholder": "eddi://ai.labs.dictionary/dictionarystore/dictionaries/<id>?version=<v>",
+    "corrections": "การแก้ไข",
+    "distance": "ระยะทาง",
+    "normalizers": "ตัวปรับปกติ",
+    "removePunctuation": "ลบเครื่องหมายวรรคตอน",
+    "regexPattern": "รูปแบบ",
+    "dict": {
+      "integer": "พจนานุกรมจำนวนเต็ม",
+      "decimal": "พจนานุกรมทศนิยม",
+      "punctuation": "พจนานุกรมเครื่องหมายวรรคตอน",
+      "email": "พจนานุกรมอีเมล",
+      "time": "พจนานุกรมนิพจน์เวลา",
+      "ordinalNumber": "พจนานุกรมเลขลำดับ"
+    },
+    "corr": {
+      "levenshtein": "การแก้ไข Levenshtein",
+      "phonetic": "การแก้ไขเชิงเสียง",
+      "mergedTerms": "การแก้ไขคำรวม"
+    },
+    "norm": {
+      "punctuation": "ตัวปรับปกติเครื่องหมายวรรคตอน",
+      "specialCharacter": "ตัวปรับปกติอักขระพิเศษ",
+      "contractedWords": "ตัวปรับปกติคำย่อ",
+      "allowedCharacter": "ตัวปรับปกติอักขระที่อนุญาต"
+    }
   },
   "coordinator": {
     "title": "แดชบอร์ดผู้ประสานงาน",

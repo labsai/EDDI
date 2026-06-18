@@ -42,6 +42,12 @@ import {
   SnippetEditor,
   type PromptSnippetConfig,
 } from "@/components/editors/snippet-editor";
+import {
+  ParserEditor,
+} from "@/components/editors/parser-editor";
+import type {
+  ParserData,
+} from "@/components/editors/parser-editor-types";
 
 export type EditorRenderFn = (
   parsed: unknown,
@@ -82,6 +88,9 @@ export const EDITOR_MAP: Record<string, EditorRenderFn> = {
   snippets: (p, o, r) => (
     <SnippetEditor data={p as PromptSnippetConfig} onChange={o} readOnly={r} />
   ),
+  parser: (p, o, r) => (
+    <ParserEditor data={p as ParserData} onChange={o} readOnly={r} />
+  ),
 };
 
 /**
@@ -99,4 +108,5 @@ export const EXTENSION_TO_SLUG: Record<string, string> = {
   "eddi://ai.labs.dictionary": "dictionary",
   "eddi://ai.labs.rag": "rag",
   "eddi://ai.labs.snippets": "snippets",
+  "eddi://ai.labs.parser": "parser",
 };
