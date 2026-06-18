@@ -471,7 +471,7 @@ public class BehaviorRulesTask implements ILifecycleTask {
 ### HTTP Calls Task (executes API calls)
 
 ```java
-public class HttpCallsTask implements ILifecycleTask {
+public class ApiCallsTask implements ILifecycleTask {
     @Override
     public void execute(IConversationMemory memory, Object component) {
         HttpCallsConfiguration config = (HttpCallsConfiguration) component;
