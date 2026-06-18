@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { CreateWorkflowDialog } from "@/components/workflows/create-workflow-dialog";
 
@@ -51,6 +51,9 @@ describe("CreateWorkflowDialog", () => {
       <CreateWorkflowDialog open={true} onClose={vi.fn()} />
     );
     const nameInput = screen.getByLabelText("Name");
+    // Wait for AccessibleDialog's rAF auto-focus to settle
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
+    await user.click(nameInput);
     await user.type(nameInput, "Test Workflow");
     expect(nameInput).toHaveValue("Test Workflow");
   });
@@ -61,6 +64,8 @@ describe("CreateWorkflowDialog", () => {
       <CreateWorkflowDialog open={true} onClose={vi.fn()} />
     );
     const descInput = screen.getByLabelText("Description");
+    // Wait for AccessibleDialog's rAF auto-focus to settle, then click
+    await waitFor(() => expect(document.activeElement).not.toBe(document.body));
     await user.click(descInput);
     await user.type(descInput, "A test description");
     expect(descInput).toHaveValue("A test description");
