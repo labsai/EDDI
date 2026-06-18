@@ -276,11 +276,15 @@ jobs:
           fi
 
   # ─── Job 2b: CodeQL SAST ───────────────────────────────────────
+  # Always runs on push to main (OpenSSF Scorecard checks all default-branch commits).
+  # On PRs, gated by detect-changes to skip docs-only changes and save CI resources.
   codeql:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
     needs: detect-changes
-    if: needs.detect-changes.outputs.code == 'true'
+    if: >-
+      github.event_name == 'push' ||
+      needs.detect-changes.outputs.code == 'true'
     permissions:
       security-events: write
       contents: read

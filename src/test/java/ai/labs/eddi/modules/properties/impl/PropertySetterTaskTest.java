@@ -414,6 +414,94 @@ class PropertySetterTaskTest {
         }
 
         @Test
+        @DisplayName("CATCH_ANY_INPUT_AS_PROPERTY with missing input:initial — should not NPE")
+        void catchAnyInput_missingInputInitial() throws Exception {
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var expressionsData = mock(IData.class);
+            when(expressionsData.getResult()).thenReturn("");
+            when(currentStep.getLatestData("expressions:parsed")).thenReturn(expressionsData);
+            when(currentStep.getAllData("context")).thenReturn(null);
+            when(currentStep.getLatestData("actions")).thenReturn(null);
+
+            when(expressionProvider.parseExpressions("")).thenReturn(new Expressions());
+
+            var conversationProperties = mock(IConversationProperties.class);
+            when(memory.getConversationProperties()).thenReturn(conversationProperties);
+
+            var templateDataObjects = new HashMap<String, Object>();
+            when(memoryItemConverter.convert(memory)).thenReturn(templateDataObjects);
+
+            var previousSteps = mock(IConversationStepStack.class);
+            when(memory.getPreviousSteps()).thenReturn(previousSteps);
+            when(previousSteps.size()).thenReturn(1);
+
+            var previousStep = mock(IWritableConversationStep.class);
+            when(previousSteps.get(0)).thenReturn(previousStep);
+
+            var prevActionsData = mock(IData.class);
+            when(previousStep.getLatestData("actions")).thenReturn(prevActionsData);
+            when(prevActionsData.getResult()).thenReturn(List.of("CATCH_ANY_INPUT_AS_PROPERTY"));
+
+            // input:initial is missing (blank message was sent)
+            when(currentStep.getLatestData("input:initial")).thenReturn(null);
+
+            var propertySetter = mock(IPropertySetter.class);
+            when(propertySetter.getSetOnActionsList()).thenReturn(List.of());
+            when(propertySetter.extractProperties(any())).thenReturn(new LinkedList<>());
+
+            assertDoesNotThrow(() -> task.execute(memory, propertySetter));
+            verify(conversationProperties, never()).put(eq("user_input"), any(Property.class));
+        }
+
+        @Test
+        @DisplayName("CATCH_ANY_INPUT_AS_PROPERTY with null result — should not NPE")
+        void catchAnyInput_nullResult() throws Exception {
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+
+            var expressionsData = mock(IData.class);
+            when(expressionsData.getResult()).thenReturn("");
+            when(currentStep.getLatestData("expressions:parsed")).thenReturn(expressionsData);
+            when(currentStep.getAllData("context")).thenReturn(null);
+            when(currentStep.getLatestData("actions")).thenReturn(null);
+
+            when(expressionProvider.parseExpressions("")).thenReturn(new Expressions());
+
+            var conversationProperties = mock(IConversationProperties.class);
+            when(memory.getConversationProperties()).thenReturn(conversationProperties);
+
+            var templateDataObjects = new HashMap<String, Object>();
+            when(memoryItemConverter.convert(memory)).thenReturn(templateDataObjects);
+
+            var previousSteps = mock(IConversationStepStack.class);
+            when(memory.getPreviousSteps()).thenReturn(previousSteps);
+            when(previousSteps.size()).thenReturn(1);
+
+            var previousStep = mock(IWritableConversationStep.class);
+            when(previousSteps.get(0)).thenReturn(previousStep);
+
+            var prevActionsData = mock(IData.class);
+            when(previousStep.getLatestData("actions")).thenReturn(prevActionsData);
+            when(prevActionsData.getResult()).thenReturn(List.of("CATCH_ANY_INPUT_AS_PROPERTY"));
+
+            // input:initial exists but getResult() returns null
+            var inputData = mock(IData.class);
+            when(currentStep.getLatestData("input:initial")).thenReturn(inputData);
+            when(inputData.getResult()).thenReturn(null);
+
+            var propertySetter = mock(IPropertySetter.class);
+            when(propertySetter.getSetOnActionsList()).thenReturn(List.of());
+            when(propertySetter.extractProperties(any())).thenReturn(new LinkedList<>());
+
+            assertDoesNotThrow(() -> task.execute(memory, propertySetter));
+            verify(conversationProperties, never()).put(eq("user_input"), any(Property.class));
+        }
+
+        @Test
         @DisplayName("fromObjectPath with String value — templates and stores as Property")
         void fromObjectPathStringValue() throws Exception {
             var memory = mock(IConversationMemory.class);
