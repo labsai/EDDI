@@ -354,4 +354,220 @@ class VaultSecretProviderBranchTest {
             assertEquals(List.of("agent-1"), captor.getValue().getAllowedAgents());
         }
     }
+
+    // ─── createUnavailableProvider helper ───
+
+    private VaultSecretProvider createUnavailableProvider() {
+        VaultSecretProvider provider = new VaultSecretProvider(
+                Optional.empty(), persistence, saltManager, meterRegistry);
+        provider.initMetrics();
+        return provider;
+    }
+
+    // ─── resetTenant ───
+
+    @Nested
+    @DisplayName("resetTenant")
+    class ResetTenantTests {
+
+        @Test
+        @DisplayName("happy path deletes all secrets then DEK and returns count")
+        void happyPath() throws Exception {
+            VaultSecretProvider provider = createAvailableProvider();
+
+            byte[] dek = EnvelopeCrypto.generateDek();
+            EncryptedSecret secret1 = createEncryptedSecret("val1", dek);
+            EncryptedSecret secret2 = createEncryptedSecret("val2", dek);
+            // Give them distinct key names for verification
+            secret1.setKeyName("key-1");
+            secret2.setKeyName("key-2");
+
+            when(persistence.listSecretsByTenant(TENANT_ID))
+                    .thenReturn(List.of(secret1, secret2));
+            when(persistence.deleteSecret(eq(TENANT_ID), anyString()))
+                    .thenReturn(true);
+
+            int result = provider.resetTenant(TENANT_ID);
+
+            assertEquals(2, result);
+            verify(persistence).deleteSecret(TENANT_ID, "key-1");
+            verify(persistence).deleteSecret(TENANT_ID, "key-2");
+            verify(persistence).deleteDek(TENANT_ID);
+        }
+
+        @Test
+        @DisplayName("empty tenant still deletes DEK and returns 0")
+        void emptyTenant() throws Exception {
+            VaultSecretProvider provider = createAvailableProvider();
+
+            when(persistence.listSecretsByTenant(TENANT_ID))
+                    .thenReturn(List.of());
+
+            int result = provider.resetTenant(TENANT_ID);
+
+            assertEquals(0, result);
+            verify(persistence, never()).deleteSecret(anyString(), anyString());
+            verify(persistence).deleteDek(TENANT_ID);
+        }
+
+        @Test
+        @DisplayName("partial delete — count excludes failed deletes")
+        void partialDelete() throws Exception {
+            VaultSecretProvider provider = createAvailableProvider();
+
+            byte[] dek = EnvelopeCrypto.generateDek();
+            EncryptedSecret secret1 = createEncryptedSecret("val1", dek);
+            EncryptedSecret secret2 = createEncryptedSecret("val2", dek);
+            secret1.setKeyName("key-ok");
+            secret2.setKeyName("key-gone");
+
+            when(persistence.listSecretsByTenant(TENANT_ID))
+                    .thenReturn(List.of(secret1, secret2));
+            when(persistence.deleteSecret(TENANT_ID, "key-ok")).thenReturn(true);
+            when(persistence.deleteSecret(TENANT_ID, "key-gone")).thenReturn(false);
+
+            int result = provider.resetTenant(TENANT_ID);
+
+            assertEquals(1, result, "Should count only successful deletes");
+            verify(persistence).deleteDek(TENANT_ID);
+        }
+
+        @Test
+        @DisplayName("persistence failure wraps as SecretProviderException")
+        void persistenceFailure() {
+            VaultSecretProvider provider = createAvailableProvider();
+
+            when(persistence.listSecretsByTenant(TENANT_ID))
+                    .thenThrow(new PersistenceException("DB down"));
+
+            var ex = assertThrows(SecretProviderException.class,
+                    () -> provider.resetTenant(TENANT_ID));
+            assertTrue(ex.getMessage().contains("Failed to reset vault"));
+        }
+
+        @Test
+        @DisplayName("vault unavailable throws SecretProviderException")
+        void vaultUnavailable() {
+            VaultSecretProvider provider = createUnavailableProvider();
+
+            assertThrows(SecretProviderException.class,
+                    () -> provider.resetTenant(TENANT_ID));
+        }
+    }
+
+    // ─── handleDekDecryptionFailure (triggered via getOrCreateDek) ───
+
+    @Nested
+    @DisplayName("handleDekDecryptionFailure")
+    class HandleDekDecryptionFailureTests {
+
+        /**
+         * Creates a DEK encrypted with a DIFFERENT master key so that decryption with
+         * the current KEK fails with AEADBadTagException (wrapped in CryptoException).
+         */
+        private EncryptedDek createDekEncryptedWithDifferentKey(byte[] rawDek) {
+            String differentMasterKey = "DIFFERENT-master-key-9876543210";
+            byte[] wrongKek = EnvelopeCrypto.deriveKeyFromString(differentMasterKey, FIXED_SALT);
+            EnvelopeCrypto.EncryptionResult encResult = EnvelopeCrypto.encryptDek(rawDek, wrongKek);
+            return new EncryptedDek("dek-wrong", TENANT_ID,
+                    encResult.ciphertext(), encResult.iv(), Instant.now());
+        }
+
+        @Test
+        @DisplayName("with secrets stored — error message lists count and recovery options")
+        void withSecretsStored() {
+            VaultSecretProvider provider = createAvailableProvider();
+
+            byte[] dek = EnvelopeCrypto.generateDek();
+            EncryptedDek wrongDek = createDekEncryptedWithDifferentKey(dek);
+
+            when(persistence.findDek(TENANT_ID)).thenReturn(Optional.of(wrongDek));
+            when(persistence.listSecretsByTenant(TENANT_ID)).thenReturn(
+                    List.of(createEncryptedSecret("s1", dek),
+                            createEncryptedSecret("s2", dek),
+                            createEncryptedSecret("s3", dek)));
+
+            var ex = assertThrows(SecretProviderException.class,
+                    () -> provider.store(new SecretReference(TENANT_ID, KEY_NAME),
+                            "value", null, null));
+
+            assertTrue(ex.getMessage().contains("3 secret(s) are stored"),
+                    "Expected '3 secret(s) are stored' but got: " + ex.getMessage());
+            assertTrue(ex.getMessage().contains("Set EDDI_VAULT_MASTER_KEY back"));
+            assertTrue(ex.getMessage().contains("rotate-kek"));
+            assertTrue(ex.getMessage().contains("/reset"));
+        }
+
+        @Test
+        @DisplayName("with 0 secrets — message says no data would be lost")
+        void withZeroSecrets() {
+            VaultSecretProvider provider = createAvailableProvider();
+
+            byte[] dek = EnvelopeCrypto.generateDek();
+            EncryptedDek wrongDek = createDekEncryptedWithDifferentKey(dek);
+
+            when(persistence.findDek(TENANT_ID)).thenReturn(Optional.of(wrongDek));
+            when(persistence.listSecretsByTenant(TENANT_ID)).thenReturn(List.of());
+
+            var ex = assertThrows(SecretProviderException.class,
+                    () -> provider.store(new SecretReference(TENANT_ID, KEY_NAME),
+                            "value", null, null));
+
+            assertTrue(ex.getMessage().contains("No secrets are stored"),
+                    "Expected 'No secrets are stored' but got: " + ex.getMessage());
+        }
+
+        @Test
+        @DisplayName("persistence error counting secrets — message says unable to determine")
+        void persistenceErrorCounting() {
+            VaultSecretProvider provider = createAvailableProvider();
+
+            byte[] dek = EnvelopeCrypto.generateDek();
+            EncryptedDek wrongDek = createDekEncryptedWithDifferentKey(dek);
+
+            when(persistence.findDek(TENANT_ID)).thenReturn(Optional.of(wrongDek));
+            when(persistence.listSecretsByTenant(TENANT_ID))
+                    .thenThrow(new PersistenceException("DB error"));
+
+            var ex = assertThrows(SecretProviderException.class,
+                    () -> provider.store(new SecretReference(TENANT_ID, KEY_NAME),
+                            "value", null, null));
+
+            assertTrue(ex.getMessage().contains("Unable to determine"),
+                    "Expected 'Unable to determine' but got: " + ex.getMessage());
+        }
+    }
+
+    // ─── generateAndPersistDek (triggered when no DEK exists) ───
+
+    @Nested
+    @DisplayName("generateAndPersistDek")
+    class GenerateAndPersistDekTests {
+
+        @Test
+        @DisplayName("new DEK generated and stored end-to-end when none exists")
+        void newDekGenerated() throws Exception {
+            VaultSecretProvider provider = createAvailableProvider();
+
+            // No existing DEK → triggers generateAndPersistDek
+            when(persistence.findDek(TENANT_ID)).thenReturn(Optional.empty());
+            when(persistence.findSecret(TENANT_ID, KEY_NAME)).thenReturn(Optional.empty());
+
+            // Store a secret — this forces DEK creation
+            provider.store(new SecretReference(TENANT_ID, KEY_NAME),
+                    "test-secret-value", "desc", null);
+
+            // Verify a new DEK was upserted
+            var dekCaptor = org.mockito.ArgumentCaptor.forClass(EncryptedDek.class);
+            verify(persistence).upsertDek(dekCaptor.capture());
+            EncryptedDek generatedDek = dekCaptor.getValue();
+            assertEquals(TENANT_ID, generatedDek.getTenantId());
+            assertNotNull(generatedDek.getEncryptedDek());
+            assertNotNull(generatedDek.getIv());
+
+            // Verify the secret was also stored
+            verify(persistence).upsertSecret(any(EncryptedSecret.class));
+        }
+    }
+
 }

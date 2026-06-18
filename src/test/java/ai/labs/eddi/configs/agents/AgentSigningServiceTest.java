@@ -324,6 +324,13 @@ class AgentSigningServiceTest {
         }
 
         @Override
+        public int resetTenant(String tenantId) {
+            int before = store.size();
+            store.entrySet().removeIf(e -> e.getKey().startsWith(tenantId + ":"));
+            return before - store.size();
+        }
+
+        @Override
         public boolean isAvailable() {
             return true;
         }

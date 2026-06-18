@@ -694,4 +694,69 @@ class AgentSetupServiceBranchCoverageTest {
             assertEquals(3, config.getWorkflowSteps().size());
         }
     }
+
+    // ─── vaultApiKey (private, tested via reflection) ────────────────────
+
+    @Nested
+    @DisplayName("vaultApiKey")
+    class VaultApiKey {
+
+        private String invokeVaultApiKey(String apiKey, String agentName) throws Exception {
+            var method = AgentSetupService.class.getDeclaredMethod("vaultApiKey", String.class, String.class);
+            method.setAccessible(true);
+            return (String) method.invoke(service, apiKey, agentName);
+        }
+
+        @Test
+        @DisplayName("vault reference is passed through as-is (not re-vaulted)")
+        void passthroughVaultReference() throws Exception {
+            String vaultRef = "${vault:anthropic-api-key}";
+
+            String result = invokeVaultApiKey(vaultRef, "MyAgent");
+
+            assertEquals(vaultRef, result, "Already-vaulted reference should be returned unchanged");
+            // Should NOT attempt to store anything
+            verifyNoInteractions(secretProvider);
+        }
+
+        @Test
+        @DisplayName("null apiKey returns null")
+        void nullApiKey() throws Exception {
+            String result = invokeVaultApiKey(null, "MyAgent");
+
+            assertNull(result);
+            verifyNoInteractions(secretProvider);
+        }
+
+        @Test
+        @DisplayName("blank apiKey returns blank")
+        void blankApiKey() throws Exception {
+            String result = invokeVaultApiKey("   ", "MyAgent");
+
+            assertEquals("   ", result);
+            verifyNoInteractions(secretProvider);
+        }
+
+        @Test
+        @DisplayName("legacy ${eddivault:...} reference is passed through as-is")
+        void passthroughLegacyVaultReference() throws Exception {
+            String legacyRef = "${eddivault:old-api-key}";
+
+            String result = invokeVaultApiKey(legacyRef, "LegacyAgent");
+
+            assertEquals(legacyRef, result, "Legacy eddivault reference should be returned unchanged");
+            verifyNoInteractions(secretProvider);
+        }
+
+        @Test
+        @DisplayName("full-form ${vault:tenant/key} reference is passed through as-is")
+        void passthroughFullFormVaultReference() throws Exception {
+            String fullRef = "${vault:my-tenant/my-api-key}";
+
+            String result = invokeVaultApiKey(fullRef, "MultiTenantAgent");
+
+            assertEquals(fullRef, result, "Full-form vault reference should be returned unchanged");
+            verifyNoInteractions(secretProvider);
+        }
+    }
 }
