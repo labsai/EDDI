@@ -20,6 +20,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
  * @since 6.0.0
  */
 @OpenAPIDefinition(info = @Info(title = "EDDI API", version = "6.0.0"), tags = {
+        @Tag(name = "Authentication", description = "User authentication lifecycle operations"),
         @Tag(name = "Agent Setup", description = "One-command agent creation and deployment"),
         @Tag(name = "Conversations", description = "Start, talk to, stream, undo/redo, and manage conversations"),
         @Tag(name = "Group Conversations", description = "Multi-agent group discussion orchestration"),
