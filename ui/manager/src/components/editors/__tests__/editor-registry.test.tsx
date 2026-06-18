@@ -40,8 +40,12 @@ describe("editor-registry", () => {
       expect(EDITOR_MAP.snippets).toBeDefined();
     });
 
-    it("has exactly 9 editors registered", () => {
-      expect(Object.keys(EDITOR_MAP).length).toBe(9);
+    it("has editor for parser", () => {
+      expect(EDITOR_MAP.parser).toBeDefined();
+    });
+
+    it("has exactly 10 editors registered", () => {
+      expect(Object.keys(EDITOR_MAP).length).toBe(10);
     });
   });
 
@@ -88,6 +92,10 @@ describe("editor-registry", () => {
 
     it("returns undefined for unknown types", () => {
       expect(EXTENSION_TO_SLUG["eddi://ai.labs.unknown"]).toBeUndefined();
+    });
+
+    it("maps parser extension type", () => {
+      expect(EXTENSION_TO_SLUG["eddi://ai.labs.parser"]).toBe("parser");
     });
   });
 });

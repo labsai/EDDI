@@ -110,7 +110,7 @@ describe("WorkflowDetailPage", () => {
     await waitFor(() => {
       // Use data-testid to reliably find the pipeline count badge
       const countBadge = screen.getByTestId("pipeline-step-count");
-      expect(countBadge).toHaveTextContent("5");
+      expect(countBadge).toHaveTextContent("6");
     });
   });
 
@@ -281,7 +281,7 @@ describe("WorkflowDetailPage", () => {
 
     // Wait for pipeline to load
     await waitFor(() => {
-      expect(screen.getByTestId("pipeline-step-count")).toHaveTextContent("5");
+      expect(screen.getByTestId("pipeline-step-count")).toHaveTextContent("6");
     });
 
     // Find and click a remove button on a pipeline step
@@ -308,7 +308,7 @@ describe("WorkflowDetailPage", () => {
 
     // Wait for pipeline to load
     await waitFor(() => {
-      expect(screen.getByTestId("pipeline-step-count")).toHaveTextContent("5");
+      expect(screen.getByTestId("pipeline-step-count")).toHaveTextContent("6");
     });
 
     // Remove a step to make dirty
@@ -328,8 +328,8 @@ describe("WorkflowDetailPage", () => {
         expect(screen.queryByTestId("dirty-indicator")).not.toBeInTheDocument();
       });
 
-      // Pipeline count should be back to 5
-      expect(screen.getByTestId("pipeline-step-count")).toHaveTextContent("5");
+      // Pipeline count should be back to 6
+      expect(screen.getByTestId("pipeline-step-count")).toHaveTextContent("6");
     }
   });
 
@@ -353,7 +353,7 @@ describe("WorkflowDetailPage", () => {
 
     // Wait for pipeline to load
     await waitFor(() => {
-      expect(screen.getByTestId("pipeline-step-count")).toHaveTextContent("5");
+      expect(screen.getByTestId("pipeline-step-count")).toHaveTextContent("6");
     });
 
     // Remove a step to make dirty

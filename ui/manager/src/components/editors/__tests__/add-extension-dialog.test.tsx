@@ -126,7 +126,7 @@ describe("AddExtensionDialog", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("selects parser (no resource store) directly", async () => {
+  it("selects parser (has resource store) and goes to step 2", async () => {
     const user = userEvent.setup();
     renderWithProviders(
       <AddExtensionDialog open={true} onClose={onClose} onSelect={onSelect} />
@@ -134,11 +134,12 @@ describe("AddExtensionDialog", () => {
     await user.click(
       screen.getByTestId("ext-option-eddi://ai.labs.parser")
     );
-    // Parser has no resource store, so it should call onSelect directly
-    expect(onSelect).toHaveBeenCalledWith({
-      descriptor: expect.objectContaining({ type: "eddi://ai.labs.parser" }),
+    // Parser now has a resource store, so it should go to step 2
+    await waitFor(() => {
+      expect(screen.getByText("Choose Config")).toBeInTheDocument();
     });
-    expect(onClose).toHaveBeenCalled();
+    expect(screen.getByTestId("create-new-config")).toBeInTheDocument();
+    expect(screen.getByTestId("back-to-types")).toBeInTheDocument();
   });
 
   it("shows step 2 when selecting LLM (has resource store)", async () => {
