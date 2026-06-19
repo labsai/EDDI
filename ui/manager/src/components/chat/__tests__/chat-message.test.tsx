@@ -5,28 +5,28 @@ import { ChatMessage } from "@/components/chat/chat-message";
 import type { ChatMessage as ChatMessageType } from "@/lib/api/chat";
 
 const userMessage: ChatMessageType = {
-  role: "user",
+  id: "msg-1", role: "user",
   content: "Hello, how are you?",
   timestamp: new Date("2024-01-15T10:30:00Z").getTime(),
   isStreaming: false,
 };
 
 const agentMessage: ChatMessageType = {
-  role: "agent",
+  id: "msg-2", role: "agent",
   content: "I'm doing well, thanks!",
   timestamp: new Date("2024-01-15T10:30:05Z").getTime(),
   isStreaming: false,
 };
 
 const streamingMessage: ChatMessageType = {
-  role: "agent",
+  id: "msg-3", role: "agent",
   content: "",
   timestamp: new Date("2024-01-15T10:30:10Z").getTime(),
   isStreaming: true,
 };
 
 const agentNoContent: ChatMessageType = {
-  role: "agent",
+  id: "msg-4", role: "agent",
   content: "",
   timestamp: new Date("2024-01-15T10:30:15Z").getTime(),
   isStreaming: false,
@@ -88,7 +88,7 @@ describe("ChatMessage", () => {
 
   it("applies animate-pulse class for streaming messages", () => {
     const streamingWithContent: ChatMessageType = {
-      role: "agent",
+      id: "msg-5", role: "agent",
       content: "Typing...",
       timestamp: Date.now(),
       isStreaming: true,

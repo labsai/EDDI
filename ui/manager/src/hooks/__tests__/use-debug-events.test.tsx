@@ -1,3 +1,4 @@
+import { beforeEach, describe, expect, it } from "vitest";
 import { act } from "@testing-library/react";
 import {
   useDebugStore,
@@ -82,9 +83,9 @@ describe("useDebugStore", () => {
 
     const state = useDebugStore.getState();
     expect(state.turns).toHaveLength(1);
-    expect(state.turns[0].events).toHaveLength(2);
-    expect(state.turns[0].totalDurationMs).toBe(500);
-    expect(state.turns[0].turnIndex).toBe(0);
+    expect(state.turns[0]!.events).toHaveLength(2);
+    expect(state.turns[0]!.totalDurationMs).toBe(500);
+    expect(state.turns[0]!.turnIndex).toBe(0);
     expect(state.currentTurnEvents).toEqual([]);
     expect(state.currentTurnStart).toBe(0);
   });

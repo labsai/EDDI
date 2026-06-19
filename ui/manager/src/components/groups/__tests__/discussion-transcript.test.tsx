@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { DiscussionTranscript } from "../discussion-transcript";
@@ -144,7 +144,7 @@ describe("DiscussionTranscript", () => {
 
   it("renders live streaming state and speaking indicators", () => {
     const mockStreamState: GroupStreamState = {
-      isStreaming: true,
+      conversationId: "conv-test-1", isStreaming: true,
       state: "IN_PROGRESS",
       startedAt: "2026-06-09T12:00:00.000Z",
       transcript: [
@@ -197,7 +197,7 @@ describe("DiscussionTranscript", () => {
 
   it("renders stream error banner", () => {
     const mockStreamStateWithError: GroupStreamState = {
-      isStreaming: false,
+      conversationId: "conv-test-1", isStreaming: false,
       state: "FAILED",
       startedAt: "2026-06-09T12:00:00.000Z",
       transcript: [],

@@ -8,6 +8,7 @@ const baseChannel: EnrichedChannelDescriptor = {
   id: "ch-001",
   version: 1,
   name: "Support Slack",
+  description: "Test channel description",
   resource: "eddi://ai.labs.channel/channelstore/channels/ch-001?version=1",
   lastModifiedOn: Date.now() - 86400000,
   createdOn: Date.now() - 86400000 * 2,

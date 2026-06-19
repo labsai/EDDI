@@ -230,7 +230,7 @@ describe("GroupsPage", () => {
 
     // Click delete on the first group
     const deleteButtons = screen.getAllByTitle(/delete/i);
-    await user.click(deleteButtons[0]);
+    await user.click(deleteButtons[0]!);
 
     // Confirm dialog should appear
     await waitFor(() => {
@@ -357,7 +357,7 @@ describe("GroupsPage", () => {
     });
 
     const deleteButtons = screen.getAllByTitle(/delete/i);
-    await user.click(deleteButtons[0]);
+    await user.click(deleteButtons[0]!);
 
     await waitFor(() => {
       expect(screen.getByText("Delete this group?")).toBeInTheDocument();
@@ -398,7 +398,7 @@ describe("GroupsPage", () => {
 
     const duplicateButtons = screen.getAllByTitle("Duplicate");
     expect(duplicateButtons.length).toBeGreaterThanOrEqual(1);
-    await user.click(duplicateButtons[0]);
+    await user.click(duplicateButtons[0]!);
 
     // Duplicate should succeed without error (toast)
     // Just verify no crash

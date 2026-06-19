@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, beforeAll, afterAll, afterEach } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { server } from "@/test/mocks/server";
@@ -89,8 +89,8 @@ describe("useChatStore", () => {
       timestamp: 2000,
     });
     expect(useChatStore.getState().messages).toHaveLength(2);
-    expect(useChatStore.getState().messages[0].content).toBe("Hello");
-    expect(useChatStore.getState().messages[1].content).toBe("Hi!");
+    expect(useChatStore.getState().messages[0]!.content).toBe("Hello");
+    expect(useChatStore.getState().messages[1]!.content).toBe("Hi!");
   });
 
   it("appendToLastAgentMessage appends token to last agent message", () => {
@@ -101,7 +101,7 @@ describe("useChatStore", () => {
       timestamp: 1000,
     });
     useChatStore.getState().appendToLastAgentMessage(" world");
-    expect(useChatStore.getState().messages[0].content).toBe("Hello world");
+    expect(useChatStore.getState().messages[0]!.content).toBe("Hello world");
   });
 
   it("appendToLastAgentMessage does nothing if last message is user", () => {
@@ -112,7 +112,7 @@ describe("useChatStore", () => {
       timestamp: 1000,
     });
     useChatStore.getState().appendToLastAgentMessage(" world");
-    expect(useChatStore.getState().messages[0].content).toBe("Hello");
+    expect(useChatStore.getState().messages[0]!.content).toBe("Hello");
   });
 
   it("finishStreaming stops streaming and processing", () => {
@@ -129,7 +129,7 @@ describe("useChatStore", () => {
 
     const s = useChatStore.getState();
     expect(s.isProcessing).toBe(false);
-    expect(s.messages[0].isStreaming).toBe(false);
+    expect(s.messages[0]!.isStreaming).toBe(false);
   });
 
   it("toggleStreaming toggles streaming state", () => {
@@ -188,15 +188,15 @@ describe("useChatStore", () => {
       { id: "m2", role: "agent", content: "New", timestamp: 2000 },
     ]);
     expect(useChatStore.getState().messages).toHaveLength(1);
-    expect(useChatStore.getState().messages[0].content).toBe("New");
+    expect(useChatStore.getState().messages[0]!.content).toBe("New");
   });
 
   it("setInputField and clearInputField manage input field state", () => {
     useChatStore.getState().setInputField({
-      type: "password",
+      subType: "password",
       label: "Enter password",
     });
-    expect(useChatStore.getState().activeInputField?.type).toBe("password");
+    expect(useChatStore.getState().activeInputField?.subType).toBe("password");
 
     useChatStore.getState().clearInputField();
     expect(useChatStore.getState().activeInputField).toBeNull();
@@ -575,7 +575,7 @@ describe("useSendMessage", () => {
     // Should have user message added
     const userMessages = state.messages.filter(m => m.role === "user");
     expect(userMessages.length).toBeGreaterThanOrEqual(1);
-    expect(userMessages[0].content).toBe("Hello");
+    expect(userMessages[0]!.content).toBe("Hello");
   });
 
   it("masks user message in secret mode", async () => {
@@ -600,7 +600,7 @@ describe("useSendMessage", () => {
     const userMessages = useChatStore.getState().messages.filter(m => m.role === "user");
     expect(userMessages.length).toBeGreaterThanOrEqual(1);
     // Secret messages should be masked
-    expect(userMessages[0].content).toBe("●●●●●●●●");
+    expect(userMessages[0]!.content).toBe("●●●●●●●●");
   });
 
   it("throws error when no active conversation", async () => {

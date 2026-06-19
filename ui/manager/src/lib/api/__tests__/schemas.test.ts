@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
 import {
@@ -18,10 +18,11 @@ describe("schemas API", () => {
     it("fetches JSON schema for a resource type", async () => {
       const rt: ResourceTypeConfig = {
         slug: "rules-test-" + Date.now(),
-        label: "Rules",
+        labelKey: "rules",
         store: "rulestore",
         plural: "rulesets",
         extension: "ai.labs.rules",
+        icon: "BookOpen",
       };
       server.use(
         http.get("*/rulestore/rulesets/jsonSchema", () =>
@@ -41,10 +42,11 @@ describe("schemas API", () => {
       const slug = "cache-test-" + Date.now();
       const rt: ResourceTypeConfig = {
         slug,
-        label: "Test",
+        labelKey: "test",
         store: "teststore",
         plural: "tests",
         extension: "ai.labs.test",
+        icon: "Settings",
       };
       server.use(
         http.get("*/teststore/tests/jsonSchema", () =>

@@ -126,10 +126,10 @@ describe("CreateGroupDialog", () => {
     // Fill display name and role
     const displayInputs = screen.getAllByPlaceholderText("Agent Name");
     expect(displayInputs).toHaveLength(1);
-    await user.type(displayInputs[0], "Lead Designer");
+    await user.type(displayInputs[0]!, "Lead Designer");
 
     const roleInputs = screen.getAllByPlaceholderText("Role (e.g. Marketing, Engineering)");
-    await user.type(roleInputs[0], "Design Lead");
+    await user.type(roleInputs[0]!, "Design Lead");
 
     // Add second member and toggle type to Group
     await user.click(screen.getByRole("button", { name: /Add Member/i }));
@@ -137,7 +137,7 @@ describe("CreateGroupDialog", () => {
     const memberCards = screen.getAllByRole("button", { name: "Group" });
     expect(memberCards).toHaveLength(2);
     // Click 'Group' button on the second member card to toggle type
-    await user.click(memberCards[1]);
+    await user.click(memberCards[1]!);
 
     // Select nested group
     const selects = await waitFor(() => {
@@ -145,10 +145,10 @@ describe("CreateGroupDialog", () => {
       if (el.length < 3) throw new Error("Selects not ready");
       return el;
     });
-    await user.selectOptions(selects[1], "group1");
+    await user.selectOptions(selects[1]!, "group1");
 
     // Assign agent for first member (Lead Designer)
-    await user.selectOptions(selects[0], "agent1");
+    await user.selectOptions(selects[0]!, "agent1");
 
     // Next should be enabled since we have 2 members
     expect(nextBtn).toBeEnabled();
@@ -164,7 +164,7 @@ describe("CreateGroupDialog", () => {
 
     server.use(
       http.post("*/groupstore/groups", async ({ request }) => {
-        mutationPayload = await request.json();
+        mutationPayload = (await request.json()) as Record<string, unknown>;
         return new HttpResponse(null, {
           status: 201,
           headers: {
@@ -187,12 +187,12 @@ describe("CreateGroupDialog", () => {
       return el;
     });
     // Selects are: 5 member selects + 1 moderator select
-    await user.selectOptions(selects[0], "agent1");
-    await user.selectOptions(selects[1], "agent2");
-    await user.selectOptions(selects[2], "agent1");
-    await user.selectOptions(selects[3], "agent2");
-    await user.selectOptions(selects[4], "agent1");
-    await user.selectOptions(selects[5], "agent1"); // Moderator
+    await user.selectOptions(selects[0]!, "agent1");
+    await user.selectOptions(selects[1]!, "agent2");
+    await user.selectOptions(selects[2]!, "agent1");
+    await user.selectOptions(selects[3]!, "agent2");
+    await user.selectOptions(selects[4]!, "agent1");
+    await user.selectOptions(selects[5]!, "agent1"); // Moderator
 
     // Go to review step
     await user.click(screen.getByRole("button", { name: /Next/i }));
@@ -207,9 +207,9 @@ describe("CreateGroupDialog", () => {
 
     await waitFor(() => {
       expect(mutationPayload).not.toBeNull();
-      expect(mutationPayload.name).toBe("Advisory Board");
-      expect(mutationPayload.moderatorAgentId).toBe("agent1");
-      expect(mutationPayload.members).toHaveLength(5);
+      expect(mutationPayload!.name).toBe("Advisory Board");
+      expect(mutationPayload!.moderatorAgentId).toBe("agent1");
+      expect(mutationPayload!.members).toHaveLength(5);
       expect(mockOnClose).toHaveBeenCalled();
     });
   });
@@ -224,9 +224,9 @@ describe("CreateGroupDialog", () => {
     await user.click(screen.getByRole("button", { name: /Next/i }));
 
     await user.click(screen.getByRole("button", { name: /Add Member/i }));
-    await user.type(screen.getAllByPlaceholderText("Agent Name")[0], "Member A");
+    await user.type(screen.getAllByPlaceholderText("Agent Name")[0]!, "Member A");
     await user.click(screen.getByRole("button", { name: /Add Member/i }));
-    await user.type(screen.getAllByPlaceholderText("Agent Name")[1], "Member B");
+    await user.type(screen.getAllByPlaceholderText("Agent Name")[1]!, "Member B");
 
     // Click Next
     await user.click(screen.getByRole("button", { name: /Next/i }));

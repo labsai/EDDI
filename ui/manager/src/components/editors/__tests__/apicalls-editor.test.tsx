@@ -219,7 +219,7 @@ describe("ApiCallsEditor", () => {
     await user.type(input, "x");
     // onChange is called per-character, each with a fresh config since component is uncontrolled
     expect(onChange).toHaveBeenCalled();
-    const firstCall = onChange.mock.calls[0][0];
+    const firstCall = onChange.mock.calls[0]![0];
     expect(firstCall).toHaveProperty("targetServerUrl");
   });
 
@@ -740,7 +740,7 @@ describe("PropertyInstructionsEditor", () => {
     );
     const rows = screen.getAllByTestId("property-instruction-row");
     // Click the remove button on the first row
-    const removeBtn = within(rows[0]).getAllByRole("button").find(
+    const removeBtn = within(rows[0]!).getAllByRole("button").find(
       (btn) => btn.querySelector("svg")
     );
     if (removeBtn) await user.click(removeBtn);

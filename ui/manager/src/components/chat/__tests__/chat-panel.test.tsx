@@ -134,7 +134,7 @@ describe("ChatPanel", () => {
     // Quick reply click
     const qrBtns = screen.getAllByTestId("quick-reply-btn");
     expect(qrBtns[0]).toHaveTextContent("Yes");
-    await user.click(qrBtns[0]);
+    await user.click(qrBtns[0]!);
 
     await waitFor(() => {
       const messages = useChatStore.getState().messages;

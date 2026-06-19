@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, fireEvent, render } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { TopBar } from "@/components/layout/top-bar";

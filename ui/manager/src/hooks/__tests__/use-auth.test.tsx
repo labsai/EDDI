@@ -1,3 +1,4 @@
+import { describe, expect, it } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { type ReactNode } from "react";
 import { AuthContext, type AuthContextValue } from "@/components/auth/auth-context";

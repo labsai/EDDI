@@ -1,3 +1,4 @@
+import { beforeEach, describe, expect, it } from "vitest";
 import { act } from "@testing-library/react";
 import { useCommandPalette } from "@/hooks/use-command-palette";
 
@@ -60,7 +61,7 @@ describe("useCommandPalette", () => {
     });
     const pages = useCommandPalette.getState().recentPages;
     expect(pages).toHaveLength(5);
-    expect(pages[0].path).toBe("/audit");
+    expect(pages[0]!.path).toBe("/audit");
   });
 
   it("addRecentPage moves existing entry to front", () => {

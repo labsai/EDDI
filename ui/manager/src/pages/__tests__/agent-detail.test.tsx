@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -479,7 +479,7 @@ describe("AgentDetailPage", () => {
     // Each workflow card has a trash button
     const trashButtons = screen.getAllByTitle("Delete");
     expect(trashButtons.length).toBeGreaterThan(0);
-    await user.click(trashButtons[0]);
+    await user.click(trashButtons[0]!);
 
     await waitFor(() => {
       expect(updateCalled).toBe(true);

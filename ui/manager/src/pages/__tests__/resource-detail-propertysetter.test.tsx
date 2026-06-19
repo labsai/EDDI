@@ -127,7 +127,7 @@ describe("Property Setter Editor", () => {
       expect(screen.getAllByTestId("property-row").length).toBeGreaterThan(0);
     });
 
-    const row = screen.getAllByTestId("property-row")[0];
+    const row = screen.getAllByTestId("property-row")[0]!;
     const inputs = within(row).getAllByRole("textbox");
     expect(inputs.length).toBeGreaterThanOrEqual(2);
   });
@@ -188,7 +188,7 @@ describe("Property Setter Editor", () => {
     });
 
     // Find the toggle button (aria-expanded) in the first setter
-    const setterEditor = screen.getAllByTestId("setter-editor")[0];
+    const setterEditor = screen.getAllByTestId("setter-editor")[0]!;
     const toggleBtn = within(setterEditor).getByRole("button", { expanded: true });
 
     // Collapse
@@ -209,9 +209,9 @@ describe("Property Setter Editor", () => {
     });
 
     // Click the remove button on the first setter (scoped via within())
-    const firstSetter = screen.getAllByTestId("setter-editor")[0];
+    const firstSetter = screen.getAllByTestId("setter-editor")[0]!;
     const removeButtons = within(firstSetter).getAllByRole("button", { name: /remove/i });
-    await user.click(removeButtons[0]);
+    await user.click(removeButtons[0]!);
 
     await waitFor(() => {
       expect(screen.getAllByTestId("setter-editor").length).toBe(3);
@@ -228,10 +228,10 @@ describe("Property Setter Editor", () => {
     const initialRows = screen.getAllByTestId("property-row").length;
 
     // Find and click a delete button inside a property row
-    const firstRow = screen.getAllByTestId("property-row")[0];
+    const firstRow = screen.getAllByTestId("property-row")[0]!;
     // The trash button is the last button in the row
     const deleteButtons = within(firstRow).getAllByRole("button");
-    const deleteBtn = deleteButtons[deleteButtons.length - 1];
+    const deleteBtn = deleteButtons[deleteButtons.length - 1]!;
     await user.click(deleteBtn);
 
     await waitFor(() => {
@@ -250,7 +250,7 @@ describe("Property Setter Editor", () => {
 
     // Click "Add Property" button (it contains text "Add Property")
     const addPropBtns = screen.getAllByText("Add Property");
-    await user.click(addPropBtns[0]);
+    await user.click(addPropBtns[0]!);
 
     await waitFor(() => {
       expect(screen.getAllByTestId("property-row").length).toBe(initialRows + 1);
@@ -280,7 +280,7 @@ describe("Property Setter Editor", () => {
     });
 
     // Find the override checkbox in the first property row
-    const firstRow = screen.getAllByTestId("property-row")[0];
+    const firstRow = screen.getAllByTestId("property-row")[0]!;
     const overrideCheckbox = within(firstRow).getByRole("checkbox") as HTMLInputElement;
     expect(overrideCheckbox.checked).toBe(true); // Default is true in mock data
 
@@ -322,14 +322,14 @@ describe("Property Setter Editor", () => {
     });
 
     // Find the "Remove greet" button within the first setter
-    const firstSetter = screen.getAllByTestId("setter-editor")[0];
+    const firstSetter = screen.getAllByTestId("setter-editor")[0]!;
     const removeBtn = within(firstSetter).getByRole("button", { name: "Remove greet" });
     await user.click(removeBtn);
 
     // After removing, the action tag for "greet" inside the first setter should be gone
     // The header text will also change from "greet" to "(no actions)"
     await waitFor(() => {
-      const firstSetterAfter = screen.getAllByTestId("setter-editor")[0];
+      const firstSetterAfter = screen.getAllByTestId("setter-editor")[0]!;
       expect(within(firstSetterAfter).getByText("(no actions)")).toBeInTheDocument();
     });
   });
@@ -345,7 +345,7 @@ describe("Property Setter Editor", () => {
     const fromPathInputs = screen.getAllByPlaceholderText("From path");
     expect(fromPathInputs.length).toBeGreaterThan(0);
 
-    await user.type(fromPathInputs[0], "result.data");
+    await user.type(fromPathInputs[0]!, "result.data");
 
     await waitFor(() => {
       expect((fromPathInputs[0] as HTMLInputElement).value).toContain("result.data");

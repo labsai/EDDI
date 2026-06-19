@@ -24,7 +24,7 @@ describe("BearerEventSource", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    fetchSpy = vi.spyOn(globalThis, "fetch");
+    fetchSpy = vi.spyOn(globalThis, "fetch") as ReturnType<typeof vi.spyOn>;
   });
 
   afterEach(() => {

@@ -176,8 +176,8 @@ describe("SyncPage", () => {
     const checkboxes = screen.getAllByRole("checkbox");
 
     // Uncheck the first checkbox
-    await user.click(checkboxes[0]);
-    expect(checkboxes[0]).not.toBeChecked();
+    await user.click(checkboxes[0]!);
+    expect(checkboxes[0]!).not.toBeChecked();
 
     // The footer text shows "X agents selected" split across text nodes
     // Verify fewer agents are selected by checking the text content
@@ -208,9 +208,9 @@ describe("SyncPage", () => {
     expect(selects.length).toBeGreaterThanOrEqual(1);
 
     // Change first dropdown value
-    await user.selectOptions(selects[0], "");
+    await user.selectOptions(selects[0]!, "");
     // Should still show "Create new" as the default
-    expect((selects[0] as HTMLSelectElement).value).toBe("");
+    expect((selects[0]! as HTMLSelectElement).value).toBe("");
   });
 
   // ─── Preview flow ─────────────────────────────────────────────────────────
@@ -242,7 +242,7 @@ describe("SyncPage", () => {
     });
 
     // Click on the first "changes" button to expand
-    const changesButton = screen.getAllByText(/changes/)[0];
+    const changesButton = screen.getAllByText(/changes/)[0]!;
     await user.click(changesButton);
 
     // Expanded detail should show resource table headers
@@ -264,14 +264,14 @@ describe("SyncPage", () => {
     });
 
     // Expand
-    const changesButton = screen.getAllByText(/changes/)[0];
+    const changesButton = screen.getAllByText(/changes/)[0]!;
     await user.click(changesButton);
     await waitFor(() => {
       expect(screen.getByText("Resource")).toBeInTheDocument();
     });
 
     // Collapse
-    await user.click(changesButton);
+    await user.click(changesButton!);
     await waitFor(() => {
       expect(screen.queryByText("Resource")).not.toBeInTheDocument();
     });
@@ -374,7 +374,7 @@ describe("SyncPage", () => {
     });
 
     // Expand
-    const changesButton = screen.getAllByText(/changes/)[0];
+    const changesButton = screen.getAllByText(/changes/)[0]!;
     await user.click(changesButton);
 
     await waitFor(() => {

@@ -10,7 +10,7 @@ vi.mock("@monaco-editor/react", () => ({
   )),
 }));
 
-const emptyConfig: LlmConfig = {};
+const emptyConfig: LlmConfig = { tasks: [] };
 
 const populatedConfig: LlmConfig = {
   tasks: [
@@ -245,7 +245,7 @@ describe("LlmEditor", () => {
     // Find the task editor and click the chevron (first button in the task header)
     const taskEditor = screen.getByTestId("llm-task-editor");
     const collapseBtn = within(taskEditor).getAllByRole("button")[0];
-    await user.click(collapseBtn);
+    await user.click(collapseBtn!);
 
     // Description should be hidden after collapse
     expect(screen.queryByDisplayValue("Main chat task")).not.toBeInTheDocument();
@@ -634,9 +634,8 @@ describe("LlmEditor", () => {
             propertyInstructions: [
               {
                 name: "context.testProp",
-                value: "testValue",
+                valueString: "testValue",
                 scope: "step",
-                valueType: "string",
               },
             ],
           },

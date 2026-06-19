@@ -35,6 +35,7 @@ describe("ChatActivity", () => {
         taskType: "ai.labs.rules",
         taskId: "1",
         index: 0,
+        timestamp: Date.now(),
       },
     ];
 
@@ -50,6 +51,7 @@ describe("ChatActivity", () => {
         taskType: "ai.labs.rules",
         taskId: "1",
         index: 0,
+        timestamp: Date.now(),
       },
       {
         type: "task_complete",
@@ -57,12 +59,14 @@ describe("ChatActivity", () => {
         taskId: "1",
         index: 0,
         durationMs: 150,
+        timestamp: Date.now(),
       },
       {
         type: "task_start",
         taskType: "ai.labs.llm",
         taskId: "2",
         index: 1,
+        timestamp: Date.now(),
       },
       {
         type: "task_complete",
@@ -70,6 +74,7 @@ describe("ChatActivity", () => {
         taskId: "2",
         index: 1,
         durationMs: 850,
+        timestamp: Date.now(),
         toolTrace: [
           { type: "tool_call", tool: "weather", arguments: '{"city":"Vienna"}' },
           { type: "tool_result", tool: "weather", result: '{"temp":20}' },
@@ -93,6 +98,7 @@ describe("ChatActivity", () => {
         taskId: "1",
         index: 0,
         durationMs: 5,
+        timestamp: Date.now(),
       },
     ];
 
@@ -118,6 +124,7 @@ describe("ChatActivity", () => {
         taskId: "2",
         index: 1,
         durationMs: 50,
+        timestamp: Date.now(),
         toolTrace: [
           { type: "tool_call", tool: "calculator", arguments: "2+2" },
           { type: "tool_result", tool: "calculator", result: "4" },
@@ -129,6 +136,7 @@ describe("ChatActivity", () => {
         taskType: "ai.labs.unknown",
         taskId: "3",
         index: 2,
+        timestamp: Date.now(),
       },
     ];
 
@@ -167,10 +175,10 @@ describe("ChatActivity", () => {
       configurable: true,
     });
 
-    fireEvent.click(copyBtns[0]);
+    fireEvent.click(copyBtns[0]!);
     expect(mockWriteText).toHaveBeenCalledWith("2+2");
 
-    fireEvent.click(copyBtns[1]);
+    fireEvent.click(copyBtns[1]!);
     expect(mockWriteText).toHaveBeenCalledWith("4");
   });
 });

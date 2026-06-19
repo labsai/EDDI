@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -168,11 +168,11 @@ describe("Dictionary Editor", () => {
       expect(screen.getAllByTestId("word-row").length).toBeGreaterThan(0);
     });
 
-    const firstWordRow = screen.getAllByTestId("word-row")[0];
-    const wordInput = within(firstWordRow).getAllByRole("textbox")[0];
+    const firstWordRow = screen.getAllByTestId("word-row")[0]!;
+    const wordInput = within(firstWordRow).getAllByRole("textbox")[0]!;
 
     await user.clear(wordInput);
-    await user.type(wordInput, "bonjour");
+    await user.type(wordInput!, "bonjour");
 
     expect(wordInput).toHaveValue("bonjour");
   });
@@ -184,12 +184,12 @@ describe("Dictionary Editor", () => {
       expect(screen.getAllByTestId("word-row").length).toBeGreaterThan(0);
     });
 
-    const firstWordRow = screen.getAllByTestId("word-row")[0];
+    const firstWordRow = screen.getAllByTestId("word-row")[0]!;
     // Second textbox is the expressions input (first is the word itself)
-    const expressionInput = within(firstWordRow).getAllByRole("textbox")[1];
+    const expressionInput = within(firstWordRow).getAllByRole("textbox")[1]!;
 
     await user.clear(expressionInput);
-    await user.type(expressionInput, "greeting(bonjour)");
+    await user.type(expressionInput!, "greeting(bonjour)");
 
     expect(expressionInput).toHaveValue("greeting(bonjour)");
   });
@@ -201,11 +201,11 @@ describe("Dictionary Editor", () => {
       expect(screen.getAllByTestId("phrase-row").length).toBeGreaterThan(0);
     });
 
-    const firstPhraseRow = screen.getAllByTestId("phrase-row")[0];
-    const phraseInput = within(firstPhraseRow).getAllByRole("textbox")[0];
+    const firstPhraseRow = screen.getAllByTestId("phrase-row")[0]!;
+    const phraseInput = within(firstPhraseRow).getAllByRole("textbox")[0]!;
 
     await user.clear(phraseInput);
-    await user.type(phraseInput, "good afternoon");
+    await user.type(phraseInput!, "good afternoon");
 
     expect(phraseInput).toHaveValue("good afternoon");
   });
@@ -220,7 +220,7 @@ describe("Dictionary Editor", () => {
     });
 
     const initialCount = screen.getAllByTestId("word-row").length;
-    const firstWordRow = screen.getAllByTestId("word-row")[0];
+    const firstWordRow = screen.getAllByTestId("word-row")[0]!;
     const removeBtn = within(firstWordRow).getByRole("button");
 
     await user.click(removeBtn);
@@ -240,7 +240,7 @@ describe("Dictionary Editor", () => {
     });
 
     const initialCount = screen.getAllByTestId("phrase-row").length;
-    const firstPhraseRow = screen.getAllByTestId("phrase-row")[0];
+    const firstPhraseRow = screen.getAllByTestId("phrase-row")[0]!;
     const removeBtn = within(firstPhraseRow).getByRole("button");
 
     await user.click(removeBtn);

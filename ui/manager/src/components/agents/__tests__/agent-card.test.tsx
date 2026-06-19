@@ -11,8 +11,8 @@ const mockAgent = {
   resource: "eddi://ai.labs.agent/agentstore/agents/agent-test-1?version=1",
   name: "Test Agent",
   description: "A test agent for unit testing",
-  lastModifiedOn: new Date().toISOString(),
-  createdOn: new Date().toISOString(),
+  lastModifiedOn: Date.now(),
+  createdOn: Date.now() - 86400000,
 };
 
 describe("AgentCard", () => {

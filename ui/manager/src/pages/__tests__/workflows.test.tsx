@@ -227,7 +227,7 @@ describe("WorkflowsPage", () => {
     // Open the context menu of the first workflow card
     const menuButtons = screen.getAllByTestId(/^workflow-menu-/);
     expect(menuButtons.length).toBeGreaterThan(0);
-    await user.click(menuButtons[0]);
+    await user.click(menuButtons[0]!);
 
     // Menu should show Delete and Duplicate options
     await waitFor(() => {
@@ -246,7 +246,7 @@ describe("WorkflowsPage", () => {
 
     // Open context menu
     const menuButtons = screen.getAllByTestId(/^workflow-menu-/);
-    await user.click(menuButtons[0]);
+    await user.click(menuButtons[0]!);
 
     // Click Delete in context menu
     await waitFor(() => {
@@ -272,7 +272,7 @@ describe("WorkflowsPage", () => {
 
     // Open context menu and click delete
     const menuButtons = screen.getAllByTestId(/^workflow-menu-/);
-    await user.click(menuButtons[0]);
+    await user.click(menuButtons[0]!);
     await waitFor(() => {
       expect(screen.getByText("Delete")).toBeInTheDocument();
     });

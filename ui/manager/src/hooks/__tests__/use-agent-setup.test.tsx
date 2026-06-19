@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { server } from "@/test/mocks/server";
@@ -51,6 +51,7 @@ describe("useCreateApiAgent", () => {
 
     result.current.mutate({
       name: "API Agent",
+      systemPrompt: "You are a helpful assistant.",
       provider: "anthropic",
       model: "claude-sonnet-4-6",
       openApiSpec: "openapi: 3.0.0",

@@ -1,3 +1,4 @@
+import { describe, expect, it } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -102,7 +103,7 @@ describe("useUpdateSchedule", () => {
     await act(async () => {
       result.current.mutate({
         id: "sched-1",
-        schedule: { name: "Updated" } as never,
+        config: { name: "Updated" } as never,
       });
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -127,7 +128,7 @@ describe("useToggleSchedule", () => {
       wrapper: createWrapper(),
     });
     await act(async () => {
-      result.current.mutate({ id: "sched-1", enabled: true });
+      result.current.mutate({ id: "sched-1", enable: true });
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });

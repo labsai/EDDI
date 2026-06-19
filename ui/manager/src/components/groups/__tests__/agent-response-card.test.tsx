@@ -9,9 +9,11 @@ const baseEntry: TranscriptEntry = {
   speakerDisplayName: "Review Agent",
   type: "OPINION",
   content: "I think this product is good.",
-  timestamp: new Date("2024-06-01T10:30:00Z").getTime(),
+  timestamp: "2024-06-01T10:30:00Z",
   phaseIndex: 0,
-  turnIndex: 0,
+  phaseName: null,
+  errorReason: null,
+  targetAgentId: null,
 };
 
 describe("AgentResponseCard", () => {

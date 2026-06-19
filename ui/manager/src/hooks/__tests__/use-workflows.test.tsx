@@ -1,3 +1,4 @@
+import { describe, expect, it } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -72,7 +73,7 @@ describe("useWorkflow", () => {
   });
 
   it("is disabled when id is empty", () => {
-    const { result } = renderHook(() => useWorkflow(""), {
+    const { result } = renderHook(() => useWorkflow("", 0), {
       wrapper: createWrapper(),
     });
     expect(result.current.fetchStatus).toBe("idle");
@@ -128,7 +129,7 @@ describe("useUpdateWorkflow", () => {
       result.current.mutate({
         id: "wf1",
         version: 2,
-        workflow: { steps: [] } as never,
+        config: { steps: [] } as never,
       });
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -141,7 +142,7 @@ describe("useCreateWorkflow", () => {
       wrapper: createWrapper(),
     });
     await act(async () => {
-      result.current.mutate({ workflow: { steps: [] } as never });
+      result.current.mutate({ config: { steps: [] } as never });
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toHaveProperty("location");

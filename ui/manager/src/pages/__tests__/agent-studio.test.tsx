@@ -123,7 +123,7 @@ describe("Agent Studio Page", () => {
 
     // Click on the first "Rules" stage (index 1) - pick first one (desktop)
     const stageButtons = screen.getAllByTestId("stage-1");
-    await user.click(stageButtons[0]);
+    await user.click(stageButtons[0]!);
 
     // After selecting, the button should have aria-current="true"
     await waitFor(() => {

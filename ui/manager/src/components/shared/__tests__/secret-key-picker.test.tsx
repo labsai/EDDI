@@ -170,7 +170,7 @@ describe("SecretKeyPicker", () => {
 
     server.use(
       http.put("*/secretstore/secrets/default/new-api-key", async ({ request }) => {
-        mutationPayload = await request.json();
+        mutationPayload = (await request.json()) as Record<string, unknown>;
         return HttpResponse.json({
           reference: "${vault:new-api-key}",
           tenantId: "default",
@@ -196,9 +196,9 @@ describe("SecretKeyPicker", () => {
     const dialog = screen.getByRole("dialog");
     const inputs = dialog.querySelectorAll("input");
     expect(inputs).toHaveLength(3);
-    await user.type(inputs[0], "new-api-key");
-    await user.type(inputs[1], "superval");
-    await user.type(inputs[2], "Test API Key");
+    await user.type(inputs[0]!, "new-api-key");
+    await user.type(inputs[1]!, "superval");
+    await user.type(inputs[2]!, "Test API Key");
 
     // Store
     const storeBtn = screen.getByRole("button", { name: "Store Secret" });
@@ -206,8 +206,8 @@ describe("SecretKeyPicker", () => {
 
     await waitFor(() => {
       expect(mutationPayload).not.toBeNull();
-      expect(mutationPayload.value).toBe("superval");
-      expect(mutationPayload.description).toBe("Test API Key");
+      expect(mutationPayload!.value).toBe("superval");
+      expect(mutationPayload!.description).toBe("Test API Key");
       expect(mockOnChange).toHaveBeenCalledWith("${vault:new-api-key}");
     });
   });

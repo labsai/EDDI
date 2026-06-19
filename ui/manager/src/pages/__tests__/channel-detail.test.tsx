@@ -242,7 +242,7 @@ describe("ChannelDetailPage", () => {
         configurable: true
       });
     } else {
-      clipboardSpy = vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(writeTextMock);
+      clipboardSpy = vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(writeTextMock as never) as unknown as ReturnType<typeof vi.spyOn>;
     }
 
     renderChannelDetail();
@@ -277,7 +277,7 @@ describe("ChannelDetailPage", () => {
     expect(within(targetCard).getByTestId("target-name-0")).toBeInTheDocument();
 
     // Click the header to collapse
-    const header = within(targetCard).getAllByText("default")[0].closest("div[class*='cursor-pointer']");
+    const header = within(targetCard).getAllByText("default")[0]!.closest("div[class*='cursor-pointer']");
     expect(header).toBeTruthy();
 
     await user.click(header!);

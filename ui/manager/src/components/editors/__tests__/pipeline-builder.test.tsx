@@ -16,7 +16,7 @@ const twoItems: PipelineItem[] = [
       type: "eddi://ai.labs.rules",
       config: {
         uri: "eddi://ai.labs.rules/rulestore/rulesets/rule-123?version=1",
-      },
+      }, extensions: {},
     },
   },
   {
@@ -26,7 +26,7 @@ const twoItems: PipelineItem[] = [
       type: "eddi://ai.labs.llm",
       config: {
         uri: "eddi://ai.labs.llm/llmstore/llms/llm-456?version=2",
-      },
+      }, extensions: {},
     },
   },
 ];

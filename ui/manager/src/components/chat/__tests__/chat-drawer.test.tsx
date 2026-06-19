@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, beforeAll, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { ChatDrawer } from "../chat-drawer";
@@ -143,10 +143,10 @@ describe("ChatDrawer", () => {
     // Check quick replies
     const qrBtns = screen.getAllByTestId("drawer-quick-reply");
     expect(qrBtns).toHaveLength(2);
-    expect(qrBtns[0]).toHaveTextContent("Reply Option 1");
+    expect(qrBtns[0]!).toHaveTextContent("Reply Option 1");
 
     // Click quick reply to trigger mutation
-    await user.click(qrBtns[0]);
+    await user.click(qrBtns[0]!);
     await waitFor(() => {
       expect(useChatStore.getState().isProcessing).toBe(true);
     });

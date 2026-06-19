@@ -1,3 +1,4 @@
+import { beforeEach, describe, expect, it } from "vitest";
 import { act } from "@testing-library/react";
 import { useOnboarding, ALL_CHAPTERS } from "@/hooks/use-onboarding";
 

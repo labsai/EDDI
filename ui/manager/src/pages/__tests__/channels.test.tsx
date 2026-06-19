@@ -192,7 +192,7 @@ describe("ChannelsPage", () => {
     expect(deleteButtons.length).toBeGreaterThanOrEqual(1);
 
     const user = userEvent.setup();
-    await user.click(deleteButtons[0]);
+    await user.click(deleteButtons[0]!);
 
     await waitFor(() => {
       expect(screen.getByText("Delete channel?")).toBeInTheDocument();
@@ -210,7 +210,7 @@ describe("ChannelsPage", () => {
 
     const deleteButtons = screen.getAllByTitle(/delete/i);
     const user = userEvent.setup();
-    await user.click(deleteButtons[0]);
+    await user.click(deleteButtons[0]!);
 
     await waitFor(() => {
       expect(screen.getByText("Delete channel?")).toBeInTheDocument();
@@ -310,7 +310,7 @@ describe("ChannelsPage", () => {
 
     const user = userEvent.setup();
     const deleteButtons = screen.getAllByTitle(/delete/i);
-    await user.click(deleteButtons[0]);
+    await user.click(deleteButtons[0]!);
 
     await waitFor(() => {
       expect(screen.getByText("Delete channel?")).toBeInTheDocument();
@@ -340,7 +340,7 @@ describe("ChannelsPage", () => {
     const user = userEvent.setup();
     const duplicateButtons = screen.getAllByTitle("Duplicate");
     if (duplicateButtons.length > 0) {
-      await user.click(duplicateButtons[0]);
+      await user.click(duplicateButtons[0]!);
       // Just verify no crash
       expect(screen.getByTestId("channel-search")).toBeInTheDocument();
     }
@@ -393,7 +393,7 @@ describe("ChannelsPage", () => {
       const rows = screen.getAllByTestId(/^channel-row-/);
       expect(rows.length).toBeGreaterThanOrEqual(1);
       // Each row should show version
-      expect(rows[0].textContent).toMatch(/v\d+/);
+      expect(rows[0]!.textContent).toMatch(/v\d+/);
     });
   });
 

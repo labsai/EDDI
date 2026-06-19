@@ -121,7 +121,7 @@ describe("ConversationsPage", () => {
     // Click "Error" filter (use getAllByText since Error appears in both pill and state badges)
     const errorFilters = screen.getAllByText("Error");
     // The first one is the filter pill button
-    await user.click(errorFilters[0]);
+    await user.click(errorFilters[0]!);
 
     // Wait for the filtered results — the MSW handler filters by conversationState
     // Only ERROR conversations should remain, which is fewer than all
@@ -163,7 +163,7 @@ describe("ConversationsPage", () => {
     });
 
     const deleteButtons = screen.getAllByLabelText("Delete conversation");
-    await user.click(deleteButtons[0]);
+    await user.click(deleteButtons[0]!);
 
     // Confirmation dialog should appear with the title
     await waitFor(() => {
@@ -182,7 +182,7 @@ describe("ConversationsPage", () => {
     });
 
     const deleteButtons = screen.getAllByLabelText("Delete conversation");
-    await user.click(deleteButtons[0]);
+    await user.click(deleteButtons[0]!);
 
     await waitFor(() => {
       expect(screen.getByText("Cancel")).toBeInTheDocument();

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { ThemeProvider, useTheme } from "@/components/layout/theme-provider";
 import { userEvent } from "@/test/test-utils";

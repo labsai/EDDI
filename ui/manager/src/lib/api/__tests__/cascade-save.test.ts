@@ -442,7 +442,7 @@ describe("cascadeSaveResource", () => {
     });
 
     it("handles extensions with no config object", async () => {
-      const workflow: WorkflowConfiguration = {
+      const workflow = {
         workflowSteps: [
           {
             type: "eddi://ai.labs.parser",
@@ -450,7 +450,7 @@ describe("cascadeSaveResource", () => {
             // No config
           },
         ],
-      };
+      } as WorkflowConfiguration;
 
       vi.mocked(updateResource).mockResolvedValue({
         location: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=2",

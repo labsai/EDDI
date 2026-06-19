@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor, render, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -168,7 +168,7 @@ describe("LogsPage", () => {
         configurable: true
       });
     } else {
-      clipboardSpy = vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(writeTextMock);
+      clipboardSpy = vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(writeTextMock as never) as unknown as ReturnType<typeof vi.spyOn>;
     }
 
     renderLogs();
@@ -176,7 +176,7 @@ describe("LogsPage", () => {
     
     // There are multiple copy buttons, pick the first one
     const copyBtns = screen.getAllByTestId("copy-log-btn");
-    await user.click(copyBtns[0]);
+    await user.click(copyBtns[0]!);
     
     expect(writeTextMock).toHaveBeenCalled();
 

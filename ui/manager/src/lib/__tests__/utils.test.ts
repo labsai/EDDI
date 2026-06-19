@@ -68,28 +68,28 @@ describe("formatRelativeTime", () => {
 
 describe("statusConfig", () => {
   it("has READY config", () => {
-    expect(statusConfig.READY.label).toBe("Deployed");
-    expect(statusConfig.READY.color).toContain("emerald");
+    expect(statusConfig.READY!.label).toBe("Deployed");
+    expect(statusConfig.READY!.color).toContain("emerald");
   });
 
   it("has IN_PROGRESS config", () => {
-    expect(statusConfig.IN_PROGRESS.label).toBe("Deploying");
-    expect(statusConfig.IN_PROGRESS.color).toContain("amber");
+    expect(statusConfig.IN_PROGRESS!.label).toBe("Deploying");
+    expect(statusConfig.IN_PROGRESS!.color).toContain("amber");
   });
 
   it("has ERROR config", () => {
-    expect(statusConfig.ERROR.label).toBe("Error");
-    expect(statusConfig.ERROR.color).toContain("destructive");
+    expect(statusConfig.ERROR!.label).toBe("Error");
+    expect(statusConfig.ERROR!.color).toContain("destructive");
   });
 
   it("has NOT_FOUND config", () => {
-    expect(statusConfig.NOT_FOUND.label).toBe("Not deployed");
-    expect(statusConfig.NOT_FOUND.color).toContain("muted");
+    expect(statusConfig.NOT_FOUND!.label).toBe("Not deployed");
+    expect(statusConfig.NOT_FOUND!.color).toContain("muted");
   });
 
   it("all statuses have dot property", () => {
     for (const key of Object.keys(statusConfig)) {
-      expect(statusConfig[key].dot).toBeTruthy();
+      expect(statusConfig[key]!.dot).toBeTruthy();
     }
   });
 });

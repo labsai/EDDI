@@ -275,7 +275,7 @@ describe("PropertySetterEditor", () => {
       <PropertySetterEditor data={populatedConfig} onChange={onChange} />
     );
     const selects = screen.getAllByTestId("scope-select");
-    await user.selectOptions(selects[0], "longTerm");
+    await user.selectOptions(selects[0]!, "longTerm");
     expect(onChange).toHaveBeenCalled();
   });
 
@@ -303,7 +303,7 @@ describe("PropertySetterEditor", () => {
     expect(overrideLabels.length).toBeGreaterThanOrEqual(1);
 
     // Click the first override checkbox
-    const checkbox = within(overrideLabels[0].closest("label")!).getByRole("checkbox");
+    const checkbox = within(overrideLabels[0]!.closest("label")!).getByRole("checkbox");
     await user.click(checkbox);
     expect(onChange).toHaveBeenCalled();
   });
@@ -315,7 +315,7 @@ describe("PropertySetterEditor", () => {
     );
 
     const expandBtn = screen.getAllByTitle("Edit in editor")[0];
-    await user.click(expandBtn);
+    await user.click(expandBtn!);
 
     // Modal should appear with the Edit Value title
     expect(screen.getByText(/Edit Value/)).toBeInTheDocument();
@@ -330,7 +330,7 @@ describe("PropertySetterEditor", () => {
 
     // Open modal
     const expandBtn = screen.getAllByTitle("Edit in editor")[0];
-    await user.click(expandBtn);
+    await user.click(expandBtn!);
 
     // Close modal
     await user.click(screen.getByText("Cancel"));
@@ -346,7 +346,7 @@ describe("PropertySetterEditor", () => {
 
     // Open modal
     const expandBtn = screen.getAllByTitle("Edit in editor")[0];
-    await user.click(expandBtn);
+    await user.click(expandBtn!);
 
     // Click apply
     await user.click(screen.getByText("Apply"));
@@ -376,10 +376,10 @@ describe("PropertySetterEditor", () => {
 
     const rows = screen.getAllByTestId("property-row");
     // Find the trash button in the first property row
-    const trashBtns = within(rows[0]).getAllByRole("button");
+    const trashBtns = within(rows[0]!).getAllByRole("button");
     // The last button in the row is the trash button
     const trashBtn = trashBtns[trashBtns.length - 1];
-    await user.click(trashBtn);
+    await user.click(trashBtn!);
     expect(onChange).toHaveBeenCalled();
   });
 });

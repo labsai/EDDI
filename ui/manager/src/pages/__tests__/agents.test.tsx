@@ -275,7 +275,7 @@ describe("AgentsPage", () => {
     });
 
     const deleteButtons = screen.getAllByTitle("Delete");
-    await user.click(deleteButtons[0]);
+    await user.click(deleteButtons[0]!);
 
     await waitFor(() => {
       expect(
@@ -299,7 +299,7 @@ describe("AgentsPage", () => {
     });
 
     const deleteButtons = screen.getAllByTitle("Delete");
-    await user.click(deleteButtons[0]);
+    await user.click(deleteButtons[0]!);
 
     await waitFor(() => {
       expect(screen.getByText("Cancel")).toBeInTheDocument();

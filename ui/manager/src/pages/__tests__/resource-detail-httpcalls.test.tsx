@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { screen, waitFor, fireEvent } from "@testing-library/react";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -111,7 +111,7 @@ describe("HTTP Calls Editor", () => {
       expect(screen.getAllByTestId("method-select").length).toBeGreaterThan(0);
     });
 
-    const select = screen.getAllByTestId("method-select")[0] as HTMLSelectElement;
+    const select = screen.getAllByTestId("method-select")[0]! as HTMLSelectElement;
     fireEvent.change(select, { target: { value: "POST" } });
 
     await waitFor(() => {
@@ -125,7 +125,7 @@ describe("HTTP Calls Editor", () => {
       const editors = screen.getAllByTestId("httpcall-editor");
       expect(editors.length).toBeGreaterThan(0);
       // Each call editor should have input elements for path
-      const inputs = editors[0].querySelectorAll("input");
+      const inputs = editors[0]!.querySelectorAll("input");
       expect(inputs.length).toBeGreaterThan(0);
     });
   });
@@ -136,7 +136,7 @@ describe("HTTP Calls Editor", () => {
       expect(screen.getAllByTestId("call-name-input").length).toBeGreaterThan(0);
     });
 
-    const input = screen.getAllByTestId("call-name-input")[0] as HTMLInputElement;
+    const input = screen.getAllByTestId("call-name-input")[0]! as HTMLInputElement;
     fireEvent.change(input, { target: { value: "my-api-call" } });
 
     await waitFor(() => {
@@ -184,7 +184,7 @@ describe("HTTP Calls Editor", () => {
     await waitFor(() => {
       const selects = screen.getAllByTestId("method-select");
       expect(selects.length).toBeGreaterThan(0);
-      const select = selects[0] as HTMLSelectElement;
+      const select = selects[0]! as HTMLSelectElement;
       // Verify it has HTTP method options
       const options = select.querySelectorAll("option");
       expect(options.length).toBeGreaterThanOrEqual(4);

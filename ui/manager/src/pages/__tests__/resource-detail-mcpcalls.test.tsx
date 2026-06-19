@@ -352,7 +352,7 @@ describe("MCP Calls Editor", () => {
 
       // Use within() to scope the query
       const firstCard = cards[0];
-      const toolInput = within(firstCard).getByTestId("tool-name-input") as HTMLInputElement;
+      const toolInput = within(firstCard!).getByTestId("tool-name-input") as HTMLInputElement;
       expect(toolInput.value).toBe("search_documents");
     });
   });
@@ -539,7 +539,7 @@ describe("MCP Calls Editor", () => {
 
     // Click remove on the first call
     const firstCall = screen.getAllByTestId("mcp-call-editor")[0];
-    const removeBtn = within(firstCall).getByRole("button", { name: /remove call/i });
+    const removeBtn = within(firstCall!).getByRole("button", { name: /remove call/i });
     await user.click(removeBtn);
 
     await waitFor(() => {
@@ -556,22 +556,22 @@ describe("MCP Calls Editor", () => {
 
     const firstCall = screen.getAllByTestId("mcp-call-editor")[0];
     // Initially expanded — tool-name-input is visible
-    expect(within(firstCall).getByTestId("tool-name-input")).toBeInTheDocument();
+    expect(within(firstCall!).getByTestId("tool-name-input")).toBeInTheDocument();
 
     // Click the chevron toggle — first button in the call header
-    const buttons = within(firstCall).getAllByRole("button");
+    const buttons = within(firstCall!).getAllByRole("button");
     // The first button is the expand/collapse toggle
-    await user.click(buttons[0]);
+    await user.click(buttons[0]!);
 
     // After collapsing, tool-name-input should be hidden
     await waitFor(() => {
-      expect(within(firstCall).queryByTestId("tool-name-input")).not.toBeInTheDocument();
+      expect(within(firstCall!).queryByTestId("tool-name-input")).not.toBeInTheDocument();
     });
 
     // Expand again
-    await user.click(buttons[0]);
+    await user.click(buttons[0]!);
     await waitFor(() => {
-      expect(within(firstCall).getByTestId("tool-name-input")).toBeInTheDocument();
+      expect(within(firstCall!).getByTestId("tool-name-input")).toBeInTheDocument();
     });
   });
 
@@ -584,7 +584,7 @@ describe("MCP Calls Editor", () => {
 
     // The first call has saveResponse: true from mock data
     const firstCall = screen.getAllByTestId("mcp-call-editor")[0];
-    const checkbox = within(firstCall).getByRole("checkbox", { name: /save response/i });
+    const checkbox = within(firstCall!).getByRole("checkbox", { name: /save response/i });
     expect((checkbox as HTMLInputElement).checked).toBe(true);
 
     // Uncheck
@@ -594,7 +594,7 @@ describe("MCP Calls Editor", () => {
     });
 
     // The response object name input should disappear when unchecked
-    expect(within(firstCall).queryByPlaceholderText("Response object name")).not.toBeInTheDocument();
+    expect(within(firstCall!).queryByPlaceholderText("Response object name")).not.toBeInTheDocument();
   });
 
   it("edits response object name when save response is checked", async () => {
@@ -606,7 +606,7 @@ describe("MCP Calls Editor", () => {
 
     const firstCall = screen.getAllByTestId("mcp-call-editor")[0];
     // Mock data has responseObjectName: "searchResults"
-    const responseInput = within(firstCall).getByDisplayValue("searchResults") as HTMLInputElement;
+    const responseInput = within(firstCall!).getByDisplayValue("searchResults") as HTMLInputElement;
     await user.clear(responseInput);
     await user.type(responseInput, "newResponseName");
 
@@ -625,8 +625,8 @@ describe("MCP Calls Editor", () => {
 
     // First call has toolArguments: { query: "...", maxResults: "5", minScore: "0.7" }
     const firstCall = screen.getAllByTestId("mcp-call-editor")[0];
-    expect(within(firstCall).getByDisplayValue("query")).toBeInTheDocument();
-    expect(within(firstCall).getByDisplayValue("maxResults")).toBeInTheDocument();
+    expect(within(firstCall!).getByDisplayValue("query")).toBeInTheDocument();
+    expect(within(firstCall!).getByDisplayValue("maxResults")).toBeInTheDocument();
   });
 
   it("adds a new tool argument", async () => {
@@ -637,12 +637,12 @@ describe("MCP Calls Editor", () => {
     });
 
     const firstCall = screen.getAllByTestId("mcp-call-editor")[0];
-    const addArgBtn = within(firstCall).getByText("Add Argument");
+    const addArgBtn = within(firstCall!).getByText("Add Argument");
     await user.click(addArgBtn);
 
     // A new argument row with key "arg3" should appear (index 3 since we have 3 existing)
     await waitFor(() => {
-      expect(within(firstCall).getByDisplayValue("arg3")).toBeInTheDocument();
+      expect(within(firstCall!).getByDisplayValue("arg3")).toBeInTheDocument();
     });
   });
 
@@ -743,11 +743,11 @@ describe("MCP Calls Editor", () => {
     });
 
     const firstActions = screen.getAllByTestId("call-actions")[0];
-    const removeBtn = within(firstActions).getByRole("button", { name: /remove search/i });
+    const removeBtn = within(firstActions!).getByRole("button", { name: /remove search/i });
     await user.click(removeBtn);
 
     await waitFor(() => {
-      expect(within(firstActions).queryByText("search")).not.toBeInTheDocument();
+      expect(within(firstActions!).queryByText("search")).not.toBeInTheDocument();
     });
   });
 

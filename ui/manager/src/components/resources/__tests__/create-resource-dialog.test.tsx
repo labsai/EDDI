@@ -168,8 +168,8 @@ describe("CreateResourceDialog", () => {
 
     await waitFor(() => {
       expect(mutationPayload).not.toBeNull();
-      expect(mutationPayload.name).toBe("custom_snippet_12");
-      expect(mutationPayload.description).toBe("Test snippet desc");
+      expect(mutationPayload!.name).toBe("custom_snippet_12");
+      expect(mutationPayload!.description).toBe("Test snippet desc");
       expect(mockOnClose).toHaveBeenCalled();
     });
   });

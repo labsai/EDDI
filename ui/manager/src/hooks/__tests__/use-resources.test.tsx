@@ -1,3 +1,4 @@
+import { describe, expect, it } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -78,7 +79,7 @@ describe("useResource", () => {
 
   it("is disabled when id is empty", () => {
     const { result } = renderHook(
-      () => useResource("rules", ""),
+      () => useResource("rules", "", 0),
       { wrapper: createWrapper() }
     );
     expect(result.current.fetchStatus).toBe("idle");

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderPage, userEvent } from "@/test/test-utils";
 import { WorkflowDetailPage } from "@/pages/workflow-detail";

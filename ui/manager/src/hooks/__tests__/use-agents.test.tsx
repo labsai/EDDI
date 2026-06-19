@@ -1,3 +1,4 @@
+import { describe, expect, it } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -230,9 +231,9 @@ describe("useAgentVersions", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toBeDefined();
     // Sorted descending by version
-    expect(result.current.data![0].version).toBe(3);
-    expect(result.current.data![1].version).toBe(2);
-    expect(result.current.data![2].version).toBe(1);
+    expect(result.current.data![0]!.version).toBe(3);
+    expect(result.current.data![1]!.version).toBe(2);
+    expect(result.current.data![2]!.version).toBe(1);
   });
 
   it("is disabled when agentId is empty", () => {
@@ -402,8 +403,8 @@ describe("groupAgentsByName", () => {
     expect(a1).toBeDefined();
     expect(a1!.version).toBe(3);
     // sorted by lastModifiedOn descending
-    expect(result[0].id).toBe("a1"); // 3000
-    expect(result[1].id).toBe("a2"); // 2000
+    expect(result[0]!.id).toBe("a1"); // 3000
+    expect(result[1]!.id).toBe("a2"); // 2000
   });
 
   it("handles empty array", () => {
@@ -422,6 +423,6 @@ describe("groupAgentsByName", () => {
       },
     ]);
     expect(result).toHaveLength(1);
-    expect(result[0].version).toBe(1);
+    expect(result[0]!.version).toBe(1);
   });
 });

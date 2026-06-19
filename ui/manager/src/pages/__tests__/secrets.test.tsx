@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { SecretsPage } from "@/pages/secrets";
@@ -414,7 +414,7 @@ describe("SecretsPage", () => {
 
     // Click cancel in the rotate dialog
     const cancelBtns = screen.getAllByText("Cancel");
-    await user.click(cancelBtns[cancelBtns.length - 1]);
+    await user.click(cancelBtns[cancelBtns.length - 1]!);
 
     await waitFor(() => {
       expect(screen.queryByTestId("rotate-value-input")).not.toBeInTheDocument();

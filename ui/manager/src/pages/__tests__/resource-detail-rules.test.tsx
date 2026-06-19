@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { screen, waitFor, fireEvent } from "@testing-library/react";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -117,7 +117,7 @@ describe("Rules Editor", () => {
     });
 
     const initialConditions = screen.getAllByTestId("condition-editor").length;
-    fireEvent.click(screen.getAllByTestId("add-condition-btn")[0]);
+    fireEvent.click(screen.getAllByTestId("add-condition-btn")[0]!);
 
     await waitFor(() => {
       expect(screen.getAllByTestId("condition-editor").length).toBe(
@@ -147,7 +147,7 @@ describe("Rules Editor", () => {
     });
 
     const initialRules = screen.getAllByTestId("rule-editor").length;
-    fireEvent.click(screen.getAllByTestId("add-rule-btn")[0]);
+    fireEvent.click(screen.getAllByTestId("add-rule-btn")[0]!);
 
     await waitFor(() => {
       expect(screen.getAllByTestId("rule-editor").length).toBe(initialRules + 1);

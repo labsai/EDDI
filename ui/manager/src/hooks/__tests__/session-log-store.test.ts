@@ -40,7 +40,7 @@ describe("useSessionLogStore", () => {
     }));
 
     expect(useSessionLogStore.getState().entries).toHaveLength(1);
-    expect(useSessionLogStore.getState().entries[0].message).toBe(
+    expect(useSessionLogStore.getState().entries[0]!.message).toBe(
       "Test message",
     );
   });
@@ -51,12 +51,12 @@ describe("useSessionLogStore", () => {
       level: "INFO" as const,
       loggerName: "test",
       message: "First",
-      environment: null,
-      agentId: null,
-      agentVersion: null,
-      conversationId: null,
-      userId: null,
-      instanceId: null,
+      environment: undefined,
+      agentId: undefined,
+      agentVersion: undefined,
+      conversationId: undefined,
+      userId: undefined,
+      instanceId: undefined,
     };
     const entry2 = {
       ...entry1,
@@ -73,8 +73,8 @@ describe("useSessionLogStore", () => {
 
     const { entries } = useSessionLogStore.getState();
     expect(entries).toHaveLength(2);
-    expect(entries[0].message).toBe("Second");
-    expect(entries[1].message).toBe("First");
+    expect(entries[0]!.message).toBe("Second");
+    expect(entries[1]!.message).toBe("First");
   });
 
   it("caps at 1000 entries", () => {
@@ -84,12 +84,12 @@ describe("useSessionLogStore", () => {
       level: "INFO" as const,
       loggerName: "test",
       message: `Entry ${i}`,
-      environment: null,
-      agentId: null,
-      agentVersion: null,
-      conversationId: null,
-      userId: null,
-      instanceId: null,
+      environment: undefined,
+      agentId: undefined,
+      agentVersion: undefined,
+      conversationId: undefined,
+      userId: undefined,
+      instanceId: undefined,
     }));
 
     useSessionLogStore.setState({ entries });
@@ -118,16 +118,16 @@ describe("useSessionLogStore", () => {
       level: "INFO" as const,
       loggerName: "test",
       message: "Log stream message",
-      environment: null,
-      agentId: null,
-      agentVersion: null,
-      conversationId: null,
-      userId: null,
-      instanceId: null,
+      environment: undefined,
+      agentId: undefined,
+      agentVersion: undefined,
+      conversationId: undefined,
+      userId: undefined,
+      instanceId: undefined,
     };
     es.onmessage?.(new MessageEvent("message", { data: JSON.stringify(entry) }));
     expect(useSessionLogStore.getState().entries).toHaveLength(1);
-    expect(useSessionLogStore.getState().entries[0].message).toBe("Log stream message");
+    expect(useSessionLogStore.getState().entries[0]!.message).toBe("Log stream message");
 
     // Trigger onerror
     es.onerror?.();

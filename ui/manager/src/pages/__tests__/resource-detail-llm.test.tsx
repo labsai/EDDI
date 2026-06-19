@@ -437,7 +437,7 @@ describe("LangChain Editor", () => {
       expect((checkboxes[0] as HTMLInputElement).checked).toBe(true);
     });
 
-    await user.click(screen.getAllByTestId("enable-builtin-tools")[0]);
+    await user.click(screen.getAllByTestId("enable-builtin-tools")[0]!);
 
     await waitFor(() => {
       expect((screen.getAllByTestId("enable-builtin-tools")[0] as HTMLInputElement).checked).toBe(false);

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, within } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { DashboardPage } from "@/pages/dashboard";
