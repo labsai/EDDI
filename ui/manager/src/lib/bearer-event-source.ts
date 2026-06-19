@@ -84,10 +84,9 @@ export class BearerEventSource {
   }
 
   private scheduleReconnect(): void {
+    if (this._closed) return;
     this.onerror?.();
-    if (!this._closed) {
-      this.reconnectTimer = setTimeout(() => this.connect(), 5000);
-    }
+    this.reconnectTimer = setTimeout(() => this.connect(), 5000);
   }
 
   private parseBlock(block: string): MessageEvent | null {

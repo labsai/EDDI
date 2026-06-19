@@ -940,6 +940,7 @@ function MemberCard({
               className="w-full bg-transparent text-sm font-semibold text-foreground focus:outline-none placeholder:text-muted-foreground/60"
               placeholder={t("groupWizard.displayNamePlaceholder")}
               autoFocus={!member.displayName && !member.created}
+              data-testid={`member-name-${index}`}
             />
           </div>
           <input
@@ -981,6 +982,7 @@ function MemberCard({
           onClick={onRemove}
           className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
           title={t("common.delete")}
+          data-testid={`remove-member-${index}`}
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>

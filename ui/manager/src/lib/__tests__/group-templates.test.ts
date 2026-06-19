@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getGroupTemplates, buildGroupFromTemplate } from "../group-templates";
 import type { TFunction } from "i18next";
 

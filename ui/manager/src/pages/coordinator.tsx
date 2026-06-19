@@ -480,7 +480,7 @@ export function CoordinatorPage() {
                         </button>
                       )}
                       {expandedPayloads.has(entry.id) && entry.payload && (
-                        <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-card/50 p-2 text-xs text-foreground/80 border border-border/50">
+                        <pre className="mt-1 max-h-40 overflow-auto rounded-lg bg-card/50 p-2 text-xs text-foreground/80 border border-border/50" data-testid={`payload-content-${entry.id}`}>
                           {(() => { try { return JSON.stringify(JSON.parse(entry.payload), null, 2); } catch { return entry.payload; } })()}
                         </pre>
                       )}

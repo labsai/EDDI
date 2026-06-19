@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { cascadeSaveResource, type CascadeContext } from "../cascade-save";
+import { cascadeSaveResource, cascadeVersionUpdate, type CascadeContext } from "../cascade-save";
 import type { ResourceTypeConfig } from "../resources";
 import type { WorkflowConfiguration } from "../workflows";
 
@@ -349,5 +349,222 @@ describe("cascadeSaveResource", () => {
       // @ts-expect-error — packageVersion should not exist on CascadeContext
       expect(ctx.packageVersion).toBeUndefined();
     });
+  });
+
+  describe("error propagation", () => {
+    it("propagates updateResource errors", async () => {
+      vi.mocked(updateResource).mockRejectedValue(new Error("save failed"));
+
+      await expect(
+        cascadeSaveResource(RT, "res1", 1, { data: "test" })
+      ).rejects.toThrow("save failed");
+    });
+
+    it("propagates getWorkflow errors during cascade", async () => {
+      vi.mocked(updateResource).mockResolvedValue({
+        location: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=2",
+      });
+      vi.mocked(getWorkflow).mockRejectedValue(new Error("workflow not found"));
+
+      await expect(
+        cascadeSaveResource(RT, "res1", 1, {}, CONTEXT)
+      ).rejects.toThrow("workflow not found");
+    });
+
+    it("propagates updateWorkflow errors during cascade", async () => {
+      vi.mocked(updateResource).mockResolvedValue({
+        location: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=2",
+      });
+      vi.mocked(getWorkflow).mockResolvedValue(
+        makeWorkflow("eddi://ai.labs.rules/rulestore/rulesets/res1?version=1")
+      );
+      vi.mocked(updateWorkflow).mockRejectedValue(new Error("wf save failed"));
+
+      await expect(
+        cascadeSaveResource(RT, "res1", 1, {}, CONTEXT)
+      ).rejects.toThrow("wf save failed");
+    });
+
+    it("propagates updateAgent errors during cascade", async () => {
+      vi.mocked(updateResource).mockResolvedValue({
+        location: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=2",
+      });
+      vi.mocked(getWorkflow).mockResolvedValue(
+        makeWorkflow("eddi://ai.labs.rules/rulestore/rulesets/res1?version=1")
+      );
+      vi.mocked(updateWorkflow).mockResolvedValue({
+        location: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2",
+      });
+      vi.mocked(getAgent).mockResolvedValue({ workflows: [
+        "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1",
+      ] });
+      vi.mocked(updateAgent).mockRejectedValue(new Error("agent save failed"));
+
+      await expect(
+        cascadeSaveResource(RT, "res1", 1, {}, CONTEXT)
+      ).rejects.toThrow("agent save failed");
+    });
+  });
+
+  describe("workflow with no matching config URI", () => {
+    it("leaves extensions untouched when no URI matches the resource", async () => {
+      const workflow: WorkflowConfiguration = {
+        workflowSteps: [
+          {
+            type: "eddi://ai.labs.output",
+            extensions: {},
+            config: { uri: "eddi://ai.labs.output/outputstore/outputsets/out1?version=1" },
+          },
+        ],
+      };
+
+      vi.mocked(updateResource).mockResolvedValue({
+        location: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=2",
+      });
+      vi.mocked(getWorkflow).mockResolvedValue(workflow);
+      vi.mocked(updateWorkflow).mockResolvedValue({
+        location: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2",
+      });
+      vi.mocked(getAgent).mockResolvedValue({ workflows: [
+        "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1",
+      ] });
+      vi.mocked(updateAgent).mockResolvedValue({
+        location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=2",
+      });
+
+      await cascadeSaveResource(RT, "res1", 1, {}, CONTEXT);
+
+      const updatedWorkflow = vi.mocked(updateWorkflow).mock.calls[0]![2] as WorkflowConfiguration;
+      // Output URI should remain unchanged since it's not a "rules" resource
+      expect(updatedWorkflow.workflowSteps[0]!.config!.uri).toBe(
+        "eddi://ai.labs.output/outputstore/outputsets/out1?version=1"
+      );
+    });
+
+    it("handles extensions with no config object", async () => {
+      const workflow = {
+        workflowSteps: [
+          {
+            type: "eddi://ai.labs.parser",
+            extensions: {},
+            // No config
+          },
+        ],
+      } as WorkflowConfiguration;
+
+      vi.mocked(updateResource).mockResolvedValue({
+        location: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=2",
+      });
+      vi.mocked(getWorkflow).mockResolvedValue(workflow);
+      vi.mocked(updateWorkflow).mockResolvedValue({
+        location: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2",
+      });
+      vi.mocked(getAgent).mockResolvedValue({ workflows: [
+        "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1",
+      ] });
+      vi.mocked(updateAgent).mockResolvedValue({
+        location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=2",
+      });
+
+      await cascadeSaveResource(RT, "res1", 1, {}, CONTEXT);
+
+      const updatedWorkflow = vi.mocked(updateWorkflow).mock.calls[0]![2] as WorkflowConfiguration;
+      // Extension without config should pass through unchanged
+      expect(updatedWorkflow.workflowSteps[0]!.config).toBeUndefined();
+    });
+  });
+});
+
+describe("cascadeVersionUpdate", () => {
+  it("updates workflow and agent references without saving resource", async () => {
+    vi.mocked(getWorkflow).mockResolvedValue(
+      makeWorkflow("eddi://ai.labs.rules/rulestore/rulesets/res1?version=1")
+    );
+    vi.mocked(updateWorkflow).mockResolvedValue({
+      location: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=3",
+    });
+    vi.mocked(getAgent).mockResolvedValue({ workflows: [
+      "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1",
+    ] });
+    vi.mocked(updateAgent).mockResolvedValue({
+      location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=3",
+    });
+
+    const result = await cascadeVersionUpdate(RT, "res1", 1, 2, CONTEXT);
+
+    expect(updateResource).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      newWorkflowVersion: 3,
+      newAgentVersion: 3,
+    });
+  });
+
+  it("replaces the resource URI in the workflow config", async () => {
+    vi.mocked(getWorkflow).mockResolvedValue(
+      makeWorkflow("eddi://ai.labs.rules/rulestore/rulesets/res1?version=1")
+    );
+    vi.mocked(updateWorkflow).mockResolvedValue({
+      location: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2",
+    });
+    vi.mocked(getAgent).mockResolvedValue({ workflows: [
+      "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1",
+    ] });
+    vi.mocked(updateAgent).mockResolvedValue({
+      location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=2",
+    });
+
+    await cascadeVersionUpdate(RT, "res1", 1, 5, CONTEXT);
+
+    const updatedWorkflow = vi.mocked(updateWorkflow).mock.calls[0]![2] as WorkflowConfiguration;
+    expect(updatedWorkflow.workflowSteps[0]!.config!.uri).toBe(
+      "eddi://ai.labs.rules/rulestore/rulesets/res1?version=5"
+    );
+  });
+
+  it("updates the agent's workflow URI reference", async () => {
+    vi.mocked(getWorkflow).mockResolvedValue(
+      makeWorkflow("eddi://ai.labs.rules/rulestore/rulesets/res1?version=1")
+    );
+    vi.mocked(updateWorkflow).mockResolvedValue({
+      location: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=4",
+    });
+    vi.mocked(getAgent).mockResolvedValue({ workflows: [
+      "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1",
+    ] });
+    vi.mocked(updateAgent).mockResolvedValue({
+      location: "eddi://ai.labs.agent/agentstore/agents/agent1?version=4",
+    });
+
+    await cascadeVersionUpdate(RT, "res1", 1, 3, CONTEXT);
+
+    const updatedAgent = vi.mocked(updateAgent).mock.calls[0]![2];
+    expect(updatedAgent.workflows).toEqual([
+      "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=4",
+    ]);
+  });
+
+  it("propagates getWorkflow errors", async () => {
+    vi.mocked(getWorkflow).mockRejectedValue(new Error("not found"));
+
+    await expect(
+      cascadeVersionUpdate(RT, "res1", 1, 2, CONTEXT)
+    ).rejects.toThrow("not found");
+  });
+
+  it("propagates updateAgent errors", async () => {
+    vi.mocked(getWorkflow).mockResolvedValue(
+      makeWorkflow("eddi://ai.labs.rules/rulestore/rulesets/res1?version=1")
+    );
+    vi.mocked(updateWorkflow).mockResolvedValue({
+      location: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2",
+    });
+    vi.mocked(getAgent).mockResolvedValue({ workflows: [
+      "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=1",
+    ] });
+    vi.mocked(updateAgent).mockRejectedValue(new Error("agent update failed"));
+
+    await expect(
+      cascadeVersionUpdate(RT, "res1", 1, 2, CONTEXT)
+    ).rejects.toThrow("agent update failed");
   });
 });

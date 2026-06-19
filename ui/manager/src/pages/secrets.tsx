@@ -492,6 +492,7 @@ export function SecretsPage() {
                   setNewAllowedAgents([]);
                 }}
                 className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted"
+                data-testid="close-create-dialog"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -791,6 +792,7 @@ export function SecretsPage() {
                 type="button"
                 onClick={() => setRotateVisible(!rotateVisible)}
                 className="absolute inset-e-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                data-testid="rotate-value-eye"
               >
                 {rotateVisible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
               </button>

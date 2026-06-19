@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/components/layout/theme-provider";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { WelcomeModal } from "@/components/onboarding/welcome-modal";
 import { GuidedTour } from "@/components/onboarding/guided-tour";
+import userEvent from "@testing-library/user-event";
 
 /* ─── Test helpers ─── */
 
@@ -228,13 +229,14 @@ describe("Onboarding — Welcome Modal", () => {
 
   it("'Start the Tour' button closes modal and starts dashboard chapter", async () => {
     render(<WelcomeModal />, { wrapper: createWrapper() });
+    const user = userEvent.setup();
 
     // Navigate to panel 3 where the start tour button is
     const dots = screen.getAllByRole("button", { name: /Panel/i });
-    fireEvent.click(dots[2]!); // Panel 3
+    await user.click(dots[2]!); // Panel 3
 
     const startBtn = await screen.findByTestId("welcome-start-tour");
-    fireEvent.click(startBtn);
+    await user.click(startBtn);
 
     await waitFor(() => {
       expect(useOnboarding.getState().showWelcome).toBe(false);
@@ -244,13 +246,14 @@ describe("Onboarding — Welcome Modal", () => {
 
   it("'Explore on My Own' button closes modal without starting tour", async () => {
     render(<WelcomeModal />, { wrapper: createWrapper() });
+    const user = userEvent.setup();
 
     // Navigate to panel 3
     const dots = screen.getAllByRole("button", { name: /Panel/i });
-    fireEvent.click(dots[2]!);
+    await user.click(dots[2]!);
 
     const exploreBtn = await screen.findByTestId("welcome-explore");
-    fireEvent.click(exploreBtn);
+    await user.click(exploreBtn);
 
     await waitFor(() => {
       expect(useOnboarding.getState().showWelcome).toBe(false);
@@ -260,8 +263,77 @@ describe("Onboarding — Welcome Modal", () => {
 
   it("Escape key dismisses welcome modal", () => {
     render(<WelcomeModal />, { wrapper: createWrapper() });
+    // Escape is a keyboard event not a user interaction, fireEvent is acceptable here
     fireEvent.keyDown(document, { key: "Escape" });
     expect(useOnboarding.getState().showWelcome).toBe(false);
+  });
+
+  it("ArrowRight key advances to the next panel", () => {
+    render(<WelcomeModal />, { wrapper: createWrapper() });
+    // Panel 0 is shown initially (welcome text)
+    expect(screen.getByText(/EDDI Manager/i)).toBeInTheDocument();
+
+    // Press ArrowRight to go to panel 1 (capabilities)
+    fireEvent.keyDown(document, { key: "ArrowRight" });
+    expect(screen.queryByTestId("welcome-start-tour")).not.toBeInTheDocument();
+  });
+
+  it("ArrowLeft key goes back to the previous panel", () => {
+    render(<WelcomeModal />, { wrapper: createWrapper() });
+
+    // Go to panel 1 first
+    fireEvent.keyDown(document, { key: "ArrowRight" });
+    // Then go back to panel 0
+    fireEvent.keyDown(document, { key: "ArrowLeft" });
+    // Panel 0 should show the welcome text
+    expect(screen.getByText(/EDDI Manager/i)).toBeInTheDocument();
+  });
+
+  it("ArrowLeft does not go below panel 0", () => {
+    render(<WelcomeModal />, { wrapper: createWrapper() });
+    // Already on panel 0, pressing ArrowLeft should stay on panel 0
+    fireEvent.keyDown(document, { key: "ArrowLeft" });
+    expect(screen.getByText(/EDDI Manager/i)).toBeInTheDocument();
+  });
+
+  it("ArrowRight does not go beyond last panel", async () => {
+    render(<WelcomeModal />, { wrapper: createWrapper() });
+    // Navigate to last panel (index 2)
+    fireEvent.keyDown(document, { key: "ArrowRight" }); // panel 1
+    fireEvent.keyDown(document, { key: "ArrowRight" }); // panel 2
+    fireEvent.keyDown(document, { key: "ArrowRight" }); // should stay on panel 2
+    // Panel 2 has the start tour button
+    expect(screen.getByTestId("welcome-start-tour")).toBeInTheDocument();
+  });
+
+  it("clicking next arrow button advances panel", async () => {
+    render(<WelcomeModal />, { wrapper: createWrapper() });
+    const user = userEvent.setup();
+    // Click the next arrow button (aria-label contains "next" from i18n)
+    const nextBtn = screen.getAllByRole("button").find(
+      (btn) => btn.querySelector("svg") && !btn.classList.contains("invisible") && btn.getAttribute("aria-label")?.toLowerCase().includes("next")
+    );
+    expect(nextBtn).toBeTruthy();
+
+    await user.click(nextBtn!);
+    // The modal should still be open after advancing
+    expect(screen.getByTestId("welcome-modal")).toBeInTheDocument();
+  });
+
+  it("clicking back arrow button goes to previous panel", async () => {
+    render(<WelcomeModal />, { wrapper: createWrapper() });
+    const user = userEvent.setup();
+    // First go to panel 1 via keyboard
+    fireEvent.keyDown(document, { key: "ArrowRight" });
+    // Now find the back button
+    const backBtn = screen.getAllByRole("button").find(
+      (btn) => btn.getAttribute("aria-label")?.toLowerCase().includes("back")
+    );
+    expect(backBtn).toBeTruthy();
+
+    await user.click(backBtn!);
+    // Should be back on panel 0
+    expect(screen.getByText(/EDDI Manager/i)).toBeInTheDocument();
   });
 });
 
@@ -282,7 +354,7 @@ describe("Onboarding — Guided Tour", () => {
     expect(screen.queryByTestId("tour-tooltip")).not.toBeInTheDocument();
   });
 
-  it("renders spotlight and tooltip when a tour is active and target exists", async () => {
+  it("activates chapter state when a tour is started with a target element", async () => {
     // Create a mock target element
     const target = document.createElement("div");
     target.setAttribute("data-testid", "sidebar");
@@ -324,6 +396,7 @@ describe("Onboarding — Guided Tour", () => {
     useOnboarding.getState().startChapter("dashboard");
     render(<GuidedTour />, { wrapper: createWrapper() });
 
+    // Escape is a non-user-initiated DOM event, fireEvent is acceptable
     fireEvent.keyDown(document, { key: "Escape" });
 
     expect(useOnboarding.getState().activeChapter).toBeNull();

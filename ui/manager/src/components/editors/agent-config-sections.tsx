@@ -326,6 +326,7 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
               onChange={() => handleToggle(field)}
               disabled={updateAgent.isPending}
               className="mt-0.5 h-3.5 w-3.5 rounded border-input accent-primary"
+              data-testid={`security-flag-${field}`}
             />
             <div>
               <span className="text-xs font-medium text-foreground">{label}</span>

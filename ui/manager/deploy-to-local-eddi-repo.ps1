@@ -7,6 +7,7 @@
     2. Cleans up old hashed assets from previous builds.
     3. Copies the entire new assets folder into EDDI's assets/ directory.
     4. Updates manage.html with the new hashed filenames
+    Note: index.html is a simple redirect to /manage and does not need updating.
 
 .PARAMETER EddiPath
     Path to the EDDI repository root. Default: ..\EDDI
@@ -113,14 +114,10 @@ Write-Host "  Copied all $($distFiles.Count) files into assets/"
 
 # Update manage.html references
 $html = Get-Content $ManageHtml -Raw
-
-# Replace the HTML references to either /scripts/js or /assets/ logic
 $html = $html -replace 'src="/(scripts/js|assets)/index-[^"]+\.js"', "src=`"/assets/$($newJs.Name)`""
 $html = $html -replace 'href="/(scripts/css|assets)/index-[^"]+\.css"', "href=`"/assets/$($newCss.Name)`""
-
 Set-Content $ManageHtml -Value $html -NoNewline
-
-Write-Host "`n  Updated manage.html" -ForegroundColor Green
+Write-Host "  Updated manage.html" -ForegroundColor Green
 Write-Host "`n[DONE] EDDI Manager deployed successfully!" -ForegroundColor Green
 Write-Host "  JS:  /assets/$($newJs.Name)"
 Write-Host "  CSS: /assets/$($newCss.Name)`n"

@@ -1,5 +1,4 @@
-import { describe, it, expect } from "vitest";
-
+import { describe, expect, it } from "vitest";
 /**
  * Unit test for the parseFloat-based number parsing used by DebouncedNumberInput.
  *

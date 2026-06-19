@@ -1,30 +1,37 @@
 /**
- * Save-flow integration test for StudioEditorPanel.
+ * Studio editor panel integration tests.
  *
- * Verifies the full cascade save path:
+ * Verifies:
  *   1. Resource loads in the editor
- *   2. User modifies data (switches to JSON tab, edits)
- *   3. User clicks Save
- *   4. Cascade save fires: PUT resource → GET/PUT workflow → GET/PUT agent
- *   5. Version is bumped, success toast appears
+ *   2. Tab switching (Form ↔ JSON) works
+ *   3. Save and discard buttons start disabled (no unsaved changes)
+ *   4. Version picker renders
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
 import { render, cleanup } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { StudioEditorPanel } from "@/components/studio/studio-editor-panel";
 import { Toaster } from "sonner";
+import userEvent from "@testing-library/user-event";
 
-// Suppress Sonner portal warnings in test output
-vi.spyOn(console, "error").mockImplementation((...args) => {
-  const msg = typeof args[0] === "string" ? args[0] : "";
-  if (msg.includes("Not implemented: HTMLCanvasElement")) return;
-  if (msg.includes("validateDOMNesting")) return;
+let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+beforeEach(() => {
+  // Suppress Sonner portal warnings in test output
+  consoleErrorSpy = vi.spyOn(console, "error").mockImplementation((...args) => {
+    const msg = typeof args[0] === "string" ? args[0] : "";
+    if (msg.includes("Not implemented: HTMLCanvasElement")) return;
+    if (msg.includes("validateDOMNesting")) return;
+  });
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  consoleErrorSpy.mockRestore();
+  cleanup();
+});
 
 function renderPanelForSave(
   step: { type: string; extensions: Record<string, unknown>; config: { uri?: string } },
@@ -60,13 +67,15 @@ function renderPanelForSave(
   );
 }
 
-describe("StudioEditorPanel save flow", () => {
-  it("loads resource, detects dirty state, and completes cascade save", async () => {
+describe("StudioEditorPanel — tab switching and dirty state", () => {
+  it("loads resource, verifies save button is disabled (no unsaved changes), and switches tabs", async () => {
     renderPanelForSave({
       type: "eddi://ai.labs.rules",
       extensions: {},
       config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1" },
     });
+
+    const user = userEvent.setup();
 
     // 1. Wait for editor to render
     await waitFor(
@@ -78,10 +87,7 @@ describe("StudioEditorPanel save flow", () => {
     );
 
     // 2. Switch to JSON tab
-    const jsonTab = screen.getByTestId("tab-json");
-    await act(async () => {
-      fireEvent.click(jsonTab);
-    });
+    await user.click(screen.getByTestId("tab-json"));
 
     // JSON view should be visible
     await waitFor(() => {
@@ -93,10 +99,7 @@ describe("StudioEditorPanel save flow", () => {
     expect(saveBtn).toBeDisabled();
 
     // 4. Switch back to form tab and verify it renders
-    const formTab = screen.getByTestId("tab-form");
-    await act(async () => {
-      fireEvent.click(formTab);
-    });
+    await user.click(screen.getByTestId("tab-form"));
 
     await waitFor(() => {
       expect(screen.getByTestId("form-view")).toBeInTheDocument();
@@ -181,6 +184,8 @@ describe("StudioEditorPanel save flow", () => {
       config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1" },
     });
 
+    const user = userEvent.setup();
+
     await waitFor(
       () => {
         expect(screen.getByTestId("config-editor-layout")).toBeInTheDocument();
@@ -192,15 +197,11 @@ describe("StudioEditorPanel save flow", () => {
     expect(screen.getByTestId("form-view")).toBeInTheDocument();
 
     // Switch to JSON
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("tab-json"));
-    });
+    await user.click(screen.getByTestId("tab-json"));
     expect(screen.getByTestId("json-view")).toBeInTheDocument();
 
     // Switch back to Form
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("tab-form"));
-    });
+    await user.click(screen.getByTestId("tab-form"));
     expect(screen.getByTestId("form-view")).toBeInTheDocument();
   });
 });

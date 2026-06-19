@@ -167,7 +167,7 @@ export function AgentsPage() {
       {/* Content */}
       <div data-tour="agents-content">
       {isLoading && (
-        <div className="cq-card-grid">
+        <div className="cq-card-grid" data-testid="agents-loading">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="rounded-xl border border-border bg-card p-5 space-y-3">
               <Skeleton className="h-5 w-3/4" />

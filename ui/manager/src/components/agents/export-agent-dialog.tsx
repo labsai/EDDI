@@ -248,6 +248,7 @@ export function ExportAgentDialog({
                     checked={selected.size === allResourceIds.length}
                     onChange={toggleAll}
                     className="accent-primary"
+                    data-testid="select-all-checkbox"
                   />
                   <span className="text-xs text-muted-foreground">
                     {selected.size === allResourceIds.length

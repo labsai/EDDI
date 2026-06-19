@@ -1,32 +1,27 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { render } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { renderWithProviders, userEvent } from "@/test/test-utils";
 import { VariablesPage } from "@/pages/variables";
-import userEvent from "@testing-library/user-event";
 
-function renderVariables() {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  });
-
-  return render(
-    <MemoryRouter initialEntries={["/manage/variables"]}>
-      <QueryClientProvider client={queryClient}>
-        <ThemeProvider defaultTheme="light" storageKey="eddi-theme-test">
-          <VariablesPage />
-        </ThemeProvider>
-      </QueryClientProvider>
-    </MemoryRouter>,
-  );
-}
+// Save original clipboard so we can restore it
+const originalClipboard = navigator.clipboard;
 
 describe("VariablesPage", () => {
+  afterEach(() => {
+    // Restore clipboard after global mutation
+    Object.defineProperty(navigator, "clipboard", {
+      value: originalClipboard,
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  function renderVariables() {
+    return renderWithProviders(<VariablesPage />, {
+      initialRoute: "/manage/variables",
+    });
+  }
+
   it("renders the page title and description", () => {
     renderVariables();
     expect(screen.getByText("Global Variables")).toBeInTheDocument();

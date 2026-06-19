@@ -766,6 +766,7 @@ export function RagEditor({ data, onChange, readOnly, resourceId, version = 1 }:
                     readOnly && "opacity-60 cursor-default",
                   )}
                   data-testid={`store-${st.value}`}
+                  aria-pressed={data.storeType === st.value}
                 >
                   <span className="text-xs font-medium text-foreground">{st.label}</span>
                   <p className="mt-0.5 text-[10px] text-muted-foreground">{st.hint}</p>

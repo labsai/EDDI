@@ -327,7 +327,7 @@ export function WorkflowDetailPage() {
   /* ─── Loading / Error states ─── */
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-20">
+      <div className="flex items-center justify-center py-20" data-testid="workflow-loading">
         <RefreshCw className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
@@ -477,7 +477,7 @@ export function WorkflowDetailPage() {
             <h2 className="text-lg font-semibold text-foreground">
               {t("packageEditor.pipeline", "Pipeline")}
             </h2>
-            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary" data-testid="pipeline-step-count">
               {currentExtensions.length}
             </span>
           </div>

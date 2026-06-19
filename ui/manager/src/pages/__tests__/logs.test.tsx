@@ -1,10 +1,53 @@
-import { describe, it, expect } from "vitest";
-import { screen } from "@testing-library/react";
-import { render } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, waitFor, render, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { LogsPage } from "@/pages/logs";
+import userEvent from "@testing-library/user-event";
+
+// ─── Mocks ─────────────────────────────────────────────────────────────
+
+vi.mock("@/hooks/use-logs", () => ({
+  useLogStream: vi.fn().mockReturnValue({
+    entries: [
+      { timestamp: 1700000000000, level: "INFO", message: "Server started", loggerName: "main", agentId: "agent1", conversationId: "conv1" },
+      { timestamp: 1700000001000, level: "ERROR", message: "NullPointerException\n  at com.example.Main.run(Main.java:42)\n  at com.example.App.start(App.java:10)\nCaused by: java.lang.RuntimeException", loggerName: "error-logger" },
+      { timestamp: 1700000002000, level: "WARNING", message: "Low memory", loggerName: "sys" },
+    ],
+    sseConnected: true,
+    paused: false,
+    setPaused: vi.fn(),
+    clearEntries: vi.fn(),
+  }),
+  useHistoryLogs: vi.fn().mockReturnValue({
+    data: [
+      { timestamp: "2024-01-15T10:30:00Z", level: "INFO", message: "History log entry", agentId: "agent1", instanceId: "inst-abc" },
+    ],
+    isLoading: false,
+    refetch: vi.fn()
+  }),
+  useInstanceId: vi.fn().mockReturnValue({ data: { instanceId: "test-instance-123" } }),
+}));
+
+vi.mock("@/hooks/use-chat", () => ({
+  useDeployedAgents: vi.fn().mockReturnValue({
+    data: [
+      { id: "agent1", name: "Test Agent" },
+    ]
+  }),
+}));
+
+vi.mock("@/hooks/use-onboarding", () => ({
+  useOnboarding: vi.fn().mockReturnValue(vi.fn()),
+}));
+
+vi.mock("@/lib/api/conversations", () => ({
+  getConversationDescriptors: vi.fn().mockResolvedValue([]),
+  parseConversationUri: vi.fn((uri: string) => uri.split("/").pop() ?? ""),
+}));
+
+// ─── Helpers ─────────────────────────────────────────────────────────────
 
 function renderLogs() {
   const queryClient = new QueryClient({
@@ -25,7 +68,13 @@ function renderLogs() {
   );
 }
 
+// ─── Tests ─────────────────────────────────────────────────────────────
+
 describe("LogsPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("renders the logs-page container", () => {
     renderLogs();
     expect(screen.getByTestId("logs-page")).toBeInTheDocument();
@@ -70,5 +119,117 @@ describe("LogsPage", () => {
   it("renders export logs button", () => {
     renderLogs();
     expect(screen.getByTestId("export-logs-btn")).toBeInTheDocument();
+  });
+
+  // ─── Interaction tests (mocked data) ────────────────────────────────────
+
+  it("renders log entries when useLogStream returns data", () => {
+    renderLogs();
+    expect(screen.getByText("Server started")).toBeInTheDocument();
+    expect(screen.getByText(/NullPointerException/)).toBeInTheDocument();
+    expect(screen.getByText("Low memory")).toBeInTheDocument();
+  });
+
+  it("renders level badges for entries", () => {
+    renderLogs();
+    // Scope to the log entries scroll area to avoid matching <option> elements in filter dropdowns
+    const logEntries = screen.getByTestId("logs-page");
+    const badges = within(logEntries).getAllByText(/^(INFO|ERROR|WARN)$/);
+    const badgeTexts = badges.map((b) => b.textContent);
+    expect(badgeTexts).toContain("INFO");
+    expect(badgeTexts).toContain("ERROR");
+    expect(badgeTexts).toContain("WARN");
+  });
+
+  it("shows stacktrace toggle for error with stacktrace", () => {
+    renderLogs();
+    expect(screen.getByTestId("stacktrace-toggle")).toBeInTheDocument();
+  });
+
+  it("expands stacktrace when toggle is clicked", async () => {
+    renderLogs();
+    const user = userEvent.setup();
+    const toggleBtn = screen.getByTestId("stacktrace-toggle");
+    
+    // Initially stacktrace is collapsed, so the frames won't be fully visible
+    // Click toggle to expand
+    await user.click(toggleBtn);
+    
+    // Verify stacktrace frame appears
+    expect(screen.getByText(/at com.example.Main.run/)).toBeInTheDocument();
+  });
+
+  it("copies log entry to clipboard", async () => {
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    let clipboardSpy: ReturnType<typeof vi.spyOn> | undefined;
+    if (!navigator.clipboard) {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: writeTextMock },
+        configurable: true
+      });
+    } else {
+      clipboardSpy = vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(writeTextMock as never) as unknown as ReturnType<typeof vi.spyOn>;
+    }
+
+    renderLogs();
+    const user = userEvent.setup();
+    
+    // There are multiple copy buttons, pick the first one
+    const copyBtns = screen.getAllByTestId("copy-log-btn");
+    await user.click(copyBtns[0]!);
+    
+    expect(writeTextMock).toHaveBeenCalled();
+
+    // Restore clipboard spy to avoid leaking into other tests
+    clipboardSpy?.mockRestore();
+  });
+
+  it("switches to History tab and shows history content", async () => {
+    renderLogs();
+    const user = userEvent.setup();
+    
+    await user.click(screen.getByTestId("tab-history"));
+    
+    await waitFor(() => {
+      // History entry from mock
+      expect(screen.getByText("History log entry")).toBeInTheDocument();
+    });
+  });
+
+  it("shows level stats bar", () => {
+    renderLogs();
+    // The stats bar appears when there are errors/warnings
+    expect(screen.getByTestId("level-stats")).toBeInTheDocument();
+  });
+
+  it("filters entries by text search", async () => {
+    renderLogs();
+    const user = userEvent.setup();
+    
+    const searchInput = screen.getByTestId("text-search");
+    await user.type(searchInput, "Server");
+    
+    // "Server started" should still be visible
+    expect(screen.getByText("Server started")).toBeInTheDocument();
+    // "Low memory" should be filtered out
+    expect(screen.queryByText("Low memory")).not.toBeInTheDocument();
+  });
+
+  it("shows instance badge", () => {
+    renderLogs();
+    expect(screen.getByText("test-instance-123")).toBeInTheDocument();
+  });
+
+  it("renders agent filter with options", async () => {
+    renderLogs();
+    const user = userEvent.setup();
+    
+    // The filter is a generic component, click to open it
+    const agentFilterBtn = screen.getByTestId("filter-agent");
+    await user.click(agentFilterBtn);
+    
+    await waitFor(() => {
+      expect(screen.getByText("Test Agent")).toBeInTheDocument();
+    });
   });
 });

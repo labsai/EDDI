@@ -192,7 +192,7 @@ export function ChannelDetailPage() {
 
   if (isLoading || !draft) {
     return (
-      <div className="p-6 space-y-6">
+      <div className="p-6 space-y-6" data-testid="channel-detail-loading">
         <div className="h-8 w-48 bg-muted rounded animate-pulse" />
         <div className="h-64 bg-muted rounded-xl animate-pulse" />
       </div>
