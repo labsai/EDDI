@@ -10,6 +10,8 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
+
 import java.net.URI;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -23,6 +25,8 @@ public interface IRestVersionInfo {
     @POST
     @Path("/{id}/currentversion")
     @Operation(description = "Redirect to latest version.")
+    @APIResponse(responseCode = "303", description = "Redirect to latest version")
+    @APIResponse(responseCode = "404", description = "Resource not found")
     default Response redirectToLatestVersion(@PathParam("id") String id) {
         try {
             IResourceStore.IResourceId currentResourceId = getCurrentResourceId(id);
@@ -37,6 +41,8 @@ public interface IRestVersionInfo {
     @Path("/{id}/currentversion")
     @Produces(MediaType.TEXT_PLAIN)
     @Operation(description = "Get current version of this resource.")
+    @APIResponse(responseCode = "200", description = "Current version")
+    @APIResponse(responseCode = "404", description = "Resource not found")
     default Integer getCurrentVersion(@PathParam("id") String id) {
         try {
             IResourceStore.IResourceId currentResourceId = getCurrentResourceId(id);

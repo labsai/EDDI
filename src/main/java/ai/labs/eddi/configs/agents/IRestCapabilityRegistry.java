@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.CapabilityRegistryService.CapabilityMatch;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import java.util.List;
@@ -27,6 +28,7 @@ public interface IRestCapabilityRegistry {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(operationId = "searchCapabilities", description = "Find agents matching a skill")
+    @APIResponse(responseCode = "200", description = "Matching agent capabilities")
     List<CapabilityMatch> searchBySkill(
                                         @QueryParam("skill") String skill,
                                         @QueryParam("strategy")
@@ -36,5 +38,6 @@ public interface IRestCapabilityRegistry {
     @Path("/skills")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(operationId = "listAllSkills", description = "List all registered skills")
+    @APIResponse(responseCode = "200", description = "List of registered skills")
     Set<String> listSkills();
 }

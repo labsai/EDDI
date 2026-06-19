@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.descriptors.model.SimpleDocumentDescriptor;
 import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
+import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.*;
@@ -29,6 +30,7 @@ public interface IRestDocumentDescriptorStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read list of descriptors.")
+    @APIResponse(responseCode = "200", description = "List of descriptors")
     List<DocumentDescriptor> readDescriptors(@QueryParam("type")
     @DefaultValue("") String type, @QueryParam("filter")
     @DefaultValue("") String filter,
@@ -41,6 +43,8 @@ public interface IRestDocumentDescriptorStore {
     @Path("/{id}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read descriptor.")
+    @APIResponse(responseCode = "200", description = "Descriptor")
+    @APIResponse(responseCode = "404", description = "Descriptor not found")
     DocumentDescriptor readDescriptor(@PathParam("id") String id,
                                       @Parameter(name = "version", required = true, example = "1")
                                       @QueryParam("version") Integer version);
@@ -49,6 +53,8 @@ public interface IRestDocumentDescriptorStore {
     @Path("/{id}/simple")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read simple descriptor.")
+    @APIResponse(responseCode = "200", description = "Simple descriptor")
+    @APIResponse(responseCode = "404", description = "Descriptor not found")
     SimpleDocumentDescriptor readSimpleDescriptor(@PathParam("id") String id,
                                                   @Parameter(name = "version", required = true, example = "1")
                                                   @QueryParam("version") Integer version);
@@ -57,6 +63,9 @@ public interface IRestDocumentDescriptorStore {
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Partial update descriptor.")
+    @APIResponse(responseCode = "200", description = "Descriptor updated")
+    @APIResponse(responseCode = "404", description = "Descriptor not found")
+    @APIResponse(responseCode = "500", description = "Internal server error")
     void patchDescriptor(@PathParam("id") String id,
                          @Parameter(name = "version", required = true, example = "1")
                          @QueryParam("version") Integer version,
