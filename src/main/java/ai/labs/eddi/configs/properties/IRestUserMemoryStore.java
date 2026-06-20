@@ -51,6 +51,8 @@ public interface IRestUserMemoryStore {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Search user memories", description = "Filter memories by key or value content.")
     @APIResponse(responseCode = "200", description = "Memory entries matching the search query.")
+    @APIResponse(responseCode = "403", description = "Caller is not allowed to access the requested user's memories.")
+    @APIResponse(responseCode = "500", description = "Memory search failed due to an internal storage error.")
     List<UserMemoryEntry> searchMemories(@PathParam("userId") String userId, @QueryParam("q") String query);
 
     @GET
@@ -58,6 +60,8 @@ public interface IRestUserMemoryStore {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Get memories by category", description = "Returns memories filtered by category (preference, fact, context).")
     @APIResponse(responseCode = "200", description = "Memory entries in the requested category.")
+    @APIResponse(responseCode = "403", description = "Caller is not allowed to access the requested user's memories.")
+    @APIResponse(responseCode = "500", description = "Category lookup failed due to an internal storage error.")
     List<UserMemoryEntry> getMemoriesByCategory(@PathParam("userId") String userId, @PathParam("category") String category);
 
     @GET
