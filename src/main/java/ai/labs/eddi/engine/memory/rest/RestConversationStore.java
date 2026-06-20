@@ -57,7 +57,7 @@ public class RestConversationStore implements IRestConversationStore {
     private final Integer deleteMemoriesOlderThanDays;
     private final Instance<IAttachmentStorage> attachmentStorageInstance;
 
-    private static final Logger log = Logger.getLogger(RestConversationStore.class);
+    private static final Logger LOGGER = Logger.getLogger(RestConversationStore.class);
 
     @Inject
     // @formatter:off
@@ -114,7 +114,7 @@ public class RestConversationStore implements IRestConversationStore {
                         URI resourceUri = conversationDescriptor.getResource();
                         var conversationResourceId = extractResourceId(resourceUri);
                         if (conversationResourceId == null) {
-                            log.warn(format("conversationResourceId was null, this should never happen. (%s)", resourceUri));
+                            LOGGER.warn(format("conversationResourceId was null, this should never happen. (%s)", resourceUri));
                             continue;
                         }
 
@@ -149,7 +149,7 @@ public class RestConversationStore implements IRestConversationStore {
                         retConversationDescriptors.add(conversationDescriptor);
                     } catch (Exception e) {
                         // Skip individual corrupted/orphaned descriptors gracefully
-                        log.debug(format("Skipping descriptor due to error: %s", e.getMessage()));
+                        LOGGER.debug(format("Skipping descriptor due to error: %s", e.getMessage()));
                     }
                 }
 
@@ -180,7 +180,7 @@ public class RestConversationStore implements IRestConversationStore {
             var memorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(resourceId.getId());
 
             if (memorySnapshot == null) {
-                log.warn(format("Memory snapshot not found for conversation [%s, %s]. Descriptor is orphaned.",
+                LOGGER.warn(format("Memory snapshot not found for conversation [%s, %s]. Descriptor is orphaned.",
                         resourceId.getId(), resourceId.getVersion()));
                 return;
             }
@@ -201,7 +201,7 @@ public class RestConversationStore implements IRestConversationStore {
         } catch (IResourceStore.ResourceNotFoundException e) {
             String message = "Resource referenced in descriptor does not exist (anymore) [%s, %s]. ";
             message += "Ignoring this resource.";
-            log.warn(format(message, resourceId.getId(), resourceId.getVersion()));
+            LOGGER.warn(format(message, resourceId.getId(), resourceId.getVersion()));
         }
     }
 
@@ -240,7 +240,7 @@ public class RestConversationStore implements IRestConversationStore {
         if (deletePermanently) {
             deleteAttachmentsForConversation(conversationId);
             conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
-            log.info(format("Conversation has been permanently deleted (conversationId=%s)", conversationId));
+            LOGGER.info(format("Conversation has been permanently deleted (conversationId=%s)", conversationId));
         }
 
         // DocumentDescriptorInterceptor will mark the DocumentDescriptor of this
@@ -255,11 +255,11 @@ public class RestConversationStore implements IRestConversationStore {
                 var amountOfEndedConversations = permanentlyDeleteEndedConversationLogs(deleteEndedConversationsOnceOlderThanDays);
 
                 if (amountOfEndedConversations > 0) {
-                    log.info(format("Successfully deleted %s conversations, which were older than %s days", amountOfEndedConversations,
+                    LOGGER.info(format("Successfully deleted %s conversations, which were older than %s days", amountOfEndedConversations,
                             deleteEndedConversationsOnceOlderThanDays));
                 }
             } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
-                log.error(e.getLocalizedMessage(), e);
+                LOGGER.error(e.getLocalizedMessage(), e);
             }
             return null;
         }, ThreadContext.getResources());
@@ -275,11 +275,11 @@ public class RestConversationStore implements IRestConversationStore {
             try {
                 long deleted = userMemoryStore.deleteOlderThan(deleteMemoriesOlderThanDays);
                 if (deleted > 0) {
-                    log.infof("User memory retention: deleted %d entries older than %d days",
+                    LOGGER.infof("User memory retention: deleted %d entries older than %d days",
                             deleted, deleteMemoriesOlderThanDays);
                 }
             } catch (Exception e) {
-                log.error("User memory retention cleanup failed", e);
+                LOGGER.error("User memory retention cleanup failed", e);
             }
             return null;
         }, ThreadContext.getResources());
@@ -306,7 +306,7 @@ public class RestConversationStore implements IRestConversationStore {
                 } catch (IResourceStore.ResourceNotFoundException e) {
                     deleteAttachmentsForConversation(endedConversationId);
                     conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
-                    log.debug(format("Cleaned up orphaned conversation memory without descriptor (id=%s)", endedConversationId));
+                    LOGGER.debug(format("Cleaned up orphaned conversation memory without descriptor (id=%s)", endedConversationId));
                 }
             }
         }
@@ -350,7 +350,7 @@ public class RestConversationStore implements IRestConversationStore {
                 conversationDescriptor.setConversationState(ConversationState.ENDED);
                 conversationDescriptorStore.setDescriptor(conversationId, 0, conversationDescriptor);
 
-                log.info(format("conversation (%s) has been set to ENDED", conversationId));
+                LOGGER.info(format("conversation (%s) has been set to ENDED", conversationId));
             }
 
             return Response.ok().build();
@@ -368,10 +368,10 @@ public class RestConversationStore implements IRestConversationStore {
             try {
                 long deleted = attachmentStorageInstance.get().deleteByConversation(conversationId);
                 if (deleted > 0) {
-                    log.debug(format("Deleted %d attachments for conversation %s", deleted, conversationId));
+                    LOGGER.debug(format("Deleted %d attachments for conversation %s", deleted, conversationId));
                 }
             } catch (Exception e) {
-                log.warn(format("Failed to delete attachments for conversation %s: %s",
+                LOGGER.warn(format("Failed to delete attachments for conversation %s: %s",
                         conversationId, e.getMessage()));
             }
         }

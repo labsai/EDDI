@@ -38,7 +38,7 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final IConversationDescriptorStore conversationDescriptorStore;
 
-    private static final Logger log = Logger.getLogger(DocumentDescriptorFilter.class);
+    private static final Logger LOGGER = Logger.getLogger(DocumentDescriptorFilter.class);
 
     @Inject
     UriInfo uriInfo;
@@ -109,10 +109,10 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
                 }
             }
         } catch (IResourceStore.ResourceNotFoundException e) {
-            log.debug(e.getLocalizedMessage(), e);
+            LOGGER.debug(e.getLocalizedMessage(), e);
             throw new NotFoundException(e.getLocalizedMessage());
         } catch (IResourceStore.ResourceModifiedException e) {
-            log.debug(e.getLocalizedMessage(), e);
+            LOGGER.debug(e.getLocalizedMessage(), e);
             throw new BadRequestException(e.getLocalizedMessage());
         } catch (Exception e) {
             throw sneakyThrow(e);
