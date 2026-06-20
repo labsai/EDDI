@@ -21,7 +21,7 @@ import org.jboss.logging.Logger;
 public class RestPropertiesStore implements IRestPropertiesStore {
     private final IUserMemoryStore userMemoryStore;
 
-    private static final Logger log = Logger.getLogger(RestPropertiesStore.class);
+    private static final Logger LOGGER = Logger.getLogger(RestPropertiesStore.class);
 
     @Inject
     public RestPropertiesStore(IUserMemoryStore userMemoryStore) {
@@ -33,7 +33,7 @@ public class RestPropertiesStore implements IRestPropertiesStore {
         try {
             return userMemoryStore.readProperties(userId);
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new RuntimeException(e.getLocalizedMessage(), e);
         }
     }
@@ -44,7 +44,7 @@ public class RestPropertiesStore implements IRestPropertiesStore {
             userMemoryStore.mergeProperties(userId, properties);
             return Response.ok().build();
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new RuntimeException(e.getLocalizedMessage(), e);
         }
     }
@@ -55,7 +55,7 @@ public class RestPropertiesStore implements IRestPropertiesStore {
             userMemoryStore.deleteProperties(userId);
             return Response.ok().build();
         } catch (Exception e) {
-            log.error(e.getLocalizedMessage(), e);
+            LOGGER.error(e.getLocalizedMessage(), e);
             throw new RuntimeException(e.getLocalizedMessage(), e);
         }
     }
