@@ -37,7 +37,7 @@ import static java.lang.String.format;
 public class RuleDeserialization implements IRuleDeserialization {
     private final ObjectMapper objectMapper;
 
-    private static final Logger log = Logger.getLogger(RuleDeserialization.class);
+    private static final Logger LOGGER = Logger.getLogger(RuleDeserialization.class);
     private final IExpressionProvider expressionProvider;
     private final IJsonSerialization jsonSerialization;
     private final IMemoryItemConverter memoryItemConverter;
@@ -119,7 +119,7 @@ public class RuleDeserialization implements IRuleDeserialization {
 
                 throw new DeserializationException(format("No condition for type %s was created (%s)", type, conditionsKey));
             } catch (CloneNotSupportedException | DeserializationException e) {
-                log.error(e.getLocalizedMessage(), e);
+                LOGGER.error(e.getLocalizedMessage(), e);
                 throw new IllegalArgumentException("Failed to instantiate rule condition: " + e.getMessage(), e);
             }
         }).filter(Objects::nonNull).toList();
