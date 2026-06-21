@@ -35,7 +35,7 @@ public class AgentFactory implements IAgentFactory {
     private final IAgentStoreClientLibrary agentStoreClientLibrary;
     private final IDeploymentListener deploymentListener;
 
-    private static final Logger log = Logger.getLogger(AgentFactory.class);
+    private static final Logger LOGGER = Logger.getLogger(AgentFactory.class);
 
     @Inject
     public AgentFactory(IAgentStoreClientLibrary agentStoreClientLibrary, IDeploymentListener deploymentListener, MeterRegistry meterRegistry) {
@@ -132,16 +132,16 @@ public class AgentFactory implements IAgentFactory {
             // Re-fetch the agent after deployment is complete
             IAgent agent = getAgentEnvironment(environment).get(agentIdObj);
             if (agent == null || agent.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
-                log.error("Agent deployment did not complete successfully for agentId: " + agentIdObj);
+                LOGGER.error("Agent deployment did not complete successfully for agentId: " + agentIdObj);
                 return null;
             }
 
             return agent;
         } catch (CancellationException e) {
-            log.error("Waited too long for agent deployment to complete (timeout reached at 60s).", e);
+            LOGGER.error("Waited too long for agent deployment to complete (timeout reached at 60s).", e);
             return null;
         } catch (Exception e) {
-            log.error("Error while waiting for agent deployment: " + e.getMessage(), e);
+            LOGGER.error("Error while waiting for agent deployment: " + e.getMessage(), e);
             return null;
         }
     }
@@ -157,13 +157,13 @@ public class AgentFactory implements IAgentFactory {
             if (existingAgent != null) {
                 // If an agent already exists, ensure it is in a valid state
                 if (existingAgent.getDeploymentStatus() == Deployment.Status.READY) {
-                    log.debug(String.format("Agent is already deployed: %s (environment=%s, version=%d)", agentId, environment, version));
+                    LOGGER.debug(String.format("Agent is already deployed: %s (environment=%s, version=%d)", agentId, environment, version));
                     finalDeploymentProcess.completed(Deployment.Status.READY);
                     return existingAgent; // No need to redeploy
                 }
 
                 if (existingAgent.getDeploymentStatus() == Deployment.Status.IN_PROGRESS) {
-                    log.debug(
+                    LOGGER.debug(
                             String.format("Agent deployment is already in progress: %s (environment=%s, version=%d)", agentId, environment, version));
                     return existingAgent; // Keep the IN_PROGRESS state
                 }
@@ -189,7 +189,7 @@ public class AgentFactory implements IAgentFactory {
 
                 return agent; // Replace the dummy agent with the actual agent
             } catch (ServiceException e) {
-                log.error("Agent deployment failed for " + agentId + " v" + version + ": " + e.getMessage(), e);
+                LOGGER.error("Agent deployment failed for " + agentId + " v" + version + ": " + e.getMessage(), e);
                 progressDummyAgent.setDeploymentStatus(Deployment.Status.ERROR);
                 finalDeploymentProcess.completed(Deployment.Status.ERROR);
                 logAgentDeployment(environment.toString(), agentId, version, Deployment.Status.ERROR);
@@ -252,9 +252,9 @@ public class AgentFactory implements IAgentFactory {
 
     private void logAgentDeployment(String environment, String agentId, Integer agentVersion, Deployment.Status status) {
         if (status == Deployment.Status.IN_PROGRESS) {
-            log.info(String.format("Deploying agent... (environment=%s, agentId=%s, version=%s)", environment, agentId, agentVersion));
+            LOGGER.info(String.format("Deploying agent... (environment=%s, agentId=%s, version=%s)", environment, agentId, agentVersion));
         } else {
-            log.info(String.format("Agent deployed with status: %s (environment=%s, agentId=%s, version=%s)", status, environment, agentId,
+            LOGGER.info(String.format("Agent deployed with status: %s (environment=%s, agentId=%s, version=%s)", status, environment, agentId,
                     agentVersion));
         }
     }

@@ -38,7 +38,7 @@ import java.util.function.Consumer;
 @ApplicationScoped
 public class BoundedLogStore {
 
-    private static final Logger log = Logger.getLogger(BoundedLogStore.class);
+    private static final Logger LOGGER = Logger.getLogger(BoundedLogStore.class);
 
     private final int bufferSize;
     private final boolean dbEnabled;
@@ -103,12 +103,12 @@ public class BoundedLogStore {
                 return t;
             });
             dbWriter.scheduleAtFixedRate(this::flushToDb, dbFlushIntervalSeconds, dbFlushIntervalSeconds, TimeUnit.SECONDS);
-            log.infov("BoundedLogStore: DB persistence enabled (flush every {0}s, min level: {1})", dbFlushIntervalSeconds, dbPersistMinLevel);
+            LOGGER.infov("BoundedLogStore: DB persistence enabled (flush every {0}s, min level: {1})", dbFlushIntervalSeconds, dbPersistMinLevel);
         } else {
-            log.info("BoundedLogStore: DB persistence disabled (ring buffer + SSE only)");
+            LOGGER.info("BoundedLogStore: DB persistence disabled (ring buffer + SSE only)");
         }
 
-        log.infov("BoundedLogStore initialized (buffer={0}, dbEnabled={1})", bufferSize, dbEnabled);
+        LOGGER.infov("BoundedLogStore initialized (buffer={0}, dbEnabled={1})", bufferSize, dbEnabled);
     }
 
     @PreDestroy
@@ -292,7 +292,7 @@ public class BoundedLogStore {
             try {
                 databaseLogs.addLogsBatch(batch);
             } catch (Exception e) {
-                log.errorv("Failed to flush {0} log entries to DB: {1}", batch.size(), e.getMessage());
+                LOGGER.errorv("Failed to flush {0} log entries to DB: {1}", batch.size(), e.getMessage());
             }
         }
     }

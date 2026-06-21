@@ -43,7 +43,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
     private final IRestRagStore restRagStore;
     private Map<String, IResourceService> restInterfaces;
 
-    private static final Logger log = Logger.getLogger(ResourceClientLibrary.class);
+    private static final Logger LOGGER = Logger.getLogger(ResourceClientLibrary.class);
 
     @Inject
     public ResourceClientLibrary(IRestParserStore restParserStore, IRestDictionaryStore restDictionaryStore, IRestRuleSetStore restRuleSetStore,
@@ -260,7 +260,7 @@ public class ResourceClientLibrary implements IResourceClientLibrary {
         String type = uri.getHost();
         IResourceService proxy = restInterfaces.get(type);
         if (RuntimeUtilities.isNullOrEmpty(proxy)) {
-            log.warnf("Could not find proxy for type '%s' in uri '%s' — skipping delete", type, uri);
+            LOGGER.warnf("Could not find proxy for type '%s' in uri '%s' — skipping delete", type, uri);
             return Response.ok().build();
         }
 
