@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { server } from "@/test/mocks/server";
 import { type ReactNode } from "react";
+import { http, HttpResponse } from "msw";
 import {
   useQuotas,
   useQuota,
@@ -10,10 +11,6 @@ import {
   useUpdateQuota,
   useResetUsage,
 } from "@/hooks/use-quotas";
-
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
-afterAll(() => server.close());
-afterEach(() => server.resetHandlers());
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -29,6 +26,8 @@ function createWrapper() {
   };
 }
 
+// ─── useQuotas (list) ──────────────────────────────────────────
+
 describe("useQuotas", () => {
   it("fetches quota list", async () => {
     const { result } = renderHook(() => useQuotas(), {
@@ -40,6 +39,8 @@ describe("useQuotas", () => {
   });
 });
 
+// ─── useQuota (single tenant) ──────────────────────────────────
+
 describe("useQuota", () => {
   it("fetches a single tenant quota", async () => {
     const { result } = renderHook(() => useQuota("default"), {
@@ -48,6 +49,7 @@ describe("useQuota", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toHaveProperty("tenantId");
     expect(result.current.data).toHaveProperty("maxConversationsPerDay");
+    expect(result.current.data).toHaveProperty("enabled");
   });
 
   it("is disabled when tenantId is empty", () => {
@@ -56,7 +58,47 @@ describe("useQuota", () => {
     });
     expect(result.current.fetchStatus).toBe("idle");
   });
+
+  it("returns default quota when backend returns 404", async () => {
+    server.use(
+      http.get("*/administration/quotas/:tenantId", ({ params }) => {
+        // Let /quotas/count fall through to the global handler — :tenantId also matches "count"
+        if (params.tenantId === "count") return;
+        return new HttpResponse(null, { status: 404 });
+      }),
+    );
+
+    const { result } = renderHook(() => useQuota("fresh-tenant"), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual({
+      tenantId: "fresh-tenant",
+      maxConversationsPerDay: -1,
+      maxAgentsPerTenant: -1,
+      maxApiCallsPerMinute: -1,
+      maxMonthlyCostUsd: -1,
+      enabled: false,
+    });
+  });
+
+  it("propagates non-404 errors", async () => {
+    server.use(
+      http.get("*/administration/quotas/:tenantId", ({ params }) => {
+        // Let /quotas/count fall through to the global handler — :tenantId also matches "count"
+        if (params.tenantId === "count") return;
+        return new HttpResponse(null, { status: 500 });
+      }),
+    );
+
+    const { result } = renderHook(() => useQuota("default"), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+  });
 });
+
+// ─── useQuotaUsage ─────────────────────────────────────────────
 
 describe("useQuotaUsage", () => {
   it("fetches usage for a tenant", async () => {
@@ -66,6 +108,7 @@ describe("useQuotaUsage", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toHaveProperty("conversationsToday");
     expect(result.current.data).toHaveProperty("monthlyCostUsd");
+    expect(result.current.data).toHaveProperty("tenantId");
   });
 
   it("is disabled when tenantId is empty", () => {
@@ -74,7 +117,39 @@ describe("useQuotaUsage", () => {
     });
     expect(result.current.fetchStatus).toBe("idle");
   });
+
+  it("returns zeroed usage when backend returns 404", async () => {
+    server.use(
+      http.get("*/administration/quotas/:tenantId/usage", () => {
+        return new HttpResponse(null, { status: 404 });
+      }),
+    );
+
+    const { result } = renderHook(() => useQuotaUsage("fresh-tenant"), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data!.tenantId).toBe("fresh-tenant");
+    expect(result.current.data!.conversationsToday).toBe(0);
+    expect(result.current.data!.apiCallsThisMinute).toBe(0);
+    expect(result.current.data!.monthlyCostUsd).toBe(0);
+  });
+
+  it("propagates non-404 errors for usage", async () => {
+    server.use(
+      http.get("*/administration/quotas/:tenantId/usage", () => {
+        return new HttpResponse(null, { status: 500 });
+      }),
+    );
+
+    const { result } = renderHook(() => useQuotaUsage("default"), {
+      wrapper: createWrapper(),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+  });
 });
+
+// ─── useUpdateQuota ────────────────────────────────────────────
 
 describe("useUpdateQuota", () => {
   it("performs mutation successfully", async () => {
@@ -95,8 +170,12 @@ describe("useUpdateQuota", () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toHaveProperty("tenantId", "default");
+    expect(result.current.data).toHaveProperty("maxConversationsPerDay", 10000);
   });
 });
+
+// ─── useResetUsage ─────────────────────────────────────────────
 
 describe("useResetUsage", () => {
   it("performs reset mutation successfully", async () => {
