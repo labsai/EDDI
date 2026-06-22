@@ -113,7 +113,7 @@ export function QuotasPage() {
               data-testid="quotas-disabled-banner"
             >
               <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-              <div className="text-sm text-amber-200/80">
+              <div className="text-sm text-muted-foreground">
                 <span className="font-medium text-amber-500">
                   {t("quotas.enforcementOff", "Enforcement is off.")}
                 </span>{" "}
