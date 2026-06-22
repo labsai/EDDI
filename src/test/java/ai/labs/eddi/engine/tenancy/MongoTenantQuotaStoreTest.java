@@ -536,44 +536,17 @@ class MongoTenantQuotaStoreTest {
     class Bootstrap {
 
         @Test
-        @DisplayName("should create default quota when none exists")
-        void bootstrapsWhenEmpty() {
-            // getQuota returns null → no existing quota
-            when(quotasCollection.find(any(Bson.class))).thenReturn(findIterable);
-            when(findIterable.first()).thenReturn(null);
-
-            // setQuota uses findOneAndUpdate
+        @DisplayName("should bootstrap default quota via atomic setOnInsert upsert")
+        void bootstrapsAtomically() {
+            // CDI constructor uses $setOnInsert with upsert — always calls findOneAndUpdate
             lenient().when(quotasCollection.findOneAndUpdate(
                     any(Bson.class), any(Bson.class), any(FindOneAndUpdateOptions.class))).thenReturn(null);
 
-            var bootstrapStore = new MongoTenantQuotaStore(
+            new MongoTenantQuotaStore(
                     database, "default", false, -1, -1, -1, -1.0);
 
-            // Verify setQuota was called (findOneAndUpdate for upsert)
+            // Verify findOneAndUpdate was called for bootstrap (beyond index creation)
             verify(quotasCollection, atLeastOnce()).findOneAndUpdate(
-                    any(Bson.class), any(Bson.class), any(FindOneAndUpdateOptions.class));
-        }
-
-        @Test
-        @DisplayName("should not overwrite existing quota")
-        void doesNotOverwriteExisting() {
-            // getQuota returns an existing doc
-            Document existingDoc = new Document()
-                    .append("tenantId", "default")
-                    .append("maxConversationsPerDay", 5000)
-                    .append("maxAgentsPerTenant", 100)
-                    .append("maxApiCallsPerMinute", 500)
-                    .append("maxMonthlyCostUsd", 2500.0)
-                    .append("enabled", true);
-            when(quotasCollection.find(any(Bson.class))).thenReturn(findIterable);
-            when(findIterable.first()).thenReturn(existingDoc);
-
-            var bootstrapStore = new MongoTenantQuotaStore(
-                    database, "default", false, -1, -1, -1, -1.0);
-
-            // setQuota (findOneAndUpdate with upsert) should NOT have been called
-            // beyond the index creation calls
-            verify(quotasCollection, never()).findOneAndUpdate(
                     any(Bson.class), any(Bson.class), any(FindOneAndUpdateOptions.class));
         }
     }

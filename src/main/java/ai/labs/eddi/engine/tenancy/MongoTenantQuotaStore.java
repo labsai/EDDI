@@ -70,13 +70,21 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
         usage.createIndex(new Document("tenantId", 1), indexOptions);
 
         // Bootstrap default tenant quota if none exists (parity with
-        // InMemoryTenantQuotaStore)
-        if (getQuota(defaultTenantId) == null) {
-            var defaultQuota = new TenantQuota(defaultTenantId, maxConvPerDay, maxAgents, maxApiCalls, maxCost, enabled);
-            setQuota(defaultQuota);
-            LOGGER.infof("Bootstrapped default tenant quota: tenantId=%s, enabled=%s, maxConv=%d, maxAgents=%d, maxApi=%d, maxCost=%.2f",
-                    defaultTenantId, enabled, maxConvPerDay, maxAgents, maxApiCalls, maxCost);
-        }
+        // InMemoryTenantQuotaStore).
+        // Uses $setOnInsert so an existing quota is never overwritten, even under
+        // races.
+        quotas.findOneAndUpdate(
+                Filters.eq("tenantId", defaultTenantId),
+                Updates.combine(
+                        Updates.setOnInsert("tenantId", defaultTenantId),
+                        Updates.setOnInsert("maxConversationsPerDay", maxConvPerDay),
+                        Updates.setOnInsert("maxAgentsPerTenant", maxAgents),
+                        Updates.setOnInsert("maxApiCallsPerMinute", maxApiCalls),
+                        Updates.setOnInsert("maxMonthlyCostUsd", maxCost),
+                        Updates.setOnInsert("enabled", enabled)),
+                new FindOneAndUpdateOptions().upsert(true));
+        LOGGER.infof("Ensured default tenant quota exists: tenantId=%s, enabled=%s, maxConv=%d, maxAgents=%d, maxApi=%d, maxCost=%.2f",
+                defaultTenantId, enabled, maxConvPerDay, maxAgents, maxApiCalls, maxCost);
     }
 
     /**

@@ -107,23 +107,50 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_QUOTAS_TABLE);
             stmt.execute(CREATE_USAGE_TABLE);
-            schemaInitialized = true;
             LOGGER.info("PostgresTenantQuotaStore initialized (tables=tenant_quotas, tenant_usage)");
 
             // Bootstrap default tenant quota if none exists (parity with
-            // InMemoryTenantQuotaStore)
-            if (defaultTenantId != null && defaultQuota != null && getQuotaInternal(conn, defaultTenantId) == null) {
-                setQuotaInternal(conn, defaultQuota);
-                LOGGER.infof("Bootstrapped default tenant quota: tenantId=%s, enabled=%s, maxConv=%d, maxAgents=%d, maxApi=%d, maxCost=%.2f",
-                        defaultTenantId, defaultQuota.enabled(), defaultQuota.maxConversationsPerDay(),
-                        defaultQuota.maxAgentsPerTenant(), defaultQuota.maxApiCallsPerMinute(), defaultQuota.maxMonthlyCostUsd());
+            // InMemoryTenantQuotaStore).
+            // Uses INSERT ... ON CONFLICT DO NOTHING so an existing quota is never
+            // overwritten.
+            if (defaultTenantId != null && defaultQuota != null) {
+                bootstrapDefaultQuota(conn, defaultQuota);
             }
+
+            schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize tenant quota tables", e);
         }
     }
 
     // ─── Quota Configuration ───
+
+    /**
+     * Bootstrap-only insert using ON CONFLICT DO NOTHING — never overwrites an
+     * existing quota.
+     */
+    private void bootstrapDefaultQuota(Connection conn, TenantQuota quota) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                """
+                        INSERT INTO tenant_quotas (tenant_id, max_conversations_per_day, max_agents_per_tenant,
+                                                   max_api_calls_per_minute, max_monthly_cost_usd, enabled)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (tenant_id) DO NOTHING
+                        """)) {
+            ps.setString(1, quota.tenantId());
+            ps.setInt(2, quota.maxConversationsPerDay());
+            ps.setInt(3, quota.maxAgentsPerTenant());
+            ps.setInt(4, quota.maxApiCallsPerMinute());
+            ps.setDouble(5, quota.maxMonthlyCostUsd());
+            ps.setBoolean(6, quota.enabled());
+            int inserted = ps.executeUpdate();
+            if (inserted > 0) {
+                LOGGER.infof("Bootstrapped default tenant quota: tenantId=%s, enabled=%s, maxConv=%d, maxAgents=%d, maxApi=%d, maxCost=%.2f",
+                        quota.tenantId(), quota.enabled(), quota.maxConversationsPerDay(),
+                        quota.maxAgentsPerTenant(), quota.maxApiCallsPerMinute(), quota.maxMonthlyCostUsd());
+            }
+        }
+    }
 
     /**
      * Internal quota lookup reusing an existing connection (used during bootstrap).
