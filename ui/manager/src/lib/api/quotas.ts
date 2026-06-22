@@ -1,4 +1,4 @@
-import { api } from "../api-client";
+import { api, isApiError } from "../api-client";
 
 /* ─── Types ─── */
 
@@ -20,6 +20,33 @@ export interface TenantUsage {
   dayStart: string;
 }
 
+/* ─── Helpers ─── */
+
+/** Sensible defaults when no quota record exists yet (all unlimited, disabled). */
+export function defaultQuota(tenantId: string): TenantQuota {
+  return {
+    tenantId,
+    maxConversationsPerDay: -1,
+    maxAgentsPerTenant: -1,
+    maxApiCallsPerMinute: -1,
+    maxMonthlyCostUsd: -1,
+    enabled: false,
+  };
+}
+
+/** Zeroed usage snapshot for tenants with no usage data yet. */
+export function emptyUsage(tenantId: string): TenantUsage {
+  const now = new Date().toISOString();
+  return {
+    tenantId,
+    conversationsToday: 0,
+    apiCallsThisMinute: 0,
+    monthlyCostUsd: 0,
+    minuteWindowStart: now,
+    dayStart: now,
+  };
+}
+
 /* ─── API Functions ─── */
 
 const BASE = "/administration/quotas";
@@ -29,12 +56,22 @@ export async function listQuotas(): Promise<TenantQuota[]> {
   return api.get<TenantQuota[]>(BASE);
 }
 
-/** Get quota for a specific tenant. */
+/**
+ * Get quota for a specific tenant.
+ * Returns local defaults when no record exists (404) so the UI can render.
+ */
 export async function getQuota(tenantId: string): Promise<TenantQuota> {
-  return api.get<TenantQuota>(`${BASE}/${tenantId}`);
+  try {
+    return await api.get<TenantQuota>(`${BASE}/${tenantId}`);
+  } catch (err) {
+    if (isApiError(err) && err.status === 404) {
+      return defaultQuota(tenantId);
+    }
+    throw err;
+  }
 }
 
-/** Update quota for a tenant. */
+/** Update (or create) quota for a tenant. */
 export async function updateQuota(
   tenantId: string,
   quota: TenantQuota,
@@ -42,12 +79,23 @@ export async function updateQuota(
   return api.put<TenantQuota>(`${BASE}/${tenantId}`, quota);
 }
 
-/** Get current usage for a tenant. */
+/**
+ * Get current usage for a tenant.
+ * Returns zeroed snapshot when no usage data exists yet (404).
+ */
 export async function getUsage(tenantId: string): Promise<TenantUsage> {
-  return api.get<TenantUsage>(`${BASE}/${tenantId}/usage`);
+  try {
+    return await api.get<TenantUsage>(`${BASE}/${tenantId}/usage`);
+  } catch (err) {
+    if (isApiError(err) && err.status === 404) {
+      return emptyUsage(tenantId);
+    }
+    throw err;
+  }
 }
 
 /** Reset usage counters for a tenant. */
 export async function resetUsage(tenantId: string): Promise<void> {
   await api.post(`${BASE}/${tenantId}/usage/reset`, undefined);
 }
+
