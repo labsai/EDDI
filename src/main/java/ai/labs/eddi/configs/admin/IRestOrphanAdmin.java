@@ -26,7 +26,7 @@ import org.jboss.resteasy.reactive.NoCache;
  * @since 6.0.0
  */
 @Path("/administration/orphans")
-@Tag(name = "08. Orphan Admin")
+@Tag(name = "Operations / Orphans")
 @RolesAllowed("eddi-admin")
 public interface IRestOrphanAdmin {
 

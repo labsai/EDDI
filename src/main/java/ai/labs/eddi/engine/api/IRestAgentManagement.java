@@ -23,7 +23,7 @@ import java.util.List;
  * given intent/userId pair.
  */
 @Path("/agents/managed")
-@Tag(name = "01. Conversations")
+@Tag(name = "Conversations")
 @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
 public interface IRestAgentManagement {
 

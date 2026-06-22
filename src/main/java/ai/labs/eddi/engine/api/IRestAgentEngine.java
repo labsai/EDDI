@@ -29,7 +29,7 @@ import java.util.Map;
  * only conversationId.
  */
 @Path("/agents")
-@Tag(name = "01. Conversations")
+@Tag(name = "Conversations")
 @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
 public interface IRestAgentEngine {
 

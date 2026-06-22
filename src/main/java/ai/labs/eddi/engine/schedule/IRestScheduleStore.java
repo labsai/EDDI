@@ -26,7 +26,7 @@ import java.util.List;
  * @since 6.0.0
  */
 @Path("/schedulestore/schedules")
-@Tag(name = "08. Schedules")
+@Tag(name = "Operations / Schedules")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestScheduleStore {
 

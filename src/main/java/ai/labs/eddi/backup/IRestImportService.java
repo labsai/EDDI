@@ -23,7 +23,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("backup/import")
-@Tag(name = "08. Backup")
+@Tag(name = "Operations / Backup")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestImportService {
     @POST

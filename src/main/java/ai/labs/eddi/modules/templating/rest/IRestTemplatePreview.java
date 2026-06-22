@@ -21,7 +21,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
  * @since 6.0.0
  */
 @Path("/administration/preview")
-@Tag(name = "05. Template Preview")
+@Tag(name = "Tools / Template Preview")
 public interface IRestTemplatePreview {
 
     @POST

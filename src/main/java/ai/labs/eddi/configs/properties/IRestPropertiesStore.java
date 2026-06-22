@@ -13,7 +13,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 @Path("/propertiesstore/properties")
-@Tag(name = "03. Properties")
+@Tag(name = "Configuration / Properties")
 public interface IRestPropertiesStore {
     String resourceURI = "eddi://ai.labs.properties/propertiesstore/properties/";
 

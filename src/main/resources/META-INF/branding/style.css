@@ -686,3 +686,146 @@ body {
 .swagger-ui .wrapper {
     max-width: 1460px;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * HIGH-SPECIFICITY OVERRIDES
+ * These use !important to override Swagger UI's inline and bundled styles.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Topbar Explore button (default green → amber) ─────────────────────── */
+.swagger-ui .topbar .download-url-wrapper .download-url-button {
+    background-color: #f59e0b !important;
+    color: #09090b !important;
+    border: 1px solid #f59e0b !important;
+    border-radius: 6px;
+    font-weight: 600;
+}
+
+.swagger-ui .topbar .download-url-wrapper .download-url-button:hover {
+    background-color: #d97706 !important;
+    border-color: #d97706 !important;
+}
+
+/* ── Version stamps (green → amber) ────────────────────────────────────── */
+.swagger-ui .info .title small {
+    background-color: #27272a !important;
+    border: 1px solid #3f3f46 !important;
+    color: #a1a1aa !important;
+    border-radius: 4px;
+}
+
+.swagger-ui .info .title small.version-stamp {
+    background-color: #f59e0b !important;
+    color: #09090b !important;
+    border: none !important;
+    font-weight: 600;
+}
+
+.swagger-ui .info .title small pre {
+    color: #a1a1aa !important;
+}
+
+.swagger-ui .info .title small pre.version {
+    color: #09090b !important;
+}
+
+/* ── Swagger-ui wrapper background ─────────────────────────────────────── */
+.swagger-ui .wrapper {
+    background-color: #09090b !important;
+}
+
+.swagger-ui {
+    background-color: #09090b !important;
+}
+
+/* ── Topbar input field ────────────────────────────────────────────────── */
+.swagger-ui .topbar input[type=text] {
+    background: #18181b !important;
+    border: 1px solid #27272a !important;
+    color: #fafaf9 !important;
+    border-radius: 6px;
+}
+
+.swagger-ui .topbar input[type=text]:focus {
+    border-color: #f59e0b !important;
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2) !important;
+}
+
+/* ── Info section (force dark card) ────────────────────────────────────── */
+.swagger-ui .info {
+    background-color: #18181b !important;
+    border-bottom: 3px solid #f59e0b !important;
+    border-radius: 8px !important;
+}
+
+/* ── Authorize button (force amber) ────────────────────────────────────── */
+.swagger-ui .btn.authorize {
+    color: #f59e0b !important;
+    border-color: #f59e0b !important;
+    background: transparent !important;
+}
+
+.swagger-ui .btn.authorize svg {
+    fill: #f59e0b !important;
+}
+
+/* ── Execute button (force amber) ──────────────────────────────────────── */
+.swagger-ui .btn.execute {
+    background-color: #f59e0b !important;
+    color: #09090b !important;
+    border-color: #f59e0b !important;
+}
+
+/* ── Select elements in topbar ─────────────────────────────────────────── */
+.swagger-ui .topbar select {
+    background: #18181b !important;
+    border: 1px solid #27272a !important;
+    color: #fafaf9 !important;
+}
+
+/* ── Operation blocks (force dark backgrounds) ─────────────────────────── */
+.swagger-ui .opblock {
+    background: #18181b !important;
+    border-color: #27272a !important;
+}
+
+.swagger-ui .opblock .opblock-summary {
+    border-color: #27272a !important;
+}
+
+/* ── Tag section borders ───────────────────────────────────────────────── */
+.swagger-ui .opblock-tag {
+    border-bottom-color: #27272a !important;
+}
+
+/* ── Models section ────────────────────────────────────────────────────── */
+.swagger-ui section.models {
+    background: #18181b !important;
+    border-color: #27272a !important;
+}
+
+/* ── Scheme container ──────────────────────────────────────────────────── */
+.swagger-ui .scheme-container {
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+/* ── Curl/response code blocks ─────────────────────────────────────────── */
+.swagger-ui .opblock-body pre.microlight,
+.swagger-ui pre.microlight {
+    background: #09090b !important;
+    color: #fafaf9 !important;
+    border: 1px solid #27272a !important;
+}
+
+/* ── Server response status ────────────────────────────────────────────── */
+.swagger-ui .response-col_status {
+    color: #fafaf9 !important;
+}
+
+/* ── Table headers ─────────────────────────────────────────────────────── */
+.swagger-ui table thead tr td,
+.swagger-ui table thead tr th {
+    color: #a1a1aa !important;
+    border-bottom-color: #27272a !important;
+}

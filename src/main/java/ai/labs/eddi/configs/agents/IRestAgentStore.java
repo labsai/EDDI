@@ -23,7 +23,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/agentstore/agents")
-@Tag(name = "02. Agents")
+@Tag(name = "Agents")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestAgentStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.agent/agentstore/agents/";

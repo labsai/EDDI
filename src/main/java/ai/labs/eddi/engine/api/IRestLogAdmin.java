@@ -27,7 +27,7 @@ import java.util.List;
  * @since 6.0.0
  */
 @Path("/administration/logs")
-@Tag(name = "08. Log Admin")
+@Tag(name = "Operations / Logs")
 @RolesAllowed("eddi-admin")
 public interface IRestLogAdmin {
 

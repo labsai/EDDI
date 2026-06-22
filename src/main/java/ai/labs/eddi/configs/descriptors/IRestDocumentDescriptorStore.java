@@ -20,7 +20,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/descriptorstore/descriptors")
-@Tag(name = "08. Descriptors")
+@Tag(name = "Operations / Descriptors")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestDocumentDescriptorStore {
     String DESCRIPTOR_STORE_PATH = "/descriptorstore/descriptors/";

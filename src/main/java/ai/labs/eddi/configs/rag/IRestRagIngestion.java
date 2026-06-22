@@ -18,7 +18,7 @@ import jakarta.ws.rs.core.Response;
  * JAX-RS interface for RAG document ingestion.
  */
 @Path("/ragstore/rags")
-@Tag(name = "04. RAG Ingestion")
+@Tag(name = "Knowledge / RAG Ingestion")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestRagIngestion {
 

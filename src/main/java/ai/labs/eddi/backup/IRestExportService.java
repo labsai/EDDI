@@ -17,7 +17,7 @@ import jakarta.ws.rs.core.Response;
  * @author ginccc
  */
 @Path("/backup/export")
-@Tag(name = "08. Backup")
+@Tag(name = "Operations / Backup")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestExportService {
     @GET

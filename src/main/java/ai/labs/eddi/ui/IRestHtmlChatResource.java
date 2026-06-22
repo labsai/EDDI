@@ -20,7 +20,7 @@ import org.jboss.resteasy.reactive.Cache;
 
 @Path("/chat")
 @Produces(MediaType.TEXT_HTML)
-@Tag(name = "09. Chat UI")
+@Tag(name = "UI / Chat")
 public interface IRestHtmlChatResource {
 
     @GET

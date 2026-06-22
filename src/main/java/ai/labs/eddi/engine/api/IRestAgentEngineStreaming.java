@@ -29,7 +29,7 @@ import java.util.List;
  * </ul>
  */
 @Path("/agents")
-@Tag(name = "01. Conversations")
+@Tag(name = "Conversations")
 @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
 public interface IRestAgentEngineStreaming {
 

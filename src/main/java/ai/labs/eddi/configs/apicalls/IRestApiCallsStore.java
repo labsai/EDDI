@@ -22,7 +22,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/apicallstore/apicalls")
-@Tag(name = "03. API Calls")
+@Tag(name = "Configuration / API Calls")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestApiCallsStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.apicalls";

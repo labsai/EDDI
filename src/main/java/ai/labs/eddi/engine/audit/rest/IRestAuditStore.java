@@ -19,7 +19,7 @@ import java.util.List;
  */
 @Path("/auditstore")
 @Produces(MediaType.APPLICATION_JSON)
-@Tag(name = "07. Audit Trail")
+@Tag(name = "Security / Audit Trail")
 @RolesAllowed("eddi-admin")
 public interface IRestAuditStore {
 

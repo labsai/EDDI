@@ -38,7 +38,7 @@ import java.util.Set;
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@Tag(name = "06. A2A Protocol", description = "Agent-to-Agent protocol endpoints")
+@Tag(name = "Integrations / A2A Protocol", description = "Agent-to-Agent protocol endpoints")
 @jakarta.enterprise.context.ApplicationScoped
 public class RestA2AEndpoint {
 

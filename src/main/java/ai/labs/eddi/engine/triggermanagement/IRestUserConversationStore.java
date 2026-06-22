@@ -12,7 +12,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 @Path("/userconversationstore/userconversations")
-@Tag(name = "01. Conversation Store")
+@Tag(name = "Conversations / Store")
 public interface IRestUserConversationStore {
     String resourceURI = "eddi://ai.labs.userconversation/userconversationstore/userconversations/";
 
