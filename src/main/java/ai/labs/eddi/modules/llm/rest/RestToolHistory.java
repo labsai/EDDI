@@ -18,6 +18,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
@@ -32,6 +33,7 @@ import java.util.Map;
 @Path("/llm/tools")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
+@Tag(name = "05. Tool History")
 public class RestToolHistory {
     private static final Logger LOGGER = Logger.getLogger(RestToolHistory.class);
 

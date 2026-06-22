@@ -23,7 +23,7 @@ import static ai.labs.eddi.datastore.IResourceStore.*;
  * @author ginccc
  */
 @Path("/conversationstore/conversations")
-@Tag(name = "Conversation Store")
+@Tag(name = "01. Conversation Store")
 public interface IRestConversationStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)

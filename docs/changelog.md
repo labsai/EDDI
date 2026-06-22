@@ -4,6 +4,53 @@
 
 ---
 
+## 🏷️ Swagger UI Tag Organization & Branding (2026-06-23)
+
+**Repo:** EDDI (`feat/swagger-ui-tags-branding`)
+**What changed:** Complete overhaul of Swagger UI API documentation presentation — organized all REST endpoints into numbered tag groups and applied EDDI brand theming.
+
+### Tag Taxonomy (38 tags, 9 groups)
+
+All `@Tag` annotations updated to include numbered group prefixes (`01.`–`09.`) for visual clustering in Swagger UI. The `@OpenAPIDefinition` tag array in `OpenApiConfig.java` controls display order.
+
+- **01 — Conversations**: Conversations, Group Conversations, Conversation Store, Attachments
+- **02 — Agent Management**: Agent Setup, Agents, Agent Administration, Agent Groups
+- **03 — Configuration**: Workflows, LLM Configuration, Behavior Rules, Dictionary, Output, API Calls, MCP Calls, Properties, Prompt Snippets, Global Variables
+- **04 — Knowledge & Memory**: RAG Knowledge Bases, RAG Ingestion, User Memory
+- **05 — Tools & Metrics**: Tool History, Template Preview, Standalone NLP
+- **06 — Integrations**: A2A Protocol, Capability Registry, Channel Integrations, Slack Webhook
+- **07 — Security & Compliance**: Authentication, Secrets Vault, Audit Trail, GDPR / Privacy, Tenant Quotas
+- **08 — Administration**: Backup, Schedules, Coordinator Admin, Orphan Admin, Log Admin, Descriptors
+- **09 — UI**: Chat UI
+
+4 previously untagged endpoints received new `@Tag` annotations:
+- `ILogoutEndpoint` → `07. Authentication`
+- `RestSlackWebhook` → `06. Slack Webhook`
+- `RestToolHistory` → `05. Tool History`
+- `RestA2AEndpoint` → `06. A2A Protocol` (class-level; removed redundant method-level tags)
+
+10 tags that existed on REST interfaces but were missing from `OpenApiConfig.java` (causing uncontrolled Swagger UI ordering) are now registered: MCP Calls, Channel Integrations, User Memory, RAG Ingestion, RAG Knowledge Bases, Prompt Snippets, Global Variables, Attachments, Template Preview, A2A Protocol.
+
+### Swagger UI Branding
+
+- **Logo fix**: Renamed `META-INF/branding/eddi-logo.png` → `logo.png` (Quarkus standard filename for auto-detection)
+- **CSS overhaul**: Complete rewrite of `META-INF/branding/style.css`:
+  - Fixed 2 CSS typos (`border-agenttom` → `border-bottom`)
+  - Warm stone-950 (`#0c0a09`) background replacing flat `#000`
+  - Amber accent colors (`#f59e0b`, `#fbbf24`) matching EDDI Manager primary palette
+  - Topbar styled with stone-900 (`#1c1917`) matching Manager sidebar
+  - HTTP verb operation blocks with tinted backgrounds (blue GET, green POST, amber PUT, red DELETE, purple PATCH)
+  - Dark-themed parameter tables, response tables, and model containers
+  - Amber-styled Authorize and Execute buttons
+  - Custom scrollbar, dialog/modal, and input field theming
+  - Hover effects and transitions throughout
+
+**Files changed:** `OpenApiConfig.java`, 51 REST interface files, `META-INF/branding/style.css`, `META-INF/branding/logo.png` (renamed)
+
+**GitHub issue check:** No existing issues found for tag organization or Swagger UI branding — this is a net-new improvement.
+
+---
+
 ## 🔒 OpenSSF Scorecard — SAST on All Commits (2026-06-18)
 
 **Repo:** EDDI (`fix/code-review-bugs`)

@@ -24,7 +24,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/groupstore/groups")
-@Tag(name = "Agent Groups")
+@Tag(name = "02. Agent Groups")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestAgentGroupStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.group";

@@ -19,7 +19,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
  * {@link ai.labs.eddi.engine.setup.AgentSetupService}.
  */
 @Path("/administration/agents")
-@Tag(name = "Agent Setup")
+@Tag(name = "02. Agent Setup")
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
 @RolesAllowed("eddi-admin")

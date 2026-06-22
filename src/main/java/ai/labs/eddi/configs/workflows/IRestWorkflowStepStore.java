@@ -15,7 +15,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/extensionstore/extensions")
-@Tag(name = "Workflows")
+@Tag(name = "03. Workflows")
 public interface IRestWorkflowStepStore {
     @GET
     @Produces(MediaType.APPLICATION_JSON)

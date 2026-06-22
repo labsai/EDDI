@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.api;
 
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
@@ -15,6 +16,7 @@ import jakarta.ws.rs.core.Response;
 
 @Path("/user")
 @Produces(MediaType.TEXT_PLAIN)
+@Tag(name = "07. Authentication")
 public interface ILogoutEndpoint {
     @GET
     @Path("/isAuthenticated")

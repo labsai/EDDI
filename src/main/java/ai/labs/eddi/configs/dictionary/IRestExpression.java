@@ -15,7 +15,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/expressions")
-@Tag(name = "Dictionary")
+@Tag(name = "03. Dictionary")
 public interface IRestExpression {
     @GET
     @Produces(MediaType.APPLICATION_JSON)

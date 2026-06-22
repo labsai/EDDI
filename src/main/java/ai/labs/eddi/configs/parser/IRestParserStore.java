@@ -18,7 +18,7 @@ import jakarta.ws.rs.core.Response;
 import java.util.List;
 
 @Path("/parserstore/parsers")
-@Tag(name = "Standalone NLP")
+@Tag(name = "05. Standalone NLP")
 public interface IRestParserStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.parser/parserstore/parsers/";
 

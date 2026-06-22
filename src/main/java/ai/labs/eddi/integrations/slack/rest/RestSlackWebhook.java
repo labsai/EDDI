@@ -14,6 +14,7 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -43,6 +44,7 @@ import java.util.Set;
 @ApplicationScoped
 @Path("/integrations/slack")
 @Produces(MediaType.APPLICATION_JSON)
+@Tag(name = "06. Slack Webhook")
 public class RestSlackWebhook {
 
     private static final Logger LOGGER = Logger.getLogger(RestSlackWebhook.class);

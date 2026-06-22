@@ -18,7 +18,7 @@ import jakarta.ws.rs.core.MediaType;
  * Standalone semantic parser endpoint for NLP evaluation.
  */
 @Path("/parser")
-@Tag(name = "Standalone NLP")
+@Tag(name = "05. Standalone NLP")
 public interface IRestSemanticParser {
 
     @POST

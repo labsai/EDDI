@@ -23,7 +23,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/dictionarystore/dictionaries")
-@Tag(name = "Dictionary")
+@Tag(name = "03. Dictionary")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestDictionaryStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.dictionary/dictionarystore/dictionaries/";

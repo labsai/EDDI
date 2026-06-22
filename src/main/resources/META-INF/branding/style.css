@@ -1,6 +1,21 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+ * EDDI Swagger UI Theme
+ * Matches the EDDI Manager amber/stone design system.
+ *
+ * Color palette:
+ *   Primary:     #f59e0b  (amber-500)
+ *   Accent:      #fbbf24  (amber-400)
+ *   Muted gold:  #d4a843
+ *   Background:  #0c0a09  (stone-950)
+ *   Surface:     #1c1917  (stone-900)
+ *   Border:      #292524  (stone-800)
+ *   Text:        #e7e5e4  (stone-200)
+ *   Muted text:  #a8a29e  (stone-400)
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Reset ─────────────────────────────────────────────────────────────── */
 html {
     box-sizing: border-box;
-    overflow: -moz-scrollbars-vertical;
     overflow-y: scroll;
 }
 
@@ -12,139 +27,641 @@ html {
 
 body {
     margin: 0;
-    background: #000;
+    background: #0c0a09;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
-.swagger-ui {
-    color: #fff;
-}
-
+/* ── Topbar ────────────────────────────────────────────────────────────── */
 .swagger-ui .topbar {
-    background-color: #000;
+    background-color: #1c1917;
+    border-bottom: 1px solid #292524;
+    padding: 8px 0;
 }
 
-#footer {
-    background-color: #000;
-    font-family: sans-serif;
-    color: #fff;
-    font-size: 70%;
-    text-align: center;
+.swagger-ui .topbar .download-url-wrapper .select-label {
+    color: #a8a29e;
+}
+
+.swagger-ui .topbar .download-url-wrapper .select-label select {
+    border-color: #292524;
 }
 
 #swaggerUiLogoLink {
     max-width: none;
 }
 
+#swaggerUiLogoLink img {
+    max-height: 40px;
+}
+
 #swaggerUiTitleLink {
     display: none;
 }
 
+/* ── Info Section ──────────────────────────────────────────────────────── */
 .swagger-ui .info {
-    background-color: black;
-    padding: 50px;
-    border-agenttom: 5px solid white;
-    color: white;
-}
-
-.swagger-ui .info .description p {
-    color: white;
-}
-
-.swagger-ui .info .description .markdown {
-    color: white;
-}
-
-.swagger-ui .scheme-container {
-    background-color: rgba(1, 1, 1, 0);
-    box-shadow: 0 0 0 0;
+    background-color: #1c1917;
+    padding: 40px 50px;
+    border-bottom: 3px solid #f59e0b;
+    border-radius: 0;
+    margin: 20px 0 30px;
 }
 
 .swagger-ui .info .title {
-    color: white;
-    letter-spacing: .1em;
+    color: #e7e5e4;
+    letter-spacing: 0.05em;
 }
 
-.swagger-ui .url {
-    color: white;
-    letter-spacing: .1em;
+.swagger-ui .info .title small {
+    background-color: #292524;
+    border: 1px solid #44403c;
+}
+
+.swagger-ui .info .title small.version-stamp {
+    background-color: #f59e0b;
+    color: #0c0a09;
+    border: none;
+    font-weight: 600;
+}
+
+.swagger-ui .info .description,
+.swagger-ui .info .description p,
+.swagger-ui .info .description .markdown,
+.swagger-ui .info .description .markdown p {
+    color: #a8a29e;
 }
 
 .swagger-ui .info a {
-    color: white;
+    color: #fbbf24;
+    text-decoration: none;
+    letter-spacing: 0.03em;
+    transition: color 0.2s;
+}
+
+.swagger-ui .info a:hover {
+    color: #f59e0b;
     text-decoration: underline;
-    letter-spacing: .1em;
+}
+
+.swagger-ui .info .base-url {
+    color: #78716c;
+}
+
+/* ── Scheme Container (Authorize bar) ──────────────────────────────────── */
+.swagger-ui .scheme-container {
+    background-color: transparent;
+    box-shadow: none;
+    border-bottom: 1px solid #292524;
+    padding: 15px 0;
 }
 
 .swagger-ui .schemes-title {
-    color: white;
-    letter-spacing: .1em;
+    color: #a8a29e;
+    letter-spacing: 0.05em;
+}
+
+.swagger-ui .btn.authorize {
+    color: #f59e0b;
+    border-color: #f59e0b;
+    background: transparent;
+    transition: all 0.2s;
+}
+
+.swagger-ui .btn.authorize:hover {
+    background: rgba(245, 158, 11, 0.1);
+}
+
+.swagger-ui .btn.authorize svg {
+    fill: #f59e0b;
+}
+
+/* ── Tag Groups (operation categories) ─────────────────────────────────── */
+.swagger-ui .opblock-tag-section {
+    margin-bottom: 4px;
 }
 
 .swagger-ui .opblock-tag {
-    color: white;
+    color: #e7e5e4;
     text-transform: uppercase;
-    letter-spacing: .1em;
-    border-agenttom: 1px solid #D4BE7D;
+    letter-spacing: 0.08em;
+    font-size: 13px;
+    border-bottom: 1px solid #292524;
+    padding: 12px 20px;
+    transition: background-color 0.15s;
+}
+
+.swagger-ui .opblock-tag:hover {
+    background-color: rgba(245, 158, 11, 0.04);
 }
 
 .swagger-ui .opblock-tag small {
-    color: white;
+    color: #78716c;
+    text-transform: none;
+    letter-spacing: normal;
+    font-size: 12px;
 }
 
-.swagger-ui .op-block {
-    border-radius: 0;
+.swagger-ui .opblock-tag a.nostyle {
+    color: #e7e5e4;
+}
+
+.swagger-ui .opblock-tag svg {
+    fill: #78716c;
+}
+
+/* ── Operations ────────────────────────────────────────────────────────── */
+.swagger-ui .opblock {
+    border-radius: 4px;
+    margin: 0 0 4px;
+    border: 1px solid #292524;
+    background: #1c1917;
+}
+
+.swagger-ui .opblock .opblock-summary {
+    border-bottom: 1px solid #292524;
 }
 
 .swagger-ui .opblock .opblock-summary-path {
-    color: white;
+    color: #e7e5e4;
 }
 
 .swagger-ui .opblock .opblock-summary-description {
-    color: white;
+    color: #a8a29e;
 }
 
-.swagger-ui .markdown {
-    color: white;
+.swagger-ui .opblock .opblock-summary-method {
+    border-radius: 3px;
+    font-weight: 700;
+    font-size: 12px;
+    min-width: 70px;
+    text-align: center;
 }
 
-.swagger-ui .markdown p {
-    color: white;
+/* HTTP method colors — muted to match dark theme */
+.swagger-ui .opblock.opblock-get {
+    background: rgba(59, 130, 246, 0.06);
+    border-color: rgba(59, 130, 246, 0.25);
+}
+
+.swagger-ui .opblock.opblock-get .opblock-summary-method {
+    background: #3b82f6;
+}
+
+.swagger-ui .opblock.opblock-get .opblock-summary {
+    border-color: rgba(59, 130, 246, 0.2);
+}
+
+.swagger-ui .opblock.opblock-post {
+    background: rgba(34, 197, 94, 0.06);
+    border-color: rgba(34, 197, 94, 0.25);
+}
+
+.swagger-ui .opblock.opblock-post .opblock-summary-method {
+    background: #22c55e;
+}
+
+.swagger-ui .opblock.opblock-post .opblock-summary {
+    border-color: rgba(34, 197, 94, 0.2);
+}
+
+.swagger-ui .opblock.opblock-put {
+    background: rgba(245, 158, 11, 0.06);
+    border-color: rgba(245, 158, 11, 0.25);
+}
+
+.swagger-ui .opblock.opblock-put .opblock-summary-method {
+    background: #f59e0b;
+}
+
+.swagger-ui .opblock.opblock-put .opblock-summary {
+    border-color: rgba(245, 158, 11, 0.2);
+}
+
+.swagger-ui .opblock.opblock-delete {
+    background: rgba(239, 68, 68, 0.06);
+    border-color: rgba(239, 68, 68, 0.25);
+}
+
+.swagger-ui .opblock.opblock-delete .opblock-summary-method {
+    background: #ef4444;
+}
+
+.swagger-ui .opblock.opblock-delete .opblock-summary {
+    border-color: rgba(239, 68, 68, 0.2);
+}
+
+.swagger-ui .opblock.opblock-patch {
+    background: rgba(168, 85, 247, 0.06);
+    border-color: rgba(168, 85, 247, 0.25);
+}
+
+.swagger-ui .opblock.opblock-patch .opblock-summary-method {
+    background: #a855f7;
+}
+
+.swagger-ui .opblock.opblock-patch .opblock-summary {
+    border-color: rgba(168, 85, 247, 0.2);
+}
+
+/* ── Operation Body (expanded) ─────────────────────────────────────────── */
+.swagger-ui .opblock-body {
+    background: #1c1917;
+}
+
+.swagger-ui .opblock-body pre {
+    background: #0c0a09;
+    color: #e7e5e4;
+    border: 1px solid #292524;
+    border-radius: 4px;
+}
+
+.swagger-ui .opblock-body pre span {
+    color: #e7e5e4 !important;
+}
+
+.swagger-ui .opblock-description-wrapper,
+.swagger-ui .opblock-external-docs-wrapper {
+    color: #a8a29e;
+}
+
+.swagger-ui .opblock-description-wrapper p,
+.swagger-ui .opblock-external-docs-wrapper p {
+    color: #a8a29e;
+}
+
+/* ── Parameters ────────────────────────────────────────────────────────── */
+.swagger-ui .parameters-col_name {
+    color: #e7e5e4;
+}
+
+.swagger-ui .parameter__name {
+    color: #e7e5e4;
+}
+
+.swagger-ui .parameter__name.required::after {
+    color: #ef4444;
+}
+
+.swagger-ui .parameter__type {
+    color: #78716c;
+}
+
+.swagger-ui .parameter__in {
+    color: #78716c;
+}
+
+.swagger-ui table thead tr td,
+.swagger-ui table thead tr th {
+    color: #a8a29e;
+    border-bottom: 1px solid #292524;
 }
 
 .swagger-ui .table-container {
-    color: white;
+    color: #e7e5e4;
 }
 
+/* ── Responses ─────────────────────────────────────────────────────────── */
 .swagger-ui .response-col_status {
-    color: white;
+    color: #e7e5e4;
+}
+
+.swagger-ui .response-col_description {
+    color: #a8a29e;
 }
 
 .swagger-ui .responses-header td {
-    color: white;
+    color: #a8a29e;
 }
 
-.swagger-ui .table-container th {
-    color: white;
+.swagger-ui .response-col_links {
+    color: #a8a29e;
 }
 
-.swagger-ui .table-container .parameter__name {
-    color: white;
+.swagger-ui .responses-inner {
+    background: transparent;
 }
 
+.swagger-ui .responses-table {
+    border-top: 1px solid #292524;
+}
+
+/* ── Models / Schemas ──────────────────────────────────────────────────── */
 .swagger-ui section.models {
-    border: 1px solid #D4BE7D;
-    border-radius: 0;
+    border: 1px solid #292524;
+    border-radius: 4px;
+    background: #1c1917;
 }
 
 .swagger-ui section.models h4 {
-    color: white;
+    color: #e7e5e4;
+    border-bottom: 1px solid #292524;
+}
+
+.swagger-ui section.models h4 svg {
+    fill: #78716c;
 }
 
 .swagger-ui section.models .model-container {
-    background-color: white;
-    border-radius: 0;
+    background-color: #0c0a09;
+    border-radius: 4px;
+    margin: 4px 0;
+    border: 1px solid #292524;
 }
 
 .swagger-ui section.models .model-container:hover {
-    background-color: whitesmoke;
+    background-color: #1c1917;
+}
+
+.swagger-ui .model {
+    color: #a8a29e;
+}
+
+.swagger-ui .model-title {
+    color: #e7e5e4;
+}
+
+.swagger-ui .model .property {
+    color: #e7e5e4;
+}
+
+.swagger-ui .model .property.primitive {
+    color: #78716c;
+}
+
+/* ── Input fields & Select boxes ───────────────────────────────────────── */
+.swagger-ui input[type=text],
+.swagger-ui input[type=password],
+.swagger-ui input[type=search],
+.swagger-ui input[type=email],
+.swagger-ui input[type=file],
+.swagger-ui textarea,
+.swagger-ui select {
+    background: #0c0a09;
+    color: #e7e5e4;
+    border: 1px solid #292524;
+    border-radius: 3px;
+}
+
+.swagger-ui input[type=text]:focus,
+.swagger-ui textarea:focus,
+.swagger-ui select:focus {
+    border-color: #f59e0b;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.15);
+}
+
+.swagger-ui textarea {
+    background: #0c0a09;
+    color: #e7e5e4;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────────── */
+.swagger-ui .btn {
+    border-radius: 3px;
+    transition: all 0.2s;
+}
+
+.swagger-ui .btn.execute {
+    background-color: #f59e0b;
+    color: #0c0a09;
+    border-color: #f59e0b;
+    font-weight: 600;
+}
+
+.swagger-ui .btn.execute:hover {
+    background-color: #d97706;
+    border-color: #d97706;
+}
+
+.swagger-ui .btn.cancel {
+    border-color: #ef4444;
+    color: #ef4444;
+}
+
+.swagger-ui .btn-group .btn {
+    border-color: #292524;
+    color: #a8a29e;
+}
+
+/* ── Try-It-Out ────────────────────────────────────────────────────────── */
+.swagger-ui .try-out__btn {
+    border-color: #f59e0b;
+    color: #f59e0b;
+}
+
+.swagger-ui .try-out__btn:hover {
+    background-color: rgba(245, 158, 11, 0.1);
+}
+
+/* ── Markdown / Content ────────────────────────────────────────────────── */
+.swagger-ui .markdown,
+.swagger-ui .markdown p,
+.swagger-ui .renderedMarkdown,
+.swagger-ui .renderedMarkdown p {
+    color: #a8a29e;
+}
+
+.swagger-ui .markdown code,
+.swagger-ui .renderedMarkdown code {
+    background: #292524;
+    color: #fbbf24;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+/* ── URL ───────────────────────────────────────────────────────────────── */
+.swagger-ui .url {
+    color: #78716c;
+    letter-spacing: 0.03em;
+}
+
+/* ── Copy-to-clipboard ─────────────────────────────────────────────────── */
+.swagger-ui .copy-to-clipboard {
+    background: #292524;
+    border: 1px solid #44403c;
+    border-radius: 3px;
+}
+
+/* ── JSON Schema / Model ───────────────────────────────────────────────── */
+.swagger-ui .model-box {
+    background: #0c0a09;
+    border-radius: 4px;
+}
+
+.swagger-ui .prop-type {
+    color: #3b82f6;
+}
+
+.swagger-ui .prop-format {
+    color: #78716c;
+}
+
+/* ── Tabs ──────────────────────────────────────────────────────────────── */
+.swagger-ui .tab li {
+    color: #a8a29e;
+}
+
+.swagger-ui .tab li.active {
+    color: #e7e5e4;
+}
+
+.swagger-ui .tab li:first-child::after {
+    background: #292524;
+}
+
+/* ── Loading ───────────────────────────────────────────────────────────── */
+.swagger-ui .loading-container .loading::after {
+    color: #a8a29e;
+}
+
+/* ── Dialog / Modal ────────────────────────────────────────────────────── */
+.swagger-ui .dialog-ux .modal-ux {
+    background: #1c1917;
+    border: 1px solid #292524;
+    color: #e7e5e4;
+}
+
+.swagger-ui .dialog-ux .modal-ux-header {
+    border-bottom: 1px solid #292524;
+}
+
+.swagger-ui .dialog-ux .modal-ux-header h3 {
+    color: #e7e5e4;
+}
+
+.swagger-ui .dialog-ux .modal-ux-content {
+    color: #a8a29e;
+}
+
+.swagger-ui .dialog-ux .modal-ux-content p {
+    color: #a8a29e;
+}
+
+.swagger-ui .dialog-ux .backdrop-ux {
+    background: rgba(12, 10, 9, 0.8);
+}
+
+/* ── Auth modal ────────────────────────────────────────────────────────── */
+.swagger-ui .auth-wrapper {
+    color: #e7e5e4;
+}
+
+.swagger-ui .auth-wrapper .auth-btn-wrapper .btn-done {
+    color: #f59e0b;
+    border-color: #f59e0b;
+}
+
+.swagger-ui .auth-wrapper input {
+    color: #e7e5e4;
+}
+
+/* ── Errors ────────────────────────────────────────────────────────────── */
+.swagger-ui .errors-wrapper {
+    background-color: rgba(239, 68, 68, 0.1);
+    border: 1px solid #ef4444;
+    border-radius: 4px;
+}
+
+.swagger-ui .errors-wrapper h4 {
+    color: #ef4444;
+}
+
+/* ── Footer ────────────────────────────────────────────────────────────── */
+#footer {
+    background-color: #0c0a09;
+    border-top: 1px solid #292524;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #78716c;
+    font-size: 12px;
+    text-align: center;
+    padding: 16px 0;
+}
+
+/* ── Scrollbar (Webkit) ────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #0c0a09;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #44403c;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #57534e;
+}
+
+/* ── Misc text overrides ───────────────────────────────────────────────── */
+.swagger-ui,
+.swagger-ui .info .title,
+.swagger-ui .opblock-tag,
+.swagger-ui label {
+    color: #e7e5e4;
+}
+
+.swagger-ui .opblock .opblock-section-header {
+    background: rgba(41, 37, 36, 0.5);
+    border-bottom: 1px solid #292524;
+}
+
+.swagger-ui .opblock .opblock-section-header h4 {
+    color: #e7e5e4;
+}
+
+.swagger-ui .opblock .opblock-section-header label {
+    color: #a8a29e;
+}
+
+.swagger-ui .response-control-media-type__accept-message {
+    color: #22c55e;
+}
+
+/* ── Highlighted code / syntax ─────────────────────────────────────────── */
+.swagger-ui .highlight-code {
+    background: #0c0a09;
+    border-radius: 4px;
+}
+
+.swagger-ui .microlight {
+    background: #0c0a09 !important;
+    color: #e7e5e4 !important;
+    border-radius: 4px;
+}
+
+/* ── Content-type selector ─────────────────────────────────────────────── */
+.swagger-ui .content-type {
+    background: #0c0a09;
+    color: #e7e5e4;
+    border: 1px solid #292524;
+}
+
+/* ── Expand arrows & toggle ────────────────────────────────────────────── */
+.swagger-ui .expand-methods svg,
+.swagger-ui .expand-operation svg {
+    fill: #78716c;
+    transition: fill 0.15s;
+}
+
+.swagger-ui .expand-methods:hover svg,
+.swagger-ui .expand-operation:hover svg {
+    fill: #f59e0b;
+}
+
+/* ── Links in content ──────────────────────────────────────────────────── */
+.swagger-ui a {
+    color: #fbbf24;
+}
+
+.swagger-ui a:hover {
+    color: #f59e0b;
+}
+
+/* ── Wrapper max-width ─────────────────────────────────────────────────── */
+.swagger-ui .wrapper {
+    max-width: 1460px;
 }

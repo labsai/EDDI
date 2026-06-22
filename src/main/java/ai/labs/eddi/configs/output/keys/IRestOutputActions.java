@@ -14,7 +14,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/outputstore/actions")
-@Tag(name = "Output")
+@Tag(name = "03. Output")
 public interface IRestOutputActions {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
