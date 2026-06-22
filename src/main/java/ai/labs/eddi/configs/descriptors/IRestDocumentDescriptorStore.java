@@ -63,7 +63,7 @@ public interface IRestDocumentDescriptorStore {
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
     @Operation(description = "Partial update descriptor.")
-    @APIResponse(responseCode = "200", description = "Descriptor updated")
+    @APIResponse(responseCode = "204", description = "Descriptor updated")
     @APIResponse(responseCode = "404", description = "Descriptor not found")
     @APIResponse(responseCode = "500", description = "Internal server error")
     void patchDescriptor(@PathParam("id") String id,

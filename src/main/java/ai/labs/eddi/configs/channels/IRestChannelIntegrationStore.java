@@ -81,6 +81,7 @@ public interface IRestChannelIntegrationStore extends IRestVersionInfo {
     @Path("/{id}")
     @Operation(description = "Duplicate this channel integration configuration.")
     @APIResponse(responseCode = "201", description = "Channel integration configuration duplicated")
+    @APIResponse(responseCode = "400", description = "Invalid channel integration configuration")
     @APIResponse(responseCode = "404", description = "Channel integration configuration not found")
     Response duplicateChannel(@PathParam("id") String id,
                               @QueryParam("version") Integer version);

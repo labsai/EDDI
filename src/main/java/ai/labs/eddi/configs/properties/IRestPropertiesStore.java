@@ -23,7 +23,7 @@ public interface IRestPropertiesStore {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Read properties.")
     @APIResponse(responseCode = "200", description = "Properties")
-    @APIResponse(responseCode = "404", description = "Properties not found")
+    @APIResponse(responseCode = "204", description = "No properties found")
     Properties readProperties(@PathParam("userId") String userId);
 
     @POST
@@ -31,13 +31,13 @@ public interface IRestPropertiesStore {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Merge properties.")
     @APIResponse(responseCode = "200", description = "Properties merged")
-    @APIResponse(responseCode = "400", description = "Invalid properties")
+    @APIResponse(responseCode = "400", description = "Invalid request body")
+    @APIResponse(responseCode = "500", description = "Internal server error")
     Response mergeProperties(@PathParam("userId") String userId, Properties properties);
 
     @DELETE
     @Path("/{userId}")
     @Operation(description = "Delete properties.")
     @APIResponse(responseCode = "200", description = "Properties deleted")
-    @APIResponse(responseCode = "404", description = "Properties not found")
     Response deleteProperties(@PathParam("userId") String userId);
 }
