@@ -705,6 +705,12 @@ class PostgresTenantQuotaStoreTest {
             // CREATE TABLE x2 + bootstrap INSERT + getQuota SELECT
             verify(statement, times(2)).execute(anyString());
             verify(preparedStatement, atLeastOnce()).executeUpdate();
+
+            // Assert the bootstrap used ON CONFLICT DO NOTHING (not DO UPDATE)
+            org.mockito.ArgumentCaptor<String> sqlCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(connection, atLeastOnce()).prepareStatement(sqlCaptor.capture());
+            assertTrue(sqlCaptor.getAllValues().stream()
+                    .anyMatch(sql -> sql.contains("ON CONFLICT (tenant_id) DO NOTHING")));
         }
     }
 }

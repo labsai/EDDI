@@ -14,6 +14,7 @@ import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.IndexOptions;
 import org.bson.Document;
 import org.bson.conversions.Bson;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -545,9 +546,11 @@ class MongoTenantQuotaStoreTest {
             new MongoTenantQuotaStore(
                     database, "default", false, -1, -1, -1, -1.0);
 
-            // Verify findOneAndUpdate was called for bootstrap (beyond index creation)
+            // Verify findOneAndUpdate was called with upsert(true) for atomic bootstrap
+            ArgumentCaptor<FindOneAndUpdateOptions> optionsCaptor = ArgumentCaptor.forClass(FindOneAndUpdateOptions.class);
             verify(quotasCollection, atLeastOnce()).findOneAndUpdate(
-                    any(Bson.class), any(Bson.class), any(FindOneAndUpdateOptions.class));
+                    any(Bson.class), any(Bson.class), optionsCaptor.capture());
+            assertTrue(optionsCaptor.getValue().isUpsert());
         }
     }
 }
