@@ -680,4 +680,55 @@ class PostgresTenantQuotaStoreTest {
             assertDoesNotThrow(() -> sut.resetUsage(TENANT_ID));
         }
     }
+
+    // ─── Bootstrap ──────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Bootstrap (CDI constructor)")
+    class Bootstrap {
+
+        @Test
+        @DisplayName("should create default quota when none exists")
+        void bootstrapsWhenEmpty() throws Exception {
+            // First call returns no existing quota (rs.next() = false)
+            when(resultSet.next()).thenReturn(false);
+            when(preparedStatement.executeUpdate()).thenReturn(1);
+
+            // Use the CDI constructor
+            @SuppressWarnings("unchecked")
+            var bootstrapStore = new PostgresTenantQuotaStore(
+                    dataSourceInstance, "default", false, -1, -1, -1, -1.0);
+
+            // Trigger ensureSchema + bootstrap
+            bootstrapStore.getQuota("any");
+
+            // Should have executed: CREATE TABLE x2, SELECT (bootstrap check), INSERT
+            // (setQuota), SELECT (getQuota)
+            verify(statement, times(2)).execute(anyString());
+            verify(preparedStatement, atLeastOnce()).executeUpdate(); // setQuota INSERT
+        }
+
+        @Test
+        @DisplayName("should not overwrite existing quota")
+        void doesNotOverwriteExisting() throws Exception {
+            // getQuotaInternal returns a row (existing quota)
+            when(resultSet.next()).thenReturn(true, false); // first true for bootstrap check, then false
+            when(resultSet.getString("tenant_id")).thenReturn("default");
+            when(resultSet.getInt("max_conversations_per_day")).thenReturn(5000);
+            when(resultSet.getInt("max_agents_per_tenant")).thenReturn(100);
+            when(resultSet.getInt("max_api_calls_per_minute")).thenReturn(500);
+            when(resultSet.getDouble("max_monthly_cost_usd")).thenReturn(2500.0);
+            when(resultSet.getBoolean("enabled")).thenReturn(true);
+
+            @SuppressWarnings("unchecked")
+            var bootstrapStore = new PostgresTenantQuotaStore(
+                    dataSourceInstance, "default", false, -1, -1, -1, -1.0);
+
+            // Trigger ensureSchema
+            bootstrapStore.getQuota("default");
+
+            // setQuota (executeUpdate) should NOT have been called
+            verify(preparedStatement, never()).executeUpdate();
+        }
+    }
 }

@@ -18,6 +18,7 @@ import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
@@ -52,11 +53,39 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
     private final MongoCollection<Document> usage;
 
     @Inject
-    public MongoTenantQuotaStore(MongoDatabase database) {
+    public MongoTenantQuotaStore(MongoDatabase database,
+            @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
+            @ConfigProperty(name = "eddi.tenant.quota.enabled", defaultValue = "false") boolean enabled,
+            @ConfigProperty(name = "eddi.tenant.quota.max-conversations-per-day", defaultValue = "-1") int maxConvPerDay,
+            @ConfigProperty(name = "eddi.tenant.quota.max-agents-per-tenant", defaultValue = "-1") int maxAgents,
+            @ConfigProperty(name = "eddi.tenant.quota.max-api-calls-per-minute", defaultValue = "-1") int maxApiCalls,
+            @ConfigProperty(name = "eddi.tenant.quota.max-monthly-cost-usd", defaultValue = "-1") double maxCost) {
+
         this.quotas = database.getCollection(QUOTAS_COLLECTION);
         this.usage = database.getCollection(USAGE_COLLECTION);
 
         // Ensure unique index on tenantId to prevent duplicate rows from upsert races
+        var indexOptions = new com.mongodb.client.model.IndexOptions().unique(true);
+        quotas.createIndex(new Document("tenantId", 1), indexOptions);
+        usage.createIndex(new Document("tenantId", 1), indexOptions);
+
+        // Bootstrap default tenant quota if none exists (parity with
+        // InMemoryTenantQuotaStore)
+        if (getQuota(defaultTenantId) == null) {
+            var defaultQuota = new TenantQuota(defaultTenantId, maxConvPerDay, maxAgents, maxApiCalls, maxCost, enabled);
+            setQuota(defaultQuota);
+            LOGGER.infof("Bootstrapped default tenant quota: tenantId=%s, enabled=%s, maxConv=%d, maxAgents=%d, maxApi=%d, maxCost=%.2f",
+                    defaultTenantId, enabled, maxConvPerDay, maxAgents, maxApiCalls, maxCost);
+        }
+    }
+
+    /**
+     * Test-only constructor — no CDI injection, no bootstrap.
+     */
+    MongoTenantQuotaStore(MongoDatabase database) {
+        this.quotas = database.getCollection(QUOTAS_COLLECTION);
+        this.usage = database.getCollection(USAGE_COLLECTION);
+
         var indexOptions = new com.mongodb.client.model.IndexOptions().unique(true);
         quotas.createIndex(new Document("tenantId", 1), indexOptions);
         usage.createIndex(new Document("tenantId", 1), indexOptions);

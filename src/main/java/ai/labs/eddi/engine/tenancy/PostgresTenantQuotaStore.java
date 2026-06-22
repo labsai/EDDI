@@ -12,6 +12,7 @@ import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import javax.sql.DataSource;
@@ -72,9 +73,31 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
 
+    // Bootstrap config — stored as fields for lazy initialization in ensureSchema()
+    private final String defaultTenantId;
+    private final TenantQuota defaultQuota;
+
     @Inject
-    public PostgresTenantQuotaStore(Instance<DataSource> dataSourceInstance) {
+    public PostgresTenantQuotaStore(Instance<DataSource> dataSourceInstance,
+            @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
+            @ConfigProperty(name = "eddi.tenant.quota.enabled", defaultValue = "false") boolean enabled,
+            @ConfigProperty(name = "eddi.tenant.quota.max-conversations-per-day", defaultValue = "-1") int maxConvPerDay,
+            @ConfigProperty(name = "eddi.tenant.quota.max-agents-per-tenant", defaultValue = "-1") int maxAgents,
+            @ConfigProperty(name = "eddi.tenant.quota.max-api-calls-per-minute", defaultValue = "-1") int maxApiCalls,
+            @ConfigProperty(name = "eddi.tenant.quota.max-monthly-cost-usd", defaultValue = "-1") double maxCost) {
+
         this.dataSourceInstance = dataSourceInstance;
+        this.defaultTenantId = defaultTenantId;
+        this.defaultQuota = new TenantQuota(defaultTenantId, maxConvPerDay, maxAgents, maxApiCalls, maxCost, enabled);
+    }
+
+    /**
+     * Test-only constructor — no CDI injection, no bootstrap.
+     */
+    PostgresTenantQuotaStore(Instance<DataSource> dataSourceInstance) {
+        this.dataSourceInstance = dataSourceInstance;
+        this.defaultTenantId = null;
+        this.defaultQuota = null;
     }
 
     private synchronized void ensureSchema() {
@@ -86,6 +109,15 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             stmt.execute(CREATE_USAGE_TABLE);
             schemaInitialized = true;
             LOGGER.info("PostgresTenantQuotaStore initialized (tables=tenant_quotas, tenant_usage)");
+
+            // Bootstrap default tenant quota if none exists (parity with
+            // InMemoryTenantQuotaStore)
+            if (defaultTenantId != null && defaultQuota != null && getQuotaInternal(conn, defaultTenantId) == null) {
+                setQuota(defaultQuota);
+                LOGGER.infof("Bootstrapped default tenant quota: tenantId=%s, enabled=%s, maxConv=%d, maxAgents=%d, maxApi=%d, maxCost=%.2f",
+                        defaultTenantId, defaultQuota.enabled(), defaultQuota.maxConversationsPerDay(),
+                        defaultQuota.maxAgentsPerTenant(), defaultQuota.maxApiCallsPerMinute(), defaultQuota.maxMonthlyCostUsd());
+            }
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize tenant quota tables", e);
         }
@@ -93,18 +125,27 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
 
     // ─── Quota Configuration ───
 
-    @Override
-    public TenantQuota getQuota(String tenantId) {
-        ensureSchema();
-        try (Connection conn = dataSourceInstance.get().getConnection();
-                PreparedStatement ps = conn.prepareStatement(
-                        "SELECT * FROM tenant_quotas WHERE tenant_id = ?")) {
+    /**
+     * Internal quota lookup reusing an existing connection (used during bootstrap).
+     */
+    private TenantQuota getQuotaInternal(Connection conn, String tenantId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT * FROM tenant_quotas WHERE tenant_id = ?")) {
             ps.setString(1, tenantId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     return toQuota(rs);
                 }
             }
+        }
+        return null;
+    }
+
+    @Override
+    public TenantQuota getQuota(String tenantId) {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            return getQuotaInternal(conn, tenantId);
         } catch (SQLException e) {
             LOGGER.warnf("Failed to read quota for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
         }

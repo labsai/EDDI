@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.IndexOptions;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -525,6 +526,55 @@ class MongoTenantQuotaStoreTest {
             sut.resetUsage(TENANT_ID);
 
             verify(usageCollection).deleteOne(any(Bson.class));
+        }
+    }
+
+    // ─── Bootstrap ──────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Bootstrap (CDI constructor)")
+    class Bootstrap {
+
+        @Test
+        @DisplayName("should create default quota when none exists")
+        void bootstrapsWhenEmpty() {
+            // getQuota returns null → no existing quota
+            when(quotasCollection.find(any(Bson.class))).thenReturn(findIterable);
+            when(findIterable.first()).thenReturn(null);
+
+            // setQuota uses findOneAndUpdate
+            lenient().when(quotasCollection.findOneAndUpdate(
+                    any(Bson.class), any(Bson.class), any(FindOneAndUpdateOptions.class))).thenReturn(null);
+
+            var bootstrapStore = new MongoTenantQuotaStore(
+                    database, "default", false, -1, -1, -1, -1.0);
+
+            // Verify setQuota was called (findOneAndUpdate for upsert)
+            verify(quotasCollection, atLeastOnce()).findOneAndUpdate(
+                    any(Bson.class), any(Bson.class), any(FindOneAndUpdateOptions.class));
+        }
+
+        @Test
+        @DisplayName("should not overwrite existing quota")
+        void doesNotOverwriteExisting() {
+            // getQuota returns an existing doc
+            Document existingDoc = new Document()
+                    .append("tenantId", "default")
+                    .append("maxConversationsPerDay", 5000)
+                    .append("maxAgentsPerTenant", 100)
+                    .append("maxApiCallsPerMinute", 500)
+                    .append("maxMonthlyCostUsd", 2500.0)
+                    .append("enabled", true);
+            when(quotasCollection.find(any(Bson.class))).thenReturn(findIterable);
+            when(findIterable.first()).thenReturn(existingDoc);
+
+            var bootstrapStore = new MongoTenantQuotaStore(
+                    database, "default", false, -1, -1, -1, -1.0);
+
+            // setQuota (findOneAndUpdate with upsert) should NOT have been called
+            // beyond the index creation calls
+            verify(quotasCollection, never()).findOneAndUpdate(
+                    any(Bson.class), any(Bson.class), any(FindOneAndUpdateOptions.class));
         }
     }
 }
