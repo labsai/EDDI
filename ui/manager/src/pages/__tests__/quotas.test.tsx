@@ -213,6 +213,7 @@ describe("QuotasPage", () => {
   it("renders with default values when backend returns 404 for quota", async () => {
     server.use(
       http.get("*/administration/quotas/:tenantId/usage", ({ params }) => {
+        // Let /quotas/count fall through to the global handler — :tenantId also matches "count"
         if (params.tenantId === "count") return;
         return HttpResponse.json({
           tenantId: "default",
@@ -263,6 +264,7 @@ describe("QuotasPage", () => {
   it("shows enforcement disabled banner when quota is disabled", async () => {
     server.use(
       http.get("*/administration/quotas/:tenantId", ({ params }) => {
+        // Let /quotas/count fall through to the global handler — :tenantId also matches "count"
         if (params.tenantId === "count") return;
         return HttpResponse.json({
           tenantId: "default",

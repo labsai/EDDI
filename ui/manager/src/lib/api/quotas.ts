@@ -36,13 +36,14 @@ export function defaultQuota(tenantId: string): TenantQuota {
 
 /** Zeroed usage snapshot for tenants with no usage data yet. */
 export function emptyUsage(tenantId: string): TenantUsage {
+  const now = new Date().toISOString();
   return {
     tenantId,
     conversationsToday: 0,
     apiCallsThisMinute: 0,
     monthlyCostUsd: 0,
-    minuteWindowStart: new Date().toISOString(),
-    dayStart: new Date().toISOString(),
+    minuteWindowStart: now,
+    dayStart: now,
   };
 }
 
