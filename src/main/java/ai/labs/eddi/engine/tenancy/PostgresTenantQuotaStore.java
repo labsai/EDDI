@@ -113,7 +113,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             // Bootstrap default tenant quota if none exists (parity with
             // InMemoryTenantQuotaStore)
             if (defaultTenantId != null && defaultQuota != null && getQuotaInternal(conn, defaultTenantId) == null) {
-                setQuota(defaultQuota);
+                setQuotaInternal(conn, defaultQuota);
                 LOGGER.infof("Bootstrapped default tenant quota: tenantId=%s, enabled=%s, maxConv=%d, maxAgents=%d, maxApi=%d, maxCost=%.2f",
                         defaultTenantId, defaultQuota.enabled(), defaultQuota.maxConversationsPerDay(),
                         defaultQuota.maxAgentsPerTenant(), defaultQuota.maxApiCallsPerMinute(), defaultQuota.maxMonthlyCostUsd());
@@ -141,6 +141,32 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
         return null;
     }
 
+    /**
+     * Internal quota upsert reusing an existing connection (used during bootstrap).
+     */
+    private void setQuotaInternal(Connection conn, TenantQuota quota) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                """
+                        INSERT INTO tenant_quotas (tenant_id, max_conversations_per_day, max_agents_per_tenant,
+                                                   max_api_calls_per_minute, max_monthly_cost_usd, enabled)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (tenant_id) DO UPDATE SET
+                            max_conversations_per_day = EXCLUDED.max_conversations_per_day,
+                            max_agents_per_tenant = EXCLUDED.max_agents_per_tenant,
+                            max_api_calls_per_minute = EXCLUDED.max_api_calls_per_minute,
+                            max_monthly_cost_usd = EXCLUDED.max_monthly_cost_usd,
+                            enabled = EXCLUDED.enabled
+                        """)) {
+            ps.setString(1, quota.tenantId());
+            ps.setInt(2, quota.maxConversationsPerDay());
+            ps.setInt(3, quota.maxAgentsPerTenant());
+            ps.setInt(4, quota.maxApiCallsPerMinute());
+            ps.setDouble(5, quota.maxMonthlyCostUsd());
+            ps.setBoolean(6, quota.enabled());
+            ps.executeUpdate();
+        }
+    }
+
     @Override
     public TenantQuota getQuota(String tenantId) {
         ensureSchema();
@@ -155,26 +181,8 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
     @Override
     public void setQuota(TenantQuota quota) {
         ensureSchema();
-        try (Connection conn = dataSourceInstance.get().getConnection();
-                PreparedStatement ps = conn.prepareStatement(
-                        """
-                                INSERT INTO tenant_quotas (tenant_id, max_conversations_per_day, max_agents_per_tenant,
-                                                           max_api_calls_per_minute, max_monthly_cost_usd, enabled)
-                                VALUES (?, ?, ?, ?, ?, ?)
-                                ON CONFLICT (tenant_id) DO UPDATE SET
-                                    max_conversations_per_day = EXCLUDED.max_conversations_per_day,
-                                    max_agents_per_tenant = EXCLUDED.max_agents_per_tenant,
-                                    max_api_calls_per_minute = EXCLUDED.max_api_calls_per_minute,
-                                    max_monthly_cost_usd = EXCLUDED.max_monthly_cost_usd,
-                                    enabled = EXCLUDED.enabled
-                                """)) {
-            ps.setString(1, quota.tenantId());
-            ps.setInt(2, quota.maxConversationsPerDay());
-            ps.setInt(3, quota.maxAgentsPerTenant());
-            ps.setInt(4, quota.maxApiCallsPerMinute());
-            ps.setDouble(5, quota.maxMonthlyCostUsd());
-            ps.setBoolean(6, quota.enabled());
-            ps.executeUpdate();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            setQuotaInternal(conn, quota);
         } catch (SQLException e) {
             LOGGER.errorf("Failed to set quota for tenant '%s': %s", sanitize(quota.tenantId()), sanitize(e.getMessage()));
         }
