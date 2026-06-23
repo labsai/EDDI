@@ -15,7 +15,7 @@ The original CSP fix (June 3) used two `quarkus.http.filter` entries with order-
 The CI smoke test only checked `/q/health/ready` for header *presence*, never the Swagger UI path, and never checked for duplicate headers — so the bug was never caught.
 
 ### Fix
-Changed the default CSP filter regex from `/.*` to `/(?!q/swagger-ui).*` — a negative lookahead that excludes the Swagger UI path. This ensures only **one** CSP header is sent per path: the strict one for the application and the relaxed one for Swagger UI.
+Changed the default CSP filter regex from `/.*` to `/(?!q/swagger-ui(/|$)).*` — a negative lookahead that excludes exactly `/q/swagger-ui` and `/q/swagger-ui/...`. This ensures only **one** CSP header is sent per path: the strict one for the application and the relaxed one for Swagger UI.
 
 **Files:** `application.properties`, `docs/changelog.md`
 
