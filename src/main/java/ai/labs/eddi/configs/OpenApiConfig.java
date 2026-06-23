@@ -19,7 +19,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
  *
  * @since 6.0.0
  */
-@OpenAPIDefinition(info = @Info(title = "EDDI API", version = "6.0.0"), tags = {
+@OpenAPIDefinition(info = @Info(title = "EDDI API", version = "6.1.1"), tags = {
         // ── Agents ───────────────────────────────────────────────────────
         @Tag(name = "Agents", description = "Agent configuration CRUD"),
         @Tag(name = "Agents / Administration", description = "Deploy, undeploy, trigger, and monitor agents"),
