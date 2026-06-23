@@ -4,6 +4,13 @@
 
 ---
 
+## Refactor: Standardize backup logger fields (2026-06-23)
+
+**Repo:** EDDI (`refactor/539-logger-name`)
+**What changed:** Renamed the private logger field from `log` to `LOGGER` in the seven backup implementation classes listed in #539. The change follows the existing project convention and does not alter runtime behavior.
+
+**Files:** `RemoteApiResourceSource.java`, `RestExportService.java`, `RestImportService.java`, `SourceUrlValidator.java`, `StructuralMatcher.java`, `UpgradeExecutor.java`, `ZipResourceSource.java`, `docs/changelog.md`
+
 ## 🐛 Fix: Swagger UI CSP Regression — Duplicate Header Causes Inline Script Block (2026-06-23)
 
 **Repo:** EDDI (`fix/swagger-csp-duplicate-header`)

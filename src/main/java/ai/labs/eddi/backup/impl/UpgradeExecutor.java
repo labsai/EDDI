@@ -73,7 +73,7 @@ import static ai.labs.eddi.configs.descriptors.ResourceUtilities.createDocumentD
 @ApplicationScoped
 public class UpgradeExecutor {
 
-    private static final Logger log = Logger.getLogger(UpgradeExecutor.class);
+    private static final Logger LOGGER = Logger.getLogger(UpgradeExecutor.class);
 
     private final IRestAgentStore agentStore;
     private final IRestWorkflowStore workflowStore;
@@ -173,7 +173,7 @@ public class UpgradeExecutor {
                     newWorkflowUris, workflowOrder);
 
         } catch (Exception e) {
-            log.errorf("Upgrade failed for target agent %s: %s", targetAgentId, e.getMessage());
+            LOGGER.errorf("Upgrade failed for target agent %s: %s", targetAgentId, e.getMessage());
             throw new RuntimeException("Upgrade failed: " + e.getMessage(), e);
         }
     }
@@ -185,15 +185,15 @@ public class UpgradeExecutor {
             if (diff.action() == DiffAction.UPDATE && diff.targetId() != null) {
                 // Update existing snippet
                 snippetStore.updateSnippet(diff.targetId(), diff.targetVersion(), sourceSnippet.snippet());
-                log.infof("Updated snippet '%s' (target=%s, v%d→v%d)",
+                LOGGER.infof("Updated snippet '%s' (target=%s, v%d→v%d)",
                         sourceSnippet.name(), diff.targetId(), diff.targetVersion(), diff.targetVersion() + 1);
             } else if (diff.action() == DiffAction.CREATE) {
                 // Create new snippet
                 snippetStore.createSnippet(sourceSnippet.snippet());
-                log.infof("Created snippet '%s'", sourceSnippet.name());
+                LOGGER.infof("Created snippet '%s'", sourceSnippet.name());
             }
         } catch (Exception e) {
-            log.warnf("Failed to process snippet '%s': %s", sourceSnippet.name(), e.getMessage());
+            LOGGER.warnf("Failed to process snippet '%s': %s", sourceSnippet.name(), e.getMessage());
         }
     }
 
@@ -227,7 +227,7 @@ public class UpgradeExecutor {
                     URI updatedUri = updateExtension(sourceExt, extDiff.targetId(), extDiff.targetVersion());
                     if (updatedUri != null) {
                         updates.put(stepType, updatedUri);
-                        log.infof("Updated %s '%s' (target=%s, v%d→v%d)",
+                        LOGGER.infof("Updated %s '%s' (target=%s, v%d→v%d)",
                                 sourceExt.type(), sourceExt.name(),
                                 extDiff.targetId(), extDiff.targetVersion(), extDiff.targetVersion() + 1);
                     }
@@ -235,11 +235,11 @@ public class UpgradeExecutor {
                     URI newUri = createExtension(sourceExt);
                     if (newUri != null) {
                         updates.put(stepType, newUri);
-                        log.infof("Created %s '%s'", sourceExt.type(), sourceExt.name());
+                        LOGGER.infof("Created %s '%s'", sourceExt.type(), sourceExt.name());
                     }
                 }
             } catch (Exception e) {
-                log.warnf("Failed to process extension %s '%s': %s",
+                LOGGER.warnf("Failed to process extension %s '%s': %s",
                         sourceExt.type(), sourceExt.name(), e.getMessage());
             }
         }
@@ -333,7 +333,7 @@ public class UpgradeExecutor {
         try {
             ExtensionStoreOps<?> ops = resolveExtensionOps(source.type());
             if (ops == null) {
-                log.warnf("Unknown extension type: %s", source.type());
+                LOGGER.warnf("Unknown extension type: %s", source.type());
                 return null;
             }
             Response resp = dispatchUpdate(ops, source.contentJson(), targetId, targetVersion);
@@ -341,7 +341,7 @@ public class UpgradeExecutor {
                     ? URI.create(ops.resourceUri() + targetId + ops.versionQueryParam() + (targetVersion + 1))
                     : null;
         } catch (Exception e) {
-            log.warnf("Failed to update %s '%s' (target=%s): %s",
+            LOGGER.warnf("Failed to update %s '%s' (target=%s): %s",
                     source.type(), source.name(), targetId, e.getMessage());
             return null;
         }
@@ -355,12 +355,12 @@ public class UpgradeExecutor {
         try {
             ExtensionStoreOps<?> ops = resolveExtensionOps(source.type());
             if (ops == null) {
-                log.warnf("Unknown extension type for create: %s", source.type());
+                LOGGER.warnf("Unknown extension type for create: %s", source.type());
                 return null;
             }
             return dispatchCreateDirect(ops, source.contentJson());
         } catch (Exception e) {
-            log.warnf("Failed to create %s '%s': %s", source.type(), source.name(), e.getMessage());
+            LOGGER.warnf("Failed to create %s '%s': %s", source.type(), source.name(), e.getMessage());
             return null;
         }
     }
@@ -429,7 +429,7 @@ public class UpgradeExecutor {
 
             return createdUri;
         } catch (Exception e) {
-            log.warnf("Failed to create workflow '%s': %s", sourceWf.name(), e.getMessage());
+            LOGGER.warnf("Failed to create workflow '%s': %s", sourceWf.name(), e.getMessage());
             return null;
         }
     }
@@ -466,7 +466,7 @@ public class UpgradeExecutor {
 
             return null;
         } catch (Exception e) {
-            log.warnf("Failed to update workflow URIs %s: %s", workflowId, e.getMessage());
+            LOGGER.warnf("Failed to update workflow URIs %s: %s", workflowId, e.getMessage());
             return null;
         }
     }
@@ -512,13 +512,13 @@ public class UpgradeExecutor {
             Response resp = agentStore.updateAgent(agentId, currentVersion, agentConfig);
             if (resp.getStatus() == 200) {
                 URI updatedUri = URI.create(IRestAgentStore.resourceURI + agentId + "?version=" + (currentVersion + 1));
-                log.infof("Agent '%s' upgraded successfully (v%d→v%d)", agentId, currentVersion, currentVersion + 1);
+                LOGGER.infof("Agent '%s' upgraded successfully (v%d→v%d)", agentId, currentVersion, currentVersion + 1);
                 return updatedUri;
             }
 
             return null;
         } catch (Exception e) {
-            log.errorf("Failed to update agent config %s: %s", agentId, e.getMessage());
+            LOGGER.errorf("Failed to update agent config %s: %s", agentId, e.getMessage());
             throw new RuntimeException("Agent config update failed: " + e.getMessage(), e);
         }
     }
@@ -535,7 +535,7 @@ public class UpgradeExecutor {
                     return resId.getVersion();
             }
         } catch (Exception e) {
-            log.debugf("Could not find latest version for %s, using 1", resourceId);
+            LOGGER.debugf("Could not find latest version for %s, using 1", resourceId);
         }
         return 1;
     }

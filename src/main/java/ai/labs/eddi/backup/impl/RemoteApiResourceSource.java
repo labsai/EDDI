@@ -53,7 +53,7 @@ import java.util.*;
  */
 public class RemoteApiResourceSource implements IResourceSource {
 
-    private static final Logger log = Logger.getLogger(RemoteApiResourceSource.class);
+    private static final Logger LOGGER = Logger.getLogger(RemoteApiResourceSource.class);
 
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
@@ -159,7 +159,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                     workflowDataList.add(wfData);
                 }
             } catch (Exception e) {
-                log.warnf("Failed to read workflow %d from remote %s: %s", i, baseUrl, e.getMessage());
+                LOGGER.warnf("Failed to read workflow %d from remote %s: %s", i, baseUrl, e.getMessage());
             }
         }
 
@@ -193,11 +193,11 @@ public class RemoteApiResourceSource implements IResourceSource {
                                 resId.getId(), snippet.getName(), snippet));
                     }
                 } catch (Exception e) {
-                    log.debugf("Could not read remote snippet %s: %s", desc.getName(), e.getMessage());
+                    LOGGER.debugf("Could not read remote snippet %s: %s", desc.getName(), e.getMessage());
                 }
             }
         } catch (Exception e) {
-            log.warnf("Failed to read snippets from remote %s: %s", baseUrl, e.getMessage());
+            LOGGER.warnf("Failed to read snippets from remote %s: %s", baseUrl, e.getMessage());
         }
 
         return snippetDataList;
@@ -303,7 +303,7 @@ public class RemoteApiResourceSource implements IResourceSource {
             String restPath = STEP_TYPE_TO_REST_PATH.get(stepTypeStr);
             String extLabel = STEP_TYPE_TO_EXT_LABEL.get(stepTypeStr);
             if (restPath == null || extLabel == null) {
-                log.debugf("Unknown step type: %s", stepTypeStr);
+                LOGGER.debugf("Unknown step type: %s", stepTypeStr);
                 continue;
             }
 
@@ -316,7 +316,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                 extensions.put(stepTypeStr, new ExtensionSourceData(
                         extResId.getId(), name, extLabel, stepTypeStr, contentJson));
             } catch (Exception e) {
-                log.debugf("Could not read remote extension %s/%s: %s",
+                LOGGER.debugf("Could not read remote extension %s/%s: %s",
                         stepTypeStr, extResId.getId(), e.getMessage());
             }
         }
@@ -341,7 +341,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                 }
             }
         } catch (Exception e) {
-            log.debugf("Could not resolve latest version for %s: %s", agentId, e.getMessage());
+            LOGGER.debugf("Could not resolve latest version for %s: %s", agentId, e.getMessage());
         }
         return 1; // fallback
     }
@@ -362,7 +362,7 @@ public class RemoteApiResourceSource implements IResourceSource {
                 }
             }
         } catch (Exception e) {
-            log.debugf("Could not read remote descriptor name for %s: %s", resourceId, e.getMessage());
+            LOGGER.debugf("Could not read remote descriptor name for %s: %s", resourceId, e.getMessage());
         }
         return null;
     }

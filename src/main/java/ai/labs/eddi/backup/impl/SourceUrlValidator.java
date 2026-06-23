@@ -19,7 +19,7 @@ import java.net.UnknownHostException;
  */
 public final class SourceUrlValidator {
 
-    private static final Logger log = Logger.getLogger(SourceUrlValidator.class);
+    private static final Logger LOGGER = Logger.getLogger(SourceUrlValidator.class);
 
     private SourceUrlValidator() {
     }
@@ -75,7 +75,7 @@ public final class SourceUrlValidator {
             throw new IllegalArgumentException("Source URL must not point to a private IP address: " + sourceUrl);
         }
 
-        log.debugf("Source URL validated: %s", sourceUrl);
+        LOGGER.debugf("Source URL validated: %s", sourceUrl);
     }
 
     private static boolean isLoopback(String host) {
@@ -100,7 +100,7 @@ public final class SourceUrlValidator {
             return false;
         } catch (UnknownHostException e) {
             // DNS resolution failed — fail closed to prevent DNS rebinding attacks
-            log.debugf("Could not resolve host %s — rejecting source URL", host);
+            LOGGER.debugf("Could not resolve host %s — rejecting source URL", host);
             throw new IllegalArgumentException("Source URL host could not be resolved: " + host, e);
         }
     }
