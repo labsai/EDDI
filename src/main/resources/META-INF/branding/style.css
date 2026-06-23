@@ -49,8 +49,8 @@ body {
 
 /* ── Topbar ────────────────────────────────────────────────────────────── */
 .swagger-ui .topbar {
-    background-color: #09090b;
-    border-bottom: 1px solid #27272a;
+    background-color: #000000 !important;
+    border-bottom: 1px solid #3f3f46 !important;
     padding: 8px 0;
 }
 
@@ -97,17 +97,18 @@ body {
 }
 
 .swagger-ui .info .title small {
-    background-color: #27272a;
-    border: 1px solid #3f3f46;
-    color: #a1a1aa;
+    background-color: #f59e0b;
+    border: none;
+    color: #09090b;
     border-radius: 4px;
+    font-weight: 700;
 }
 
 .swagger-ui .info .title small.version-stamp {
-    background-color: #f59e0b;
-    color: #09090b;
-    border: none;
-    font-weight: 600;
+    background-color: #27272a;
+    color: #a1a1aa;
+    border: 1px solid #3f3f46;
+    font-weight: 400;
 }
 
 .swagger-ui .info .description,
@@ -708,25 +709,26 @@ body {
 
 /* ── Version stamps (green → amber) ────────────────────────────────────── */
 .swagger-ui .info .title small {
-    background-color: #27272a !important;
-    border: 1px solid #3f3f46 !important;
-    color: #a1a1aa !important;
+    background-color: #f59e0b !important;
+    border: none !important;
+    color: #09090b !important;
     border-radius: 4px;
+    font-weight: 700;
 }
 
 .swagger-ui .info .title small.version-stamp {
-    background-color: #f59e0b !important;
-    color: #09090b !important;
-    border: none !important;
-    font-weight: 600;
+    background-color: #27272a !important;
+    color: #a1a1aa !important;
+    border: 1px solid #3f3f46 !important;
+    font-weight: 400;
 }
 
 .swagger-ui .info .title small pre {
-    color: #a1a1aa !important;
+    color: #09090b !important;
 }
 
-.swagger-ui .info .title small pre.version {
-    color: #09090b !important;
+.swagger-ui .info .title small.version-stamp pre {
+    color: #a1a1aa !important;
 }
 
 /* ── Swagger-ui wrapper background ─────────────────────────────────────── */

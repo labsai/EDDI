@@ -17,7 +17,7 @@ import jakarta.ws.rs.core.Response;
  * @author ginccc
  */
 @Path("/backup/export")
-@Tag(name = "Operations / Backup")
+@Tag(name = "Operations / Backup", description = "Import and export agents as zip files")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestExportService {
     @GET

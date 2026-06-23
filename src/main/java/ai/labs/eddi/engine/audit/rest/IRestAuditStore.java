@@ -19,7 +19,7 @@ import java.util.List;
  */
 @Path("/auditstore")
 @Produces(MediaType.APPLICATION_JSON)
-@Tag(name = "Security / Audit Trail")
+@Tag(name = "Security / Audit Trail", description = "Immutable audit ledger queries")
 @RolesAllowed("eddi-admin")
 public interface IRestAuditStore {
 

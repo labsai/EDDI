@@ -33,7 +33,7 @@ import java.util.Map;
 @Path("/llm/tools")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@Tag(name = "Tools / Tool History")
+@Tag(name = "Tools / Tool History", description = "Tool execution history, cache, rate limits, and cost tracking")
 public class RestToolHistory {
     private static final Logger LOGGER = Logger.getLogger(RestToolHistory.class);
 

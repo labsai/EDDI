@@ -15,7 +15,7 @@ import jakarta.ws.rs.core.Response;
 import java.util.List;
 
 @Path("/AgentTriggerStore/agenttriggers")
-@Tag(name = "Agents / Administration")
+@Tag(name = "Agents / Administration", description = "Deploy, undeploy, trigger, and monitor agents")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestAgentTriggerStore {
     String resourceURI = "eddi://ai.labs.agentTrigger/AgentTriggerStore/agenttriggers/";

@@ -23,7 +23,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/outputstore/outputsets")
-@Tag(name = "Configuration / Output")
+@Tag(name = "Configuration / Output", description = "Output template configuration and action keys")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestOutputStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.output";

@@ -27,7 +27,7 @@ import java.util.List;
  * @since 6.0.0
  */
 @Path("/administration/logs")
-@Tag(name = "Operations / Logs")
+@Tag(name = "Operations / Logs", description = "Real-time log streaming and historical queries")
 @RolesAllowed("eddi-admin")
 public interface IRestLogAdmin {
 

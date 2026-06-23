@@ -26,7 +26,7 @@ import java.util.List;
  * @since 6.0.0
  */
 @Path("/schedulestore/schedules")
-@Tag(name = "Operations / Schedules")
+@Tag(name = "Operations / Schedules", description = "Scheduled agent triggers (heartbeat, cron)")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestScheduleStore {
 

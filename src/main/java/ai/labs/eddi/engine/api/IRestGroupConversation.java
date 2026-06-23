@@ -24,7 +24,7 @@ import java.util.List;
  * production environment.
  */
 @Path("/groups/{groupId}/conversations")
-@Tag(name = "Conversations / Groups")
+@Tag(name = "Conversations / Groups", description = "Multi-agent group discussion orchestration")
 @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
 public interface IRestGroupConversation {
 

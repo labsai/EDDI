@@ -29,7 +29,7 @@ import java.util.List;
  * @since 6.0.0
  */
 @Path("/variablestore/variables")
-@Tag(name = "Configuration / Global Variables")
+@Tag(name = "Configuration / Global Variables", description = "Deployment-wide configuration variables")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestGlobalVariableStore {
 

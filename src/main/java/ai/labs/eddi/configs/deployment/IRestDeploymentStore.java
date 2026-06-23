@@ -19,7 +19,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/deploymentstore/deployments")
-@Tag(name = "Agents / Administration")
+@Tag(name = "Agents / Administration", description = "Deploy, undeploy, trigger, and monitor agents")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestDeploymentStore {
     @GET

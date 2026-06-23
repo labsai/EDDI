@@ -26,7 +26,7 @@ import java.util.List;
  * @since 6.1.0
  */
 @Path("/channelstore/channels")
-@Tag(name = "Integrations / Channels")
+@Tag(name = "Integrations / Channels", description = "Channel integration configuration (Slack, Teams, etc.)")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestChannelIntegrationStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.channel";

@@ -16,7 +16,7 @@ import jakarta.ws.rs.core.Response;
 
 @Path("/user")
 @Produces(MediaType.TEXT_PLAIN)
-@Tag(name = "Security / Authentication")
+@Tag(name = "Security / Authentication", description = "Authentication status and session management")
 public interface ILogoutEndpoint {
     @GET
     @Path("/isAuthenticated")

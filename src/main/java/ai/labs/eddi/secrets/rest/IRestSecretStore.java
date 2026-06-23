@@ -25,7 +25,7 @@ import java.util.List;
  * @since 6.0.0
  */
 @Path("/secretstore/secrets")
-@Tag(name = "Security / Secrets Vault")
+@Tag(name = "Security / Secrets Vault", description = "Encrypted secret storage and management")
 @RolesAllowed("eddi-admin")
 public interface IRestSecretStore {
 

@@ -23,7 +23,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("backup/import")
-@Tag(name = "Operations / Backup")
+@Tag(name = "Operations / Backup", description = "Import and export agents as zip files")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestImportService {
     @POST

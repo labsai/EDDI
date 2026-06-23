@@ -23,7 +23,7 @@ import static ai.labs.eddi.engine.model.Deployment.Environment;
  * REST API for agent deployment lifecycle management.
  */
 @Path("/administration")
-@Tag(name = "Agents / Administration")
+@Tag(name = "Agents / Administration", description = "Deploy, undeploy, trigger, and monitor agents")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestAgentAdministration {
     @POST

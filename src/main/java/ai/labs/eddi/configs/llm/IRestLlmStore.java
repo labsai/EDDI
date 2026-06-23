@@ -22,7 +22,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/llmstore/llms")
-@Tag(name = "Configuration / LLM")
+@Tag(name = "Configuration / LLM", description = "LLM provider and model settings")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestLlmStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.llm";

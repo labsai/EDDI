@@ -12,7 +12,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
 @Path("/userconversationstore/userconversations")
-@Tag(name = "Conversations / Store")
+@Tag(name = "Conversations / Store", description = "Query, delete, and manage conversation history")
 public interface IRestUserConversationStore {
     String resourceURI = "eddi://ai.labs.userconversation/userconversationstore/userconversations/";
 

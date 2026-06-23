@@ -44,7 +44,7 @@ import java.util.Set;
 @ApplicationScoped
 @Path("/integrations/slack")
 @Produces(MediaType.APPLICATION_JSON)
-@Tag(name = "Integrations / Slack Webhook")
+@Tag(name = "Integrations / Slack Webhook", description = "Slack Events API webhook receiver")
 public class RestSlackWebhook {
 
     private static final Logger LOGGER = Logger.getLogger(RestSlackWebhook.class);

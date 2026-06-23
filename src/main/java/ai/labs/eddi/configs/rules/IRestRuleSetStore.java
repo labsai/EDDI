@@ -22,7 +22,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/rulestore/rulesets")
-@Tag(name = "Configuration / Behavior Rules")
+@Tag(name = "Configuration / Behavior Rules", description = "Behavior rule evaluation configuration")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestRuleSetStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.rules";

@@ -23,7 +23,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/workflowstore/workflows")
-@Tag(name = "Configuration / Workflows")
+@Tag(name = "Configuration / Workflows", description = "Workflow pipeline configuration and available steps")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestWorkflowStore extends IRestVersionInfo {
     String resourceURI = "eddi://ai.labs.workflow/workflowstore/workflows/";
