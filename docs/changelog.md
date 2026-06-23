@@ -4,6 +4,19 @@
 
 ---
 
+## 📦 Safe Dependency Bumps (2026-06-19)
+
+**Repo:** EDDI (`chore/bump-safe-deps`)
+**What changed:** Bumped two dependencies to their latest stable patch/minor versions. Both are drop-in upgrades with no breaking changes.
+
+- **`quarkus-mcp-server.version`**: `1.12.1` → `1.13.0` — adds lazy SSE initialization for Streamable HTTP transport (defers SSE setup until first API call)
+- **`swagger-parser`**: `2.1.42` → `2.1.44` — bug fix for unsafe Yaml instantiation in ReferenceVisitor
+
+**File:** `pom.xml`
+**Verified:** `mvnw compile` passes cleanly.
+
+---
+
 ## 🔒 OpenSSF Scorecard — SAST on All Commits (2026-06-18)
 
 **Repo:** EDDI (`fix/code-review-bugs`)
