@@ -4,6 +4,23 @@
 
 ---
 
+## 🐛 Fix: Swagger UI CSP Regression — Duplicate Header Causes Inline Script Block (2026-06-23)
+
+**Repo:** EDDI (`fix/swagger-csp-duplicate-header`)
+**What changed:** Swagger UI showed a blank page on Docker with `Content-Security-Policy` blocking inline scripts (`script-src-elem` violation).
+
+### Root Cause
+The original CSP fix (June 3) used two `quarkus.http.filter` entries with order-based precedence, assuming the higher-order Swagger filter would *replace* the default filter's CSP header. In reality, **both filters fire and both add a `Content-Security-Policy` header** to the response. Per the CSP spec, when a browser receives multiple CSP headers it enforces the **intersection** (most restrictive) — so the default filter's `script-src 'self'` blocked Swagger's inline scripts regardless of the relaxed swagger filter.
+
+The CI smoke test only checked `/q/health/ready` for header *presence*, never the Swagger UI path, and never checked for duplicate headers — so the bug was never caught.
+
+### Fix
+Changed the default CSP filter regex from `/.*` to `/(?!q/swagger-ui).*` — a negative lookahead that excludes the Swagger UI path. This ensures only **one** CSP header is sent per path: the strict one for the application and the relaxed one for Swagger UI.
+
+**Files:** `application.properties`, `docs/changelog.md`
+
+---
+
 ## Swagger UI Overhaul, Manager Update & Version 6.1.1 (2026-06-23)
 
 **Repo:** EDDI (`feat/swagger-ui-overhaul`)
