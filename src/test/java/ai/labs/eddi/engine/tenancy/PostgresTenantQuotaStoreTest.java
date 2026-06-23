@@ -680,4 +680,37 @@ class PostgresTenantQuotaStoreTest {
             assertDoesNotThrow(() -> sut.resetUsage(TENANT_ID));
         }
     }
+
+    // ─── Bootstrap ──────────────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Bootstrap (CDI constructor)")
+    class Bootstrap {
+
+        @Test
+        @DisplayName("should bootstrap default quota via atomic INSERT ON CONFLICT DO NOTHING")
+        void bootstrapsAtomically() throws Exception {
+            // executeUpdate returns 1 (row was inserted — no prior quota existed)
+            when(preparedStatement.executeUpdate()).thenReturn(1);
+            // getQuota after bootstrap returns no rows (the bootstrap INSERT used a
+            // different PS)
+            when(resultSet.next()).thenReturn(false);
+
+            var bootstrapStore = new PostgresTenantQuotaStore(
+                    dataSourceInstance, "default", false, -1, -1, -1, -1.0);
+
+            // Trigger ensureSchema + bootstrap
+            bootstrapStore.getQuota("any");
+
+            // CREATE TABLE x2 + bootstrap INSERT + getQuota SELECT
+            verify(statement, times(2)).execute(anyString());
+            verify(preparedStatement, atLeastOnce()).executeUpdate();
+
+            // Assert the bootstrap used ON CONFLICT DO NOTHING (not DO UPDATE)
+            org.mockito.ArgumentCaptor<String> sqlCaptor = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(connection, atLeastOnce()).prepareStatement(sqlCaptor.capture());
+            assertTrue(sqlCaptor.getAllValues().stream()
+                    .anyMatch(sql -> sql.contains("ON CONFLICT (tenant_id) DO NOTHING")));
+        }
+    }
 }
