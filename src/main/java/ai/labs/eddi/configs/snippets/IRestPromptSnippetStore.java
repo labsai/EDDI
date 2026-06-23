@@ -28,7 +28,7 @@ import java.util.List;
  * @since 6.0.0
  */
 @Path("/snippetstore/snippets")
-@Tag(name = "Prompt Snippets")
+@Tag(name = "Configuration / Prompt Snippets", description = "Reusable system prompt building blocks")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestPromptSnippetStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.snippet";

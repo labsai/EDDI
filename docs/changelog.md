@@ -4,6 +4,64 @@
 
 ---
 
+## Swagger UI Overhaul, Manager Update & Version 6.1.1 (2026-06-23)
+
+**Repo:** EDDI (`feat/swagger-ui-overhaul`)
+**What changed:** Complete overhaul of Swagger UI, version bump to 6.1.1, Manager frontend asset update, and Docker base image bump.
+
+### Tag Taxonomy (40 tags, 9 categories)
+
+All `@Tag` annotations updated from flat names to category-based hierarchy (`Category / Subcategory`) for logical grouping in Swagger UI. The `@OpenAPIDefinition` tag array in `OpenApiConfig.java` defines the canonical taxonomy.
+
+- **Agents**: Setup, Agents, Administration, Agent Groups
+- **Configuration**: Workflows, LLM, Behavior Rules, Dictionary, Output, API Calls, MCP Calls, Properties, Prompt Snippets, Global Variables
+- **Conversations**: Conversations, Group Conversations, Conversation Store, Attachments
+- **Integrations**: A2A Protocol, Capability Registry, Channel Integrations, Slack Webhook
+- **Knowledge & Memory**: RAG Knowledge Bases, RAG Ingestion, User Memory
+- **Security**: Authentication, Secrets Vault, Audit Trail, GDPR / Privacy, Tenant Quotas
+- **Administration**: Backup, Schedules, Coordinator Admin, Orphan Admin, Log Admin, Descriptors
+- **Tools**: Tool History, Template Preview, Standalone NLP
+- **UI**: Chat UI
+
+All 49 REST interface `@Tag` annotations now include `description` attributes (SmallRye was silently dropping `@OpenAPIDefinition` descriptions when interface-level `@Tag` lacked one).
+
+4 previously untagged endpoints received new `@Tag` annotations:
+- `ILogoutEndpoint` → `Security / Authentication`
+- `RestSlackWebhook` → `Integrations / Slack Webhook`
+- `RestToolHistory` → `Tools / Tool History` (+ added missing `@ApplicationScoped`)
+- `RestA2AEndpoint` → `Integrations / A2A Protocol` (capability endpoints tagged `Integrations / Capability Registry`)
+
+### OpenApiTagSortFilter (new)
+
+New `OASFilter` implementation (`OpenApiTagSortFilter.java`) sorts tags alphabetically at build time, producing stable ordering. Fixed `UnsupportedOperationException` caused by sorting SmallRye's unmodifiable tag list. Swagger UI config: `quarkus.swagger-ui.tags-sorter=alpha`, `quarkus.swagger-ui.theme=original`.
+
+### Swagger UI Light/Dark Mode
+
+Complete rewrite of `META-INF/branding/style.css` with proper dual-theme support:
+- **Light mode** (default): white backgrounds, dark text, amber-600 (`#d97706`) accents
+- **Dark mode** (lamp toggle → `html.dark-mode`): EDDI Manager palette — zinc-950 bg, zinc-900 surfaces, amber-500 accents
+- Topbar stays dark (`#18181b`) in both modes for brand consistency with logo
+- EDDI amber accents on Authorize, Execute, Explore, and Try-it-out buttons
+- Version badge `6.1.1` with WCAG AAA contrast; OAS 3.1 badge demoted to subtle gray
+- HTTP verb tinted operation blocks (blue GET, green POST, amber PUT, red DELETE, purple PATCH)
+- Logo renamed `eddi-logo.png` → `logo.png` (Quarkus auto-detection convention)
+
+### Version Bump → 6.1.1
+
+Updated across: `pom.xml`, `application.properties` (×3 fields), `OpenApiConfig.java`, `Dockerfile`, `Chart.yaml`, `eddi-deployment.yaml`, `quickstart.yaml`, `redhat-certify.yml`.
+
+### Docker Base Image
+
+Bumped Red Hat UBI9 OpenJDK 25 runtime digest (`sha256:0f4e04...` → `sha256:2aed9f...`).
+
+### Manager Frontend
+
+Updated `manage.html` asset references to latest EDDI-Manager build. Removed old bundle artifacts (~4,000 lines of obsolete JS/CSS).
+
+**Files changed:** 100 files, +1,107 / −4,041 lines
+
+---
+
 ## 📦 Safe Dependency Bumps (2026-06-19)
 
 **Repo:** EDDI (`chore/bump-safe-deps`)

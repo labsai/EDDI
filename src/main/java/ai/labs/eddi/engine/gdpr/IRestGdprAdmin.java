@@ -22,7 +22,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag;
  * @since 6.0.0
  */
 @Path("/admin/gdpr")
-@Tag(name = "GDPR / Privacy")
+@Tag(name = "Security / GDPR / Privacy", description = "User data erasure and export for GDPR/CCPA compliance")
 @Produces(MediaType.APPLICATION_JSON)
 @RolesAllowed("eddi-admin")
 public interface IRestGdprAdmin {

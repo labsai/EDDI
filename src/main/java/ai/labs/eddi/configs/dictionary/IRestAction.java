@@ -15,7 +15,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/actions")
-@Tag(name = "Dictionary")
+@Tag(name = "Configuration / Dictionary", description = "Dictionary, expressions, and actions for NLP")
 public interface IRestAction {
     @GET
     @Produces(MediaType.APPLICATION_JSON)

@@ -22,7 +22,7 @@ import java.util.List;
  * @since 6.0.0
  */
 @Path("/usermemorystore/memories")
-@Tag(name = "User Memory", description = "Persistent user memory management")
+@Tag(name = "Knowledge / User Memory", description = "Persistent user memory management")
 @RolesAllowed({"eddi-admin", "eddi-user"})
 public interface IRestUserMemoryStore {
 

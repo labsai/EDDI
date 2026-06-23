@@ -14,10 +14,12 @@ import ai.labs.eddi.modules.llm.model.ToolExecutionTrace.ToolCall;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolRateLimiter;
+import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
@@ -32,6 +34,8 @@ import java.util.Map;
 @Path("/llm/tools")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
+@Tag(name = "Tools / Tool History", description = "Tool execution history, cache, rate limits, and cost tracking")
+@ApplicationScoped
 public class RestToolHistory {
     private static final Logger LOGGER = Logger.getLogger(RestToolHistory.class);
 

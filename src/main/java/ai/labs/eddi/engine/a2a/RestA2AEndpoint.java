@@ -38,6 +38,7 @@ import java.util.Set;
 @Path("/")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
+@Tag(name = "Integrations / A2A Protocol", description = "Agent-to-Agent protocol endpoints")
 @jakarta.enterprise.context.ApplicationScoped
 public class RestA2AEndpoint {
 
@@ -124,7 +125,7 @@ public class RestA2AEndpoint {
     @PermitAll
     @GET
     @Path(".well-known/capabilities")
-    @Tag(name = "06. Capability Registry", description = "A2A agent capability discovery")
+    @Tag(name = "Integrations / Capability Registry", description = "A2A agent capability discovery")
     @Operation(operationId = "publicSearchCapabilities",
                description = "Public endpoint: find agents matching a skill. Requires eddi.a2a.capabilities.public=true.")
     public Response searchCapabilities(@QueryParam("skill") String skill,
@@ -153,7 +154,7 @@ public class RestA2AEndpoint {
     @PermitAll
     @GET
     @Path(".well-known/capabilities/skills")
-    @Tag(name = "06. Capability Registry", description = "A2A agent capability discovery")
+    @Tag(name = "Integrations / Capability Registry", description = "A2A agent capability discovery")
     @Operation(operationId = "publicListSkills",
                description = "Public endpoint: list all registered skill names. Requires eddi.a2a.capabilities.public=true.")
     public Response listCapabilitySkills() {

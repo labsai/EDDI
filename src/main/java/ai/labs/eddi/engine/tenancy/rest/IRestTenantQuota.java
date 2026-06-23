@@ -20,7 +20,7 @@ import java.util.List;
 @Path("/administration/quotas")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@Tag(name = "Tenant Quotas")
+@Tag(name = "Security / Tenant Quotas", description = "Per-tenant rate limits and usage metering")
 @RolesAllowed("eddi-admin")
 public interface IRestTenantQuota {
 

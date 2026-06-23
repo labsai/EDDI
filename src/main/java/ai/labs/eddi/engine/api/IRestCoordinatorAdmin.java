@@ -25,7 +25,7 @@ import java.util.List;
  * @since 6.0.0
  */
 @Path("/administration/coordinator")
-@Tag(name = "Coordinator Admin")
+@Tag(name = "Operations / Coordinator", description = "Conversation coordinator monitoring and dead letters")
 @RolesAllowed("eddi-admin")
 public interface IRestCoordinatorAdmin {
 

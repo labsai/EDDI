@@ -22,7 +22,7 @@ import java.util.List;
  * JAX-RS interface for MCP Calls configuration store.
  */
 @Path("/mcpcallsstore/mcpcalls")
-@Tag(name = "MCP Calls")
+@Tag(name = "Configuration / MCP Calls", description = "MCP server call definitions for tool use")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestMcpCallsStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.mcpcalls";
