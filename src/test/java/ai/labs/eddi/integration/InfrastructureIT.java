@@ -87,6 +87,63 @@ public class InfrastructureIT {
                 .statusCode(anyOf(equalTo(200), equalTo(301), equalTo(302)));
     }
 
+    @Test
+    @Order(10)
+    @DisplayName("Swagger UI should receive exactly one relaxed CSP header")
+    void swaggerUiCspHeader() {
+        // Regression guard: if both the default and swagger CSP filters match this
+        // path,
+        // the browser receives two Content-Security-Policy headers and enforces the
+        // most-restrictive intersection — breaking Swagger UI's inline scripts.
+        // Follow redirects — /q/swagger-ui may 301→/q/swagger-ui/ in some profiles.
+        var response = given().redirects().follow(true).get("/q/swagger-ui/");
+        var cspHeaders = response.headers().getValues("Content-Security-Policy");
+        // In test profiles, swagger-ui filters may not be active — skip gracefully
+        Assumptions.assumeFalse(cspHeaders.isEmpty(),
+                "Swagger UI CSP header not present in test profile — skipping assertion");
+        Assertions.assertEquals(1, cspHeaders.size(),
+                "Expected exactly 1 CSP header on /q/swagger-ui/ but got " + cspHeaders.size()
+                        + ": " + cspHeaders);
+        var csp = cspHeaders.getFirst();
+        Assertions.assertTrue(csp.contains("'unsafe-inline'"),
+                "Swagger UI CSP must allow 'unsafe-inline' for inline scripts: " + csp);
+        Assertions.assertTrue(csp.contains("'unsafe-eval'"),
+                "Swagger UI CSP must allow 'unsafe-eval' for JSON schema rendering: " + csp);
+    }
+
+    @Test
+    @Order(11)
+    @DisplayName("Non-Swagger paths should receive exactly one strict CSP header")
+    void apiPathCspHeader() {
+        var response = given().get("/q/health/ready");
+        var cspHeaders = response.headers().getValues("Content-Security-Policy");
+        Assertions.assertEquals(1, cspHeaders.size(),
+                "Expected exactly 1 CSP header on /q/health/ready but got " + cspHeaders.size()
+                        + ": " + cspHeaders);
+        var csp = cspHeaders.getFirst();
+        Assertions.assertTrue(csp.contains("script-src 'self'"),
+                "Non-Swagger CSP must contain strict script-src: " + csp);
+        // Extract just the script-src directive — style-src also has 'unsafe-inline'
+        var scriptSrc = extractDirective(csp, "script-src");
+        Assertions.assertFalse(scriptSrc.contains("'unsafe-inline'"),
+                "Non-Swagger script-src must NOT allow 'unsafe-inline': " + scriptSrc);
+    }
+
+    /**
+     * Extracts a single CSP directive value (e.g. "script-src 'self'") from a full
+     * CSP string.
+     */
+    private static String extractDirective(String csp, String directive) {
+        for (var part : csp.split(";")) {
+            var trimmed = part.trim();
+            var tokens = trimmed.split("\\s+", 2);
+            if (tokens.length > 0 && tokens[0].equals(directive)) {
+                return trimmed;
+            }
+        }
+        return "";
+    }
+
     // ==================== Coordinator Admin ====================
 
     @Test
