@@ -125,6 +125,7 @@ public class RestA2AEndpoint {
     @PermitAll
     @GET
     @Path(".well-known/capabilities")
+    @Tag(name = "Integrations / Capability Registry", description = "A2A agent capability discovery")
     @Operation(operationId = "publicSearchCapabilities",
                description = "Public endpoint: find agents matching a skill. Requires eddi.a2a.capabilities.public=true.")
     public Response searchCapabilities(@QueryParam("skill") String skill,
@@ -153,6 +154,7 @@ public class RestA2AEndpoint {
     @PermitAll
     @GET
     @Path(".well-known/capabilities/skills")
+    @Tag(name = "Integrations / Capability Registry", description = "A2A agent capability discovery")
     @Operation(operationId = "publicListSkills",
                description = "Public endpoint: list all registered skill names. Requires eddi.a2a.capabilities.public=true.")
     public Response listCapabilitySkills() {

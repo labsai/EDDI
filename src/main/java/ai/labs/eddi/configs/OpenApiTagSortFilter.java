@@ -11,9 +11,8 @@ import org.eclipse.microprofile.openapi.models.OpenAPI;
 import java.util.Comparator;
 
 /**
- * Sorts OpenAPI tags alphabetically at build time, ensuring the numbered group
- * prefixes ({@code 01.}, {@code 02.}, etc.) produce a stable, logically grouped
- * order in Swagger UI and all API consumers.
+ * Sorts OpenAPI tags alphabetically at build time, producing a stable,
+ * logically grouped order in Swagger UI and all API consumers.
  *
  * @since 6.1.1
  */
