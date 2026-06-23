@@ -135,8 +135,10 @@ public class InfrastructureIT {
      */
     private static String extractDirective(String csp, String directive) {
         for (var part : csp.split(";")) {
-            if (part.trim().startsWith(directive)) {
-                return part.trim();
+            var trimmed = part.trim();
+            var tokens = trimmed.split("\\s+", 2);
+            if (tokens.length > 0 && tokens[0].equals(directive)) {
+                return trimmed;
             }
         }
         return "";
