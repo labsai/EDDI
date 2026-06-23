@@ -1,0 +1,29 @@
+name: Sync labels
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/labels.yml
+      - .github/workflows/labels.yml
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  labels:
+    name: Sync repository labels
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout label configuration
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/labels.yml
+
+      - name: Sync labels
+        uses: EndBug/label-sync@v2
+        with:
+          config-file: .github/labels.yml
+          delete-other-labels: false
