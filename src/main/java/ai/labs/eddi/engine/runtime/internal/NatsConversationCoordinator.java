@@ -79,7 +79,7 @@ import java.util.concurrent.atomic.AtomicLong;
 @IfBuildProfile("nats")
 public class NatsConversationCoordinator implements IConversationCoordinator {
 
-    private static final Logger log = Logger.getLogger(NatsConversationCoordinator.class);
+    private static final Logger LOGGER = Logger.getLogger(NatsConversationCoordinator.class);
     private static final String SUBJECT_PREFIX = "eddi.conversation.";
     private static final String DEAD_LETTER_PREFIX = "eddi.deadletter.";
 
@@ -140,24 +140,24 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     @Override
     public void start() {
         try {
-            log.infof("Connecting to NATS at %s (stream: %s)", natsUrl, streamName);
+            LOGGER.infof("Connecting to NATS at %s (stream: %s)", natsUrl, streamName);
 
             Options options = new Options.Builder().server(natsUrl).connectionTimeout(Duration.ofSeconds(10)).reconnectWait(Duration.ofSeconds(2))
                     .maxReconnects(-1) // unlimited reconnects
-                    .connectionListener((conn, type) -> log.infof("NATS connection event: %s", type)).errorListener(new ErrorListener() {
+                    .connectionListener((conn, type) -> LOGGER.infof("NATS connection event: %s", type)).errorListener(new ErrorListener() {
                         @Override
                         public void errorOccurred(Connection conn, String error) {
-                            log.errorf("NATS error: %s", error);
+                            LOGGER.errorf("NATS error: %s", error);
                         }
 
                         @Override
                         public void exceptionOccurred(Connection conn, Exception exp) {
-                            log.errorf(exp, "NATS exception");
+                            LOGGER.errorf(exp, "NATS exception");
                         }
 
                         @Override
                         public void slowConsumerDetected(Connection conn, Consumer consumer) {
-                            log.warnf("NATS slow consumer detected");
+                            LOGGER.warnf("NATS slow consumer detected");
                         }
                     }).build();
 
@@ -177,10 +177,10 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
             createOrUpdateStream(jsm, deadLetterStreamName, deadLetterConfig);
 
             jetStream = natsConnection.jetStream();
-            log.info("NATS JetStream connection established successfully");
+            LOGGER.info("NATS JetStream connection established successfully");
 
         } catch (IOException | InterruptedException | JetStreamApiException e) {
-            log.errorf(e, "Failed to connect to NATS at %s", natsUrl);
+            LOGGER.errorf(e, "Failed to connect to NATS at %s", natsUrl);
             throw new RuntimeException("NATS connection failed", e);
         }
     }
@@ -189,10 +189,10 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
         try {
             jsm.getStreamInfo(name);
             jsm.updateStream(config);
-            log.infof("Updated existing NATS stream: %s", name);
+            LOGGER.infof("Updated existing NATS stream: %s", name);
         } catch (JetStreamApiException e) {
             jsm.addStream(config);
-            log.infof("Created new NATS stream: %s", name);
+            LOGGER.infof("Created new NATS stream: %s", name);
         }
     }
 
@@ -216,7 +216,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
         // Max-size check: only reject truly new conversations, not follow-up messages.
         // Note: this check is intentionally non-atomic (soft limit).
         if (!conversationQueues.containsKey(conversationId) && conversationQueues.size() >= maxActiveConversations) {
-            log.warnf("Coordinator capacity exceeded (%d active conversations). Rejecting new conversationId=%s", maxActiveConversations,
+            LOGGER.warnf("Coordinator capacity exceeded (%d active conversations). Rejecting new conversationId=%s", maxActiveConversations,
                     safeConversationId);
             throw new java.util.concurrent.RejectedExecutionException(
                     "Coordinator capacity exceeded: " + maxActiveConversations + " active conversations. Try again later.");
@@ -236,7 +236,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
             synchronized (queue) {
                 if (conversationQueues.get(conversationId) != queue) {
                     if (attempt >= 3) {
-                        log.debugf("CAS loop retried %d times for conversationId=%s (expected 0-1)", attempt, safeConversationId);
+                        LOGGER.debugf("CAS loop retried %d times for conversationId=%s (expected 0-1)", attempt, safeConversationId);
                     }
                     continue; // retry with fresh computeIfAbsent
                 }
@@ -244,7 +244,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 boolean wasEmpty = queue.isEmpty();
                 boolean enqueued = queue.offer(new RetryableCallable(callable));
                 if (!enqueued) {
-                    log.warnf("Failed to enqueue task for conversationId=%s", safeConversationId);
+                    LOGGER.warnf("Failed to enqueue task for conversationId=%s", safeConversationId);
                     throw new java.util.concurrent.RejectedExecutionException(
                             "Failed to enqueue task for conversationId=" + safeConversationId);
                 }
@@ -265,7 +265,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
             PublishAck ack = jetStream.publish(subject, conversationId.getBytes());
             long durationNanos = System.nanoTime() - startNanos;
 
-            log.debugf("Published to NATS subject %s (seq: %d)", subject, ack.getSeqno());
+            LOGGER.debugf("Published to NATS subject %s (seq: %d)", subject, ack.getSeqno());
 
             // Record publish metrics
             getMetrics().ifPresent(m -> {
@@ -273,7 +273,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 m.getPublishDuration().record(Duration.ofNanos(durationNanos));
             });
         } catch (IOException | JetStreamApiException e) {
-            log.warnf(e, "Failed to publish to NATS for conversation %s, executing locally", sanitize(conversationId));
+            LOGGER.warnf(e, "Failed to publish to NATS for conversation %s, executing locally", sanitize(conversationId));
         }
 
         // Execute the callable via the runtime thread pool
@@ -292,12 +292,12 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                 int attempt = retryable.incrementAndGetAttempt();
 
                 if (attempt < maxRetries) {
-                    log.warnf(t, "Conversation task failed (conversationId=%s, attempt=%d/%d), retrying...", sanitize(conversationId), attempt,
+                    LOGGER.warnf(t, "Conversation task failed (conversationId=%s, attempt=%d/%d), retrying...", sanitize(conversationId), attempt,
                             maxRetries);
                     // Re-execute the same callable (retry)
                     publishAndExecute(conversationId, queue, retryable);
                 } else {
-                    log.errorf(t, "Conversation task exhausted retries (conversationId=%s, attempts=%d), " + "routing to dead-letter",
+                    LOGGER.errorf(t, "Conversation task exhausted retries (conversationId=%s, attempts=%d), " + "routing to dead-letter",
                             sanitize(conversationId),
                             attempt);
                     routeToDeadLetter(conversationId, t);
@@ -327,12 +327,12 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
                     failure.getMessage() != null ? failure.getMessage().replace("\"", "\\\"") : "unknown", System.currentTimeMillis());
 
             jetStream.publish(deadLetterSubject, payload.getBytes());
-            log.infof("Published dead-letter for conversation %s to %s", sanitize(conversationId), sanitize(deadLetterSubject));
+            LOGGER.infof("Published dead-letter for conversation %s to %s", sanitize(conversationId), sanitize(deadLetterSubject));
 
             totalDeadLettered.incrementAndGet();
             getMetrics().ifPresent(m -> m.getDeadLetterCount().increment());
         } catch (IOException | JetStreamApiException e) {
-            log.errorf(e, "Failed to publish dead-letter for conversation %s", sanitize(conversationId));
+            LOGGER.errorf(e, "Failed to publish dead-letter for conversation %s", sanitize(conversationId));
         }
     }
 
@@ -364,12 +364,12 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     public void shutdown() {
         if (natsConnection != null) {
             try {
-                log.info("Shutting down NATS connection...");
+                LOGGER.info("Shutting down NATS connection...");
                 natsConnection.drain(Duration.ofSeconds(10));
                 natsConnection.close();
-                log.info("NATS connection closed");
+                LOGGER.info("NATS connection closed");
             } catch (InterruptedException | TimeoutException e) {
-                log.warnf(e, "Error during NATS shutdown");
+                LOGGER.warnf(e, "Error during NATS shutdown");
                 Thread.currentThread().interrupt();
             }
         }
@@ -438,7 +438,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
             }
             sub.unsubscribe();
         } catch (Exception e) {
-            log.warnf(e, "Failed to list dead-letter entries");
+            LOGGER.warnf(e, "Failed to list dead-letter entries");
         }
         return entries;
     }
@@ -447,7 +447,7 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
     public boolean discardDeadLetter(String entryId) {
         // For NATS, we can't selectively delete individual messages from a stream.
         // Instead, we log it and let the operator know.
-        log.infof("Dead-letter %s acknowledged (NATS stream messages expire via retention policy)", sanitize(entryId));
+        LOGGER.infof("Dead-letter %s acknowledged (NATS stream messages expire via retention policy)", sanitize(entryId));
         return true;
     }
 
@@ -459,10 +459,10 @@ public class NatsConversationCoordinator implements IConversationCoordinator {
             JetStreamManagement jsm = natsConnection.jetStreamManagement();
             PurgeResponse response = jsm.purgeStream(deadLetterStreamName);
             int purged = (int) response.getPurged();
-            log.infof("Purged %d dead-letter messages from stream %s", purged, deadLetterStreamName);
+            LOGGER.infof("Purged %d dead-letter messages from stream %s", purged, deadLetterStreamName);
             return purged;
         } catch (IOException | JetStreamApiException e) {
-            log.errorf(e, "Failed to purge dead-letter stream %s", deadLetterStreamName);
+            LOGGER.errorf(e, "Failed to purge dead-letter stream %s", deadLetterStreamName);
             return 0;
         }
     }
