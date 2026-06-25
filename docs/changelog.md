@@ -4,6 +4,19 @@
 
 ---
 
+## 🐛 Fix: Tenant Quota Enforcement in Group Conversations (2026-06-25)
+
+**Repo:** EDDI (`feat/group-task-orchestration`)
+**What changed:** `QuotaExceededException` from `ConversationService` was being silently caught and treated as a per-agent skip/retry. Now detected at 4 levels and causes immediate abort — prevents burning N round-trips when quota is exhausted.
+
+- `executeAgentTurn` → `startConversation()`: immediate `GroupDiscussionException`
+- `executeAgentTurn` → `say()`: unwrap from `ExecutionException`, abort (bypasses retry policy)
+- Task execution loop: quota error exits the agent's `CompletableFuture` immediately
+- Parallel phase: quota propagates through `CompletionException`, cancels remaining futures
+- +3 regression tests (startConversation quota, say() quota, no-retry-even-with-RETRY-policy). Total: 112 tests, 0 failures.
+
+---
+
 ## 🐛 Fix: Final Review — Duplicate Task Bug, Regression Tests (2026-06-25)
 
 **Repo:** EDDI (`feat/group-task-orchestration`)
