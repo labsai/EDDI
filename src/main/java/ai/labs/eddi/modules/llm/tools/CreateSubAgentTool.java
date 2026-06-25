@@ -115,7 +115,11 @@ public class CreateSubAgentTool {
                     && !config.getAllowedModels().isEmpty()) {
                 if (provider != null && !provider.isBlank()) {
                     // Provider specified — check against that provider's model list
-                    List<String> allowedModels = config.getAllowedModels().get(provider.toLowerCase());
+                    // (case-insensitive key match)
+                    List<String> allowedModels = config.getAllowedModels().entrySet().stream()
+                            .filter(e -> e.getKey() != null && e.getKey().equalsIgnoreCase(provider))
+                            .map(Map.Entry::getValue)
+                            .findFirst().orElse(null);
                     if (allowedModels != null && !allowedModels.isEmpty()
                             && allowedModels.stream().noneMatch(m -> m.equalsIgnoreCase(model))) {
                         return "⚠️ Model '%s' is not allowed for provider '%s'. Allowed: %s"

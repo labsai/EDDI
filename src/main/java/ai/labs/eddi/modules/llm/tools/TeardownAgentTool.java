@@ -44,7 +44,7 @@ public class TeardownAgentTool {
             Set<String> retainedAgentIds) {
         this.agentFactory = agentFactory;
         this.agentStore = agentStore;
-        this.createdAgentIds = createdAgentIds != null ? createdAgentIds : List.of();
+        this.createdAgentIds = createdAgentIds != null ? createdAgentIds : new java.util.concurrent.CopyOnWriteArrayList<>();
         this.retainedAgentIds = retainedAgentIds != null ? retainedAgentIds : new java.util.concurrent.CopyOnWriteArraySet<>();
     }
 

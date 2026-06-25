@@ -240,4 +240,109 @@ class AgentGroupConfigurationTest {
         assertNotNull(MemberType.valueOf("AGENT"));
         assertNotNull(MemberType.valueOf("GROUP"));
     }
+
+    // ==================== LifecyclePolicy ====================
+
+    @Test
+    void lifecyclePolicy_toJson_allValues() {
+        assertEquals("ephemeral", LifecyclePolicy.EPHEMERAL.toJson());
+        assertEquals("keep-deployed", LifecyclePolicy.KEEP_DEPLOYED.toJson());
+        assertEquals("undeploy-only", LifecyclePolicy.UNDEPLOY_ONLY.toJson());
+        assertEquals("agent-decides", LifecyclePolicy.AGENT_DECIDES.toJson());
+    }
+
+    @Test
+    void lifecyclePolicy_fromJson_validValues() {
+        assertEquals(LifecyclePolicy.EPHEMERAL, LifecyclePolicy.fromJson("ephemeral"));
+        assertEquals(LifecyclePolicy.KEEP_DEPLOYED, LifecyclePolicy.fromJson("keep-deployed"));
+        assertEquals(LifecyclePolicy.UNDEPLOY_ONLY, LifecyclePolicy.fromJson("undeploy-only"));
+        assertEquals(LifecyclePolicy.AGENT_DECIDES, LifecyclePolicy.fromJson("agent-decides"));
+    }
+
+    @Test
+    void lifecyclePolicy_fromJson_null() {
+        assertEquals(LifecyclePolicy.EPHEMERAL, LifecyclePolicy.fromJson(null));
+    }
+
+    @Test
+    void lifecyclePolicy_fromJson_uppercase() {
+        assertEquals(LifecyclePolicy.EPHEMERAL, LifecyclePolicy.fromJson("EPHEMERAL"));
+    }
+
+    @Test
+    void lifecyclePolicy_fromJson_invalid() {
+        assertThrows(IllegalArgumentException.class,
+                () -> LifecyclePolicy.fromJson("unknown-value"));
+    }
+
+    // ==================== TaskDefinition ====================
+
+    @Test
+    void taskDefinition_fullConstructor() {
+        var td = new TaskDefinition("Subject", "Desc", "ROLE:analyst", List.of("dep1"), 2);
+
+        assertEquals("Subject", td.subject());
+        assertEquals("Desc", td.description());
+        assertEquals("ROLE:analyst", td.assignToRole());
+        assertEquals(List.of("dep1"), td.dependsOn());
+        assertEquals(2, td.priority());
+    }
+
+    @Test
+    void taskDefinition_convenienceConstructor() {
+        var td = new TaskDefinition("Subject", "Desc");
+
+        assertEquals("Subject", td.subject());
+        assertEquals("Desc", td.description());
+        assertEquals("ALL", td.assignToRole());
+        assertTrue(td.dependsOn().isEmpty());
+        assertEquals(0, td.priority());
+    }
+
+    @Test
+    void taskDefinition_nullSubject_throws() {
+        assertThrows(NullPointerException.class,
+                () -> new TaskDefinition(null, "Desc"));
+    }
+
+    @Test
+    void taskDefinition_nullDescription_throws() {
+        assertThrows(NullPointerException.class,
+                () -> new TaskDefinition("Subject", null));
+    }
+
+    @Test
+    void taskDefinition_nullDependsOn_defaultsToEmptyList() {
+        var td = new TaskDefinition("Subject", "Desc", "ALL", null, 0);
+
+        assertNotNull(td.dependsOn());
+        assertTrue(td.dependsOn().isEmpty());
+    }
+
+    @Test
+    void taskDefinition_nullAssignToRole_defaultsToALL() {
+        var td = new TaskDefinition("Subject", "Desc", null, List.of(), 0);
+
+        assertEquals("ALL", td.assignToRole());
+    }
+
+    // ==================== DiscussionPhase ====================
+
+    @Test
+    void discussionPhase_requiresApprovalTrue() {
+        var phase = new DiscussionPhase(
+                "PHASE", PhaseType.OPINION, "ALL",
+                TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, true);
+
+        assertTrue(phase.requiresApproval());
+    }
+
+    @Test
+    void discussionPhase_requiresApprovalFalse() {
+        var phase = new DiscussionPhase(
+                "PHASE", PhaseType.OPINION, "ALL",
+                TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false);
+
+        assertFalse(phase.requiresApproval());
+    }
 }

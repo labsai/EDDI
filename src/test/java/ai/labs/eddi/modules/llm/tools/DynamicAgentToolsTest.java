@@ -182,6 +182,215 @@ class DynamicAgentToolsTest {
             assertTrue(result.contains("DB error"));
             assertTrue(createdAgentIds.isEmpty());
         }
+
+        @Test
+        void createSubAgent_retainFlag() throws Exception {
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
+                            null, null, true, "ready", null, null, null, null, null));
+
+            String result = tool.createSubAgent("Test", "prompt", null, null, null, true);
+
+            assertTrue(result.contains("✅"));
+            assertTrue(result.contains("retained"));
+            assertTrue(retainedAgentIds.contains("sub-agent-1"));
+        }
+
+        @Test
+        void createSubAgent_modelAllowed_caseInsensitiveKey() throws Exception {
+            // Config uses mixed-case key "OpenAI", but caller passes lowercase "openai"
+            config.setAllowedProviders(List.of("openai"));
+            config.setAllowedModels(Map.of("OpenAI", List.of("gpt-4o-mini")));
+
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
+                            "openai", "gpt-4o-mini", true, "ready", null, null, null, null, null));
+
+            String result = tool.createSubAgent("Test", "prompt", "openai", "gpt-4o-mini", null, null);
+
+            assertTrue(result.contains("✅"));
+        }
+
+        @Test
+        void createSubAgent_modelAllowed_providerOmitted_positiveCase() throws Exception {
+            // Model exists in one of the provider lists — should be allowed
+            config.setAllowedModels(Map.of("openai", List.of("gpt-4o-mini")));
+
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
+                            null, "gpt-4o-mini", true, "ready", null, null, null, null, null));
+
+            String result = tool.createSubAgent("Test", "prompt", null, "gpt-4o-mini", null, null);
+
+            assertTrue(result.contains("✅"));
+        }
+
+        @Test
+        void createSubAgent_configDisabled() {
+            config.setEnabled(false);
+            config.setAllowCreation(true);
+
+            String result = tool.createSubAgent("Test", "prompt", null, null, null, null);
+
+            assertTrue(result.contains("⚠️"));
+            assertTrue(result.contains("not enabled"));
+        }
+
+        @Test
+        void createSubAgent_withInitialMessage_success() throws Exception {
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
+                            "openai", "gpt-4o-mini", true, "ready", null, null, null, null, null));
+
+            // Stub startConversation
+            when(conversationService.startConversation(any(Environment.class), eq("sub-agent-1"), eq("user-1"), anyMap()))
+                    .thenReturn(new ConversationResult("conv-123", null));
+
+            // Stub say() — callback with snapshot containing output
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationId("conv-123");
+            snapshot.setConversationState(ConversationState.READY);
+            var output = new ConversationOutput();
+            output.put("output", List.of("Hello from sub-agent!"));
+            snapshot.setConversationOutputs(List.of(output));
+
+            doAnswer(invocation -> {
+                IConversationService.ConversationResponseHandler handler = invocation.getArgument(8);
+                handler.onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(
+                    any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+            String result = tool.createSubAgent("Test", "prompt", "openai", "gpt-4o-mini", "hi", null);
+
+            assertTrue(result.contains("✅"));
+            assertTrue(result.contains("conv-123"));
+            assertTrue(result.contains("Hello from sub-agent!"));
+            assertTrue(result.contains("Provider: openai"));
+            assertTrue(result.contains("Model: gpt-4o-mini"));
+        }
+
+        @Test
+        void createSubAgent_withInitialMessage_failure() throws Exception {
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
+                            null, null, true, "ready", null, null, null, null, null));
+
+            // Stub startConversation to throw
+            when(conversationService.startConversation(any(Environment.class), eq("sub-agent-1"), eq("user-1"), anyMap()))
+                    .thenThrow(new RuntimeException("Not deployed"));
+
+            String result = tool.createSubAgent("Test", "prompt", null, null, "hi", null);
+
+            assertTrue(result.contains("✅")); // Agent was created successfully
+            assertTrue(result.contains("Initial message failed"));
+        }
+
+        @Test
+        void createSubAgent_noProviderNoModel_omitsFromResult() throws Exception {
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
+                            null, null, true, "ready", null, null, null, null, null));
+
+            String result = tool.createSubAgent("Test", "prompt", null, null, null, null);
+
+            assertTrue(result.contains("✅"));
+            assertFalse(result.contains("Provider:"));
+            assertFalse(result.contains("Model:"));
+        }
+
+        @Test
+        void createSubAgent_unexpectedException() throws Exception {
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenThrow(new RuntimeException("Unexpected"));
+
+            String result = tool.createSubAgent("Test", "prompt", null, null, null, null);
+
+            assertTrue(result.contains("❌"));
+            assertTrue(result.contains("Unexpected"));
+        }
+
+        @Test
+        void createSubAgent_blankName() {
+            String result = tool.createSubAgent("  ", "prompt", null, null, null, null);
+            assertTrue(result.contains("⚠️"));
+            assertTrue(result.contains("name is required"));
+        }
+
+        @Test
+        void createSubAgent_blankPrompt() {
+            String result = tool.createSubAgent("Test", "  ", null, null, null, null);
+            assertTrue(result.contains("⚠️"));
+            assertTrue(result.contains("prompt is required"));
+        }
+
+        @Test
+        void createSubAgent_emptyProviderAllowList() throws Exception {
+            // Empty (not null) allow list should not restrict
+            config.setAllowedProviders(List.of());
+
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
+                            "anthropic", null, true, "ready", null, null, null, null, null));
+
+            String result = tool.createSubAgent("Test", "prompt", "anthropic", null, null, null);
+            assertTrue(result.contains("✅"));
+        }
+
+        @Test
+        void createSubAgent_emptyModelAllowList() throws Exception {
+            // Empty (not null) model allow list should not restrict
+            config.setAllowedModels(Map.of());
+
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
+                            null, "any-model", true, "ready", null, null, null, null, null));
+
+            String result = tool.createSubAgent("Test", "prompt", null, "any-model", null, null);
+            assertTrue(result.contains("✅"));
+        }
+
+        @Test
+        void createSubAgent_retainFalse_notTracked() throws Exception {
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
+                            null, null, true, "ready", null, null, null, null, null));
+
+            String result = tool.createSubAgent("Test", "prompt", null, null, null, false);
+
+            assertTrue(result.contains("✅"));
+            assertFalse(result.contains("retained"));
+            assertTrue(retainedAgentIds.isEmpty());
+        }
+
+        @Test
+        void createSubAgent_withInitialMessage_extractResponseMapFormat() throws Exception {
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
+                            null, null, true, "ready", null, null, null, null, null));
+
+            when(conversationService.startConversation(any(Environment.class), eq("sub-agent-1"), eq("user-1"), anyMap()))
+                    .thenReturn(new ConversationResult("conv-123", null));
+
+            // Snapshot with Map-format output items ("text" key)
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationId("conv-123");
+            snapshot.setConversationState(ConversationState.READY);
+            var output = new ConversationOutput();
+            output.put("output", List.of(Map.of("text", "Map-format response")));
+            snapshot.setConversationOutputs(List.of(output));
+
+            doAnswer(invocation -> {
+                IConversationService.ConversationResponseHandler handler = invocation.getArgument(8);
+                handler.onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(
+                    any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+            String result = tool.createSubAgent("Test", "prompt", null, null, "hi", null);
+
+            assertTrue(result.contains("Map-format response"));
+        }
     }
 
     // === ConverseWithAgentTool ===
@@ -332,6 +541,123 @@ class DynamicAgentToolsTest {
         }
 
         @Test
+        @DisplayName("Agent ID required")
+        void converseWithAgent_agentIdRequired() {
+            String result = tool.converseWithAgent(null, "Hello", null);
+            assertTrue(result.contains("⚠️"));
+            assertTrue(result.contains("Agent ID is required"));
+        }
+
+        @Test
+        @DisplayName("Blank agent ID rejected")
+        void converseWithAgent_blankAgentId() {
+            String result = tool.converseWithAgent("  ", "Hello", null);
+            assertTrue(result.contains("⚠️"));
+        }
+
+        @Test
+        @DisplayName("Message required")
+        void converseWithAgent_messageRequired() {
+            String result = tool.converseWithAgent(AGENT_ID, null, null);
+            assertTrue(result.contains("⚠️"));
+            assertTrue(result.contains("Message is required"));
+        }
+
+        @Test
+        @DisplayName("Blank message rejected")
+        void converseWithAgent_blankMessage() {
+            String result = tool.converseWithAgent(AGENT_ID, "  ", null);
+            assertTrue(result.contains("⚠️"));
+        }
+
+        @Test
+        @DisplayName("Map-format output items extracted")
+        void converseWithAgent_mapFormatOutput() throws Exception {
+            when(conversationService.startConversation(any(Environment.class), eq(AGENT_ID), eq(USER_ID), anyMap()))
+                    .thenReturn(new ConversationResult(CONVERSATION_ID, URI.create("/conv")));
+
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationId(CONVERSATION_ID);
+            snapshot.setConversationState(ConversationState.READY);
+            var output = new ConversationOutput();
+            output.put("output", List.of(Map.of("text", "Map text")));
+            snapshot.setConversationOutputs(List.of(output));
+            stubSayWithSnapshot(snapshot);
+
+            String result = tool.converseWithAgent(AGENT_ID, "Hello", null);
+            assertTrue(result.contains("Map text"));
+        }
+
+        @Test
+        @DisplayName("Non-string/non-map items in output list are skipped")
+        void converseWithAgent_mixedOutputItems() throws Exception {
+            when(conversationService.startConversation(any(Environment.class), eq(AGENT_ID), eq(USER_ID), anyMap()))
+                    .thenReturn(new ConversationResult(CONVERSATION_ID, URI.create("/conv")));
+
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationId(CONVERSATION_ID);
+            snapshot.setConversationState(ConversationState.READY);
+            var output = new ConversationOutput();
+            output.put("output", List.of("text1", 42, Map.of("text", "text2"), Map.of("other", "no-text-key")));
+            snapshot.setConversationOutputs(List.of(output));
+            stubSayWithSnapshot(snapshot);
+
+            String result = tool.converseWithAgent(AGENT_ID, "Hello", null);
+            assertTrue(result.contains("text1"));
+            assertTrue(result.contains("text2"));
+            assertFalse(result.contains("42"));
+        }
+
+        @Test
+        @DisplayName("Null snapshot returns no response")
+        void converseWithAgent_nullSnapshot() throws Exception {
+            when(conversationService.startConversation(any(Environment.class), eq(AGENT_ID), eq(USER_ID), anyMap()))
+                    .thenReturn(new ConversationResult(CONVERSATION_ID, URI.create("/conv")));
+
+            doAnswer(invocation -> {
+                ConversationResponseHandler handler = invocation.getArgument(8);
+                handler.onComplete(null);
+                return null;
+            }).when(conversationService).say(
+                    any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+            String result = tool.converseWithAgent(AGENT_ID, "Hello", null);
+            assertTrue(result.contains("[no response]"));
+        }
+
+        @Test
+        @DisplayName("Output with no 'output' key returns no response")
+        void converseWithAgent_noOutputKey() throws Exception {
+            when(conversationService.startConversation(any(Environment.class), eq(AGENT_ID), eq(USER_ID), anyMap()))
+                    .thenReturn(new ConversationResult(CONVERSATION_ID, URI.create("/conv")));
+
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationId(CONVERSATION_ID);
+            snapshot.setConversationState(ConversationState.READY);
+            var output = new ConversationOutput();
+            output.put("someOtherKey", "value");
+            snapshot.setConversationOutputs(List.of(output));
+            stubSayWithSnapshot(snapshot);
+
+            String result = tool.converseWithAgent(AGENT_ID, "Hello", null);
+            assertTrue(result.contains("[no response]"));
+        }
+
+        @Test
+        @DisplayName("General exception during say returns error")
+        void converseWithAgent_generalException() throws Exception {
+            when(conversationService.startConversation(any(Environment.class), eq(AGENT_ID), eq(USER_ID), anyMap()))
+                    .thenReturn(new ConversationResult(CONVERSATION_ID, URI.create("/conv")));
+
+            doThrow(new RuntimeException("Connection lost")).when(conversationService).say(
+                    any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+            String result = tool.converseWithAgent(AGENT_ID, "Hello", null);
+            assertTrue(result.contains("❌"));
+            assertTrue(result.contains("Connection lost"));
+        }
+
+        @Test
         @DisplayName("startConversation failure returns error message")
         void converseWithAgent_startConversationFails_returnsError() throws Exception {
             // Arrange — startConversation throws
@@ -442,6 +768,58 @@ class DynamicAgentToolsTest {
         }
 
         @Test
+        void findAgentsByCapability_blankSkill() {
+            String result = tool.findAgentsByCapability("  ", null);
+            assertTrue(result.contains("⚠️"));
+        }
+
+        @Test
+        void findAgentsByCapability_nullResult() {
+            when(registryService.findBySkill("test", "highest_confidence")).thenReturn(null);
+
+            String result = tool.findAgentsByCapability("test", null);
+            assertTrue(result.contains("No agents found"));
+        }
+
+        @Test
+        void findAgentsByCapability_noConfidence() {
+            when(registryService.findBySkill("test", "highest_confidence"))
+                    .thenReturn(List.of(new CapabilityMatch("agent-1", "test", null, Map.of())));
+
+            String result = tool.findAgentsByCapability("test", null);
+            assertTrue(result.contains("agent-1"));
+            assertFalse(result.contains("Confidence:"));
+        }
+
+        @Test
+        void findAgentsByCapability_blankConfidence() {
+            when(registryService.findBySkill("test", "highest_confidence"))
+                    .thenReturn(List.of(new CapabilityMatch("agent-1", "test", "  ", Map.of())));
+
+            String result = tool.findAgentsByCapability("test", null);
+            assertFalse(result.contains("Confidence:"));
+        }
+
+        @Test
+        void findAgentsByCapability_nullAttributes() {
+            when(registryService.findBySkill("test", "highest_confidence"))
+                    .thenReturn(List.of(new CapabilityMatch("agent-1", "test", "high", null)));
+
+            String result = tool.findAgentsByCapability("test", null);
+            assertFalse(result.contains("Attributes:"));
+        }
+
+        @Test
+        void findAgentsByCapability_exception() {
+            when(registryService.findBySkill("test", "highest_confidence"))
+                    .thenThrow(new RuntimeException("Registry down"));
+
+            String result = tool.findAgentsByCapability("test", null);
+            assertTrue(result.contains("❌"));
+            assertTrue(result.contains("Registry down"));
+        }
+
+        @Test
         void findAgentsByCapability_customStrategy() {
             when(registryService.findBySkill("code-review", "round_robin"))
                     .thenReturn(List.of(new CapabilityMatch("agent-1", "code-review", "high", Map.of())));
@@ -545,6 +923,63 @@ class DynamicAgentToolsTest {
             String result = tool.teardownAgent(null, false);
             assertTrue(result.contains("⚠️"));
         }
+
+        @Test
+        void teardownAgent_undeployFailure() throws Exception {
+            doThrow(new RuntimeException("Agent not found")).when(agentFactory)
+                    .undeployAgent(any(Environment.class), eq("created-1"), isNull());
+
+            String result = tool.teardownAgent("created-1", false);
+
+            assertTrue(result.contains("❌"));
+            assertTrue(result.contains("Agent not found"));
+        }
+
+        @Test
+        void teardownAgent_deleteFailure() throws Exception {
+            doThrow(new RuntimeException("DB locked")).when(agentStore)
+                    .deleteAllPermanently("created-1");
+
+            String result = tool.teardownAgent("created-1", true);
+
+            assertTrue(result.contains("⚠️"));
+            assertTrue(result.contains("undeployed"));
+            assertTrue(result.contains("deletion failed"));
+        }
+
+        @Test
+        void unretainAgent_success() {
+            retainedAgentIds.add("created-1");
+
+            String result = tool.unretainAgent("created-1");
+
+            assertTrue(result.contains("✅"));
+            assertTrue(result.contains("Retention flag removed"));
+            assertFalse(retainedAgentIds.contains("created-1"));
+        }
+
+        @Test
+        void unretainAgent_notRetained() {
+            String result = tool.unretainAgent("created-1");
+
+            assertTrue(result.contains("⚠️"));
+            assertTrue(result.contains("not currently retained"));
+        }
+
+        @Test
+        void unretainAgent_agentIdRequired() {
+            String result = tool.unretainAgent(null);
+            assertTrue(result.contains("⚠️"));
+        }
+
+        @Test
+        void constructor_nullFallbacks() {
+            // Verify null constructor args produce mutable (not immutable) defaults
+            var safeTool = new TeardownAgentTool(agentFactory, agentStore, null, null);
+            // These should not throw UnsupportedOperationException
+            String result = safeTool.teardownAgent("non-existent", false);
+            assertTrue(result.contains("⚠️"));
+        }
     }
 
     // === DynamicAgentConfig ===
@@ -595,6 +1030,14 @@ class DynamicAgentToolsTest {
             assertEquals(Map.of("openai", List.of("gpt-4o")), config.getAllowedModels());
             assertFalse(config.isInheritParentModel());
             assertEquals(AgentGroupConfiguration.LifecyclePolicy.AGENT_DECIDES, config.getLifecyclePolicy());
+        }
+
+        @Test
+        void lifecyclePolicyNullSafe() {
+            var config = new DynamicAgentConfig();
+            config.setLifecyclePolicy(null);
+            // null should be coerced to EPHEMERAL
+            assertEquals(AgentGroupConfiguration.LifecyclePolicy.EPHEMERAL, config.getLifecyclePolicy());
         }
     }
 

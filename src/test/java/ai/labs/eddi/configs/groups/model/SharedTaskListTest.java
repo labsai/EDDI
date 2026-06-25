@@ -529,4 +529,115 @@ class SharedTaskListTest {
         // List still has exactly 2 tasks
         assertEquals(2, list.size(), "updateTask must not change list size");
     }
+
+    // --- Additional branch coverage ---
+
+    @Test
+    void findTasksForAgent_null_returnsEmpty() {
+        list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
+        assertTrue(list.findTasksForAgent(null).isEmpty());
+    }
+
+    @Test
+    void assignTask_fromAssigned_throws() {
+        var task = list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
+        list.assignTask(task.id(), "agent-1", "Agent");
+
+        // Trying to assign again should throw (already ASSIGNED)
+        assertThrows(IllegalStateException.class,
+                () -> list.assignTask(task.id(), "agent-2", "Agent2"));
+    }
+
+    @Test
+    void completeTask_nonexistentId_throws() {
+        assertThrows(IllegalArgumentException.class,
+                () -> list.completeTask("nonexistent", "result"));
+    }
+
+    @Test
+    void verifyTask_nonexistentId_throws() {
+        assertThrows(IllegalArgumentException.class,
+                () -> list.verifyTask("nonexistent", true, "note"));
+    }
+
+    @Test
+    void verifyTask_fromPending_throws() {
+        var task = list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
+        assertThrows(IllegalStateException.class,
+                () -> list.verifyTask(task.id(), true, "note"));
+    }
+
+    @Test
+    void failTask_nonexistentId_throws() {
+        assertThrows(IllegalArgumentException.class,
+                () -> list.failTask("nonexistent", "reason"));
+    }
+
+    @Test
+    void failTask_fromCompleted() {
+        var task = list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
+        list.assignTask(task.id(), "agent-1", "Agent");
+        list.startTask(task.id());
+        list.completeTask(task.id(), "done");
+
+        var failed = list.failTask(task.id(), "actually wrong");
+        assertEquals(SharedTaskList.TaskStatus.FAILED, failed.status());
+    }
+
+    @Test
+    void failTask_fromFailed_throws() {
+        var task = list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
+        list.assignTask(task.id(), "agent-1", "Agent");
+        list.startTask(task.id());
+        list.failTask(task.id(), "failed");
+
+        // Already failed — can't fail again
+        assertThrows(IllegalStateException.class,
+                () -> list.failTask(task.id(), "fail again"));
+    }
+
+    @Test
+    void setTasks_null_createsEmptyList() {
+        list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
+        assertFalse(list.isEmpty());
+
+        list.setTasks(null);
+        assertTrue(list.isEmpty());
+        assertEquals(0, list.size());
+    }
+
+    @Test
+    void sizeAndIsEmpty_basicOperations() {
+        assertTrue(list.isEmpty());
+        assertEquals(0, list.size());
+
+        list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
+        assertFalse(list.isEmpty());
+        assertEquals(1, list.size());
+    }
+
+    @Test
+    void findExecutableTasks_withNonexistentDep_notExecutable() {
+        var id = UUID.randomUUID().toString();
+        var task = new SharedTaskList.TaskItem(
+                id, "Task", "desc", SharedTaskList.TaskStatus.PENDING,
+                null, null, List.of("nonexistent-dep-id"), null, null, false, 0, Instant.now(), null);
+        list.addTask(task);
+
+        // Task depends on a nonexistent ID — should NOT be executable
+        assertTrue(list.findExecutableTasks().isEmpty());
+    }
+
+    @Test
+    void failTask_fromVerified_throws() {
+        var task = list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
+        list.assignTask(task.id(), "agent-1", "Agent");
+        list.startTask(task.id());
+        list.completeTask(task.id(), "done");
+        list.verifyTask(task.id(), true, "good");
+
+        // VERIFIED is terminal — can't fail
+        assertThrows(IllegalStateException.class,
+                () -> list.failTask(task.id(), "no"));
+    }
 }

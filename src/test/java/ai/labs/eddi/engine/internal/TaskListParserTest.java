@@ -246,4 +246,267 @@ class TaskListParserTest {
         assertTrue(result.getFirst().description().contains("hotel"),
                 "Fallback should preserve LLM output as task description");
     }
+
+    // --- Additional branch coverage tests ---
+
+    @Test
+    @DisplayName("JSON object without array field returns null (falls to markdown/fallback)")
+    void jsonObject_noArrayField() {
+        String input = "{\"message\": \"hello\", \"count\": 42}";
+        var result = TaskListParser.parse(input, MEMBERS);
+
+        // No array field found, no markdown items → falls to single task fallback
+        assertEquals(1, result.size());
+        assertEquals("Complete goal", result.getFirst().subject());
+    }
+
+    @Test
+    @DisplayName("JSON with 'title' alias for subject field")
+    void jsonAlternativeKey_title() {
+        String json = """
+                [{"title":"Task via Title","description":"Using title key"}]
+                """;
+        var result = TaskListParser.parse(json, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Task via Title", result.getFirst().subject());
+    }
+
+    @Test
+    @DisplayName("JSON with 'name' alias for subject field")
+    void jsonAlternativeKey_name() {
+        String json = """
+                [{"name":"Task via Name","desc":"Using desc key"}]
+                """;
+        var result = TaskListParser.parse(json, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Task via Name", result.getFirst().subject());
+        assertEquals("Using desc key", result.getFirst().description());
+    }
+
+    @Test
+    @DisplayName("JSON with 'assignee' alias for assignedTo")
+    void jsonAlternativeKey_assignee() {
+        String json = """
+                [{"subject":"Task","description":"D","assignee":"agent-2"}]
+                """;
+        var result = TaskListParser.parse(json, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("agent-2", result.getFirst().assignedTo());
+    }
+
+    @Test
+    @DisplayName("JSON with 'assigned_to' alias for assignedTo")
+    void jsonAlternativeKey_assigned_to() {
+        String json = """
+                [{"subject":"Task","description":"D","assigned_to":"agent-1"}]
+                """;
+        var result = TaskListParser.parse(json, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("agent-1", result.getFirst().assignedTo());
+    }
+
+    @Test
+    @DisplayName("JSON with missing description uses subject as description")
+    void jsonMissingDescription_usesSubject() {
+        String json = """
+                [{"subject":"Only Subject"}]
+                """;
+        var result = TaskListParser.parse(json, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Only Subject", result.getFirst().subject());
+        assertEquals("Only Subject", result.getFirst().description());
+    }
+
+    @Test
+    @DisplayName("JSON with priority as number")
+    void jsonPriority_number() {
+        String json = """
+                [{"subject":"Task","description":"D","priority":3}]
+                """;
+        var result = TaskListParser.parse(json, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals(3, result.getFirst().priority());
+    }
+
+    @Test
+    @DisplayName("JSON with priority as string (non-number) uses default 0")
+    void jsonPriority_stringFallback() {
+        String json = """
+                [{"subject":"Task","description":"D","priority":"high"}]
+                """;
+        var result = TaskListParser.parse(json, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals(0, result.getFirst().priority());
+    }
+
+    @Test
+    @DisplayName("Markdown with dash-separated title and description")
+    void markdownDashSeparator() {
+        String markdown = "- Plan — create a detailed plan";
+        var result = TaskListParser.parse(markdown, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Plan", result.getFirst().subject());
+        assertEquals("create a detailed plan", result.getFirst().description());
+    }
+
+    @Test
+    @DisplayName("Markdown item without description uses subject as description")
+    void markdownItemWithoutDescription() {
+        String markdown = "1. Research competitors";
+        var result = TaskListParser.parse(markdown, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Research competitors", result.getFirst().subject());
+        // When no description part, description equals subject
+        assertEquals("Research competitors", result.getFirst().description());
+    }
+
+    @Test
+    @DisplayName("Markdown with assignedTo= format extracts assignment")
+    void markdownAssignment_equalsFormat() {
+        String markdown = "- Research (assignedTo=agent-1) — find references";
+        var result = TaskListParser.parse(markdown, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("agent-1", result.getFirst().assignedTo());
+    }
+
+    @Test
+    @DisplayName("resolveAgent with null assignedTo returns null")
+    void resolveAgent_nullAssignedTo() {
+        assertNull(TaskListParser.resolveAgent(null, MEMBERS));
+    }
+
+    @Test
+    @DisplayName("resolveAgent with blank assignedTo returns null")
+    void resolveAgent_blankAssignedTo() {
+        assertNull(TaskListParser.resolveAgent("  ", MEMBERS));
+    }
+
+    @Test
+    @DisplayName("resolveAgent with null members returns null")
+    void resolveAgent_nullMembers() {
+        assertNull(TaskListParser.resolveAgent("agent-1", null));
+    }
+
+    @Test
+    @DisplayName("resolveAgent with empty members returns null")
+    void resolveAgent_emptyMembers() {
+        assertNull(TaskListParser.resolveAgent("agent-1", List.of()));
+    }
+
+    @Test
+    @DisplayName("resolveAgent matches display name with extra whitespace")
+    void resolveAgent_displayNameWithWhitespace() {
+        assertEquals("agent-1", TaskListParser.resolveAgent("  Analyst  ", MEMBERS));
+    }
+
+    @Test
+    @DisplayName("roundRobinAssign with null members returns null")
+    void roundRobinAssign_nullMembers() {
+        assertNull(TaskListParser.roundRobinAssign(0, null));
+    }
+
+    @Test
+    @DisplayName("Tier 3 fallback truncates very long text to 2000 chars")
+    void tier3Fallback_truncatesLongText() {
+        String longText = "A".repeat(5000);
+        var result = TaskListParser.parse(longText, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals(2000, result.getFirst().description().length());
+    }
+
+    @Test
+    @DisplayName("JSON with 'items' wrapper object is unwrapped")
+    void jsonObjectWithItemsKey() {
+        String json = """
+                {"items":[{"subject":"Task A","description":"Do A"}]}
+                """;
+        var result = TaskListParser.parse(json, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Task A", result.getFirst().subject());
+    }
+
+    @Test
+    @DisplayName("Markdown with plus sign bullet is parsed")
+    void markdownPlusBullet() {
+        String markdown = "+ Review code";
+        var result = TaskListParser.parse(markdown, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Review code", result.getFirst().subject());
+    }
+
+    @Test
+    @DisplayName("JSON entries with blank subject are skipped")
+    void jsonBlankSubject_skipped() {
+        String json = """
+                [{"subject":"","description":"should be skipped"},{"subject":"Valid","description":"keep"}]
+                """;
+        var result = TaskListParser.parse(json, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Valid", result.getFirst().subject());
+    }
+
+    @Test
+    @DisplayName("JSON with 'details' alias for description")
+    void jsonAlternativeKey_details() {
+        String json = """
+                [{"subject":"Task","details":"Using details key"}]
+                """;
+        var result = TaskListParser.parse(json, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Using details key", result.getFirst().description());
+    }
+
+    @Test
+    @DisplayName("JSON with 'instructions' alias for description")
+    void jsonAlternativeKey_instructions() {
+        String json = """
+                [{"subject":"Task","instructions":"Using instructions key"}]
+                """;
+        var result = TaskListParser.parse(json, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Using instructions key", result.getFirst().description());
+    }
+
+    @Test
+    @DisplayName("JSON with 'agent' alias for assignedTo")
+    void jsonAlternativeKey_agent() {
+        String json = """
+                [{"subject":"Task","description":"D","agent":"agent-1"}]
+                """;
+        var result = TaskListParser.parse(json, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("agent-1", result.getFirst().assignedTo());
+    }
+
+    @Test
+    @DisplayName("resolveAgent with member having null displayName does not crash")
+    void resolveAgent_memberWithNullDisplayName() {
+        var membersWithNullName = List.of(
+                new GroupMember("agent-1", null, 0, "ROLE"),
+                new GroupMember("agent-2", "Writer", 1, "ROLE"));
+
+        // Should still match by agentId
+        assertEquals("agent-1", TaskListParser.resolveAgent("agent-1", membersWithNullName));
+        // Should not crash when iterating through null displayNames
+        assertEquals("agent-2", TaskListParser.resolveAgent("Writer", membersWithNullName));
+        // Should return null for unmatched
+        assertNull(TaskListParser.resolveAgent("unknown", membersWithNullName));
+    }
 }

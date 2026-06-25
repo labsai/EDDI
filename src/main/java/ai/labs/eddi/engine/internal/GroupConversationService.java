@@ -664,109 +664,133 @@ public class GroupConversationService implements IGroupConversationService {
             return;
         }
 
-        // Group tasks by assigned agent
-        Map<String, List<TaskItem>> tasksByAgent = gc.getTaskList().findExecutableTasks().stream()
-                .filter(t -> t.assignedAgentId() != null)
-                .collect(Collectors.groupingBy(TaskItem::assignedAgentId));
-
-        if (tasksByAgent.isEmpty()) {
-            LOGGER.warn("EXECUTE phase: no assigned tasks found");
-            return;
-        }
-
         // Note: unlike executeParallelPhase, no transcript snapshot is needed here
-        // because
-        // agents receive task-specific input via buildTaskExecutionInput(), not
-        // transcript context.
-        // Execute agents in parallel, tasks per agent sequentially
-        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        // because agents receive task-specific input via buildTaskExecutionInput(),
+        // not transcript context.
+
         List<GroupDiscussionException> errors = Collections.synchronizedList(new ArrayList<>());
+        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : 60;
+        int maxWaves = 100; // safety cap to prevent infinite loops
 
-        for (Map.Entry<String, List<TaskItem>> agentEntry : tasksByAgent.entrySet()) {
-            String agentId = agentEntry.getKey();
-            List<TaskItem> agentTasks = agentEntry.getValue();
-            GroupMember member = findMemberIncludingDynamic(config.getMembers(), gc, agentId);
+        // Wave loop: re-query executable tasks after each wave completes.
+        // Tasks that become executable when their dependencies finish are picked up
+        // in the next wave. This handles dependsOn chains across any depth.
+        for (int wave = 0; wave < maxWaves; wave++) {
+            Map<String, List<TaskItem>> tasksByAgent = gc.getTaskList().findExecutableTasks().stream()
+                    .filter(t -> t.assignedAgentId() != null)
+                    .collect(Collectors.groupingBy(TaskItem::assignedAgentId));
 
-            if (member == null) {
-                LOGGER.warnf("Task assigned to unknown agent '%s', skipping", agentId);
-                continue;
+            if (tasksByAgent.isEmpty()) {
+                if (wave == 0) {
+                    LOGGER.warn("EXECUTE phase: no assigned tasks found");
+                }
+                break; // no more executable tasks — all waves complete
             }
 
-            CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
-                for (TaskItem task : agentTasks) {
-                    if (turnCounter.get() >= maxTurns) {
-                        break;
-                    }
-                    try {
-                        turnCounter.incrementAndGet();
-                        gc.getTaskList().startTask(task.id());
+            LOGGER.debugf("EXECUTE phase wave %d: %d agents, %d tasks",
+                    wave + 1, tasksByAgent.size(),
+                    tasksByAgent.values().stream().mapToInt(List::size).sum());
 
-                        if (listener != null) {
-                            listener.onSpeakerStart(new GroupConversationEventSink.SpeakerStartEvent(
-                                    member.agentId(), member.displayName(), phaseIdx, phase.name()));
-                        }
+            // Execute agents in parallel, tasks per agent sequentially
+            List<CompletableFuture<Void>> futures = new ArrayList<>();
 
-                        // Build task-specific input
-                        String taskInput = buildTaskExecutionInput(task, question, phase, gc);
-                        TranscriptEntry entry = executeAgentTurn(member, gc, taskInput, protocol, phaseIdx, phase, null);
+            for (Map.Entry<String, List<TaskItem>> agentEntry : tasksByAgent.entrySet()) {
+                String agentId = agentEntry.getKey();
+                List<TaskItem> agentTasks = agentEntry.getValue();
+                GroupMember member = findMemberIncludingDynamic(config.getMembers(), gc, agentId);
 
-                        synchronized (gc.getTranscript()) {
-                            gc.getTranscript().add(entry);
-                        }
+                if (member == null) {
+                    LOGGER.warnf("Task assigned to unknown agent '%s', skipping", agentId);
+                    continue;
+                }
 
-                        gc.getTaskList().completeTask(task.id(), entry.content());
-
-                        if (listener != null) {
-                            listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
-                                    member.agentId(), member.displayName(), entry.content(), phaseIdx, phase.name()));
-                        }
-
-                    } catch (GroupDiscussionException e) {
-                        // Quota errors are non-retryable — abort all tasks immediately
-                        if (e.getCause() instanceof QuotaExceededException) {
-                            errors.add(e);
-                            return; // exit the entire agent's CompletableFuture
-                        }
-                        handleTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, listener, errors, e);
-                        if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
+                CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                    for (TaskItem task : agentTasks) {
+                        if (turnCounter.get() >= maxTurns) {
                             break;
                         }
-                    } catch (IllegalStateException e) {
-                        // H5 fix: catch status transition errors (e.g., double completion)
-                        LOGGER.warnf("Task state error for '%s': %s", task.subject(), e.getMessage());
-                        handleTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, listener, errors,
-                                new GroupDiscussionException(e.getMessage(), e));
+                        try {
+                            turnCounter.incrementAndGet();
+                            gc.getTaskList().startTask(task.id());
+
+                            if (listener != null) {
+                                listener.onSpeakerStart(new GroupConversationEventSink.SpeakerStartEvent(
+                                        member.agentId(), member.displayName(), phaseIdx, phase.name()));
+                            }
+
+                            // Build task-specific input
+                            String taskInput = buildTaskExecutionInput(task, question, phase, gc);
+                            TranscriptEntry entry = executeAgentTurn(member, gc, taskInput, protocol, phaseIdx, phase, null);
+
+                            synchronized (gc.getTranscript()) {
+                                gc.getTranscript().add(entry);
+                            }
+
+                            gc.getTaskList().completeTask(task.id(), entry.content());
+
+                            if (listener != null) {
+                                listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
+                                        member.agentId(), member.displayName(), entry.content(), phaseIdx, phase.name()));
+                            }
+
+                        } catch (GroupDiscussionException e) {
+                            // Quota errors are non-retryable — abort all tasks immediately
+                            if (e.getCause() instanceof QuotaExceededException) {
+                                errors.add(e);
+                                return; // exit the entire agent's CompletableFuture
+                            }
+                            handleTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, listener, errors, e);
+                            if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
+                                break;
+                            }
+                        } catch (IllegalStateException e) {
+                            // H5 fix: catch status transition errors (e.g., double completion)
+                            LOGGER.warnf("Task state error for '%s': %s", task.subject(), e.getMessage());
+                            handleTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, listener, errors,
+                                    new GroupDiscussionException(e.getMessage(), e));
+                        }
                     }
+                }, executorService);
+                futures.add(future);
+            }
+
+            // Wait for this wave — timeout based on max tasks per agent (H2 fix)
+            int maxTasksPerAgent = tasksByAgent.values().stream().mapToInt(List::size).max().orElse(1);
+            try {
+                CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
+                        .get(timeout * (long) maxTasksPerAgent, TimeUnit.SECONDS);
+            } catch (TimeoutException e) {
+                LOGGER.warnf("Task execution timed out for group %s (wave %d)",
+                        LogSanitizer.sanitize(gc.getGroupId()), wave + 1);
+                futures.forEach(f -> f.cancel(true));
+                break;
+            } catch (ExecutionException | InterruptedException e) {
+                LOGGER.warnf("Task execution error for group %s: %s",
+                        LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(e.getMessage()));
+                if (e instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
                 }
-            }, executorService);
-            futures.add(future);
-        }
+                break;
+            }
 
-        // Wait for all agent executions — timeout based on max tasks per agent (H2 fix)
-        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : 60;
-        int maxTasksPerAgent = tasksByAgent.values().stream().mapToInt(List::size).max().orElse(1);
-        try {
-            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
-                    .get(timeout * (long) maxTasksPerAgent, TimeUnit.SECONDS);
-        } catch (TimeoutException e) {
-            LOGGER.warnf("Task execution timed out for group %s", LogSanitizer.sanitize(gc.getGroupId()));
-            futures.forEach(f -> f.cancel(true));
-        } catch (ExecutionException | InterruptedException e) {
-            LOGGER.warnf("Task execution error for group %s: %s",
-                    LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(e.getMessage()));
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
+            // Quota errors always abort, regardless of onAgentFailure policy
+            for (GroupDiscussionException error : errors) {
+                if (error.getCause() instanceof QuotaExceededException) {
+                    throw error;
+                }
+            }
+
+            // If ABORT policy and there were errors, stop further waves
+            if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT && !errors.isEmpty()) {
+                throw errors.getFirst();
+            }
+
+            if (turnCounter.get() >= maxTurns) {
+                break;
             }
         }
 
-        // Quota errors always abort, regardless of onAgentFailure policy
-        for (GroupDiscussionException error : errors) {
-            if (error.getCause() instanceof QuotaExceededException) {
-                throw error;
-            }
-        }
-
-        // If ABORT policy and there were errors, propagate
+        // Final error propagation after all waves (ABORT policy)
         if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT && !errors.isEmpty()) {
             throw errors.getFirst();
         }
