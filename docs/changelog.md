@@ -13,6 +13,7 @@
 - `executeAgentTurn` → `say()`: unwrap from `ExecutionException`, abort (bypasses retry policy)
 - Task execution loop: quota error exits the agent's `CompletableFuture` immediately
 - Parallel phase: quota propagates through `CompletionException`, cancels remaining futures
+- Review fix: quota errors in task loop now propagate regardless of `onAgentFailure` policy (was silently lost with SKIP policy)
 - +3 regression tests (startConversation quota, say() quota, no-retry-even-with-RETRY-policy). Total: 112 tests, 0 failures.
 
 ---
