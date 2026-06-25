@@ -4,7 +4,36 @@
 
 ---
 
+## 🔧 Dynamic Agent System — Critical Code Review Fixes (2026-06-25)
+
+**Repo:** EDDI (`feat/group-task-orchestration`)
+**What changed:** 3-reviewer code review uncovered 6 critical bugs and 8 medium issues. All critical and key medium issues fixed.
+
+### Critical Fixes
+- **C1: Shared tracking lists** — `AgentOrchestrator` was creating separate `createdAgentIds`/`retainedAgentIds` per whitelist tool call. TeardownAgentTool couldn't see agents created by CreateSubAgentTool. Fixed: shared lists created once, passed to all tools.
+- **C2: Retain flag non-functional** — `CreateSubAgentTool` accepted `retain=true` but never populated `retainedAgentIds`. Agents were auto-deleted despite LLM requesting retention. Fixed: wired `Set<String> retainedAgentIds` to constructor + `retainedAgentIds.add(agentId)` when retain=true.
+- **C3: Double quota counting** — `CreateSubAgentTool` called `acquireConversationSlot()` then `startConversation()` also called it internally. Each creation burned 2 quota slots. Fixed: removed explicit quota call from tool.
+- **C4: Transcript race condition** — `GroupConversation.transcript` was a plain `ArrayList` accessed from parallel virtual threads. Fixed: `Collections.synchronizedList(new ArrayList<>())` + null-safe setter.
+- **C5: Dead ERROR detection** — `ConverseWithAgentTool.extractResponse()` returned `""` instead of `null`, making `response == null` check dead code. Fixed: returns `null` for empty/missing outputs.
+- **C6: Zero test coverage** — `ConverseWithAgentTool` had 154 lines of untested code. Added 8 tests covering new conversation, existing conversation, validation, timeout, error state, empty response.
+
+### Medium Fixes
+- **M1: LifecyclePolicy enum** — `lifecyclePolicy` changed from `String` to `LifecyclePolicy` enum with `@JsonValue`/`@JsonCreator` for kebab-case JSON. Typos now fail at deserialization instead of silently skipping cleanup.
+- **M2: synchronizedList streaming** — `findMemberIncludingDynamic()` now wraps `findMember(dynamicMembers)` in `synchronized(dynamicMembers)` block.
+- **M3: Cycle detection** — `SharedTaskList.detectCycles()` now called after task list dependency resolution. Circular deps throw `GroupDiscussionException` fail-fast.
+- **M5: unretainAgent()** — New `@Tool` method on `TeardownAgentTool` to remove retention flags.
+- **M6: Agent removal after teardown** — `createdAgentIds.remove(agentId)` after successful undeploy, so counter accurately reflects active agents.
+- **M10: Case-insensitive guardrails** — Provider/model allow-list checks now use `equalsIgnoreCase()`.
+
+### Test Updates
+- `DynamicAgentToolsTest`: +8 ConverseWithAgentTool tests, updated quota test, updated enum assertions
+- `GroupConversationTest`: Updated enum count assertions (TranscriptEntryType 11→14, GroupConversationState 5→6)
+- **9,486 tests pass, 0 failures**
+
+---
+
 ## ✨ Dynamic Agent System — Create, Recruit, Delegate (2026-06-25)
+
 
 **Repo:** EDDI (`feat/group-task-orchestration`)
 **What changed:** LLM agents in TASK_FORCE group conversations can now dynamically create, recruit, converse with, and teardown other agents at runtime. This enables agentic patterns where a moderator or specialist agent can spin up sub-agents on-the-fly to accomplish tasks.

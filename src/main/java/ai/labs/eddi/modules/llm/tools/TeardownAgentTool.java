@@ -95,6 +95,7 @@ public class TeardownAgentTool {
                 }
             }
 
+            createdAgentIds.remove(agentId);
             return "✅ Agent '%s' has been undeployed successfully.".formatted(agentId);
 
         } catch (Exception e) {
@@ -136,5 +137,17 @@ public class TeardownAgentTool {
             LOGGER.errorf("[TEARDOWN] Error retaining agent '%s': %s", agentId, e.getMessage());
             return "❌ Error retaining agent: " + e.getMessage();
         }
+    }
+
+    @Tool("Remove the retention flag from a previously retained agent, allowing it to be cleaned up when the discussion ends.")
+    public String unretainAgent(@P("The agent ID to un-retain") String agentId) {
+        if (agentId == null || agentId.isBlank()) {
+            return "⚠️ Agent ID is required.";
+        }
+        if (!retainedAgentIds.contains(agentId)) {
+            return "⚠️ Agent '%s' is not currently retained.".formatted(agentId);
+        }
+        retainedAgentIds.remove(agentId);
+        return "✅ Retention flag removed from agent '%s'. It will be cleaned up when the discussion ends.".formatted(agentId);
     }
 }

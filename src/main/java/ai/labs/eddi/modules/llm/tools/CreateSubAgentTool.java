@@ -23,6 +23,7 @@ import org.jboss.logging.Logger;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -50,6 +51,7 @@ public class CreateSubAgentTool {
     private final String userId;
     private final DynamicAgentConfig config;
     private final List<String> createdAgentIds;
+    private final Set<String> retainedAgentIds;
 
     public CreateSubAgentTool(AgentSetupService agentSetupService,
             TenantQuotaService tenantQuotaService,
@@ -57,7 +59,8 @@ public class CreateSubAgentTool {
             String parentAgentId,
             String userId,
             DynamicAgentConfig config,
-            List<String> createdAgentIds) {
+            List<String> createdAgentIds,
+            Set<String> retainedAgentIds) {
         this.agentSetupService = agentSetupService;
         this.tenantQuotaService = tenantQuotaService;
         this.conversationService = conversationService;
@@ -65,6 +68,7 @@ public class CreateSubAgentTool {
         this.userId = userId;
         this.config = config;
         this.createdAgentIds = createdAgentIds != null ? createdAgentIds : new java.util.concurrent.CopyOnWriteArrayList<>();
+        this.retainedAgentIds = retainedAgentIds != null ? retainedAgentIds : java.util.concurrent.ConcurrentHashMap.newKeySet();
     }
 
     @Tool("Create a new sub-agent dynamically. The agent is set up, deployed, and optionally sent an initial message. "
@@ -101,10 +105,13 @@ public class CreateSubAgentTool {
             // --- Guardrail: allowed providers ---
             if (provider != null && !provider.isBlank()
                     && config.getAllowedProviders() != null
-                    && !config.getAllowedProviders().isEmpty()
-                    && !config.getAllowedProviders().contains(provider.toLowerCase())) {
-                return "⚠️ Provider '%s' is not allowed. Allowed: %s"
-                        .formatted(provider, config.getAllowedProviders());
+                    && !config.getAllowedProviders().isEmpty()) {
+                boolean providerAllowed = config.getAllowedProviders().stream()
+                        .anyMatch(p -> p.equalsIgnoreCase(provider));
+                if (!providerAllowed) {
+                    return "⚠️ Provider '%s' is not allowed. Allowed: %s"
+                            .formatted(provider, config.getAllowedProviders());
+                }
             }
 
             // --- Guardrail: allowed models ---
@@ -113,16 +120,11 @@ public class CreateSubAgentTool {
                     && !config.getAllowedModels().isEmpty()) {
                 String effectiveProvider = (provider != null && !provider.isBlank()) ? provider.toLowerCase() : "default";
                 List<String> allowedModels = config.getAllowedModels().get(effectiveProvider);
-                if (allowedModels != null && !allowedModels.isEmpty() && !allowedModels.contains(model)) {
+                if (allowedModels != null && !allowedModels.isEmpty()
+                        && allowedModels.stream().noneMatch(m -> m.equalsIgnoreCase(model))) {
                     return "⚠️ Model '%s' is not allowed for provider '%s'. Allowed: %s"
                             .formatted(model, effectiveProvider, allowedModels);
                 }
-            }
-
-            // --- Quota check ---
-            QuotaCheckResult quotaResult = tenantQuotaService.acquireConversationSlot();
-            if (!quotaResult.allowed()) {
-                return "⚠️ Tenant quota exceeded: " + quotaResult.reason();
             }
 
             // --- Build and execute setup ---
@@ -147,6 +149,9 @@ public class CreateSubAgentTool {
             SetupResult result = agentSetupService.setupAgent(request);
             String agentId = result.agentId();
             createdAgentIds.add(agentId);
+            if (Boolean.TRUE.equals(retain)) {
+                retainedAgentIds.add(agentId);
+            }
 
             LOGGER.infof("[SUB-AGENT] Created sub-agent: name='%s', agentId='%s', parent='%s'",
                     prefixedName, agentId, parentAgentId);
@@ -217,15 +222,15 @@ public class CreateSubAgentTool {
     @SuppressWarnings("unchecked")
     private String extractResponse(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
         if (snapshot == null || snapshot.getConversationOutputs() == null) {
-            return "";
+            return null;
         }
         var outputs = snapshot.getConversationOutputs();
         if (outputs.isEmpty()) {
-            return "";
+            return null;
         }
         var lastOutput = outputs.get(outputs.size() - 1);
         if (lastOutput == null) {
-            return "";
+            return null;
         }
 
         // Look for "output" array in the last output map
@@ -247,6 +252,6 @@ public class CreateSubAgentTool {
             }
         }
 
-        return "";
+        return null;
     }
 }

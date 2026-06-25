@@ -314,6 +314,25 @@ public class AgentGroupConfiguration {
     // --- Dynamic Agent Configuration ---
 
     /**
+     * Lifecycle policy for agents created during a discussion.
+     */
+    public enum LifecyclePolicy {
+        EPHEMERAL, KEEP_DEPLOYED, UNDEPLOY_ONLY, AGENT_DECIDES;
+
+        @com.fasterxml.jackson.annotation.JsonValue
+        public String toJson() {
+            return name().toLowerCase().replace('_', '-');
+        }
+
+        @com.fasterxml.jackson.annotation.JsonCreator
+        public static LifecyclePolicy fromJson(String value) {
+            if (value == null)
+                return EPHEMERAL;
+            return valueOf(value.toUpperCase().replace('-', '_'));
+        }
+    }
+
+    /**
      * Configuration for dynamic agent creation, recruitment, and delegation during
      * group discussions. Controls guardrails, allowed providers/models, and
      * lifecycle policy for dynamically created agents.
@@ -346,7 +365,7 @@ public class AgentGroupConfiguration {
          * <li>{@code agent-decides} — default ephemeral, but agent can retain</li>
          * </ul>
          */
-        private String lifecyclePolicy = "ephemeral";
+        private LifecyclePolicy lifecyclePolicy = LifecyclePolicy.EPHEMERAL;
 
         public boolean isEnabled() {
             return enabled;
@@ -408,10 +427,10 @@ public class AgentGroupConfiguration {
         public void setInheritParentModel(boolean inheritParentModel) {
             this.inheritParentModel = inheritParentModel;
         }
-        public String getLifecyclePolicy() {
+        public LifecyclePolicy getLifecyclePolicy() {
             return lifecyclePolicy;
         }
-        public void setLifecyclePolicy(String lifecyclePolicy) {
+        public void setLifecyclePolicy(LifecyclePolicy lifecyclePolicy) {
             this.lifecyclePolicy = lifecyclePolicy;
         }
     }

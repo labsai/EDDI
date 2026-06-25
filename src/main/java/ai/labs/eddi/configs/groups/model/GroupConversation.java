@@ -24,7 +24,7 @@ public class GroupConversation {
     private String userId;
     private GroupConversationState state;
     private String originalQuestion;
-    private List<TranscriptEntry> transcript = new ArrayList<>();
+    private List<TranscriptEntry> transcript = Collections.synchronizedList(new ArrayList<>());
     private Map<String, String> memberConversationIds = new ConcurrentHashMap<>();
     private int currentPhaseIndex;
     private String currentPhaseName;
@@ -166,7 +166,9 @@ public class GroupConversation {
     }
 
     public void setTranscript(List<TranscriptEntry> transcript) {
-        this.transcript = transcript;
+        this.transcript = transcript != null
+                ? Collections.synchronizedList(new ArrayList<>(transcript))
+                : Collections.synchronizedList(new ArrayList<>());
     }
 
     public Map<String, String> getMemberConversationIds() {

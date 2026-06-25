@@ -23,6 +23,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.LifecyclePolicy;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
@@ -386,22 +387,22 @@ public class GroupConversationService implements IGroupConversationService {
         }
 
         var dynamicConfig = config.getDynamicAgents();
-        String policy = dynamicConfig != null ? dynamicConfig.getLifecyclePolicy() : "ephemeral";
+        LifecyclePolicy policy = dynamicConfig != null ? dynamicConfig.getLifecyclePolicy() : LifecyclePolicy.EPHEMERAL;
 
         for (String agentId : createdIds) {
             // 'agent-decides': skip retained agents
-            if ("agent-decides".equals(policy) && gc.getRetainedAgentIds().contains(agentId)) {
+            if (policy == LifecyclePolicy.AGENT_DECIDES && gc.getRetainedAgentIds().contains(agentId)) {
                 LOGGER.infof("Ephemeral cleanup: agent '%s' retained by creator — skipping", agentId);
                 continue;
             }
 
             // 'keep-deployed': no cleanup
-            if ("keep-deployed".equals(policy)) {
+            if (policy == LifecyclePolicy.KEEP_DEPLOYED) {
                 continue;
             }
 
             try {
-                boolean shouldDelete = "ephemeral".equals(policy) || "agent-decides".equals(policy);
+                boolean shouldDelete = policy == LifecyclePolicy.EPHEMERAL || policy == LifecyclePolicy.AGENT_DECIDES;
                 agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
                 LOGGER.infof("Ephemeral cleanup: undeployed agent '%s'", agentId);
 
@@ -538,6 +539,13 @@ public class GroupConversationService implements IGroupConversationService {
                         gc.getTaskList().updateTask(withDeps); // replace with dependency-aware version
                     }
                 }
+            }
+
+            // Validate no circular dependencies
+            List<String> cycles = gc.getTaskList().detectCycles();
+            if (!cycles.isEmpty()) {
+                throw new GroupDiscussionException(
+                        "Circular task dependencies detected: " + String.join(" → ", cycles));
             }
 
             // Third pass: resolve assignments with round-robin for "ALL"
@@ -1041,7 +1049,10 @@ public class GroupConversationService implements IGroupConversationService {
     private GroupMember findMemberIncludingDynamic(List<GroupMember> configMembers, GroupConversation gc, String agentId) {
         GroupMember member = findMember(configMembers, agentId);
         if (member == null && gc.getDynamicMembers() != null) {
-            member = findMember(gc.getDynamicMembers(), agentId);
+            List<GroupMember> dynamicMembers = gc.getDynamicMembers();
+            synchronized (dynamicMembers) {
+                member = findMember(dynamicMembers, agentId);
+            }
         }
         return member;
     }

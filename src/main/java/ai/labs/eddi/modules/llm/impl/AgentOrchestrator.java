@@ -559,15 +559,33 @@ class AgentOrchestrator {
                 addUserMemoryToolIfEnabled(tools, memory);
             if (whitelist.contains("conversationRecall"))
                 addConversationRecallToolIfEnabled(tools, task, memory);
-            // Dynamic agent tools (whitelist-gated)
-            if (whitelist.contains("create_sub_agent"))
-                addDynamicAgentTools(tools, memory, true, false, false, false);
-            if (whitelist.contains("converse_with_agent"))
-                addDynamicAgentTools(tools, memory, false, true, false, false);
-            if (whitelist.contains("find_agents_by_capability"))
-                addDynamicAgentTools(tools, memory, false, false, true, false);
-            if (whitelist.contains("teardown_agent"))
-                addDynamicAgentTools(tools, memory, false, false, false, true);
+            // Dynamic agent tools (whitelist-gated, shared tracking lists)
+            {
+                List<String> sharedCreatedIds = new java.util.concurrent.CopyOnWriteArrayList<>();
+                Set<String> sharedRetainedIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
+                String parentAgentId = memory.getAgentId();
+                String userId = memory.getUserId();
+                DynamicAgentConfig defaultConfig = createDefaultDynamicConfig();
+
+                if (whitelist.contains("create_sub_agent") && agentSetupService != null) {
+                    tools.add(new CreateSubAgentTool(agentSetupService, tenantQuotaService,
+                            conversationService, parentAgentId, userId, defaultConfig,
+                            sharedCreatedIds, sharedRetainedIds));
+                    LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s'", sanitize(parentAgentId));
+                }
+                if (whitelist.contains("converse_with_agent") && conversationService != null) {
+                    tools.add(new ConverseWithAgentTool(conversationService, userId));
+                    LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s'", sanitize(parentAgentId));
+                }
+                if (whitelist.contains("find_agents_by_capability") && capabilityRegistryService != null) {
+                    tools.add(new FindAgentsByCapabilityTool(capabilityRegistryService));
+                    LOGGER.debugf("[DYNAMIC] FindAgentsByCapabilityTool enabled for agent='%s'", sanitize(parentAgentId));
+                }
+                if (whitelist.contains("teardown_agent") && agentFactory != null && agentStore != null) {
+                    tools.add(new TeardownAgentTool(agentFactory, agentStore, sharedCreatedIds, sharedRetainedIds));
+                    LOGGER.debugf("[DYNAMIC] TeardownAgentTool enabled for agent='%s'", sanitize(parentAgentId));
+                }
+            }
         } else {
             // No whitelist — add all built-in tools
             tools.add(calculatorTool);
@@ -639,18 +657,15 @@ class AgentOrchestrator {
 
     /**
      * Constructs and adds dynamic agent tools (create, converse, find, teardown).
-     * Uses a default DynamicAgentConfig and fresh tracking lists.
+     * Accepts shared tracking lists to ensure tools can see each other's state.
      * <p>
      * For group conversations, tools are wired with proper context
      * (GroupConversation's createdAgentIds/retainedAgentIds) by
      * GroupConversationService directly.
      */
     private void addDynamicAgentTools(List<Object> tools, IConversationMemory memory,
-                                      boolean addCreate, boolean addConverse, boolean addFind, boolean addTeardown) {
-
-        // Fresh tracking lists for standalone usage (non-group conversations)
-        List<String> createdAgentIds = new java.util.concurrent.CopyOnWriteArrayList<>();
-        Set<String> retainedAgentIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
+                                      boolean addCreate, boolean addConverse, boolean addFind, boolean addTeardown,
+                                      List<String> createdAgentIds, Set<String> retainedAgentIds) {
 
         String parentAgentId = memory.getAgentId();
         String userId = memory.getUserId();
@@ -658,7 +673,7 @@ class AgentOrchestrator {
         if (addCreate && agentSetupService != null) {
             DynamicAgentConfig config = createDefaultDynamicConfig();
             tools.add(new CreateSubAgentTool(agentSetupService, tenantQuotaService,
-                    conversationService, parentAgentId, userId, config, createdAgentIds));
+                    conversationService, parentAgentId, userId, config, createdAgentIds, retainedAgentIds));
             LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s'", sanitize(parentAgentId));
         }
 

@@ -218,20 +218,24 @@ class GroupConversationTest {
         @DisplayName("TranscriptEntryType — all values")
         void transcriptEntryTypes() {
             var values = TranscriptEntryType.values();
-            assertEquals(11, values.length);
+            assertEquals(14, values.length);
             assertNotNull(TranscriptEntryType.valueOf("QUESTION"));
             assertNotNull(TranscriptEntryType.valueOf("SYNTHESIS"));
             assertNotNull(TranscriptEntryType.valueOf("SKIPPED"));
+            assertNotNull(TranscriptEntryType.valueOf("PLAN"));
+            assertNotNull(TranscriptEntryType.valueOf("TASK_RESULT"));
+            assertNotNull(TranscriptEntryType.valueOf("VERIFICATION"));
         }
 
         @Test
         @DisplayName("GroupConversationState — all values")
         void groupConversationStates() {
             var values = GroupConversationState.values();
-            assertEquals(5, values.length);
+            assertEquals(6, values.length);
             assertNotNull(GroupConversationState.valueOf("CREATED"));
             assertNotNull(GroupConversationState.valueOf("COMPLETED"));
             assertNotNull(GroupConversationState.valueOf("FAILED"));
+            assertNotNull(GroupConversationState.valueOf("AWAITING_APPROVAL"));
         }
     }
 

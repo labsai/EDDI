@@ -7,9 +7,14 @@ package ai.labs.eddi.modules.llm.tools;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService.CapabilityMatch;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -20,6 +25,7 @@ import ai.labs.eddi.engine.setup.SetupResult;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -27,6 +33,8 @@ import java.net.URI;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -50,6 +58,7 @@ class DynamicAgentToolsTest {
         private IConversationService conversationService;
         private DynamicAgentConfig config;
         private List<String> createdAgentIds;
+        private Set<String> retainedAgentIds;
         private CreateSubAgentTool tool;
 
         @BeforeEach
@@ -62,8 +71,9 @@ class DynamicAgentToolsTest {
             config.setAllowCreation(true);
             config.setMaxCreatedAgentsPerDiscussion(5);
             createdAgentIds = new CopyOnWriteArrayList<>();
+            retainedAgentIds = ConcurrentHashMap.newKeySet();
             tool = new CreateSubAgentTool(agentSetupService, tenantQuotaService,
-                    conversationService, "parent-agent-1", "user-1", config, createdAgentIds);
+                    conversationService, "parent-agent-1", "user-1", config, createdAgentIds, retainedAgentIds);
         }
 
         @Test
@@ -134,14 +144,19 @@ class DynamicAgentToolsTest {
         }
 
         @Test
-        void createSubAgent_quotaDenied() {
-            when(tenantQuotaService.acquireConversationSlot())
-                    .thenReturn(new QuotaCheckResult(false, "Rate limit exceeded"));
+        void createSubAgent_quotaEnforcedByConversationStart() throws Exception {
+            // Quota is now enforced by startConversation() internally, not by a
+            // pre-flight acquireConversationSlot() call in CreateSubAgentTool.
+            // This avoids double-counting. We just verify that the tool no longer
+            // calls acquireConversationSlot() directly.
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
+                            null, null, true, "ready", null, null, null, null, null));
 
             String result = tool.createSubAgent("Test", "prompt", null, null, null, null);
 
-            assertTrue(result.contains("⚠️"));
-            assertTrue(result.contains("quota"));
+            assertTrue(result.contains("✅"));
+            verify(tenantQuotaService, never()).acquireConversationSlot();
         }
 
         @Test
@@ -170,6 +185,217 @@ class DynamicAgentToolsTest {
             assertTrue(result.contains("❌"));
             assertTrue(result.contains("DB error"));
             assertTrue(createdAgentIds.isEmpty());
+        }
+    }
+
+    // === ConverseWithAgentTool ===
+
+    @Nested
+    @DisplayName("ConverseWithAgentTool")
+    class ConverseWithAgentToolTest {
+
+        private IConversationService conversationService;
+        private ConverseWithAgentTool tool;
+
+        private static final String USER_ID = "test-user-1";
+        private static final String AGENT_ID = "target-agent-1";
+        private static final String CONVERSATION_ID = "conv-12345";
+
+        @BeforeEach
+        void setUp() {
+            conversationService = mock(IConversationService.class);
+            tool = new ConverseWithAgentTool(conversationService, USER_ID);
+        }
+
+        /**
+         * Helper: create a snapshot with the given outputs and conversation state.
+         */
+        private SimpleConversationMemorySnapshot createSnapshot(ConversationState state,
+                                                                List<String> outputTexts) {
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationId(CONVERSATION_ID);
+            snapshot.setConversationState(state);
+
+            if (outputTexts != null && !outputTexts.isEmpty()) {
+                var output = new ConversationOutput();
+                output.put("output", outputTexts);
+                snapshot.setConversationOutputs(List.of(output));
+            }
+
+            return snapshot;
+        }
+
+        /**
+         * Helper: stub conversationService.say() to invoke the callback with the given
+         * snapshot.
+         */
+        private void stubSayWithSnapshot(SimpleConversationMemorySnapshot snapshot) throws Exception {
+            doAnswer(invocation -> {
+                ConversationResponseHandler handler = invocation.getArgument(8);
+                handler.onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(
+                    any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        }
+
+        @Test
+        @DisplayName("New conversation: starts conversation + sends message + returns response")
+        void converseWithAgent_newConversation_success() throws Exception {
+            // Arrange — startConversation returns a new conversation
+            when(conversationService.startConversation(any(Environment.class), eq(AGENT_ID), eq(USER_ID), anyMap()))
+                    .thenReturn(new ConversationResult(CONVERSATION_ID, URI.create("/conversations/" + CONVERSATION_ID)));
+
+            var snapshot = createSnapshot(ConversationState.READY, List.of("Hello from agent!"));
+            stubSayWithSnapshot(snapshot);
+
+            // Act
+            String result = tool.converseWithAgent(AGENT_ID, "Hi there", null);
+
+            // Assert
+            assertTrue(result.contains("✅"), "Should contain success marker");
+            assertTrue(result.contains(CONVERSATION_ID), "Should contain conversation ID");
+            assertTrue(result.contains("Hello from agent!"), "Should contain agent response text");
+
+            verify(conversationService).startConversation(any(Environment.class), eq(AGENT_ID), eq(USER_ID), anyMap());
+            verify(conversationService).say(
+                    any(), eq(AGENT_ID), eq(CONVERSATION_ID), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        }
+
+        @Test
+        @DisplayName("Existing conversation: reuses conversationId, does not start new")
+        void converseWithAgent_existingConversation_success() throws Exception {
+            // Arrange — provide an existing conversation ID
+            var snapshot = createSnapshot(ConversationState.READY, List.of("Follow-up response"));
+            stubSayWithSnapshot(snapshot);
+
+            // Act
+            String result = tool.converseWithAgent(AGENT_ID, "Follow-up question", CONVERSATION_ID);
+
+            // Assert
+            assertTrue(result.contains("✅"), "Should contain success marker");
+            assertTrue(result.contains(CONVERSATION_ID), "Should contain conversation ID");
+            assertTrue(result.contains("Follow-up response"), "Should contain agent response text");
+
+            // Must NOT start a new conversation
+            verify(conversationService, never()).startConversation(any(), any(), any(), any());
+            verify(conversationService).say(
+                    any(), eq(AGENT_ID), eq(CONVERSATION_ID), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        }
+
+        @Test
+        @DisplayName("Null agentId returns warning")
+        void converseWithAgent_nullAgentId_returnsWarning() {
+            String result = tool.converseWithAgent(null, "Hello", null);
+
+            assertTrue(result.contains("⚠️"), "Should contain warning marker");
+            assertTrue(result.contains("Agent ID is required"), "Should mention agent ID required");
+            verifyNoInteractions(conversationService);
+        }
+
+        @Test
+        @DisplayName("Null message returns warning")
+        void converseWithAgent_nullMessage_returnsWarning() {
+            String result = tool.converseWithAgent(AGENT_ID, null, null);
+
+            assertTrue(result.contains("⚠️"), "Should contain warning marker");
+            assertTrue(result.contains("Message is required"), "Should mention message required");
+            verifyNoInteractions(conversationService);
+        }
+
+        @Test
+        @DisplayName("Timeout waiting for agent response returns warning")
+        void converseWithAgent_timeout_returnsWarning() throws Exception {
+            // Arrange — startConversation succeeds but say() never invokes the callback
+            when(conversationService.startConversation(any(Environment.class), eq(AGENT_ID), eq(USER_ID), anyMap()))
+                    .thenReturn(new ConversationResult(CONVERSATION_ID, URI.create("/conversations/" + CONVERSATION_ID)));
+
+            // say() does NOT invoke the callback — the CompletableFuture will time out.
+            // We simulate this by making say() throw a TimeoutException wrapped in
+            // ExecutionException
+            // Actually the production code calls responseFuture.get(60, TimeUnit.SECONDS)
+            // which throws TimeoutException.
+            // We need say() to simply not call the handler. But we can't wait 60s in a
+            // test.
+            // Instead, we make say() throw an exception that gets caught as
+            // TimeoutException.
+            doAnswer(invocation -> {
+                // Don't invoke the handler — but we can't wait 60s.
+                // Instead, let's directly throw to simulate the scenario via the outer catch.
+                throw new java.util.concurrent.TimeoutException("Simulated timeout");
+            }).when(conversationService).say(
+                    any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+            // Act
+            String result = tool.converseWithAgent(AGENT_ID, "Hello", null);
+
+            // Assert — the outer catch handles TimeoutException
+            assertTrue(result.contains("⚠️") || result.contains("❌"),
+                    "Should contain a warning or error marker");
+            assertTrue(result.toLowerCase().contains("timeout") || result.toLowerCase().contains("error"),
+                    "Should mention timeout or error");
+        }
+
+        @Test
+        @DisplayName("startConversation failure returns error message")
+        void converseWithAgent_startConversationFails_returnsError() throws Exception {
+            // Arrange — startConversation throws
+            when(conversationService.startConversation(any(Environment.class), eq(AGENT_ID), eq(USER_ID), anyMap()))
+                    .thenThrow(new RuntimeException("Agent not deployed"));
+
+            // Act
+            String result = tool.converseWithAgent(AGENT_ID, "Hello", null);
+
+            // Assert
+            assertTrue(result.contains("❌"), "Should contain error marker");
+            assertTrue(result.contains("Agent not deployed"), "Should contain the exception message");
+            assertTrue(result.contains(AGENT_ID), "Should mention the agent ID");
+
+            // say() should never be called since startConversation failed
+            verify(conversationService, never()).say(
+                    any(Environment.class), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        }
+
+        @Test
+        @DisplayName("ERROR conversation state returns error message")
+        void converseWithAgent_errorState_returnsErrorMessage() throws Exception {
+            // Arrange — provide existing conversation ID, snapshot with ERROR state and no
+            // output
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationId(CONVERSATION_ID);
+            snapshot.setConversationState(ConversationState.ERROR);
+            snapshot.setConversationOutputs(new LinkedList<>()); // empty outputs
+
+            stubSayWithSnapshot(snapshot);
+
+            // Act
+            String result = tool.converseWithAgent(AGENT_ID, "Hello", CONVERSATION_ID);
+
+            // Assert
+            assertTrue(result.contains("✅"), "Should contain success marker (tool itself succeeded)");
+            assertTrue(result.contains("ERROR state") || result.contains("failed to produce output"),
+                    "Should indicate the agent entered ERROR state");
+        }
+
+        @Test
+        @DisplayName("Empty response (no output in snapshot) is handled gracefully")
+        void converseWithAgent_emptyResponse_handledGracefully() throws Exception {
+            // Arrange — snapshot with READY state but no conversation outputs
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationId(CONVERSATION_ID);
+            snapshot.setConversationState(ConversationState.READY);
+            snapshot.setConversationOutputs(new LinkedList<>()); // no outputs
+
+            stubSayWithSnapshot(snapshot);
+
+            // Act
+            String result = tool.converseWithAgent(AGENT_ID, "Hello", CONVERSATION_ID);
+
+            // Assert — extractResponse returns null for empty outputs (C5 fix),
+            // so the tool correctly shows "[no response]"
+            assertTrue(result.contains("✅"), "Should contain success marker");
+            assertTrue(result.contains(CONVERSATION_ID), "Should contain conversation ID");
+            assertTrue(result.contains("[no response]"),
+                    "Null response from extractResponse should trigger [no response] placeholder");
         }
     }
 
@@ -342,7 +568,7 @@ class DynamicAgentToolsTest {
             assertEquals(10, config.getMaxRecruitedAgentsPerDiscussion());
             assertEquals(3, config.getMaxDelegationsPerTask());
             assertTrue(config.isInheritParentModel());
-            assertEquals("ephemeral", config.getLifecyclePolicy());
+            assertEquals(AgentGroupConfiguration.LifecyclePolicy.EPHEMERAL, config.getLifecyclePolicy());
             assertNull(config.getAllowedProviders());
             assertNull(config.getAllowedModels());
         }
@@ -360,7 +586,7 @@ class DynamicAgentToolsTest {
             config.setAllowedProviders(List.of("openai", "anthropic"));
             config.setAllowedModels(Map.of("openai", List.of("gpt-4o")));
             config.setInheritParentModel(false);
-            config.setLifecyclePolicy("agent-decides");
+            config.setLifecyclePolicy(AgentGroupConfiguration.LifecyclePolicy.AGENT_DECIDES);
 
             assertTrue(config.isEnabled());
             assertTrue(config.isAllowCreation());
@@ -372,7 +598,7 @@ class DynamicAgentToolsTest {
             assertEquals(List.of("openai", "anthropic"), config.getAllowedProviders());
             assertEquals(Map.of("openai", List.of("gpt-4o")), config.getAllowedModels());
             assertFalse(config.isInheritParentModel());
-            assertEquals("agent-decides", config.getLifecyclePolicy());
+            assertEquals(AgentGroupConfiguration.LifecyclePolicy.AGENT_DECIDES, config.getLifecyclePolicy());
         }
     }
 

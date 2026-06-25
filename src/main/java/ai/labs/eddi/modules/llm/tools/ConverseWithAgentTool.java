@@ -100,7 +100,8 @@ public class ConverseWithAgentTool {
 
             LOGGER.debugf("[CONVERSE] Agent '%s' responded in conversation '%s'", agentId, convId);
 
-            return "✅ Agent response (conversationId: %s):\n%s".formatted(convId, response != null ? response : "[no response]");
+            return "✅ Agent response (conversationId: %s):\n%s".formatted(convId,
+                    response != null && !response.isEmpty() ? response : "[no response]");
 
         } catch (java.util.concurrent.TimeoutException e) {
             LOGGER.warnf("[CONVERSE] Timeout waiting for agent '%s' response", agentId);
@@ -118,15 +119,15 @@ public class ConverseWithAgentTool {
     @SuppressWarnings("unchecked")
     private String extractResponse(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
         if (snapshot == null || snapshot.getConversationOutputs() == null) {
-            return "";
+            return null;
         }
         var outputs = snapshot.getConversationOutputs();
         if (outputs.isEmpty()) {
-            return "";
+            return null;
         }
         var lastOutput = outputs.get(outputs.size() - 1);
         if (lastOutput == null) {
-            return "";
+            return null;
         }
 
         // Look for "output" array in the last output map
@@ -148,6 +149,6 @@ public class ConverseWithAgentTool {
             }
         }
 
-        return "";
+        return null;
     }
 }
