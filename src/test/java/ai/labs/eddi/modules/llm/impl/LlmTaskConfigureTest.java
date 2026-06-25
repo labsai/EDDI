@@ -115,7 +115,8 @@ class LlmTaskConfigureTest {
                 mockSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, toolResponseTruncator,
                 mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
-                null, null);
+                null, null,
+                null, null, null, null, null);
     }
 
     // ==================== getId ====================

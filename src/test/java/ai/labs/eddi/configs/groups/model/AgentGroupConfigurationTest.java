@@ -47,12 +47,13 @@ class AgentGroupConfigurationTest {
 
     @Test
     void style_allValues() {
-        assertEquals(6, DiscussionStyle.values().length);
+        assertEquals(7, DiscussionStyle.values().length);
         assertNotNull(DiscussionStyle.valueOf("ROUND_TABLE"));
         assertNotNull(DiscussionStyle.valueOf("PEER_REVIEW"));
         assertNotNull(DiscussionStyle.valueOf("DEVIL_ADVOCATE"));
         assertNotNull(DiscussionStyle.valueOf("DELPHI"));
         assertNotNull(DiscussionStyle.valueOf("DEBATE"));
+        assertNotNull(DiscussionStyle.valueOf("TASK_FORCE"));
         assertNotNull(DiscussionStyle.valueOf("CUSTOM"));
     }
 
@@ -135,7 +136,7 @@ class AgentGroupConfigurationTest {
 
     @Test
     void phaseType_allValues() {
-        assertEquals(8, PhaseType.values().length);
+        assertEquals(11, PhaseType.values().length);
         assertNotNull(PhaseType.valueOf("OPINION"));
         assertNotNull(PhaseType.valueOf("CRITIQUE"));
         assertNotNull(PhaseType.valueOf("REVISION"));
@@ -144,16 +145,21 @@ class AgentGroupConfigurationTest {
         assertNotNull(PhaseType.valueOf("ARGUE"));
         assertNotNull(PhaseType.valueOf("REBUTTAL"));
         assertNotNull(PhaseType.valueOf("SYNTHESIS"));
+        assertNotNull(PhaseType.valueOf("PLAN"));
+        assertNotNull(PhaseType.valueOf("EXECUTE"));
+        assertNotNull(PhaseType.valueOf("VERIFY"));
     }
 
     @Test
     void contextScope_allValues() {
-        assertEquals(5, ContextScope.values().length);
+        assertEquals(7, ContextScope.values().length);
         assertNotNull(ContextScope.valueOf("NONE"));
         assertNotNull(ContextScope.valueOf("FULL"));
         assertNotNull(ContextScope.valueOf("LAST_PHASE"));
         assertNotNull(ContextScope.valueOf("ANONYMOUS"));
         assertNotNull(ContextScope.valueOf("OWN_FEEDBACK"));
+        assertNotNull(ContextScope.valueOf("TASK_ONLY"));
+        assertNotNull(ContextScope.valueOf("TASK_WITH_DEPS"));
     }
 
     @Test

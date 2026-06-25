@@ -5,19 +5,25 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
+import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.engine.setup.AgentSetupService;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -26,6 +32,10 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
 import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
+import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
+import ai.labs.eddi.modules.llm.tools.ConverseWithAgentTool;
+import ai.labs.eddi.modules.llm.tools.FindAgentsByCapabilityTool;
+import ai.labs.eddi.modules.llm.tools.TeardownAgentTool;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -93,6 +103,13 @@ class AgentOrchestrator {
     private final TenantQuotaService tenantQuotaService;
     private final MemorySnapshotService memorySnapshotService;
 
+    // Dynamic agent creation dependencies
+    private final AgentSetupService agentSetupService;
+    private final CapabilityRegistryService capabilityRegistryService;
+    private final IConversationService conversationService;
+    private final IAgentFactory agentFactory;
+    private final IAgentStore agentStore;
+
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             FetchToolResponsePageTool fetchToolResponsePageTool,
@@ -100,7 +117,9 @@ class AgentOrchestrator {
             IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore, IResourceClientLibrary resourceClientLibrary,
             IApiCallExecutor apiCallExecutor, IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter,
             IUserMemoryStore userMemoryStore, ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService,
-            MemorySnapshotService memorySnapshotService) {
+            MemorySnapshotService memorySnapshotService,
+            AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
+            IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore) {
         this.calculatorTool = calculatorTool;
         this.dateTimeTool = dateTimeTool;
         this.webSearchTool = webSearchTool;
@@ -123,6 +142,11 @@ class AgentOrchestrator {
         this.toolResponseTruncator = toolResponseTruncator;
         this.tenantQuotaService = tenantQuotaService;
         this.memorySnapshotService = memorySnapshotService;
+        this.agentSetupService = agentSetupService;
+        this.capabilityRegistryService = capabilityRegistryService;
+        this.conversationService = conversationService;
+        this.agentFactory = agentFactory;
+        this.agentStore = agentStore;
     }
 
     /**
@@ -535,6 +559,15 @@ class AgentOrchestrator {
                 addUserMemoryToolIfEnabled(tools, memory);
             if (whitelist.contains("conversationRecall"))
                 addConversationRecallToolIfEnabled(tools, task, memory);
+            // Dynamic agent tools (whitelist-gated)
+            if (whitelist.contains("create_sub_agent"))
+                addDynamicAgentTools(tools, memory, true, false, false, false);
+            if (whitelist.contains("converse_with_agent"))
+                addDynamicAgentTools(tools, memory, false, true, false, false);
+            if (whitelist.contains("find_agents_by_capability"))
+                addDynamicAgentTools(tools, memory, false, false, true, false);
+            if (whitelist.contains("teardown_agent"))
+                addDynamicAgentTools(tools, memory, false, false, false, true);
         } else {
             // No whitelist — add all built-in tools
             tools.add(calculatorTool);
@@ -602,6 +635,61 @@ class AgentOrchestrator {
         tools.add(tool);
         LOGGER.infof("[RECALL] ConversationRecallTool enabled: summaryThroughStep=%d, maxRecallTurns=%d", throughStep,
                 summaryConfig.getMaxRecallTurns());
+    }
+
+    /**
+     * Constructs and adds dynamic agent tools (create, converse, find, teardown).
+     * Uses a default DynamicAgentConfig and fresh tracking lists.
+     * <p>
+     * For group conversations, tools are wired with proper context
+     * (GroupConversation's createdAgentIds/retainedAgentIds) by
+     * GroupConversationService directly.
+     */
+    private void addDynamicAgentTools(List<Object> tools, IConversationMemory memory,
+                                      boolean addCreate, boolean addConverse, boolean addFind, boolean addTeardown) {
+
+        // Fresh tracking lists for standalone usage (non-group conversations)
+        List<String> createdAgentIds = new java.util.concurrent.CopyOnWriteArrayList<>();
+        Set<String> retainedAgentIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+        String parentAgentId = memory.getAgentId();
+        String userId = memory.getUserId();
+
+        if (addCreate && agentSetupService != null) {
+            DynamicAgentConfig config = createDefaultDynamicConfig();
+            tools.add(new CreateSubAgentTool(agentSetupService, tenantQuotaService,
+                    conversationService, parentAgentId, userId, config, createdAgentIds));
+            LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s'", sanitize(parentAgentId));
+        }
+
+        if (addConverse && conversationService != null) {
+            tools.add(new ConverseWithAgentTool(conversationService, userId));
+            LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s'", sanitize(parentAgentId));
+        }
+
+        if (addFind && capabilityRegistryService != null) {
+            tools.add(new FindAgentsByCapabilityTool(capabilityRegistryService));
+            LOGGER.debugf("[DYNAMIC] FindAgentsByCapabilityTool enabled for agent='%s'", sanitize(parentAgentId));
+        }
+
+        if (addTeardown && agentFactory != null && agentStore != null) {
+            tools.add(new TeardownAgentTool(agentFactory, agentStore, createdAgentIds, retainedAgentIds));
+            LOGGER.debugf("[DYNAMIC] TeardownAgentTool enabled for agent='%s'", sanitize(parentAgentId));
+        }
+    }
+
+    /**
+     * Creates a default DynamicAgentConfig for agents without explicit group
+     * config. Used when individual agents have dynamic agent tools in their
+     * whitelist.
+     */
+    private DynamicAgentConfig createDefaultDynamicConfig() {
+        var config = new DynamicAgentConfig();
+        config.setEnabled(true);
+        config.setAllowCreation(true);
+        config.setAllowRecruitment(true);
+        config.setAllowDelegation(true);
+        return config;
     }
 
     // --- Httpcall auto-discovery from workflow ---

@@ -337,6 +337,9 @@ public class GroupConversationService implements IGroupConversationService {
             timerGroupDiscussion.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
             // Clean up incremental verification cursor — conversation is done
             lastVerifiedIndex.remove(gc.getId());
+            // Ephemeral agent cleanup — undeploy/delete agents created during this
+            // discussion
+            cleanupEphemeralAgents(gc, config);
         }
     }
 
@@ -366,6 +369,50 @@ public class GroupConversationService implements IGroupConversationService {
     @Override
     public List<GroupConversation> listGroupConversations(String groupId, int index, int limit) throws IResourceStore.ResourceStoreException {
         return conversationStore.listByGroupId(groupId, index, limit);
+    }
+
+    // =================================================================
+    // Ephemeral agent cleanup
+    // =================================================================
+
+    /**
+     * Clean up agents created during a discussion based on the lifecycle policy.
+     * Called in the {@code executeDiscussion} finally block.
+     */
+    private void cleanupEphemeralAgents(GroupConversation gc, AgentGroupConfiguration config) {
+        List<String> createdIds = gc.getCreatedAgentIds();
+        if (createdIds == null || createdIds.isEmpty()) {
+            return;
+        }
+
+        var dynamicConfig = config.getDynamicAgents();
+        String policy = dynamicConfig != null ? dynamicConfig.getLifecyclePolicy() : "ephemeral";
+
+        for (String agentId : createdIds) {
+            // 'agent-decides': skip retained agents
+            if ("agent-decides".equals(policy) && gc.getRetainedAgentIds().contains(agentId)) {
+                LOGGER.infof("Ephemeral cleanup: agent '%s' retained by creator — skipping", agentId);
+                continue;
+            }
+
+            // 'keep-deployed': no cleanup
+            if ("keep-deployed".equals(policy)) {
+                continue;
+            }
+
+            try {
+                boolean shouldDelete = "ephemeral".equals(policy) || "agent-decides".equals(policy);
+                agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
+                LOGGER.infof("Ephemeral cleanup: undeployed agent '%s'", agentId);
+
+                if (shouldDelete) {
+                    agentStore.deleteAllPermanently(agentId);
+                    LOGGER.infof("Ephemeral cleanup: deleted agent '%s'", agentId);
+                }
+            } catch (Exception e) {
+                LOGGER.warnf("Ephemeral cleanup failed for agent '%s': %s", agentId, e.getMessage());
+            }
+        }
     }
 
     // =================================================================
@@ -629,7 +676,7 @@ public class GroupConversationService implements IGroupConversationService {
         for (Map.Entry<String, List<TaskItem>> agentEntry : tasksByAgent.entrySet()) {
             String agentId = agentEntry.getKey();
             List<TaskItem> agentTasks = agentEntry.getValue();
-            GroupMember member = findMember(config.getMembers(), agentId);
+            GroupMember member = findMemberIncludingDynamic(config.getMembers(), gc, agentId);
 
             if (member == null) {
                 LOGGER.warnf("Task assigned to unknown agent '%s', skipping", agentId);
@@ -985,6 +1032,18 @@ public class GroupConversationService implements IGroupConversationService {
                 .filter(m -> agentId.equals(m.agentId()))
                 .findFirst()
                 .orElse(null);
+    }
+
+    /**
+     * Find a member by agentId, searching both static config members and
+     * dynamically added members from the conversation.
+     */
+    private GroupMember findMemberIncludingDynamic(List<GroupMember> configMembers, GroupConversation gc, String agentId) {
+        GroupMember member = findMember(configMembers, agentId);
+        if (member == null && gc.getDynamicMembers() != null) {
+            member = findMember(gc.getDynamicMembers(), agentId);
+        }
+        return member;
     }
 
     // =================================================================

@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.groups.model;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -26,6 +27,8 @@ public class AgentGroupConfiguration {
     private ProtocolConfig protocol;
     /** Pre-configured task list. If non-empty, skips the PLAN phase. */
     private List<TaskDefinition> tasks;
+    /** Dynamic agent creation and recruitment configuration. */
+    private DynamicAgentConfig dynamicAgents;
 
     /**
      * A member of the group. Members can be individual agents or nested groups.
@@ -259,6 +262,14 @@ public class AgentGroupConfiguration {
         this.tasks = tasks;
     }
 
+    public DynamicAgentConfig getDynamicAgents() {
+        return dynamicAgents;
+    }
+
+    public void setDynamicAgents(DynamicAgentConfig dynamicAgents) {
+        this.dynamicAgents = dynamicAgents;
+    }
+
     // --- Task Definition ---
 
     /**
@@ -297,6 +308,111 @@ public class AgentGroupConfiguration {
             if (assignToRole == null) {
                 assignToRole = "ALL";
             }
+        }
+    }
+
+    // --- Dynamic Agent Configuration ---
+
+    /**
+     * Configuration for dynamic agent creation, recruitment, and delegation during
+     * group discussions. Controls guardrails, allowed providers/models, and
+     * lifecycle policy for dynamically created agents.
+     */
+    public static class DynamicAgentConfig {
+        private boolean enabled;
+        private boolean allowCreation;
+        private boolean allowRecruitment;
+        private boolean allowDelegation = true;
+
+        private int maxCreatedAgentsPerDiscussion = 5;
+        private int maxRecruitedAgentsPerDiscussion = 10;
+        private int maxDelegationsPerTask = 3;
+
+        /** Allowed LLM providers for created agents. Null = inherit parent. */
+        private List<String> allowedProviders;
+        /**
+         * Allowed models per provider. Keys are provider names, values are lists of
+         * model names. Null = inherit parent model.
+         */
+        private Map<String, List<String>> allowedModels;
+        private boolean inheritParentModel = true;
+
+        /**
+         * Lifecycle policy for agents created during the discussion.
+         * <ul>
+         * <li>{@code ephemeral} — auto-delete after discussion ends</li>
+         * <li>{@code keep-deployed} — keep deployed for future use</li>
+         * <li>{@code undeploy-only} — undeploy but keep config</li>
+         * <li>{@code agent-decides} — default ephemeral, but agent can retain</li>
+         * </ul>
+         */
+        private String lifecyclePolicy = "ephemeral";
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+        public boolean isAllowCreation() {
+            return allowCreation;
+        }
+        public void setAllowCreation(boolean allowCreation) {
+            this.allowCreation = allowCreation;
+        }
+        public boolean isAllowRecruitment() {
+            return allowRecruitment;
+        }
+        public void setAllowRecruitment(boolean allowRecruitment) {
+            this.allowRecruitment = allowRecruitment;
+        }
+        public boolean isAllowDelegation() {
+            return allowDelegation;
+        }
+        public void setAllowDelegation(boolean allowDelegation) {
+            this.allowDelegation = allowDelegation;
+        }
+        public int getMaxCreatedAgentsPerDiscussion() {
+            return maxCreatedAgentsPerDiscussion;
+        }
+        public void setMaxCreatedAgentsPerDiscussion(int max) {
+            this.maxCreatedAgentsPerDiscussion = max;
+        }
+        public int getMaxRecruitedAgentsPerDiscussion() {
+            return maxRecruitedAgentsPerDiscussion;
+        }
+        public void setMaxRecruitedAgentsPerDiscussion(int max) {
+            this.maxRecruitedAgentsPerDiscussion = max;
+        }
+        public int getMaxDelegationsPerTask() {
+            return maxDelegationsPerTask;
+        }
+        public void setMaxDelegationsPerTask(int max) {
+            this.maxDelegationsPerTask = max;
+        }
+        public List<String> getAllowedProviders() {
+            return allowedProviders;
+        }
+        public void setAllowedProviders(List<String> allowedProviders) {
+            this.allowedProviders = allowedProviders;
+        }
+        public Map<String, List<String>> getAllowedModels() {
+            return allowedModels;
+        }
+        public void setAllowedModels(Map<String, List<String>> allowedModels) {
+            this.allowedModels = allowedModels;
+        }
+        public boolean isInheritParentModel() {
+            return inheritParentModel;
+        }
+        public void setInheritParentModel(boolean inheritParentModel) {
+            this.inheritParentModel = inheritParentModel;
+        }
+        public String getLifecyclePolicy() {
+            return lifecyclePolicy;
+        }
+        public void setLifecyclePolicy(String lifecyclePolicy) {
+            this.lifecyclePolicy = lifecyclePolicy;
         }
     }
 }

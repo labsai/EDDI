@@ -6,8 +6,10 @@ package ai.labs.eddi.configs.groups.model;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -29,6 +31,12 @@ public class GroupConversation {
     private String synthesizedAnswer;
     private int depth;
     private SharedTaskList taskList;
+    /** Agents dynamically added during the discussion (recruited or created). */
+    private List<AgentGroupConfiguration.GroupMember> dynamicMembers = Collections.synchronizedList(new ArrayList<>());
+    /** Agent IDs created during this discussion (for lifecycle cleanup). */
+    private List<String> createdAgentIds = Collections.synchronizedList(new ArrayList<>());
+    /** Agent IDs explicitly retained by the creating agent (skip cleanup). */
+    private Set<String> retainedAgentIds = ConcurrentHashMap.newKeySet();
     private Instant created;
     private Instant lastModified;
 
@@ -225,5 +233,45 @@ public class GroupConversation {
 
     public void setTaskList(SharedTaskList taskList) {
         this.taskList = taskList;
+    }
+
+    public List<AgentGroupConfiguration.GroupMember> getDynamicMembers() {
+        return dynamicMembers;
+    }
+
+    public void setDynamicMembers(List<AgentGroupConfiguration.GroupMember> dynamicMembers) {
+        this.dynamicMembers = dynamicMembers != null
+                ? Collections.synchronizedList(new ArrayList<>(dynamicMembers))
+                : Collections.synchronizedList(new ArrayList<>());
+    }
+
+    /**
+     * Add a dynamically recruited or created member to the conversation.
+     * Thread-safe.
+     */
+    public void addDynamicMember(AgentGroupConfiguration.GroupMember member) {
+        dynamicMembers.add(member);
+    }
+
+    public List<String> getCreatedAgentIds() {
+        return createdAgentIds;
+    }
+
+    public void setCreatedAgentIds(List<String> createdAgentIds) {
+        this.createdAgentIds = createdAgentIds != null
+                ? Collections.synchronizedList(new ArrayList<>(createdAgentIds))
+                : Collections.synchronizedList(new ArrayList<>());
+    }
+
+    public Set<String> getRetainedAgentIds() {
+        return retainedAgentIds;
+    }
+
+    public void setRetainedAgentIds(Set<String> retainedAgentIds) {
+        Set<String> newSet = ConcurrentHashMap.newKeySet();
+        if (retainedAgentIds != null) {
+            newSet.addAll(retainedAgentIds);
+        }
+        this.retainedAgentIds = newSet;
     }
 }

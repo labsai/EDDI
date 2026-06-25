@@ -4,6 +4,31 @@
 
 ---
 
+## ✨ Dynamic Agent System — Create, Recruit, Delegate (2026-06-25)
+
+**Repo:** EDDI (`feat/group-task-orchestration`)
+**What changed:** LLM agents in TASK_FORCE group conversations can now dynamically create, recruit, converse with, and teardown other agents at runtime. This enables agentic patterns where a moderator or specialist agent can spin up sub-agents on-the-fly to accomplish tasks.
+
+### Config Model
+- **`DynamicAgentConfig`** — new inner class on `AgentGroupConfiguration` with config switches for creation, recruitment, delegation, guardrails (provider/model whitelists, per-discussion caps), and lifecycle policy (ephemeral/keep-deployed/undeploy-only/agent-decides)
+- **`GroupConversation`** — added `dynamicMembers`, `createdAgentIds`, `retainedAgentIds` fields for runtime tracking
+
+### 4 LLM Tools (all `@Vetoed`, per-invocation constructed)
+- **`CreateSubAgentTool`** — creates + deploys agent via `AgentSetupService`, quota-gated, guardrail-validated, optional initial message
+- **`ConverseWithAgentTool`** — send messages to any deployed agent, supports multi-turn via conversationId
+- **`FindAgentsByCapabilityTool`** — discover agents by skill via `CapabilityRegistryService`
+- **`TeardownAgentTool`** — undeploy/delete created agents + `retainAgent` for lifecycle override
+
+### Wiring
+- `AgentOrchestrator` + `LlmTask` — 5 new CDI dependencies, whitelist-gated tool names: `create_sub_agent`, `converse_with_agent`, `find_agents_by_capability`, `teardown_agent`
+- `GroupConversationService` — `findMemberIncludingDynamic()` for task assignment to dynamic members, `cleanupEphemeralAgents()` in finally block with lifecycle policy enforcement
+
+### Tests
+- **`DynamicAgentToolsTest`** — 22 tests: CreateSubAgent (8), FindAgents (4), Teardown (5), DynamicAgentConfig (2), GroupConversation fields (6)
+- All existing test files updated for new constructor signatures (11 files)
+
+---
+
 ## 🐛 Fix: Tenant Quota Enforcement in Group Conversations (2026-06-25)
 
 **Repo:** EDDI (`feat/group-task-orchestration`)
