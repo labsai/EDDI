@@ -22,8 +22,6 @@ import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
 import ai.labs.eddi.engine.setup.SetupAgentRequest;
 import ai.labs.eddi.engine.setup.SetupResult;
-import ai.labs.eddi.engine.tenancy.TenantQuotaService;
-import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -54,7 +52,6 @@ class DynamicAgentToolsTest {
     class CreateSubAgentToolTest {
 
         private AgentSetupService agentSetupService;
-        private TenantQuotaService tenantQuotaService;
         private IConversationService conversationService;
         private DynamicAgentConfig config;
         private List<String> createdAgentIds;
@@ -64,7 +61,6 @@ class DynamicAgentToolsTest {
         @BeforeEach
         void setUp() {
             agentSetupService = mock(AgentSetupService.class);
-            tenantQuotaService = mock(TenantQuotaService.class);
             conversationService = mock(IConversationService.class);
             config = new DynamicAgentConfig();
             config.setEnabled(true);
@@ -72,14 +68,12 @@ class DynamicAgentToolsTest {
             config.setMaxCreatedAgentsPerDiscussion(5);
             createdAgentIds = new CopyOnWriteArrayList<>();
             retainedAgentIds = ConcurrentHashMap.newKeySet();
-            tool = new CreateSubAgentTool(agentSetupService, tenantQuotaService,
+            tool = new CreateSubAgentTool(agentSetupService,
                     conversationService, "parent-agent-1", "user-1", config, createdAgentIds, retainedAgentIds);
         }
 
         @Test
         void createSubAgent_success() throws Exception {
-            when(tenantQuotaService.acquireConversationSlot())
-                    .thenReturn(new QuotaCheckResult(true, null));
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/DataAnalyst",
                             "anthropic", "claude-sonnet-4-6", true, "ready", null, null, null, null, null));
@@ -120,9 +114,6 @@ class DynamicAgentToolsTest {
         void createSubAgent_providerNotAllowed() {
             config.setAllowedProviders(List.of("openai"));
 
-            when(tenantQuotaService.acquireConversationSlot())
-                    .thenReturn(new QuotaCheckResult(true, null));
-
             String result = tool.createSubAgent("Test", "prompt", "anthropic", null, null, null);
 
             assertTrue(result.contains("⚠️"));
@@ -134,9 +125,6 @@ class DynamicAgentToolsTest {
             config.setAllowedProviders(List.of("openai"));
             config.setAllowedModels(Map.of("openai", List.of("gpt-4o-mini")));
 
-            when(tenantQuotaService.acquireConversationSlot())
-                    .thenReturn(new QuotaCheckResult(true, null));
-
             String result = tool.createSubAgent("Test", "prompt", "openai", "gpt-4o", null, null);
 
             assertTrue(result.contains("⚠️"));
@@ -145,10 +133,9 @@ class DynamicAgentToolsTest {
 
         @Test
         void createSubAgent_quotaEnforcedByConversationStart() throws Exception {
-            // Quota is now enforced by startConversation() internally, not by a
-            // pre-flight acquireConversationSlot() call in CreateSubAgentTool.
-            // This avoids double-counting. We just verify that the tool no longer
-            // calls acquireConversationSlot() directly.
+            // Quota is enforced by startConversation() internally, not by
+            // CreateSubAgentTool.
+            // The tool no longer holds a TenantQuotaService reference at all.
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
                             null, null, true, "ready", null, null, null, null, null));
@@ -156,7 +143,6 @@ class DynamicAgentToolsTest {
             String result = tool.createSubAgent("Test", "prompt", null, null, null, null);
 
             assertTrue(result.contains("✅"));
-            verify(tenantQuotaService, never()).acquireConversationSlot();
         }
 
         @Test
@@ -175,8 +161,6 @@ class DynamicAgentToolsTest {
 
         @Test
         void createSubAgent_setupFailure() throws Exception {
-            when(tenantQuotaService.acquireConversationSlot())
-                    .thenReturn(new QuotaCheckResult(true, null));
             when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
                     .thenThrow(new AgentSetupException("DB error"));
 

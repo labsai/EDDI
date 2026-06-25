@@ -568,7 +568,7 @@ class AgentOrchestrator {
                 DynamicAgentConfig defaultConfig = createDefaultDynamicConfig();
 
                 if (whitelist.contains("create_sub_agent") && agentSetupService != null) {
-                    tools.add(new CreateSubAgentTool(agentSetupService, tenantQuotaService,
+                    tools.add(new CreateSubAgentTool(agentSetupService,
                             conversationService, parentAgentId, userId, defaultConfig,
                             sharedCreatedIds, sharedRetainedIds));
                     LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s'", sanitize(parentAgentId));
@@ -653,44 +653,6 @@ class AgentOrchestrator {
         tools.add(tool);
         LOGGER.infof("[RECALL] ConversationRecallTool enabled: summaryThroughStep=%d, maxRecallTurns=%d", throughStep,
                 summaryConfig.getMaxRecallTurns());
-    }
-
-    /**
-     * Constructs and adds dynamic agent tools (create, converse, find, teardown).
-     * Accepts shared tracking lists to ensure tools can see each other's state.
-     * <p>
-     * For group conversations, tools are wired with proper context
-     * (GroupConversation's createdAgentIds/retainedAgentIds) by
-     * GroupConversationService directly.
-     */
-    private void addDynamicAgentTools(List<Object> tools, IConversationMemory memory,
-                                      boolean addCreate, boolean addConverse, boolean addFind, boolean addTeardown,
-                                      List<String> createdAgentIds, Set<String> retainedAgentIds) {
-
-        String parentAgentId = memory.getAgentId();
-        String userId = memory.getUserId();
-
-        if (addCreate && agentSetupService != null) {
-            DynamicAgentConfig config = createDefaultDynamicConfig();
-            tools.add(new CreateSubAgentTool(agentSetupService, tenantQuotaService,
-                    conversationService, parentAgentId, userId, config, createdAgentIds, retainedAgentIds));
-            LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s'", sanitize(parentAgentId));
-        }
-
-        if (addConverse && conversationService != null) {
-            tools.add(new ConverseWithAgentTool(conversationService, userId));
-            LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s'", sanitize(parentAgentId));
-        }
-
-        if (addFind && capabilityRegistryService != null) {
-            tools.add(new FindAgentsByCapabilityTool(capabilityRegistryService));
-            LOGGER.debugf("[DYNAMIC] FindAgentsByCapabilityTool enabled for agent='%s'", sanitize(parentAgentId));
-        }
-
-        if (addTeardown && agentFactory != null && agentStore != null) {
-            tools.add(new TeardownAgentTool(agentFactory, agentStore, createdAgentIds, retainedAgentIds));
-            LOGGER.debugf("[DYNAMIC] TeardownAgentTool enabled for agent='%s'", sanitize(parentAgentId));
-        }
     }
 
     /**

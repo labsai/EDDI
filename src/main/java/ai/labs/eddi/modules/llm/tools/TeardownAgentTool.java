@@ -83,6 +83,7 @@ public class TeardownAgentTool {
             }
 
             // --- Optional: delete agent configuration ---
+            createdAgentIds.remove(agentId);
             if (Boolean.TRUE.equals(delete)) {
                 try {
                     agentStore.deleteAllPermanently(agentId);
@@ -95,7 +96,6 @@ public class TeardownAgentTool {
                 }
             }
 
-            createdAgentIds.remove(agentId);
             return "✅ Agent '%s' has been undeployed successfully.".formatted(agentId);
 
         } catch (Exception e) {

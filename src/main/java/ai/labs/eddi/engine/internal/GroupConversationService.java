@@ -541,13 +541,6 @@ public class GroupConversationService implements IGroupConversationService {
                 }
             }
 
-            // Validate no circular dependencies
-            List<String> cycles = gc.getTaskList().detectCycles();
-            if (!cycles.isEmpty()) {
-                throw new GroupDiscussionException(
-                        "Circular task dependencies detected: " + String.join(" → ", cycles));
-            }
-
             // Third pass: resolve assignments with round-robin for "ALL"
             for (int i = 0; i < createdItems.size(); i++) {
                 TaskItem task = createdItems.get(i);
@@ -637,6 +630,14 @@ public class GroupConversationService implements IGroupConversationService {
                     LOGGER.warnf("Task '%s' has no assignable agent, will be skipped during execution", pt.subject());
                 }
             }
+        }
+
+        // Validate no circular dependencies (covers both pre-configured and LLM-planned
+        // paths)
+        List<String> cycles = gc.getTaskList().detectCycles();
+        if (!cycles.isEmpty()) {
+            throw new GroupDiscussionException(
+                    "Circular task dependencies detected: " + String.join(" → ", cycles));
         }
 
         // Emit task plan event

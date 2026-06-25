@@ -13,8 +13,6 @@ import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.setup.AgentSetupService.AgentSetupException;
 import ai.labs.eddi.engine.setup.SetupAgentRequest;
 import ai.labs.eddi.engine.setup.SetupResult;
-import ai.labs.eddi.engine.tenancy.TenantQuotaService;
-import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.inject.Vetoed;
@@ -45,7 +43,6 @@ public class CreateSubAgentTool {
     private static final Environment DEFAULT_ENV = Environment.production;
 
     private final AgentSetupService agentSetupService;
-    private final TenantQuotaService tenantQuotaService;
     private final IConversationService conversationService;
     private final String parentAgentId;
     private final String userId;
@@ -54,7 +51,6 @@ public class CreateSubAgentTool {
     private final Set<String> retainedAgentIds;
 
     public CreateSubAgentTool(AgentSetupService agentSetupService,
-            TenantQuotaService tenantQuotaService,
             IConversationService conversationService,
             String parentAgentId,
             String userId,
@@ -62,7 +58,6 @@ public class CreateSubAgentTool {
             List<String> createdAgentIds,
             Set<String> retainedAgentIds) {
         this.agentSetupService = agentSetupService;
-        this.tenantQuotaService = tenantQuotaService;
         this.conversationService = conversationService;
         this.parentAgentId = parentAgentId;
         this.userId = userId;
