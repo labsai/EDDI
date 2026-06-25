@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw } from "lucide-react";
+import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn, hashColor, getInitials } from "@/lib/utils";
@@ -24,6 +24,7 @@ const PANEL_STYLE_COLORS: Record<DiscussionStyle, { bg: string; border: string; 
   DEVIL_ADVOCATE: { bg: "bg-rose-500/10", border: "border-rose-500/30", text: "text-rose-600 dark:text-rose-400" },
   DELPHI: { bg: "bg-violet-500/10", border: "border-violet-500/30", text: "text-violet-600 dark:text-violet-400" },
   DEBATE: { bg: "bg-indigo-500/10", border: "border-indigo-500/30", text: "text-indigo-600 dark:text-indigo-400" },
+  TASK_FORCE: { bg: "bg-orange-500/10", border: "border-orange-500/30", text: "text-orange-600 dark:text-orange-400" },
   CUSTOM: { bg: "bg-secondary/20", border: "border-border", text: "text-foreground" },
 };
 
@@ -140,6 +141,83 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
             <InfoRow label={t("groups.protocolMaxRetries", "Max Retries")} value={String(config.protocol.maxRetries)} />
             <InfoRow label={t("groups.protocolUnavailable", "Unavailable")} value={config.protocol.onMemberUnavailable} />
             <InfoRow label={t("groups.protocolMaxRounds", "Max Rounds")} value={String(config.maxRounds)} />
+          </div>
+        </div>
+      )}
+
+      {/* Pre-configured Tasks (TASK_FORCE) */}
+      {config.tasks && config.tasks.length > 0 && (
+        <div>
+          <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+            <ClipboardList className="inline h-3 w-3 me-1" />
+            {t("groups.preConfiguredTasks", "Pre-configured Tasks")} ({config.tasks.length})
+          </h4>
+          <div className="space-y-1.5">
+            {config.tasks.map((task, idx) => (
+              <div
+                key={idx}
+                className="rounded-lg border border-border bg-secondary/20 p-2 space-y-1"
+              >
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-medium text-foreground">{task.subject}</span>
+                  <Badge variant="outline" className="text-[9px] px-1 py-0 ms-auto">
+                    P{task.priority}
+                  </Badge>
+                </div>
+                {task.description && (
+                  <p className="text-[10px] text-muted-foreground line-clamp-2">{task.description}</p>
+                )}
+                <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <span>→ {task.assignToRole}</span>
+                  {task.dependsOn && task.dependsOn.length > 0 && (
+                    <span className="flex items-center gap-0.5">
+                      <Link2 className="h-2.5 w-2.5" />
+                      {task.dependsOn.join(", ")}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Dynamic Agents */}
+      {config.dynamicAgents && config.dynamicAgents.enabled && (
+        <div>
+          <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+            <Bot className="inline h-3 w-3 me-1" />
+            {t("groups.dynamicAgents", "Dynamic Agents")}
+          </h4>
+          <div className="rounded-lg border border-border bg-secondary/30 p-2.5 space-y-1">
+            {config.dynamicAgents.allowCreation && (
+              <InfoRow
+                label={t("groups.dynamicCreation", "Creation")}
+                value={`✓ (max ${config.dynamicAgents.maxCreatedAgentsPerDiscussion})`}
+              />
+            )}
+            {config.dynamicAgents.allowRecruitment && (
+              <InfoRow
+                label={t("groups.dynamicRecruitment", "Recruitment")}
+                value={`✓ (max ${config.dynamicAgents.maxRecruitedAgentsPerDiscussion})`}
+              />
+            )}
+            {config.dynamicAgents.allowDelegation && (
+              <InfoRow
+                label={t("groups.dynamicDelegation", "Delegation")}
+                value={`✓ (max ${config.dynamicAgents.maxDelegationsPerTask}/task)`}
+              />
+            )}
+            <InfoRow
+              label={t("groups.lifecyclePolicy", "Lifecycle")}
+              value={config.dynamicAgents.lifecyclePolicy.replace(/_/g, " ").toLowerCase()}
+            />
+            {config.dynamicAgents.allowedProviders.length > 0 && (
+              <InfoRow
+                label={t("groups.allowedProviders", "Providers")}
+                value={config.dynamicAgents.allowedProviders.join(", ")}
+              />
+            )}
           </div>
         </div>
       )}

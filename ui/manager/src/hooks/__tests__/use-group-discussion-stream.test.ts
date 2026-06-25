@@ -62,7 +62,7 @@ describe("useGroupDiscussionStream", () => {
 
   it("streams discussion events and updates state successfully", async () => {
     async function* mockEvents() {
-      yield { type: "group_start", data: JSON.stringify({ conversationId: "conv-123", question: "Is 2+2=4?" }) };
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-123", question: "Is 2+2=4?" }) };
       yield { type: "phase_start", data: JSON.stringify({ phaseIndex: 0, phaseName: "Opinion Gathering", phaseType: "OPINION" }) };
       yield { type: "speaker_start", data: JSON.stringify({ agentId: "agent-1", displayName: "MathBot", phaseIndex: 0, phaseName: "Opinion Gathering" }) };
       yield { type: "speaker_complete", data: JSON.stringify({ agentId: "agent-1", displayName: "MathBot", phaseIndex: 0, response: "Yes, 2+2=4." }) };
@@ -89,7 +89,7 @@ describe("useGroupDiscussionStream", () => {
 
   it("handles speaker_complete without matching speaker_start placeholder", async () => {
     async function* mockEvents() {
-      yield { type: "group_start", data: JSON.stringify({ conversationId: "conv-123", question: "Is 2+2=4?" }) };
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-123", question: "Is 2+2=4?" }) };
       yield { type: "phase_start", data: JSON.stringify({ phaseIndex: 0, phaseName: "Opinion Gathering", phaseType: "CRITIQUE" }) };
       yield { type: "speaker_complete", data: JSON.stringify({ agentId: "agent-1", displayName: "MathBot", phaseIndex: 0, content: "Direct reply" }) };
       yield { type: "group_complete", data: "{}" }; // empty data
@@ -110,7 +110,7 @@ describe("useGroupDiscussionStream", () => {
 
   it("handles stream error event", async () => {
     async function* mockEvents() {
-      yield { type: "group_start", data: JSON.stringify({ conversationId: "conv-123", question: "Is 2+2=4?" }) };
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-123", question: "Is 2+2=4?" }) };
       yield { type: "group_error", data: JSON.stringify({ error: "Failed to fetch model" }) };
     }
 
@@ -165,7 +165,7 @@ describe("useGroupDiscussionStream", () => {
 
   it("handles exception thrown in generator", async () => {
     async function* mockEvents() {
-      yield { type: "group_start", data: JSON.stringify({ conversationId: "conv-123", question: "Is 2+2=4?" }) };
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-123", question: "Is 2+2=4?" }) };
       throw new Error("Network interrupted");
     }
 
@@ -183,7 +183,7 @@ describe("useGroupDiscussionStream", () => {
 
   it("swallows AbortError exception in generator", async () => {
     async function* mockEvents() {
-      yield { type: "group_start", data: JSON.stringify({ conversationId: "conv-123", question: "Is 2+2=4?" }) };
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-123", question: "Is 2+2=4?" }) };
       throw new DOMException("The operation was aborted.", "AbortError");
     }
 

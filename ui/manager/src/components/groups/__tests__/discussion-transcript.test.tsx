@@ -51,6 +51,10 @@ const mockConversation: GroupConversation = {
   currentPhaseName: "Synthesis",
   synthesizedAnswer: "### Hybrid Systems\nWe need both deterministic guardrails and LLMs.",
   depth: 0,
+  taskList: null,
+  dynamicMembers: [],
+  createdAgentIds: [],
+  retainedAgentIds: [],
   created: "2026-06-09T12:00:00.000Z",
   lastModified: "2026-06-09T12:05:00.000Z",
 };
@@ -175,6 +179,10 @@ describe("DiscussionTranscript", () => {
       activeSpeakers: new Set(["agent-2"]),
       synthesizedAnswer: null,
       error: null,
+      taskPlan: null,
+      taskVerifications: new Map(),
+      tasksInProgress: new Set(),
+      tasksCompleted: new Set(),
     };
 
     renderWithProviders(
@@ -205,6 +213,10 @@ describe("DiscussionTranscript", () => {
       activeSpeakers: new Set(),
       synthesizedAnswer: null,
       error: "SSE Connection Aborted",
+      taskPlan: null,
+      taskVerifications: new Map(),
+      tasksInProgress: new Set(),
+      tasksCompleted: new Set(),
     };
 
     renderWithProviders(

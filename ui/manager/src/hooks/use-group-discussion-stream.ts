@@ -10,6 +10,8 @@ import {
   type SpeakerStartPayload,
   type SpeakerCompletePayload,
   type GroupCompletePayload,
+  type TaskPlanCreatedPayload,
+  type TaskVerifiedPayload,
 } from "@/lib/api/groups";
 
 // ─── Streaming State ────────────────────────────────────────────
@@ -33,6 +35,14 @@ export interface GroupStreamState {
   error: string | null;
   /** Timestamp when the stream was started (stable, not recalculated per render) */
   startedAt: string | null;
+  /** Task plan received from task_plan_created SSE event */
+  taskPlan: { id: string; subject: string; assignedTo: string; priority: number }[] | null;
+  /** Task verification results from task_verified SSE events */
+  taskVerifications: Map<string, { passed: boolean; feedback: string }>;
+  /** Set of task IDs currently being executed (inferred from speaker events during EXECUTE phase) */
+  tasksInProgress: Set<string>;
+  /** Set of task IDs completed (inferred from speaker events during EXECUTE phase) */
+  tasksCompleted: Set<string>;
 }
 
 const initialState: GroupStreamState = {
@@ -45,6 +55,10 @@ const initialState: GroupStreamState = {
   synthesizedAnswer: null,
   error: null,
   startedAt: null,
+  taskPlan: null,
+  taskVerifications: new Map(),
+  tasksInProgress: new Set(),
+  tasksCompleted: new Set(),
 };
 
 // ─── Hook ───────────────────────────────────────────────────────
@@ -136,7 +150,7 @@ function handleSSEEvent(
         const payload: GroupStartPayload = JSON.parse(event.data);
         setState((s) => ({
           ...s,
-          conversationId: payload.conversationId,
+          conversationId: payload.groupConversationId,
           state: "IN_PROGRESS",
           // Add the original question as the first transcript entry
           transcript: [
@@ -182,9 +196,26 @@ function handleSSEEvent(
         setState((s) => {
           const newSpeakers = new Set(s.activeSpeakers);
           newSpeakers.add(payload.agentId);
+
+          // Track task execution during EXECUTE phase
+          let newTasksInProgress = s.tasksInProgress;
+          if (s.currentPhase?.type === "EXECUTE" && s.taskPlan) {
+            newTasksInProgress = new Set(s.tasksInProgress);
+            // Find the next pending task for this agent
+            const agentTask = s.taskPlan.find(
+              (t) => t.assignedTo === payload.displayName &&
+                !s.tasksCompleted.has(t.id) &&
+                !s.tasksInProgress.has(t.id)
+            );
+            if (agentTask) {
+              newTasksInProgress.add(agentTask.id);
+            }
+          }
+
           return {
             ...s,
             activeSpeakers: newSpeakers,
+            tasksInProgress: newTasksInProgress,
             // Add a placeholder entry for the active speaker (typing indicator)
             transcript: [
               ...s.transcript,
@@ -252,11 +283,59 @@ function handleSSEEvent(
             });
           }
 
+          // Track task completion during EXECUTE phase
+          let newTasksInProgress2 = s.tasksInProgress;
+          let newTasksCompleted = s.tasksCompleted;
+          if (s.currentPhase?.type === "EXECUTE" && s.taskPlan) {
+            const agentTask = s.taskPlan.find(
+              (t) => t.assignedTo === payload.displayName &&
+                s.tasksInProgress.has(t.id)
+            );
+            if (agentTask) {
+              newTasksInProgress2 = new Set(s.tasksInProgress);
+              newTasksInProgress2.delete(agentTask.id);
+              newTasksCompleted = new Set(s.tasksCompleted);
+              newTasksCompleted.add(agentTask.id);
+            }
+          }
+
           return {
             ...s,
             activeSpeakers: newSpeakers,
             transcript,
+            tasksInProgress: newTasksInProgress2,
+            tasksCompleted: newTasksCompleted,
           };
+        });
+      } catch {
+        // ignore
+      }
+      return false;
+    }
+
+    case "task_plan_created": {
+      try {
+        const payload: TaskPlanCreatedPayload = JSON.parse(event.data);
+        setState((s) => ({
+          ...s,
+          taskPlan: payload.tasks,
+        }));
+      } catch {
+        // ignore
+      }
+      return false;
+    }
+
+    case "task_verified": {
+      try {
+        const payload: TaskVerifiedPayload = JSON.parse(event.data);
+        setState((s) => {
+          const newVerifications = new Map(s.taskVerifications);
+          newVerifications.set(payload.taskId, {
+            passed: payload.passed,
+            feedback: payload.feedback,
+          });
+          return { ...s, taskVerifications: newVerifications };
         });
       } catch {
         // ignore
@@ -350,6 +429,12 @@ function mapPhaseToEntryType(phaseType?: string): TranscriptEntryType {
       return "REBUTTAL";
     case "SYNTHESIS":
       return "SYNTHESIS";
+    case "PLAN":
+      return "PLAN";
+    case "EXECUTE":
+      return "TASK_RESULT";
+    case "VERIFY":
+      return "VERIFICATION";
     default:
       return "OPINION";
   }

@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import DOMPurify from "dompurify";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, ClipboardList, CheckCircle2 } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import type { TranscriptEntry, TranscriptEntryType, DiscussionStyle } from "@/lib/api/groups";
@@ -20,6 +20,11 @@ const STYLE_BADGE_OVERRIDES: Partial<Record<DiscussionStyle, Partial<Record<Tran
   DEVIL_ADVOCATE: {
     CHALLENGE: "destructive",
     DEFENSE: "success",
+  },
+  TASK_FORCE: {
+    PLAN: "default",
+    TASK_RESULT: "success",
+    VERIFICATION: "warning",
   },
 };
 
@@ -49,6 +54,7 @@ function defaultBadgeVariant(
 ): "default" | "secondary" | "success" | "warning" | "destructive" | "outline" {
   switch (type) {
     case "SYNTHESIS":
+    case "PLAN":
       return "default";
     case "ERROR":
       return "destructive";
@@ -56,10 +62,12 @@ function defaultBadgeVariant(
       return "secondary";
     case "CRITIQUE":
     case "CHALLENGE":
+    case "VERIFICATION":
       return "warning";
     case "OPINION":
     case "REVISION":
     case "DEFENSE":
+    case "TASK_RESULT":
       return "success";
     default:
       return "outline";
@@ -74,6 +82,9 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
   const info = ENTRY_TYPE_INFO[entry.type];
   const isSynthesis = entry.type === "SYNTHESIS";
   const isError = entry.type === "ERROR" || entry.type === "SKIPPED";
+  const isPlan = entry.type === "PLAN";
+  const isVerification = entry.type === "VERIFICATION";
+  const isTaskResult = entry.type === "TASK_RESULT";
 
   // Style-aware badge variants
   const badgeVar = (discussionStyle && STYLE_BADGE_OVERRIDES[discussionStyle]?.[entry.type])
@@ -100,8 +111,14 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
         "flex gap-3 rounded-lg p-3 transition-colors",
         isSynthesis &&
           "border-2 border-primary/40 bg-primary/5 shadow-sm",
+        isPlan &&
+          "border border-sky-500/30 bg-sky-500/5",
+        isTaskResult &&
+          "border border-emerald-500/20 bg-emerald-500/5",
+        isVerification &&
+          "border border-amber-500/20 bg-amber-500/5",
         isError && "opacity-60",
-        !isSynthesis && !isError && "hover:bg-secondary/30",
+        !isSynthesis && !isError && !isPlan && !isTaskResult && !isVerification && "hover:bg-secondary/30",
         className
       )}
       data-testid={`transcript-entry-${entry.speakerAgentId}-${entry.phaseIndex}`}
@@ -114,7 +131,13 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
         )}
         title={entry.speakerDisplayName}
       >
-        {getInitials(entry.speakerDisplayName)}
+        {isPlan ? (
+          <ClipboardList className="h-4 w-4" />
+        ) : isVerification ? (
+          <CheckCircle2 className="h-4 w-4" />
+        ) : (
+          getInitials(entry.speakerDisplayName)
+        )}
       </div>
 
       {/* Content */}

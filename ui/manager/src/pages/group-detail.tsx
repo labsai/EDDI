@@ -34,6 +34,7 @@ const STATE_COLORS: Record<string, string> = {
   SYNTHESIZING: "text-amber-500",
   FAILED: "text-destructive",
   CREATED: "text-muted-foreground",
+  AWAITING_APPROVAL: "text-orange-500",
 };
 
 export function GroupDetailPage() {

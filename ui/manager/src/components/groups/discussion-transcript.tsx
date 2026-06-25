@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { PhaseHeader } from "./phase-header";
 import { AgentResponseCard } from "./agent-response-card";
+import { TaskBoard } from "./task-board";
 import { parseTranscriptContent, safeFormatDate } from "./group-utils";
 import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle } from "@/lib/api/groups";
 import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
@@ -91,6 +92,16 @@ const STYLE_THEME: Record<DiscussionStyle, {
     progressText: "text-indigo-600 dark:text-indigo-400",
     progressBorder: "border-indigo-500/20",
   },
+  TASK_FORCE: {
+    accent: "text-orange-500",
+    phaseAccent: "border-orange-500/30 bg-orange-500/5",
+    questionBg: "bg-orange-500/5 border-b-orange-500/20",
+    flowBg: "bg-orange-500/10",
+    flowText: "text-orange-600 dark:text-orange-400",
+    progressBg: "bg-orange-500/5",
+    progressText: "text-orange-600 dark:text-orange-400",
+    progressBorder: "border-orange-500/20",
+  },
   CUSTOM: {
     accent: "text-primary",
     phaseAccent: "border-primary/30 bg-primary/5",
@@ -114,6 +125,9 @@ function entryTypeToPhaseType(type: TranscriptEntryType): PhaseType {
     ARGUMENT: "ARGUE",
     REBUTTAL: "REBUTTAL",
     SYNTHESIS: "SYNTHESIS",
+    PLAN: "PLAN",
+    TASK_RESULT: "EXECUTE",
+    VERIFICATION: "VERIFY",
   };
   return map[type] || "OPINION";
 }
@@ -150,6 +164,7 @@ const STATE_VARIANTS: Record<string, { variant: "default" | "success" | "warning
   SYNTHESIZING: { variant: "warning" },
   COMPLETED: { variant: "success" },
   FAILED: { variant: "destructive" },
+  AWAITING_APPROVAL: { variant: "warning" },
 };
 
 /** Height above which synthesis content is collapsed */
@@ -260,6 +275,7 @@ export function DiscussionTranscript({
     SYNTHESIZING: t("groups.stateSynthesizing", "Synthesizing…"),
     COMPLETED: t("groups.stateCompleted", "Completed"),
     FAILED: t("groups.stateFailed", "Failed"),
+    AWAITING_APPROVAL: t("groups.stateAwaitingApproval", "Awaiting Approval"),
   };
   const stateLabel = discussionStateLabels[effectiveState] ?? effectiveState;
 
@@ -381,6 +397,41 @@ export function DiscussionTranscript({
           </PhaseHeader>
         ))}
 
+        {/* Task Board — shown for TASK_FORCE style when task plan is available */}
+        {style === "TASK_FORCE" && isStreaming && streamState && (
+          <TaskBoard
+            taskPlan={streamState.taskPlan}
+            tasksInProgress={streamState.tasksInProgress}
+            tasksCompleted={streamState.tasksCompleted}
+            taskVerifications={streamState.taskVerifications}
+            isStreaming={streamState.isStreaming}
+          />
+        )}
+
+        {/* Also show task board for completed TASK_FORCE conversations loaded from API */}
+        {style === "TASK_FORCE" && !isStreaming && conversation?.taskList && (
+          <TaskBoard
+            taskPlan={conversation.taskList.tasks.map(t => ({
+              id: t.id,
+              subject: t.subject,
+              assignedTo: t.assignedDisplayName || t.assignedAgentId || "Unassigned",
+              priority: t.priority,
+            }))}
+            tasksInProgress={new Set(
+              conversation.taskList.tasks.filter(t => t.status === "IN_PROGRESS").map(t => t.id)
+            )}
+            tasksCompleted={new Set(
+              conversation.taskList.tasks.filter(t => t.status === "COMPLETED" || t.status === "VERIFIED").map(t => t.id)
+            )}
+            taskVerifications={new Map(
+              conversation.taskList.tasks
+                .filter(t => t.status === "VERIFIED" || (t.verificationNote != null))
+                .map(t => [t.id, { passed: t.verified, feedback: t.verificationNote || "" }])
+            )}
+            isStreaming={false}
+          />
+        )}
+
         {/* Synthesized answer highlight */}
         {parsedSynthesis && (
           <div
@@ -495,6 +546,7 @@ const STYLE_INFO_FLOW: Record<string, string[]> = {
   DEVIL_ADVOCATE: ["Opinion", "Challenge", "Defense", "Synthesis"],
   DELPHI: ["Independent", "Anonymous", "Revised", "Synthesis"],
   DEBATE: ["Pro Opening", "Con Opening", "Rebuttals", "Judgment"],
+  TASK_FORCE: ["Plan", "Execute", "Verify", "Synthesize"],
 };
 
 // Re-export for use in group-detail

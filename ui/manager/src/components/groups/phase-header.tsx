@@ -23,6 +23,9 @@ const PHASE_ICONS: Record<PhaseType, string> = {
   ARGUE: "📢",
   REBUTTAL: "↩️",
   SYNTHESIS: "⭐",
+  PLAN: "📋",
+  EXECUTE: "⚡",
+  VERIFY: "✅",
 };
 
 export function PhaseHeader({
