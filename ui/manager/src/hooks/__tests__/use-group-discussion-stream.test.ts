@@ -198,4 +198,186 @@ describe("useGroupDiscussionStream", () => {
     expect(result.current.streamState.state).toBe("IN_PROGRESS");
     expect(result.current.streamState.isStreaming).toBe(false);
   });
+
+  it("handles task_plan_created event and populates taskPlan state", async () => {
+    async function* mockEvents() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-200", question: "Plan tasks" }) };
+      yield {
+        type: "task_plan_created",
+        data: JSON.stringify({
+          tasks: [
+            { id: "t1", subject: "Research", assignedTo: "Agent Alpha", priority: 0 },
+            { id: "t2", subject: "Summarize", assignedTo: "Agent Beta", priority: 1 },
+          ],
+        }),
+      };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "Done" }) };
+    }
+
+    mockStreamGroupDiscussion.mockReturnValue(mockEvents());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+
+    await act(async () => {
+      await result.current.startStream("group-1", "Plan tasks");
+    });
+
+    expect(result.current.streamState.taskPlan).toEqual([
+      { id: "t1", subject: "Research", assignedTo: "Agent Alpha", priority: 0 },
+      { id: "t2", subject: "Summarize", assignedTo: "Agent Beta", priority: 1 },
+    ]);
+  });
+
+  it("handles task_verified event and populates taskVerifications map", async () => {
+    async function* mockEvents() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-201", question: "Verify tasks" }) };
+      yield {
+        type: "task_plan_created",
+        data: JSON.stringify({
+          tasks: [{ id: "t1", subject: "Research", assignedTo: "Agent Alpha", priority: 0 }],
+        }),
+      };
+      yield { type: "phase_start", data: JSON.stringify({ phaseIndex: 0, phaseName: "Verification", phaseType: "VERIFY" }) };
+      yield { type: "task_verified", data: JSON.stringify({ taskId: "t1", passed: true, feedback: "Good" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "Verified" }) };
+    }
+
+    mockStreamGroupDiscussion.mockReturnValue(mockEvents());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+
+    await act(async () => {
+      await result.current.startStream("group-1", "Verify tasks");
+    });
+
+    const verification = result.current.streamState.taskVerifications.get("t1");
+    expect(verification).toEqual({ passed: true, feedback: "Good" });
+  });
+
+  it("tracks task in-progress during EXECUTE phase on speaker_start", async () => {
+    async function* mockEvents() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-202", question: "Execute tasks" }) };
+      yield {
+        type: "task_plan_created",
+        data: JSON.stringify({
+          tasks: [{ id: "t1", subject: "Research", assignedTo: "Agent Alpha", priority: 0 }],
+        }),
+      };
+      yield { type: "phase_start", data: JSON.stringify({ phaseIndex: 0, phaseName: "Execution", phaseType: "EXECUTE" }) };
+      yield { type: "speaker_start", data: JSON.stringify({ agentId: "agent-1", displayName: "Agent Alpha", phaseIndex: 0, phaseName: "Execution" }) };
+      // Do NOT yield speaker_complete — we want to observe in-progress state
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "In progress" }) };
+    }
+
+    mockStreamGroupDiscussion.mockReturnValue(mockEvents());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+
+    await act(async () => {
+      await result.current.startStream("group-1", "Execute tasks");
+    });
+
+    expect(result.current.streamState.tasksInProgress.has("t1")).toBe(true);
+  });
+
+  it("tracks task completion during EXECUTE phase on speaker_complete", async () => {
+    async function* mockEvents() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-203", question: "Complete tasks" }) };
+      yield {
+        type: "task_plan_created",
+        data: JSON.stringify({
+          tasks: [{ id: "t1", subject: "Research", assignedTo: "Agent Alpha", priority: 0 }],
+        }),
+      };
+      yield { type: "phase_start", data: JSON.stringify({ phaseIndex: 0, phaseName: "Execution", phaseType: "EXECUTE" }) };
+      yield { type: "speaker_start", data: JSON.stringify({ agentId: "agent-1", displayName: "Agent Alpha", phaseIndex: 0, phaseName: "Execution" }) };
+      yield { type: "speaker_complete", data: JSON.stringify({ agentId: "agent-1", displayName: "Agent Alpha", phaseIndex: 0, response: "Task done" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "All done" }) };
+    }
+
+    mockStreamGroupDiscussion.mockReturnValue(mockEvents());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+
+    await act(async () => {
+      await result.current.startStream("group-1", "Complete tasks");
+    });
+
+    expect(result.current.streamState.tasksInProgress.size).toBe(0);
+    expect(result.current.streamState.tasksCompleted.has("t1")).toBe(true);
+  });
+
+  it("resets task state on new stream", async () => {
+    // First stream with task events
+    async function* mockEvents1() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-204", question: "First stream" }) };
+      yield {
+        type: "task_plan_created",
+        data: JSON.stringify({
+          tasks: [{ id: "t1", subject: "Research", assignedTo: "Agent Alpha", priority: 0 }],
+        }),
+      };
+      yield { type: "phase_start", data: JSON.stringify({ phaseIndex: 0, phaseName: "Verification", phaseType: "VERIFY" }) };
+      yield { type: "task_verified", data: JSON.stringify({ taskId: "t1", passed: true, feedback: "Good" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "Done" }) };
+    }
+
+    // Second stream — no task events
+    async function* mockEvents2() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-205", question: "Second stream" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "Done again" }) };
+    }
+
+    mockStreamGroupDiscussion.mockReturnValueOnce(mockEvents1());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+
+    await act(async () => {
+      await result.current.startStream("group-1", "First stream");
+    });
+
+    // Confirm task state was populated from first stream
+    expect(result.current.streamState.taskPlan).not.toBeNull();
+    expect(result.current.streamState.taskVerifications.size).toBe(1);
+
+    // Start a new stream
+    mockStreamGroupDiscussion.mockReturnValueOnce(mockEvents2());
+
+    await act(async () => {
+      await result.current.startStream("group-1", "Second stream");
+    });
+
+    // All task state should be reset
+    expect(result.current.streamState.taskPlan).toBeNull();
+    expect(result.current.streamState.taskVerifications.size).toBe(0);
+    expect(result.current.streamState.tasksInProgress.size).toBe(0);
+    expect(result.current.streamState.tasksCompleted.size).toBe(0);
+  });
+
+  it("task tracking does not trigger outside EXECUTE phase", async () => {
+    async function* mockEvents() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-206", question: "Opinion phase" }) };
+      yield {
+        type: "task_plan_created",
+        data: JSON.stringify({
+          tasks: [{ id: "t1", subject: "Research", assignedTo: "Agent Alpha", priority: 0 }],
+        }),
+      };
+      yield { type: "phase_start", data: JSON.stringify({ phaseIndex: 0, phaseName: "Opinion Gathering", phaseType: "OPINION" }) };
+      yield { type: "speaker_start", data: JSON.stringify({ agentId: "agent-1", displayName: "Agent Alpha", phaseIndex: 0, phaseName: "Opinion Gathering" }) };
+      yield { type: "speaker_complete", data: JSON.stringify({ agentId: "agent-1", displayName: "Agent Alpha", phaseIndex: 0, response: "My opinion" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "Opinions gathered" }) };
+    }
+
+    mockStreamGroupDiscussion.mockReturnValue(mockEvents());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+
+    await act(async () => {
+      await result.current.startStream("group-1", "Opinion phase");
+    });
+
+    expect(result.current.streamState.tasksInProgress.size).toBe(0);
+    expect(result.current.streamState.tasksCompleted.size).toBe(0);
+  });
 });
