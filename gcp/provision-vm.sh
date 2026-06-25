@@ -103,9 +103,11 @@ ${BOLD}Create options:${RESET}
   --with-postgres           Use PostgreSQL instead of MongoDB
   --open-access             No auth (dev/demo mode, default)
   --vault-key=KEY           Set EDDI vault master key (min 16 chars)
+  --keycloak-admin-password=PW  Keycloak admin password (auto-generated if omitted with --with-auth)
   --https                   Set up nginx + Let's Encrypt HTTPS (implies --with-auth)
   --letsencrypt-email=EMAIL Email for Let's Encrypt notifications
   --static-ip               Reserve a static external IP address
+  --debug-direct            Keep direct service ports open even with --https (troubleshooting only)
   --no-wait                 Don't wait for EDDI to become healthy
 
 ${BOLD}How HTTPS works:${RESET}
@@ -195,16 +197,19 @@ ensure_firewall_rule() {
     --direction=INGRESS \
     --priority=1000 \
     --network=default \
-    --action=ALLOW \
-    --rules="tcp:${ports}" \
+    --allow="tcp:${ports}" \
     --target-tags="$NETWORK_TAG" \
     --description="$description" \
-    --quiet >/dev/null 2>"$fw_err"; then
+    --quiet >"$fw_err" 2>&1; then
     echo -e "${GREEN}✅${RESET}"
   else
     echo ""
     echo -e "  ${RED}❌  Failed to create firewall rule '${rule_name}':${RESET}"
-    sed 's/^/    /' "$fw_err" >&2
+    if [[ -s "$fw_err" ]]; then
+      sed 's/^/    /' "$fw_err"
+    else
+      echo "    (no error output captured)"
+    fi
     rm -f "$fw_err"
     exit 1
   fi
@@ -214,15 +219,18 @@ ensure_firewall_rule() {
 setup_firewall_rules() {
   step "Firewall Rules"
 
-  # Direct EDDI ports (always open — useful for debugging / MCP direct access)
-  ensure_firewall_rule "$FIREWALL_RULE_HTTP" \
-    "$EDDI_PORT" "EDDI HTTP API and dashboard (direct)"
-  ensure_firewall_rule "$FIREWALL_RULE_HTTPS" \
-    "$EDDI_HTTPS_PORT" "EDDI HTTPS (direct)"
+  # Direct EDDI and Keycloak ports — omitted in HTTPS mode to enforce the nginx/TLS
+  # security boundary; re-enable with --debug-direct when troubleshooting is needed
+  if [[ "$SETUP_HTTPS" != "true" ]] || [[ "${DEBUG_DIRECT:-false}" == "true" ]]; then
+    ensure_firewall_rule "$FIREWALL_RULE_HTTP" \
+      "$EDDI_PORT" "EDDI HTTP API and dashboard (direct)"
+    ensure_firewall_rule "$FIREWALL_RULE_HTTPS" \
+      "$EDDI_HTTPS_PORT" "EDDI HTTPS (direct)"
 
-  if [[ "$WITH_AUTH" == "true" ]]; then
-    ensure_firewall_rule "$FIREWALL_RULE_KC" \
-      "8180" "EDDI Keycloak authentication portal (direct)"
+    if [[ "$WITH_AUTH" == "true" ]]; then
+      ensure_firewall_rule "$FIREWALL_RULE_KC" \
+        "8180" "EDDI Keycloak authentication portal (direct)"
+    fi
   fi
 
   if [[ "$WITH_MONITORING" == "true" ]]; then
@@ -282,29 +290,40 @@ maybe_reserve_static_ip() {
 # ${VAR} syntax and nginx $var syntax inside heredocs.
 
 build_startup_script() {
-  local install_flags="--defaults"
-  if [[ "$WITH_AUTH" == "true" ]];       then install_flags+=" --with-auth"; fi
-  if [[ "$WITH_MONITORING" == "true" ]]; then install_flags+=" --with-monitoring"; fi
-  if [[ "$WITH_POSTGRES" == "true" ]];   then install_flags+=" --db=postgres"; fi
-  if [[ -n "${VAULT_KEY_ARG:-}" ]];      then install_flags+=" --vault-key=${VAULT_KEY_ARG}"; fi
+  local -a install_flags=(--defaults)
+  if [[ "$WITH_AUTH" == "true" ]];       then install_flags+=(--with-auth); fi
+  if [[ "$WITH_MONITORING" == "true" ]]; then install_flags+=(--with-monitoring); fi
+  if [[ "$WITH_POSTGRES" == "true" ]];   then install_flags+=(--db=postgres); fi
+  if [[ -n "${VAULT_KEY_ARG:-}" ]];      then install_flags+=(--vault-key "$VAULT_KEY_ARG"); fi
 
   # Capture provision-time values into locals so the heredoc picks them up cleanly
   local p_branch="${EDDI_BRANCH}"
   local p_port="${EDDI_PORT}"
   local p_https_port="${EDDI_HTTPS_PORT}"
-  local p_flags="${install_flags}"
+  local p_flags
+  printf -v p_flags '%q ' "${install_flags[@]}"
+  # Redact vault key value in any logged output to avoid writing it to the install log
+  local p_flags_safe="$p_flags"
+  [[ -n "${VAULT_KEY_ARG:-}" ]] && p_flags_safe="${p_flags/$(printf '%q' "$VAULT_KEY_ARG")/***}"
   local p_setup_https="${SETUP_HTTPS}"
   local p_le_email="${LETSENCRYPT_EMAIL:-admin@example.com}"
+  local p_kc_admin_pass="${KC_ADMIN_PASSWORD:-}"
 
   cat <<STARTUP_SCRIPT
 #!/usr/bin/env bash
-# EDDI VM startup script — auto-executed by GCP on first boot
+# EDDI VM startup script — auto-executed by GCP on every boot; idempotent after first install
 set -euo pipefail
 
 LOGFILE="/var/log/eddi-install.log"
 exec > >(tee -a "\$LOGFILE") 2>&1
 
 echo "=== EDDI startup script starting at \$(date) ==="
+
+# ── Idempotency guard ──────────────────────────────────────────────────────────
+if [[ -f "/root/.eddi/.env" ]]; then
+  echo "=== EDDI already installed — skipping re-install on re-boot ==="
+  exit 0
+fi
 
 export DEBIAN_FRONTEND=noninteractive
 export HOME=/root
@@ -407,10 +426,11 @@ else
 fi
 
 # ── [5/6] EDDI install ─────────────────────────────────────────────────────────
-echo "[5/6] Installing EDDI (branch: ${p_branch}, flags: ${p_flags})..."
+echo "[5/6] Installing EDDI (branch: ${p_branch}, flags: ${p_flags_safe})..."
 export EDDI_BRANCH="${p_branch}"
 export EDDI_PORT="${p_port}"
 export EDDI_HTTPS_PORT="${p_https_port}"
+export KEYCLOAK_ADMIN_PASSWORD="${p_kc_admin_pass}"
 
 curl -fsSL "https://raw.githubusercontent.com/labsai/EDDI/\${EDDI_BRANCH}/install.sh" \\
   | bash -s -- ${p_flags}
@@ -544,7 +564,7 @@ OVERRIDE_EOF
   for attempt in \$(seq 1 18); do
     KC_TOKEN=\$(curl -sf -X POST \\
       "http://localhost:8180/realms/master/protocol/openid-connect/token" \\
-      -d "client_id=admin-cli&username=admin&password=admin&grant_type=password" \\
+      -d "client_id=admin-cli&username=admin&password=${p_kc_admin_pass}&grant_type=password" \\
       2>/dev/null | jq -r '.access_token // empty' 2>/dev/null) || KC_TOKEN=""
     [[ -n "\${KC_TOKEN:-}" ]] && break
     echo "  Waiting for Keycloak admin API... (\${attempt}/18)"
@@ -607,12 +627,7 @@ create_vm() {
 
   if gcloud compute instances describe "$VM_NAME" \
       --zone="$ZONE" --project="$GCP_PROJECT" &>/dev/null 2>&1; then
-    warn "VM '${VM_NAME}' already exists in zone '${ZONE}'."
-    EXTERNAL_IP=$(gcloud compute instances describe "$VM_NAME" \
-      --zone="$ZONE" --project="$GCP_PROJECT" \
-      --format='value(networkInterfaces[0].accessConfigs[0].natIP)' 2>/dev/null)
-    info "Existing VM external IP: ${CYAN}${EXTERNAL_IP}${RESET}"
-    return 0
+    fail "VM '${VM_NAME}' already exists in zone '${ZONE}'. Use 'delete' or choose a different --name."
   fi
 
   local startup_script_file
@@ -634,6 +649,10 @@ create_vm() {
     --scopes="default"
   )
 
+  if [[ "$WITH_AUTH" == "true" && -n "${KC_ADMIN_PASSWORD:-}" ]]; then
+    create_args+=(--metadata="kc-admin-password=${KC_ADMIN_PASSWORD}")
+  fi
+
   if [[ -n "${RESERVED_IP:-}" ]]; then
     create_args+=(--address="$RESERVED_IP")
   fi
@@ -642,18 +661,33 @@ create_vm() {
   local gcloud_err
   gcloud_err=$(mktemp /tmp/eddi-gcloud-err-XXXXXX)
 
-  if gcloud "${create_args[@]}" >/dev/null 2>"$gcloud_err"; then
+  if gcloud "${create_args[@]}" >"$gcloud_err" 2>&1; then
     echo -e "${GREEN}✅${RESET}"
+    rm -f "$gcloud_err"
   else
-    echo ""
-    echo -e "  ${RED}❌  gcloud returned an error:${RESET}"
-    echo ""
-    sed 's/^/    /' "$gcloud_err" >&2
-    rm -f "$gcloud_err" "$startup_script_file"
-    exit 1
+    # gcloud can return non-zero even when the VM was successfully created
+    # (e.g. the API call succeeds but the client times out waiting for confirmation).
+    # Verify the VM actually exists before treating this as a hard failure.
+    if gcloud compute instances describe "$VM_NAME" \
+        --zone="$ZONE" --project="$GCP_PROJECT" &>/dev/null 2>&1; then
+      echo -e "${GREEN}✅${RESET}"
+      rm -f "$gcloud_err"
+    else
+      echo ""
+      echo -e "  ${RED}❌  gcloud returned an error:${RESET}"
+      echo ""
+      if [[ -s "$gcloud_err" ]]; then
+        sed 's/^/    /' "$gcloud_err"
+      else
+        echo "    (no error output captured — the command was:)"
+        echo "    gcloud ${create_args[*]}"
+      fi
+      rm -f "$gcloud_err" "$startup_script_file"
+      exit 1
+    fi
   fi
 
-  rm -f "$gcloud_err" "$startup_script_file"
+  rm -f "$startup_script_file"
 
   EXTERNAL_IP=$(gcloud compute instances describe "$VM_NAME" \
     --zone="$ZONE" --project="$GCP_PROJECT" \
@@ -717,6 +751,7 @@ wait_for_eddi() {
   echo "  Check the install log:"
   echo ""
   echo "    $(basename "$0") logs ${VM_NAME}"
+  return 1
 }
 
 # ── Success banner ─────────────────────────────────────────────────────────────
@@ -740,9 +775,11 @@ print_success() {
     echo -e "  ${BOLD}API Docs${RESET}     ${CYAN}https://${eddi_domain}/q/swagger-ui${RESET}"
     echo -e "  ${BOLD}MCP${RESET}          ${CYAN}https://${eddi_domain}/mcp${RESET}"
     echo -e "  ${BOLD}Keycloak${RESET}     ${CYAN}https://${kc_domain}${RESET}"
-    echo ""
-    echo -e "  ${DIM}Direct HTTP (always available):${RESET}"
-    echo -e "  ${DIM}  http://${EXTERNAL_IP}:${EDDI_PORT}/manage${RESET}"
+    if [[ "${DEBUG_DIRECT:-false}" == "true" ]]; then
+      echo ""
+      echo -e "  ${DIM}Direct HTTP (--debug-direct):${RESET}"
+      echo -e "  ${DIM}  http://${EXTERNAL_IP}:${EDDI_PORT}/manage${RESET}"
+    fi
   else
     echo -e "  ${BOLD}Dashboard${RESET}    ${CYAN}http://${EXTERNAL_IP}:${EDDI_PORT}/manage${RESET}"
     echo -e "  ${BOLD}API Docs${RESET}     ${CYAN}http://${EXTERNAL_IP}:${EDDI_PORT}/q/swagger-ui${RESET}"
@@ -757,12 +794,13 @@ print_success() {
   if [[ "$WITH_AUTH" == "true" ]]; then
     echo ""
     echo -e "  ${DIM}Login:  eddi / eddi  (admin)  •  viewer / viewer  (read-only)${RESET}"
-    echo -e "  ${DIM}Keycloak console admin: admin / admin${RESET}"
+    echo -e "  ${DIM}Keycloak admin password stored in VM metadata — retrieve with:${RESET}"
+    echo -e "  ${DIM}  gcloud compute instances describe ${VM_NAME} --zone=${ZONE} --project=${GCP_PROJECT} --format='value(metadata.items[kc-admin-password])'${RESET}"
   fi
 
   if [[ "$WITH_MONITORING" == "true" ]]; then
     echo ""
-    echo -e "  ${BOLD}Grafana${RESET}      ${CYAN}http://${EXTERNAL_IP}:3000${RESET}  ${DIM}(admin/admin)${RESET}"
+    echo -e "  ${BOLD}Grafana${RESET}      ${CYAN}http://${EXTERNAL_IP}:3000${RESET}"
     echo -e "  ${BOLD}Prometheus${RESET}   ${CYAN}http://${EXTERNAL_IP}:9090${RESET}"
   fi
 
@@ -820,12 +858,23 @@ print_config_summary() {
 cmd_create() {
   check_prerequisites
   resolve_project
+  if gcloud compute instances describe "$VM_NAME" \
+      --zone="$ZONE" --project="$GCP_PROJECT" &>/dev/null 2>&1; then
+    fail "VM '${VM_NAME}' already exists. Use 'status', 'ssh', or 'delete', or choose a different --name."
+  fi
+  if [[ -n "${VAULT_KEY_ARG:-}" && ${#VAULT_KEY_ARG} -lt 16 ]]; then
+    fail "--vault-key must be at least 16 characters."
+  fi
+  if [[ "$WITH_AUTH" == "true" && -z "${KC_ADMIN_PASSWORD:-}" ]]; then
+    KC_ADMIN_PASSWORD=$(openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 32)
+  fi
   print_config_summary
   maybe_reserve_static_ip
   setup_firewall_rules
   create_vm
-  wait_for_eddi
-  print_success
+  if wait_for_eddi; then
+    print_success
+  fi
 }
 
 # ── Command: delete ───────────────────────────────────────────────────────────
@@ -848,16 +897,14 @@ cmd_delete() {
     --zone="$ZONE" --project="$GCP_PROJECT" --quiet >/dev/null 2>&1
   echo -e "${GREEN}✅${RESET}"
 
-  if [[ "$STATIC_IP" == "true" ]]; then
-    local address_name="${name}-ip"
-    local region="${ZONE%-*}"
-    if gcloud compute addresses describe "$address_name" \
-        --region="$region" --project="$GCP_PROJECT" &>/dev/null 2>&1; then
-      echo -ne "  Releasing static IP '${address_name}'... "
-      gcloud compute addresses delete "$address_name" \
-        --region="$region" --project="$GCP_PROJECT" --quiet >/dev/null 2>&1
-      echo -e "${GREEN}✅${RESET}"
-    fi
+  local address_name="${name}-ip"
+  local region="${ZONE%-*}"
+  if gcloud compute addresses describe "$address_name" \
+      --region="$region" --project="$GCP_PROJECT" &>/dev/null 2>&1; then
+    echo -ne "  Releasing static IP '${address_name}'... "
+    gcloud compute addresses delete "$address_name" \
+      --region="$region" --project="$GCP_PROJECT" --quiet >/dev/null 2>&1
+    echo -e "${GREEN}✅${RESET}"
   fi
 
   info "VM '${name}' deleted."
@@ -1008,8 +1055,10 @@ WITH_POSTGRES="false"
 SETUP_HTTPS="false"
 LETSENCRYPT_EMAIL="admin@example.com"
 STATIC_IP="false"
+DEBUG_DIRECT="false"
 NO_WAIT="false"
 VAULT_KEY_ARG=""
+KC_ADMIN_PASSWORD="${KC_ADMIN_PASSWORD:-}"
 EXTERNAL_IP=""
 RESERVED_IP=""
 
@@ -1026,8 +1075,9 @@ for arg in "$@"; do
     --disk-size=*)          DISK_SIZE="${arg#*=}" ;;
     --project=*)            GCP_PROJECT="${arg#*=}" ;;
     --eddi-branch=*)        EDDI_BRANCH="${arg#*=}" ;;
-    --vault-key=*)          VAULT_KEY_ARG="${arg#*=}" ;;
-    --letsencrypt-email=*)  LETSENCRYPT_EMAIL="${arg#*=}" ;;
+    --vault-key=*)                  VAULT_KEY_ARG="${arg#*=}" ;;
+    --keycloak-admin-password=*)    KC_ADMIN_PASSWORD="${arg#*=}" ;;
+    --letsencrypt-email=*)          LETSENCRYPT_EMAIL="${arg#*=}" ;;
     --with-auth)            WITH_AUTH="true" ;;
     --with-monitoring)      WITH_MONITORING="true" ;;
     --with-postgres)        WITH_POSTGRES="true" ;;
@@ -1035,6 +1085,7 @@ for arg in "$@"; do
     --https)                SETUP_HTTPS="true"; WITH_AUTH="true" ;;
     --no-https)             SETUP_HTTPS="false" ;;
     --static-ip)            STATIC_IP="true" ;;
+    --debug-direct)         DEBUG_DIRECT="true" ;;
     --no-wait)              NO_WAIT="true" ;;
     --help|-h)              usage ;;
     --*)
