@@ -13,6 +13,7 @@
 #  COMMANDS
 #  ────────
 #    create   Provision a new VM and install EDDI
+#    update   Update EDDI to a new version on an existing VM
 #    delete   Delete a VM (and its static IP if reserved)
 #    list     List all EDDI VMs in the project
 #    ssh      Open an interactive SSH session to a VM
@@ -84,6 +85,7 @@ ${BOLD}Usage:${RESET}
 
 ${BOLD}Commands:${RESET}
   create        Provision a new GCP VM and install EDDI
+  update        Update EDDI to a new version on an existing VM
   delete        Delete a VM (pass VM_NAME as first positional arg)
   list          List all EDDI VMs in the project
   ssh           SSH into a VM (pass VM_NAME as first positional arg)
@@ -119,6 +121,12 @@ ${BOLD}How HTTPS works:${RESET}
 
   sslip.io is a free wildcard DNS service — no domain registration needed.
   e.g. for IP 34.27.206.65:  34-27-206-65.sslip.io
+
+${BOLD}Update options:${RESET}
+  --version=X.Y.Z           EDDI Docker image tag to deploy  [required]
+  --name=NAME               VM name                          [${DEFAULT_VM_NAME}]
+  --zone=ZONE               GCP zone                         [${DEFAULT_ZONE}]
+  --no-wait                 Skip health check after restart
 
 ${BOLD}Machine type reference:${RESET}
   e2-medium      2 vCPU,  4 GB   minimum for testing
@@ -877,6 +885,148 @@ cmd_create() {
   fi
 }
 
+# ── Command: update ───────────────────────────────────────────────────────────
+
+cmd_update() {
+  local name="${POSITIONAL[0]:-$VM_NAME}"
+  check_prerequisites
+  resolve_project
+
+  if [[ -z "${UPDATE_VERSION:-}" ]]; then
+    fail "No version specified. Use: $(basename "$0") update --version=X.Y.Z [VM_NAME]"
+  fi
+
+  step "Updating EDDI on VM: ${name} → ${UPDATE_VERSION}"
+
+  if ! gcloud compute instances describe "$name" \
+      --zone="$ZONE" --project="$GCP_PROJECT" &>/dev/null 2>&1; then
+    fail "VM '${name}' not found in zone '${ZONE}'."
+  fi
+
+  local vm_status
+  vm_status=$(gcloud compute instances describe "$name" \
+    --zone="$ZONE" --project="$GCP_PROJECT" \
+    --format='value(status)' 2>/dev/null)
+  if [[ "$vm_status" != "RUNNING" ]]; then
+    fail "VM '${name}' is not running (state: ${vm_status}). Start it first."
+  fi
+
+  local new_tag="${UPDATE_VERSION}"
+  info "Target version: ${CYAN}${new_tag}${RESET}"
+
+  echo ""
+  echo "  Running update on VM..."
+  echo ""
+
+  # The startup script installs EDDI into /root/.eddi (owned by root).
+  # gcloud SSH connects as the user account, so all file ops need sudo.
+  # We write a temp script locally, scp it to the VM, then execute it.
+  local update_script
+  update_script=$(mktemp /tmp/eddi-update-XXXXXX.sh)
+
+  cat > "$update_script" <<SCRIPT
+#!/usr/bin/env bash
+set -euo pipefail
+EDDI_DIR=/root/.eddi
+ENV_FILE="\${EDDI_DIR}/.env"
+EDDI_CONFIG="\${EDDI_DIR}/.eddi-config"
+
+if [[ ! -f "\${ENV_FILE}" ]]; then
+  echo "ERROR: \${ENV_FILE} not found — is EDDI installed on this VM?"
+  exit 1
+fi
+
+NEW_TAG="${new_tag}"
+
+CURRENT=\$(grep -E "^EDDI_VERSION=" "\${ENV_FILE}" | cut -d= -f2- | tr -d '"' || echo "(not set)")
+echo "  Current EDDI_VERSION: \${CURRENT}"
+echo "  New EDDI_VERSION:     \${NEW_TAG}"
+
+# The compose file uses EDDI_VERSION for the image tag
+if grep -q "^EDDI_VERSION=" "\${ENV_FILE}"; then
+  sed -i "s|^EDDI_VERSION=.*|EDDI_VERSION=\${NEW_TAG}|" "\${ENV_FILE}"
+else
+  echo "EDDI_VERSION=\${NEW_TAG}" >> "\${ENV_FILE}"
+fi
+# Clean up stale EDDI_IMAGE_TAG if present (added by older update runs)
+sed -i '/^EDDI_IMAGE_TAG=/d' "\${ENV_FILE}" 2>/dev/null || true
+
+# Build space-separated list of -f flags from .eddi-config
+COMPOSE_F_ARGS=""
+if [[ -f "\${EDDI_CONFIG}" ]] && grep -q "^COMPOSE_FILES=" "\${EDDI_CONFIG}"; then
+  for f in \$(grep "^COMPOSE_FILES=" "\${EDDI_CONFIG}" | cut -d= -f2-); do
+    COMPOSE_F_ARGS="\${COMPOSE_F_ARGS} -f \${f}"
+  done
+else
+  COMPOSE_F_ARGS="-f \${EDDI_DIR}/docker-compose.yml"
+fi
+
+echo ""
+echo "  Pulling labsai/eddi:\${NEW_TAG}..."
+# shellcheck disable=SC2086
+docker compose --env-file "\${ENV_FILE}" \${COMPOSE_F_ARGS} pull eddi
+
+echo ""
+echo "  Restarting EDDI container..."
+# shellcheck disable=SC2086
+docker compose --env-file "\${ENV_FILE}" \${COMPOSE_F_ARGS} up -d --no-deps eddi
+
+echo ""
+echo "  Update applied."
+SCRIPT
+
+  gcloud compute scp "$update_script" "${name}:/tmp/eddi-update.sh" \
+    --zone="$ZONE" --project="$GCP_PROJECT" --quiet 2>/dev/null
+  rm -f "$update_script"
+
+  gcloud compute ssh "$name" \
+    --zone="$ZONE" --project="$GCP_PROJECT" \
+    --command="sudo bash /tmp/eddi-update.sh; sudo rm -f /tmp/eddi-update.sh"
+
+  if [[ "$NO_WAIT" == "true" ]]; then
+    info "Update applied (--no-wait: skipping health check)."
+    return 0
+  fi
+
+  step "Waiting for EDDI to become healthy"
+
+  EXTERNAL_IP=$(gcloud compute instances describe "$name" \
+    --zone="$ZONE" --project="$GCP_PROJECT" \
+    --format='value(networkInterfaces[0].accessConfigs[0].natIP)' 2>/dev/null)
+
+  local health_url="http://${EXTERNAL_IP}:${EDDI_PORT}/q/health/ready"
+  local max_wait=180
+  local elapsed=0
+
+  echo "  Polling: ${DIM}${health_url}${RESET}"
+  echo -ne "  "
+
+  while [[ $elapsed -lt $max_wait ]]; do
+    if curl -sf --connect-timeout 5 "$health_url" &>/dev/null 2>&1; then
+      echo ""
+      echo ""
+      info "EDDI ${new_tag} is healthy! (ready in ${elapsed}s)"
+      echo ""
+      echo -e "  ${BOLD}Dashboard:${RESET}  ${CYAN}http://${EXTERNAL_IP}:${EDDI_PORT}/manage${RESET}"
+      local ip_dashes="${EXTERNAL_IP//./-}"
+      echo -e "  ${BOLD}HTTPS:${RESET}      ${CYAN}https://${ip_dashes}.sslip.io/manage${RESET}  ${DIM}(if cert configured)${RESET}"
+      echo ""
+      return 0
+    fi
+    sleep 5
+    elapsed=$((elapsed + 5))
+    echo -ne "."
+    if (( elapsed % 60 == 0 )); then
+      echo -ne "\n  "
+    fi
+  done
+
+  echo ""
+  echo ""
+  warn "EDDI didn't respond within ${max_wait}s — container may still be starting."
+  echo "  Check logs:  $(basename "$0") logs ${name}"
+}
+
 # ── Command: delete ───────────────────────────────────────────────────────────
 
 cmd_delete() {
@@ -1057,6 +1207,7 @@ LETSENCRYPT_EMAIL="admin@example.com"
 STATIC_IP="false"
 DEBUG_DIRECT="false"
 NO_WAIT="false"
+UPDATE_VERSION=""
 VAULT_KEY_ARG=""
 KC_ADMIN_PASSWORD="${KC_ADMIN_PASSWORD:-}"
 EXTERNAL_IP=""
@@ -1075,6 +1226,7 @@ for arg in "$@"; do
     --disk-size=*)          DISK_SIZE="${arg#*=}" ;;
     --project=*)            GCP_PROJECT="${arg#*=}" ;;
     --eddi-branch=*)        EDDI_BRANCH="${arg#*=}" ;;
+    --version=*)                    UPDATE_VERSION="${arg#*=}" ;;
     --vault-key=*)                  VAULT_KEY_ARG="${arg#*=}" ;;
     --keycloak-admin-password=*)    KC_ADMIN_PASSWORD="${arg#*=}" ;;
     --letsencrypt-email=*)          LETSENCRYPT_EMAIL="${arg#*=}" ;;
@@ -1099,6 +1251,7 @@ done
 
 case "$COMMAND" in
   create)         cmd_create ;;
+  update)         cmd_update ;;
   delete|destroy|rm) cmd_delete "${POSITIONAL[0]:-}" ;;
   list|ls)        cmd_list ;;
   ssh|connect)    cmd_ssh "${POSITIONAL[0]:-}" ;;
