@@ -487,7 +487,7 @@ public class GroupConversationService implements IGroupConversationService {
                                 original.status(), original.assignedAgentId(), original.assignedDisplayName(),
                                 resolvedDepIds, original.result(), original.verificationNote(),
                                 original.verified(), original.priority(), original.createdAt(), original.completedAt());
-                        gc.getTaskList().addTask(withDeps); // replaces by adding updated
+                        gc.getTaskList().updateTask(withDeps); // replace with dependency-aware version
                     }
                 }
             }
@@ -617,10 +617,10 @@ public class GroupConversationService implements IGroupConversationService {
             return;
         }
 
-        // SAFETY: Snapshot the transcript so parallel agents each see a consistent view
-        // (H1 fix)
-        List<TranscriptEntry> snapshotTranscript = List.copyOf(gc.getTranscript());
-
+        // Note: unlike executeParallelPhase, no transcript snapshot is needed here
+        // because
+        // agents receive task-specific input via buildTaskExecutionInput(), not
+        // transcript context.
         // Execute agents in parallel, tasks per agent sequentially
         List<CompletableFuture<Void>> futures = new ArrayList<>();
         List<GroupDiscussionException> errors = Collections.synchronizedList(new ArrayList<>());

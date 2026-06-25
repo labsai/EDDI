@@ -166,7 +166,9 @@ public class GroupConversation {
     }
 
     public void setMemberConversationIds(Map<String, String> memberConversationIds) {
-        this.memberConversationIds = memberConversationIds;
+        this.memberConversationIds = memberConversationIds != null
+                ? new ConcurrentHashMap<>(memberConversationIds)
+                : new ConcurrentHashMap<>();
     }
 
     public int getCurrentPhaseIndex() {

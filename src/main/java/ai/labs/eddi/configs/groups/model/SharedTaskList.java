@@ -301,6 +301,27 @@ public class SharedTaskList {
         }
     }
 
+    /**
+     * Replace a task with an updated version (same ID). Used for updating task
+     * metadata (e.g., adding dependency IDs) without changing status.
+     *
+     * @throws IllegalArgumentException
+     *             if no task with the given ID exists
+     */
+    public synchronized void updateTask(TaskItem replacement) {
+        boolean found = false;
+        for (int i = 0; i < tasks.size(); i++) {
+            if (tasks.get(i).id().equals(replacement.id())) {
+                tasks.set(i, replacement);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            throw new IllegalArgumentException("Task not found: " + replacement.id());
+        }
+    }
+
     private void replaceTask(String taskId, TaskItem replacement) {
         for (int i = 0; i < tasks.size(); i++) {
             if (tasks.get(i).id().equals(taskId)) {

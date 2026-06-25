@@ -469,4 +469,64 @@ class SharedTaskListTest {
         // No corruption: all tasks should still be accessible
         assertEquals(100, list.size(), "All 100 tasks should survive concurrent access");
     }
+
+    // --- updateTask regression tests (C1 fix: addTask→updateTask for deps) ---
+
+    @Test
+    void updateTask_replacesExistingTask() {
+        var task = list.addTask(new SharedTaskList.TaskItem("Task A", "desc", 0));
+        var updated = new SharedTaskList.TaskItem(
+                task.id(), "Task A", "updated desc",
+                SharedTaskList.TaskStatus.PENDING, null, null,
+                List.of(), null, null, false, 5, Instant.now(), null);
+
+        list.updateTask(updated);
+
+        assertEquals(1, list.size(), "updateTask must not duplicate");
+        assertEquals("updated desc", list.findById(task.id()).description());
+        assertEquals(5, list.findById(task.id()).priority());
+    }
+
+    @Test
+    void updateTask_nonexistentId_throws() {
+        var orphan = new SharedTaskList.TaskItem(
+                "nonexistent-id", "X", "desc",
+                SharedTaskList.TaskStatus.PENDING, null, null,
+                List.of(), null, null, false, 0, Instant.now(), null);
+
+        assertThrows(IllegalArgumentException.class, () -> list.updateTask(orphan));
+    }
+
+    @Test
+    void updateTask_addsDependencies_blocksExecution() {
+        String idA = UUID.randomUUID().toString();
+        String idB = UUID.randomUUID().toString();
+
+        var taskA = new SharedTaskList.TaskItem(
+                idA, "A", "desc", SharedTaskList.TaskStatus.PENDING,
+                null, null, List.of(), null, null, false, 0, Instant.now(), null);
+        var taskB = new SharedTaskList.TaskItem(
+                idB, "B", "desc", SharedTaskList.TaskStatus.PENDING,
+                null, null, List.of(), null, null, false, 1, Instant.now(), null);
+
+        list.addTask(taskA);
+        list.addTask(taskB);
+
+        // Both executable initially (no deps)
+        assertEquals(2, list.findExecutableTasks().size());
+
+        // Update B to depend on A
+        var taskBWithDep = new SharedTaskList.TaskItem(
+                idB, "B", "desc", SharedTaskList.TaskStatus.PENDING,
+                null, null, List.of(idA), null, null, false, 1, Instant.now(), null);
+        list.updateTask(taskBWithDep);
+
+        // Only A should be executable now
+        var executable = list.findExecutableTasks();
+        assertEquals(1, executable.size(), "Only A should be executable after B gains dep on A");
+        assertEquals(idA, executable.getFirst().id());
+
+        // List still has exactly 2 tasks
+        assertEquals(2, list.size(), "updateTask must not change list size");
+    }
 }

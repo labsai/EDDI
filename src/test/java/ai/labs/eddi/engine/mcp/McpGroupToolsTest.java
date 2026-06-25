@@ -58,6 +58,7 @@ class McpGroupToolsTest {
         assertTrue(result.contains("DEVIL_ADVOCATE"));
         assertTrue(result.contains("DELPHI"));
         assertTrue(result.contains("DEBATE"));
+        assertTrue(result.contains("TASK_FORCE"));
     }
 
     // --- list_groups ---
