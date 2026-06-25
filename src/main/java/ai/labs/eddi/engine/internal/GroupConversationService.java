@@ -702,6 +702,13 @@ public class GroupConversationService implements IGroupConversationService {
             }
         }
 
+        // Quota errors always abort, regardless of onAgentFailure policy
+        for (GroupDiscussionException error : errors) {
+            if (error.getCause() instanceof QuotaExceededException) {
+                throw error;
+            }
+        }
+
         // If ABORT policy and there were errors, propagate
         if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT && !errors.isEmpty()) {
             throw errors.getFirst();
