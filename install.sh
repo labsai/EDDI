@@ -13,6 +13,7 @@ set -euo pipefail
 
 # ── Configuration ──────────────────────────────────────────
 EDDI_BRANCH="${EDDI_BRANCH:-main}"
+EDDI_VERSION="${EDDI_VERSION:-latest}"
 EDDI_PORT="${EDDI_PORT:-7070}"
 EDDI_HTTPS_PORT="${EDDI_HTTPS_PORT:-7443}"
 EDDI_DIR="${EDDI_DIR:-$HOME/.eddi}"
@@ -210,6 +211,7 @@ for arg in "$@"; do
     --with-auth)      WITH_AUTH=true ;;
     --with-monitoring) WITH_MONITORING=true ;;
     --vault-key=*)    VAULT_KEY_ARG="${arg#*=}" ;;
+    --eddi-version=*) EDDI_VERSION="${arg#*=}" ;;
     --full)           DB_CHOICE="2"; WITH_AUTH=true; WITH_MONITORING=true ;;
     --local)          LOCAL_IMAGE=true ;;
     --help|-h)
@@ -219,19 +221,21 @@ for arg in "$@"; do
       echo "       bash install.sh [OPTIONS]"
       echo ""
       echo "Options:"
-      echo "  --defaults          Accept all defaults (non-interactive)"
-      echo "  --db=mongodb        Use MongoDB (default)"
-      echo "  --db=postgres       Use PostgreSQL"
-      echo "  --vault-key=<key>   Set vault master key (min 16 chars)"
-      echo "  --with-auth         Include Keycloak authentication"
-      echo "  --with-monitoring   Include Grafana + Prometheus"
-      echo "  --full              All options enabled"
-      echo "  --local             Use locally built Docker image (skip pull)"
+      echo "  --defaults              Accept all defaults (non-interactive)"
+      echo "  --db=mongodb            Use MongoDB (default)"
+      echo "  --db=postgres           Use PostgreSQL"
+      echo "  --vault-key=<key>       Set vault master key (min 16 chars)"
+      echo "  --with-auth             Include Keycloak authentication"
+      echo "  --with-monitoring       Include Grafana + Prometheus"
+      echo "  --eddi-version=<tag>    Pin EDDI image tag (default: latest)"
+      echo "  --full                  All options enabled"
+      echo "  --local                 Use locally built Docker image (skip pull)"
       echo ""
       echo "Environment variables:"
       echo "  EDDI_PORT           HTTP port (default: 7070)"
       echo "  EDDI_HTTPS_PORT     HTTPS port (default: 7443)"
       echo "  EDDI_DIR            Install directory (default: ~/.eddi)"
+      echo "  EDDI_VERSION        Image tag to pull (default: latest)"
       exit 0
       ;;
   esac
@@ -682,6 +686,7 @@ EDDI_VAULT_MASTER_KEY="${escaped_key}"
 EDDI_DATASTORE_TYPE=${db_txt}
 EDDI_PORT=$EDDI_PORT
 EDDI_HTTPS_PORT=$EDDI_HTTPS_PORT
+EDDI_VERSION=$EDDI_VERSION
 EOF
   # Restrict permissions on sensitive files (owner-only read/write)
   chmod 600 "$EDDI_DIR/.env"
@@ -1057,6 +1062,23 @@ case "${1:-help}" in
     docker compose "${compose_args[@]}" logs "${@}"
     ;;
   update)
+    # Optional: eddi update --eddi-version=<tag>
+    NEW_VERSION=""
+    for arg in "${@:2}"; do
+      case "$arg" in
+        --eddi-version=*) NEW_VERSION="${arg#*=}" ;;
+      esac
+    done
+
+    if [[ -n "$NEW_VERSION" ]]; then
+      echo "Pinning EDDI_VERSION=${NEW_VERSION} in ${ENV_FILE}..."
+      if grep -q '^EDDI_VERSION=' "$ENV_FILE" 2>/dev/null; then
+        sed -i "s|^EDDI_VERSION=.*|EDDI_VERSION=${NEW_VERSION}|" "$ENV_FILE"
+      else
+        echo "EDDI_VERSION=${NEW_VERSION}" >> "$ENV_FILE"
+      fi
+    fi
+
     echo "Refreshing compose files from GitHub..."
     for f in "${COMPOSE_FILE_LIST[@]}"; do
       local_name=$(basename "$f")
@@ -1072,7 +1094,7 @@ case "${1:-help}" in
       fi
     done
     echo ""
-    echo "Pulling latest images..."
+    echo "Pulling images..."
     docker compose "${compose_args[@]}" pull
     docker compose "${compose_args[@]}" up -d
     echo "EDDI updated."
@@ -1097,13 +1119,13 @@ case "${1:-help}" in
     echo "Usage: eddi <command>"
     echo ""
     echo "Commands:"
-    echo "  start       Start EDDI containers"
-    echo "  stop        Stop EDDI containers"
-    echo "  restart     Restart EDDI containers"
-    echo "  status      Show health and agent count"
-    echo "  logs [-f]   View container logs"
-    echo "  update      Refresh configs, pull latest images, restart"
-    echo "  uninstall   Remove EDDI and all data"
+    echo "  start                          Start EDDI containers"
+    echo "  stop                           Stop EDDI containers"
+    echo "  restart                        Restart EDDI containers"
+    echo "  status                         Show health and agent count"
+    echo "  logs [-f]                      View container logs"
+    echo "  update [--eddi-version=<tag>]  Refresh configs, pull images, restart"
+    echo "  uninstall                      Remove EDDI and all data"
     ;;
 esac
 EDDI_CLI
@@ -1131,6 +1153,7 @@ print_config_summary() {
   section "Configuration"
   local db_label="MongoDB"
   [[ "${DB_CHOICE:-1}" == "2" ]] && db_label="PostgreSQL"
+  echo -e "  EDDI version:   ${BOLD}${EDDI_VERSION}${RESET}"
   echo -e "  Database:       ${BOLD}${db_label}${RESET}"
   echo -e "  Vault:          ${BOLD}🔒 enabled${RESET} ${DIM}(unique key)${RESET}"
   if [[ "$WITH_AUTH" == "true" ]]; then
