@@ -407,7 +407,7 @@ export interface GroupErrorPayload {
 }
 
 export interface TaskPlanCreatedPayload {
-  tasks: { id: string; subject: string; assignedTo: string; priority: number }[];
+  tasks: { id: string; subject: string; assignedTo: string; assignedAgentId?: string; priority: number }[];
   preConfigured: boolean;
 }
 

@@ -34,6 +34,7 @@ interface PhaseGroup {
 /** Style-aware accent colors for transcript theming */
 const STYLE_THEME: Record<DiscussionStyle, {
   accent: string;
+  dotColor: string;
   phaseAccent: string;
   questionBg: string;
   flowBg: string;
@@ -44,6 +45,7 @@ const STYLE_THEME: Record<DiscussionStyle, {
 }> = {
   ROUND_TABLE: {
     accent: "text-amber-500",
+    dotColor: "bg-amber-500",
     phaseAccent: "border-amber-500/30 bg-amber-500/5",
     questionBg: "bg-amber-500/5 border-b-amber-500/20",
     flowBg: "bg-amber-500/10",
@@ -54,6 +56,7 @@ const STYLE_THEME: Record<DiscussionStyle, {
   },
   PEER_REVIEW: {
     accent: "text-teal-500",
+    dotColor: "bg-teal-500",
     phaseAccent: "border-teal-500/30 bg-teal-500/5",
     questionBg: "bg-teal-500/5 border-b-teal-500/20",
     flowBg: "bg-teal-500/10",
@@ -64,6 +67,7 @@ const STYLE_THEME: Record<DiscussionStyle, {
   },
   DEVIL_ADVOCATE: {
     accent: "text-rose-500",
+    dotColor: "bg-rose-500",
     phaseAccent: "border-rose-500/30 bg-rose-500/5",
     questionBg: "bg-rose-500/5 border-b-rose-500/20",
     flowBg: "bg-rose-500/10",
@@ -74,6 +78,7 @@ const STYLE_THEME: Record<DiscussionStyle, {
   },
   DELPHI: {
     accent: "text-violet-500",
+    dotColor: "bg-violet-500",
     phaseAccent: "border-violet-500/30 bg-violet-500/5",
     questionBg: "bg-violet-500/5 border-b-violet-500/20",
     flowBg: "bg-violet-500/10",
@@ -84,6 +89,7 @@ const STYLE_THEME: Record<DiscussionStyle, {
   },
   DEBATE: {
     accent: "text-indigo-500",
+    dotColor: "bg-indigo-500",
     phaseAccent: "border-indigo-500/30 bg-indigo-500/5",
     questionBg: "bg-indigo-500/5 border-b-indigo-500/20",
     flowBg: "bg-indigo-500/10",
@@ -94,6 +100,7 @@ const STYLE_THEME: Record<DiscussionStyle, {
   },
   TASK_FORCE: {
     accent: "text-orange-500",
+    dotColor: "bg-orange-500",
     phaseAccent: "border-orange-500/30 bg-orange-500/5",
     questionBg: "bg-orange-500/5 border-b-orange-500/20",
     flowBg: "bg-orange-500/10",
@@ -104,6 +111,7 @@ const STYLE_THEME: Record<DiscussionStyle, {
   },
   CUSTOM: {
     accent: "text-primary",
+    dotColor: "bg-primary",
     phaseAccent: "border-primary/30 bg-primary/5",
     questionBg: "bg-card/50",
     flowBg: "bg-primary/10",
@@ -312,7 +320,7 @@ export function DiscussionTranscript({
               </Badge>
               {isStreaming && (
                 <Badge variant="outline" className={cn("text-[10px] animate-pulse border-current", theme.accent)}>
-                  ● LIVE
+                  {t("groups.liveIndicator", "● LIVE")}
                 </Badge>
               )}
               {/* Allow HTML toggle — opt-in for trusted content */}
@@ -327,7 +335,7 @@ export function DiscussionTranscript({
                 title={t("groups.allowHtmlTooltip", "When enabled, renders HTML content (sanitized). Use only with trusted agents.")}
               >
                 <Code className="h-3 w-3" />
-                HTML
+                {t("groups.htmlToggle", "HTML")}
               </button>
               <span className="text-[10px] text-muted-foreground ms-auto">
                 {safeFormatDate(effectiveCreated, "full")}
@@ -360,7 +368,7 @@ export function DiscussionTranscript({
                   {isCompleted && !isActive && (
                     <Check className="h-2.5 w-2.5" />
                   )}
-                  {step}
+                  {t(`groups.flow.${step.replace(/\s+/g, "")}`, step)}
                 </span>
                 {idx < flowSteps.length - 1 && (
                   <ArrowRight className="h-2.5 w-2.5 text-muted-foreground/50" />
@@ -497,9 +505,9 @@ export function DiscussionTranscript({
         {(effectiveState === "IN_PROGRESS" || effectiveState === "SYNTHESIZING") && (
           <div className={cn("flex items-center gap-3 p-3 rounded-lg border", theme.progressBg, theme.progressBorder)}>
             <div className="flex gap-1">
-              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:0ms]", theme.accent.replace("text-", "bg-"))} />
-              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:150ms]", theme.accent.replace("text-", "bg-"))} />
-              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:300ms]", theme.accent.replace("text-", "bg-"))} />
+              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:0ms]", theme.dotColor)} />
+              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:150ms]", theme.dotColor)} />
+              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:300ms]", theme.dotColor)} />
             </div>
             <span className={cn("text-sm font-medium", theme.progressText)}>
               {effectiveState === "SYNTHESIZING"

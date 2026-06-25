@@ -114,12 +114,13 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
                 )}
                 {member.memberType === "GROUP" && (
                   <Badge variant="secondary" className="text-[9px] px-1 py-0">
-                    <Users className="h-2 w-2 me-0.5" /> Group
+                    <Users className="h-2 w-2 me-0.5" />
+                    {t("groups.memberTypeGroup", "Group")}
                   </Badge>
                 )}
                 {config.moderatorAgentId === member.agentId && (
                   <Badge variant="default" className="text-[9px] px-1 py-0">
-                    ⭐ Mod
+                    {t("groups.moderatorBadge", "⭐ Mod")}
                   </Badge>
                 )}
               </div>
@@ -150,7 +151,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
         <div>
           <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
             <ClipboardList className="inline h-3 w-3 me-1" />
-            {t("groups.preConfiguredTasks", "Pre-configured Tasks")} ({config.tasks.length})
+            {t("groups.preConfiguredTasksCount", "Pre-configured Tasks ({{count}})", { count: config.tasks.length })}
           </h4>
           <div className="space-y-1.5">
             {config.tasks.map((task, idx) => (
@@ -210,7 +211,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
             )}
             <InfoRow
               label={t("groups.lifecyclePolicy", "Lifecycle")}
-              value={config.dynamicAgents.lifecyclePolicy.replace(/_/g, " ").toLowerCase()}
+              value={t(`groups.lifecycle.${config.dynamicAgents.lifecyclePolicy}`, config.dynamicAgents.lifecyclePolicy.replace(/_/g, " ").toLowerCase())}
             />
             {config.dynamicAgents.allowedProviders.length > 0 && (
               <InfoRow

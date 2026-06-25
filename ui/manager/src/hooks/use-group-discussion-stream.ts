@@ -36,7 +36,7 @@ export interface GroupStreamState {
   /** Timestamp when the stream was started (stable, not recalculated per render) */
   startedAt: string | null;
   /** Task plan received from task_plan_created SSE event */
-  taskPlan: { id: string; subject: string; assignedTo: string; priority: number }[] | null;
+  taskPlan: { id: string; subject: string; assignedTo: string; assignedAgentId?: string; priority: number }[] | null;
   /** Task verification results from task_verified SSE events */
   taskVerifications: Map<string, { passed: boolean; feedback: string }>;
   /** Set of task IDs currently being executed (inferred from speaker events during EXECUTE phase) */
@@ -171,8 +171,8 @@ function handleSSEEvent(
             },
           ],
         }));
-      } catch {
-        // ignore parse error
+      } catch (e) {
+        console.warn('[SSE] Failed to parse group_start event:', e);
       }
       return false;
     }
@@ -188,8 +188,8 @@ function handleSSEEvent(
             type: payload.phaseType,
           },
         }));
-      } catch {
-        // ignore
+      } catch (e) {
+        console.warn('[SSE] Failed to parse phase_start event:', e);
       }
       return false;
     }
@@ -205,9 +205,12 @@ function handleSSEEvent(
           let newTasksInProgress = s.tasksInProgress;
           if (s.currentPhase?.type === "EXECUTE" && s.taskPlan) {
             newTasksInProgress = new Set(s.tasksInProgress);
-            // Find the next pending task for this agent
+            // Find the next pending task for this agent — prefer agentId, fall back to displayName
             const agentTask = s.taskPlan.find(
-              (t) => t.assignedTo === payload.displayName &&
+              (t) =>
+                (t.assignedAgentId
+                  ? t.assignedAgentId === payload.agentId
+                  : t.assignedTo === payload.displayName) &&
                 !s.tasksCompleted.has(t.id) &&
                 !s.tasksInProgress.has(t.id)
             );
@@ -237,8 +240,8 @@ function handleSSEEvent(
             ],
           };
         });
-      } catch {
-        // ignore
+      } catch (e) {
+        console.warn('[SSE] Failed to parse speaker_start event:', e);
       }
       return false;
     }
@@ -291,8 +294,12 @@ function handleSSEEvent(
           let newTasksInProgress2 = s.tasksInProgress;
           let newTasksCompleted = s.tasksCompleted;
           if (s.currentPhase?.type === "EXECUTE" && s.taskPlan) {
+            // Prefer agentId matching, fall back to displayName
             const agentTask = s.taskPlan.find(
-              (t) => t.assignedTo === payload.displayName &&
+              (t) =>
+                (t.assignedAgentId
+                  ? t.assignedAgentId === payload.agentId
+                  : t.assignedTo === payload.displayName) &&
                 s.tasksInProgress.has(t.id)
             );
             if (agentTask) {
@@ -311,8 +318,8 @@ function handleSSEEvent(
             tasksCompleted: newTasksCompleted,
           };
         });
-      } catch {
-        // ignore
+      } catch (e) {
+        console.warn('[SSE] Failed to parse speaker_complete event:', e);
       }
       return false;
     }
@@ -322,10 +329,13 @@ function handleSSEEvent(
         const payload: TaskPlanCreatedPayload = JSON.parse(event.data);
         setState((s) => ({
           ...s,
-          taskPlan: payload.tasks,
+          taskPlan: payload.tasks.map((t) => ({
+            ...t,
+            assignedAgentId: t.assignedAgentId,
+          })),
         }));
-      } catch {
-        // ignore
+      } catch (e) {
+        console.warn('[SSE] Failed to parse task_plan_created event:', e);
       }
       return false;
     }
@@ -341,8 +351,8 @@ function handleSSEEvent(
           });
           return { ...s, taskVerifications: newVerifications };
         });
-      } catch {
-        // ignore
+      } catch (e) {
+        console.warn('[SSE] Failed to parse task_verified event:', e);
       }
       return false;
     }
@@ -354,8 +364,8 @@ function handleSSEEvent(
           ...s,
           activeSpeakers: new Set(),
         }));
-      } catch {
-        // ignore
+      } catch (e) {
+        console.warn('[SSE] Failed to parse phase_complete event:', e);
       }
       return false;
     }
@@ -378,7 +388,8 @@ function handleSSEEvent(
           synthesizedAnswer: payload.synthesizedAnswer,
           activeSpeakers: new Set(),
         }));
-      } catch {
+      } catch (e) {
+        console.warn('[SSE] Failed to parse group_complete event:', e);
         setState((s) => ({
           ...s,
           isStreaming: false,
@@ -394,7 +405,8 @@ function handleSSEEvent(
       try {
         const payload = JSON.parse(event.data);
         errorMsg = payload.error || payload.message || errorMsg;
-      } catch {
+      } catch (e) {
+        console.warn('[SSE] Failed to parse group_error event:', e);
         errorMsg = event.data || errorMsg;
       }
       setState((s) => ({

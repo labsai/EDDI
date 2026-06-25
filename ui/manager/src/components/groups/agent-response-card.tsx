@@ -148,7 +148,7 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
             {entry.speakerDisplayName}
           </span>
           <Badge variant={badgeVar} className="text-[10px] px-1.5 py-0">
-            {info.label}
+            {t(`groups.entryType.${entry.type}`, info.label)}
           </Badge>
           {entry.targetAgentId && (
             <span className="text-[10px] text-muted-foreground">
