@@ -142,10 +142,90 @@ public final class DiscussionStylePresets {
             As {displayName}, share your (updated) perspective. Consider the \
             anonymous feedback but form your own independent judgment.""";
 
+    public static final String TEMPLATE_PLAN = """
+            You are the project planner for a team of experts.
+
+            GOAL: "{question}"
+
+            TEAM MEMBERS:
+            {#for member in members}
+            - {member.displayName} (ID: {member.agentId}){#if member.capabilities}, skills: {member.capabilities}{/if}
+            {/for}
+
+            Decompose this goal into concrete, actionable tasks. Assign each task to the most \
+            suitable team member based on their expertise. Output a JSON array:
+
+            ```json
+            [
+              {
+                "subject": "Short task title",
+                "description": "Detailed instructions for the assigned agent",
+                "assignedTo": "agent-id or display-name",
+                "priority": 0
+              }
+            ]
+            ```
+
+            Rules:
+            - Each task must be independently executable
+            - Assign tasks based on member expertise
+            - Keep tasks focused — one clear deliverable per task
+            - Aim for 2-6 tasks for most goals""";
+
+    public static final String TEMPLATE_EXECUTE = """
+            You have been assigned the following task as part of a team effort.
+
+            OVERALL GOAL: "{question}"
+
+            YOUR TASK: {taskSubject}
+            {taskDescription}
+
+            {#if dependencyResults}
+            PREREQUISITE RESULTS:
+            {#for dep in dependencyResults}
+            - {dep.subject}: {dep.result}
+            {/for}
+            {/if}
+
+            Complete this task thoroughly. Provide your result as clear, actionable output.""";
+
+    public static final String TEMPLATE_VERIFY = """
+            You are reviewing the results of a collaborative task.
+
+            ORIGINAL GOAL: "{question}"
+
+            COMPLETED TASKS:
+            {#for task in completedTasks}
+            ---
+            TASK: {task.subject}
+            ASSIGNED TO: {task.assignedDisplayName}
+            DESCRIPTION: {task.description}
+            RESULT: {task.result}
+            ---
+            {/for}
+
+            For each task, assess whether the result adequately addresses the task description \
+            and contributes to the overall goal. Provide your assessment as JSON:
+
+            ```json
+            [
+              {"subject": "task title", "passed": true, "feedback": "assessment"}
+            ]
+            ```""";
+
     // Template lookup by phase type
-    private static final Map<PhaseType, String> DEFAULT_TEMPLATES = Map.of(PhaseType.OPINION, TEMPLATE_OPINION_INDEPENDENT, PhaseType.CRITIQUE,
-            TEMPLATE_CRITIQUE, PhaseType.REVISION, TEMPLATE_REVISION, PhaseType.CHALLENGE, TEMPLATE_CHALLENGE, PhaseType.DEFENSE, TEMPLATE_DEFENSE,
-            PhaseType.ARGUE, TEMPLATE_ARGUE, PhaseType.REBUTTAL, TEMPLATE_REBUTTAL, PhaseType.SYNTHESIS, TEMPLATE_SYNTHESIS);
+    private static final Map<PhaseType, String> DEFAULT_TEMPLATES = Map.ofEntries(
+            Map.entry(PhaseType.OPINION, TEMPLATE_OPINION_INDEPENDENT),
+            Map.entry(PhaseType.CRITIQUE, TEMPLATE_CRITIQUE),
+            Map.entry(PhaseType.REVISION, TEMPLATE_REVISION),
+            Map.entry(PhaseType.CHALLENGE, TEMPLATE_CHALLENGE),
+            Map.entry(PhaseType.DEFENSE, TEMPLATE_DEFENSE),
+            Map.entry(PhaseType.ARGUE, TEMPLATE_ARGUE),
+            Map.entry(PhaseType.REBUTTAL, TEMPLATE_REBUTTAL),
+            Map.entry(PhaseType.SYNTHESIS, TEMPLATE_SYNTHESIS),
+            Map.entry(PhaseType.PLAN, TEMPLATE_PLAN),
+            Map.entry(PhaseType.EXECUTE, TEMPLATE_EXECUTE),
+            Map.entry(PhaseType.VERIFY, TEMPLATE_VERIFY));
 
     /**
      * Returns the default template for a given phase type.
@@ -178,6 +258,7 @@ public final class DiscussionStylePresets {
             case DEVIL_ADVOCATE -> devilAdvocate();
             case DELPHI -> delphi(rounds);
             case DEBATE -> debate();
+            case TASK_FORCE -> taskForce();
             case CUSTOM -> List.of();
         };
     }
@@ -249,5 +330,15 @@ public final class DiscussionStylePresets {
                 new DiscussionPhase("Rebuttal (Pro)", PhaseType.REBUTTAL, "ROLE:PRO", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1),
                 new DiscussionPhase("Rebuttal (Con)", PhaseType.REBUTTAL, "ROLE:CON", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1),
                 new DiscussionPhase("Judgment", PhaseType.SYNTHESIS, "MODERATOR", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1));
+    }
+
+    // --- TASK_FORCE ---
+
+    private static List<DiscussionPhase> taskForce() {
+        return List.of(
+                new DiscussionPhase("Task Planning", PhaseType.PLAN, "MODERATOR", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1),
+                new DiscussionPhase("Task Execution", PhaseType.EXECUTE, "ALL", TurnOrder.PARALLEL, ContextScope.TASK_ONLY, false, null, 1),
+                new DiscussionPhase("Result Verification", PhaseType.VERIFY, "MODERATOR", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1),
+                new DiscussionPhase("Final Synthesis", PhaseType.SYNTHESIS, "MODERATOR", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1));
     }
 }

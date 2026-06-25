@@ -78,6 +78,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
             case DEVIL_ADVOCATE -> "One designated challenger argues against the group consensus";
             case DELPHI -> "Anonymous opinion rounds to reduce groupthink and achieve convergence";
             case DEBATE -> "Structured pro/con argumentation with rebuttal and judge";
+            case TASK_FORCE -> "Collaborative task accomplishment: plan, execute in parallel, verify, synthesize";
             case CUSTOM -> "User-defined phases for full control over the discussion flow";
         };
     }

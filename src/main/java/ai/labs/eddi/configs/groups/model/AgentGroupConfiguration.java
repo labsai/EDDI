@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.groups.model;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Versioned configuration for a group of agents that can participate in
@@ -23,6 +24,8 @@ public class AgentGroupConfiguration {
     private int maxRounds = 2;
     private List<DiscussionPhase> phases;
     private ProtocolConfig protocol;
+    /** Pre-configured task list. If non-empty, skips the PLAN phase. */
+    private List<TaskDefinition> tasks;
 
     /**
      * A member of the group. Members can be individual agents or nested groups.
@@ -70,6 +73,8 @@ public class AgentGroupConfiguration {
         DELPHI,
         /** Pro team argues → Con team argues → rebuttals → judge decides. */
         DEBATE,
+        /** Collaborative task accomplishment: plan → execute → verify → synthesis. */
+        TASK_FORCE,
         /** User defines phases manually. */
         CUSTOM
     }
@@ -85,20 +90,34 @@ public class AgentGroupConfiguration {
      * "ROLE:&lt;roleName&gt;" (e.g. "ROLE:DEVIL_ADVOCATE").
      */
     public record DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
-            boolean targetEachPeer, String inputTemplate, int repeats) {
+            boolean targetEachPeer, String inputTemplate, int repeats, boolean requiresApproval) {
 
         /**
          * Convenience constructor with defaults: participants=ALL,
          * turnOrder=SEQUENTIAL, contextScope=FULL, no peer targeting, no custom
-         * template, 1 repeat.
+         * template, 1 repeat, no approval required.
          */
         public DiscussionPhase(String name, PhaseType type) {
-            this(name, type, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1);
+            this(name, type, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false);
+        }
+
+        /**
+         * Backward-compatible constructor without requiresApproval.
+         */
+        public DiscussionPhase(String name, PhaseType type, String participants, TurnOrder turnOrder, ContextScope contextScope,
+                boolean targetEachPeer, String inputTemplate, int repeats) {
+            this(name, type, participants, turnOrder, contextScope, targetEachPeer, inputTemplate, repeats, false);
         }
     }
 
     public enum PhaseType {
-        OPINION, CRITIQUE, REVISION, CHALLENGE, DEFENSE, ARGUE, REBUTTAL, SYNTHESIS
+        OPINION, CRITIQUE, REVISION, CHALLENGE, DEFENSE, ARGUE, REBUTTAL, SYNTHESIS,
+        /** Task decomposition and assignment. */
+        PLAN,
+        /** Task execution by assigned agents. */
+        EXECUTE,
+        /** Verification of task results. */
+        VERIFY
     }
 
     public enum TurnOrder {
@@ -118,7 +137,11 @@ public class AgentGroupConfiguration {
         /** Agent sees content from prior phases but not who said it. */
         ANONYMOUS,
         /** Agent sees only entries targeted AT them (for REVISION phase). */
-        OWN_FEEDBACK
+        OWN_FEEDBACK,
+        /** Agent sees only its assigned task description. */
+        TASK_ONLY,
+        /** Agent sees its task plus results of dependency tasks. */
+        TASK_WITH_DEPS
     }
 
     // --- Protocol (error handling / timeouts) ---
@@ -226,5 +249,54 @@ public class AgentGroupConfiguration {
 
     public void setProtocol(ProtocolConfig protocol) {
         this.protocol = protocol;
+    }
+
+    public List<TaskDefinition> getTasks() {
+        return tasks;
+    }
+
+    public void setTasks(List<TaskDefinition> tasks) {
+        this.tasks = tasks;
+    }
+
+    // --- Task Definition ---
+
+    /**
+     * A pre-configured task for config-driven task orchestration. When tasks are
+     * pre-defined here, the PLAN phase is skipped and these tasks are used
+     * directly.
+     *
+     * @param subject
+     *            short task title
+     * @param description
+     *            detailed instructions for the assigned agent
+     * @param assignToRole
+     *            "ALL", "ROLE:<name>", or specific agentId
+     * @param dependsOn
+     *            subjects of tasks that must complete first
+     * @param priority
+     *            0 = highest
+     */
+    public record TaskDefinition(
+            String subject,
+            String description,
+            String assignToRole,
+            List<String> dependsOn,
+            int priority) {
+
+        public TaskDefinition(String subject, String description) {
+            this(subject, description, "ALL", List.of(), 0);
+        }
+
+        public TaskDefinition {
+            Objects.requireNonNull(subject, "Task subject must not be null");
+            Objects.requireNonNull(description, "Task description must not be null");
+            if (dependsOn == null) {
+                dependsOn = List.of();
+            }
+            if (assignToRole == null) {
+                assignToRole = "ALL";
+            }
+        }
     }
 }

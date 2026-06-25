@@ -28,6 +28,7 @@ public class GroupConversation {
     private String currentPhaseName;
     private String synthesizedAnswer;
     private int depth;
+    private SharedTaskList taskList;
     private Instant created;
     private Instant lastModified;
 
@@ -95,11 +96,19 @@ public class GroupConversation {
     }
 
     public enum TranscriptEntryType {
-        QUESTION, OPINION, CRITIQUE, REVISION, CHALLENGE, DEFENSE, ARGUMENT, REBUTTAL, SYNTHESIS, ERROR, SKIPPED
+        QUESTION, OPINION, CRITIQUE, REVISION, CHALLENGE, DEFENSE, ARGUMENT, REBUTTAL, SYNTHESIS, ERROR, SKIPPED,
+        /** Task plan output from the PLAN phase. */
+        PLAN,
+        /** Task execution result from the EXECUTE phase. */
+        TASK_RESULT,
+        /** Verification assessment from the VERIFY phase. */
+        VERIFICATION
     }
 
     public enum GroupConversationState {
-        CREATED, IN_PROGRESS, SYNTHESIZING, COMPLETED, FAILED
+        CREATED, IN_PROGRESS, SYNTHESIZING, COMPLETED, FAILED,
+        /** Paused for human approval — HITL foundation (Phase 9b). */
+        AWAITING_APPROVAL
     }
 
     // --- Getters/Setters ---
@@ -206,5 +215,13 @@ public class GroupConversation {
 
     public void setLastModified(Instant lastModified) {
         this.lastModified = lastModified;
+    }
+
+    public SharedTaskList getTaskList() {
+        return taskList;
+    }
+
+    public void setTaskList(SharedTaskList taskList) {
+        this.taskList = taskList;
     }
 }

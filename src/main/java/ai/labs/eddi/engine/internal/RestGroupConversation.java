@@ -120,6 +120,16 @@ public class RestGroupConversation implements IRestGroupConversation {
                     sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR, toJson(event));
                     closeQuietly(eventSink);
                 }
+
+                @Override
+                public void onTaskPlanCreated(GroupConversationEventSink.TaskPlanCreatedEvent event) {
+                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_TASK_PLAN_CREATED, toJson(event));
+                }
+
+                @Override
+                public void onTaskVerified(GroupConversationEventSink.TaskVerifiedEvent event) {
+                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_TASK_VERIFIED, toJson(event));
+                }
             };
 
             groupConversationService.startAndDiscussAsync(groupId, request.question(), userId, listener);

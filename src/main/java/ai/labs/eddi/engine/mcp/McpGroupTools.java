@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
@@ -60,8 +61,8 @@ public class McpGroupTools {
     // --- Discovery ---
 
     @Tool(description = "Describe all available discussion styles for agent " + "groups. Returns the name, phase flow, and recommended use case "
-            + "for each style (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, " + "DELPHI, DEBATE). Call this before create_group to choose the "
-            + "right style.")
+            + "for each style (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, " + "DELPHI, DEBATE, TASK_FORCE). Call this before create_group to "
+            + "choose the right style.")
     public String describe_discussion_styles() {
         requireRole(identity, authEnabled, "eddi-viewer");
         return """
@@ -92,6 +93,16 @@ public class McpGroupTools {
                 Use when: Evaluating trade-offs, pro/con analysis, technology comparisons.
                 Member roles: assign members role=PRO or role=CON. Moderator acts as judge.
 
+                ### TASK_FORCE
+                Flow: Plan → Execute (parallel) → Verify → Synthesis
+                TASK_FORCE — Collaborative task accomplishment. The moderator decomposes the
+                goal into tasks, each agent executes their assigned tasks in parallel, a
+                verification phase checks results, and a synthesis phase combines everything.
+                Best for: concrete deliverables, divide-and-conquer goals, project-style work.
+                Member roles: none required. Moderator handles planning and synthesis.
+                Optional: pass pre-configured tasks via the `tasks` parameter to skip the
+                PLAN phase entirely.
+
                 ## Nested Groups (Group-of-Groups)
                 Members can be other groups (memberTypes=GROUP). The sub-group runs its
                 own full discussion and its synthesized answer becomes the member's response.
@@ -102,6 +113,9 @@ public class McpGroupTools {
                 - moderatorAgentId: required for synthesis/judging phase
                 - memberRoles: comma-separated roles matching member positions
                 - memberTypes: comma-separated types: AGENT (default) or GROUP
+                - tasks: (TASK_FORCE only) JSON array of pre-configured task definitions.
+                  Each task: {"subject":"...","description":"...","assignToRole":"ALL",
+                  "dependsOn":[],"priority":0}. If provided, the PLAN phase is skipped.
                 """;
     }
 
@@ -154,10 +168,14 @@ public class McpGroupTools {
                                        + "(default) or GROUP for nested groups (optional)") String memberTypes,
                                @ToolArg(description = "Moderator agent ID (optional)") String moderatorAgentId,
                                @ToolArg(description = "Discussion style: ROUND_TABLE, PEER_REVIEW, "
-                                       + "DEVIL_ADVOCATE, DELPHI, DEBATE (default ROUND_TABLE)") String style,
+                                       + "DEVIL_ADVOCATE, DELPHI, DEBATE, TASK_FORCE (default ROUND_TABLE)") String style,
                                @ToolArg(description = "Max rounds (default 2)") String maxRounds,
                                @ToolArg(description = "Maximum total agent turns across all phases (default 50). "
-                                       + "Safety cap to prevent runaway discussions.") String maxTurns) {
+                                       + "Safety cap to prevent runaway discussions.") String maxTurns,
+                               @ToolArg(description = "JSON array of pre-configured tasks for TASK_FORCE style "
+                                       + "(optional). Each element: {\"subject\":\"...\",\"description\":\"...\","
+                                       + "\"assignToRole\":\"ALL\",\"dependsOn\":[],\"priority\":0}. "
+                                       + "If provided, the PLAN phase is skipped.") String tasks) {
         requireRole(identity, authEnabled, "eddi-editor");
         try {
             AgentGroupConfiguration config = new AgentGroupConfiguration();
@@ -199,6 +217,16 @@ public class McpGroupTools {
             }
             config.setStyle(discussionStyle);
             config.setMaxRounds(parseIntOrDefault(maxRounds, 2));
+
+            // Pre-configured tasks (TASK_FORCE style — skips PLAN phase)
+            if (tasks != null && !tasks.isBlank()) {
+                try {
+                    TaskDefinition[] taskArray = jsonSerialization.deserialize(tasks, TaskDefinition[].class);
+                    config.setTasks(List.of(taskArray));
+                } catch (Exception ex) {
+                    return errorJson("Invalid tasks JSON: " + ex.getMessage());
+                }
+            }
 
             // Protocol with maxTurns safety cap
             int mt = parseIntOrDefault(maxTurns, 0);

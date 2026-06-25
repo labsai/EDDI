@@ -20,12 +20,16 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.model.SharedTaskList;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -53,9 +57,9 @@ import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 /**
- * Phase-based orchestrator for multi-agent group conversations. Supports 5
- * discussion styles (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, DELPHI, DEBATE)
- * plus fully custom phase definitions.
+ * Phase-based orchestrator for multi-agent group conversations. Supports 6
+ * discussion styles (ROUND_TABLE, PEER_REVIEW, DEVIL_ADVOCATE, DELPHI, DEBATE,
+ * TASK_FORCE) plus fully custom phase definitions.
  * <p>
  * Agents participate through their normal pipelines via
  * {@link IConversationService#say}. The orchestrator constructs phase-specific
@@ -276,7 +280,10 @@ public class GroupConversationService implements IGroupConversationService {
 
                     List<GroupMember> speakers = resolveParticipants(phase, config.getMembers(), config.getModeratorAgentId());
 
-                    if (phase.targetEachPeer()) {
+                    // --- Task-oriented phase routing ---
+                    if (phase.type() == PhaseType.PLAN || phase.type() == PhaseType.EXECUTE || phase.type() == PhaseType.VERIFY) {
+                        executeTaskPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
+                    } else if (phase.targetEachPeer()) {
                         executePeerTargetedPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
                     } else if (phase.turnOrder() == TurnOrder.PARALLEL) {
                         executeParallelPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
@@ -412,7 +419,430 @@ public class GroupConversationService implements IGroupConversationService {
     }
 
     // =================================================================
-    // Phase execution
+    // Task-oriented phase execution (TASK_FORCE style)
+    // =================================================================
+
+    /**
+     * Dispatches task-oriented phases (PLAN, EXECUTE, VERIFY) to their specific
+     * handlers. These phases are structurally different from debate phases — they
+     * operate on a shared task list rather than iterating speakers with a common
+     * question.
+     */
+    private void executeTaskPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers,
+                                  DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,
+                                  GroupDiscussionEventListener listener, java.util.concurrent.atomic.AtomicInteger turnCounter, int maxTurns)
+            throws GroupDiscussionException {
+
+        switch (phase.type()) {
+            case PLAN -> executeTaskPlanPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
+            case EXECUTE -> executeTaskExecutionPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
+            case VERIFY -> executeTaskVerificationPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
+            default -> LOGGER.warnf("Unexpected phase type %s routed to executeTaskPhase", phase.type());
+        }
+    }
+
+    /**
+     * PLAN phase: Decompose the goal into tasks. If pre-configured tasks exist in
+     * the group config, uses those directly (skipping LLM planning). Otherwise, the
+     * moderator agent decomposes the goal via its pipeline and the output is parsed
+     * with three-tier fallback (JSON → Markdown → single task).
+     */
+    private void executeTaskPlanPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers,
+                                      DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,
+                                      GroupDiscussionEventListener listener, java.util.concurrent.atomic.AtomicInteger turnCounter, int maxTurns)
+            throws GroupDiscussionException {
+
+        if (gc.getTaskList() == null) {
+            gc.setTaskList(new SharedTaskList());
+        }
+
+        boolean preConfigured = config.getTasks() != null && !config.getTasks().isEmpty();
+
+        if (preConfigured) {
+            // Config-driven tasks — skip LLM planning
+            for (TaskDefinition td : config.getTasks()) {
+                TaskItem task = new TaskItem(td.subject(), td.description(), td.priority());
+                gc.getTaskList().addTask(task);
+
+                // Resolve assignment
+                String assignedAgentId = resolveTaskAssignment(td.assignToRole(), config.getMembers(), config.getModeratorAgentId());
+                GroupMember assignedMember = findMember(config.getMembers(), assignedAgentId);
+                String displayName = assignedMember != null ? assignedMember.displayName() : assignedAgentId;
+                gc.getTaskList().assignTask(task.id(), assignedAgentId, displayName);
+            }
+
+            gc.getTranscript().add(new TranscriptEntry(
+                    "system", "System",
+                    "Pre-configured task plan: " + config.getTasks().size() + " tasks",
+                    phaseIdx, phase.name(), TranscriptEntryType.PLAN,
+                    Instant.now(), null, null));
+
+        } else {
+            // LLM-driven planning via moderator
+            if (speakers.isEmpty()) {
+                throw new GroupDiscussionException("PLAN phase requires a moderator but no speakers resolved");
+            }
+
+            GroupMember planner = speakers.getFirst();
+            turnCounter.incrementAndGet();
+
+            if (listener != null) {
+                listener.onSpeakerStart(
+                        new GroupConversationEventSink.SpeakerStartEvent(planner.agentId(), planner.displayName(), phaseIdx, phase.name()));
+            }
+
+            // Build planning input with member info
+            String planTemplate = DiscussionStylePresets.defaultTemplate(PhaseType.PLAN);
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("question", question);
+            data.put("displayName", planner.displayName());
+            List<Map<String, Object>> memberList = config.getMembers().stream()
+                    .filter(m -> !m.agentId().equals(planner.agentId()) || config.getMembers().size() == 1)
+                    .map(m -> {
+                        Map<String, Object> md = new LinkedHashMap<>();
+                        md.put("agentId", m.agentId());
+                        md.put("displayName", m.displayName());
+                        md.put("capabilities", m.role() != null ? m.role() : "");
+                        return md;
+                    }).collect(Collectors.toList());
+            data.put("members", memberList);
+
+            String planInput;
+            try {
+                planInput = templatingEngine.processTemplate(planTemplate, data, ITemplatingEngine.TemplateMode.TEXT);
+            } catch (ITemplatingEngine.TemplateEngineException e) {
+                planInput = "Decompose this goal into tasks for your team: " + question;
+            }
+
+            TranscriptEntry planEntry = executeAgentTurn(planner, gc, planInput, protocol, phaseIdx, phase, null);
+            gc.getTranscript().add(planEntry);
+
+            if (listener != null) {
+                listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
+                        planner.agentId(), planner.displayName(), planEntry.content(), phaseIdx, phase.name()));
+            }
+
+            // Parse the plan output
+            List<TaskListParser.ParsedTask> parsedTasks = TaskListParser.parse(planEntry.content(), config.getMembers());
+
+            for (int i = 0; i < parsedTasks.size(); i++) {
+                TaskListParser.ParsedTask pt = parsedTasks.get(i);
+                TaskItem task = new TaskItem(pt.subject(), pt.description(), pt.priority());
+                gc.getTaskList().addTask(task);
+
+                // Resolve assignment
+                String agentId = TaskListParser.resolveAgent(pt.assignedTo(), config.getMembers());
+                if (agentId == null) {
+                    agentId = TaskListParser.roundRobinAssign(i, config.getMembers());
+                    LOGGER.debugf("Could not resolve assignee '%s', round-robin assigning to %s", pt.assignedTo(), agentId);
+                }
+                if (agentId != null) {
+                    GroupMember member = findMember(config.getMembers(), agentId);
+                    String displayName = member != null ? member.displayName() : agentId;
+                    gc.getTaskList().assignTask(task.id(), agentId, displayName);
+                }
+            }
+        }
+
+        // Emit task plan event
+        if (listener != null) {
+            List<GroupConversationEventSink.TaskSummary> summaries = gc.getTaskList().all().stream()
+                    .map(t -> new GroupConversationEventSink.TaskSummary(t.id(), t.subject(), t.assignedDisplayName(), t.priority()))
+                    .toList();
+            listener.onTaskPlanCreated(new GroupConversationEventSink.TaskPlanCreatedEvent(summaries, preConfigured));
+        }
+    }
+
+    /**
+     * EXECUTE phase: Run each assigned task by sending it to the responsible
+     * agent's pipeline. Tasks for different agents execute in parallel; tasks for
+     * the same agent execute sequentially within a single CompletableFuture.
+     */
+    private void executeTaskExecutionPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers,
+                                           DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,
+                                           GroupDiscussionEventListener listener, java.util.concurrent.atomic.AtomicInteger turnCounter, int maxTurns)
+            throws GroupDiscussionException {
+
+        if (gc.getTaskList() == null || gc.getTaskList().isEmpty()) {
+            LOGGER.warn("EXECUTE phase: no tasks to execute");
+            return;
+        }
+
+        // Group tasks by assigned agent
+        Map<String, List<TaskItem>> tasksByAgent = gc.getTaskList().findExecutableTasks().stream()
+                .filter(t -> t.assignedAgentId() != null)
+                .collect(Collectors.groupingBy(TaskItem::assignedAgentId));
+
+        if (tasksByAgent.isEmpty()) {
+            LOGGER.warn("EXECUTE phase: no assigned tasks found");
+            return;
+        }
+
+        // Execute agents in parallel, tasks per agent sequentially
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+        List<GroupDiscussionException> errors = Collections.synchronizedList(new ArrayList<>());
+
+        for (Map.Entry<String, List<TaskItem>> agentEntry : tasksByAgent.entrySet()) {
+            String agentId = agentEntry.getKey();
+            List<TaskItem> agentTasks = agentEntry.getValue();
+            GroupMember member = findMember(config.getMembers(), agentId);
+
+            if (member == null) {
+                LOGGER.warnf("Task assigned to unknown agent '%s', skipping", agentId);
+                continue;
+            }
+
+            CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                for (TaskItem task : agentTasks) {
+                    if (turnCounter.get() >= maxTurns) {
+                        break;
+                    }
+                    try {
+                        turnCounter.incrementAndGet();
+                        gc.getTaskList().startTask(task.id());
+
+                        if (listener != null) {
+                            listener.onSpeakerStart(new GroupConversationEventSink.SpeakerStartEvent(
+                                    member.agentId(), member.displayName(), phaseIdx, phase.name()));
+                        }
+
+                        // Build task-specific input
+                        String taskInput = buildTaskExecutionInput(task, question, phase, gc);
+                        TranscriptEntry entry = executeAgentTurn(member, gc, taskInput, protocol, phaseIdx, phase, null);
+
+                        synchronized (gc.getTranscript()) {
+                            gc.getTranscript().add(entry);
+                        }
+
+                        gc.getTaskList().completeTask(task.id(), entry.content());
+
+                        if (listener != null) {
+                            listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
+                                    member.agentId(), member.displayName(), entry.content(), phaseIdx, phase.name()));
+                        }
+
+                    } catch (GroupDiscussionException e) {
+                        gc.getTaskList().failTask(task.id(), e.getMessage());
+                        errors.add(e);
+                        if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
+                            break;
+                        }
+                    }
+                }
+            }, executorService);
+            futures.add(future);
+        }
+
+        // Wait for all agent executions
+        int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : 60;
+        try {
+            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
+                    .get(timeout * (long) tasksByAgent.size(), TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            LOGGER.warnf("Task execution timed out for group %s", gc.getGroupId());
+            futures.forEach(f -> f.cancel(true));
+        } catch (ExecutionException | InterruptedException e) {
+            LOGGER.warnf("Task execution error for group %s: %s", gc.getGroupId(), e.getMessage());
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        // If ABORT policy and there were errors, propagate
+        if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT && !errors.isEmpty()) {
+            throw errors.getFirst();
+        }
+    }
+
+    /**
+     * VERIFY phase: The moderator reviews all completed tasks and provides
+     * pass/fail assessments. Results are parsed and applied to the task list.
+     */
+    private void executeTaskVerificationPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers,
+                                              DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,
+                                              GroupDiscussionEventListener listener, java.util.concurrent.atomic.AtomicInteger turnCounter,
+                                              int maxTurns)
+            throws GroupDiscussionException {
+
+        if (gc.getTaskList() == null || gc.getTaskList().isEmpty()) {
+            LOGGER.warn("VERIFY phase: no tasks to verify");
+            return;
+        }
+
+        List<TaskItem> completedTasks = gc.getTaskList().all().stream()
+                .filter(t -> t.status() == TaskStatus.COMPLETED)
+                .toList();
+
+        if (completedTasks.isEmpty()) {
+            LOGGER.warn("VERIFY phase: no completed tasks to verify");
+            gc.getTranscript().add(new TranscriptEntry(
+                    "system", "System", "No completed tasks to verify",
+                    phaseIdx, phase.name(), TranscriptEntryType.VERIFICATION,
+                    Instant.now(), null, null));
+            return;
+        }
+
+        if (speakers.isEmpty()) {
+            LOGGER.warn("VERIFY phase: no verifier available");
+            return;
+        }
+
+        GroupMember verifier = speakers.getFirst();
+        turnCounter.incrementAndGet();
+
+        if (listener != null) {
+            listener.onSpeakerStart(
+                    new GroupConversationEventSink.SpeakerStartEvent(verifier.agentId(), verifier.displayName(), phaseIdx, phase.name()));
+        }
+
+        // Build verification input
+        String verifyTemplate = DiscussionStylePresets.defaultTemplate(PhaseType.VERIFY);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("question", question);
+        data.put("displayName", verifier.displayName());
+        List<Map<String, Object>> taskData = completedTasks.stream().map(t -> {
+            Map<String, Object> td = new LinkedHashMap<>();
+            td.put("subject", t.subject());
+            td.put("description", t.description());
+            td.put("assignedDisplayName", t.assignedDisplayName());
+            td.put("result", t.result() != null ? t.result() : "(no result)");
+            return td;
+        }).collect(Collectors.toList());
+        data.put("completedTasks", taskData);
+
+        String verifyInput;
+        try {
+            verifyInput = templatingEngine.processTemplate(verifyTemplate, data, ITemplatingEngine.TemplateMode.TEXT);
+        } catch (ITemplatingEngine.TemplateEngineException e) {
+            verifyInput = "Review the task results and provide pass/fail for each task.";
+        }
+
+        TranscriptEntry verifyEntry = executeAgentTurn(verifier, gc, verifyInput, protocol, phaseIdx, phase, null);
+        gc.getTranscript().add(verifyEntry);
+
+        if (listener != null) {
+            listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
+                    verifier.agentId(), verifier.displayName(), verifyEntry.content(), phaseIdx, phase.name()));
+        }
+
+        // Parse verification results — same three-tier fallback
+        parseAndApplyVerification(gc, completedTasks, verifyEntry.content(), listener);
+    }
+
+    /**
+     * Builds the input message for a task execution phase, respecting the
+     * configured context scope.
+     */
+    private String buildTaskExecutionInput(TaskItem task, String question, DiscussionPhase phase, GroupConversation gc) {
+        String template = DiscussionStylePresets.defaultTemplate(PhaseType.EXECUTE);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("question", question);
+        data.put("taskSubject", task.subject());
+        data.put("taskDescription", task.description());
+
+        // Add dependency results if scope is TASK_WITH_DEPS
+        if (phase.contextScope() == ContextScope.TASK_WITH_DEPS && gc.getTaskList() != null) {
+            List<Map<String, Object>> depResults = task.dependsOnIds().stream()
+                    .map(depId -> gc.getTaskList().findById(depId))
+                    .filter(dep -> dep != null && dep.result() != null)
+                    .map(dep -> {
+                        Map<String, Object> dr = new LinkedHashMap<>();
+                        dr.put("subject", dep.subject());
+                        dr.put("result", dep.result());
+                        return dr;
+                    }).collect(Collectors.toList());
+            if (!depResults.isEmpty()) {
+                data.put("dependencyResults", depResults);
+            }
+        }
+
+        try {
+            return templatingEngine.processTemplate(template, data, ITemplatingEngine.TemplateMode.TEXT);
+        } catch (ITemplatingEngine.TemplateEngineException e) {
+            LOGGER.warnf("Template processing failed for task execution, using plain text: %s", e.getMessage());
+            return "Task: " + task.subject() + "\n" + task.description();
+        }
+    }
+
+    /**
+     * Parses verification output and applies pass/fail to the task list. Falls back
+     * to marking all tasks as passed if parsing fails (safe default).
+     */
+    private void parseAndApplyVerification(GroupConversation gc, List<TaskItem> completedTasks,
+                                           String verifyContent, GroupDiscussionEventListener listener) {
+        // Try to parse JSON verification
+        try {
+            if (verifyContent != null && (verifyContent.contains("[") || verifyContent.contains("passed"))) {
+                List<TaskListParser.ParsedTask> parsed = TaskListParser.parse(verifyContent, List.of());
+                if (parsed != null) {
+                    for (TaskListParser.ParsedTask pt : parsed) {
+                        // Match by subject
+                        for (TaskItem task : completedTasks) {
+                            if (task.subject().equalsIgnoreCase(pt.subject()) && task.status() == TaskStatus.COMPLETED) {
+                                boolean passed = pt.description() == null || !pt.description().toLowerCase().contains("fail");
+                                gc.getTaskList().verifyTask(task.id(), passed, pt.description());
+
+                                if (listener != null) {
+                                    listener.onTaskVerified(new GroupConversationEventSink.TaskVerifiedEvent(
+                                            task.id(), task.subject(), passed, pt.description()));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Failed to parse verification output, marking all as passed: %s", e.getMessage());
+        }
+
+        // Fallback: mark all completed tasks as verified (safe default)
+        for (TaskItem task : completedTasks) {
+            if (task.status() == TaskStatus.COMPLETED) {
+                gc.getTaskList().verifyTask(task.id(), true, "Auto-verified (verification parse failed)");
+                if (listener != null) {
+                    listener.onTaskVerified(new GroupConversationEventSink.TaskVerifiedEvent(
+                            task.id(), task.subject(), true, "Auto-verified"));
+                }
+            }
+        }
+    }
+
+    // --- Task assignment helpers ---
+
+    private String resolveTaskAssignment(String assignToRole, List<GroupMember> members, String moderatorAgentId) {
+        if (assignToRole == null || "ALL".equalsIgnoreCase(assignToRole)) {
+            // Assign to first non-moderator member
+            return members.stream()
+                    .filter(m -> !m.agentId().equals(moderatorAgentId))
+                    .map(GroupMember::agentId)
+                    .findFirst()
+                    .orElse(members.isEmpty() ? null : members.getFirst().agentId());
+        }
+        if (assignToRole.toUpperCase().startsWith("ROLE:")) {
+            String role = assignToRole.substring(5).trim();
+            return members.stream()
+                    .filter(m -> role.equalsIgnoreCase(m.role()))
+                    .map(GroupMember::agentId)
+                    .findFirst()
+                    .orElse(null);
+        }
+        // Direct agentId reference
+        return TaskListParser.resolveAgent(assignToRole, members);
+    }
+
+    private GroupMember findMember(List<GroupMember> members, String agentId) {
+        if (agentId == null)
+            return null;
+        return members.stream()
+                .filter(m -> agentId.equals(m.agentId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    // =================================================================
+    // Phase execution (debate styles)
     // =================================================================
 
     private void executeSequentialPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers, DiscussionPhase phase,
@@ -825,6 +1255,18 @@ public class GroupConversationService implements IGroupConversationService {
                 data.put("transcript", fullTranscript);
                 data.put("totalPhases", phaseIdx);
             }
+            case PLAN -> {
+                // Provide member list for planning template
+                List<Map<String, Object>> memberList = new ArrayList<>();
+                // Note: speaker list should be the full member list for planning
+                data.put("members", memberList); // populated by caller via template data
+            }
+            case EXECUTE -> {
+                // Task-specific context populated by executeTaskPhase
+            }
+            case VERIFY -> {
+                // Completed tasks populated by executeTaskPhase
+            }
             default -> {
                 // All PhaseType values handled above; default required by checkstyle
             }
@@ -869,6 +1311,7 @@ public class GroupConversationService implements IGroupConversationService {
                     case ANONYMOUS -> true; // Content included, attribution stripped
                     case OWN_FEEDBACK -> speaker.agentId().equals(e.targetAgentId());
                     case NONE -> false;
+                    case TASK_ONLY, TASK_WITH_DEPS -> false; // Handled by task-specific logic
                 }).map(e -> {
                     Map<String, Object> entry = new LinkedHashMap<>();
                     if (scope == ContextScope.ANONYMOUS) {
@@ -924,6 +1367,9 @@ public class GroupConversationService implements IGroupConversationService {
             case ARGUE -> TranscriptEntryType.ARGUMENT;
             case REBUTTAL -> TranscriptEntryType.REBUTTAL;
             case SYNTHESIS -> TranscriptEntryType.SYNTHESIS;
+            case PLAN -> TranscriptEntryType.PLAN;
+            case EXECUTE -> TranscriptEntryType.TASK_RESULT;
+            case VERIFY -> TranscriptEntryType.VERIFICATION;
         };
     }
 
