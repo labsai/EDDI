@@ -10,7 +10,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | --------------------------- | ------------------------------------- |
 | `http://localhost:7070/mcp` | MCP server endpoint (default + admin) |
 
-## Available Tools (48)
+## Available Tools (63)
 
 ### Conversation Tools (11)
 
@@ -96,6 +96,42 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `list_group_conversations`  | List past group discussions for a group, with state and timestamps                                                                                         |
 
 See [Group Conversations](group-conversations.md) for full style details, custom phases, and nested groups.
+
+### Memory Tools (8)
+
+| Tool                      | Description                                                                                          |
+| ------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `list_user_memories`      | List all persistent memory entries for a user                                                        |
+| `get_visible_memories`    | Get memories visible to a specific agent, considering self/group/global visibility scopes             |
+| `search_user_memories`    | Search user memories by keyword across keys and values                                               |
+| `get_memory_by_key`       | Get a specific memory entry by key for a user                                                        |
+| `upsert_user_memory`      | Create or update a persistent memory entry for a user                                                |
+| `delete_user_memory`      | Delete a specific memory entry by ID                                                                 |
+| `delete_all_user_memories` | Delete all memory entries for a user (GDPR-compliant bulk erasure)                                  |
+| `count_user_memories`     | Count total memory entries for a user                                                                |
+
+See [User Memory](user-memory.md) for visibility scoping, recall order, and dream consolidation.
+
+### GDPR Tools (2)
+
+| Tool               | Description                                                                                                                      |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `delete_user_data` | Cascade-delete all user data across all stores (GDPR Art. 17 Right to Erasure). Requires `confirmation='CONFIRM'`. Irreversible |
+| `export_user_data` | Export all data for a user (GDPR Art. 15/20 Right of Access / Data Portability)                                                  |
+
+See [GDPR / CCPA Compliance](gdpr-compliance.md) for data erasure, export, and retention details.
+
+### Channel Integration Tools (5)
+
+| Tool                           | Description                                                                |
+| ------------------------------ | -------------------------------------------------------------------------- |
+| `list_channel_integrations`    | List all channel integration configurations with name, type, target count  |
+| `read_channel_integration`     | Read a channel integration's full config (targets, triggers, platformConfig) |
+| `create_channel_integration`   | Create a new channel integration (Slack, etc.)                             |
+| `update_channel_integration`   | Update an existing channel integration configuration                       |
+| `delete_channel_integration`   | Delete a channel integration configuration                                 |
+
+See [Slack Integration](slack-integration.md) for Slack-specific setup and multi-agent thread discussions.
 
 ## MCP Resources
 
@@ -457,7 +493,7 @@ eddi.docs.path=docs
 
 EDDI uses a **whitelist-based `ToolFilter`** (`McpToolFilter.java`) to control which tools are exposed via MCP.
 
-**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The filter ensures only the 48 intended tools are visible.
+**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The filter ensures only the 63 intended tools are visible.
 
 To add a new MCP tool: add it to the `MCP_TOOLS` set in `McpToolFilter.java`.
 

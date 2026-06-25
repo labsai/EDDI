@@ -6,13 +6,13 @@
 
 [![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) ![Tests](https://img.shields.io/badge/tests-9%2C000%2B-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-%3E90%25-brightgreen)
 
-[![Docker Pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi) [![Repository: AI Ready](https://img.shields.io/badge/Repository-AI_Ready-blueviolet?logo=robot)](AGENTS.md)
+[![Docker Pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi) [![Latest Release](https://img.shields.io/github/v/release/labsai/EDDI?label=latest&color=blue)](https://github.com/labsai/EDDI/releases) [![Repository: AI Ready](https://img.shields.io/badge/Repository-AI_Ready-blueviolet?logo=robot)](AGENTS.md)
 
 **E.D.D.I** (Enhanced Dialog Driven Interface) is a production-grade, **config-driven multi-agent orchestration middleware** for conversational AI. It coordinates users, AI agents, and business systems through **intelligent routing, persistent memory, and API orchestration** — without writing code.
 
-Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker image**. Native support for **MCP** (Model Context Protocol), **A2A** (Agent-to-Agent), **Slack**, **OpenAPI**, and **OAuth 2.0**.
+Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker image**. Selected as a **UNIDO Trusted Partner** for Industrial AI. Native support for **MCP** (Model Context Protocol), **A2A** (Agent-to-Agent), **Slack**, **OpenAPI**, and **OAuth 2.0**.
 
-**Latest version: 6.1.0** · [Website](https://eddi.labs.ai/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
+[Website](https://eddi.labs.ai/) · [Documentation](https://docs.labs.ai/) · License: Apache 2.0
 
 ---
 
@@ -271,7 +271,7 @@ EDDI implements open standards — not proprietary APIs:
 
 | Standard                                                             | Role                            | What It Enables                                                                                          |
 | -------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (42 tools) + Client      | Control EDDI from Claude Desktop, Cursor, or any MCP client. Connect agents to external MCP tool servers |
+| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (60+ tools) + Client    | Control EDDI from Claude Desktop, Cursor, or any MCP client. Connect agents to external MCP tool servers |
 | **[A2A](https://google.github.io/A2A/)** (Agent-to-Agent Protocol)   | Full implementation             | Cross-platform agent communication, Agent Cards, and skill discovery                                     |
 | **[OpenAPI](https://www.openapis.org/)** 3.1                         | Native generation + consumption | Auto-generated spec. Paste any OpenAPI spec → get a fully deployed API-calling agent                     |
 | **OAuth 2.0 / OIDC**                                                 | Keycloak integration            | Authentication, authorization, and multi-tenant isolation                                                |
@@ -401,7 +401,7 @@ Building a Quarkus app that talks to EDDI? Use the **[quarkus-eddi](https://gith
 <dependency>
     <groupId>io.quarkiverse.eddi</groupId>
     <artifactId>quarkus-eddi</artifactId>
-    <version>6.1.0</version>
+    <version>LATEST</version> <!-- Check https://github.com/quarkiverse/quarkus-eddi/releases -->
 </dependency>
 ```
 
@@ -426,7 +426,7 @@ Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming
 | **[Behavior Rules](docs/behavior-rules.md)**                 | Configuring agent routing logic                    |
 | **[HTTP Calls](docs/httpcalls.md)**                          | External API integration                           |
 | **[RAG](docs/rag.md)**                                       | Knowledge base retrieval setup                     |
-| **[MCP Server](docs/mcp-server.md)**                         | 42 tools for AI-assisted agent management          |
+| **[MCP Server](docs/mcp-server.md)**                         | 60+ tools for AI-assisted agent management         |
 | **[A2A Protocol](docs/a2a-protocol.md)**                     | Agent-to-Agent peer communication                  |
 | **[Slack Integration](docs/slack-integration.md)**           | Deploy agents to Slack and run group discussions   |
 | **[Group Conversations](docs/group-conversations.md)**       | Multi-agent debate orchestration                   |
