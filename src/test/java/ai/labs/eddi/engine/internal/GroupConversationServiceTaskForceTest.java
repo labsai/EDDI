@@ -22,6 +22,7 @@ import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -412,6 +413,124 @@ class GroupConversationServiceTaskForceTest {
             assertNotNull(gc.getMemberConversationIds());
             assertTrue(gc.getMemberConversationIds() instanceof java.util.concurrent.ConcurrentHashMap);
             assertTrue(gc.getMemberConversationIds().isEmpty());
+        }
+    }
+
+    // =================================================================
+    // Quota enforcement — abort on QuotaExceededException
+    // =================================================================
+
+    @Nested
+    @DisplayName("Quota enforcement in executeAgentTurn")
+    class QuotaEnforcementTests {
+
+        @Test
+        @DisplayName("QuotaExceededException from startConversation wraps as GroupDiscussionException")
+        void startConversation_quotaExceeded_throwsGroupDiscussionException() throws Exception {
+            var method = GroupConversationService.class.getDeclaredMethod(
+                    "executeAgentTurn", GroupMember.class, GroupConversation.class,
+                    String.class, AgentGroupConfiguration.ProtocolConfig.class,
+                    int.class, DiscussionPhase.class, String.class);
+            method.setAccessible(true);
+
+            var member = new GroupMember("agent-1", "Agent One", 0, "MEMBER");
+            var gc = new GroupConversation();
+            gc.setTranscript(new ArrayList<>());
+            gc.setMemberConversationIds(new java.util.concurrent.ConcurrentHashMap<>());
+
+            var protocol = new AgentGroupConfiguration.ProtocolConfig(
+                    60, AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy.SKIP, 2,
+                    AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy.SKIP);
+            var phase = new DiscussionPhase("Execute", PhaseType.EXECUTE, "ALL",
+                    AgentGroupConfiguration.TurnOrder.PARALLEL, AgentGroupConfiguration.ContextScope.TASK_ONLY,
+                    false, null, 1);
+
+            // Agent is available but startConversation throws quota error
+            when(agentFactory.getLatestReadyAgent(any(), eq("agent-1"))).thenReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class));
+            when(conversationService.startConversation(any(), eq("agent-1"), any(), any()))
+                    .thenThrow(new QuotaExceededException("Conversation limit reached"));
+
+            var ex = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> method.invoke(service, member, gc, "test input", protocol, 0, phase, null));
+
+            assertInstanceOf(GroupDiscussionException.class, ex.getCause());
+            assertTrue(ex.getCause().getMessage().contains("Tenant quota exceeded"));
+            assertInstanceOf(QuotaExceededException.class, ex.getCause().getCause());
+        }
+
+        @Test
+        @DisplayName("QuotaExceededException from say() wraps as GroupDiscussionException")
+        void say_quotaExceeded_throwsGroupDiscussionException() throws Exception {
+            var method = GroupConversationService.class.getDeclaredMethod(
+                    "executeAgentTurn", GroupMember.class, GroupConversation.class,
+                    String.class, AgentGroupConfiguration.ProtocolConfig.class,
+                    int.class, DiscussionPhase.class, String.class);
+            method.setAccessible(true);
+
+            var member = new GroupMember("agent-1", "Agent One", 0, "MEMBER");
+            var gc = new GroupConversation();
+            gc.setTranscript(new ArrayList<>());
+            // Pre-set a conversation ID so startConversation is skipped
+            gc.setMemberConversationIds(new java.util.concurrent.ConcurrentHashMap<>(
+                    Map.of("agent-1", "existing-conv")));
+
+            var protocol = new AgentGroupConfiguration.ProtocolConfig(
+                    60, AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy.SKIP, 2,
+                    AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy.SKIP);
+            var phase = new DiscussionPhase("Execute", PhaseType.EXECUTE, "ALL",
+                    AgentGroupConfiguration.TurnOrder.PARALLEL, AgentGroupConfiguration.ContextScope.TASK_ONLY,
+                    false, null, 1);
+
+            // Agent is available
+            when(agentFactory.getLatestReadyAgent(any(), eq("agent-1"))).thenReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class));
+            // say() throws quota error
+            doThrow(new QuotaExceededException("API call limit reached"))
+                    .when(conversationService).say(any(), eq("agent-1"), eq("existing-conv"),
+                            any(), any(), any(), any(), anyBoolean(), any());
+
+            var ex = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> method.invoke(service, member, gc, "test input", protocol, 0, phase, null));
+
+            assertInstanceOf(GroupDiscussionException.class, ex.getCause());
+            assertTrue(ex.getCause().getMessage().contains("Tenant quota exceeded"));
+            assertInstanceOf(QuotaExceededException.class, ex.getCause().getCause());
+        }
+
+        @Test
+        @DisplayName("QuotaExceededException is NOT retried even with RETRY policy")
+        void quota_notRetried_evenWithRetryPolicy() throws Exception {
+            var method = GroupConversationService.class.getDeclaredMethod(
+                    "executeAgentTurn", GroupMember.class, GroupConversation.class,
+                    String.class, AgentGroupConfiguration.ProtocolConfig.class,
+                    int.class, DiscussionPhase.class, String.class);
+            method.setAccessible(true);
+
+            var member = new GroupMember("agent-1", "Agent One", 0, "MEMBER");
+            var gc = new GroupConversation();
+            gc.setTranscript(new ArrayList<>());
+            gc.setMemberConversationIds(new java.util.concurrent.ConcurrentHashMap<>(
+                    Map.of("agent-1", "existing-conv")));
+
+            // RETRY policy with 5 retries — quota should still abort immediately
+            var protocol = new AgentGroupConfiguration.ProtocolConfig(
+                    60, AgentGroupConfiguration.ProtocolConfig.MemberFailurePolicy.RETRY, 5,
+                    AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy.SKIP);
+            var phase = new DiscussionPhase("Execute", PhaseType.EXECUTE, "ALL",
+                    AgentGroupConfiguration.TurnOrder.PARALLEL, AgentGroupConfiguration.ContextScope.TASK_ONLY,
+                    false, null, 1);
+
+            when(agentFactory.getLatestReadyAgent(any(), eq("agent-1"))).thenReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class));
+            doThrow(new QuotaExceededException("API call limit reached"))
+                    .when(conversationService).say(any(), eq("agent-1"), eq("existing-conv"),
+                            any(), any(), any(), any(), anyBoolean(), any());
+
+            var ex = assertThrows(java.lang.reflect.InvocationTargetException.class,
+                    () -> method.invoke(service, member, gc, "test input", protocol, 0, phase, null));
+
+            assertInstanceOf(GroupDiscussionException.class, ex.getCause());
+            // Verify say() was called exactly once (no retries)
+            verify(conversationService, times(1)).say(any(), eq("agent-1"), eq("existing-conv"),
+                    any(), any(), any(), any(), anyBoolean(), any());
         }
     }
 }

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.AgentSigningService;
+import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
@@ -665,6 +666,11 @@ public class GroupConversationService implements IGroupConversationService {
                         }
 
                     } catch (GroupDiscussionException e) {
+                        // Quota errors are non-retryable — abort all tasks immediately
+                        if (e.getCause() instanceof QuotaExceededException) {
+                            errors.add(e);
+                            return; // exit the entire agent's CompletableFuture
+                        }
                         handleTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, listener, errors, e);
                         if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
                             break;
@@ -1030,6 +1036,12 @@ public class GroupConversationService implements IGroupConversationService {
             try {
                 String input = buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null);
                 return executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null);
+            } catch (GroupDiscussionException e) {
+                if (e.getCause() instanceof QuotaExceededException) {
+                    throw new java.util.concurrent.CompletionException(e);
+                }
+                LOGGER.errorf("Parallel phase failed for %s: %s", speaker.agentId(), e.getMessage());
+                return errorEntry(speaker, phaseIdx, phase, e.getMessage());
             } catch (Exception e) {
                 LOGGER.errorf("Parallel phase failed for %s: %s", speaker.agentId(), e.getMessage());
                 return errorEntry(speaker, phaseIdx, phase, e.getMessage());
@@ -1049,6 +1061,22 @@ public class GroupConversationService implements IGroupConversationService {
                 futures.get(i).cancel(true);
                 gc.getTranscript().add(new TranscriptEntry("unknown", "Unknown", null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
                         Instant.now(), "Timeout", null));
+            } catch (ExecutionException e) {
+                // Unwrap: CompletionException → GroupDiscussionException →
+                // QuotaExceededException
+                Throwable cause = e.getCause();
+                if (cause instanceof java.util.concurrent.CompletionException ce) {
+                    cause = ce.getCause();
+                }
+                if (cause instanceof GroupDiscussionException gde
+                        && gde.getCause() instanceof QuotaExceededException) {
+                    // Cancel remaining futures and propagate
+                    for (int j = i + 1; j < futures.size(); j++) {
+                        futures.get(j).cancel(true);
+                    }
+                    throw gde;
+                }
+                gc.getTranscript().add(errorEntry(null, phaseIdx, phase, e.getMessage()));
             } catch (Exception e) {
                 gc.getTranscript().add(errorEntry(null, phaseIdx, phase, e.getMessage()));
             }
@@ -1140,6 +1168,8 @@ public class GroupConversationService implements IGroupConversationService {
                 var result = conversationService.startConversation(DEFAULT_ENV, member.agentId(), gc.getUserId(), groupContext);
                 privateConvId = result.conversationId();
                 gc.getMemberConversationIds().put(member.agentId(), privateConvId);
+            } catch (QuotaExceededException qe) {
+                throw new GroupDiscussionException("Tenant quota exceeded: " + qe.getMessage(), qe);
             } catch (Exception e) {
                 return handleAgentFailure(member, phaseIdx, phase, protocol, e, "Failed to start conversation", targetAgentId);
             }
@@ -1287,6 +1317,10 @@ public class GroupConversationService implements IGroupConversationService {
 
             } catch (Exception e) {
                 Throwable cause = e instanceof ExecutionException ? e.getCause() : e;
+                // Quota errors are non-retryable and affect all agents — abort immediately
+                if (cause instanceof QuotaExceededException) {
+                    throw new GroupDiscussionException("Tenant quota exceeded: " + cause.getMessage(), cause);
+                }
                 if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY && retries < maxRetries) {
                     retries++;
                     LOGGER.warnf("Agent %s failed (attempt %d/%d): %s", member.agentId(), retries, maxRetries, cause.getMessage());
