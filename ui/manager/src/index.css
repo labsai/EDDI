@@ -244,4 +244,10 @@
       grid-template-columns: repeat(4, 1fr);
     }
   }
+
+  /* ── Task Board active card pulse ─────────── */
+  @keyframes pulse-border {
+    0%, 100% { border-color: var(--color-primary); }
+    50% { border-color: color-mix(in oklch, var(--color-primary) 40%, transparent); }
+  }
 }

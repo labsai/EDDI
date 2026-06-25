@@ -81,12 +81,16 @@ export function useGroupDiscussionStream() {
     const abort = new AbortController();
     abortRef.current = abort;
 
-    // Reset state
+    // Reset state with fresh collection instances (don't reuse shared refs from initialState)
     setStreamState({
       ...initialState,
       isStreaming: true,
       state: "IN_PROGRESS",
       startedAt: new Date().toISOString(),
+      activeSpeakers: new Set(),
+      tasksInProgress: new Set(),
+      tasksCompleted: new Set(),
+      taskVerifications: new Map(),
     });
 
     try {

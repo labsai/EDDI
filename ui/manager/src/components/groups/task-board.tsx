@@ -227,7 +227,14 @@ function ProgressBar({
           </span>
         </div>
       </div>
-      <div className="h-2 w-full overflow-hidden rounded-full bg-secondary/50">
+      <div
+        className="h-2 w-full overflow-hidden rounded-full bg-secondary/50"
+        role="progressbar"
+        aria-valuenow={pct}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={t("taskBoard.progress", "Progress")}
+      >
         <div
           className="h-full rounded-full bg-gradient-to-r from-primary via-primary/80 to-emerald-500 transition-all duration-700 ease-out"
           style={{ width: `${pct}%` }}
@@ -347,7 +354,13 @@ export function TaskBoard({
   //  Render
   // ------------------------------------------------------------------
   return (
-    <div data-testid="task-board">
+    <div data-testid="task-board" role="region" aria-label={t("taskBoard.title", "Task Board")}>
+      {/* Section heading */}
+      <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+        <ClipboardList className="h-4 w-4 text-muted-foreground" />
+        {t("taskBoard.title", "Task Board")}
+      </h3>
+
       {/* Progress bar */}
       <ProgressBar
         total={total}
@@ -363,6 +376,8 @@ export function TaskBoard({
             key={col.key}
             className="rounded-xl border border-border bg-card/50 overflow-hidden flex flex-col"
             data-testid={`task-column-${col.key}`}
+            role="region"
+            aria-label={col.label}
           >
             <ColumnHeader
               icon={col.icon}
@@ -426,14 +441,6 @@ export function TaskBoard({
           ) : null,
         )}
       </div>
-
-      {/* Pulse border keyframe — injected once via Tailwind arbitrary animation */}
-      <style>{`
-        @keyframes pulse-border {
-          0%, 100% { border-color: oklch(0.769 0.188 70.08 / 0.4); box-shadow: 0 0 0 0 oklch(0.769 0.188 70.08 / 0.15); }
-          50% { border-color: oklch(0.769 0.188 70.08 / 0.8); box-shadow: 0 0 12px 2px oklch(0.769 0.188 70.08 / 0.2); }
-        }
-      `}</style>
     </div>
   );
 }

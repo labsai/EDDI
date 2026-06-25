@@ -1414,6 +1414,8 @@
     "dependsOn": "Depends on: {{tasks}}",
     "emptyTitle": "Waiting for task plan",
     "emptyDescription": "The moderator will create a task plan once the discussion begins.",
+    "emptyState": "Task plan will appear here when the moderator creates it",
+    "unassigned": "Unassigned",
     "progress": "{{done}} of {{total}} tasks done",
     "verificationPassed": "Passed",
     "verificationFailed": "Failed"

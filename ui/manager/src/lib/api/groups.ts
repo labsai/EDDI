@@ -466,7 +466,7 @@ export async function* streamGroupDiscussion(
 
       for (const part of parts) {
         if (!part.trim()) continue;
-        let eventType: GroupSSEEventType = "group_start";
+        let eventType: GroupSSEEventType | null = null;
         let eventData = "";
 
         for (const line of part.split("\n")) {
@@ -478,7 +478,8 @@ export async function* streamGroupDiscussion(
           }
         }
 
-        if (eventData || eventType) {
+        // Only yield events with an explicit event: type (skip bare data-only chunks)
+        if (eventType && (eventData || eventType)) {
           yield { type: eventType, data: eventData };
         }
       }

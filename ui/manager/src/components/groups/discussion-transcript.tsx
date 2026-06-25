@@ -8,7 +8,7 @@ import { PhaseHeader } from "./phase-header";
 import { AgentResponseCard } from "./agent-response-card";
 import { TaskBoard } from "./task-board";
 import { parseTranscriptContent, safeFormatDate } from "./group-utils";
-import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle } from "@/lib/api/groups";
+import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle, SharedTaskList } from "@/lib/api/groups";
 import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -397,8 +397,8 @@ export function DiscussionTranscript({
           </PhaseHeader>
         ))}
 
-        {/* Task Board — shown for TASK_FORCE style when task plan is available */}
-        {style === "TASK_FORCE" && isStreaming && streamState && (
+        {/* Task Board — shown for TASK_FORCE style during/after streaming (until API data loads) */}
+        {style === "TASK_FORCE" && streamState?.taskPlan && !conversation?.taskList && (
           <TaskBoard
             taskPlan={streamState.taskPlan}
             tasksInProgress={streamState.tasksInProgress}
@@ -407,29 +407,20 @@ export function DiscussionTranscript({
             isStreaming={streamState.isStreaming}
           />
         )}
+        {/* Show empty task board placeholder during TASK_FORCE streaming before plan arrives */}
+        {style === "TASK_FORCE" && isStreaming && streamState && !streamState.taskPlan && !conversation?.taskList && (
+          <TaskBoard
+            taskPlan={null}
+            tasksInProgress={new Set()}
+            tasksCompleted={new Set()}
+            taskVerifications={new Map()}
+            isStreaming={true}
+          />
+        )}
 
         {/* Also show task board for completed TASK_FORCE conversations loaded from API */}
         {style === "TASK_FORCE" && !isStreaming && conversation?.taskList && (
-          <TaskBoard
-            taskPlan={conversation.taskList.tasks.map(t => ({
-              id: t.id,
-              subject: t.subject,
-              assignedTo: t.assignedDisplayName || t.assignedAgentId || "Unassigned",
-              priority: t.priority,
-            }))}
-            tasksInProgress={new Set(
-              conversation.taskList.tasks.filter(t => t.status === "IN_PROGRESS").map(t => t.id)
-            )}
-            tasksCompleted={new Set(
-              conversation.taskList.tasks.filter(t => t.status === "COMPLETED" || t.status === "VERIFIED").map(t => t.id)
-            )}
-            taskVerifications={new Map(
-              conversation.taskList.tasks
-                .filter(t => t.status === "VERIFIED" || (t.verificationNote != null))
-                .map(t => [t.id, { passed: t.verified, feedback: t.verificationNote || "" }])
-            )}
-            isStreaming={false}
-          />
+          <MemoizedApiTaskBoard taskList={conversation.taskList} t={t} />
         )}
 
         {/* Synthesized answer highlight */}
@@ -536,6 +527,45 @@ export function DiscussionTranscript({
         )}
       </div>
     </div>
+  );
+}
+
+/** Memoized wrapper for API-loaded task boards to avoid re-creating Set/Map on every render */
+function MemoizedApiTaskBoard({ taskList, t }: { taskList: SharedTaskList; t: (key: string, fallback: string) => string }) {
+  const taskPlan = useMemo(
+    () => taskList.tasks.map(task => ({
+      id: task.id,
+      subject: task.subject,
+      assignedTo: task.assignedDisplayName || task.assignedAgentId || t("taskBoard.unassigned", "Unassigned"),
+      priority: task.priority,
+    })),
+    [taskList, t],
+  );
+  const tasksInProgress = useMemo(
+    () => new Set(taskList.tasks.filter(task => task.status === "IN_PROGRESS").map(task => task.id)),
+    [taskList],
+  );
+  const tasksCompleted = useMemo(
+    () => new Set(taskList.tasks.filter(task => task.status === "COMPLETED").map(task => task.id)),
+    [taskList],
+  );
+  const taskVerifications = useMemo(
+    () => new Map(
+      taskList.tasks
+        .filter(task => task.status === "VERIFIED" || task.verificationNote != null)
+        .map(task => [task.id, { passed: task.verified, feedback: task.verificationNote || "" }] as const),
+    ),
+    [taskList],
+  );
+
+  return (
+    <TaskBoard
+      taskPlan={taskPlan}
+      tasksInProgress={tasksInProgress}
+      tasksCompleted={tasksCompleted}
+      taskVerifications={taskVerifications}
+      isStreaming={false}
+    />
   );
 }
 
