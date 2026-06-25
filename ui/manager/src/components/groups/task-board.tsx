@@ -216,7 +216,7 @@ function ProgressBar({
     <div className="mb-4" data-testid="task-board-progress">
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-xs font-medium text-muted-foreground">
-          {t("taskBoard.progress", "Progress")}
+          {t("taskBoard.progress", "{{done}} of {{total}} tasks done", { done, total })}
         </span>
         <div className="flex items-center gap-2">
           {isStreaming && (
@@ -233,7 +233,7 @@ function ProgressBar({
         aria-valuenow={pct}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-label={t("taskBoard.progress", "Progress")}
+        aria-label={t("taskBoard.progress", "{{done}} of {{total}} tasks done", { done, total })}
       >
         <div
           className="h-full rounded-full bg-gradient-to-r from-primary via-primary/80 to-emerald-500 transition-all duration-700 ease-out"

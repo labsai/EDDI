@@ -1447,7 +1447,9 @@
       "DISCUSSION_SCOPED": "discussion scoped",
       "PERSISTENT": "persistent",
       "EPHEMERAL": "ephemeral"
-    }
+    },
+    "dynamicMax": "✓ (max {{count}})",
+    "dynamicMaxPerTask": "✓ (max {{count}}/task)"
   },
   "taskBoard": {
     "title": "Task Board",

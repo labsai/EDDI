@@ -1443,6 +1443,8 @@
     "dynamicCreation": "Creation",
     "dynamicRecruitment": "Recruitment",
     "dynamicDelegation": "Delegation",
+    "dynamicMax": "✓ (max {{count}})",
+    "dynamicMaxPerTask": "✓ (max {{count}}/task)",
     "lifecyclePolicy": "Lifecycle",
     "allowedProviders": "Providers",
     "liveIndicator": "● LIVE",

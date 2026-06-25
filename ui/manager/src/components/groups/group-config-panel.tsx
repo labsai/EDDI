@@ -156,7 +156,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
           <div className="space-y-1.5">
             {config.tasks.map((task, idx) => (
               <div
-                key={idx}
+                key={`${task.subject}-${idx}`}
                 className="rounded-lg border border-border bg-secondary/20 p-2 space-y-1"
               >
                 <div className="flex items-center gap-1.5">
@@ -194,19 +194,19 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
             {config.dynamicAgents.allowCreation && (
               <InfoRow
                 label={t("groups.dynamicCreation", "Creation")}
-                value={`✓ (max ${config.dynamicAgents.maxCreatedAgentsPerDiscussion})`}
+                value={t("groups.dynamicMax", "✓ (max {{count}})", { count: config.dynamicAgents.maxCreatedAgentsPerDiscussion })}
               />
             )}
             {config.dynamicAgents.allowRecruitment && (
               <InfoRow
                 label={t("groups.dynamicRecruitment", "Recruitment")}
-                value={`✓ (max ${config.dynamicAgents.maxRecruitedAgentsPerDiscussion})`}
+                value={t("groups.dynamicMax", "✓ (max {{count}})", { count: config.dynamicAgents.maxRecruitedAgentsPerDiscussion })}
               />
             )}
             {config.dynamicAgents.allowDelegation && (
               <InfoRow
                 label={t("groups.dynamicDelegation", "Delegation")}
-                value={`✓ (max ${config.dynamicAgents.maxDelegationsPerTask}/task)`}
+                value={t("groups.dynamicMaxPerTask", "✓ (max {{count}}/task)", { count: config.dynamicAgents.maxDelegationsPerTask })}
               />
             )}
             <InfoRow
