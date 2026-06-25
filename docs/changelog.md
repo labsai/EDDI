@@ -4,6 +4,19 @@
 
 ---
 
+## 🐛 Fix: Final Review — Duplicate Task Bug, Regression Tests (2026-06-25)
+
+**Repo:** EDDI (`feat/group-task-orchestration`)
+**What changed:** Second review pass found 3 remaining issues (1 CRITICAL, 1 MEDIUM, 1 dead code). All fixed. Added comprehensive regression tests.
+
+- **C1-final**: `addTask→updateTask` — pre-configured dependency resolution was APPENDING tasks with same ID instead of REPLACING, silently breaking dependency ordering
+- **M1-final**: `setMemberConversationIds` defensively wraps in `ConcurrentHashMap` (MongoDB deserialization was replacing with `LinkedHashMap`)
+- **Dead code**: Removed unused `snapshotTranscript` from `executeTaskExecutionPhase`
+- **New**: `SharedTaskList.updateTask()` public synchronized method
+- **Regression tests**: +20 tests covering `resolveTaskAssignment` (7), `tryParseVerificationJson` (6), `handleTaskFailure` (2), `setMemberConversationIds` (2), `updateTask` (3). Total: 109 tests, 0 failures.
+
+---
+
 ## 🐛 Fix: TASK_FORCE Code Review — Thread Safety, Verification Parser, Error Handling (2026-06-25)
 
 **Repo:** EDDI (`feat/group-task-orchestration`)
