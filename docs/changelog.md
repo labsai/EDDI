@@ -4,6 +4,40 @@
 
 ---
 
+## 🐛 Fix: TASK_FORCE Code Review — Thread Safety, Verification Parser, Error Handling (2026-06-25)
+
+**Repo:** EDDI (`feat/group-task-orchestration`)
+**What changed:** Three-pass code review identified 4 CRITICAL, 6 HIGH, and 4 MEDIUM issues. All fixed.
+
+### Critical Fixes (C1–C4)
+- **Thread safety**: All `SharedTaskList` public methods now `synchronized` — prevents race conditions during parallel EXECUTE phase
+- **ConcurrentHashMap**: `GroupConversation.memberConversationIds` changed from `LinkedHashMap` to `ConcurrentHashMap`
+- **Dependency resolution**: Pre-configured `TaskDefinition.dependsOn` subjects now resolved to actual task IDs (was silently dropped)
+- **Null guard**: `resolveTaskAssignment` null returns no longer crash `assignTask`
+
+### High Fixes (H1–H6)
+- **Transcript snapshot**: EXECUTE phase now takes `List.copyOf(gc.getTranscript())` before launching parallel futures (consistent with `executeParallelPhase`)
+- **Timeout semantics**: Changed from `timeout × agentCount` to `timeout × maxTasksPerAgent` (agents run in parallel, tasks per agent are sequential)
+- **Round-robin assignment**: `resolveTaskAssignment("ALL")` now distributes evenly across non-moderator members (was always picking first)
+- **Verification parser**: Dedicated JSON parser reads `passed` boolean directly (was using heuristic `contains("fail")`)
+- **IllegalStateException**: Now caught alongside `GroupDiscussionException` in parallel EXECUTE lambda
+- **Error events**: New `handleTaskFailure()` method emits transcript entry + SSE event for failed tasks
+
+### Medium Fixes (M1–M4)
+- **Slack**: `TASK_FORCE` added to `EXPANDED_STYLES` set
+- **Cycle detection**: Changed from `ArrayList.contains()` O(n) to `HashSet.contains()` O(1)
+- **Fallback**: `singleTaskFallback` now preserves LLM output as task description (was discarding it)
+- **HITL placeholders**: `BLOCKED` and `AWAITING_APPROVAL` statuses documented as Phase 9b placeholders
+
+### Documentation Updates (6 files)
+- `architecture.md`, `group-conversations.md`, `README.md`, `AGENTS.md`, `mcp-server.md`, `slack-integration.md`, `HANDOFF.md` — all updated from "5 styles" to "6 styles" with TASK_FORCE entries
+
+### New Tests (+18 tests)
+- `SharedTaskListTest`: +11 tests (null findById, nonexistent IDs, verified deps, multiple deps, self-ref cycles, defensive copy, concurrent stress)
+- `TaskListParserTest`: +7 tests (empty array, code-fenced JSON, empty members, missing fields, round-robin, tier-3 output preservation)
+
+---
+
 ## ✨ Feature: TASK_FORCE Group Orchestration — Collaborative Task Accomplishment (2026-06-25)
 
 **Repo:** EDDI (`feat/group-task-orchestration`)

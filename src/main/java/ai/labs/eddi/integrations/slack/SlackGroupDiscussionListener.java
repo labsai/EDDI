@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit;
  * agent's message; revisions thread under the agent's own message.
  * <p>
  * Compact mode code paths remain as a safety net for potential future styles
- * but are currently unreachable ({@code EXPANDED_STYLES} contains all 5
+ * but are currently unreachable ({@code EXPANDED_STYLES} contains all 6
  * styles).
  *
  * @since 6.0.0
@@ -41,7 +41,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
      * mode (single thread) is too hard to follow with multiple agents.
      */
     private static final Set<String> EXPANDED_STYLES = Set.of(
-            "ROUND_TABLE", "PEER_REVIEW", "DEVIL_ADVOCATE", "DEBATE", "DELPHI");
+            "ROUND_TABLE", "PEER_REVIEW", "DEVIL_ADVOCATE", "DEBATE", "DELPHI", "TASK_FORCE");
 
     private final SlackWebApiClient slackApi;
     private final String authToken;

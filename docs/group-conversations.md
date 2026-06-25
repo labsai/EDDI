@@ -15,6 +15,7 @@ Group Conversations enable multiple agents to discuss a question. Each agent par
 | `DEVIL_ADVOCATE` | Opinion → Challenge → Defense → Synthesis | Risk assessment, stress-testing |
 | `DELPHI` | Anonymous rounds → convergence → Synthesis | Forecasting, reducing groupthink |
 | `DEBATE` | Pro → Con → Rebuttals → Judge | Trade-off analysis, comparisons |
+| `TASK_FORCE` | Plan → Execute → Verify → Synthesis | Structured task decomposition, parallel execution |
 | `CUSTOM` | Define your own phases | Any workflow |
 
 ## Quick Start (MCP)
@@ -144,6 +145,9 @@ For full control, define phases directly:
 | `DEFENSE` | Defend position against challenges |
 | `ARGUE` | Present argument for a side (debate) |
 | `REBUTTAL` | Counter opposing arguments |
+| `PLAN` | Decompose the question into sub-tasks |
+| `EXECUTE` | Work on assigned sub-task |
+| `VERIFY` | Review and validate another member's work |
 | `SYNTHESIS` | Moderator produces balanced conclusion |
 
 ### Context Scopes
@@ -155,6 +159,12 @@ For full control, define phases directly:
 | `LAST_PHASE` | Only the previous phase's entries |
 | `ANONYMOUS` | Previous entries with speaker names removed |
 | `OWN_FEEDBACK` | Only feedback addressed to this agent |
+| `TASK_ONLY` | Only this agent's assigned task from the plan |
+| `TASK_WITH_DEPS` | Assigned task plus outputs from dependency tasks |
+
+### Pre-Configured Tasks (TASK_FORCE)
+
+The TASK_FORCE style uses a 4-phase pipeline where the moderator first decomposes the question into sub-tasks (PLAN), agents execute their assigned tasks in parallel (EXECUTE), peers verify each other's work (VERIFY), and the moderator synthesizes the final result (SYNTHESIS). The `TASK_ONLY` and `TASK_WITH_DEPS` context scopes ensure agents see only the information relevant to their assigned work.
 
 ## Protocol Configuration
 
@@ -228,7 +238,7 @@ All discussion styles use the same rendering pattern in Slack:
 | **PEER_REVIEW** | Agents post → Critiques thread under targets → Revisions thread under own → Synthesis |
 | **DEVIL_ADVOCATE** | Agent posts → Challenger threads challenges → Agent threads defense → Synthesis |
 | **DEBATE** | PRO agent posts → CON agent posts → Rebuttals thread under opponents → Judge synthesizes |
-| **DELPHI** | Round 1 agents post → Round 2 agents post (convergence) → Synthesis |
+| **DELPHI** | Round 1 agents post → Round 2 agents post (convergence) → Synthesis |\r\n| **TASK_FORCE** | Moderator posts plan → Agents post task results → Verifiers thread under targets → Synthesis |
 
 ### Trigger Keywords
 

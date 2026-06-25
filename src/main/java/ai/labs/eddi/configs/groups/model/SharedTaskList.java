@@ -6,7 +6,9 @@ package ai.labs.eddi.configs.groups.model;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -79,9 +81,17 @@ public class SharedTaskList {
 
     /**
      * Task lifecycle states.
+     * <p>
+     * {@code BLOCKED} and {@code AWAITING_APPROVAL} are placeholders for Phase 9b
+     * (HITL — Human-in-the-Loop). They are recognized by {@link #failTask} as
+     * non-terminal but no code transitions into them yet.
      */
     public enum TaskStatus {
-        PENDING, ASSIGNED, IN_PROGRESS, COMPLETED, VERIFIED, FAILED, BLOCKED, AWAITING_APPROVAL
+        PENDING, ASSIGNED, IN_PROGRESS, COMPLETED, VERIFIED, FAILED,
+        /** Phase 9b placeholder — task blocked by unmet dependency or resource. */
+        BLOCKED,
+        /** Phase 9b placeholder — task requires human approval before proceeding. */
+        AWAITING_APPROVAL
     }
 
     // --- Query methods ---
@@ -90,7 +100,7 @@ public class SharedTaskList {
      * Tasks whose dependencies are all COMPLETED or VERIFIED and that are ready for
      * execution (status is PENDING or ASSIGNED).
      */
-    public List<TaskItem> findExecutableTasks() {
+    public synchronized List<TaskItem> findExecutableTasks() {
         return tasks.stream()
                 .filter(t -> t.status() == TaskStatus.PENDING || t.status() == TaskStatus.ASSIGNED)
                 .filter(t -> t.dependsOnIds().isEmpty() || allDependenciesSatisfied(t))
@@ -100,7 +110,7 @@ public class SharedTaskList {
     /**
      * Tasks assigned to a specific agent.
      */
-    public List<TaskItem> findTasksForAgent(String agentId) {
+    public synchronized List<TaskItem> findTasksForAgent(String agentId) {
         if (agentId == null) {
             return List.of();
         }
@@ -113,9 +123,9 @@ public class SharedTaskList {
      * Check for circular dependencies. Returns the cycle path if found, or an empty
      * list if the dependency graph is acyclic.
      */
-    public List<String> detectCycles() {
+    public synchronized List<String> detectCycles() {
         // Simple DFS-based cycle detection
-        List<String> visited = new ArrayList<>();
+        Set<String> visited = new HashSet<>();
         List<String> recursionStack = new ArrayList<>();
 
         for (TaskItem task : tasks) {
@@ -130,28 +140,31 @@ public class SharedTaskList {
     /**
      * All tasks regardless of status.
      */
-    public List<TaskItem> all() {
+    public synchronized List<TaskItem> all() {
         return List.copyOf(tasks);
     }
 
     /**
      * Returns the number of tasks.
      */
-    public int size() {
+    public synchronized int size() {
         return tasks.size();
     }
 
     /**
      * Whether the task list is empty.
      */
-    public boolean isEmpty() {
+    public synchronized boolean isEmpty() {
         return tasks.isEmpty();
     }
 
     /**
      * Find a task by ID, or null if not found.
      */
-    public TaskItem findById(String taskId) {
+    public synchronized TaskItem findById(String taskId) {
+        if (taskId == null) {
+            return null;
+        }
         return tasks.stream()
                 .filter(t -> t.id().equals(taskId))
                 .findFirst()
@@ -163,7 +176,7 @@ public class SharedTaskList {
     /**
      * Add a task to the list. Returns the added task.
      */
-    public TaskItem addTask(TaskItem task) {
+    public synchronized TaskItem addTask(TaskItem task) {
         tasks.add(task);
         return task;
     }
@@ -174,7 +187,7 @@ public class SharedTaskList {
      * @throws IllegalStateException
      *             if the task is not in PENDING status
      */
-    public TaskItem assignTask(String taskId, String agentId, String displayName) {
+    public synchronized TaskItem assignTask(String taskId, String agentId, String displayName) {
         TaskItem existing = requireTask(taskId);
         requireStatus(existing, TaskStatus.PENDING, "assign");
         TaskItem updated = new TaskItem(
@@ -193,7 +206,7 @@ public class SharedTaskList {
      * @throws IllegalStateException
      *             if the task is not in ASSIGNED status
      */
-    public TaskItem startTask(String taskId) {
+    public synchronized TaskItem startTask(String taskId) {
         TaskItem existing = requireTask(taskId);
         requireStatus(existing, TaskStatus.ASSIGNED, "start");
         TaskItem updated = new TaskItem(
@@ -212,7 +225,7 @@ public class SharedTaskList {
      * @throws IllegalStateException
      *             if the task is not in IN_PROGRESS status
      */
-    public TaskItem completeTask(String taskId, String result) {
+    public synchronized TaskItem completeTask(String taskId, String result) {
         TaskItem existing = requireTask(taskId);
         requireStatus(existing, TaskStatus.IN_PROGRESS, "complete");
         TaskItem updated = new TaskItem(
@@ -228,7 +241,7 @@ public class SharedTaskList {
     /**
      * Verify a task. Transitions COMPLETED → VERIFIED (if passed) or FAILED.
      */
-    public TaskItem verifyTask(String taskId, boolean passed, String note) {
+    public synchronized TaskItem verifyTask(String taskId, boolean passed, String note) {
         TaskItem existing = requireTask(taskId);
         requireStatus(existing, TaskStatus.COMPLETED, "verify");
         TaskStatus newStatus = passed ? TaskStatus.VERIFIED : TaskStatus.FAILED;
@@ -246,7 +259,7 @@ public class SharedTaskList {
      * Mark a task as failed. Any non-terminal status (not VERIFIED, not FAILED) can
      * transition to FAILED.
      */
-    public TaskItem failTask(String taskId, String reason) {
+    public synchronized TaskItem failTask(String taskId, String reason) {
         TaskItem existing = requireTask(taskId);
         if (existing.status() == TaskStatus.VERIFIED || existing.status() == TaskStatus.FAILED) {
             throw new IllegalStateException(
@@ -297,7 +310,7 @@ public class SharedTaskList {
         }
     }
 
-    private List<String> dfs(String taskId, List<String> visited, List<String> recursionStack) {
+    private List<String> dfs(String taskId, Set<String> visited, List<String> recursionStack) {
         if (recursionStack.contains(taskId)) {
             // Found a cycle — return the path
             List<String> cycle = new ArrayList<>(recursionStack.subList(recursionStack.indexOf(taskId), recursionStack.size()));

@@ -173,4 +173,77 @@ class TaskListParserTest {
 
         assertNull(resolved);
     }
+
+    // --- Edge cases (code review gap coverage) ---
+
+    @Test
+    @DisplayName("Empty JSON array falls back to single task")
+    void emptyJsonArray_fallsToSingleTask() {
+        var result = TaskListParser.parse("[]", MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Complete goal", result.getFirst().subject());
+    }
+
+    @Test
+    @DisplayName("JSON wrapped in markdown code fences is parsed")
+    void jsonInCodeFences() {
+        String input = """
+                Here are the tasks:
+                ```json
+                [{"subject": "Task A", "description": "Do A"}]
+                ```
+                """;
+        var result = TaskListParser.parse(input, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Task A", result.getFirst().subject());
+    }
+
+    @Test
+    @DisplayName("Empty string input falls back to single task")
+    void emptyString_fallsToSingleTask() {
+        var result = TaskListParser.parse("", MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Complete goal", result.getFirst().subject());
+    }
+
+    @Test
+    @DisplayName("JSON with missing required fields is parsed with null subject")
+    void jsonMissingSubject() {
+        String input = "[{\"foo\": \"bar\", \"description\": \"some desc\"}]";
+        var result = TaskListParser.parse(input, MEMBERS);
+
+        // Should parse but subject will be null from JSON
+        assertNotNull(result);
+        assertFalse(result.isEmpty());
+    }
+
+    @Test
+    @DisplayName("roundRobinAssign with empty members returns null")
+    void roundRobinAssign_emptyMembers() {
+        String result = TaskListParser.roundRobinAssign(0, List.of());
+        assertNull(result);
+    }
+
+    @Test
+    @DisplayName("roundRobinAssign distributes evenly")
+    void roundRobinAssign_distributes() {
+        assertEquals("agent-1", TaskListParser.roundRobinAssign(0, MEMBERS));
+        assertEquals("agent-2", TaskListParser.roundRobinAssign(1, MEMBERS));
+        assertEquals("agent-1", TaskListParser.roundRobinAssign(2, MEMBERS));
+    }
+
+    @Test
+    @DisplayName("Tier 3 fallback preserves LLM output as description")
+    void tier3Fallback_preservesOutput() {
+        String freeformText = "Just talk to the user about their preferences and find a suitable hotel.";
+        var result = TaskListParser.parse(freeformText, MEMBERS);
+
+        assertEquals(1, result.size());
+        assertEquals("Complete goal", result.getFirst().subject());
+        assertTrue(result.getFirst().description().contains("hotel"),
+                "Fallback should preserve LLM output as task description");
+    }
 }

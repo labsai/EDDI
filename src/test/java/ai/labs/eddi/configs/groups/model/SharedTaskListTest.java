@@ -300,4 +300,173 @@ class SharedTaskListTest {
 
         assertFalse(cycles.isEmpty(), "A↔B mutual dependency must be detected as a cycle");
     }
+
+    // --- Additional edge cases (code review gap coverage) ---
+
+    @Test
+    void findById_null_returnsNull() {
+        list.addTask(new SharedTaskList.TaskItem("Task A", "desc", 0));
+        assertNull(list.findById(null));
+    }
+
+    @Test
+    void findById_nonexistent_returnsNull() {
+        list.addTask(new SharedTaskList.TaskItem("Task A", "desc", 0));
+        assertNull(list.findById("does-not-exist"));
+    }
+
+    @Test
+    void assignTask_nonexistentId_throws() {
+        assertThrows(IllegalArgumentException.class,
+                () -> list.assignTask("nonexistent", "agent-1", "Agent One"));
+    }
+
+    @Test
+    void startTask_nonexistentId_throws() {
+        assertThrows(IllegalArgumentException.class,
+                () -> list.startTask("nonexistent"));
+    }
+
+    @Test
+    void isAllComplete_allVerified_returnsTrue() {
+        var task = list.addTask(new SharedTaskList.TaskItem("Task A", "desc", 0));
+        list.assignTask(task.id(), "a1", "A1");
+        list.startTask(task.id());
+        list.completeTask(task.id(), "done");
+        list.verifyTask(task.id(), true, "ok");
+
+        assertTrue(list.all().stream().allMatch(
+                t -> t.status() == SharedTaskList.TaskStatus.VERIFIED
+                        || t.status() == SharedTaskList.TaskStatus.COMPLETED));
+    }
+
+    @Test
+    void isAllComplete_mixedStates_includingFailed() {
+        var t1 = list.addTask(new SharedTaskList.TaskItem("T1", "desc", 0));
+        var t2 = list.addTask(new SharedTaskList.TaskItem("T2", "desc", 1));
+
+        list.assignTask(t1.id(), "a1", "A1");
+        list.startTask(t1.id());
+        list.completeTask(t1.id(), "done");
+
+        list.failTask(t2.id(), "too hard");
+
+        assertEquals(SharedTaskList.TaskStatus.COMPLETED, list.findById(t1.id()).status());
+        assertEquals(SharedTaskList.TaskStatus.FAILED, list.findById(t2.id()).status());
+    }
+
+    @Test
+    void findExecutableTasks_satisfiedByVerified() {
+        String idA = UUID.randomUUID().toString();
+        String idB = UUID.randomUUID().toString();
+
+        var taskA = new SharedTaskList.TaskItem(
+                idA, "A", "desc", SharedTaskList.TaskStatus.PENDING,
+                null, null, List.of(), null, null, false, 0, Instant.now(), null);
+        var taskB = new SharedTaskList.TaskItem(
+                idB, "B", "desc", SharedTaskList.TaskStatus.PENDING,
+                null, null, List.of(idA), null, null, false, 1, Instant.now(), null);
+
+        list.addTask(taskA);
+        list.addTask(taskB);
+
+        // B not executable (A not complete)
+        assertEquals(1, list.findExecutableTasks().size());
+
+        // Complete and verify A
+        list.assignTask(idA, "agent-1", "Agent One");
+        list.startTask(idA);
+        list.completeTask(idA, "result");
+        list.verifyTask(idA, true, "good");
+
+        // B should now be executable (dependency A is VERIFIED)
+        var executableIds = list.findExecutableTasks().stream().map(SharedTaskList.TaskItem::id).toList();
+        assertTrue(executableIds.contains(idB), "B should be executable after A is VERIFIED");
+    }
+
+    @Test
+    void multipleDependencies_allMustBeSatisfied() {
+        String idA = UUID.randomUUID().toString();
+        String idB = UUID.randomUUID().toString();
+        String idC = UUID.randomUUID().toString();
+
+        var taskA = new SharedTaskList.TaskItem(idA, "A", "desc",
+                SharedTaskList.TaskStatus.PENDING, null, null, List.of(), null, null, false, 0, Instant.now(), null);
+        var taskB = new SharedTaskList.TaskItem(idB, "B", "desc",
+                SharedTaskList.TaskStatus.PENDING, null, null, List.of(), null, null, false, 0, Instant.now(), null);
+        var taskC = new SharedTaskList.TaskItem(idC, "C", "desc",
+                SharedTaskList.TaskStatus.PENDING, null, null, List.of(idA, idB), null, null, false, 0, Instant.now(), null);
+
+        list.addTask(taskA);
+        list.addTask(taskB);
+        list.addTask(taskC);
+
+        // Only A and B executable initially
+        assertEquals(2, list.findExecutableTasks().size());
+
+        // Complete A only — C still blocked (B not done)
+        list.assignTask(idA, "a1", "A1");
+        list.startTask(idA);
+        list.completeTask(idA, "done");
+        assertFalse(list.findExecutableTasks().stream().anyMatch(t -> t.id().equals(idC)));
+
+        // Complete B — C now executable
+        list.assignTask(idB, "a2", "A2");
+        list.startTask(idB);
+        list.completeTask(idB, "done");
+        assertTrue(list.findExecutableTasks().stream().anyMatch(t -> t.id().equals(idC)));
+    }
+
+    @Test
+    void all_returnsDefensiveCopy() {
+        var task = list.addTask(new SharedTaskList.TaskItem("Task A", "desc", 0));
+        var snapshot = list.all();
+        list.addTask(new SharedTaskList.TaskItem("Task B", "desc", 1));
+
+        // snapshot should not reflect the later addition
+        assertEquals(1, snapshot.size());
+        assertEquals(2, list.all().size());
+    }
+
+    @Test
+    void detectCycles_selfReferencing() {
+        String id = UUID.randomUUID().toString();
+        var selfRef = new SharedTaskList.TaskItem(
+                id, "Self", "depends on itself",
+                SharedTaskList.TaskStatus.PENDING, null, null,
+                List.of(id), null, null, false, 0, Instant.now(), null);
+        list.addTask(selfRef);
+
+        var cycles = list.detectCycles();
+        assertFalse(cycles.isEmpty(), "Self-referencing dependency must be detected");
+    }
+
+    @Test
+    void concurrentModifications_doNotCorrupt() throws Exception {
+        // Add 100 tasks
+        for (int i = 0; i < 100; i++) {
+            list.addTask(new SharedTaskList.TaskItem("Task " + i, "desc", i));
+        }
+
+        // Concurrently assign + start + complete from multiple threads
+        var tasks = list.all();
+        var futures = new java.util.ArrayList<java.util.concurrent.CompletableFuture<Void>>();
+        for (var task : tasks) {
+            futures.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
+                try {
+                    list.assignTask(task.id(), "agent-" + task.priority(), "Agent " + task.priority());
+                    list.startTask(task.id());
+                    list.completeTask(task.id(), "done-" + task.priority());
+                } catch (Exception e) {
+                    // Some concurrent attempts may get state errors — that's fine
+                }
+            }));
+        }
+
+        java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0])).get(10,
+                java.util.concurrent.TimeUnit.SECONDS);
+
+        // No corruption: all tasks should still be accessible
+        assertEquals(100, list.size(), "All 100 tasks should survive concurrent access");
+    }
 }

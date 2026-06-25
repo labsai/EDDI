@@ -66,7 +66,7 @@ public final class TaskListParser {
     public static List<ParsedTask> parse(String llmOutput, List<GroupMember> members) {
         if (llmOutput == null || llmOutput.isBlank()) {
             LOGGER.debug("Empty LLM output, falling back to single task");
-            return singleTaskFallback(members);
+            return singleTaskFallback(null);
         }
 
         // Tier 1: Try JSON
@@ -85,7 +85,7 @@ public final class TaskListParser {
 
         // Tier 3: Single task fallback
         LOGGER.debug("Tier 3 (Fallback): treating entire output as single task");
-        return singleTaskFallback(members);
+        return singleTaskFallback(llmOutput);
     }
 
     /**
@@ -217,8 +217,11 @@ public final class TaskListParser {
 
     // --- Tier 3: Single task fallback ---
 
-    private static List<ParsedTask> singleTaskFallback(List<GroupMember> members) {
-        return List.of(new ParsedTask("Complete goal", "Complete the assigned goal", null, 0));
+    private static List<ParsedTask> singleTaskFallback(String llmOutput) {
+        String description = llmOutput != null && !llmOutput.isBlank()
+                ? llmOutput.substring(0, Math.min(llmOutput.length(), 2000))
+                : "Complete the assigned goal";
+        return List.of(new ParsedTask("Complete goal", description, null, 0));
     }
 
     // --- Helpers ---

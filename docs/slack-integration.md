@@ -276,6 +276,7 @@ Each style produces a distinct phase flow, but all use the same header+thread UX
 | **DEVIL'S ADVOCATE** | Opinion → Challenge → Defense → Synthesis | Challenger threads under the original agent's header |
 | **DEBATE** | Pro Arguments → Con Arguments → Rebuttals → Judge | PRO and CON agents post separate headers; rebuttals thread under opponents |
 | **DELPHI** | Anonymous Round 1 → Round 2 (convergence) → Synthesis | Each round's opinions post as headers; convergence visible across rounds |
+| **TASK FORCE** | Plan → Execute → Verify → Synthesis | Moderator posts plan; agents post task results; verifiers thread under targets; synthesis |
 
 #### Peer Feedback Threading
 

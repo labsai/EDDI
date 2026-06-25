@@ -85,7 +85,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 
 | Tool                        | Description                                                                                                                                                |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `describe_discussion_styles` | Rich descriptions of all 5 discussion styles with phase flows, member roles, and use cases                                                                |
+| `describe_discussion_styles` | Rich descriptions of all 6 discussion styles with phase flows, member roles, and use cases                                                                |
 | `list_groups`               | List all group configurations with name, style, member count                                                                                               |
 | `read_group`                | Read a group configuration's full details                                                                                                                  |
 | `create_group`              | Create a group (members, moderator, style, roles, member types). Supports nested groups via `memberTypes=GROUP`                                           |

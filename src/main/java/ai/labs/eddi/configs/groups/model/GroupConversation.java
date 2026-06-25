@@ -6,9 +6,9 @@ package ai.labs.eddi.configs.groups.model;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Transcript record for a group conversation. Persisted with a single-version
@@ -23,7 +23,7 @@ public class GroupConversation {
     private GroupConversationState state;
     private String originalQuestion;
     private List<TranscriptEntry> transcript = new ArrayList<>();
-    private Map<String, String> memberConversationIds = new LinkedHashMap<>();
+    private Map<String, String> memberConversationIds = new ConcurrentHashMap<>();
     private int currentPhaseIndex;
     private String currentPhaseName;
     private String synthesizedAnswer;

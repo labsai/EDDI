@@ -868,7 +868,7 @@ A `GroupConversationService` orchestrates discussions through configurable phase
 
 **Key capabilities:**
 
-- **5 built-in discussion styles**: Round Table, Peer Review, Devil's Advocate, Delphi, and Debate — each with distinct phase flows and turn-taking rules
+- **6 built-in discussion styles**: Round Table, Peer Review, Devil's Advocate, Delphi, Debate, and Task Force — each with distinct phase flows and turn-taking rules. Task Force uses a 4-phase pipeline (PLAN→EXECUTE→VERIFY→SYNTHESIS) for structured task decomposition and parallel execution
 - **Custom phases**: Define your own phase sequences with configurable context scopes (independent, full transcript, anonymous, own-feedback-only)
 - **Group-of-groups**: Members can themselves be groups, enabling hierarchical multi-agent composition with configurable depth limits
 - **Fault tolerance**: Per-agent timeouts, configurable failure policies (skip, retry, abort), and graceful degradation when members are unavailable

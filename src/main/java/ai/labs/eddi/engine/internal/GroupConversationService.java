@@ -460,15 +460,52 @@ public class GroupConversationService implements IGroupConversationService {
 
         if (preConfigured) {
             // Config-driven tasks — skip LLM planning
+            // First pass: create all TaskItems
+            List<TaskItem> createdItems = new ArrayList<>();
             for (TaskDefinition td : config.getTasks()) {
                 TaskItem task = new TaskItem(td.subject(), td.description(), td.priority());
                 gc.getTaskList().addTask(task);
+                createdItems.add(task);
+            }
 
-                // Resolve assignment
-                String assignedAgentId = resolveTaskAssignment(td.assignToRole(), config.getMembers(), config.getModeratorAgentId());
-                GroupMember assignedMember = findMember(config.getMembers(), assignedAgentId);
-                String displayName = assignedMember != null ? assignedMember.displayName() : assignedAgentId;
-                gc.getTaskList().assignTask(task.id(), assignedAgentId, displayName);
+            // Second pass: resolve dependsOn subjects to task IDs
+            for (int i = 0; i < config.getTasks().size(); i++) {
+                TaskDefinition td = config.getTasks().get(i);
+                TaskItem original = createdItems.get(i);
+                if (td.dependsOn() != null && !td.dependsOn().isEmpty()) {
+                    List<String> resolvedDepIds = td.dependsOn().stream()
+                            .map(depSubject -> createdItems.stream()
+                                    .filter(ci -> ci.subject().equalsIgnoreCase(depSubject))
+                                    .map(TaskItem::id)
+                                    .findFirst().orElse(null))
+                            .filter(java.util.Objects::nonNull)
+                            .toList();
+                    if (!resolvedDepIds.isEmpty()) {
+                        // Replace with dependency-aware TaskItem
+                        TaskItem withDeps = new TaskItem(
+                                original.id(), original.subject(), original.description(),
+                                original.status(), original.assignedAgentId(), original.assignedDisplayName(),
+                                resolvedDepIds, original.result(), original.verificationNote(),
+                                original.verified(), original.priority(), original.createdAt(), original.completedAt());
+                        gc.getTaskList().addTask(withDeps); // replaces by adding updated
+                    }
+                }
+            }
+
+            // Third pass: resolve assignments with round-robin for "ALL"
+            for (int i = 0; i < createdItems.size(); i++) {
+                TaskItem task = createdItems.get(i);
+                TaskDefinition td = config.getTasks().get(i);
+                String assignedAgentId = resolveTaskAssignment(
+                        td.assignToRole(), config.getMembers(), config.getModeratorAgentId(), i);
+                if (assignedAgentId != null) {
+                    GroupMember assignedMember = findMember(config.getMembers(), assignedAgentId);
+                    String displayName = assignedMember != null ? assignedMember.displayName() : assignedAgentId;
+                    gc.getTaskList().assignTask(task.id(), assignedAgentId, displayName);
+                } else {
+                    LOGGER.warnf("Could not resolve assignment for task '%s' with role '%s'",
+                            task.subject(), td.assignToRole());
+                }
             }
 
             gc.getTranscript().add(new TranscriptEntry(
@@ -530,7 +567,7 @@ public class GroupConversationService implements IGroupConversationService {
                 TaskItem task = new TaskItem(pt.subject(), pt.description(), pt.priority());
                 gc.getTaskList().addTask(task);
 
-                // Resolve assignment
+                // Resolve assignment — null-safe (C4 fix)
                 String agentId = TaskListParser.resolveAgent(pt.assignedTo(), config.getMembers());
                 if (agentId == null) {
                     agentId = TaskListParser.roundRobinAssign(i, config.getMembers());
@@ -540,6 +577,8 @@ public class GroupConversationService implements IGroupConversationService {
                     GroupMember member = findMember(config.getMembers(), agentId);
                     String displayName = member != null ? member.displayName() : agentId;
                     gc.getTaskList().assignTask(task.id(), agentId, displayName);
+                } else {
+                    LOGGER.warnf("Task '%s' has no assignable agent, will be skipped during execution", pt.subject());
                 }
             }
         }
@@ -577,6 +616,10 @@ public class GroupConversationService implements IGroupConversationService {
             LOGGER.warn("EXECUTE phase: no assigned tasks found");
             return;
         }
+
+        // SAFETY: Snapshot the transcript so parallel agents each see a consistent view
+        // (H1 fix)
+        List<TranscriptEntry> snapshotTranscript = List.copyOf(gc.getTranscript());
 
         // Execute agents in parallel, tasks per agent sequentially
         List<CompletableFuture<Void>> futures = new ArrayList<>();
@@ -622,22 +665,27 @@ public class GroupConversationService implements IGroupConversationService {
                         }
 
                     } catch (GroupDiscussionException e) {
-                        gc.getTaskList().failTask(task.id(), e.getMessage());
-                        errors.add(e);
+                        handleTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, listener, errors, e);
                         if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
                             break;
                         }
+                    } catch (IllegalStateException e) {
+                        // H5 fix: catch status transition errors (e.g., double completion)
+                        LOGGER.warnf("Task state error for '%s': %s", task.subject(), e.getMessage());
+                        handleTaskFailure(gc, task, member, e.getMessage(), phaseIdx, phase, listener, errors,
+                                new GroupDiscussionException(e.getMessage(), e));
                     }
                 }
             }, executorService);
             futures.add(future);
         }
 
-        // Wait for all agent executions
+        // Wait for all agent executions — timeout based on max tasks per agent (H2 fix)
         int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : 60;
+        int maxTasksPerAgent = tasksByAgent.values().stream().mapToInt(List::size).max().orElse(1);
         try {
             CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
-                    .get(timeout * (long) tasksByAgent.size(), TimeUnit.SECONDS);
+                    .get(timeout * (long) maxTasksPerAgent, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             LOGGER.warnf("Task execution timed out for group %s", gc.getGroupId());
             futures.forEach(f -> f.cancel(true));
@@ -770,26 +818,10 @@ public class GroupConversationService implements IGroupConversationService {
      */
     private void parseAndApplyVerification(GroupConversation gc, List<TaskItem> completedTasks,
                                            String verifyContent, GroupDiscussionEventListener listener) {
-        // Try to parse JSON verification
+        // H4 fix: dedicated verification parser that reads 'passed' boolean from JSON
         try {
-            if (verifyContent != null && (verifyContent.contains("[") || verifyContent.contains("passed"))) {
-                List<TaskListParser.ParsedTask> parsed = TaskListParser.parse(verifyContent, List.of());
-                if (parsed != null) {
-                    for (TaskListParser.ParsedTask pt : parsed) {
-                        // Match by subject
-                        for (TaskItem task : completedTasks) {
-                            if (task.subject().equalsIgnoreCase(pt.subject()) && task.status() == TaskStatus.COMPLETED) {
-                                boolean passed = pt.description() == null || !pt.description().toLowerCase().contains("fail");
-                                gc.getTaskList().verifyTask(task.id(), passed, pt.description());
-
-                                if (listener != null) {
-                                    listener.onTaskVerified(new GroupConversationEventSink.TaskVerifiedEvent(
-                                            task.id(), task.subject(), passed, pt.description()));
-                                }
-                                break;
-                            }
-                        }
-                    }
+            if (verifyContent != null && verifyContent.contains("[")) {
+                if (tryParseVerificationJson(gc, completedTasks, verifyContent, listener)) {
                     return;
                 }
             }
@@ -809,16 +841,83 @@ public class GroupConversationService implements IGroupConversationService {
         }
     }
 
+    /**
+     * Attempts to parse verification results from JSON. The expected schema is:
+     * {@code [{"subject": "...", "passed": true, "feedback": "..."}]}
+     *
+     * @return true if parsing succeeded and at least one task was verified
+     */
+    @SuppressWarnings("unchecked")
+    private boolean tryParseVerificationJson(GroupConversation gc, List<TaskItem> completedTasks,
+                                             String content, GroupDiscussionEventListener listener) {
+        try {
+            // Extract JSON array from content (may be wrapped in markdown fences)
+            int jsonStart = content.indexOf('[');
+            int jsonEnd = content.lastIndexOf(']');
+            if (jsonStart < 0 || jsonEnd <= jsonStart) {
+                return false;
+            }
+            String json = content.substring(jsonStart, jsonEnd + 1);
+
+            var items = jsonSerialization.deserialize(json, List.class);
+            if (items == null || items.isEmpty()) {
+                return false;
+            }
+
+            boolean anyVerified = false;
+            for (Object item : items) {
+                if (item instanceof Map<?, ?> map) {
+                    String subject = map.containsKey("subject") ? String.valueOf(map.get("subject")) : null;
+                    // Read 'passed' boolean directly from JSON
+                    boolean passed = true; // default to passed
+                    if (map.containsKey("passed")) {
+                        Object passedVal = map.get("passed");
+                        passed = Boolean.TRUE.equals(passedVal) || "true".equalsIgnoreCase(String.valueOf(passedVal));
+                    }
+                    String feedback = map.containsKey("feedback") ? String.valueOf(map.get("feedback")) : null;
+
+                    if (subject != null) {
+                        for (TaskItem task : completedTasks) {
+                            if (task.subject().equalsIgnoreCase(subject) && task.status() == TaskStatus.COMPLETED) {
+                                gc.getTaskList().verifyTask(task.id(), passed, feedback);
+                                if (listener != null) {
+                                    listener.onTaskVerified(new GroupConversationEventSink.TaskVerifiedEvent(
+                                            task.id(), task.subject(), passed, feedback));
+                                }
+                                anyVerified = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            return anyVerified;
+        } catch (Exception e) {
+            LOGGER.debugf("Verification JSON parse failed: %s", e.getMessage());
+            return false;
+        }
+    }
+
     // --- Task assignment helpers ---
 
-    private String resolveTaskAssignment(String assignToRole, List<GroupMember> members, String moderatorAgentId) {
+    /**
+     * Resolves task assignment. For "ALL" role, uses round-robin across
+     * non-moderator members to distribute tasks evenly (H3 fix).
+     *
+     * @param taskIndex
+     *            index of the task in the list, used for round-robin distribution
+     */
+    private String resolveTaskAssignment(String assignToRole, List<GroupMember> members,
+                                         String moderatorAgentId, int taskIndex) {
         if (assignToRole == null || "ALL".equalsIgnoreCase(assignToRole)) {
-            // Assign to first non-moderator member
-            return members.stream()
+            // Round-robin across non-moderator members (H3 fix)
+            List<GroupMember> eligible = members.stream()
                     .filter(m -> !m.agentId().equals(moderatorAgentId))
-                    .map(GroupMember::agentId)
-                    .findFirst()
-                    .orElse(members.isEmpty() ? null : members.getFirst().agentId());
+                    .toList();
+            if (eligible.isEmpty()) {
+                return members.isEmpty() ? null : members.getFirst().agentId();
+            }
+            return eligible.get(taskIndex % eligible.size()).agentId();
         }
         if (assignToRole.toUpperCase().startsWith("ROLE:")) {
             String role = assignToRole.substring(5).trim();
@@ -830,6 +929,40 @@ public class GroupConversationService implements IGroupConversationService {
         }
         // Direct agentId reference
         return TaskListParser.resolveAgent(assignToRole, members);
+    }
+
+    /**
+     * Centralized error handling for task failures during EXECUTE phase (H6 fix).
+     * Marks the task as failed, adds an error transcript entry, emits SSE events,
+     * and collects the error for potential ABORT propagation.
+     */
+    private void handleTaskFailure(GroupConversation gc, TaskItem task, GroupMember member,
+                                   String errorMessage, int phaseIdx, DiscussionPhase phase,
+                                   GroupDiscussionEventListener listener,
+                                   List<GroupDiscussionException> errors, GroupDiscussionException ex) {
+        try {
+            gc.getTaskList().failTask(task.id(), errorMessage);
+        } catch (IllegalStateException ise) {
+            LOGGER.debugf("Could not fail task '%s' (already terminal): %s", task.id(), ise.getMessage());
+        }
+
+        // Add error transcript entry
+        synchronized (gc.getTranscript()) {
+            gc.getTranscript().add(new TranscriptEntry(
+                    member.agentId(), member.displayName(),
+                    "[ERROR] Task '%s' failed: %s".formatted(task.subject(), errorMessage),
+                    phaseIdx, phase.name(), TranscriptEntryType.TASK_RESULT,
+                    Instant.now(), null, null));
+        }
+
+        // Emit error event so SSE clients see the failure
+        if (listener != null) {
+            listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
+                    member.agentId(), member.displayName(),
+                    "[ERROR] " + errorMessage, phaseIdx, phase.name()));
+        }
+
+        errors.add(ex);
     }
 
     private GroupMember findMember(List<GroupMember> members, String agentId) {
