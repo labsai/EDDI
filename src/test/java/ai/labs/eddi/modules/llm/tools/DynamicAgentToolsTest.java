@@ -973,12 +973,15 @@ class DynamicAgentToolsTest {
         }
 
         @Test
-        void constructor_nullFallbacks() {
-            // Verify null constructor args produce mutable (not immutable) defaults
+        void constructor_nullArgs_doesNotThrow() {
+            // Null constructor args should produce safe fallback collections
             var safeTool = new TeardownAgentTool(agentFactory, agentStore, null, null);
-            // These should not throw UnsupportedOperationException
+            // teardownAgent with unknown agentId returns a warning (doesn't NPE)
             String result = safeTool.teardownAgent("non-existent", false);
             assertTrue(result.contains("⚠️"));
+            // unretainAgent also doesn't throw (exercises retainedAgentIds fallback)
+            String unretainResult = safeTool.unretainAgent("non-existent");
+            assertTrue(unretainResult.contains("⚠️") || unretainResult.contains("not marked"));
         }
     }
 

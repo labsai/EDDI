@@ -1312,6 +1312,11 @@ public class GroupConversationService implements IGroupConversationService {
                             && snapshot.getConversationState() == ConversationState.ERROR) {
                         response = "[Agent failed to produce output — conversation entered ERROR state]";
                     }
+
+                    // Propagate dynamic agent tracking data from the member's conversation
+                    // memory to the GroupConversation for lifecycle cleanup.
+                    propagateDynamicAgentTracking(snapshot, gc);
+
                     responseFuture.complete(response);
                 });
 
@@ -1705,6 +1710,51 @@ public class GroupConversationService implements IGroupConversationService {
             LOGGER.warnf("Failed to update group conversation state to FAILED: %s", e.getMessage());
         }
         counterGroupFailure.increment();
+    }
+
+    /**
+     * Reads dynamic agent tracking data from the member's conversation snapshot and
+     * propagates it to the group conversation's tracking lists. This bridges the
+     * gap between per-turn tool-local tracking lists and the group-level lifecycle
+     * tracking in {@link GroupConversation}.
+     */
+    @SuppressWarnings("unchecked")
+    private void propagateDynamicAgentTracking(
+                                               ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot,
+                                               GroupConversation gc) {
+        if (snapshot == null || snapshot.getConversationSteps() == null) {
+            return;
+        }
+        var steps = snapshot.getConversationSteps();
+        if (steps.isEmpty()) {
+            return;
+        }
+        // Check the last step for tracking data
+        var lastStep = steps.get(steps.size() - 1);
+        if (lastStep == null || lastStep.getConversationStep() == null) {
+            return;
+        }
+        for (var stepData : lastStep.getConversationStep()) {
+            if (stepData == null || stepData.getKey() == null) {
+                continue;
+            }
+            if ("dynamic:created_agent_ids"
+                    .equals(stepData.getKey()) && stepData.getValue() instanceof java.util.Collection<?> ids) {
+                for (Object id : ids) {
+                    if (id instanceof String agentId && !gc.getCreatedAgentIds().contains(agentId)) {
+                        gc.getCreatedAgentIds().add(agentId);
+                        LOGGER.debugf("[DYNAMIC] Propagated created agent '%s' to group conversation", agentId);
+                    }
+                }
+            } else if ("dynamic:retained_agent_ids"
+                    .equals(stepData.getKey()) && stepData.getValue() instanceof java.util.Collection<?> ids) {
+                for (Object id : ids) {
+                    if (id instanceof String agentId) {
+                        gc.getRetainedAgentIds().add(agentId);
+                    }
+                }
+            }
+        }
     }
 
     /**

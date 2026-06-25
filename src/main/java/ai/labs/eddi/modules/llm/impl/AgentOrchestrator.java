@@ -77,6 +77,10 @@ class AgentOrchestrator {
     private static final String HTTPCALLS_TYPE = "eddi://ai.labs.httpcalls";
     private static final String MCPCALLS_TYPE = "eddi://ai.labs.mcpcalls";
 
+    /** Well-known data keys for dynamic agent lifecycle tracking. */
+    public static final String KEY_DYNAMIC_CREATED_AGENT_IDS = "dynamic:created_agent_ids";
+    public static final String KEY_DYNAMIC_RETAINED_AGENT_IDS = "dynamic:retained_agent_ids";
+
     // Built-in tools
     private final CalculatorTool calculatorTool;
     private final DateTimeTool dateTimeTool;
@@ -567,11 +571,13 @@ class AgentOrchestrator {
                 String userId = memory.getUserId();
                 DynamicAgentConfig defaultConfig = createDefaultDynamicConfig();
 
-                if (whitelist.contains("create_sub_agent") && agentSetupService != null) {
+                boolean anyDynamicToolAdded = false;
+                if (whitelist.contains("create_sub_agent") && agentSetupService != null && conversationService != null) {
                     tools.add(new CreateSubAgentTool(agentSetupService,
                             conversationService, parentAgentId, userId, defaultConfig,
                             sharedCreatedIds, sharedRetainedIds));
                     LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s'", sanitize(parentAgentId));
+                    anyDynamicToolAdded = true;
                 }
                 if (whitelist.contains("converse_with_agent") && conversationService != null) {
                     tools.add(new ConverseWithAgentTool(conversationService, userId));
@@ -584,6 +590,20 @@ class AgentOrchestrator {
                 if (whitelist.contains("teardown_agent") && agentFactory != null && agentStore != null) {
                     tools.add(new TeardownAgentTool(agentFactory, agentStore, sharedCreatedIds, sharedRetainedIds));
                     LOGGER.debugf("[DYNAMIC] TeardownAgentTool enabled for agent='%s'", sanitize(parentAgentId));
+                    anyDynamicToolAdded = true;
+                }
+
+                // Store tracking lists in memory step data so GroupConversationService
+                // can read them from the snapshot after each member turn and propagate
+                // to GroupConversation for lifecycle cleanup (Copilot PR review fix).
+                // The lists are stored by reference — after tool execution, they'll
+                // contain all agent IDs accumulated during this turn.
+                if (anyDynamicToolAdded) {
+                    memory.getCurrentStep().storeData(
+                            new ai.labs.eddi.engine.memory.model.Data<>(KEY_DYNAMIC_CREATED_AGENT_IDS, sharedCreatedIds));
+                    memory.getCurrentStep().storeData(
+                            new ai.labs.eddi.engine.memory.model.Data<>(KEY_DYNAMIC_RETAINED_AGENT_IDS,
+                                    new java.util.ArrayList<>(sharedRetainedIds)));
                 }
             }
         } else {

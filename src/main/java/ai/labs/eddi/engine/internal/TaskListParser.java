@@ -60,7 +60,9 @@ public final class TaskListParser {
      * @param llmOutput
      *            the raw LLM response text
      * @param members
-     *            group members for assignment resolution
+     *            group members (unused by parse itself; accepted for API
+     *            consistency — use {@link #resolveAgent} and
+     *            {@link #roundRobinAssign} separately for assignment resolution)
      * @return non-empty list of parsed tasks
      */
     public static List<ParsedTask> parse(String llmOutput, List<GroupMember> members) {
