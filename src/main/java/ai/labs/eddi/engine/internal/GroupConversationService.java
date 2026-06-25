@@ -749,10 +749,11 @@ public class GroupConversationService implements IGroupConversationService {
             CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
                     .get(timeout * (long) maxTasksPerAgent, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
-            LOGGER.warnf("Task execution timed out for group %s", gc.getGroupId());
+            LOGGER.warnf("Task execution timed out for group %s", LogSanitizer.sanitize(gc.getGroupId()));
             futures.forEach(f -> f.cancel(true));
         } catch (ExecutionException | InterruptedException e) {
-            LOGGER.warnf("Task execution error for group %s: %s", gc.getGroupId(), e.getMessage());
+            LOGGER.warnf("Task execution error for group %s: %s",
+                    LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(e.getMessage()));
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }

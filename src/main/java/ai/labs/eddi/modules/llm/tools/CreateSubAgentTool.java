@@ -113,12 +113,24 @@ public class CreateSubAgentTool {
             if (model != null && !model.isBlank()
                     && config.getAllowedModels() != null
                     && !config.getAllowedModels().isEmpty()) {
-                String effectiveProvider = (provider != null && !provider.isBlank()) ? provider.toLowerCase() : "default";
-                List<String> allowedModels = config.getAllowedModels().get(effectiveProvider);
-                if (allowedModels != null && !allowedModels.isEmpty()
-                        && allowedModels.stream().noneMatch(m -> m.equalsIgnoreCase(model))) {
-                    return "⚠️ Model '%s' is not allowed for provider '%s'. Allowed: %s"
-                            .formatted(model, effectiveProvider, allowedModels);
+                if (provider != null && !provider.isBlank()) {
+                    // Provider specified — check against that provider's model list
+                    List<String> allowedModels = config.getAllowedModels().get(provider.toLowerCase());
+                    if (allowedModels != null && !allowedModels.isEmpty()
+                            && allowedModels.stream().noneMatch(m -> m.equalsIgnoreCase(model))) {
+                        return "⚠️ Model '%s' is not allowed for provider '%s'. Allowed: %s"
+                                .formatted(model, provider, allowedModels);
+                    }
+                } else {
+                    // No provider specified — model must appear in at least one provider's
+                    // allow-list
+                    boolean modelFoundInAnyProvider = config.getAllowedModels().values().stream()
+                            .flatMap(List::stream)
+                            .anyMatch(m -> m.equalsIgnoreCase(model));
+                    if (!modelFoundInAnyProvider) {
+                        return "⚠️ Model '%s' is not in any provider's allowed models list."
+                                .formatted(model);
+                    }
                 }
             }
 

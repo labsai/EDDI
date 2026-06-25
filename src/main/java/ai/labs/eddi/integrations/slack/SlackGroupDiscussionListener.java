@@ -25,9 +25,8 @@ import java.util.concurrent.TimeUnit;
  * response lives in a thread reply. Peer feedback threads under the target
  * agent's message; revisions thread under the agent's own message.
  * <p>
- * Compact mode code paths remain as a safety net for potential future styles
- * but are currently unreachable ({@code EXPANDED_STYLES} contains all 6
- * styles).
+ * Compact mode code paths remain as a fallback for styles not in
+ * {@code EXPANDED_STYLES} (e.g. {@code CUSTOM}).
  *
  * @since 6.0.0
  */

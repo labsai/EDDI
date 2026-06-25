@@ -132,6 +132,18 @@ class DynamicAgentToolsTest {
         }
 
         @Test
+        void createSubAgent_modelNotAllowed_providerOmitted() {
+            // When provider is omitted, model must still be checked against all provider
+            // lists
+            config.setAllowedModels(Map.of("openai", List.of("gpt-4o-mini")));
+
+            String result = tool.createSubAgent("Test", "prompt", null, "unknown-model", null, null);
+
+            assertTrue(result.contains("⚠️"));
+            assertTrue(result.contains("not in any provider"));
+        }
+
+        @Test
         void createSubAgent_quotaEnforcedByConversationStart() throws Exception {
             // Quota is enforced by startConversation() internally, not by
             // CreateSubAgentTool.

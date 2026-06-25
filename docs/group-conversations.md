@@ -238,7 +238,8 @@ All discussion styles use the same rendering pattern in Slack:
 | **PEER_REVIEW** | Agents post → Critiques thread under targets → Revisions thread under own → Synthesis |
 | **DEVIL_ADVOCATE** | Agent posts → Challenger threads challenges → Agent threads defense → Synthesis |
 | **DEBATE** | PRO agent posts → CON agent posts → Rebuttals thread under opponents → Judge synthesizes |
-| **DELPHI** | Round 1 agents post → Round 2 agents post (convergence) → Synthesis |\r\n| **TASK_FORCE** | Moderator posts plan → Agents post task results → Verifiers thread under targets → Synthesis |
+| **DELPHI** | Round 1 agents post → Round 2 agents post (convergence) → Synthesis |
+| **TASK_FORCE** | Moderator posts plan → Agents post task results → Verifiers thread under targets → Synthesis |
 
 ### Trigger Keywords
 

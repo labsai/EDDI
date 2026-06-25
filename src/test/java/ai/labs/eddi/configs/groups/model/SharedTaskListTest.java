@@ -419,7 +419,7 @@ class SharedTaskListTest {
 
     @Test
     void all_returnsDefensiveCopy() {
-        var task = list.addTask(new SharedTaskList.TaskItem("Task A", "desc", 0));
+        list.addTask(new SharedTaskList.TaskItem("Task A", "desc", 0));
         var snapshot = list.all();
         list.addTask(new SharedTaskList.TaskItem("Task B", "desc", 1));
 

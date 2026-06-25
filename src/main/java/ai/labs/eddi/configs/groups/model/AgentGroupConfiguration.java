@@ -431,7 +431,7 @@ public class AgentGroupConfiguration {
             return lifecyclePolicy;
         }
         public void setLifecyclePolicy(LifecyclePolicy lifecyclePolicy) {
-            this.lifecyclePolicy = lifecyclePolicy;
+            this.lifecyclePolicy = lifecyclePolicy != null ? lifecyclePolicy : LifecyclePolicy.EPHEMERAL;
         }
     }
 }
