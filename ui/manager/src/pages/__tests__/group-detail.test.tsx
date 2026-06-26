@@ -62,6 +62,9 @@ describe("GroupDetailPage", () => {
   });
 
   it("shows no discussions message when empty", async () => {
+    server.use(
+      http.get("*/groups/:groupId/conversations", () => HttpResponse.json([]))
+    );
     renderGroupDetail();
 
     await waitFor(() => {
@@ -72,6 +75,9 @@ describe("GroupDetailPage", () => {
   });
 
   it("shows ask below hint when no discussions", async () => {
+    server.use(
+      http.get("*/groups/:groupId/conversations", () => HttpResponse.json([]))
+    );
     renderGroupDetail();
 
     await waitFor(() => {

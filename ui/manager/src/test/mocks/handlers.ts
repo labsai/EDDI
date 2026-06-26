@@ -1886,6 +1886,41 @@ export const handlers = [
         createdOn: Date.now() - 259200000,
         lastModifiedOn: Date.now() - 7200000,
       },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp4?version=1",
+        name: "Market Forecast Panel",
+        description: "Delphi-style anonymous forecasting for quarterly predictions",
+        createdOn: Date.now() - 432000000,
+        lastModifiedOn: Date.now() - 14400000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp5?version=3",
+        name: "Feature Prioritization Debate",
+        description: "Pro/con debate on which features to prioritize for next release",
+        createdOn: Date.now() - 604800000,
+        lastModifiedOn: Date.now() - 43200000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp6?version=1",
+        name: "Security Audit Task Force",
+        description: "Coordinated task force to plan and execute a full security audit",
+        createdOn: Date.now() - 345600000,
+        lastModifiedOn: Date.now() - 1800000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp7?version=2",
+        name: "Customer Feedback Analysis",
+        description: "Round table review of customer feedback themes and action items",
+        createdOn: Date.now() - 518400000,
+        lastModifiedOn: Date.now() - 86400000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp8?version=1",
+        name: "Compliance Risk Review",
+        description: "Devil's advocate challenge of compliance assumptions across departments",
+        createdOn: Date.now() - 691200000,
+        lastModifiedOn: Date.now() - 172800000,
+      },
     ]);
   }),
 
@@ -1896,6 +1931,7 @@ export const handlers = [
       DEVIL_ADVOCATE: { label: "Devil's Advocate", phases: ["OPINION", "CHALLENGE", "DEFENSE", "SYNTHESIS"] },
       DELPHI: { label: "Delphi", phases: ["OPINION", "REVISION", "SYNTHESIS"] },
       DEBATE: { label: "Debate", phases: ["ARGUE", "REBUTTAL", "SYNTHESIS"] },
+      TASK_FORCE: { label: "Task Force", phases: ["PLAN", "EXECUTE", "VERIFY", "SYNTHESIS"] },
       CUSTOM: { label: "Custom", phases: [] },
     });
   }),
@@ -1916,29 +1952,134 @@ export const handlers = [
     });
   }),
 
-  http.get("*/groupstore/groups/:id", () => {
-    return HttpResponse.json({
-      name: "Product Review Panel",
-      description: "Peer-review discussion for product decisions",
-      members: [
-        { agentId: "agent1", displayName: "Support Agent", speakingOrder: 1, role: "Reviewer", memberType: "AGENT" },
-        { agentId: "agent2", displayName: "FAQ Agent", speakingOrder: 2, role: "Critic", memberType: "AGENT" },
-      ],
-      moderatorAgentId: "agent1",
-      style: "PEER_REVIEW",
-      maxRounds: 3,
-      phases: [
-        { name: "Initial Opinions", type: "OPINION", participants: "*", turnOrder: "SEQUENTIAL", contextScope: "NONE", targetEachPeer: false, inputTemplate: null, repeats: 1 },
-        { name: "Critique", type: "CRITIQUE", participants: "*", turnOrder: "SEQUENTIAL", contextScope: "FULL", targetEachPeer: true, inputTemplate: null, repeats: 1 },
-        { name: "Synthesis", type: "SYNTHESIS", participants: "moderator", turnOrder: "SEQUENTIAL", contextScope: "FULL", targetEachPeer: false, inputTemplate: null, repeats: 1 },
-      ],
-      protocol: {
-        agentTimeoutSeconds: 60,
-        onAgentFailure: "SKIP",
-        maxRetries: 2,
-        onMemberUnavailable: "SKIP",
+  http.get("*/groupstore/groups/:id", ({ params }) => {
+    const groupConfigs: Record<string, object> = {
+      grp1: {
+        name: "Product Review Panel",
+        description: "Peer-review discussion for product decisions",
+        members: [
+          { agentId: "agent1", displayName: "Support Agent", speakingOrder: 1, role: "Reviewer", memberType: "AGENT" },
+          { agentId: "agent2", displayName: "FAQ Agent", speakingOrder: 2, role: "Critic", memberType: "AGENT" },
+        ],
+        moderatorAgentId: "agent1",
+        style: "PEER_REVIEW",
+        maxRounds: 3,
+        phases: [
+          { name: "Initial Opinions", type: "OPINION", participants: "*", turnOrder: "SEQUENTIAL", contextScope: "NONE", targetEachPeer: false, inputTemplate: null, repeats: 1 },
+          { name: "Critique", type: "CRITIQUE", participants: "*", turnOrder: "SEQUENTIAL", contextScope: "FULL", targetEachPeer: true, inputTemplate: null, repeats: 1 },
+          { name: "Synthesis", type: "SYNTHESIS", participants: "moderator", turnOrder: "SEQUENTIAL", contextScope: "FULL", targetEachPeer: false, inputTemplate: null, repeats: 1 },
+        ],
+        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
       },
-    });
+      grp2: {
+        name: "Strategy Debate",
+        description: "Devil's advocate debate on business strategy",
+        members: [
+          { agentId: "agent3", displayName: "Market Analyst", speakingOrder: 1, role: "Risk", memberType: "AGENT" },
+          { agentId: "agent4", displayName: "Growth Strategist", speakingOrder: 2, role: "Domain", memberType: "AGENT" },
+          { agentId: "agent5", displayName: "Contrarian", speakingOrder: 3, role: "DEVIL_ADVOCATE", memberType: "AGENT" },
+        ],
+        moderatorAgentId: "agent3",
+        style: "DEVIL_ADVOCATE",
+        maxRounds: 1,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+      },
+      grp3: {
+        name: "Research Round Table",
+        description: "Open discussion for research synthesis",
+        members: [
+          { agentId: "agent6", displayName: "Data Scientist", speakingOrder: 1, role: "Analysis", memberType: "AGENT" },
+          { agentId: "agent7", displayName: "Domain Expert", speakingOrder: 2, role: "Context", memberType: "AGENT" },
+          { agentId: "agent8", displayName: "Research Lead", speakingOrder: 3, role: "Synthesis", memberType: "AGENT" },
+          { agentId: "agent9", displayName: "Peer Reviewer", speakingOrder: 4, role: "Validation", memberType: "AGENT" },
+        ],
+        moderatorAgentId: "agent8",
+        style: "ROUND_TABLE",
+        maxRounds: 2,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+      },
+      grp4: {
+        name: "Market Forecast Panel",
+        description: "Delphi-style anonymous forecasting for quarterly predictions",
+        members: [
+          { agentId: "agent10", displayName: "Economist A", speakingOrder: 1, role: "Forecasting", memberType: "AGENT" },
+          { agentId: "agent11", displayName: "Economist B", speakingOrder: 2, role: "Forecasting", memberType: "AGENT" },
+          { agentId: "agent12", displayName: "Industry Analyst", speakingOrder: 3, role: "Forecasting", memberType: "AGENT" },
+          { agentId: "agent13", displayName: "Risk Modeler", speakingOrder: 4, role: "Forecasting", memberType: "AGENT" },
+          { agentId: "agent14", displayName: "Trend Spotter", speakingOrder: 5, role: "Forecasting", memberType: "AGENT" },
+        ],
+        moderatorAgentId: "agent10",
+        style: "DELPHI",
+        maxRounds: 3,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 90, onAgentFailure: "SKIP", maxRetries: 3, onMemberUnavailable: "SKIP" },
+      },
+      grp5: {
+        name: "Feature Prioritization Debate",
+        description: "Pro/con debate on which features to prioritize for next release",
+        members: [
+          { agentId: "agent15", displayName: "Product Advocate", speakingOrder: 1, role: "PRO", memberType: "AGENT" },
+          { agentId: "agent16", displayName: "UX Champion", speakingOrder: 2, role: "PRO", memberType: "AGENT" },
+          { agentId: "agent17", displayName: "Tech Debt Guardian", speakingOrder: 3, role: "CON", memberType: "AGENT" },
+          { agentId: "agent18", displayName: "Budget Hawk", speakingOrder: 4, role: "CON", memberType: "AGENT" },
+        ],
+        moderatorAgentId: null,
+        style: "DEBATE",
+        maxRounds: 1,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+      },
+      grp6: {
+        name: "Security Audit Task Force",
+        description: "Coordinated task force to plan and execute a full security audit",
+        members: [
+          { agentId: "agent19", displayName: "Security Lead", speakingOrder: 1, role: "Lead", memberType: "AGENT" },
+          { agentId: "agent20", displayName: "Penetration Tester", speakingOrder: 2, role: "Research", memberType: "AGENT" },
+          { agentId: "agent21", displayName: "Infrastructure Eng", speakingOrder: 3, role: "Implementation", memberType: "AGENT" },
+          { agentId: "agent22", displayName: "Compliance Officer", speakingOrder: 4, role: "QA", memberType: "AGENT" },
+        ],
+        moderatorAgentId: "agent19",
+        style: "TASK_FORCE",
+        maxRounds: 1,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 120, onAgentFailure: "RETRY", maxRetries: 3, onMemberUnavailable: "SKIP" },
+      },
+      grp7: {
+        name: "Customer Feedback Analysis",
+        description: "Round table review of customer feedback themes and action items",
+        members: [
+          { agentId: "agent23", displayName: "CX Analyst", speakingOrder: 1, role: "Analysis", memberType: "AGENT" },
+          { agentId: "agent24", displayName: "Product Manager", speakingOrder: 2, role: "Prioritization", memberType: "AGENT" },
+          { agentId: "grp4", displayName: "Market Forecast Panel", speakingOrder: 3, role: "Context", memberType: "GROUP" },
+        ],
+        moderatorAgentId: "agent24",
+        style: "ROUND_TABLE",
+        maxRounds: 2,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+      },
+      grp8: {
+        name: "Compliance Risk Review",
+        description: "Devil's advocate challenge of compliance assumptions across departments",
+        members: [
+          { agentId: "agent25", displayName: "Legal Advisor", speakingOrder: 1, role: "Compliance", memberType: "AGENT" },
+          { agentId: "agent26", displayName: "Risk Manager", speakingOrder: 2, role: "Risk", memberType: "AGENT" },
+          { agentId: "agent27", displayName: "Operations Head", speakingOrder: 3, role: "Operations", memberType: "AGENT" },
+          { agentId: "agent28", displayName: "External Auditor", speakingOrder: 4, role: "DEVIL_ADVOCATE", memberType: "AGENT" },
+          { agentId: "grp2", displayName: "Strategy Debate", speakingOrder: 5, role: "Strategy", memberType: "GROUP" },
+        ],
+        moderatorAgentId: "agent25",
+        style: "DEVIL_ADVOCATE",
+        maxRounds: 2,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+      },
+    };
+    const id = params.id as string;
+    const config = groupConfigs[id] ?? groupConfigs.grp1;
+    return HttpResponse.json(config);
   }),
 
   http.post("*/groupstore/groups", () => {
@@ -1967,8 +2108,46 @@ export const handlers = [
   }),
 
   // Group conversations
-  http.get("*/groups/:groupId/conversations", () => {
-    return HttpResponse.json([]);
+  http.get("*/groups/:groupId/conversations", ({ params }) => {
+    const now = Date.now();
+    const groupConversations: Record<string, object[]> = {
+      grp1: [
+        { id: "gc-1a", groupId: "grp1", userId: "admin", state: "COMPLETED", originalQuestion: "Review the new onboarding flow — is it production-ready?", created: new Date(now - 86400000).toISOString(), lastModified: new Date(now - 82800000).toISOString() },
+        { id: "gc-1b", groupId: "grp1", userId: "admin", state: "COMPLETED", originalQuestion: "Assess the mobile checkout redesign for UX consistency", created: new Date(now - 604800000).toISOString(), lastModified: new Date(now - 601200000).toISOString() },
+        { id: "gc-1c", groupId: "grp1", userId: "admin", state: "FAILED", originalQuestion: "Evaluate the new API rate limiting strategy", created: new Date(now - 172800000).toISOString(), lastModified: new Date(now - 169200000).toISOString() },
+      ],
+      grp2: [
+        { id: "gc-2a", groupId: "grp2", userId: "admin", state: "COMPLETED", originalQuestion: "Should we pivot to a product-led growth strategy?", created: new Date(now - 259200000).toISOString(), lastModified: new Date(now - 255600000).toISOString() },
+        { id: "gc-2b", groupId: "grp2", userId: "admin", state: "COMPLETED", originalQuestion: "Is expanding into the enterprise segment worth the R&D cost?", created: new Date(now - 432000000).toISOString(), lastModified: new Date(now - 428400000).toISOString() },
+      ],
+      grp3: [
+        { id: "gc-3a", groupId: "grp3", userId: "admin", state: "COMPLETED", originalQuestion: "What are the key findings from last quarter's user research?", created: new Date(now - 345600000).toISOString(), lastModified: new Date(now - 342000000).toISOString() },
+        { id: "gc-3b", groupId: "grp3", userId: "admin", state: "IN_PROGRESS", originalQuestion: "Synthesize competitor analysis data from the 3 latest reports", created: new Date(now - 3600000).toISOString(), lastModified: new Date(now - 1800000).toISOString() },
+      ],
+      grp4: [
+        { id: "gc-4a", groupId: "grp4", userId: "admin", state: "COMPLETED", originalQuestion: "Forecast Q3 revenue across our three business lines", created: new Date(now - 518400000).toISOString(), lastModified: new Date(now - 514800000).toISOString() },
+        { id: "gc-4b", groupId: "grp4", userId: "admin", state: "COMPLETED", originalQuestion: "What is the probability of a market correction in the next 6 months?", created: new Date(now - 691200000).toISOString(), lastModified: new Date(now - 687600000).toISOString() },
+        { id: "gc-4c", groupId: "grp4", userId: "admin", state: "COMPLETED", originalQuestion: "Estimate customer churn rate for enterprise tier in Q4", created: new Date(now - 864000000).toISOString(), lastModified: new Date(now - 860400000).toISOString() },
+      ],
+      grp5: [
+        { id: "gc-5a", groupId: "grp5", userId: "admin", state: "COMPLETED", originalQuestion: "Should we prioritize real-time collaboration or offline mode?", created: new Date(now - 172800000).toISOString(), lastModified: new Date(now - 169200000).toISOString() },
+      ],
+      grp6: [
+        { id: "gc-6a", groupId: "grp6", userId: "admin", state: "COMPLETED", originalQuestion: "Plan and execute a comprehensive security audit of our auth system", created: new Date(now - 259200000).toISOString(), lastModified: new Date(now - 252000000).toISOString() },
+        { id: "gc-6b", groupId: "grp6", userId: "admin", state: "AWAITING_APPROVAL", originalQuestion: "Audit the new payment processing microservice for PCI compliance", created: new Date(now - 43200000).toISOString(), lastModified: new Date(now - 36000000).toISOString() },
+      ],
+      grp7: [
+        { id: "gc-7a", groupId: "grp7", userId: "admin", state: "COMPLETED", originalQuestion: "What are the top 5 customer pain points from this month's feedback?", created: new Date(now - 604800000).toISOString(), lastModified: new Date(now - 601200000).toISOString() },
+        { id: "gc-7b", groupId: "grp7", userId: "admin", state: "COMPLETED", originalQuestion: "Analyze NPS trends and identify actionable improvements", created: new Date(now - 1209600000).toISOString(), lastModified: new Date(now - 1206000000).toISOString() },
+      ],
+      grp8: [
+        { id: "gc-8a", groupId: "grp8", userId: "admin", state: "COMPLETED", originalQuestion: "Challenge our GDPR compliance assumptions for the new analytics pipeline", created: new Date(now - 432000000).toISOString(), lastModified: new Date(now - 428400000).toISOString() },
+        { id: "gc-8b", groupId: "grp8", userId: "admin", state: "COMPLETED", originalQuestion: "Review SOC 2 readiness across all departments", created: new Date(now - 864000000).toISOString(), lastModified: new Date(now - 860400000).toISOString() },
+        { id: "gc-8c", groupId: "grp8", userId: "admin", state: "CREATED", originalQuestion: "Assess data retention policy compliance with new EU regulations", created: new Date(now - 7200000).toISOString(), lastModified: new Date(now - 7200000).toISOString() },
+      ],
+    };
+    const id = params.groupId as string;
+    return HttpResponse.json(groupConversations[id] ?? []);
   }),
 
   http.post("*/groups/:groupId/conversations", ({ params }) => {
