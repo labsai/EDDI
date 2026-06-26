@@ -1864,7 +1864,7 @@ export const handlers = [
 
   // --- Group Store Mock Handlers ---
   http.get("*/groupstore/groups/descriptors", () => {
-    return HttpResponse.json([
+    const groups = [
       {
         resource: "eddi://ai.labs.group/groupstore/groups/grp1?version=1",
         name: "Product Review Panel",
@@ -1921,7 +1921,8 @@ export const handlers = [
         createdOn: Date.now() - 691200000,
         lastModifiedOn: Date.now() - 172800000,
       },
-    ]);
+    ];
+    return HttpResponse.json(groups);
   }),
 
   http.get("*/groupstore/groups/styles", () => {

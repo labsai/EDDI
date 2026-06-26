@@ -28,12 +28,14 @@ import { STYLE_INFO, type DiscussionStyle, type AgentGroupConfiguration } from "
 import { STYLE_THEME } from "@/components/groups/discussion-transcript";
 import { safeFormatDate } from "@/components/groups/group-utils";
 
+const DEFAULT_STATE = { label: "Created", color: "text-muted-foreground", dot: "bg-muted-foreground" } as const;
+
 const STATE_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
   COMPLETED: { label: "Completed", color: "text-emerald-500", dot: "bg-emerald-500" },
   IN_PROGRESS: { label: "In Progress", color: "text-amber-500", dot: "bg-amber-500" },
   SYNTHESIZING: { label: "Synthesizing", color: "text-amber-500", dot: "bg-amber-500" },
   FAILED: { label: "Failed", color: "text-destructive", dot: "bg-destructive" },
-  CREATED: { label: "Created", color: "text-muted-foreground", dot: "bg-muted-foreground" },
+  CREATED: DEFAULT_STATE,
   AWAITING_APPROVAL: { label: "Awaiting Approval", color: "text-orange-500", dot: "bg-orange-500" },
   ERROR: { label: "Error", color: "text-destructive", dot: "bg-destructive" },
 };
@@ -194,7 +196,7 @@ export function GroupDetailPage() {
               </p>
               <div className="flex items-center gap-1.5 mt-1">
                 {(() => {
-                  const cfg = STATE_CONFIG[conv.state] ?? STATE_CONFIG.CREATED;
+                  const cfg = STATE_CONFIG[conv.state] ?? DEFAULT_STATE;
                   const isLive = streamState.isStreaming && conv.id === streamState.conversationId;
                   return (
                     <span
