@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   Users, Trash2, MessageSquareQuote, Clock,
   PanelRightOpen, PanelRightClose,
+  PanelLeftOpen, PanelLeftClose,
   Maximize2, Minimize2, History,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -54,6 +55,7 @@ export function GroupDetailPage() {
   const queryClient = useQueryClient();
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [showConfig, setShowConfig] = useState(true);
+  const [showDiscussions, setShowDiscussions] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
 
@@ -286,6 +288,23 @@ export function GroupDetailPage() {
             {discussionListContent}
           </HistoryDropdown>
 
+          {/* Discussions panel toggle */}
+          {!isFullscreen && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowDiscussions(!showDiscussions)}
+              title={showDiscussions ? t("groups.hideDiscussions", "Hide discussions panel") : t("groups.showDiscussions", "Show discussions panel")}
+              className="max-lg:hidden"
+            >
+              {showDiscussions ? (
+                <PanelLeftClose className="h-4 w-4" />
+              ) : (
+                <PanelLeftOpen className="h-4 w-4" />
+              )}
+            </Button>
+          )}
+
           {/* Config panel toggle */}
           {!isFullscreen && (
             <Button
@@ -324,7 +343,7 @@ export function GroupDetailPage() {
       {/* Three-panel layout */}
       <div className="flex flex-1 min-h-0 mt-2 gap-2">
         {/* LEFT: Discussion history — hidden on small screens and in fullscreen */}
-        {!isFullscreen && (
+        {!isFullscreen && showDiscussions && (
           <div className="w-64 shrink-0 flex flex-col rounded-xl border border-border bg-card overflow-hidden max-lg:hidden">
             <div className="p-3 border-b border-border">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">

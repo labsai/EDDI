@@ -225,7 +225,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
 
       {/* Delete group + all agents */}
       {groupId && groupVersion != null && (
-        <div className="mt-auto pt-4 border-t border-border">
+        <div className="mt-auto pt-4 pb-4 border-t border-border">
           {!showDeleteConfirm ? (
             <Button
               variant="outline"
