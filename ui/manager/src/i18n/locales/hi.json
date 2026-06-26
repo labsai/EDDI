@@ -1406,6 +1406,20 @@
     "htmlToggle": "HTML",
     "memberTypeGroup": "समूह",
     "moderatorBadge": "⭐ मॉडरेटर",
+    "styleColumn": "शैली",
+    "membersColumn": "सदस्य",
+    "memberOverflow": "+{{count}} और",
+    "defaultLabel": "समूह",
+    "liveDiscussion": "लाइव",
+    "state": {
+      "CREATED": "बनाया गया",
+      "IN_PROGRESS": "प्रगति में",
+      "SYNTHESIZING": "संश्लेषण जारी",
+      "COMPLETED": "पूर्ण",
+      "FAILED": "विफल",
+      "ERROR": "त्रुटि",
+      "AWAITING_APPROVAL": "अनुमोदन की प्रतीक्षा"
+    },
     "preConfiguredTasksCount": "पूर्व-कॉन्फ़िगर किए गए कार्य ({{count}})",
     "entryType": {
       "QUESTION": "प्रश्न",

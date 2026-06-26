@@ -1406,6 +1406,20 @@
     "htmlToggle": "HTML",
     "memberTypeGroup": "กลุ่ม",
     "moderatorBadge": "⭐ ผู้ดูแล",
+    "styleColumn": "สไตล์",
+    "membersColumn": "สมาชิก",
+    "memberOverflow": "+{{count}} เพิ่มเติม",
+    "defaultLabel": "กลุ่ม",
+    "liveDiscussion": "สด",
+    "state": {
+      "CREATED": "สร้างแล้ว",
+      "IN_PROGRESS": "กำลังดำเนินการ",
+      "SYNTHESIZING": "กำลังสังเคราะห์",
+      "COMPLETED": "เสร็จสิ้น",
+      "FAILED": "ล้มเหลว",
+      "ERROR": "ข้อผิดพลาด",
+      "AWAITING_APPROVAL": "รอการอนุมัติ"
+    },
     "preConfiguredTasksCount": "งานที่ตั้งค่าไว้ล่วงหน้า ({{count}})",
     "entryType": {
       "QUESTION": "คำถาม",

@@ -1451,6 +1451,20 @@
     "htmlToggle": "HTML",
     "memberTypeGroup": "Group",
     "moderatorBadge": "⭐ Mod",
+    "styleColumn": "Style",
+    "membersColumn": "Members",
+    "memberOverflow": "+{{count}} more",
+    "defaultLabel": "Group",
+    "liveDiscussion": "Live",
+    "state": {
+      "CREATED": "Created",
+      "IN_PROGRESS": "In Progress",
+      "SYNTHESIZING": "Synthesizing",
+      "COMPLETED": "Completed",
+      "FAILED": "Failed",
+      "ERROR": "Error",
+      "AWAITING_APPROVAL": "Awaiting Approval"
+    },
     "entryType": {
       "QUESTION": "Question",
       "OPINION": "Opinion",

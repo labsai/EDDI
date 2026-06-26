@@ -131,4 +131,130 @@ describe("GroupCard", () => {
     await user.click(screen.getByText("Duplicate"));
     expect(screen.queryByText("Duplicate")).not.toBeInTheDocument();
   });
+
+  // ─── Style badge variants ──────────────────────────────────────────
+
+  it("renders style badge with icon and label for ROUND_TABLE", () => {
+    renderWithProviders(
+      <GroupCard group={baseGroup} style="ROUND_TABLE" />
+    );
+    expect(screen.getByText("Round Table")).toBeInTheDocument();
+    expect(screen.getByText("🗣️")).toBeInTheDocument();
+  });
+
+  it("renders style badge for TASK_FORCE", () => {
+    renderWithProviders(
+      <GroupCard group={baseGroup} style="TASK_FORCE" />
+    );
+    expect(screen.getByText("Task Force")).toBeInTheDocument();
+    expect(screen.getByText("🎯")).toBeInTheDocument();
+  });
+
+  // ─── Member preview chips ─────────────────────────────────────────
+
+  it("renders member preview chips (up to 4)", () => {
+    const members = [
+      { displayName: "Agent Alpha", memberType: "AGENT" },
+      { displayName: "Agent Beta", memberType: "AGENT" },
+      { displayName: "Sub Group", memberType: "GROUP" },
+    ];
+    renderWithProviders(
+      <GroupCard group={baseGroup} members={members} memberCount={3} />
+    );
+    expect(screen.getByText("Agent Alpha")).toBeInTheDocument();
+    expect(screen.getByText("Agent Beta")).toBeInTheDocument();
+    expect(screen.getByText("Sub Group")).toBeInTheDocument();
+  });
+
+  it("shows Bot icon for AGENT type members", () => {
+    const members = [{ displayName: "Agent Alpha", memberType: "AGENT" }];
+    renderWithProviders(
+      <GroupCard group={baseGroup} members={members} memberCount={1} />
+    );
+    // Bot icon from lucide has aria-hidden="true" on SVG inside the chip
+    const chip = screen.getByRole("listitem", { name: "Agent Alpha" });
+    const svg = chip.querySelector("svg");
+    expect(svg).toBeInTheDocument();
+    expect(svg).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("shows Users icon for GROUP type members", () => {
+    const members = [{ displayName: "Sub Group", memberType: "GROUP" }];
+    renderWithProviders(
+      <GroupCard group={baseGroup} members={members} memberCount={1} />
+    );
+    const chip = screen.getByRole("listitem", { name: "Sub Group" });
+    const svg = chip.querySelector("svg");
+    expect(svg).toBeInTheDocument();
+    expect(svg).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("shows overflow count when more than 4 members", () => {
+    const members = [
+      { displayName: "A1", memberType: "AGENT" },
+      { displayName: "A2", memberType: "AGENT" },
+      { displayName: "A3", memberType: "AGENT" },
+      { displayName: "A4", memberType: "AGENT" },
+      { displayName: "A5", memberType: "AGENT" },
+      { displayName: "A6", memberType: "AGENT" },
+    ];
+    renderWithProviders(
+      <GroupCard group={baseGroup} members={members} memberCount={6} />
+    );
+    // Only first 4 chips rendered; overflow text shows "+2 more"
+    expect(screen.queryByText("A5")).not.toBeInTheDocument();
+    expect(screen.queryByText("A6")).not.toBeInTheDocument();
+    expect(screen.getByText(/\+2 more/)).toBeInTheDocument();
+  });
+
+  it("does not render member chips when members is empty", () => {
+    renderWithProviders(
+      <GroupCard group={baseGroup} members={[]} memberCount={0} />
+    );
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+  });
+
+  it("member chips have role='listitem' and aria-label", () => {
+    const members = [
+      { displayName: "Agent Alpha", memberType: "AGENT" },
+      { displayName: "Agent Beta", memberType: "AGENT" },
+    ];
+    renderWithProviders(
+      <GroupCard group={baseGroup} members={members} memberCount={2} />
+    );
+    const items = screen.getAllByRole("listitem");
+    expect(items.length).toBe(2);
+    expect(items[0]).toHaveAttribute("aria-label", "Agent Alpha");
+    expect(items[1]).toHaveAttribute("aria-label", "Agent Beta");
+  });
+
+  it("member container has role='list' and data-testid", () => {
+    const members = [{ displayName: "Agent Alpha", memberType: "AGENT" }];
+    renderWithProviders(
+      <GroupCard group={baseGroup} members={members} memberCount={1} />
+    );
+    const list = screen.getByRole("list");
+    expect(list).toHaveAttribute("data-testid", "group-card-members-grp-123");
+  });
+
+  // ─── Name as link ─────────────────────────────────────────────────
+
+  it("renders group name as a navigable link", () => {
+    renderWithProviders(<GroupCard group={baseGroup} />);
+    const link = screen.getByText("Product Review Panel").closest("a");
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute("href", "/manage/groups/grp-123?version=2");
+  });
+
+  // ─── Relative time ────────────────────────────────────────────────
+
+  it("renders relative time", () => {
+    // baseGroup.lastModifiedOn is 1 hour ago
+    renderWithProviders(<GroupCard group={baseGroup} />);
+    // formatRelativeTime returns something like "1h ago" — just verify something renders
+    const card = screen.getByTestId("group-card-grp-123");
+    // The footer area should contain time text (not empty)
+    const timeSpan = card.querySelector("[title]");
+    expect(timeSpan).toBeInTheDocument();
+  });
 });

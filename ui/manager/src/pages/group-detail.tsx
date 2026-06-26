@@ -28,13 +28,14 @@ import { STYLE_INFO, type DiscussionStyle, type AgentGroupConfiguration } from "
 import { STYLE_THEME } from "@/components/groups/discussion-transcript";
 import { safeFormatDate } from "@/components/groups/group-utils";
 
-const STATE_COLORS: Record<string, string> = {
-  COMPLETED: "text-emerald-500",
-  IN_PROGRESS: "text-amber-500",
-  SYNTHESIZING: "text-amber-500",
-  FAILED: "text-destructive",
-  CREATED: "text-muted-foreground",
-  AWAITING_APPROVAL: "text-orange-500",
+const STATE_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
+  COMPLETED: { label: "Completed", color: "text-emerald-500", dot: "bg-emerald-500" },
+  IN_PROGRESS: { label: "In Progress", color: "text-amber-500", dot: "bg-amber-500" },
+  SYNTHESIZING: { label: "Synthesizing", color: "text-amber-500", dot: "bg-amber-500" },
+  FAILED: { label: "Failed", color: "text-destructive", dot: "bg-destructive" },
+  CREATED: { label: "Created", color: "text-muted-foreground", dot: "bg-muted-foreground" },
+  AWAITING_APPROVAL: { label: "Awaiting Approval", color: "text-orange-500", dot: "bg-orange-500" },
+  ERROR: { label: "Error", color: "text-destructive", dot: "bg-destructive" },
 };
 
 export function GroupDetailPage() {
@@ -91,16 +92,21 @@ export function GroupDetailPage() {
     toast.success(t("groups.discussionStarted", "Discussion started — streaming live"));
   }, [groupId, startStream, t]);
 
-  // When streaming completes, select the new conversation and refresh the list
+  // Invalidate conversation list when stream starts (so the new entry appears in sidebar)
+  // AND when it completes (so the state updates to COMPLETED)
   useEffect(() => {
-    if (streamState.state === "COMPLETED" && streamState.conversationId && !streamState.isStreaming) {
-      setSelectedConvId(streamState.conversationId);
-      // M2 fix: refresh conversation list so sidebar shows the new discussion
-      if (groupId) {
-        queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
-      }
+    if (
+      streamState.conversationId &&
+      groupId &&
+      (streamState.state === "IN_PROGRESS" || streamState.state === "COMPLETED")
+    ) {
+      queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
     }
-  }, [streamState.state, streamState.conversationId, streamState.isStreaming, groupId, queryClient]);
+    // Auto-select the completed conversation
+    if (streamState.state === "COMPLETED" && streamState.conversationId) {
+      setSelectedConvId(streamState.conversationId);
+    }
+  }, [streamState.state, streamState.conversationId, groupId, queryClient]);
 
   function handleDeleteConversation(convId: string) {
     if (!groupId) return;
@@ -169,19 +175,45 @@ export function GroupDetailPage() {
               onClick={() => handleSelectConversation(conv.id)}
               className={cn(
                 "w-full text-start rounded-lg px-3 py-2 transition-all group/item",
-                selectedConvId === conv.id && !isStreamActive
+                streamState.isStreaming && conv.id === streamState.conversationId
                   ? "bg-primary/10 border border-primary/30"
-                  : "hover:bg-secondary/50 border border-transparent"
+                  : selectedConvId === conv.id && !isStreamActive
+                    ? "bg-primary/10 border border-primary/30"
+                    : "hover:bg-secondary/50 border border-transparent"
               )}
+              aria-current={
+                (streamState.isStreaming && conv.id === streamState.conversationId) ||
+                (selectedConvId === conv.id && !isStreamActive)
+                  ? true
+                  : undefined
+              }
               data-testid={`discussion-item-${conv.id}`}
             >
               <p className="text-xs font-medium text-foreground line-clamp-2">
                 {conv.originalQuestion}
               </p>
               <div className="flex items-center gap-1.5 mt-1">
-                <span className={cn("text-[10px] font-medium", STATE_COLORS[conv.state])}>
-                  {conv.state}
-                </span>
+                {(() => {
+                  const cfg = STATE_CONFIG[conv.state] ?? STATE_CONFIG.CREATED;
+                  const isLive = streamState.isStreaming && conv.id === streamState.conversationId;
+                  return (
+                    <span
+                      className={cn("text-[10px] font-medium flex items-center gap-1", cfg.color)}
+                      aria-live={isLive ? "polite" : undefined}
+                      aria-label={isLive ? t("groups.liveDiscussion", "Live") : t(`groups.state.${conv.state}`, cfg.label)}
+                      data-testid={isLive ? "discussion-live-badge" : `discussion-state-${conv.id}`}
+                    >
+                      <span
+                        className={cn("h-1.5 w-1.5 rounded-full shrink-0", isLive ? "bg-current animate-pulse" : cfg.dot)}
+                        data-testid={`state-dot-${conv.id}`}
+                      />
+                      {isLive
+                        ? t("groups.liveDiscussion", "Live")
+                        : t(`groups.state.${conv.state}`, cfg.label)
+                      }
+                    </span>
+                  );
+                })()}
                 <span className="text-[10px] text-muted-foreground">
                   {safeFormatDate(conv.created, "date")}
                 </span>

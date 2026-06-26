@@ -1406,6 +1406,20 @@
     "htmlToggle": "HTML",
     "memberTypeGroup": "Groupe",
     "moderatorBadge": "⭐ Mod",
+    "styleColumn": "Style",
+    "membersColumn": "Membres",
+    "memberOverflow": "+{{count}} de plus",
+    "defaultLabel": "Groupe",
+    "liveDiscussion": "En direct",
+    "state": {
+      "CREATED": "Créé",
+      "IN_PROGRESS": "En cours",
+      "SYNTHESIZING": "Synthèse en cours",
+      "COMPLETED": "Terminé",
+      "FAILED": "Échoué",
+      "ERROR": "Erreur",
+      "AWAITING_APPROVAL": "En attente d'approbation"
+    },
     "preConfiguredTasksCount": "Tâches préconfigurées ({{count}})",
     "entryType": {
       "QUESTION": "Question",

@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Boxes, Search, Plus, ExternalLink, Copy, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useEnrichedGroupDescriptors, useDeleteGroup, useDuplicateGroup } from "@/hooks/use-groups";
 import { GroupCard } from "@/components/groups/group-card";
+import { STYLE_INFO } from "@/lib/api/groups";
 import { CreateGroupDialog } from "@/components/groups/create-group-dialog";
 import { CreateOrWizardDialog } from "@/components/shared/create-or-wizard-dialog";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ import { formatRelativeTime } from "@/lib/utils";
 
 export function GroupsPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
@@ -155,6 +157,7 @@ export function GroupsPage() {
                   key={group.id}
                   group={group}
                   memberCount={group.memberCount}
+                  members={group.members}
                   style={group.style}
                   onDuplicate={handleDuplicate}
                   onDelete={handleDelete}
@@ -174,10 +177,10 @@ export function GroupsPage() {
                       {t("common.name", "Name")}
                     </th>
                     <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      {t("common.id", "ID")}
+                      {t("groups.styleColumn", "Style")}
                     </th>
                     <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      {t("common.version", "Version")}
+                      {t("groups.membersColumn", "Members")}
                     </th>
                     <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       {t("common.modified", "Modified")}
@@ -191,26 +194,65 @@ export function GroupsPage() {
                   {groupedGroups.map((group) => (
                     <tr
                       key={group.id}
-                      className="hover:bg-secondary/30 transition-colors"
+                      className="hover:bg-secondary/30 transition-colors cursor-pointer"
+                      onClick={() => navigate(`/manage/groups/${group.id}?version=${group.version}`)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(`/manage/groups/${group.id}?version=${group.version}`); } }}
+                      tabIndex={0}
+                      role="link"
+                      data-testid={`group-row-${group.id}`}
                     >
                       <td className="px-5 py-3">
                         <Link
                           to={`/manage/groups/${group.id}?version=${group.version}`}
                           className="text-sm font-medium text-foreground hover:text-primary transition-colors"
+                          onClick={(e) => e.stopPropagation()}
                         >
                           {group.name || t("groups.unnamed", "Unnamed Group")}
                           <ExternalLink className="ms-1 inline h-3 w-3 opacity-40" />
                         </Link>
                       </td>
                       <td className="px-5 py-3">
-                        <span className="font-mono text-xs text-muted-foreground">
-                          {group.id.slice(0, 12)}…
-                        </span>
+                        {(() => {
+                          const info = group.style ? STYLE_INFO[group.style] : null;
+                          return info ? (
+                            <span
+                              className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+                              aria-label={`${t("groups.styleColumn", "Style")}: ${info.label}`}
+                              title={info.flow}
+                              data-testid={`group-style-${group.id}`}
+                            >
+                              <span aria-hidden="true">{info.icon}</span>
+                              {info.label}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          );
+                        })()}
                       </td>
                       <td className="px-5 py-3">
-                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                          v{group.version}
-                        </span>
+                        <div
+                          className="flex items-center gap-2"
+                          title={group.members?.map(m => m.displayName).join(", ")}
+                          role="list"
+                          aria-label={t("groups.membersColumn", "Members")}
+                          data-testid={`group-members-${group.id}`}
+                        >
+                          <div className="flex -space-x-1.5">
+                            {(group.members ?? []).slice(0, 3).map((m, i) => (
+                              <span
+                                key={`${m.displayName}-${i}`}
+                                className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary ring-2 ring-card"
+                                role="listitem"
+                                aria-label={m.displayName}
+                              >
+                                {m.displayName.charAt(0).toUpperCase()}
+                              </span>
+                            ))}
+                          </div>
+                          <span className="text-xs text-muted-foreground">
+                            {group.memberCount}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-5 py-3">
                         <span className="text-sm text-muted-foreground" title={new Date(group.lastModifiedOn).toLocaleString()}>
@@ -220,14 +262,14 @@ export function GroupsPage() {
                       <td className="px-5 py-3 text-end">
                         <div className="inline-flex items-center gap-1">
                           <button
-                            onClick={() => handleDuplicate(group.id, group.version)}
+                            onClick={(e) => { e.stopPropagation(); handleDuplicate(group.id, group.version); }}
                             className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
                             title={t("common.duplicate", "Duplicate")}
                           >
                             <Copy className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => handleDelete(group.id, group.version)}
+                            onClick={(e) => { e.stopPropagation(); handleDelete(group.id, group.version); }}
                             className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                             title={t("common.delete")}
                           >

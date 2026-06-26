@@ -1406,6 +1406,20 @@
     "htmlToggle": "HTML",
     "memberTypeGroup": "群组",
     "moderatorBadge": "⭐ 主持人",
+    "styleColumn": "风格",
+    "membersColumn": "成员",
+    "memberOverflow": "+{{count}} 更多",
+    "defaultLabel": "群组",
+    "liveDiscussion": "实时",
+    "state": {
+      "CREATED": "已创建",
+      "IN_PROGRESS": "进行中",
+      "SYNTHESIZING": "正在合成",
+      "COMPLETED": "已完成",
+      "FAILED": "已失败",
+      "ERROR": "错误",
+      "AWAITING_APPROVAL": "等待审批"
+    },
     "preConfiguredTasksCount": "预配置任务 ({{count}})",
     "entryType": {
       "QUESTION": "提问",

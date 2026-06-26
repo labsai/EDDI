@@ -560,6 +560,7 @@ export type EnrichedGroupDescriptor = GroupDescriptor & {
   version: number;
   memberCount: number;
   style?: DiscussionStyle;
+  members: { displayName: string; memberType?: MemberType }[];
 };
 
 /**
@@ -587,11 +588,16 @@ export async function getEnrichedGroupDescriptors(
           description: config.description || g.description,
           memberCount: config.members?.length ?? 0,
           style: config.style,
+          members: (config.members ?? []).map((m) => ({
+            displayName: m.displayName,
+            memberType: m.memberType,
+          })),
         } satisfies EnrichedGroupDescriptor;
       } catch {
         return {
           ...g,
           memberCount: 0,
+          members: [],
         } satisfies EnrichedGroupDescriptor;
       }
     })

@@ -1406,6 +1406,20 @@
     "htmlToggle": "HTML",
     "memberTypeGroup": "مجموعة",
     "moderatorBadge": "⭐ مشرف",
+    "styleColumn": "النمط",
+    "membersColumn": "الأعضاء",
+    "memberOverflow": "+{{count}} آخرون",
+    "defaultLabel": "مجموعة",
+    "liveDiscussion": "مباشر",
+    "state": {
+      "CREATED": "تم الإنشاء",
+      "IN_PROGRESS": "قيد التنفيذ",
+      "SYNTHESIZING": "جارٍ التجميع",
+      "COMPLETED": "مكتمل",
+      "FAILED": "فشل",
+      "ERROR": "خطأ",
+      "AWAITING_APPROVAL": "بانتظار الموافقة"
+    },
     "preConfiguredTasksCount": "مهام مُعدّة مسبقاً ({{count}})",
     "entryType": {
       "QUESTION": "سؤال",

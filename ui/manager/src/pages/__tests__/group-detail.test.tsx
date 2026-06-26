@@ -204,7 +204,7 @@ describe("GroupDetailPage", () => {
     renderGroupDetail();
 
     await waitFor(() => {
-      expect(screen.getByText("COMPLETED")).toBeInTheDocument();
+      expect(screen.getByText("Completed")).toBeInTheDocument();
     });
   });
 
@@ -301,5 +301,82 @@ describe("GroupDetailPage", () => {
     // The description is "" so the conditional {groupConfig.description && ...} is falsy
     const heading = screen.getByRole("heading", { level: 1 });
     expect(heading).toHaveTextContent("Simple Group");
+  });
+
+  // ─── Conversation state display ────────────────────────────────────
+
+  it("conversation state shows translated label instead of raw state", async () => {
+    server.use(
+      http.get("*/groups/:groupId/conversations", () => {
+        return HttpResponse.json([
+          {
+            id: "conv-state-1",
+            originalQuestion: "Test translated state",
+            state: "IN_PROGRESS",
+            created: Date.now(),
+          },
+        ]);
+      })
+    );
+
+    renderGroupDetail();
+
+    await waitFor(() => {
+      // Should show "In Progress" (translated label) not "IN_PROGRESS" (raw state)
+      expect(screen.getByText("In Progress")).toBeInTheDocument();
+      expect(screen.queryByText("IN_PROGRESS")).not.toBeInTheDocument();
+    });
+  });
+
+  it("conversation state has colored dot indicator", async () => {
+    server.use(
+      http.get("*/groups/:groupId/conversations", () => {
+        return HttpResponse.json([
+          {
+            id: "conv-dot-1",
+            originalQuestion: "Test dot indicator",
+            state: "COMPLETED",
+            created: Date.now(),
+          },
+        ]);
+      })
+    );
+
+    renderGroupDetail();
+
+    await waitFor(() => {
+      // The dot indicator has data-testid="state-dot-{convId}"
+      const dot = screen.getByTestId("state-dot-conv-dot-1");
+      expect(dot).toBeInTheDocument();
+      // The dot should have a rounded-full class (visual indicator)
+      expect(dot.className).toContain("rounded-full");
+    });
+  });
+
+  it("conversation state uses STATE_CONFIG for label and color", async () => {
+    server.use(
+      http.get("*/groups/:groupId/conversations", () => {
+        return HttpResponse.json([
+          {
+            id: "conv-cfg-1",
+            originalQuestion: "Test STATE_CONFIG usage",
+            state: "FAILED",
+            created: Date.now(),
+          },
+        ]);
+      })
+    );
+
+    renderGroupDetail();
+
+    await waitFor(() => {
+      // STATE_CONFIG.FAILED.label is "Failed"
+      expect(screen.getByText("Failed")).toBeInTheDocument();
+      // The state container has data-testid="discussion-state-{convId}"
+      const stateEl = screen.getByTestId("discussion-state-conv-cfg-1");
+      expect(stateEl).toBeInTheDocument();
+      // Should have the destructive color class from STATE_CONFIG.FAILED.color
+      expect(stateEl.className).toContain("text-destructive");
+    });
   });
 });

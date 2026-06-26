@@ -1406,6 +1406,20 @@
     "htmlToggle": "HTML",
     "memberTypeGroup": "グループ",
     "moderatorBadge": "⭐ モデレーター",
+    "styleColumn": "スタイル",
+    "membersColumn": "メンバー",
+    "memberOverflow": "+{{count}} 件",
+    "defaultLabel": "グループ",
+    "liveDiscussion": "ライブ",
+    "state": {
+      "CREATED": "作成済み",
+      "IN_PROGRESS": "進行中",
+      "SYNTHESIZING": "統合中",
+      "COMPLETED": "完了",
+      "FAILED": "失敗",
+      "ERROR": "エラー",
+      "AWAITING_APPROVAL": "承認待ち"
+    },
     "preConfiguredTasksCount": "事前設定タスク ({{count}})",
     "entryType": {
       "QUESTION": "質問",

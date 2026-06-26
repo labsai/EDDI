@@ -1406,6 +1406,20 @@
     "htmlToggle": "HTML",
     "memberTypeGroup": "그룹",
     "moderatorBadge": "⭐ 관리자",
+    "styleColumn": "스타일",
+    "membersColumn": "멤버",
+    "memberOverflow": "+{{count}} 더 보기",
+    "defaultLabel": "그룹",
+    "liveDiscussion": "라이브",
+    "state": {
+      "CREATED": "생성됨",
+      "IN_PROGRESS": "진행 중",
+      "SYNTHESIZING": "합성 중",
+      "COMPLETED": "완료",
+      "FAILED": "실패",
+      "ERROR": "오류",
+      "AWAITING_APPROVAL": "승인 대기 중"
+    },
     "preConfiguredTasksCount": "사전 구성된 작업 ({{count}})",
     "entryType": {
       "QUESTION": "질문",

@@ -1406,6 +1406,20 @@
     "htmlToggle": "HTML",
     "memberTypeGroup": "Gruppe",
     "moderatorBadge": "⭐ Mod",
+    "styleColumn": "Stil",
+    "membersColumn": "Mitglieder",
+    "memberOverflow": "+{{count}} weitere",
+    "defaultLabel": "Gruppe",
+    "liveDiscussion": "Live",
+    "state": {
+      "CREATED": "Erstellt",
+      "IN_PROGRESS": "In Bearbeitung",
+      "SYNTHESIZING": "Wird zusammengefasst",
+      "COMPLETED": "Abgeschlossen",
+      "FAILED": "Fehlgeschlagen",
+      "ERROR": "Fehler",
+      "AWAITING_APPROVAL": "Wartet auf Genehmigung"
+    },
     "preConfiguredTasksCount": "Vorkonfigurierte Aufgaben ({{count}})",
     "entryType": {
       "QUESTION": "Frage",

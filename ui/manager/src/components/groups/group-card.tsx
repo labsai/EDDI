@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Users, Copy, Trash2, MoreVertical, ExternalLink } from "lucide-react";
+import { Users, Bot, Copy, Trash2, MoreVertical, ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { STYLE_INFO, type DiscussionStyle } from "@/lib/api/groups";
@@ -15,6 +15,7 @@ interface GroupCardProps {
     lastModifiedOn: number;
   };
   memberCount?: number;
+  members?: { displayName: string; memberType?: string }[];
   style?: DiscussionStyle;
   onDuplicate?: (id: string, version: number) => void;
   onDelete?: (id: string, version: number) => void;
@@ -23,6 +24,7 @@ interface GroupCardProps {
 export function GroupCard({
   group,
   memberCount = 0,
+  members = [],
   style,
   onDuplicate,
   onDelete,
@@ -31,6 +33,7 @@ export function GroupCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const styleInfo = style ? STYLE_INFO[style] : null;
   const timeAgo = formatRelativeTime(group.lastModifiedOn);
+  const effectiveMemberCount = members.length > 0 ? members.length : memberCount;
 
   return (
     <div
@@ -54,7 +57,7 @@ export function GroupCard({
         ) : (
           <div className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground ring-1 ring-border">
             <Users className="h-3.5 w-3.5" />
-            Group
+            {t("groups.defaultLabel", "Group")}
           </div>
         )}
 
@@ -119,6 +122,38 @@ export function GroupCard({
         <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
           {group.description || t("groups.noDescription", "No description")}
         </p>
+
+        {/* Member preview */}
+        {members && members.length > 0 && (
+          <div
+            className="mt-2 flex flex-wrap items-center gap-1"
+            title={members.map(m => m.displayName).join(", ")}
+            role="list"
+            aria-label={t("groups.membersColumn", "Members")}
+            data-testid={`group-card-members-${group.id}`}
+          >
+            {members.slice(0, 4).map((m, i) => (
+              <span
+                key={`${m.displayName}-${i}`}
+                className="inline-flex items-center gap-1 rounded-full bg-secondary/80 px-2 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-border"
+                role="listitem"
+                aria-label={m.displayName}
+              >
+                {m.memberType === "GROUP" ? (
+                  <Users className="h-2.5 w-2.5" aria-hidden="true" />
+                ) : (
+                  <Bot className="h-2.5 w-2.5" aria-hidden="true" />
+                )}
+                <span className="max-w-[6rem] truncate">{m.displayName}</span>
+              </span>
+            ))}
+            {members.length > 4 && (
+              <span className="text-[10px] text-muted-foreground">
+                {t("groups.memberOverflow", "+{{count}} more", { count: members.length - 4 })}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Footer: meta + badges */}
@@ -130,7 +165,7 @@ export function GroupCard({
         <div className="flex items-center gap-2">
           <Badge variant="secondary" className="text-[10px]">
             <Users className="me-0.5 h-3 w-3" />
-            {memberCount}
+            {effectiveMemberCount}
           </Badge>
           <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
             v{group.version}
