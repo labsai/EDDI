@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
+import io.smallrye.common.annotation.Blocking;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -281,8 +282,14 @@ public class McpGroupTools {
 
     // --- Group Conversation ---
 
-    @Tool(description = "Start a structured multi-agent discussion. All " + "configured member agents will participate using the group's "
-            + "discussion style. Returns the full transcript with each " + "agent's contributions organized by phase.")
+    @Blocking
+    @Tool(description = "Start a structured multi-agent discussion and wait for it to complete. "
+            + "All configured member agents participate using the group's discussion style. "
+            + "Returns the full GroupConversation including transcript, task list (for TASK_FORCE), "
+            + "dynamic agent tracking, and synthesized answer. "
+            + "WARNING: TASK_FORCE discussions with many agents/tasks can take several minutes. "
+            + "For long-running discussions, use start_group_discussion instead (returns immediately, "
+            + "poll with read_group_conversation).")
     public String discuss_with_group(@ToolArg(description = "Group configuration ID (from create_group " + "or list_groups)") String groupId,
                                      @ToolArg(description = "The question or topic for the group to " + "discuss") String question,
                                      @ToolArg(description = "User ID (optional, defaults to " + "'mcp-client')") String userId) {
@@ -297,10 +304,15 @@ public class McpGroupTools {
         }
     }
 
-    @Tool(description = "Read a group conversation transcript including all " + "phases, agent contributions, and synthesized answer.")
+    @Tool(description = "Read a group conversation including its full transcript, task list "
+            + "(for TASK_FORCE discussions with per-task status, assignments, and results), "
+            + "dynamic agent tracking (createdAgentIds, retainedAgentIds), synthesized answer, "
+            + "and conversation state. Use this to poll for completion after start_group_discussion, "
+            + "or to inspect task-level results after a TASK_FORCE discussion.")
     public String read_group_conversation(
                                           @ToolArg(description = "Group conversation ID (from "
-                                                  + "discuss_with_group or list_group_conversations)") String groupConversationId) {
+                                                  + "discuss_with_group, start_group_discussion, "
+                                                  + "or list_group_conversations)") String groupConversationId) {
         requireRole(identity, authEnabled, "eddi-viewer");
         try {
             GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
@@ -323,6 +335,45 @@ public class McpGroupTools {
             return jsonSerialization.serialize(conversations);
         } catch (Exception e) {
             LOGGER.errorf("list_group_conversations failed: %s", e.getMessage());
+            return errorJson(e.getMessage());
+        }
+    }
+
+    // --- Async Discussion + Delete ---
+
+    @Tool(description = "Start a group discussion asynchronously and return immediately "
+            + "with the conversation ID and IN_PROGRESS state. Use this instead of "
+            + "discuss_with_group for TASK_FORCE or other long-running discussions. "
+            + "Poll with read_group_conversation to check progress and get results "
+            + "when state changes to COMPLETED or FAILED.")
+    public String start_group_discussion(
+                                         @ToolArg(description = "Group configuration ID (from create_group or list_groups)") String groupId,
+                                         @ToolArg(description = "The question or topic for the group to discuss") String question,
+                                         @ToolArg(description = "User ID (optional, defaults to 'mcp-client')") String userId) {
+        requireRole(identity, authEnabled, "eddi-viewer");
+        try {
+            String user = userId != null && !userId.isBlank() ? userId : "mcp-client";
+            GroupConversation gc = groupConversationService.startAndDiscussAsync(groupId, question, user, null);
+            return jsonSerialization.serialize(java.util.Map.of(
+                    "groupConversationId", gc.getId(),
+                    "state", String.valueOf(gc.getState()),
+                    "message", "Discussion started. Poll read_group_conversation with this ID to check progress."));
+        } catch (Exception e) {
+            LOGGER.errorf("start_group_discussion failed: %s", e.getMessage());
+            return errorJson(e.getMessage());
+        }
+    }
+
+    @Tool(description = "Delete a group conversation and cascade-delete all member "
+            + "conversations created during the discussion.")
+    public String delete_group_conversation(
+                                            @ToolArg(description = "Group conversation ID to delete") String groupConversationId) {
+        requireRole(identity, authEnabled, "eddi-editor");
+        try {
+            groupConversationService.deleteGroupConversation(groupConversationId);
+            return "Deleted group conversation " + groupConversationId;
+        } catch (Exception e) {
+            LOGGER.errorf("delete_group_conversation failed: %s", e.getMessage());
             return errorJson(e.getMessage());
         }
     }

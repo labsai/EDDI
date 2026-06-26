@@ -4,6 +4,27 @@
 
 ---
 
+## 🔧 MCP Group Tools — Async Discussion, Delete, @Blocking Fix (2026-06-26)
+
+**Repo:** EDDI (`feat/group-task-orchestration`)
+**What changed:** 3 MCP improvements for Task Force group discussions.
+
+### Changes
+- **Bug fix**: `discuss_with_group` was missing `@Blocking` — a multi-minute TASK_FORCE discussion would block the Vert.x event loop thread, potentially freezing the MCP server. Now correctly annotated (matches `talk_to_agent` pattern in McpConversationTools).
+- **New tool**: `start_group_discussion` — async variant that returns immediately with `groupConversationId` + `IN_PROGRESS` state. Client polls with `read_group_conversation`. Uses existing `startAndDiscussAsync()` backend method.
+- **New tool**: `delete_group_conversation` — REST-MCP parity gap. DELETE endpoint existed in REST API but had no MCP equivalent.
+- **Improved docs**: Tool descriptions now document what data `read_group_conversation` returns (task list, tracking lists, state) so MCP clients know they don't need separate tools for task inspection.
+
+### Design Decision
+Rejected adding 5 separate tools (read_task_list, list_dynamic_agents, discuss_task, clone_group, describe_task_force_syntax) — all proposed data is already available via existing tools. Avoided tool sprawl (project already has 63 MCP tools).
+
+### Coverage
+- McpGroupTools: 91.79% instruction, 81.25% branch, 100% methods
+- 9 new tests (31 total in McpGroupToolsTest): async success/defaults/blank/error, delete success/confirmation/error, @Blocking annotation reflection tests
+- Full suite: 9,611 tests, 0 failures
+
+---
+
 ## 🧪 Comprehensive Branch Coverage for Dynamic Agent System (2026-06-25)
 
 **Repo:** EDDI (`feat/group-task-orchestration`)
