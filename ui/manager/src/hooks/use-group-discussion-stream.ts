@@ -154,7 +154,7 @@ function handleSSEEvent(
         const payload: GroupStartPayload = JSON.parse(event.data);
         setState((s) => ({
           ...s,
-          conversationId: payload.groupConversationId,
+          conversationId: payload.groupConversationId ?? payload.conversationId,
           state: "IN_PROGRESS",
           // Add the original question as the first transcript entry
           transcript: [

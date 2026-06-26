@@ -353,6 +353,8 @@ export interface GroupSSEEvent {
  *  Field names match the backend's GroupStartEvent Java record. */
 export interface GroupStartPayload {
   groupConversationId: string;
+  /** @deprecated Use groupConversationId — kept for backwards compatibility */
+  conversationId?: string;
   groupId: string;
   question: string;
   style: string;
@@ -458,7 +460,8 @@ export async function* streamGroupDiscussion(
       const { done, value } = await reader.read();
       if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
+      // Normalise CRLF → LF so the split works regardless of server line-ending style
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
 
       // Parse SSE lines: "event: <type>\ndata: <data>\n\n"
       const parts = buffer.split("\n\n");

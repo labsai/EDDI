@@ -582,7 +582,7 @@ const STYLE_INFO_FLOW: Record<string, string[]> = {
   ROUND_TABLE: ["Opinion", "Discussion", "Synthesis"],
   PEER_REVIEW: ["Opinion", "Critique", "Revision", "Synthesis"],
   DEVIL_ADVOCATE: ["Opinion", "Challenge", "Defense", "Synthesis"],
-  DELPHI: ["Independent", "Anonymous", "Revised", "Synthesis"],
+  DELPHI: ["Independent", "Anonymous Sharing", "Revised", "Synthesis"],
   DEBATE: ["Pro Opening", "Con Opening", "Rebuttals", "Judgment"],
   TASK_FORCE: ["Plan", "Execute", "Verify", "Synthesize"],
 };
