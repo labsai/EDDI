@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
-import { Boxes, Search, Plus, ExternalLink, Copy, Trash2 } from "lucide-react";
+import { Boxes, Search, Plus, ExternalLink, Copy, Trash2, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { toast } from "sonner";
 import { useEnrichedGroupDescriptors, useDeleteGroup, useDuplicateGroup } from "@/hooks/use-groups";
 import { GroupCard } from "@/components/groups/group-card";
@@ -21,6 +21,9 @@ import {
 import { getStoredViewMode, setStoredViewMode } from "@/components/shared/view-mode";
 import { formatRelativeTime } from "@/lib/utils";
 
+type SortField = "name" | "style" | "members" | "modified";
+type SortDir = "asc" | "desc";
+
 export function GroupsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -29,6 +32,8 @@ export function GroupsPage() {
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("groups"));
+  const [sortField, setSortField] = useState<SortField>("modified");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("groups"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
@@ -37,7 +42,26 @@ export function GroupsPage() {
   const deleteMutation = useDeleteGroup();
   const duplicateMutation = useDuplicateGroup();
 
-  const groupedGroups = enrichedGroups ?? [];
+  const groupedGroups = useMemo(() => {
+    const list = enrichedGroups ?? [];
+    return [...list].sort((a, b) => {
+      let cmp = 0;
+      if (sortField === "name") cmp = (a.name ?? "").localeCompare(b.name ?? "");
+      else if (sortField === "style") cmp = (a.style ?? "").localeCompare(b.style ?? "");
+      else if (sortField === "members") cmp = (a.members?.length ?? a.memberCount) - (b.members?.length ?? b.memberCount);
+      else cmp = a.lastModifiedOn - b.lastModifiedOn;
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [enrichedGroups, sortField, sortDir]);
+
+  const toggleSort = useCallback((field: SortField) => {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir(field === "modified" ? "desc" : "asc");
+    }
+  }, [sortField]);
 
   function handleDelete(id: string, version: number) {
     setDeleteTarget({ id, version });
@@ -173,17 +197,57 @@ export function GroupsPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border bg-secondary/50">
-                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      {t("common.name", "Name")}
+                    <th
+                      className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                      aria-sort={sortField === "name" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
+                    >
+                      <button
+                        onClick={() => toggleSort("name")}
+                        className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                        aria-label={t("common.sortByName", "Sort by name")}
+                      >
+                        {t("common.name", "Name")}
+                        {sortField === "name" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" aria-hidden="true" /> : <ArrowDown className="h-3 w-3" aria-hidden="true" />) : <ArrowUpDown className="h-3 w-3 opacity-30" aria-hidden="true" />}
+                      </button>
                     </th>
-                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      {t("groups.styleColumn", "Style")}
+                    <th
+                      className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                      aria-sort={sortField === "style" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
+                    >
+                      <button
+                        onClick={() => toggleSort("style")}
+                        className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                        aria-label={t("groups.sortByStyle", "Sort by style")}
+                      >
+                        {t("groups.styleColumn", "Style")}
+                        {sortField === "style" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" aria-hidden="true" /> : <ArrowDown className="h-3 w-3" aria-hidden="true" />) : <ArrowUpDown className="h-3 w-3 opacity-30" aria-hidden="true" />}
+                      </button>
                     </th>
-                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      {t("groups.membersColumn", "Members")}
+                    <th
+                      className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                      aria-sort={sortField === "members" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
+                    >
+                      <button
+                        onClick={() => toggleSort("members")}
+                        className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                        aria-label={t("groups.sortByMembers", "Sort by members")}
+                      >
+                        {t("groups.membersColumn", "Members")}
+                        {sortField === "members" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" aria-hidden="true" /> : <ArrowDown className="h-3 w-3" aria-hidden="true" />) : <ArrowUpDown className="h-3 w-3 opacity-30" aria-hidden="true" />}
+                      </button>
                     </th>
-                    <th className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                      {t("common.modified", "Modified")}
+                    <th
+                      className="px-5 py-3 text-start text-xs font-medium uppercase tracking-wider text-muted-foreground"
+                      aria-sort={sortField === "modified" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
+                    >
+                      <button
+                        onClick={() => toggleSort("modified")}
+                        className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                        aria-label={t("common.sortByModified", "Sort by last modified")}
+                      >
+                        {t("common.modified", "Modified")}
+                        {sortField === "modified" ? (sortDir === "asc" ? <ArrowUp className="h-3 w-3" aria-hidden="true" /> : <ArrowDown className="h-3 w-3" aria-hidden="true" />) : <ArrowUpDown className="h-3 w-3 opacity-30" aria-hidden="true" />}
+                      </button>
                     </th>
                     <th className="px-5 py-3 text-end text-xs font-medium uppercase tracking-wider text-muted-foreground">
                       {t("conversations.actions", "Actions")}
