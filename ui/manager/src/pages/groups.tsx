@@ -24,6 +24,25 @@ import { formatRelativeTime } from "@/lib/utils";
 type SortField = "name" | "style" | "members" | "modified";
 type SortDir = "asc" | "desc";
 
+const SORT_STORAGE_KEY = "eddi-groups-sort";
+
+function getStoredSort(): { field: SortField; dir: SortDir } {
+  try {
+    const stored = localStorage.getItem(SORT_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed.field && parsed.dir) return parsed;
+    }
+  } catch { /* ignore */ }
+  return { field: "modified", dir: "desc" };
+}
+
+function setStoredSort(field: SortField, dir: SortDir) {
+  try {
+    localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify({ field, dir }));
+  } catch { /* ignore */ }
+}
+
 export function GroupsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -32,8 +51,8 @@ export function GroupsPage() {
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; version: number } | null>(null);
   const [view, setView] = useState<ViewMode>(() => getStoredViewMode("groups"));
-  const [sortField, setSortField] = useState<SortField>("modified");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [sortField, setSortField] = useState<SortField>(() => getStoredSort().field);
+  const [sortDir, setSortDir] = useState<SortDir>(() => getStoredSort().dir);
 
   const maybeAutoStart = useOnboarding((s) => s.maybeAutoStart);
   useEffect(() => { const t = setTimeout(() => maybeAutoStart("groups"), 500); return () => clearTimeout(t); }, [maybeAutoStart]);
@@ -56,12 +75,16 @@ export function GroupsPage() {
 
   const toggleSort = useCallback((field: SortField) => {
     if (sortField === field) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      const newDir = sortDir === "asc" ? "desc" : "asc";
+      setSortDir(newDir);
+      setStoredSort(field, newDir);
     } else {
+      const newDir = field === "modified" ? "desc" : "asc";
       setSortField(field);
-      setSortDir(field === "modified" ? "desc" : "asc");
+      setSortDir(newDir);
+      setStoredSort(field, newDir);
     }
-  }, [sortField]);
+  }, [sortField, sortDir]);
 
   function handleDelete(id: string, version: number) {
     setDeleteTarget({ id, version });

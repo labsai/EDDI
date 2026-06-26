@@ -115,8 +115,8 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
     || defaultBadgeVariant(entry.type);
 
   const parsedContent = entry.content ? parseTranscriptContent(entry.content) : null;
-  // Try parsing raw content as task plan JSON (before parseTranscriptContent strips it)
-  const taskPlanItems = isPlan ? tryParseTaskPlan(entry.content) : null;
+  // Try parsing as task plan JSON — check both raw content and parsed (unwrapped) content
+  const taskPlanItems = isPlan ? (tryParseTaskPlan(entry.content) ?? tryParseTaskPlan(parsedContent)) : null;
   // Only render as HTML if opt-in is enabled AND content actually contains HTML tags
   const renderAsHtml = allowHtml && parsedContent ? hasHtml(parsedContent) : false;
 

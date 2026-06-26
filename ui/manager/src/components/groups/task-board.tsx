@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ClipboardList,
@@ -8,6 +8,8 @@ import {
   Clock,
   Zap,
   Shield,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -19,7 +21,9 @@ import { Badge } from "@/components/ui/badge";
 interface Task {
   id: string;
   subject: string;
+  description?: string;
   assignedTo: string;
+  displayName?: string;
   priority: number;
 }
 
@@ -106,10 +110,12 @@ function TaskCard({
       )}
     >
       {/* Subject */}
-      <p className="text-sm font-bold text-foreground truncate" title={task.subject}>
+      <p className="text-sm font-bold text-foreground line-clamp-2" title={task.subject}>
         {task.subject}
       </p>
-
+      {task.description && (
+        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{task.description}</p>
+      )}
       {/* Agent + Priority row */}
       <div className="mt-2 flex items-center justify-between gap-2">
         {/* Agent avatar + name */}
@@ -124,7 +130,7 @@ function TaskCard({
             {initials}
           </div>
           <span className="text-xs text-muted-foreground truncate">
-            {task.assignedTo}
+            {task.displayName || task.assignedTo}
           </span>
         </div>
 
@@ -256,6 +262,9 @@ export function TaskBoard({
   isStreaming,
 }: TaskBoardProps) {
   const { t } = useTranslation();
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("eddi-task-board-collapsed") === "true"; } catch { return false; }
+  });
 
   // Bucket tasks into columns
   const { pending, inProgress, completed, verified } = useMemo(() => {
@@ -355,13 +364,28 @@ export function TaskBoard({
   // ------------------------------------------------------------------
   return (
     <div data-testid="task-board" role="region" aria-label={t("taskBoard.title", "Task Board")}>
-      {/* Section heading */}
-      <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+      {/* Section heading — clickable to toggle */}
+      <button
+        onClick={() => {
+          setCollapsed((c) => {
+            try { localStorage.setItem("eddi-task-board-collapsed", String(!c)); } catch { /* ignore */ }
+            return !c;
+          });
+        }}
+        className="w-full flex items-center gap-2 text-sm font-semibold text-foreground mb-3 hover:text-primary transition-colors cursor-pointer"
+        aria-expanded={!collapsed}
+        aria-controls="task-board-content"
+      >
         <ClipboardList className="h-4 w-4 text-muted-foreground" />
         {t("taskBoard.title", "Task Board")}
-      </h3>
+        {collapsed ? (
+          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground ms-auto" />
+        ) : (
+          <ChevronUp className="h-3.5 w-3.5 text-muted-foreground ms-auto" />
+        )}
+      </button>
 
-      {/* Progress bar */}
+      {/* Progress bar — always visible */}
       <ProgressBar
         total={total}
         completed={completed.length}
@@ -370,7 +394,8 @@ export function TaskBoard({
       />
 
       {/* ---- Desktop: 4-column kanban ---- */}
-      <div className="hidden md:grid md:grid-cols-4 gap-3">
+      {!collapsed && (
+      <div className="hidden md:grid md:grid-cols-4 gap-3" id="task-board-content">
         {columns.map((col) => (
           <div
             key={col.key}
@@ -407,8 +432,10 @@ export function TaskBoard({
           </div>
         ))}
       </div>
+      )}
 
       {/* ---- Mobile: vertical list with status indicators ---- */}
+      {!collapsed && (
       <div className="md:hidden space-y-2">
         {columns.map((col) =>
           col.tasks.length > 0 ? (
@@ -441,6 +468,7 @@ export function TaskBoard({
           ) : null,
         )}
       </div>
+      )}
     </div>
   );
 }
