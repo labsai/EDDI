@@ -1303,7 +1303,7 @@ public class GroupConversationService implements IGroupConversationService {
                 CompletableFuture<String> responseFuture = new CompletableFuture<>();
                 final String convId = privateConvId;
 
-                conversationService.say(DEFAULT_ENV, member.agentId(), convId, false, true, null, inputData, false, snapshot -> {
+                conversationService.say(DEFAULT_ENV, member.agentId(), convId, true, true, null, inputData, false, snapshot -> {
                     String response = extractResponse(snapshot);
                     // When the agent pipeline fails (e.g. LLM unreachable), extractResponse
                     // returns null because there are no output keys — only pipeline metadata.
@@ -1718,7 +1718,6 @@ public class GroupConversationService implements IGroupConversationService {
      * gap between per-turn tool-local tracking lists and the group-level lifecycle
      * tracking in {@link GroupConversation}.
      */
-    @SuppressWarnings("unchecked")
     private void propagateDynamicAgentTracking(
                                                ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot,
                                                GroupConversation gc) {

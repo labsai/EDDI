@@ -602,8 +602,7 @@ class AgentOrchestrator {
                     memory.getCurrentStep().storeData(
                             new ai.labs.eddi.engine.memory.model.Data<>(KEY_DYNAMIC_CREATED_AGENT_IDS, sharedCreatedIds));
                     memory.getCurrentStep().storeData(
-                            new ai.labs.eddi.engine.memory.model.Data<>(KEY_DYNAMIC_RETAINED_AGENT_IDS,
-                                    new java.util.ArrayList<>(sharedRetainedIds)));
+                            new ai.labs.eddi.engine.memory.model.Data<>(KEY_DYNAMIC_RETAINED_AGENT_IDS, sharedRetainedIds));
                 }
             }
         } else {
