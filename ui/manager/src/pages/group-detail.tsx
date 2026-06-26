@@ -224,6 +224,7 @@ export function GroupDetailPage() {
                   }}
                   className="ms-auto opacity-0 group-hover/item:opacity-100 rounded p-0.5 text-muted-foreground hover:text-destructive transition-all"
                   title={t("common.delete")}
+                  aria-label={t("common.delete")}
                 >
                   <Trash2 className="h-3 w-3" />
                 </button>

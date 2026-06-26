@@ -66,6 +66,7 @@ export function GroupCard({
           <button
             onClick={() => setMenuOpen(!menuOpen)}
             className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-secondary hover:text-foreground group-hover:opacity-100"
+            aria-label={t("common.actions", "Actions")}
             data-testid={`group-menu-${group.id}`}
           >
             <MoreVertical className="h-4 w-4" />

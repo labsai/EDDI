@@ -250,7 +250,7 @@ export function GroupsPage() {
                             ))}
                           </div>
                           <span className="text-xs text-muted-foreground">
-                            {group.memberCount}
+                            {group.members?.length || group.memberCount}
                           </span>
                         </div>
                       </td>
@@ -265,6 +265,7 @@ export function GroupsPage() {
                             onClick={(e) => { e.stopPropagation(); handleDuplicate(group.id, group.version); }}
                             className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
                             title={t("common.duplicate", "Duplicate")}
+                            aria-label={t("common.duplicate", "Duplicate")}
                           >
                             <Copy className="h-4 w-4" />
                           </button>
@@ -272,6 +273,7 @@ export function GroupsPage() {
                             onClick={(e) => { e.stopPropagation(); handleDelete(group.id, group.version); }}
                             className="rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                             title={t("common.delete")}
+                            aria-label={t("common.delete")}
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
