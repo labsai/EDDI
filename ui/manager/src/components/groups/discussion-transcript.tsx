@@ -381,6 +381,31 @@ export function DiscussionTranscript({
 
       {/* Transcript body */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+        {/* Task Board — placed at top for better visibility */}
+        {style === "TASK_FORCE" && streamState?.taskPlan && !conversation?.taskList && (
+          <TaskBoard
+            taskPlan={streamState.taskPlan}
+            tasksInProgress={streamState.tasksInProgress}
+            tasksCompleted={streamState.tasksCompleted}
+            taskVerifications={streamState.taskVerifications}
+            isStreaming={streamState.isStreaming}
+          />
+        )}
+        {/* Show empty task board placeholder during TASK_FORCE streaming before plan arrives */}
+        {style === "TASK_FORCE" && isStreaming && streamState && !streamState.taskPlan && !conversation?.taskList && (
+          <TaskBoard
+            taskPlan={null}
+            tasksInProgress={new Set()}
+            tasksCompleted={new Set()}
+            taskVerifications={new Map()}
+            isStreaming={true}
+          />
+        )}
+        {/* Also show task board for completed TASK_FORCE conversations loaded from API */}
+        {style === "TASK_FORCE" && !isStreaming && conversation?.taskList && (
+          <MemoizedApiTaskBoard taskList={conversation.taskList} t={t} />
+        )}
+
         {phases.map((phase, idx) => (
           <PhaseHeader
             key={`${phase.phaseIndex}-${phase.phaseName}-${idx}`}
@@ -404,32 +429,6 @@ export function DiscussionTranscript({
             ))}
           </PhaseHeader>
         ))}
-
-        {/* Task Board — shown for TASK_FORCE style during/after streaming (until API data loads) */}
-        {style === "TASK_FORCE" && streamState?.taskPlan && !conversation?.taskList && (
-          <TaskBoard
-            taskPlan={streamState.taskPlan}
-            tasksInProgress={streamState.tasksInProgress}
-            tasksCompleted={streamState.tasksCompleted}
-            taskVerifications={streamState.taskVerifications}
-            isStreaming={streamState.isStreaming}
-          />
-        )}
-        {/* Show empty task board placeholder during TASK_FORCE streaming before plan arrives */}
-        {style === "TASK_FORCE" && isStreaming && streamState && !streamState.taskPlan && !conversation?.taskList && (
-          <TaskBoard
-            taskPlan={null}
-            tasksInProgress={new Set()}
-            tasksCompleted={new Set()}
-            taskVerifications={new Map()}
-            isStreaming={true}
-          />
-        )}
-
-        {/* Also show task board for completed TASK_FORCE conversations loaded from API */}
-        {style === "TASK_FORCE" && !isStreaming && conversation?.taskList && (
-          <MemoizedApiTaskBoard taskList={conversation.taskList} t={t} />
-        )}
 
         {/* Synthesized answer highlight */}
         {parsedSynthesis && (
