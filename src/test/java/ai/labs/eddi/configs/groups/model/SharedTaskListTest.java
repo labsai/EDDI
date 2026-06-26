@@ -640,4 +640,307 @@ class SharedTaskListTest {
         assertThrows(IllegalStateException.class,
                 () -> list.failTask(task.id(), "no"));
     }
+
+    // =========================================================================
+    // Concurrency / Deadlock Tests
+    // =========================================================================
+
+    /**
+     * Verifies that findExecutableTasks (which internally calls findById via
+     * allDependenciesSatisfied) does not deadlock due to reentrant locking. The
+     * synchronized findExecutableTasks calls allDependenciesSatisfied which calls
+     * findById (also synchronized) — reentrant, but worth proving.
+     */
+    @Test
+    void findExecutableTasks_withDependencies_noReentrantDeadlock() throws Exception {
+        // Set up a dependency chain: task2 depends on task1
+        var task1 = list.addTask(new SharedTaskList.TaskItem("Task 1", "desc", 0));
+        var task2 = list.addTask(new SharedTaskList.TaskItem(
+                UUID.randomUUID().toString(), "Task 2", "depends on task1",
+                SharedTaskList.TaskStatus.PENDING, null, null,
+                List.of(task1.id()), null, null, false, 0, Instant.now(), null));
+        list.updateTask(task2);
+
+        // If reentrant locking fails, this would deadlock.
+        // Use a timeout to detect deadlock rather than hanging forever.
+        var future = java.util.concurrent.CompletableFuture.supplyAsync(() -> list.findExecutableTasks());
+        var result = future.get(5, java.util.concurrent.TimeUnit.SECONDS);
+
+        // task1 has no deps → executable; task2 depends on uncompleted task1 → not
+        // executable
+        assertEquals(1, result.size());
+        assertEquals(task1.id(), result.get(0).id());
+    }
+
+    /**
+     * Verifies that detectCycles (synchronized) calling findById (also
+     * synchronized) inside DFS does not deadlock.
+     */
+    @Test
+    void detectCycles_noReentrantDeadlock() throws Exception {
+        // Create tasks with dependencies that form a chain (no cycle)
+        var task1 = list.addTask(new SharedTaskList.TaskItem("Task 1", "desc", 0));
+        var task2Id = UUID.randomUUID().toString();
+        var task2 = new SharedTaskList.TaskItem(
+                task2Id, "Task 2", "depends on task1",
+                SharedTaskList.TaskStatus.PENDING, null, null,
+                List.of(task1.id()), null, null, false, 0, Instant.now(), null);
+        list.addTask(task2);
+
+        var future = java.util.concurrent.CompletableFuture.supplyAsync(() -> list.detectCycles());
+        var result = future.get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertTrue(result.isEmpty(), "No cycles expected");
+    }
+
+    /**
+     * Stress test: multiple threads performing lifecycle transitions on different
+     * tasks simultaneously. Verifies no deadlock and no data corruption.
+     */
+    @Test
+    void parallelLifecycleTransitions_noDeadlockOrCorruption() throws Exception {
+        int taskCount = 50;
+        var latch = new java.util.concurrent.CountDownLatch(1);
+        var errors = new java.util.concurrent.CopyOnWriteArrayList<Throwable>();
+        var threads = new java.util.ArrayList<Thread>();
+
+        // Pre-populate tasks
+        var taskIds = new java.util.ArrayList<String>();
+        for (int i = 0; i < taskCount; i++) {
+            var task = list.addTask(new SharedTaskList.TaskItem("Task " + i, "desc " + i, i));
+            taskIds.add(task.id());
+        }
+
+        // Each thread drives one task through the full lifecycle
+        for (String taskId : taskIds) {
+            threads.add(Thread.ofVirtual().start(() -> {
+                try {
+                    latch.await(); // All threads start simultaneously
+                    list.assignTask(taskId, "agent-" + taskId, "Agent");
+                    list.startTask(taskId);
+                    list.completeTask(taskId, "result-" + taskId);
+                    list.verifyTask(taskId, true, "ok");
+                } catch (Throwable t) {
+                    errors.add(t);
+                }
+            }));
+        }
+
+        // Release all threads at once for maximum contention
+        latch.countDown();
+        for (var thread : threads) {
+            thread.join(10_000); // 10s timeout — deadlock detection
+            assertFalse(thread.isAlive(), "Thread should have completed — possible deadlock");
+        }
+
+        assertTrue(errors.isEmpty(),
+                "Unexpected errors during parallel transitions: " + errors);
+
+        // All tasks should be VERIFIED
+        for (String taskId : taskIds) {
+            var task = list.findById(taskId);
+            assertEquals(SharedTaskList.TaskStatus.VERIFIED, task.status(),
+                    "Task " + taskId + " should be VERIFIED");
+        }
+    }
+
+    /**
+     * Stress test: interleaved read and write operations. Readers call
+     * findExecutableTasks/all/size while writers add and transition tasks.
+     */
+    @Test
+    void concurrentReadWriteInterleaving_noDeadlock() throws Exception {
+        var latch = new java.util.concurrent.CountDownLatch(1);
+        var errors = new java.util.concurrent.CopyOnWriteArrayList<Throwable>();
+        int writerCount = 20;
+        int readerCount = 20;
+        var threads = new java.util.ArrayList<Thread>();
+
+        // Writers: add tasks and transition them
+        for (int i = 0; i < writerCount; i++) {
+            final int idx = i;
+            threads.add(Thread.ofVirtual().start(() -> {
+                try {
+                    latch.await();
+                    var task = list.addTask(new SharedTaskList.TaskItem("Task " + idx, "desc", idx));
+                    list.assignTask(task.id(), "agent-" + idx, "Agent " + idx);
+                    list.startTask(task.id());
+                    list.completeTask(task.id(), "done " + idx);
+                } catch (Throwable t) {
+                    errors.add(t);
+                }
+            }));
+        }
+
+        // Readers: continuously query the list
+        for (int i = 0; i < readerCount; i++) {
+            threads.add(Thread.ofVirtual().start(() -> {
+                try {
+                    latch.await();
+                    for (int j = 0; j < 100; j++) {
+                        list.findExecutableTasks();
+                        list.all();
+                        list.size();
+                        list.isEmpty();
+                    }
+                } catch (Throwable t) {
+                    errors.add(t);
+                }
+            }));
+        }
+
+        latch.countDown();
+        for (var thread : threads) {
+            thread.join(10_000);
+            assertFalse(thread.isAlive(), "Thread should have completed — possible deadlock");
+        }
+
+        assertTrue(errors.isEmpty(),
+                "Unexpected errors during concurrent R/W: " + errors);
+        assertEquals(writerCount, list.size());
+    }
+
+    /**
+     * Two threads race to assign the same PENDING task. Exactly one should succeed
+     * and one should fail (the task is no longer PENDING after the first assign).
+     */
+    @Test
+    void raceCondition_doubleAssign_exactlyOneWins() throws Exception {
+        var task = list.addTask(new SharedTaskList.TaskItem("Contested Task", "desc", 0));
+        var latch = new java.util.concurrent.CountDownLatch(1);
+        var successes = new java.util.concurrent.atomic.AtomicInteger(0);
+        var failures = new java.util.concurrent.atomic.AtomicInteger(0);
+
+        var t1 = Thread.ofVirtual().start(() -> {
+            try {
+                latch.await();
+                list.assignTask(task.id(), "agent-1", "Agent 1");
+                successes.incrementAndGet();
+            } catch (IllegalStateException e) {
+                failures.incrementAndGet();
+            } catch (Throwable t) {
+                failures.incrementAndGet(); // Unexpected
+            }
+        });
+
+        var t2 = Thread.ofVirtual().start(() -> {
+            try {
+                latch.await();
+                list.assignTask(task.id(), "agent-2", "Agent 2");
+                successes.incrementAndGet();
+            } catch (IllegalStateException e) {
+                failures.incrementAndGet();
+            } catch (Throwable t) {
+                failures.incrementAndGet(); // Unexpected
+            }
+        });
+
+        latch.countDown();
+        t1.join(5000);
+        t2.join(5000);
+
+        assertEquals(1, successes.get(), "Exactly one thread should win the assignment");
+        assertEquals(1, failures.get(), "Exactly one thread should fail with IllegalStateException");
+
+        var updated = list.findById(task.id());
+        assertEquals(SharedTaskList.TaskStatus.ASSIGNED, updated.status());
+    }
+
+    /**
+     * Verifies that getTasks() returning a direct mutable reference is documented
+     * and understood. Callers modifying the returned list could corrupt internal
+     * state if done concurrently with synchronized methods.
+     *
+     * This test documents the risk: getTasks() returns the internal list reference.
+     */
+    @Test
+    void getTasks_returnsMutableReference_concurrentModificationRisk() {
+        list.addTask(new SharedTaskList.TaskItem("Task 1", "desc", 0));
+        list.addTask(new SharedTaskList.TaskItem("Task 2", "desc", 1));
+
+        // getTasks() returns the internal list — not a copy
+        var directRef = list.getTasks();
+        assertEquals(2, directRef.size());
+
+        // Modifications through the reference affect the internal state
+        // This is a known design trade-off for serialization compatibility
+        int sizeBefore = list.size();
+        directRef.add(new SharedTaskList.TaskItem("Sneaky Task", "injected", 99));
+        assertEquals(sizeBefore + 1, list.size(),
+                "getTasks() returns internal mutable list — callers must not modify it");
+    }
+
+    /**
+     * Stress test: concurrent lifecycle transitions mixed with findExecutableTasks
+     * calls that trigger allDependenciesSatisfied → findById reentrant path. This
+     * is the most realistic contention scenario from GroupConversationService.
+     */
+    @Test
+    void realisticContention_lifecycleWithDependencyQueries() throws Exception {
+        // Create a realistic task graph: 5 root tasks, 5 dependent tasks
+        var rootIds = new java.util.ArrayList<String>();
+        for (int i = 0; i < 5; i++) {
+            var task = list.addTask(new SharedTaskList.TaskItem("Root " + i, "desc", 0));
+            rootIds.add(task.id());
+        }
+        for (int i = 0; i < 5; i++) {
+            var depTask = new SharedTaskList.TaskItem(
+                    UUID.randomUUID().toString(), "Dep " + i, "depends on root " + i,
+                    SharedTaskList.TaskStatus.PENDING, null, null,
+                    List.of(rootIds.get(i)), null, null, false, 1, Instant.now(), null);
+            list.addTask(depTask);
+        }
+
+        var latch = new java.util.concurrent.CountDownLatch(1);
+        var errors = new java.util.concurrent.CopyOnWriteArrayList<Throwable>();
+        var threads = new java.util.ArrayList<Thread>();
+
+        // 5 threads drive root tasks through lifecycle
+        for (String rootId : rootIds) {
+            threads.add(Thread.ofVirtual().start(() -> {
+                try {
+                    latch.await();
+                    list.assignTask(rootId, "agent-root", "Root Agent");
+                    list.startTask(rootId);
+                    // Interleave queries between transitions
+                    list.findExecutableTasks();
+                    list.completeTask(rootId, "done");
+                    list.findExecutableTasks(); // Should now unlock dependent tasks
+                } catch (Throwable t) {
+                    errors.add(t);
+                }
+            }));
+        }
+
+        // 5 query threads hammering findExecutableTasks and detectCycles
+        for (int i = 0; i < 5; i++) {
+            threads.add(Thread.ofVirtual().start(() -> {
+                try {
+                    latch.await();
+                    for (int j = 0; j < 200; j++) {
+                        list.findExecutableTasks();
+                        if (j % 20 == 0) {
+                            list.detectCycles();
+                        }
+                    }
+                } catch (Throwable t) {
+                    errors.add(t);
+                }
+            }));
+        }
+
+        latch.countDown();
+        for (var thread : threads) {
+            thread.join(15_000);
+            assertFalse(thread.isAlive(), "Thread should have completed — possible deadlock");
+        }
+
+        assertTrue(errors.isEmpty(),
+                "Unexpected errors during realistic contention: " + errors);
+
+        // All root tasks should be COMPLETED
+        for (String rootId : rootIds) {
+            var task = list.findById(rootId);
+            assertEquals(SharedTaskList.TaskStatus.COMPLETED, task.status());
+        }
+    }
 }
