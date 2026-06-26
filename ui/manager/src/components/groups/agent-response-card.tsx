@@ -117,10 +117,8 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
     || defaultBadgeVariant(entry.type);
 
   const parsedContent = entry.content ? parseTranscriptContent(entry.content) : null;
-  // Try parsing as structured JSON — check both raw content and parsed (unwrapped) content
-  const structuredItems = (isPlan || isVerification || isTaskResult)
-    ? (tryParseStructuredItems(entry.content) ?? tryParseStructuredItems(parsedContent))
-    : null;
+  // Try parsing as structured JSON array — check both raw and unwrapped content (no type gate)
+  const structuredItems = tryParseStructuredItems(entry.content) ?? tryParseStructuredItems(parsedContent);
   // Only render as HTML if opt-in is enabled AND content actually contains HTML tags
   const renderAsHtml = allowHtml && parsedContent ? hasHtml(parsedContent) : false;
 
