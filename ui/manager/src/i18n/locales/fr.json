@@ -1735,6 +1735,8 @@
     "forecastingDesc": "Délibération anonyme de style Delphi pour des estimations impartiales.",
     "proCon": "Débat pour/contre",
     "proConDesc": "Débat structuré avec équipes pour et contre, suivi de réfutations.",
+    "taskForce": "Groupe de travail",
+    "taskForceDesc": "Orchestration orientée objectif où les agents planifient, exécutent des tâches en parallèle, vérifient les résultats et synthétisent les conclusions.",
     "roles": {
       "marketingExpert": "Expert marketing",
       "techLead": "Lead technique",
@@ -1754,7 +1756,11 @@
       "proAdvocate1": "Avocat pour 1",
       "proAdvocate2": "Avocat pour 2",
       "conAdvocate1": "Avocat contre 1",
-      "conAdvocate2": "Avocat contre 2"
+      "conAdvocate2": "Avocat contre 2",
+      "projectLead": "Chef de projet",
+      "researcher": "Chercheur",
+      "implementer": "Développeur",
+      "qualityAssurance": "Assurance qualité"
     }
   },
   "channels": {

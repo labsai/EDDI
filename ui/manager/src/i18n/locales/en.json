@@ -1593,6 +1593,8 @@
     "forecastingDesc": "Delphi-style anonymous deliberation for reducing groupthink and getting unbiased estimates.",
     "proCon": "Pro/Con Debate",
     "proConDesc": "Formal debate with pro and con teams arguing their positions, followed by rebuttals and a verdict.",
+    "taskForce": "Task Force",
+    "taskForceDesc": "Goal-oriented task orchestration where agents plan, execute tasks in parallel, verify results, and synthesize findings.",
     "roles": {
       "marketingExpert": "Marketing Expert",
       "techLead": "Tech Lead",
@@ -1612,7 +1614,11 @@
       "proAdvocate1": "Pro Advocate 1",
       "proAdvocate2": "Pro Advocate 2",
       "conAdvocate1": "Con Advocate 1",
-      "conAdvocate2": "Con Advocate 2"
+      "conAdvocate2": "Con Advocate 2",
+      "projectLead": "Project Lead",
+      "researcher": "Researcher",
+      "implementer": "Implementer",
+      "qualityAssurance": "Quality Assurance"
     }
   },
   "memories": {

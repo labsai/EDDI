@@ -1551,6 +1551,8 @@
     "forecastingDesc": "Anonyme Delphi-Beratung zur Vermeidung von Gruppendenken und für unvoreingenommene Einschätzungen.",
     "proCon": "Pro/Contra-Debatte",
     "proConDesc": "Formale Debatte mit Pro- und Contra-Teams, gefolgt von Erwiderungen und einem Urteil.",
+    "taskForce": "Einsatzgruppe",
+    "taskForceDesc": "Zielorientierte Aufgabenorchestrierung, bei der Agenten planen, Aufgaben parallel ausführen, Ergebnisse überprüfen und Erkenntnisse zusammenfassen.",
     "roles": {
       "marketingExpert": "Marketing-Experte",
       "techLead": "Tech-Lead",
@@ -1570,7 +1572,11 @@
       "proAdvocate1": "Pro-Vertreter 1",
       "proAdvocate2": "Pro-Vertreter 2",
       "conAdvocate1": "Contra-Vertreter 1",
-      "conAdvocate2": "Contra-Vertreter 2"
+      "conAdvocate2": "Contra-Vertreter 2",
+      "projectLead": "Projektleiter",
+      "researcher": "Forscher",
+      "implementer": "Umsetzer",
+      "qualityAssurance": "Qualitätssicherung"
     }
   },
   "memories": {

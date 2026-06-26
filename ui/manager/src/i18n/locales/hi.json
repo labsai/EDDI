@@ -1735,6 +1735,8 @@
     "forecastingDesc": "Delphi-style anonymous deliberation for unbiased estimates.",
     "proCon": "Pro/Con Debate",
     "proConDesc": "Formal debate with pro and con teams arguing their positions.",
+    "taskForce": "कार्य दल",
+    "taskForceDesc": "लक्ष्य-उन्मुख कार्य समन्वय जहां एजेंट योजना बनाते हैं, समानांतर में कार्य निष्पादित करते हैं, परिणाम सत्यापित करते हैं और निष्कर्ष संश्लेषित करते हैं।",
     "roles": {
       "marketingExpert": "Marketing Expert",
       "techLead": "Tech Lead",
@@ -1754,7 +1756,11 @@
       "proAdvocate1": "Pro Advocate 1",
       "proAdvocate2": "Pro Advocate 2",
       "conAdvocate1": "Con Advocate 1",
-      "conAdvocate2": "Con Advocate 2"
+      "conAdvocate2": "Con Advocate 2",
+      "projectLead": "परियोजना प्रमुख",
+      "researcher": "शोधकर्ता",
+      "implementer": "कार्यान्वयनकर्ता",
+      "qualityAssurance": "गुणवत्ता आश्वासन"
     }
   },
   "channels": {

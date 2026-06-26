@@ -1735,6 +1735,8 @@
     "forecastingDesc": "Deliberación anónima estilo Delphi para estimaciones imparciales.",
     "proCon": "Debate a favor/en contra",
     "proConDesc": "Debate estructurado con equipos a favor y en contra.",
+    "taskForce": "Grupo de trabajo",
+    "taskForceDesc": "Orquestación de tareas orientada a objetivos donde los agentes planifican, ejecutan tareas en paralelo, verifican resultados y sintetizan hallazgos.",
     "roles": {
       "marketingExpert": "Experto en marketing",
       "techLead": "Líder técnico",
@@ -1754,7 +1756,11 @@
       "proAdvocate1": "Defensor a favor 1",
       "proAdvocate2": "Defensor a favor 2",
       "conAdvocate1": "Defensor en contra 1",
-      "conAdvocate2": "Defensor en contra 2"
+      "conAdvocate2": "Defensor en contra 2",
+      "projectLead": "Líder de proyecto",
+      "researcher": "Investigador",
+      "implementer": "Implementador",
+      "qualityAssurance": "Control de calidad"
     }
   },
   "channels": {
