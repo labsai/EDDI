@@ -479,7 +479,7 @@ export async function* streamGroupDiscussion(
         }
 
         // Only yield events with an explicit event: type (skip bare data-only chunks)
-        if (eventType && (eventData || eventType)) {
+        if (eventType) {
           yield { type: eventType, data: eventData };
         }
       }

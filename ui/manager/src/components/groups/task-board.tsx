@@ -236,7 +236,7 @@ function ProgressBar({
         aria-label={t("taskBoard.progress", "{{done}} of {{total}} tasks done", { done, total })}
       >
         <div
-          className="h-full rounded-full bg-gradient-to-r from-primary via-primary/80 to-emerald-500 transition-all duration-700 ease-out"
+          className="h-full rounded-full bg-linear-to-r from-primary via-primary/80 to-emerald-500 transition-all duration-700 ease-out"
           style={{ width: `${pct}%` }}
         />
       </div>

@@ -329,10 +329,7 @@ function handleSSEEvent(
         const payload: TaskPlanCreatedPayload = JSON.parse(event.data);
         setState((s) => ({
           ...s,
-          taskPlan: payload.tasks.map((t) => ({
-            ...t,
-            assignedAgentId: t.assignedAgentId,
-          })),
+          taskPlan: payload.tasks,
         }));
       } catch (e) {
         console.warn('[SSE] Failed to parse task_plan_created event:', e);
