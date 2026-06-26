@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import DOMPurify from "dompurify";
-import { ChevronDown, ChevronUp, ClipboardList, CheckCircle2, ListOrdered, User2 } from "lucide-react";
+import { ChevronDown, ChevronUp, ClipboardList, CheckCircle2, ListOrdered, User2, XCircle } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import type { TranscriptEntry, TranscriptEntryType, DiscussionStyle } from "@/lib/api/groups";
@@ -77,16 +77,18 @@ function defaultBadgeVariant(
 /** Height in px above which we collapse a message (~6 lines of text) */
 const COLLAPSE_THRESHOLD = 144;
 
-/** Task plan item from moderator's PLAN output */
-interface TaskPlanItem {
+/** Structured item from moderator's JSON output (plans, verifications, etc.) */
+interface StructuredItem {
   subject: string;
   description?: string;
   assignedTo?: string;
   priority?: number;
+  passed?: boolean;
+  feedback?: string;
 }
 
-/** Try to parse content as a JSON task plan array */
-function tryParseTaskPlan(content: string | null): TaskPlanItem[] | null {
+/** Try to parse content as a JSON array of structured items */
+function tryParseStructuredItems(content: string | null): StructuredItem[] | null {
   if (!content) return null;
   const trimmed = content.trim();
   if (!trimmed.startsWith("[")) return null;
@@ -95,7 +97,7 @@ function tryParseTaskPlan(content: string | null): TaskPlanItem[] | null {
     if (!Array.isArray(parsed) || parsed.length === 0) return null;
     // Validate the first item has at least a "subject" field
     if (typeof parsed[0]?.subject !== "string") return null;
-    return parsed as TaskPlanItem[];
+    return parsed as StructuredItem[];
   } catch {
     return null;
   }
@@ -115,8 +117,10 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
     || defaultBadgeVariant(entry.type);
 
   const parsedContent = entry.content ? parseTranscriptContent(entry.content) : null;
-  // Try parsing as task plan JSON — check both raw content and parsed (unwrapped) content
-  const taskPlanItems = isPlan ? (tryParseTaskPlan(entry.content) ?? tryParseTaskPlan(parsedContent)) : null;
+  // Try parsing as structured JSON — check both raw content and parsed (unwrapped) content
+  const structuredItems = (isPlan || isVerification || isTaskResult)
+    ? (tryParseStructuredItems(entry.content) ?? tryParseStructuredItems(parsedContent))
+    : null;
   // Only render as HTML if opt-in is enabled AND content actually contains HTML tags
   const renderAsHtml = allowHtml && parsedContent ? hasHtml(parsedContent) : false;
 
@@ -194,42 +198,65 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
             <span className="text-xs text-muted-foreground ms-1">{t("groups.responding", "responding…")}</span>
           </div>
-        ) : taskPlanItems ? (
-          /* Render task plan as a structured list instead of raw JSON */
+        ) : structuredItems ? (
+          /* Render structured items (plans, verifications, etc.) instead of raw JSON */
           <div className="space-y-2">
             <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-2">
-              <ListOrdered className="h-3.5 w-3.5" />
-              {taskPlanItems.length} {taskPlanItems.length === 1 ? "task" : "tasks"} planned
+              {isVerification ? (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              ) : (
+                <ListOrdered className="h-3.5 w-3.5" />
+              )}
+              {structuredItems.length} {structuredItems.length === 1 ? "item" : "items"}
             </div>
-            {taskPlanItems.map((task, i) => (
-              <div
-                key={i}
-                className="flex items-start gap-3 rounded-lg border border-border/50 bg-secondary/30 px-3 py-2.5"
-              >
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-500/20 text-sky-400 text-[10px] font-bold mt-0.5">
-                  {i + 1}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground leading-snug">{task.subject}</p>
-                  {task.description && (
-                    <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{task.description}</p>
+            {structuredItems.map((item, i) => {
+              const hasVerdict = item.passed !== undefined;
+              return (
+                <div
+                  key={i}
+                  className={cn(
+                    "flex items-start gap-3 rounded-lg border px-3 py-2.5",
+                    hasVerdict && item.passed && "border-emerald-500/30 bg-emerald-500/5",
+                    hasVerdict && !item.passed && "border-destructive/30 bg-destructive/5",
+                    !hasVerdict && "border-border/50 bg-secondary/30",
                   )}
-                  {task.assignedTo && (
-                    <div className="flex items-center gap-1 mt-1.5">
-                      <User2 className="h-3 w-3 text-muted-foreground" />
-                      <span className="text-[10px] text-muted-foreground font-medium truncate max-w-[200px]">
-                        {task.assignedTo.slice(0, 12)}…
-                      </span>
-                    </div>
+                >
+                  {hasVerdict ? (
+                    item.passed ? (
+                      <CheckCircle2 className="h-4.5 w-4.5 shrink-0 text-emerald-500 mt-0.5" />
+                    ) : (
+                      <XCircle className="h-4.5 w-4.5 shrink-0 text-destructive mt-0.5" />
+                    )
+                  ) : (
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-500/20 text-sky-400 text-[10px] font-bold mt-0.5">
+                      {i + 1}
+                    </span>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground leading-snug">{item.subject}</p>
+                    {item.description && (
+                      <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{item.description}</p>
+                    )}
+                    {item.feedback && (
+                      <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{item.feedback}</p>
+                    )}
+                    {item.assignedTo && (
+                      <div className="flex items-center gap-1 mt-1.5">
+                        <User2 className="h-3 w-3 text-muted-foreground" />
+                        <span className="text-[10px] text-muted-foreground font-medium truncate max-w-[200px]">
+                          {item.assignedTo.slice(0, 12)}…
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  {item.priority != null && (
+                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 shrink-0">
+                      P{item.priority}
+                    </Badge>
                   )}
                 </div>
-                {task.priority != null && (
-                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 shrink-0">
-                    P{task.priority}
-                  </Badge>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : parsedContent ? (
           <>
