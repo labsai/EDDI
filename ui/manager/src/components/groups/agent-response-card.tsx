@@ -87,17 +87,53 @@ interface StructuredItem {
   feedback?: string;
 }
 
-/** Try to parse content as a JSON array of structured items */
+/** Validate parsed array has structured items with 'subject' field */
+function validateStructuredArray(arr: unknown): StructuredItem[] | null {
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  if (typeof (arr[0] as Record<string, unknown>)?.subject !== "string") return null;
+  return arr as StructuredItem[];
+}
+
+/** Extract a JSON array substring from content (finds first `[` to last `]`) */
+function extractJsonArray(content: string): string | null {
+  const start = content.indexOf("[");
+  const end = content.lastIndexOf("]");
+  if (start === -1 || end === -1 || end <= start) return null;
+  return content.slice(start, end + 1);
+}
+
+/** Try to parse content as a JSON array of structured items.
+ *  Handles multiple scenarios:
+ *  1. Clean JSON array
+ *  2. JSON with unescaped newlines in string values (LLM output)
+ *  3. JSON array embedded within wrapper text
+ */
 function tryParseStructuredItems(content: string | null): StructuredItem[] | null {
   if (!content) return null;
-  const trimmed = content.trim();
-  if (!trimmed.startsWith("[")) return null;
+
+  // 1. Try to extract a JSON array substring from the content
+  const jsonStr = extractJsonArray(content);
+  if (!jsonStr) return null;
+
+  // 2. Fast path: try standard JSON.parse
   try {
-    const parsed = JSON.parse(trimmed);
-    if (!Array.isArray(parsed) || parsed.length === 0) return null;
-    // Validate the first item has at least a "subject" field
-    if (typeof parsed[0]?.subject !== "string") return null;
-    return parsed as StructuredItem[];
+    return validateStructuredArray(JSON.parse(jsonStr));
+  } catch { /* continue to fallback */ }
+
+  // 3. Fallback: sanitize newlines (LLMs sometimes produce unescaped newlines in strings)
+  //    Collapse all whitespace runs (newlines + spaces) into single spaces
+  try {
+    const sanitized = jsonStr.replace(/\s+/g, " ");
+    return validateStructuredArray(JSON.parse(sanitized));
+  } catch { /* continue to fallback */ }
+
+  // 4. Last resort: try to repair by escaping newlines within JSON strings
+  try {
+    const repaired = jsonStr.replace(
+      /"(?:[^"\\]|\\.)*"/g,
+      (match) => match.replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t"),
+    );
+    return validateStructuredArray(JSON.parse(repaired));
   } catch {
     return null;
   }
