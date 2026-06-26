@@ -361,11 +361,11 @@ public class SharedTaskList {
 
     // --- Getters/Setters for serialization ---
 
-    public List<TaskItem> getTasks() {
-        return tasks;
+    public synchronized List<TaskItem> getTasks() {
+        return new ArrayList<>(tasks);
     }
 
-    public void setTasks(List<TaskItem> tasks) {
-        this.tasks = tasks != null ? tasks : new ArrayList<>();
+    public synchronized void setTasks(List<TaskItem> tasks) {
+        this.tasks = tasks != null ? new ArrayList<>(tasks) : new ArrayList<>();
     }
 }

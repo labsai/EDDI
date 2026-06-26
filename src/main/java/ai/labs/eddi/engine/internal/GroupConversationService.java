@@ -1718,9 +1718,9 @@ public class GroupConversationService implements IGroupConversationService {
      * gap between per-turn tool-local tracking lists and the group-level lifecycle
      * tracking in {@link GroupConversation}.
      */
-    private void propagateDynamicAgentTracking(
-                                               ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot,
-                                               GroupConversation gc) {
+    static void propagateDynamicAgentTracking(
+                                              ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot,
+                                              GroupConversation gc) {
         if (snapshot == null || snapshot.getConversationSteps() == null) {
             return;
         }

@@ -808,7 +808,8 @@ class SharedTaskListTest {
         var task = list.addTask(new SharedTaskList.TaskItem("Contested Task", "desc", 0));
         var latch = new java.util.concurrent.CountDownLatch(1);
         var successes = new java.util.concurrent.atomic.AtomicInteger(0);
-        var failures = new java.util.concurrent.atomic.AtomicInteger(0);
+        var expectedFailures = new java.util.concurrent.atomic.AtomicInteger(0);
+        var unexpectedErrors = new java.util.concurrent.CopyOnWriteArrayList<Throwable>();
 
         var t1 = Thread.ofVirtual().start(() -> {
             try {
@@ -816,9 +817,9 @@ class SharedTaskListTest {
                 list.assignTask(task.id(), "agent-1", "Agent 1");
                 successes.incrementAndGet();
             } catch (IllegalStateException e) {
-                failures.incrementAndGet();
+                expectedFailures.incrementAndGet();
             } catch (Throwable t) {
-                failures.incrementAndGet(); // Unexpected
+                unexpectedErrors.add(t);
             }
         });
 
@@ -828,9 +829,9 @@ class SharedTaskListTest {
                 list.assignTask(task.id(), "agent-2", "Agent 2");
                 successes.incrementAndGet();
             } catch (IllegalStateException e) {
-                failures.incrementAndGet();
+                expectedFailures.incrementAndGet();
             } catch (Throwable t) {
-                failures.incrementAndGet(); // Unexpected
+                unexpectedErrors.add(t);
             }
         });
 
@@ -838,35 +839,32 @@ class SharedTaskListTest {
         t1.join(5000);
         t2.join(5000);
 
+        assertTrue(unexpectedErrors.isEmpty(),
+                "Unexpected errors during race: " + unexpectedErrors);
         assertEquals(1, successes.get(), "Exactly one thread should win the assignment");
-        assertEquals(1, failures.get(), "Exactly one thread should fail with IllegalStateException");
+        assertEquals(1, expectedFailures.get(), "Exactly one thread should fail with IllegalStateException");
 
         var updated = list.findById(task.id());
         assertEquals(SharedTaskList.TaskStatus.ASSIGNED, updated.status());
     }
 
     /**
-     * Verifies that getTasks() returning a direct mutable reference is documented
-     * and understood. Callers modifying the returned list could corrupt internal
-     * state if done concurrently with synchronized methods.
-     *
-     * This test documents the risk: getTasks() returns the internal list reference.
+     * Verifies that getTasks() returns a defensive copy, so callers cannot corrupt
+     * internal state by modifying the returned list.
      */
     @Test
-    void getTasks_returnsMutableReference_concurrentModificationRisk() {
+    void getTasks_returnsDefensiveCopy_internalStateIsolated() {
         list.addTask(new SharedTaskList.TaskItem("Task 1", "desc", 0));
         list.addTask(new SharedTaskList.TaskItem("Task 2", "desc", 1));
 
-        // getTasks() returns the internal list — not a copy
-        var directRef = list.getTasks();
-        assertEquals(2, directRef.size());
+        var copy = list.getTasks();
+        assertEquals(2, copy.size());
 
-        // Modifications through the reference affect the internal state
-        // This is a known design trade-off for serialization compatibility
+        // Modifying the returned list must NOT affect internal state
         int sizeBefore = list.size();
-        directRef.add(new SharedTaskList.TaskItem("Sneaky Task", "injected", 99));
-        assertEquals(sizeBefore + 1, list.size(),
-                "getTasks() returns internal mutable list — callers must not modify it");
+        copy.add(new SharedTaskList.TaskItem("Sneaky Task", "injected", 99));
+        assertEquals(sizeBefore, list.size(),
+                "getTasks() should return a defensive copy — internal state must be unchanged");
     }
 
     /**
