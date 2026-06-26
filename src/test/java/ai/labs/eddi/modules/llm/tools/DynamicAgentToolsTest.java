@@ -391,6 +391,96 @@ class DynamicAgentToolsTest {
 
             assertTrue(result.contains("Map-format response"));
         }
+
+        // --- Null-safety tests (Copilot PR review fixes) ---
+
+        @Test
+        @DisplayName("Fix 2: null DynamicAgentConfig defaults to disabled config")
+        void createSubAgent_nullConfig_defaultsToDisabled() {
+            // Construct with null config — should not NPE
+            var toolWithNullConfig = new CreateSubAgentTool(agentSetupService,
+                    conversationService, "parent-1", "user-1", null, createdAgentIds, retainedAgentIds);
+
+            // Default DynamicAgentConfig has enabled=false, so creation should be blocked
+            String result = toolWithNullConfig.createSubAgent("Test", "prompt", null, null, null, null);
+            assertTrue(result.contains("⚠️"), "Null config should default to disabled");
+            assertTrue(result.contains("not enabled"), "Should indicate feature is not enabled");
+        }
+
+        @Test
+        @DisplayName("Fix 3: null entries in allowedProviders list don't cause NPE")
+        void createSubAgent_nullEntryInProviderAllowList() {
+            // Simulates malformed JSON config with null entries
+            var providers = new java.util.ArrayList<String>();
+            providers.add(null);
+            providers.add("openai");
+            config.setAllowedProviders(providers);
+
+            String result = tool.createSubAgent("Test", "prompt", "anthropic", null, null, null);
+            assertTrue(result.contains("⚠️"), "Should still enforce allow-list");
+            assertTrue(result.contains("not allowed"));
+        }
+
+        @Test
+        @DisplayName("Fix 4: null values in allowedModels map don't cause NPE (with provider)")
+        void createSubAgent_nullModelListInAllowedModels_withProvider() throws Exception {
+            // Map with a provider key mapping to null list
+            var models = new java.util.HashMap<String, List<String>>();
+            models.put("openai", null); // null list for provider
+            config.setAllowedModels(models);
+            config.setAllowedProviders(List.of("openai"));
+
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
+                            "openai", "gpt-4o", true, "ready", null, null, null, null, null));
+
+            // Should not NPE — null list is filtered, so model check is skipped
+            String result = tool.createSubAgent("Test", "prompt", "openai", "gpt-4o", null, null);
+            assertTrue(result.contains("✅"), "Null model list should be treated as no restriction");
+        }
+
+        @Test
+        @DisplayName("Fix 4: null values in allowedModels map don't cause NPE (without provider)")
+        void createSubAgent_nullModelListInAllowedModels_noProvider() {
+            // Map with a provider key mapping to null list
+            var models = new java.util.HashMap<String, List<String>>();
+            models.put("openai", null);
+            config.setAllowedModels(models);
+
+            // Without provider, the check iterates ALL provider values.stream().flatMap()
+            // A null list would cause NPE without the Objects::nonNull filter.
+            String result = tool.createSubAgent("Test", "prompt", null, "some-model", null, null);
+            // Should not NPE; model not found in any list → blocked
+            assertTrue(result.contains("⚠️"));
+        }
+
+        @Test
+        @DisplayName("Fix 4: null model entries in allowedModels list don't cause NPE")
+        void createSubAgent_nullModelEntryInList() {
+            var modelList = new java.util.ArrayList<String>();
+            modelList.add(null);
+            modelList.add("gpt-4o");
+            config.setAllowedModels(Map.of("openai", modelList));
+
+            // Provider omitted — checks all values; null entries should be filtered
+            String result = tool.createSubAgent("Test", "prompt", null, "unknown-model", null, null);
+            assertTrue(result.contains("⚠️"), "Should still enforce allow-list despite null entries");
+        }
+
+        @Test
+        @DisplayName("Constructor with null tracking lists defaults to empty collections")
+        void createSubAgent_nullTrackingLists() throws Exception {
+            var toolNullLists = new CreateSubAgentTool(agentSetupService,
+                    conversationService, "parent-1", "user-1", config, null, null);
+
+            when(agentSetupService.setupAgent(any(SetupAgentRequest.class)))
+                    .thenReturn(new SetupResult("created", "sub-agent-1", "parent-agent-1/Test",
+                            null, null, true, "ready", null, null, null, null, null));
+
+            // Should not NPE
+            String result = toolNullLists.createSubAgent("Test", "prompt", null, null, null, null);
+            assertTrue(result.contains("✅"));
+        }
     }
 
     // === ConverseWithAgentTool ===

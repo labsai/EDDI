@@ -36,10 +36,10 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
-import ai.labs.eddi.modules.output.model.OutputItem;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -233,6 +233,11 @@ public class GroupConversationService implements IGroupConversationService {
 
         ProtocolConfig protocol = resolveProtocol(config);
         int maxTurns = protocol.maxTurns() > 0 ? protocol.maxTurns() : 50;
+
+        // Store the group's DynamicAgentConfig on the GC so executeAgentTurn()
+        // can pass it to member agents via context variables, allowing
+        // AgentOrchestrator to enforce group-level guardrails on dynamic tools.
+        gc.setDynamicAgentConfig(config.getDynamicAgents());
 
         // AtomicInteger: shared across the phase loop; parallel phases increment
         // from virtual threads. Mutable counter avoids passing & returning counts.
@@ -1287,6 +1292,12 @@ public class GroupConversationService implements IGroupConversationService {
         context.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
         context.put("groupDepth", new Context(Context.ContextType.string, String.valueOf(gc.getDepth())));
 
+        // Pass group-level dynamic agent guardrails to member agents so that
+        // AgentOrchestrator can enforce caps, allowed providers/models, etc.
+        if (gc.getDynamicAgentConfig() != null) {
+            context.put("dynamicAgentConfig", new Context(Context.ContextType.object, gc.getDynamicAgentConfig()));
+        }
+
         // Wave 6: Peer verification — if the receiving agent requires it,
         // verify all signed entries from prior speakers before sending context
         verifyPriorEntriesIfRequired(member.agentId(), gc);
@@ -1306,9 +1317,9 @@ public class GroupConversationService implements IGroupConversationService {
                 conversationService.say(DEFAULT_ENV, member.agentId(), convId, true, true, null, inputData, false, snapshot -> {
                     String response = extractResponse(snapshot);
                     // When the agent pipeline fails (e.g. LLM unreachable), extractResponse
-                    // returns null because there are no output keys — only pipeline metadata.
+                    // returns empty because there are no output keys — only pipeline metadata.
                     // Surface the failure as explicit content so the transcript entry is not empty.
-                    if (response == null && snapshot != null
+                    if ((response == null || response.isEmpty()) && snapshot != null
                             && snapshot.getConversationState() == ConversationState.ERROR) {
                         response = "[Agent failed to produce output — conversation entered ERROR state]";
                     }
@@ -1757,89 +1768,15 @@ public class GroupConversationService implements IGroupConversationService {
     }
 
     /**
-     * Extracts the human-readable text from a conversation memory snapshot. Looks
-     * for the {@code output} array in the last ConversationOutput map and
-     * concatenates all text entries (same logic as the Manager's
-     * {@code extractOutput()}).
+     * Extracts the human-readable text from a conversation memory snapshot.
+     * Delegates to the shared {@link ConversationOutputExtractor} utility.
      */
     private String extractResponse(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
-        if (snapshot == null || snapshot.getConversationOutputs() == null) {
-            return "";
-        }
-        var outputs = snapshot.getConversationOutputs();
-        if (outputs.isEmpty()) {
-            return "";
-        }
-        var lastOutput = outputs.get(outputs.size() - 1);
-        if (lastOutput == null) {
-            return "";
-        }
-
-        var texts = new ArrayList<String>();
-
-        // Format 1: Nested "output" array — may contain TextOutputItem POJOs or Maps
-        Object outputArray = lastOutput.get("output");
-        if (outputArray instanceof List<?> list) {
-            for (var item : list) {
-                if (item instanceof String s) {
-                    texts.add(s);
-                } else if (item instanceof OutputItem oi && oi.toString() != null) {
-                    // TextOutputItem.toString() returns the text field
-                    texts.add(oi.toString());
-                } else if (item instanceof Map<?, ?> map) {
-                    Object text = map.get("text");
-                    if (text instanceof String s) {
-                        texts.add(s);
-                    }
-                }
-            }
-            if (!texts.isEmpty()) {
-                return String.join("\n", texts);
-            }
-        }
-
-        // Format 2: Flat keys like "output:text:*"
-        for (var entry : lastOutput.entrySet()) {
-            if (entry.getKey() instanceof String key && key.startsWith("output:text:")) {
-                Object val = entry.getValue();
-                if (val instanceof String s) {
-                    texts.add(s);
-                } else if (val instanceof List<?> list) {
-                    for (var item : list) {
-                        if (item instanceof String s)
-                            texts.add(s);
-                        else if (item instanceof Map<?, ?> map && map.get("text") instanceof String s)
-                            texts.add(s);
-                    }
-                } else if (val instanceof Map<?, ?> map && map.get("text") instanceof String s) {
-                    texts.add(s);
-                }
-            }
-        }
-
-        if (!texts.isEmpty()) {
-            return String.join("\n", texts);
-        }
-
-        // Check if the output contains any actual LLM-generated content.
-        // Output keys follow patterns like "output", "output:text:*", "reply".
-        // If none are present, the map only contains pipeline metadata
-        // (e.g. "actions", "input", "context") — return null to avoid
-        // serializing raw metadata as a group discussion response.
-        boolean hasAnyOutput = lastOutput.keySet().stream()
-                .anyMatch(k -> k instanceof String s &&
-                        (s.startsWith("output") || s.startsWith("reply")));
-        if (!hasAnyOutput) {
-            return null;
-        }
-
-        // Fallback: serialize the entire output map (backward compat)
-        try {
-            return jsonSerialization.serialize(lastOutput);
-        } catch (Exception e) {
-            LOGGER.warnf("Failed to serialize conversation output, falling back to toString(): %s", e.getMessage());
-            return lastOutput.toString();
-        }
+        String result = ConversationOutputExtractor.extractResponse(snapshot);
+        // Convert null to empty string for backward compatibility with GCS callers
+        // that check for empty-string (pipeline metadata-only snapshots still return
+        // null).
+        return result != null ? result : "";
     }
 
     private String buildPlainTextFallback(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript) {

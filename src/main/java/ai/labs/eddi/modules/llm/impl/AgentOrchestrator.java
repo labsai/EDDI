@@ -569,12 +569,12 @@ class AgentOrchestrator {
                 Set<String> sharedRetainedIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
                 String parentAgentId = memory.getAgentId();
                 String userId = memory.getUserId();
-                DynamicAgentConfig defaultConfig = createDefaultDynamicConfig();
+                DynamicAgentConfig dynamicConfig = resolveDynamicAgentConfig(memory);
 
                 boolean anyDynamicToolAdded = false;
                 if (whitelist.contains("create_sub_agent") && agentSetupService != null && conversationService != null) {
                     tools.add(new CreateSubAgentTool(agentSetupService,
-                            conversationService, parentAgentId, userId, defaultConfig,
+                            conversationService, parentAgentId, userId, dynamicConfig,
                             sharedCreatedIds, sharedRetainedIds));
                     LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s'", sanitize(parentAgentId));
                     anyDynamicToolAdded = true;
@@ -672,6 +672,35 @@ class AgentOrchestrator {
         tools.add(tool);
         LOGGER.infof("[RECALL] ConversationRecallTool enabled: summaryThroughStep=%d, maxRecallTurns=%d", throughStep,
                 summaryConfig.getMaxRecallTurns());
+    }
+
+    /**
+     * Resolves the DynamicAgentConfig for the current conversation. If the agent is
+     * participating in a group discussion, the group's {@link DynamicAgentConfig}
+     * is passed via context variable {@code dynamicAgentConfig} by
+     * {@code GroupConversationService}. If no group config is present (standalone
+     * agent), a permissive default is used.
+     *
+     * @param memory
+     *            the conversation memory to check for group context
+     * @return the resolved DynamicAgentConfig — group-level if available,
+     *         permissive default otherwise
+     */
+    private DynamicAgentConfig resolveDynamicAgentConfig(IConversationMemory memory) {
+        // Check if GroupConversationService injected a DynamicAgentConfig via context
+        var currentStep = memory.getCurrentStep();
+        if (currentStep != null) {
+            var contextData = currentStep.getLatestData("context:dynamicAgentConfig");
+            if (contextData != null) {
+                Object value = contextData.getResult();
+                if (value instanceof ai.labs.eddi.engine.model.Context ctx && ctx.getValue() instanceof DynamicAgentConfig groupConfig) {
+                    LOGGER.debugf("[DYNAMIC] Using group-level DynamicAgentConfig for agent='%s'", sanitize(memory.getAgentId()));
+                    return groupConfig;
+                }
+            }
+        }
+        // Fallback: standalone agent — use permissive defaults
+        return createDefaultDynamicConfig();
     }
 
     /**

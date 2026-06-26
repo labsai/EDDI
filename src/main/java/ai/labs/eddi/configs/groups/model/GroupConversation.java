@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.groups.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -39,6 +41,15 @@ public class GroupConversation {
     private Set<String> retainedAgentIds = ConcurrentHashMap.newKeySet();
     private Instant created;
     private Instant lastModified;
+
+    /**
+     * Transient reference to the group's dynamic agent configuration. Set by
+     * {@code GroupConversationService.executeDiscussion()} at the start of a
+     * discussion so that {@code executeAgentTurn()} can pass it to member agents
+     * via context. Never persisted to MongoDB or serialized to REST.
+     */
+    @JsonIgnore
+    private transient AgentGroupConfiguration.DynamicAgentConfig dynamicAgentConfig;
 
     /**
      * A single entry in the discussion transcript. Each entry records one agent's
@@ -275,5 +286,14 @@ public class GroupConversation {
             newSet.addAll(retainedAgentIds);
         }
         this.retainedAgentIds = newSet;
+    }
+
+    @JsonIgnore
+    public AgentGroupConfiguration.DynamicAgentConfig getDynamicAgentConfig() {
+        return dynamicAgentConfig;
+    }
+
+    public void setDynamicAgentConfig(AgentGroupConfiguration.DynamicAgentConfig dynamicAgentConfig) {
+        this.dynamicAgentConfig = dynamicAgentConfig;
     }
 }

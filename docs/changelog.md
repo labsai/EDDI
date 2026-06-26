@@ -2,6 +2,34 @@
 
 > **Purpose:** Living document tracking all changes, decisions, and reasoning during implementation. Updated as work progresses for easy reference and review.
 
+
+---
+
+## 🔒 PR Review Fixes — DynamicAgentConfig Propagation, Null Safety, Code Dedup (2026-06-26)
+
+**Repo:** EDDI (`feat/group-task-orchestration`)
+**What changed:** 5 fixes addressing Copilot PR review findings.
+
+### Fixes
+
+1. **HIGH: DynamicAgentConfig propagation** — Group-level guardrails were silently ignored. Fix: GCS stores config on GC (transient), passes via context to AgentOrchestrator which reads it from memory.
+2. **MEDIUM: Null-safe DynamicAgentConfig** — Constructor defaults null to disabled config.
+3. **MEDIUM: Null-safe provider allow-list** — `Objects::nonNull` filter before `equalsIgnoreCase()`.
+4. **MEDIUM: Null-safe model allow-list** — Filters for both null map values and null list entries.
+5. **LOW: extractResponse() deduplication** — Shared `ConversationOutputExtractor` utility replacing 3 copies.
+
+### Files Changed
+- `GroupConversation.java` — Transient `dynamicAgentConfig` field (`@JsonIgnore`)
+- `GroupConversationService.java` — Config propagation + `extractResponse()` delegation
+- `AgentOrchestrator.java` — `resolveDynamicAgentConfig()` reads group config from context
+- `CreateSubAgentTool.java` — Null-safe constructor + allow-lists + `extractResponse()` delegation
+- `ConverseWithAgentTool.java` — `extractResponse()` delegation
+- `ConversationOutputExtractor.java` — **[NEW]** Shared utility
+
+### Tests Added
+- `ConversationOutputExtractorTest` — 11 tests
+- `DynamicAgentToolsTest` — 7 new null-safety tests
+
 ---
 
 ## 🔧 MCP Group Tools — Async Discussion, Delete, @Blocking Fix (2026-06-26)

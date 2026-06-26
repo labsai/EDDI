@@ -61,7 +61,7 @@ public class CreateSubAgentTool {
         this.conversationService = conversationService;
         this.parentAgentId = parentAgentId;
         this.userId = userId;
-        this.config = config;
+        this.config = config != null ? config : new DynamicAgentConfig();
         this.createdAgentIds = createdAgentIds != null ? createdAgentIds : new java.util.concurrent.CopyOnWriteArrayList<>();
         this.retainedAgentIds = retainedAgentIds != null ? retainedAgentIds : java.util.concurrent.ConcurrentHashMap.newKeySet();
     }
@@ -102,6 +102,7 @@ public class CreateSubAgentTool {
                     && config.getAllowedProviders() != null
                     && !config.getAllowedProviders().isEmpty()) {
                 boolean providerAllowed = config.getAllowedProviders().stream()
+                        .filter(java.util.Objects::nonNull)
                         .anyMatch(p -> p.equalsIgnoreCase(provider));
                 if (!providerAllowed) {
                     return "⚠️ Provider '%s' is not allowed. Allowed: %s"
@@ -119,6 +120,7 @@ public class CreateSubAgentTool {
                     List<String> allowedModels = config.getAllowedModels().entrySet().stream()
                             .filter(e -> e.getKey() != null && e.getKey().equalsIgnoreCase(provider))
                             .map(Map.Entry::getValue)
+                            .filter(java.util.Objects::nonNull)
                             .findFirst().orElse(null);
                     if (allowedModels != null && !allowedModels.isEmpty()
                             && allowedModels.stream().noneMatch(m -> m.equalsIgnoreCase(model))) {
@@ -129,7 +131,9 @@ public class CreateSubAgentTool {
                     // No provider specified — model must appear in at least one provider's
                     // allow-list
                     boolean modelFoundInAnyProvider = config.getAllowedModels().values().stream()
+                            .filter(java.util.Objects::nonNull)
                             .flatMap(List::stream)
+                            .filter(java.util.Objects::nonNull)
                             .anyMatch(m -> m.equalsIgnoreCase(model));
                     if (!modelFoundInAnyProvider) {
                         return "⚠️ Model '%s' is not in any provider's allowed models list."
@@ -228,41 +232,9 @@ public class CreateSubAgentTool {
 
     /**
      * Extracts the human-readable text from a conversation memory snapshot.
-     * Simplified version of GroupConversationService.extractResponse().
+     * Delegates to shared utility.
      */
-    @SuppressWarnings("unchecked")
     private String extractResponse(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
-        if (snapshot == null || snapshot.getConversationOutputs() == null) {
-            return null;
-        }
-        var outputs = snapshot.getConversationOutputs();
-        if (outputs.isEmpty()) {
-            return null;
-        }
-        var lastOutput = outputs.get(outputs.size() - 1);
-        if (lastOutput == null) {
-            return null;
-        }
-
-        // Look for "output" array in the last output map
-        Object outputArray = lastOutput.get("output");
-        if (outputArray instanceof List<?> list) {
-            var texts = new java.util.ArrayList<String>();
-            for (var item : list) {
-                if (item instanceof String s) {
-                    texts.add(s);
-                } else if (item instanceof Map<?, ?> map) {
-                    Object text = map.get("text");
-                    if (text instanceof String s) {
-                        texts.add(s);
-                    }
-                }
-            }
-            if (!texts.isEmpty()) {
-                return String.join("\n", texts);
-            }
-        }
-
-        return null;
+        return ai.labs.eddi.engine.memory.ConversationOutputExtractor.extractResponse(snapshot);
     }
 }
