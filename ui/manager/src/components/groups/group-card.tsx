@@ -32,7 +32,8 @@ export function GroupCard({
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const styleInfo = style ? STYLE_INFO[style] : null;
-  const timeAgo = formatRelativeTime(group.lastModifiedOn);
+  const effectiveTimestamp = group.lastModifiedOn || group.createdOn;
+  const timeAgo = formatRelativeTime(effectiveTimestamp);
   const effectiveMemberCount = members.length > 0 ? members.length : memberCount;
 
   return (
@@ -159,7 +160,7 @@ export function GroupCard({
 
       {/* Footer: meta + badges */}
       <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
-        <span className="text-xs text-muted-foreground" title={new Date(group.lastModifiedOn).toLocaleString()}>
+        <span className="text-xs text-muted-foreground" title={effectiveTimestamp ? new Date(effectiveTimestamp).toLocaleString() : undefined}>
           {timeAgo}
         </span>
 

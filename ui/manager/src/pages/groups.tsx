@@ -342,9 +342,11 @@ export function GroupsPage() {
                         </div>
                       </td>
                       <td className="px-5 py-3">
-                        <span className="text-sm text-muted-foreground" title={new Date(group.lastModifiedOn).toLocaleString()}>
-                          {formatRelativeTime(group.lastModifiedOn)}
-                        </span>
+                        {(() => { const ts = group.lastModifiedOn || group.createdOn; return (
+                          <span className="text-sm text-muted-foreground" title={ts ? new Date(ts).toLocaleString() : undefined}>
+                            {formatRelativeTime(ts)}
+                          </span>
+                        ); })()}
                       </td>
                       <td className="px-5 py-3 text-end">
                         <div className="inline-flex items-center gap-1">

@@ -551,7 +551,7 @@ export function groupGroupsByName(
   }
 
   return Array.from(grouped.values()).sort(
-    (a, b) => b.lastModifiedOn - a.lastModifiedOn
+    (a, b) => (b.lastModifiedOn || b.createdOn || 0) - (a.lastModifiedOn || a.createdOn || 0)
   );
 }
 
