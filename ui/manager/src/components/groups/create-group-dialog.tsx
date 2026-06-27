@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { X, ChevronRight, ChevronLeft, Users, Plus, Trash2, AlertTriangle, Check, Clock, Shield, RotateCcw } from "lucide-react";
+import { X, ChevronRight, ChevronLeft, Users, Plus, Trash2, AlertTriangle, Check, Clock, Shield, RotateCcw, ChevronDown, ChevronUp, Info, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,8 @@ import {
   type DiscussionStyle,
   type GroupMember,
   type AgentGroupConfiguration,
+  type MemberFailurePolicy,
+  type MemberUnavailablePolicy,
 } from "@/lib/api/groups";
 import { getGroupTemplates, type GroupTemplate } from "@/lib/group-templates";
 
@@ -52,6 +54,14 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
   );
   const [moderatorAgentId, setModeratorAgentId] = useState("");
 
+  // Advanced protocol settings
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [agentTimeout, setAgentTimeout] = useState(60);
+  const [onAgentFailure, setOnAgentFailure] = useState<MemberFailurePolicy>("SKIP");
+  const [maxRetries, setMaxRetries] = useState(2);
+  const [onMemberUnavailable, setOnMemberUnavailable] = useState<MemberUnavailablePolicy>("SKIP");
+  const [maxTurns, setMaxTurns] = useState(0);
+
   // Resolve agent IDs → display names for review step
   const agentNameMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -68,6 +78,12 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
     setMaxRounds(2);
     setMembers([]);
     setModeratorAgentId("");
+    setShowAdvanced(false);
+    setAgentTimeout(60);
+    setOnAgentFailure("SKIP");
+    setMaxRetries(2);
+    setOnMemberUnavailable("SKIP");
+    setMaxTurns(0);
     onClose();
   }, [onClose]);
 
@@ -125,10 +141,11 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
       maxRounds,
       phases: null,
       protocol: {
-        agentTimeoutSeconds: 60,
-        onAgentFailure: "SKIP",
-        maxRetries: 2,
-        onMemberUnavailable: "SKIP",
+        agentTimeoutSeconds: agentTimeout,
+        onAgentFailure,
+        maxRetries,
+        onMemberUnavailable,
+        ...(maxTurns > 0 ? { maxTurns } : {}),
       },
     };
 
@@ -157,7 +174,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border px-5 py-3">
           <h2 className="text-lg font-bold">{t("groups.createGroup", "Create Group")}</h2>
-          <button onClick={resetAndClose} className="rounded-md p-1 hover:bg-secondary transition-colors">
+          <button onClick={resetAndClose} className="rounded-md p-1 hover:bg-secondary transition-colors" aria-label={t("common.close", "Close")}>
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -269,7 +286,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                   {t("groups.discussionStyle", "Discussion Style")}
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-1">
-                  {DISCUSSION_STYLES.filter((s) => s !== "CUSTOM").map((s) => (
+                  {DISCUSSION_STYLES.map((s) => (
                     <button
                       key={s}
                       onClick={() => setStyle(s)}
@@ -285,6 +302,63 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                     </button>
                   ))}
                 </div>
+                {/* Style-specific hints */}
+                {style === "ROUND_TABLE" && (
+                  <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2 mt-2">
+                    <Info className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("groupWizard.hintRoundTable", "All members share their opinions, then discuss each other's views across multiple rounds before the moderator synthesizes.")}
+                    </p>
+                  </div>
+                )}
+                {style === "DEBATE" && (
+                  <div className="flex items-start gap-2 rounded-lg border border-sky-500/30 bg-sky-500/5 p-2 mt-2">
+                    <Info className="h-3.5 w-3.5 text-sky-500 shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("groupWizard.hintDebate", "Assign PRO and CON roles to members. Pro argues first, then Con, followed by rebuttals and judgment.")}
+                    </p>
+                  </div>
+                )}
+                {style === "DEVIL_ADVOCATE" && (
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 mt-2">
+                    <Info className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("groupWizard.hintDevilAdvocate", "Assign the role DEVIL_ADVOCATE to at least one member. They will challenge the group's consensus.")}
+                    </p>
+                  </div>
+                )}
+                {style === "PEER_REVIEW" && (
+                  <div className="flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2 mt-2">
+                    <Info className="h-3.5 w-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("groupWizard.hintPeerReview", "Each member individually critiques every other member's work, then revises based on feedback received.")}
+                    </p>
+                  </div>
+                )}
+                {style === "DELPHI" && (
+                  <div className="flex items-start gap-2 rounded-lg border border-purple-500/30 bg-purple-500/5 p-2 mt-2">
+                    <Info className="h-3.5 w-3.5 text-purple-500 shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("groupWizard.hintDelphi", "All members respond independently and anonymously. After each round, they see anonymous results and can adjust. Max Rounds controls the number of anonymous iterations.")}
+                    </p>
+                  </div>
+                )}
+                {style === "TASK_FORCE" && (
+                  <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 p-2 mt-2">
+                    <Info className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("groupWizard.hintTaskForce", "The moderator creates a task plan, assigns work to agents in parallel, then verifies and synthesizes the results.")}
+                    </p>
+                  </div>
+                )}
+                {style === "CUSTOM" && (
+                  <div className="flex items-start gap-2 rounded-lg border border-muted-foreground/30 bg-muted/20 p-2 mt-2">
+                    <Info className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("groupWizard.hintCustom", "Define your own phases manually. Custom phases can be configured via the API after creation.")}
+                    </p>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -298,6 +372,105 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                   min={1}
                   max={10}
                 />
+              </div>
+
+              {/* Advanced Protocol Settings */}
+              <div className="border border-border rounded-lg overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanced(!showAdvanced)}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Settings className="h-3.5 w-3.5" />
+                  {t("groupWizard.advancedSettings", "Advanced Protocol Settings")}
+                  {showAdvanced ? (
+                    <ChevronUp className="h-3 w-3 ms-auto" />
+                  ) : (
+                    <ChevronDown className="h-3 w-3 ms-auto" />
+                  )}
+                </button>
+                {showAdvanced && (
+                  <div className="px-3 pb-3 space-y-3 border-t border-border pt-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      {/* Agent Timeout */}
+                      <div>
+                        <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          {t("groupWizard.agentTimeout", "Agent Timeout (seconds)")}
+                        </label>
+                        <input
+                          type="number"
+                          value={agentTimeout}
+                          onChange={(e) => setAgentTimeout(Math.max(10, parseInt(e.target.value) || 60))}
+                          className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+                          min={10}
+                          max={600}
+                        />
+                      </div>
+                      {/* Max Retries */}
+                      <div>
+                        <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          {t("groupWizard.maxRetries", "Max Retries")}
+                        </label>
+                        <input
+                          type="number"
+                          value={maxRetries}
+                          onChange={(e) => setMaxRetries(Math.max(0, parseInt(e.target.value) || 0))}
+                          className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+                          min={0}
+                          max={10}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      {/* On Agent Failure */}
+                      <div>
+                        <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          {t("groupWizard.onAgentFailure", "On Agent Failure")}
+                        </label>
+                        <select
+                          value={onAgentFailure}
+                          onChange={(e) => setOnAgentFailure(e.target.value as MemberFailurePolicy)}
+                          className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+                        >
+                          <option value="SKIP">{t("groupWizard.policySkip", "Skip")}</option>
+                          <option value="RETRY">{t("groupWizard.policyRetry", "Retry")}</option>
+                          <option value="ABORT">{t("groupWizard.policyAbort", "Abort")}</option>
+                        </select>
+                      </div>
+                      {/* On Member Unavailable */}
+                      <div>
+                        <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          {t("groupWizard.onMemberUnavailable", "On Member Unavailable")}
+                        </label>
+                        <select
+                          value={onMemberUnavailable}
+                          onChange={(e) => setOnMemberUnavailable(e.target.value as MemberUnavailablePolicy)}
+                          className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+                        >
+                          <option value="SKIP">{t("groupWizard.policySkip", "Skip")}</option>
+                          <option value="FAIL">{t("groupWizard.policyFail", "Fail")}</option>
+                        </select>
+                      </div>
+                    </div>
+                    {/* Max Turns */}
+                    <div>
+                      <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        {t("groupWizard.maxTurns", "Max Turns (0 = unlimited)")}
+                      </label>
+                      <input
+                        type="number"
+                        value={maxTurns}
+                        onChange={(e) => setMaxTurns(Math.max(0, parseInt(e.target.value) || 0))}
+                        className="mt-1 w-24 rounded-md border border-input bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+                        min={0}
+                        max={200}
+                      />
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        {t("groupWizard.maxTurnsHelp", "Safety cap for total agent turns. Default backend limit is 50.")}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -431,6 +604,11 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
               members={members}
               moderatorAgentId={moderatorAgentId}
               agentNameMap={agentNameMap}
+              agentTimeout={agentTimeout}
+              onAgentFailure={onAgentFailure}
+              maxRetries={maxRetries}
+              onMemberUnavailable={onMemberUnavailable}
+              maxTurns={maxTurns}
             />
           )}
         </div>
@@ -478,6 +656,11 @@ interface ReviewStepProps {
   members: GroupMember[];
   moderatorAgentId: string;
   agentNameMap: Map<string, string>;
+  agentTimeout: number;
+  onAgentFailure: MemberFailurePolicy;
+  maxRetries: number;
+  onMemberUnavailable: MemberUnavailablePolicy;
+  maxTurns: number;
 }
 
 function ReviewStep({
@@ -488,6 +671,11 @@ function ReviewStep({
   members,
   moderatorAgentId,
   agentNameMap,
+  agentTimeout,
+  onAgentFailure,
+  maxRetries,
+  onMemberUnavailable,
+  maxTurns,
 }: ReviewStepProps) {
   const { t } = useTranslation();
   const unassignedCount = members.filter((m) => !m.agentId).length;
@@ -545,7 +733,7 @@ function ReviewStep({
         </div>
         <div className="rounded-lg border border-border bg-secondary/10 p-2.5 text-center">
           <Clock className="h-3.5 w-3.5 text-muted-foreground inline-block mb-1" />
-          <div className="text-sm font-bold">60s</div>
+          <div className="text-sm font-bold">{agentTimeout}s</div>
           <div className="text-[10px] text-muted-foreground">
             {t("groups.reviewTimeout", "Agent Timeout")}
           </div>
@@ -630,12 +818,26 @@ function ReviewStep({
         </div>
       </div>
 
-      {/* Section 5: Protocol defaults */}
-      <div className="flex items-center gap-3 text-[10px] text-muted-foreground px-1">
-        <Shield className="h-3 w-3 shrink-0" />
-        <span>
-          {t("groups.reviewProtocol", "On failure: skip agent • 2 retries • Unavailable members: skip")}
-        </span>
+      {/* Section 5: Protocol details */}
+      <div className="rounded-lg border border-border bg-secondary/10 p-2.5 space-y-1">
+        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+          <Shield className="h-3 w-3" />
+          {t("groupWizard.protocolSummary", "Protocol")}
+        </div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
+          <span className="text-muted-foreground">{t("groupWizard.onAgentFailure", "On Agent Failure")}</span>
+          <span className="font-medium">{onAgentFailure.toLowerCase().replace(/_/g, " ")}</span>
+          <span className="text-muted-foreground">{t("groupWizard.maxRetries", "Max Retries")}</span>
+          <span className="font-medium">{maxRetries}</span>
+          <span className="text-muted-foreground">{t("groupWizard.onMemberUnavailable", "On Member Unavailable")}</span>
+          <span className="font-medium">{onMemberUnavailable.toLowerCase().replace(/_/g, " ")}</span>
+          {maxTurns > 0 && (
+            <>
+              <span className="text-muted-foreground">{t("groupWizard.maxTurns", "Max Turns")}</span>
+              <span className="font-medium">{maxTurns}</span>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

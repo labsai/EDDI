@@ -88,6 +88,7 @@ export interface DiscussionPhase {
   targetEachPeer: boolean;
   inputTemplate: string | null;
   repeats: number;
+  requiresApproval?: boolean;
 }
 
 export interface ProtocolConfig {

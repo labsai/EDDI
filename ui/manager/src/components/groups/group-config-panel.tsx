@@ -4,7 +4,7 @@ import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, Clipboa
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn, hashColor, getInitials } from "@/lib/utils";
-import type { AgentGroupConfiguration, DiscussionStyle } from "@/lib/api/groups";
+import type { AgentGroupConfiguration, DiscussionStyle, DiscussionPhase } from "@/lib/api/groups";
 import { STYLE_INFO } from "@/lib/api/groups";
 import { toast } from "sonner";
 import { useDeleteGroupWithMembers } from "@/hooks/use-groups";
@@ -26,6 +26,17 @@ const PANEL_STYLE_COLORS: Record<DiscussionStyle, { bg: string; border: string; 
   DEBATE: { bg: "bg-indigo-500/10", border: "border-indigo-500/30", text: "text-indigo-600 dark:text-indigo-400" },
   TASK_FORCE: { bg: "bg-orange-500/10", border: "border-orange-500/30", text: "text-orange-600 dark:text-orange-400" },
   CUSTOM: { bg: "bg-secondary/20", border: "border-border", text: "text-foreground" },
+};
+
+/** Human-readable labels for ContextScope values */
+const CONTEXT_SCOPE_LABELS: Record<string, string> = {
+  NONE: "independent",
+  FULL: "full context",
+  LAST_PHASE: "last phase",
+  ANONYMOUS: "anonymous",
+  OWN_FEEDBACK: "own feedback",
+  TASK_ONLY: "task only",
+  TASK_WITH_DEPS: "task + deps",
 };
 
 export function GroupConfigPanel({ config, groupId, groupVersion, className }: GroupConfigPanelProps) {
@@ -72,7 +83,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
             <span className="text-base">{styleInfo.icon}</span>
             <span className={cn("text-sm font-semibold", styleColors.text)}>{styleInfo.label}</span>
           </div>
-          <StyleFlowPreview flow={styleInfo.flow} />
+          <PhaseFlowPreview flow={styleInfo.flow} phases={config.phases} />
         </div>
       </div>
 
@@ -97,9 +108,19 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
                 {getInitials(member.displayName || "?")}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-foreground truncate">
-                  {member.displayName}
-                </p>
+                <div className="flex items-center gap-1">
+                  <p className="text-xs font-medium text-foreground truncate">
+                    {member.displayName}
+                  </p>
+                  {member.speakingOrder != null && (
+                    <span
+                      className="inline-flex items-center justify-center h-4 min-w-4 rounded-full bg-muted text-[9px] font-semibold text-muted-foreground px-1 shrink-0"
+                      title={t("groups.speakingOrderTooltip", "Speaking order: #{{order}}", { order: member.speakingOrder })}
+                    >
+                      #{member.speakingOrder}
+                    </span>
+                  )}
+                </div>
                 {member.agentId && (
                   <p className="text-[10px] text-muted-foreground font-mono truncate">
                     {member.agentId.slice(0, 12)}…
@@ -138,10 +159,13 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
           </h4>
           <div className="rounded-lg border border-border bg-secondary/30 p-2.5 space-y-1">
             <InfoRow label={t("groups.protocolTimeout", "Timeout")} value={`${config.protocol.agentTimeoutSeconds}s`} />
-            <InfoRow label={t("groups.protocolOnFailure", "On Failure")} value={config.protocol.onAgentFailure} />
+            <InfoRow label={t("groups.protocolOnFailure", "On Failure")} value={config.protocol.onAgentFailure.charAt(0) + config.protocol.onAgentFailure.slice(1).toLowerCase()} />
             <InfoRow label={t("groups.protocolMaxRetries", "Max Retries")} value={String(config.protocol.maxRetries)} />
-            <InfoRow label={t("groups.protocolUnavailable", "Unavailable")} value={config.protocol.onMemberUnavailable} />
+            <InfoRow label={t("groups.protocolUnavailable", "Unavailable")} value={config.protocol.onMemberUnavailable.charAt(0) + config.protocol.onMemberUnavailable.slice(1).toLowerCase()} />
             <InfoRow label={t("groups.protocolMaxRounds", "Max Rounds")} value={String(config.maxRounds)} />
+            {config.protocol.maxTurns != null && config.protocol.maxTurns > 0 && (
+              <InfoRow label={t("groups.protocolMaxTurns", "Max Turns")} value={String(config.protocol.maxTurns)} />
+            )}
           </div>
         </div>
       )}
@@ -219,6 +243,18 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
                 value={config.dynamicAgents.allowedProviders.join(", ")}
               />
             )}
+            {Object.keys(config.dynamicAgents.allowedModels).length > 0 && (
+              <InfoRow
+                label={t("groups.allowedModels", "Models")}
+                value={formatAllowedModels(config.dynamicAgents.allowedModels)}
+              />
+            )}
+            <InfoRow
+              label={t("groups.inheritParentModel", "Inherit Model")}
+              value={config.dynamicAgents.inheritParentModel
+                ? t("groups.enabled", "Enabled")
+                : t("groups.disabled", "Disabled")}
+            />
           </div>
         </div>
       )}
@@ -285,7 +321,62 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function StyleFlowPreview({ flow }: { flow: string }) {
+/** Format allowedModels Record<string, string[]> into a compact display string */
+function formatAllowedModels(allowedModels: Record<string, string[]>): string {
+  const parts: string[] = [];
+  for (const [provider, models] of Object.entries(allowedModels)) {
+    for (const model of models) {
+      parts.push(`${provider}:${model}`);
+    }
+  }
+  return parts.join(", ") || "—";
+}
+
+/**
+ * Enhanced flow preview that shows richer phase info when phase data is available.
+ * Falls back to the simple text flow (from STYLE_INFO) when no phases are configured.
+ */
+function PhaseFlowPreview({ flow, phases }: { flow: string; phases: DiscussionPhase[] | null }) {
+  const { t } = useTranslation();
+
+  // If we have real phase data, render the enhanced version
+  if (phases && phases.length > 0) {
+    return (
+      <div className="flex flex-wrap items-start gap-1 mt-1">
+        {phases.map((phase, idx) => {
+          const turnIcon = phase.turnOrder === "PARALLEL" ? "⇉" : "⟳";
+          const turnLabel = phase.turnOrder === "PARALLEL"
+            ? t("groups.turnOrderParallel", "parallel")
+            : t("groups.turnOrderSequential", "sequential");
+          const scopeLabel = CONTEXT_SCOPE_LABELS[phase.contextScope] || phase.contextScope.toLowerCase();
+
+          return (
+            <span key={idx} className="flex items-center gap-1">
+              <span
+                className="group relative text-[10px] font-medium text-foreground/80 rounded-md bg-background px-1.5 py-0.5 border border-border cursor-default"
+                title={`${turnLabel} · ${scopeLabel}${phase.requiresApproval ? ` · ${t("groups.requiresApproval", "requires approval")}` : ""}`}
+              >
+                <div className="flex flex-col items-center gap-0">
+                  <span className="flex items-center gap-0.5">
+                    <span className="opacity-60" aria-label={turnLabel}>{turnIcon}</span>
+                    {phase.name}
+                  </span>
+                  <span className="text-[8px] text-muted-foreground font-normal leading-none">
+                    {scopeLabel}
+                  </span>
+                </div>
+              </span>
+              {idx < phases.length - 1 && (
+                <ArrowRight className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
+              )}
+            </span>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Fallback: simple text-based flow preview (no phase data available)
   const steps = flow.split(" → ");
   return (
     <div className="flex flex-wrap items-center gap-1 mt-1">

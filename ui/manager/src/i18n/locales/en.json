@@ -1502,10 +1502,20 @@
       "Synthesize": "Synthesize"
     },
     "lifecycle": {
-      "DISCUSSION_SCOPED": "discussion scoped",
-      "PERSISTENT": "persistent",
-      "EPHEMERAL": "ephemeral"
-    }
+      "EPHEMERAL": "ephemeral",
+      "KEEP_DEPLOYED": "keep deployed",
+      "UNDEPLOY_ONLY": "undeploy only",
+      "AGENT_DECIDES": "agent decides"
+    },
+    "protocolMaxTurns": "Max Turns",
+    "speakingOrderTooltip": "Speaking order: #{{order}}",
+    "allowedModels": "Models",
+    "inheritParentModel": "Inherit Model",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "turnOrderSequential": "sequential",
+    "turnOrderParallel": "parallel",
+    "requiresApproval": "requires approval"
   },
   "taskBoard": {
     "title": "Task Board",
@@ -1580,7 +1590,26 @@
     "created": "Group Created!",
     "viewGroup": "Open Group",
     "createAnother": "Create Another",
-    "success": "Group created successfully!"
+    "success": "Group created successfully!",
+    "advancedSettings": "Advanced Protocol Settings",
+    "agentTimeout": "Agent Timeout (seconds)",
+    "maxRetries": "Max Retries",
+    "onAgentFailure": "On Agent Failure",
+    "onMemberUnavailable": "On Member Unavailable",
+    "maxTurns": "Max Turns (0 = unlimited)",
+    "maxTurnsHelp": "Safety cap for total agent turns. Default backend limit is 50.",
+    "policySkip": "Skip",
+    "policyRetry": "Retry",
+    "policyAbort": "Abort",
+    "policyFail": "Fail",
+    "hintDebate": "Assign PRO and CON roles to members. Pro argues first, then Con, followed by rebuttals and judgment.",
+    "hintDevilAdvocate": "Assign the role DEVIL_ADVOCATE to at least one member. They will challenge the group's consensus.",
+    "hintPeerReview": "Each member individually critiques every other member's work, then revises based on feedback received.",
+    "hintDelphi": "All members respond independently and anonymously. After each round, they see anonymous results and can adjust. Max Rounds controls the number of anonymous iterations.",
+    "hintTaskForce": "The moderator creates a task plan, assigns work to agents in parallel, then verifies and synthesizes the results.",
+    "hintCustom": "Define your own phases manually. Custom phases can be configured via the API after creation.",
+    "hintRoundTable": "All members share their opinions, then discuss each other's views across multiple rounds before the moderator synthesizes.",
+    "protocolSummary": "Protocol"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",

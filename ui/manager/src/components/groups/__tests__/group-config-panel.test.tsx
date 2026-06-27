@@ -86,7 +86,7 @@ describe("GroupConfigPanel", () => {
     expect(screen.getByText("Timeout")).toBeInTheDocument();
     expect(screen.getByText("30s")).toBeInTheDocument();
     expect(screen.getByText("On Failure")).toBeInTheDocument();
-    expect(screen.getAllByText("SKIP")).toHaveLength(2);
+    expect(screen.getAllByText("Skip")).toHaveLength(2);
     expect(screen.getByText("Max Retries")).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument();
     expect(screen.getByText("Max Rounds")).toBeInTheDocument();
