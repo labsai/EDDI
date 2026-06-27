@@ -12,6 +12,7 @@ interface GroupCardProps {
     version: number;
     name: string;
     description: string;
+    createdOn?: number;
     lastModifiedOn: number;
   };
   memberCount?: number;
@@ -32,7 +33,7 @@ export function GroupCard({
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const styleInfo = style ? STYLE_INFO[style] : null;
-  const effectiveTimestamp = group.lastModifiedOn || group.createdOn;
+  const effectiveTimestamp = group.lastModifiedOn || group.createdOn || 0;
   const timeAgo = formatRelativeTime(effectiveTimestamp);
   const effectiveMemberCount = members.length > 0 ? members.length : memberCount;
 
