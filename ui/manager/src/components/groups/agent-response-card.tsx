@@ -269,10 +269,10 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground leading-snug">{item.subject}</p>
                     {item.description && (
-                      <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{item.description}</p>
+                      <ExpandableText text={item.description} className="mt-0.5" />
                     )}
                     {item.feedback && (
-                      <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{item.feedback}</p>
+                      <ExpandableText text={item.feedback} className="mt-0.5" />
                     )}
                     {item.assignedTo && (
                       <div className="flex items-center gap-1 mt-1.5">
@@ -361,6 +361,32 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Clamped text with show more/less toggle for long content */
+function ExpandableText({ text, className }: { text: string; className?: string }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > 100;
+
+  return (
+    <div className={className}>
+      <p className={cn("text-xs text-muted-foreground leading-relaxed", !expanded && isLong && "line-clamp-2")}>
+        {text}
+      </p>
+      {isLong && (
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="text-[10px] text-primary/70 hover:text-primary font-medium mt-0.5 transition-colors"
+        >
+          {expanded
+            ? t("taskBoard.showLess", "show less")
+            : t("taskBoard.showMore", "show more")}
+        </button>
+      )}
     </div>
   );
 }
