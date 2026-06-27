@@ -1,6 +1,6 @@
 # EDDI Architecture
 
-**Version: 6.0.0**
+**Version: 6.2.0**
 
 This document provides a comprehensive overview of EDDI's architecture, design principles, and internal workflow.
 
@@ -872,6 +872,7 @@ A `GroupConversationService` orchestrates discussions through configurable phase
 - **Custom phases**: Define your own phase sequences with configurable context scopes (independent, full transcript, anonymous, own-feedback-only)
 - **Group-of-groups**: Members can themselves be groups, enabling hierarchical multi-agent composition with configurable depth limits
 - **Fault tolerance**: Per-agent timeouts, configurable failure policies (skip, retry, abort), and graceful degradation when members are unavailable
+- **Dynamic agents**: Agents can create, recruit, delegate to, and teardown new agents at runtime during discussions, with configurable guardrails (provider/model whitelists, per-discussion caps, lifecycle policies)
 
 See [Group Conversations](group-conversations.md) for full configuration reference, and [A2A Protocol](a2a-protocol.md) for peer-to-peer agent communication.
 

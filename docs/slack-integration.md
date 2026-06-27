@@ -278,6 +278,17 @@ Each style produces a distinct phase flow, but all use the same header+thread UX
 | **DELPHI** | Anonymous Round 1 → Round 2 (convergence) → Synthesis | Each round's opinions post as headers; convergence visible across rounds |
 | **TASK FORCE** | Plan → Execute → Verify → Synthesis | Moderator posts plan; agents post task results; verifiers thread under targets; synthesis |
 
+#### TASK_FORCE Events in Slack
+
+The `SlackGroupDiscussionListener` handles TASK_FORCE-specific events:
+
+| Event | Slack Rendering |
+|-------|----------------|
+| `onTaskPlanCreated` | Posts "📝 *Task plan created*" (or "pre-configured") with numbered task list and assignments |
+| `onSpeakerComplete` (EXECUTE phase) | Each agent's task result posts as a channel-level header + thread reply |
+| `onTaskVerified` | Posts ✅/❌ with task subject, pass/fail status, and moderator feedback |
+| `onGroupComplete` | Posts "📋 *Panel Synthesis*" with preview + full content in thread |
+
 #### Peer Feedback Threading
 
 In styles with agent-to-agent feedback (PEER_REVIEW, DEVIL_ADVOCATE, DEBATE), feedback is posted as a **thread reply under the target agent's channel header**. This creates a natural conversation flow:
