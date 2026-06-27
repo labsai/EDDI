@@ -257,4 +257,22 @@ describe("GroupCard", () => {
     const timeSpan = card.querySelector("[title]");
     expect(timeSpan).toBeInTheDocument();
   });
+
+  it("renders '—' when lastModifiedOn is 0", () => {
+    const group = { ...baseGroup, lastModifiedOn: 0 };
+    renderWithProviders(<GroupCard group={group} />);
+    expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
+  it("renders '—' when lastModifiedOn is undefined", () => {
+    const group = { ...baseGroup, lastModifiedOn: undefined as unknown as number };
+    renderWithProviders(<GroupCard group={group} />);
+    expect(screen.getByText("—")).toBeInTheDocument();
+  });
+
+  it("renders valid relative time for valid timestamp", () => {
+    const group = { ...baseGroup, lastModifiedOn: Date.now() - 7200000 }; // 2h ago
+    renderWithProviders(<GroupCard group={group} />);
+    expect(screen.getByText("2h ago")).toBeInTheDocument();
+  });
 });

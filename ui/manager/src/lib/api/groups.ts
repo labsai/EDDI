@@ -587,6 +587,7 @@ export async function getEnrichedGroupDescriptors(
           ...g,
           name: config.name || g.name,
           description: config.description || g.description,
+          lastModifiedOn: g.lastModifiedOn || (config.lastModified ? new Date(config.lastModified).getTime() : 0),
           memberCount: config.members?.length ?? 0,
           style: config.style,
           members: (config.members ?? []).map((m) => ({

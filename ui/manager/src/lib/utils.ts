@@ -7,8 +7,10 @@ export function cn(...inputs: ClassValue[]) {
 
 /** Format a timestamp into a human-friendly relative time string */
 export function formatRelativeTime(timestamp: number): string {
+  if (!timestamp || !Number.isFinite(timestamp)) return "—";
   const now = Date.now();
   const diff = now - timestamp;
+  if (diff < 0 || !Number.isFinite(diff)) return "—";
   const seconds = Math.floor(diff / 1000);
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
