@@ -28,8 +28,8 @@ const PANEL_STYLE_COLORS: Record<DiscussionStyle, { bg: string; border: string; 
   CUSTOM: { bg: "bg-secondary/20", border: "border-border", text: "text-foreground" },
 };
 
-/** Human-readable labels for ContextScope values */
-const CONTEXT_SCOPE_LABELS: Record<string, string> = {
+/** Fallback labels for ContextScope values (used as i18n defaults) */
+const CONTEXT_SCOPE_FALLBACKS: Record<string, string> = {
   NONE: "independent",
   FULL: "full context",
   LAST_PHASE: "last phase",
@@ -159,9 +159,9 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
           </h4>
           <div className="rounded-lg border border-border bg-secondary/30 p-2.5 space-y-1">
             <InfoRow label={t("groups.protocolTimeout", "Timeout")} value={`${config.protocol.agentTimeoutSeconds}s`} />
-            <InfoRow label={t("groups.protocolOnFailure", "On Failure")} value={config.protocol.onAgentFailure.charAt(0) + config.protocol.onAgentFailure.slice(1).toLowerCase()} />
+            <InfoRow label={t("groups.protocolOnFailure", "On Failure")} value={t(`groupWizard.policy${config.protocol.onAgentFailure.charAt(0) + config.protocol.onAgentFailure.slice(1).toLowerCase()}`, config.protocol.onAgentFailure.charAt(0) + config.protocol.onAgentFailure.slice(1).toLowerCase())} />
             <InfoRow label={t("groups.protocolMaxRetries", "Max Retries")} value={String(config.protocol.maxRetries)} />
-            <InfoRow label={t("groups.protocolUnavailable", "Unavailable")} value={config.protocol.onMemberUnavailable.charAt(0) + config.protocol.onMemberUnavailable.slice(1).toLowerCase()} />
+            <InfoRow label={t("groups.protocolUnavailable", "Unavailable")} value={t(`groupWizard.policy${config.protocol.onMemberUnavailable.charAt(0) + config.protocol.onMemberUnavailable.slice(1).toLowerCase()}`, config.protocol.onMemberUnavailable.charAt(0) + config.protocol.onMemberUnavailable.slice(1).toLowerCase())} />
             <InfoRow label={t("groups.protocolMaxRounds", "Max Rounds")} value={String(config.maxRounds)} />
             {config.protocol.maxTurns != null && config.protocol.maxTurns > 0 && (
               <InfoRow label={t("groups.protocolMaxTurns", "Max Turns")} value={String(config.protocol.maxTurns)} />
@@ -348,7 +348,7 @@ function PhaseFlowPreview({ flow, phases }: { flow: string; phases: DiscussionPh
           const turnLabel = phase.turnOrder === "PARALLEL"
             ? t("groups.turnOrderParallel", "parallel")
             : t("groups.turnOrderSequential", "sequential");
-          const scopeLabel = CONTEXT_SCOPE_LABELS[phase.contextScope] || phase.contextScope.toLowerCase();
+          const scopeLabel = t(`groups.contextScope.${phase.contextScope}`, CONTEXT_SCOPE_FALLBACKS[phase.contextScope] || phase.contextScope.toLowerCase());
 
           return (
             <span key={idx} className="flex items-center gap-1">

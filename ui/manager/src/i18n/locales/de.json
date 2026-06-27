@@ -1473,7 +1473,18 @@
     "disabled": "Deaktiviert",
     "turnOrderSequential": "sequenziell",
     "turnOrderParallel": "parallel",
-    "requiresApproval": "Genehmigung erforderlich"
+    "requiresApproval": "Genehmigung erforderlich",
+    "item": "Element",
+    "items": "Elemente",
+    "contextScope": {
+      "NONE": "unabhängig",
+      "FULL": "vollständiger Kontext",
+      "LAST_PHASE": "letzte Phase",
+      "ANONYMOUS": "anonym",
+      "OWN_FEEDBACK": "eigenes Feedback",
+      "TASK_ONLY": "nur Aufgabe",
+      "TASK_WITH_DEPS": "Aufgabe + Abhängigkeiten"
+    }
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",

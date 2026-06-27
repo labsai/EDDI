@@ -1473,7 +1473,18 @@
     "disabled": "ปิดใช้งาน",
     "turnOrderSequential": "ตามลำดับ",
     "turnOrderParallel": "ขนาน",
-    "requiresApproval": "ต้องได้รับอนุมัติ"
+    "requiresApproval": "ต้องได้รับอนุมัติ",
+    "item": "รายการ",
+    "items": "รายการ",
+    "contextScope": {
+      "NONE": "อิสระ",
+      "FULL": "บริบทเต็ม",
+      "LAST_PHASE": "เฟสล่าสุด",
+      "ANONYMOUS": "ไม่ระบุตัวตน",
+      "OWN_FEEDBACK": "ข้อเสนอแนะของตนเอง",
+      "TASK_ONLY": "เฉพาะงาน",
+      "TASK_WITH_DEPS": "งาน + งานที่เกี่ยวข้อง"
+    }
   },
   "taskBoard": {
     "title": "บอร์ดงาน",

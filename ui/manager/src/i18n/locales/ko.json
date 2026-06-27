@@ -1473,7 +1473,18 @@
     "disabled": "비활성화",
     "turnOrderSequential": "순차",
     "turnOrderParallel": "병렬",
-    "requiresApproval": "승인 필요"
+    "requiresApproval": "승인 필요",
+    "item": "항목",
+    "items": "항목",
+    "contextScope": {
+      "NONE": "독립",
+      "FULL": "전체 컨텍스트",
+      "LAST_PHASE": "이전 단계",
+      "ANONYMOUS": "익명",
+      "OWN_FEEDBACK": "자체 피드백",
+      "TASK_ONLY": "작업만",
+      "TASK_WITH_DEPS": "작업 + 종속"
+    }
   },
   "taskBoard": {
     "title": "작업 보드",

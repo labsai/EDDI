@@ -1473,7 +1473,18 @@
     "disabled": "Desativado",
     "turnOrderSequential": "sequencial",
     "turnOrderParallel": "paralelo",
-    "requiresApproval": "requer aprovação"
+    "requiresApproval": "requer aprovação",
+    "item": "item",
+    "items": "itens",
+    "contextScope": {
+      "NONE": "independente",
+      "FULL": "contexto completo",
+      "LAST_PHASE": "última fase",
+      "ANONYMOUS": "anônimo",
+      "OWN_FEEDBACK": "feedback próprio",
+      "TASK_ONLY": "apenas tarefa",
+      "TASK_WITH_DEPS": "tarefa + dependências"
+    }
   },
   "taskBoard": {
     "title": "Quadro de tarefas",

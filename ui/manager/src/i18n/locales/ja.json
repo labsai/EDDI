@@ -1473,7 +1473,18 @@
     "disabled": "無効",
     "turnOrderSequential": "順次",
     "turnOrderParallel": "並列",
-    "requiresApproval": "承認が必要"
+    "requiresApproval": "承認が必要",
+    "item": "アイテム",
+    "items": "アイテム",
+    "contextScope": {
+      "NONE": "独立",
+      "FULL": "フルコンテキスト",
+      "LAST_PHASE": "前フェーズ",
+      "ANONYMOUS": "匿名",
+      "OWN_FEEDBACK": "自身のフィードバック",
+      "TASK_ONLY": "タスクのみ",
+      "TASK_WITH_DEPS": "タスク＋依存"
+    }
   },
   "taskBoard": {
     "title": "タスクボード",

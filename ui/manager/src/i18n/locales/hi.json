@@ -1473,7 +1473,18 @@
     "disabled": "अक्षम",
     "turnOrderSequential": "क्रमिक",
     "turnOrderParallel": "समानांतर",
-    "requiresApproval": "अनुमोदन आवश्यक"
+    "requiresApproval": "अनुमोदन आवश्यक",
+    "item": "आइटम",
+    "items": "आइटम",
+    "contextScope": {
+      "NONE": "स्वतंत्र",
+      "FULL": "पूर्ण संदर्भ",
+      "LAST_PHASE": "अंतिम चरण",
+      "ANONYMOUS": "अनाम",
+      "OWN_FEEDBACK": "स्वयं की प्रतिक्रिया",
+      "TASK_ONLY": "केवल कार्य",
+      "TASK_WITH_DEPS": "कार्य + निर्भरताएँ"
+    }
   },
   "taskBoard": {
     "title": "कार्य बोर्ड",

@@ -1473,7 +1473,18 @@
     "disabled": "Désactivé",
     "turnOrderSequential": "séquentiel",
     "turnOrderParallel": "parallèle",
-    "requiresApproval": "approbation requise"
+    "requiresApproval": "approbation requise",
+    "item": "élément",
+    "items": "éléments",
+    "contextScope": {
+      "NONE": "indépendant",
+      "FULL": "contexte complet",
+      "LAST_PHASE": "dernière phase",
+      "ANONYMOUS": "anonyme",
+      "OWN_FEEDBACK": "propre feedback",
+      "TASK_ONLY": "tâche uniquement",
+      "TASK_WITH_DEPS": "tâche + dépendances"
+    }
   },
   "taskBoard": {
     "title": "Tableau des tâches",

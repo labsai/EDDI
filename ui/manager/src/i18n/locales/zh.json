@@ -1473,7 +1473,18 @@
     "disabled": "已禁用",
     "turnOrderSequential": "顺序",
     "turnOrderParallel": "并行",
-    "requiresApproval": "需要审批"
+    "requiresApproval": "需要审批",
+    "item": "项目",
+    "items": "项目",
+    "contextScope": {
+      "NONE": "独立",
+      "FULL": "完整上下文",
+      "LAST_PHASE": "上一阶段",
+      "ANONYMOUS": "匿名",
+      "OWN_FEEDBACK": "自身反馈",
+      "TASK_ONLY": "仅任务",
+      "TASK_WITH_DEPS": "任务 + 依赖"
+    }
   },
   "taskBoard": {
     "title": "任务看板",

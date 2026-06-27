@@ -1515,7 +1515,18 @@
     "disabled": "Disabled",
     "turnOrderSequential": "sequential",
     "turnOrderParallel": "parallel",
-    "requiresApproval": "requires approval"
+    "requiresApproval": "requires approval",
+    "item": "item",
+    "items": "items",
+    "contextScope": {
+      "NONE": "independent",
+      "FULL": "full context",
+      "LAST_PHASE": "last phase",
+      "ANONYMOUS": "anonymous",
+      "OWN_FEEDBACK": "own feedback",
+      "TASK_ONLY": "task only",
+      "TASK_WITH_DEPS": "task + deps"
+    }
   },
   "taskBoard": {
     "title": "Task Board",

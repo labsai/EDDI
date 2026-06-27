@@ -241,7 +241,7 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
               ) : (
                 <ListOrdered className="h-3.5 w-3.5" />
               )}
-              {structuredItems.length} {structuredItems.length === 1 ? "item" : "items"}
+              {structuredItems.length} {structuredItems.length === 1 ? t("groups.item", "item") : t("groups.items", "items")}
             </div>
             {structuredItems.map((item, i) => {
               const hasVerdict = item.passed !== undefined;
@@ -257,9 +257,9 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
                 >
                   {hasVerdict ? (
                     item.passed ? (
-                      <CheckCircle2 className="h-4.5 w-4.5 shrink-0 text-emerald-500 mt-0.5" />
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500 mt-0.5" />
                     ) : (
-                      <XCircle className="h-4.5 w-4.5 shrink-0 text-destructive mt-0.5" />
+                      <XCircle className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
                     )
                   ) : (
                     <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-500/20 text-sky-400 text-[10px] font-bold mt-0.5">

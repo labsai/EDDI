@@ -1473,7 +1473,18 @@
     "disabled": "معطّل",
     "turnOrderSequential": "تسلسلي",
     "turnOrderParallel": "متوازٍ",
-    "requiresApproval": "يتطلب الموافقة"
+    "requiresApproval": "يتطلب الموافقة",
+    "item": "عنصر",
+    "items": "عناصر",
+    "contextScope": {
+      "NONE": "مستقل",
+      "FULL": "سياق كامل",
+      "LAST_PHASE": "المرحلة الأخيرة",
+      "ANONYMOUS": "مجهول",
+      "OWN_FEEDBACK": "ملاحظات ذاتية",
+      "TASK_ONLY": "المهمة فقط",
+      "TASK_WITH_DEPS": "المهمة + التبعيات"
+    }
   },
   "taskBoard": {
     "title": "لوحة المهام",
