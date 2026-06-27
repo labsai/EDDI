@@ -1484,7 +1484,14 @@
       "OWN_FEEDBACK": "自身反馈",
       "TASK_ONLY": "仅任务",
       "TASK_WITH_DEPS": "任务 + 依赖"
-    }
+    },
+    "configuration": "配置",
+    "deleteGroupOnly": "仅删除群组",
+    "deleteGroupOnlySuccess": "群组已删除（代理已保留）",
+    "deleteGroupOnlyWarning": "这将删除群组。所有成员代理将被保留。",
+    "deleteGroupAndAgents": "删除群组 + 所有代理",
+    "deleteWithMembersSuccess": "群组和所有成员代理已删除（软删除）",
+    "deleteWithMembersWarning": "这将软删除群组和所有 {{count}} 个成员代理。它们可以被恢复。"
   },
   "taskBoard": {
     "title": "任务看板",

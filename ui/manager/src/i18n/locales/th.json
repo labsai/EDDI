@@ -1484,7 +1484,14 @@
       "OWN_FEEDBACK": "ข้อเสนอแนะของตนเอง",
       "TASK_ONLY": "เฉพาะงาน",
       "TASK_WITH_DEPS": "งาน + งานที่เกี่ยวข้อง"
-    }
+    },
+    "configuration": "การกำหนดค่า",
+    "deleteGroupOnly": "ลบเฉพาะกลุ่ม",
+    "deleteGroupOnlySuccess": "ลบกลุ่มแล้ว (เก็บเอเจนต์ไว้)",
+    "deleteGroupOnlyWarning": "การดำเนินการนี้จะลบกลุ่ม เอเจนต์สมาชิกทั้งหมดจะถูกเก็บไว้",
+    "deleteGroupAndAgents": "ลบกลุ่ม + เอเจนต์ทั้งหมด",
+    "deleteWithMembersSuccess": "ลบกลุ่มและเอเจนต์สมาชิกทั้งหมดแล้ว (ลบแบบซอฟต์)",
+    "deleteWithMembersWarning": "การดำเนินการนี้จะลบแบบซอฟต์ทั้งกลุ่มและเอเจนต์สมาชิกทั้ง {{count}} ราย สามารถกู้คืนได้"
   },
   "taskBoard": {
     "title": "บอร์ดงาน",

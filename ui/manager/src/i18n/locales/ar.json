@@ -1484,7 +1484,14 @@
       "OWN_FEEDBACK": "ملاحظات ذاتية",
       "TASK_ONLY": "المهمة فقط",
       "TASK_WITH_DEPS": "المهمة + التبعيات"
-    }
+    },
+    "configuration": "الإعدادات",
+    "deleteGroupOnly": "حذف المجموعة فقط",
+    "deleteGroupOnlySuccess": "تم حذف المجموعة (تم الاحتفاظ بالوكلاء)",
+    "deleteGroupOnlyWarning": "سيؤدي هذا إلى حذف المجموعة. سيتم الاحتفاظ بجميع الوكلاء الأعضاء.",
+    "deleteGroupAndAgents": "حذف المجموعة + جميع الوكلاء",
+    "deleteWithMembersSuccess": "تم حذف المجموعة وجميع الوكلاء الأعضاء (حذف مؤقت)",
+    "deleteWithMembersWarning": "سيؤدي هذا إلى الحذف المؤقت للمجموعة وجميع الوكلاء الأعضاء البالغ عددهم {{count}}. يمكن استعادتهم."
   },
   "taskBoard": {
     "title": "لوحة المهام",

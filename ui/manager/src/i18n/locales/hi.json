@@ -1484,7 +1484,14 @@
       "OWN_FEEDBACK": "स्वयं की प्रतिक्रिया",
       "TASK_ONLY": "केवल कार्य",
       "TASK_WITH_DEPS": "कार्य + निर्भरताएँ"
-    }
+    },
+    "configuration": "कॉन्फ़िगरेशन",
+    "deleteGroupOnly": "केवल समूह हटाएँ",
+    "deleteGroupOnlySuccess": "समूह हटा दिया गया (एजेंट रखे गए)",
+    "deleteGroupOnlyWarning": "इससे समूह हट जाएगा। सभी सदस्य एजेंट रखे जाएँगे।",
+    "deleteGroupAndAgents": "समूह + सभी एजेंट हटाएँ",
+    "deleteWithMembersSuccess": "समूह और सभी सदस्य एजेंट हटा दिए गए (सॉफ्ट-डिलीट)",
+    "deleteWithMembersWarning": "इससे समूह और सभी {{count}} सदस्य एजेंट सॉफ्ट-डिलीट हो जाएँगे। उन्हें पुनर्स्थापित किया जा सकता है।"
   },
   "taskBoard": {
     "title": "कार्य बोर्ड",

@@ -1484,7 +1484,14 @@
       "OWN_FEEDBACK": "feedback próprio",
       "TASK_ONLY": "apenas tarefa",
       "TASK_WITH_DEPS": "tarefa + dependências"
-    }
+    },
+    "configuration": "Configuração",
+    "deleteGroupOnly": "Excluir apenas o grupo",
+    "deleteGroupOnlySuccess": "Grupo excluído (agentes mantidos)",
+    "deleteGroupOnlyWarning": "Isso excluirá o grupo. Todos os agentes membros serão mantidos.",
+    "deleteGroupAndAgents": "Excluir grupo + todos os agentes",
+    "deleteWithMembersSuccess": "Grupo e todos os agentes membros excluídos (exclusão suave)",
+    "deleteWithMembersWarning": "Isso fará a exclusão suave do grupo e de todos os {{count}} agentes membros. Eles poderão ser recuperados."
   },
   "taskBoard": {
     "title": "Quadro de tarefas",

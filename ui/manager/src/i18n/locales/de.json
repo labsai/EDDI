@@ -1484,7 +1484,14 @@
       "OWN_FEEDBACK": "eigenes Feedback",
       "TASK_ONLY": "nur Aufgabe",
       "TASK_WITH_DEPS": "Aufgabe + Abhängigkeiten"
-    }
+    },
+    "configuration": "Konfiguration",
+    "deleteGroupOnly": "Nur Gruppe löschen",
+    "deleteGroupOnlySuccess": "Gruppe gelöscht (Agenten behalten)",
+    "deleteGroupOnlyWarning": "Dies löscht die Gruppe. Alle Mitglieds-Agenten werden behalten.",
+    "deleteGroupAndAgents": "Gruppe + alle Agenten löschen",
+    "deleteWithMembersSuccess": "Gruppe und alle Mitglieds-Agenten gelöscht (Soft-Delete)",
+    "deleteWithMembersWarning": "Dies wird die Gruppe und alle {{count}} Mitglieds-Agenten per Soft-Delete löschen. Sie können wiederhergestellt werden."
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",

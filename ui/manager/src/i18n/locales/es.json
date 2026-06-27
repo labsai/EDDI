@@ -1484,7 +1484,14 @@
       "OWN_FEEDBACK": "feedback propio",
       "TASK_ONLY": "solo tarea",
       "TASK_WITH_DEPS": "tarea + dependencias"
-    }
+    },
+    "configuration": "Configuración",
+    "deleteGroupOnly": "Eliminar solo el grupo",
+    "deleteGroupOnlySuccess": "Grupo eliminado (agentes conservados)",
+    "deleteGroupOnlyWarning": "Esto eliminará el grupo. Todos los agentes miembros se mantendrán.",
+    "deleteGroupAndAgents": "Eliminar grupo + todos los agentes",
+    "deleteWithMembersSuccess": "Grupo y todos los agentes miembros eliminados (eliminación suave)",
+    "deleteWithMembersWarning": "Esto eliminará suavemente el grupo y todos los {{count}} agentes miembros. Se podrán recuperar."
   },
   "taskBoard": {
     "title": "Tablero de tareas",
