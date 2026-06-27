@@ -8,7 +8,7 @@ import { PhaseHeader } from "./phase-header";
 import { AgentResponseCard } from "./agent-response-card";
 import { TaskBoard } from "./task-board";
 import { parseTranscriptContent, safeFormatDate } from "./group-utils";
-import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle, SharedTaskList } from "@/lib/api/groups";
+import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle, SharedTaskList, TaskDefinition } from "@/lib/api/groups";
 import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +22,8 @@ interface DiscussionTranscriptProps {
   isLoading?: boolean;
   /** Discussion style for visual theming */
   discussionStyle?: DiscussionStyle;
+  /** Pre-configured tasks from group config (for TASK_FORCE style) */
+  preConfiguredTasks?: TaskDefinition[];
 }
 
 interface PhaseGroup {
@@ -183,6 +185,7 @@ export function DiscussionTranscript({
   streamState,
   isLoading,
   discussionStyle,
+  preConfiguredTasks,
 }: DiscussionTranscriptProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
@@ -425,6 +428,7 @@ export function DiscussionTranscript({
                 isSpeaking={activeSpeakers.has(entry.speakerAgentId) && entry.content === null}
                 allowHtml={allowHtml}
                 discussionStyle={style}
+                preConfiguredTasks={preConfiguredTasks}
               />
             ))}
           </PhaseHeader>

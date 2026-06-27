@@ -3,7 +3,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  Users, Trash2, MessageSquareQuote, Clock,
+  Users, Trash2, MessageSquareQuote, Clock, Settings2,
   PanelRightOpen, PanelRightClose,
   PanelLeftOpen, PanelLeftClose,
   Maximize2, Minimize2, History,
@@ -288,40 +288,6 @@ export function GroupDetailPage() {
             {discussionListContent}
           </HistoryDropdown>
 
-          {/* Discussions panel toggle */}
-          {!isFullscreen && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowDiscussions(!showDiscussions)}
-              title={showDiscussions ? t("groups.hideDiscussions", "Hide discussions panel") : t("groups.showDiscussions", "Show discussions panel")}
-              className="max-lg:hidden"
-            >
-              {showDiscussions ? (
-                <PanelLeftClose className="h-4 w-4" />
-              ) : (
-                <PanelLeftOpen className="h-4 w-4" />
-              )}
-            </Button>
-          )}
-
-          {/* Config panel toggle */}
-          {!isFullscreen && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowConfig(!showConfig)}
-              title={showConfig ? t("groups.hideConfig", "Hide config panel") : t("groups.showConfig", "Show config panel")}
-              className="max-xl:hidden"
-            >
-              {showConfig ? (
-                <PanelRightClose className="h-4 w-4" />
-              ) : (
-                <PanelRightOpen className="h-4 w-4" />
-              )}
-            </Button>
-          )}
-
           {/* Fullscreen toggle */}
           <Button
             variant="outline"
@@ -345,16 +311,36 @@ export function GroupDetailPage() {
         {/* LEFT: Discussion history — hidden on small screens and in fullscreen */}
         {!isFullscreen && showDiscussions && (
           <div className="w-64 shrink-0 flex flex-col rounded-xl border border-border bg-card overflow-hidden max-lg:hidden">
-            <div className="p-3 border-b border-border">
+            <div className="p-3 border-b border-border flex items-center justify-between">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                 <Clock className="h-3 w-3" />
                 {t("groups.discussions", "Discussions")}
               </h3>
+              <button
+                type="button"
+                onClick={() => setShowDiscussions(false)}
+                className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"
+                title={t("groups.hideDiscussions", "Hide discussions panel")}
+              >
+                <PanelLeftClose className="h-3.5 w-3.5" />
+              </button>
             </div>
             <div className="flex-1 overflow-y-auto">
               {discussionListContent}
             </div>
           </div>
+        )}
+
+        {/* LEFT re-open button — shows when discussions panel is hidden */}
+        {!isFullscreen && !showDiscussions && (
+          <button
+            type="button"
+            onClick={() => setShowDiscussions(true)}
+            className="shrink-0 flex items-center justify-center w-6 rounded-lg border border-border bg-card hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors max-lg:hidden"
+            title={t("groups.showDiscussions", "Show discussions panel")}
+          >
+            <PanelLeftOpen className="h-3.5 w-3.5" />
+          </button>
         )}
 
         {/* CENTER: Transcript + Input */}
@@ -365,6 +351,7 @@ export function GroupDetailPage() {
               streamState={isStreamActive ? streamState : undefined}
               isLoading={convLoading && !!selectedConvId}
               discussionStyle={groupConfig.style as DiscussionStyle}
+              preConfiguredTasks={groupConfig.tasks}
             />
           </div>
           {/* Input always at the bottom of the transcript panel */}
@@ -374,9 +361,35 @@ export function GroupDetailPage() {
           />
         </div>
 
+        {/* RIGHT re-open button — shows when config panel is hidden */}
+        {!isFullscreen && !showConfig && (
+          <button
+            type="button"
+            onClick={() => setShowConfig(true)}
+            className="shrink-0 flex items-center justify-center w-6 rounded-lg border border-border bg-card hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors max-xl:hidden"
+            title={t("groups.showConfig", "Show config panel")}
+          >
+            <PanelRightOpen className="h-3.5 w-3.5" />
+          </button>
+        )}
+
         {/* RIGHT: Config panel — hidden on small screens and in fullscreen */}
         {showConfig && !isFullscreen && (
           <div className="w-72 shrink-0 rounded-xl border border-border bg-card overflow-hidden flex flex-col max-xl:hidden">
+            <div className="p-3 border-b border-border flex items-center justify-between">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Settings2 className="h-3 w-3" />
+                {t("groups.configuration", "Configuration")}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowConfig(false)}
+                className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"
+                title={t("groups.hideConfig", "Hide config panel")}
+              >
+                <PanelRightClose className="h-3.5 w-3.5" />
+              </button>
+            </div>
             <GroupConfigPanel config={safeConfig} groupId={groupId} groupVersion={version} className="flex-1 min-h-0" />
           </div>
         )}

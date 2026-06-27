@@ -7,7 +7,7 @@ import DOMPurify from "dompurify";
 import { ChevronDown, ChevronUp, ClipboardList, CheckCircle2, ListOrdered, User2, XCircle } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import type { TranscriptEntry, TranscriptEntryType, DiscussionStyle } from "@/lib/api/groups";
+import type { TranscriptEntry, TranscriptEntryType, DiscussionStyle, TaskDefinition } from "@/lib/api/groups";
 import { ENTRY_TYPE_INFO } from "@/lib/api/groups";
 import { parseTranscriptContent, safeFormatDate } from "./group-utils";
 
@@ -27,17 +27,6 @@ const STYLE_BADGE_OVERRIDES: Partial<Record<DiscussionStyle, Partial<Record<Tran
     VERIFICATION: "warning",
   },
 };
-
-interface AgentResponseCardProps {
-  entry: TranscriptEntry;
-  /** Show typing indicator instead of content */
-  isSpeaking?: boolean;
-  /** When true, render HTML content (sanitized via DOMPurify). Off by default for safety. */
-  allowHtml?: boolean;
-  /** Discussion style for style-aware badge colors */
-  discussionStyle?: DiscussionStyle;
-  className?: string;
-}
 
 /** Check if content contains HTML tags */
 function hasHtml(content: string): boolean {
@@ -139,7 +128,17 @@ function tryParseStructuredItems(content: string | null): StructuredItem[] | nul
   }
 }
 
-export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyle, className }: AgentResponseCardProps) {
+interface AgentResponseCardProps {
+  entry: TranscriptEntry;
+  isSpeaking?: boolean;
+  allowHtml?: boolean;
+  discussionStyle?: DiscussionStyle;
+  /** Pre-configured tasks from group config (for TASK_FORCE style PLAN entries) */
+  preConfiguredTasks?: TaskDefinition[];
+  className?: string;
+}
+
+export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyle, preConfiguredTasks, className }: AgentResponseCardProps) {
   const { t } = useTranslation();
   const info = ENTRY_TYPE_INFO[entry.type];
   const isSynthesis = entry.type === "SYNTHESIS";
@@ -154,7 +153,17 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
 
   const parsedContent = entry.content ? parseTranscriptContent(entry.content) : null;
   // Try parsing as structured JSON array — check both raw and unwrapped content (no type gate)
-  const structuredItems = tryParseStructuredItems(entry.content) ?? tryParseStructuredItems(parsedContent);
+  let structuredItems = tryParseStructuredItems(entry.content) ?? tryParseStructuredItems(parsedContent);
+
+  // For PLAN entries with pre-configured tasks: convert TaskDefinition[] → StructuredItem[]
+  if (!structuredItems && isPlan && preConfiguredTasks && preConfiguredTasks.length > 0) {
+    structuredItems = preConfiguredTasks.map((task) => ({
+      subject: task.subject,
+      description: task.description,
+      assignedTo: task.assignToRole,
+      priority: task.priority,
+    }));
+  }
   // Only render as HTML if opt-in is enabled AND content actually contains HTML tags
   const renderAsHtml = allowHtml && parsedContent ? hasHtml(parsedContent) : false;
 

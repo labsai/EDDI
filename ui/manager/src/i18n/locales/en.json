@@ -1526,7 +1526,14 @@
       "OWN_FEEDBACK": "own feedback",
       "TASK_ONLY": "task only",
       "TASK_WITH_DEPS": "task + deps"
-    }
+    },
+    "configuration": "Configuration",
+    "deleteGroupOnly": "Delete Group Only",
+    "deleteGroupOnlySuccess": "Group deleted (agents kept)",
+    "deleteGroupOnlyWarning": "This will delete the group. All member agents will be kept.",
+    "deleteGroupAndAgents": "Delete Group + All Agents",
+    "deleteWithMembersSuccess": "Group and all member agents deleted (soft-delete)",
+    "deleteWithMembersWarning": "This will soft-delete the group and all {{count}} member agents. They can be recovered."
   },
   "taskBoard": {
     "title": "Task Board",

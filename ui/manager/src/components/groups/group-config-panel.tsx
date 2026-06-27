@@ -7,7 +7,7 @@ import { cn, hashColor, getInitials } from "@/lib/utils";
 import type { AgentGroupConfiguration, DiscussionStyle, DiscussionPhase } from "@/lib/api/groups";
 import { STYLE_INFO } from "@/lib/api/groups";
 import { toast } from "sonner";
-import { useDeleteGroupWithMembers } from "@/hooks/use-groups";
+import { useDeleteGroup, useDeleteGroupWithMembers } from "@/hooks/use-groups";
 import { useNavigate } from "react-router-dom";
 
 interface GroupConfigPanelProps {
@@ -44,8 +44,23 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
   const navigate = useNavigate();
   const styleInfo = STYLE_INFO[config.style] || STYLE_INFO.ROUND_TABLE;
   const styleColors = PANEL_STYLE_COLORS[config.style as DiscussionStyle] || PANEL_STYLE_COLORS.ROUND_TABLE;
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<"group" | "all" | null>(null);
+  const deleteGroupMutation = useDeleteGroup();
   const deleteWithMembersMutation = useDeleteGroupWithMembers();
+
+  function handleDeleteGroupOnly() {
+    if (!groupId || groupVersion == null) return;
+    deleteGroupMutation.mutate(
+      { id: groupId, version: groupVersion },
+      {
+        onSuccess: () => {
+          toast.success(t("groups.deleteGroupOnlySuccess", "Group deleted (agents kept)"));
+          navigate("/manage/groups");
+        },
+        onError: () => toast.error(t("common.error")),
+      }
+    );
+  }
 
   function handleDeleteWithMembers() {
     if (!groupId || groupVersion == null) return;
@@ -261,23 +276,36 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
 
       {/* Delete group + all agents */}
       {groupId && groupVersion != null && (
-        <div className="mt-auto pt-4 pb-4 border-t border-border">
+        <div className="mt-auto pt-4 pb-4 border-t border-border space-y-2">
           {!showDeleteConfirm ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
-              onClick={() => setShowDeleteConfirm(true)}
-            >
-              <Trash2 className="h-3.5 w-3.5 me-1.5" />
-              {t("groups.deleteGroupAndAgents", "Delete Group + All Agents")}
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full text-muted-foreground border-border hover:bg-secondary/50"
+                onClick={() => setShowDeleteConfirm("group")}
+              >
+                <Trash2 className="h-3.5 w-3.5 me-1.5" />
+                {t("groups.deleteGroupOnly", "Delete Group Only")}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => setShowDeleteConfirm("all")}
+              >
+                <Trash2 className="h-3.5 w-3.5 me-1.5" />
+                {t("groups.deleteGroupAndAgents", "Delete Group + All Agents")}
+              </Button>
+            </>
           ) : (
             <div className="space-y-2">
               <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2">
                 <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
                 <p className="text-[10px] text-muted-foreground leading-relaxed">
-                  {t("groups.deleteWithMembersWarning", "This will soft-delete the group and all {{count}} member agents. They can be recovered.", { count: config.members.length })}
+                  {showDeleteConfirm === "all"
+                    ? t("groups.deleteWithMembersWarning", "This will soft-delete the group and all {{count}} member agents. They can be recovered.", { count: config.members.length })
+                    : t("groups.deleteGroupOnlyWarning", "This will delete the group. All member agents will be kept.")}
                 </p>
               </div>
               <div className="flex gap-2">
@@ -285,7 +313,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
                   variant="outline"
                   size="sm"
                   className="flex-1"
-                  onClick={() => setShowDeleteConfirm(false)}
+                  onClick={() => setShowDeleteConfirm(null)}
                 >
                   {t("common.cancel", "Cancel")}
                 </Button>
@@ -293,10 +321,10 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
                   variant="destructive"
                   size="sm"
                   className="flex-1"
-                  onClick={handleDeleteWithMembers}
-                  disabled={deleteWithMembersMutation.isPending}
+                  onClick={showDeleteConfirm === "all" ? handleDeleteWithMembers : handleDeleteGroupOnly}
+                  disabled={showDeleteConfirm === "all" ? deleteWithMembersMutation.isPending : deleteGroupMutation.isPending}
                 >
-                  {deleteWithMembersMutation.isPending ? (
+                  {(showDeleteConfirm === "all" ? deleteWithMembersMutation.isPending : deleteGroupMutation.isPending) ? (
                     <RefreshCw className="h-3 w-3 animate-spin me-1" />
                   ) : (
                     <Trash2 className="h-3 w-3 me-1" />
