@@ -1458,12 +1458,22 @@
       "Synthesize": "종합 정리"
     },
     "lifecycle": {
-      "DISCUSSION_SCOPED": "토론 한정",
-      "PERSISTENT": "영구",
-      "EPHEMERAL": "일시적"
+      "EPHEMERAL": "임시",
+      "KEEP_DEPLOYED": "배포 유지",
+      "UNDEPLOY_ONLY": "배포 해제만",
+      "AGENT_DECIDES": "에이전트가 결정"
     },
     "dynamicMax": "✓ (max {{count}})",
-    "dynamicMaxPerTask": "✓ (최대 {{count}}/작업)"
+    "dynamicMaxPerTask": "✓ (최대 {{count}}/작업)",
+    "protocolMaxTurns": "최대 턴 수",
+    "speakingOrderTooltip": "발언 순서: #{{order}}",
+    "allowedModels": "모델",
+    "inheritParentModel": "모델 상속",
+    "enabled": "활성화",
+    "disabled": "비활성화",
+    "turnOrderSequential": "순차",
+    "turnOrderParallel": "병렬",
+    "requiresApproval": "승인 필요"
   },
   "taskBoard": {
     "title": "작업 보드",
@@ -1480,7 +1490,9 @@
     "unassigned": "미할당",
     "progress": "{{done}} / {{total}} 작업 완료",
     "verificationPassed": "통과",
-    "verificationFailed": "실패"
+    "verificationFailed": "실패",
+    "showMore": "더 보기",
+    "showLess": "접기"
   },
   "memories": {
     "title": "사용자 메모리",
@@ -1722,7 +1734,26 @@
     "created": "Group Created!",
     "viewGroup": "Open Group",
     "createAnother": "Create Another",
-    "success": "Group created successfully!"
+    "success": "Group created successfully!",
+    "advancedSettings": "고급 프로토콜 설정",
+    "agentTimeout": "에이전트 타임아웃 (초)",
+    "maxRetries": "최대 재시도 횟수",
+    "onAgentFailure": "에이전트 실패 시",
+    "onMemberUnavailable": "멤버 사용 불가 시",
+    "maxTurns": "최대 턴 수 (0 = 무제한)",
+    "maxTurnsHelp": "총 에이전트 턴 수의 안전 한도입니다. 백엔드 기본 제한은 50입니다.",
+    "policySkip": "건너뛰기",
+    "policyRetry": "재시도",
+    "policyAbort": "중단",
+    "policyFail": "실패",
+    "hintDebate": "멤버에게 PRO 및 CON 역할을 할당합니다. Pro가 먼저 주장하고, 그 다음 Con, 이어서 반박과 판정이 진행됩니다.",
+    "hintDevilAdvocate": "최소 한 명의 멤버에게 DEVIL_ADVOCATE 역할을 할당합니다. 그들은 그룹의 합의에 이의를 제기합니다.",
+    "hintPeerReview": "각 멤버가 다른 모든 멤버의 작업을 개별적으로 비평한 후, 받은 피드백을 바탕으로 수정합니다.",
+    "hintDelphi": "모든 멤버가 독립적이고 익명으로 응답합니다. 각 라운드 후 익명 결과를 확인하고 조정할 수 있습니다. 최대 턴 수가 익명 반복 횟수를 제어합니다.",
+    "hintTaskForce": "모더레이터가 작업 계획을 생성하고, 에이전트에게 병렬로 작업을 할당한 후, 결과를 검증하고 종합합니다.",
+    "hintCustom": "자체 단계를 수동으로 정의합니다. 사용자 정의 단계는 생성 후 API를 통해 구성할 수 있습니다.",
+    "hintRoundTable": "모든 멤버가 의견을 공유하고, 여러 라운드에 걸쳐 서로의 관점을 토론한 후 모더레이터가 종합합니다.",
+    "protocolSummary": "프로토콜"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",

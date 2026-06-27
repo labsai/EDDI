@@ -1458,12 +1458,22 @@
       "Synthesize": "สรุปรวม"
     },
     "lifecycle": {
-      "DISCUSSION_SCOPED": "จำกัดเฉพาะการสนทนา",
-      "PERSISTENT": "ถาวร",
-      "EPHEMERAL": "ชั่วคราว"
+      "EPHEMERAL": "ชั่วคราว",
+      "KEEP_DEPLOYED": "คงการปรับใช้",
+      "UNDEPLOY_ONLY": "ถอนการปรับใช้เท่านั้น",
+      "AGENT_DECIDES": "เอเจนต์ตัดสินใจ"
     },
     "dynamicMax": "✓ (max {{count}})",
-    "dynamicMaxPerTask": "✓ (สูงสุด {{count}}/งาน)"
+    "dynamicMaxPerTask": "✓ (สูงสุด {{count}}/งาน)",
+    "protocolMaxTurns": "จำนวนรอบสูงสุด",
+    "speakingOrderTooltip": "ลำดับการพูด: #{{order}}",
+    "allowedModels": "โมเดล",
+    "inheritParentModel": "สืบทอดโมเดล",
+    "enabled": "เปิดใช้งาน",
+    "disabled": "ปิดใช้งาน",
+    "turnOrderSequential": "ตามลำดับ",
+    "turnOrderParallel": "ขนาน",
+    "requiresApproval": "ต้องได้รับอนุมัติ"
   },
   "taskBoard": {
     "title": "บอร์ดงาน",
@@ -1480,7 +1490,9 @@
     "unassigned": "ยังไม่มอบหมาย",
     "progress": "{{done}} จาก {{total}} งานเสร็จแล้ว",
     "verificationPassed": "ผ่าน",
-    "verificationFailed": "ไม่ผ่าน"
+    "verificationFailed": "ไม่ผ่าน",
+    "showMore": "แสดงเพิ่มเติม",
+    "showLess": "แสดงน้อยลง"
   },
   "memories": {
     "title": "หน่วยความจำผู้ใช้",
@@ -1722,7 +1734,26 @@
     "created": "Group Created!",
     "viewGroup": "Open Group",
     "createAnother": "Create Another",
-    "success": "Group created successfully!"
+    "success": "Group created successfully!",
+    "advancedSettings": "การตั้งค่าโปรโตคอลขั้นสูง",
+    "agentTimeout": "หมดเวลาเอเจนต์ (วินาที)",
+    "maxRetries": "จำนวนลองใหม่สูงสุด",
+    "onAgentFailure": "เมื่อเอเจนต์ล้มเหลว",
+    "onMemberUnavailable": "เมื่อสมาชิกไม่พร้อม",
+    "maxTurns": "จำนวนรอบสูงสุด (0 = ไม่จำกัด)",
+    "maxTurnsHelp": "ขีดจำกัดความปลอดภัยสำหรับจำนวนรอบเอเจนต์ทั้งหมด ค่าเริ่มต้นของแบ็กเอนด์คือ 50",
+    "policySkip": "ข้าม",
+    "policyRetry": "ลองใหม่",
+    "policyAbort": "ยกเลิก",
+    "policyFail": "ล้มเหลว",
+    "hintDebate": "กำหนดบทบาท PRO และ CON ให้สมาชิก Pro โต้แย้งก่อน ตามด้วย Con จากนั้นเป็นการโต้กลับและการตัดสิน",
+    "hintDevilAdvocate": "กำหนดบทบาท DEVIL_ADVOCATE ให้สมาชิกอย่างน้อยหนึ่งคน พวกเขาจะท้าทายฉันทามติของกลุ่ม",
+    "hintPeerReview": "สมาชิกแต่ละคนวิจารณ์งานของสมาชิกคนอื่นทุกคนเป็นรายบุคคล จากนั้นแก้ไขตามข้อเสนอแนะที่ได้รับ",
+    "hintDelphi": "สมาชิกทุกคนตอบอย่างอิสระและไม่ระบุตัวตน หลังจากแต่ละรอบ พวกเขาจะเห็นผลลัพธ์ที่ไม่ระบุตัวตนและสามารถปรับเปลี่ยนได้ จำนวนรอบสูงสุดควบคุมจำนวนการทำซ้ำแบบไม่ระบุตัวตน",
+    "hintTaskForce": "ผู้ดำเนินรายการสร้างแผนงาน มอบหมายงานให้เอเจนต์แบบขนาน จากนั้นตรวจสอบและสังเคราะห์ผลลัพธ์",
+    "hintCustom": "กำหนดเฟสของคุณเองด้วยตนเอง เฟสที่กำหนดเองสามารถตั้งค่าผ่าน API หลังจากสร้าง",
+    "hintRoundTable": "สมาชิกทุกคนแบ่งปันความเห็น จากนั้นอภิปรายมุมมองของกันและกันหลายรอบก่อนที่ผู้ดำเนินรายการจะสังเคราะห์",
+    "protocolSummary": "โปรโตคอล"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",

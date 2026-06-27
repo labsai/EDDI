@@ -1458,12 +1458,22 @@
       "Synthesize": "सारांश"
     },
     "lifecycle": {
-      "DISCUSSION_SCOPED": "चर्चा सीमित",
-      "PERSISTENT": "स्थायी",
-      "EPHEMERAL": "अस्थायी"
+      "EPHEMERAL": "अस्थायी",
+      "KEEP_DEPLOYED": "तैनात रखें",
+      "UNDEPLOY_ONLY": "केवल हटाएं",
+      "AGENT_DECIDES": "एजेंट तय करता है"
     },
     "dynamicMax": "✓ (max {{count}})",
-    "dynamicMaxPerTask": "✓ (अधिकतम {{count}}/कार्य)"
+    "dynamicMaxPerTask": "✓ (अधिकतम {{count}}/कार्य)",
+    "protocolMaxTurns": "अधिकतम मोड़",
+    "speakingOrderTooltip": "बोलने का क्रम: #{{order}}",
+    "allowedModels": "मॉडल",
+    "inheritParentModel": "मॉडल विरासत में लें",
+    "enabled": "सक्षम",
+    "disabled": "अक्षम",
+    "turnOrderSequential": "क्रमिक",
+    "turnOrderParallel": "समानांतर",
+    "requiresApproval": "अनुमोदन आवश्यक"
   },
   "taskBoard": {
     "title": "कार्य बोर्ड",
@@ -1480,7 +1490,9 @@
     "unassigned": "असाइन नहीं किया गया",
     "progress": "{{done}} / {{total}} कार्य पूर्ण",
     "verificationPassed": "उत्तीर्ण",
-    "verificationFailed": "विफल"
+    "verificationFailed": "विफल",
+    "showMore": "और दिखाएं",
+    "showLess": "कम दिखाएं"
   },
   "memories": {
     "title": "उपयोगकर्ता स्मृति",
@@ -1722,7 +1734,26 @@
     "created": "Group Created!",
     "viewGroup": "Open Group",
     "createAnother": "Create Another",
-    "success": "Group created successfully!"
+    "success": "Group created successfully!",
+    "advancedSettings": "उन्नत प्रोटोकॉल सेटिंग्स",
+    "agentTimeout": "एजेंट टाइमआउट (सेकंड)",
+    "maxRetries": "अधिकतम पुनः प्रयास",
+    "onAgentFailure": "एजेंट विफलता पर",
+    "onMemberUnavailable": "सदस्य अनुपलब्ध होने पर",
+    "maxTurns": "अधिकतम मोड़ (0 = असीमित)",
+    "maxTurnsHelp": "कुल एजेंट मोड़ों के लिए सुरक्षा सीमा। डिफ़ॉल्ट बैकएंड सीमा 50 है।",
+    "policySkip": "छोड़ें",
+    "policyRetry": "पुनः प्रयास",
+    "policyAbort": "रद्द करें",
+    "policyFail": "विफल",
+    "hintDebate": "सदस्यों को PRO और CON भूमिकाएं सौंपें। Pro पहले तर्क देता है, फिर Con, उसके बाद प्रतिवाद और निर्णय।",
+    "hintDevilAdvocate": "कम से कम एक सदस्य को DEVIL_ADVOCATE भूमिका सौंपें। वे समूह की सहमति को चुनौती देंगे।",
+    "hintPeerReview": "प्रत्येक सदस्य व्यक्तिगत रूप से हर दूसरे सदस्य के काम की समीक्षा करता है, फिर प्राप्त प्रतिक्रिया के आधार पर संशोधन करता है।",
+    "hintDelphi": "सभी सदस्य स्वतंत्र और गुमनाम रूप से जवाब देते हैं। प्रत्येक दौर के बाद, वे गुमनाम परिणाम देखते हैं और समायोजित कर सकते हैं। अधिकतम मोड़ गुमनाम पुनरावृत्तियों की संख्या नियंत्रित करता है।",
+    "hintTaskForce": "मॉडरेटर एक कार्य योजना बनाता है, एजेंटों को समानांतर में काम सौंपता है, फिर परिणामों की जांच करता है और उन्हें संश्लेषित करता है।",
+    "hintCustom": "अपने स्वयं के चरण मैन्युअल रूप से परिभाषित करें। कस्टम चरण बनाने के बाद API के माध्यम से कॉन्फ़िगर किए जा सकते हैं।",
+    "hintRoundTable": "सभी सदस्य अपनी राय साझा करते हैं, फिर कई दौरों में एक-दूसरे के विचारों पर चर्चा करते हैं, इसके बाद मॉडरेटर संश्लेषण करता है।",
+    "protocolSummary": "प्रोटोकॉल"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",

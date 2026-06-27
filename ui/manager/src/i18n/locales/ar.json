@@ -1458,12 +1458,22 @@
       "Synthesize": "التلخيص"
     },
     "lifecycle": {
-      "DISCUSSION_SCOPED": "محدد بالنقاش",
-      "PERSISTENT": "دائم",
-      "EPHEMERAL": "مؤقت"
+      "EPHEMERAL": "مؤقت",
+      "KEEP_DEPLOYED": "إبقاء منشور",
+      "UNDEPLOY_ONLY": "إلغاء النشر فقط",
+      "AGENT_DECIDES": "الوكيل يقرر"
     },
     "dynamicMax": "✓ (max {{count}})",
-    "dynamicMaxPerTask": "✓ (الحد {{count}}/مهمة)"
+    "dynamicMaxPerTask": "✓ (الحد {{count}}/مهمة)",
+    "protocolMaxTurns": "الحد الأقصى للأدوار",
+    "speakingOrderTooltip": "ترتيب الحديث: #{{order}}",
+    "allowedModels": "النماذج",
+    "inheritParentModel": "وراثة النموذج",
+    "enabled": "مفعّل",
+    "disabled": "معطّل",
+    "turnOrderSequential": "تسلسلي",
+    "turnOrderParallel": "متوازٍ",
+    "requiresApproval": "يتطلب الموافقة"
   },
   "taskBoard": {
     "title": "لوحة المهام",
@@ -1480,7 +1490,9 @@
     "unassigned": "غير مُعيَّن",
     "progress": "{{done}} من {{total}} مهام مكتملة",
     "verificationPassed": "ناجح",
-    "verificationFailed": "فاشل"
+    "verificationFailed": "فاشل",
+    "showMore": "عرض المزيد",
+    "showLess": "عرض أقل"
   },
   "memories": {
     "title": "ذاكرة المستخدم",
@@ -1722,7 +1734,26 @@
     "created": "Group Created!",
     "viewGroup": "Open Group",
     "createAnother": "Create Another",
-    "success": "Group created successfully!"
+    "success": "Group created successfully!",
+    "advancedSettings": "إعدادات البروتوكول المتقدمة",
+    "agentTimeout": "مهلة الوكيل (ثوانٍ)",
+    "maxRetries": "الحد الأقصى لإعادة المحاولة",
+    "onAgentFailure": "عند فشل الوكيل",
+    "onMemberUnavailable": "عند عدم توفر العضو",
+    "maxTurns": "الحد الأقصى للأدوار (0 = غير محدود)",
+    "maxTurnsHelp": "حد أمان لإجمالي أدوار الوكيل. الحد الافتراضي للخادم هو 50.",
+    "policySkip": "تخطي",
+    "policyRetry": "إعادة المحاولة",
+    "policyAbort": "إلغاء",
+    "policyFail": "فشل",
+    "hintDebate": "قم بتعيين أدوار PRO و CON للأعضاء. يبدأ Pro بالحجج أولاً، ثم Con، يليها الردود والحكم.",
+    "hintDevilAdvocate": "قم بتعيين دور DEVIL_ADVOCATE لعضو واحد على الأقل. سيتحدى إجماع المجموعة.",
+    "hintPeerReview": "يقوم كل عضو بنقد عمل كل عضو آخر بشكل فردي، ثم يراجع بناءً على الملاحظات المتلقاة.",
+    "hintDelphi": "يستجيب جميع الأعضاء بشكل مستقل ومجهول. بعد كل جولة، يرون النتائج المجهولة ويمكنهم التعديل. الحد الأقصى للأدوار يتحكم في عدد التكرارات المجهولة.",
+    "hintTaskForce": "ينشئ المشرف خطة مهام، ويوزع العمل على الوكلاء بشكل متوازٍ، ثم يتحقق من النتائج ويجمعها.",
+    "hintCustom": "حدد مراحلك الخاصة يدوياً. يمكن تكوين المراحل المخصصة عبر واجهة API بعد الإنشاء.",
+    "hintRoundTable": "يشارك جميع الأعضاء آراءهم، ثم يناقشون وجهات نظر بعضهم عبر جولات متعددة قبل أن يقوم المشرف بالتجميع.",
+    "protocolSummary": "البروتوكول"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",

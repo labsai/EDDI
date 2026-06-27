@@ -1458,12 +1458,22 @@
       "Synthesize": "总结"
     },
     "lifecycle": {
-      "DISCUSSION_SCOPED": "讨论范围内",
-      "PERSISTENT": "持久",
-      "EPHEMERAL": "临时"
+      "EPHEMERAL": "临时",
+      "KEEP_DEPLOYED": "保持部署",
+      "UNDEPLOY_ONLY": "仅取消部署",
+      "AGENT_DECIDES": "代理决定"
     },
     "dynamicMax": "✓ (max {{count}})",
-    "dynamicMaxPerTask": "✓ (最多 {{count}}/任务)"
+    "dynamicMaxPerTask": "✓ (最多 {{count}}/任务)",
+    "protocolMaxTurns": "最大轮次",
+    "speakingOrderTooltip": "发言顺序：#{{order}}",
+    "allowedModels": "模型",
+    "inheritParentModel": "继承模型",
+    "enabled": "已启用",
+    "disabled": "已禁用",
+    "turnOrderSequential": "顺序",
+    "turnOrderParallel": "并行",
+    "requiresApproval": "需要审批"
   },
   "taskBoard": {
     "title": "任务看板",
@@ -1480,7 +1490,9 @@
     "unassigned": "未分配",
     "progress": "{{done}} / {{total}} 个任务已完成",
     "verificationPassed": "通过",
-    "verificationFailed": "未通过"
+    "verificationFailed": "未通过",
+    "showMore": "显示更多",
+    "showLess": "收起"
   },
   "memories": {
     "title": "用户记忆",
@@ -1722,7 +1734,26 @@
     "created": "Group Created!",
     "viewGroup": "Open Group",
     "createAnother": "Create Another",
-    "success": "Group created successfully!"
+    "success": "Group created successfully!",
+    "advancedSettings": "高级协议设置",
+    "agentTimeout": "代理超时（秒）",
+    "maxRetries": "最大重试次数",
+    "onAgentFailure": "代理失败时",
+    "onMemberUnavailable": "成员不可用时",
+    "maxTurns": "最大轮次（0 = 无限制）",
+    "maxTurnsHelp": "代理轮次总数的安全上限。后端默认限制为 50。",
+    "policySkip": "跳过",
+    "policyRetry": "重试",
+    "policyAbort": "中止",
+    "policyFail": "失败",
+    "hintDebate": "为成员分配 PRO 和 CON 角色。Pro 先论证，然后 Con，接着是反驳和裁决。",
+    "hintDevilAdvocate": "至少为一名成员分配 DEVIL_ADVOCATE 角色。他们将挑战小组的共识。",
+    "hintPeerReview": "每位成员独立评审其他所有成员的工作，然后根据收到的反馈进行修订。",
+    "hintDelphi": "所有成员独立且匿名地回应。每轮结束后，他们可以看到匿名结果并进行调整。最大轮次控制匿名迭代的次数。",
+    "hintTaskForce": "主持人创建任务计划，将工作并行分配给代理，然后验证并综合结果。",
+    "hintCustom": "手动定义您自己的阶段。自定义阶段可以在创建后通过 API 进行配置。",
+    "hintRoundTable": "所有成员分享意见，然后在多轮中讨论彼此的观点，最后由主持人进行综合。",
+    "protocolSummary": "协议"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",

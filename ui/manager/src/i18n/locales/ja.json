@@ -1458,12 +1458,22 @@
       "Synthesize": "統合"
     },
     "lifecycle": {
-      "DISCUSSION_SCOPED": "ディスカッション限定",
-      "PERSISTENT": "永続",
-      "EPHEMERAL": "一時的"
+      "EPHEMERAL": "一時的",
+      "KEEP_DEPLOYED": "デプロイ維持",
+      "UNDEPLOY_ONLY": "アンデプロイのみ",
+      "AGENT_DECIDES": "エージェントが決定"
     },
     "dynamicMax": "✓ (max {{count}})",
-    "dynamicMaxPerTask": "✓ (最大 {{count}}/タスク)"
+    "dynamicMaxPerTask": "✓ (最大 {{count}}/タスク)",
+    "protocolMaxTurns": "最大ターン数",
+    "speakingOrderTooltip": "発言順：#{{order}}",
+    "allowedModels": "モデル",
+    "inheritParentModel": "モデルを継承",
+    "enabled": "有効",
+    "disabled": "無効",
+    "turnOrderSequential": "順次",
+    "turnOrderParallel": "並列",
+    "requiresApproval": "承認が必要"
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -1480,7 +1490,9 @@
     "unassigned": "未割り当て",
     "progress": "{{done}} / {{total}} タスク完了",
     "verificationPassed": "合格",
-    "verificationFailed": "不合格"
+    "verificationFailed": "不合格",
+    "showMore": "もっと表示",
+    "showLess": "折りたたむ"
   },
   "memories": {
     "title": "ユーザーメモリ",
@@ -1722,7 +1734,26 @@
     "created": "Group Created!",
     "viewGroup": "Open Group",
     "createAnother": "Create Another",
-    "success": "Group created successfully!"
+    "success": "Group created successfully!",
+    "advancedSettings": "高度なプロトコル設定",
+    "agentTimeout": "エージェントタイムアウト（秒）",
+    "maxRetries": "最大リトライ回数",
+    "onAgentFailure": "エージェント失敗時",
+    "onMemberUnavailable": "メンバー利用不可時",
+    "maxTurns": "最大ターン数（0 = 無制限）",
+    "maxTurnsHelp": "エージェントターン総数の安全上限。バックエンドのデフォルト制限は50です。",
+    "policySkip": "スキップ",
+    "policyRetry": "リトライ",
+    "policyAbort": "中止",
+    "policyFail": "失敗",
+    "hintDebate": "メンバーに PRO と CON の役割を割り当てます。Proが先に論じ、次にCon、その後反論と判定が行われます。",
+    "hintDevilAdvocate": "少なくとも1名のメンバーに DEVIL_ADVOCATE の役割を割り当てます。グループの合意に異議を唱えます。",
+    "hintPeerReview": "各メンバーが他の全メンバーの作業を個別に批評し、受け取ったフィードバックに基づいて修正します。",
+    "hintDelphi": "全メンバーが独立かつ匿名で回答します。各ラウンド後、匿名の結果を確認して調整できます。最大ターン数が匿名反復回数を制御します。",
+    "hintTaskForce": "モデレーターがタスク計画を作成し、エージェントに並列で作業を割り当て、結果を検証・統合します。",
+    "hintCustom": "独自のフェーズを手動で定義します。カスタムフェーズは作成後にAPIで設定できます。",
+    "hintRoundTable": "全メンバーが意見を共有し、複数ラウンドにわたって互いの見解を議論した後、モデレーターが統合します。",
+    "protocolSummary": "プロトコル"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",

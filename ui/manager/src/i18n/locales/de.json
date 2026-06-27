@@ -1458,12 +1458,22 @@
       "Synthesize": "Zusammenfassung"
     },
     "lifecycle": {
-      "DISCUSSION_SCOPED": "diskussionsbezogen",
-      "PERSISTENT": "persistent",
-      "EPHEMERAL": "kurzlebig"
+      "EPHEMERAL": "kurzlebig",
+      "KEEP_DEPLOYED": "bereitgestellt lassen",
+      "UNDEPLOY_ONLY": "nur zurückziehen",
+      "AGENT_DECIDES": "Agent entscheidet"
     },
     "dynamicMax": "✓ (max {{count}})",
-    "dynamicMaxPerTask": "✓ (max {{count}}/Aufgabe)"
+    "dynamicMaxPerTask": "✓ (max {{count}}/Aufgabe)",
+    "protocolMaxTurns": "Max. Züge",
+    "speakingOrderTooltip": "Reihenfolge: #{{order}}",
+    "allowedModels": "Modelle",
+    "inheritParentModel": "Modell erben",
+    "enabled": "Aktiviert",
+    "disabled": "Deaktiviert",
+    "turnOrderSequential": "sequenziell",
+    "turnOrderParallel": "parallel",
+    "requiresApproval": "Genehmigung erforderlich"
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",
@@ -1480,7 +1490,9 @@
     "unassigned": "Nicht zugewiesen",
     "progress": "{{done}} von {{total}} Aufgaben erledigt",
     "verificationPassed": "Bestanden",
-    "verificationFailed": "Fehlgeschlagen"
+    "verificationFailed": "Fehlgeschlagen",
+    "showMore": "mehr anzeigen",
+    "showLess": "weniger anzeigen"
   },
   "groupWizard": {
     "title": "Gruppen-Assistent",
@@ -1538,7 +1550,26 @@
     "created": "Gruppe erstellt!",
     "viewGroup": "Gruppe öffnen",
     "createAnother": "Weitere erstellen",
-    "success": "Gruppe erfolgreich erstellt!"
+    "success": "Gruppe erfolgreich erstellt!",
+    "advancedSettings": "Erweiterte Protokolleinstellungen",
+    "agentTimeout": "Agent-Timeout (Sekunden)",
+    "maxRetries": "Max. Wiederholungen",
+    "onAgentFailure": "Bei Agent-Fehler",
+    "onMemberUnavailable": "Bei nicht verfügbarem Mitglied",
+    "maxTurns": "Max. Züge (0 = unbegrenzt)",
+    "maxTurnsHelp": "Sicherheitslimit für Agent-Züge insgesamt. Standard-Backend-Limit ist 50.",
+    "policySkip": "Überspringen",
+    "policyRetry": "Wiederholen",
+    "policyAbort": "Abbrechen",
+    "policyFail": "Fehlschlagen",
+    "hintDebate": "Weisen Sie Mitgliedern die Rollen PRO und CON zu. Pro argumentiert zuerst, dann Con, gefolgt von Erwiderungen und Urteil.",
+    "hintDevilAdvocate": "Weisen Sie mindestens einem Mitglied die Rolle DEVIL_ADVOCATE zu. Es wird den Konsens der Gruppe hinterfragen.",
+    "hintPeerReview": "Jedes Mitglied kritisiert individuell die Arbeit aller anderen und überarbeitet dann basierend auf dem erhaltenen Feedback.",
+    "hintDelphi": "Alle Mitglieder antworten unabhängig und anonym. Nach jeder Runde sehen sie die anonymen Ergebnisse und können anpassen. Max. Runden steuert die Anzahl der anonymen Iterationen.",
+    "hintTaskForce": "Der Moderator erstellt einen Aufgabenplan, weist Arbeit parallel an Agenten zu, überprüft dann die Ergebnisse und fasst sie zusammen.",
+    "hintCustom": "Definieren Sie Ihre eigenen Phasen manuell. Benutzerdefinierte Phasen können nach der Erstellung über die API konfiguriert werden.",
+    "hintRoundTable": "Alle Mitglieder teilen ihre Meinungen, diskutieren dann die Ansichten der anderen über mehrere Runden, bevor der Moderator zusammenfasst.",
+    "protocolSummary": "Protokoll"
   },
   "groupTemplates": {
     "advisoryBoard": "Beratungsgremium",

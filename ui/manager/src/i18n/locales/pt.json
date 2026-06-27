@@ -1458,12 +1458,22 @@
       "Synthesize": "Sintetizar"
     },
     "lifecycle": {
-      "DISCUSSION_SCOPED": "limitado à discussão",
-      "PERSISTENT": "persistente",
-      "EPHEMERAL": "efêmero"
+      "EPHEMERAL": "efêmero",
+      "KEEP_DEPLOYED": "manter implantado",
+      "UNDEPLOY_ONLY": "apenas retirar",
+      "AGENT_DECIDES": "o agente decide"
     },
     "dynamicMax": "✓ (max {{count}})",
-    "dynamicMaxPerTask": "✓ (máx. {{count}}/tarefa)"
+    "dynamicMaxPerTask": "✓ (máx. {{count}}/tarefa)",
+    "protocolMaxTurns": "Turnos máx.",
+    "speakingOrderTooltip": "Ordem de fala: #{{order}}",
+    "allowedModels": "Modelos",
+    "inheritParentModel": "Herdar modelo",
+    "enabled": "Ativado",
+    "disabled": "Desativado",
+    "turnOrderSequential": "sequencial",
+    "turnOrderParallel": "paralelo",
+    "requiresApproval": "requer aprovação"
   },
   "taskBoard": {
     "title": "Quadro de tarefas",
@@ -1480,7 +1490,9 @@
     "unassigned": "Não atribuído",
     "progress": "{{done}} de {{total}} tarefas concluídas",
     "verificationPassed": "Aprovado",
-    "verificationFailed": "Reprovado"
+    "verificationFailed": "Reprovado",
+    "showMore": "mostrar mais",
+    "showLess": "mostrar menos"
   },
   "memories": {
     "title": "Memória do utilizador",
@@ -1722,7 +1734,26 @@
     "created": "Group Created!",
     "viewGroup": "Open Group",
     "createAnother": "Create Another",
-    "success": "Group created successfully!"
+    "success": "Group created successfully!",
+    "advancedSettings": "Configurações avançadas de protocolo",
+    "agentTimeout": "Tempo limite do agente (segundos)",
+    "maxRetries": "Tentativas máx.",
+    "onAgentFailure": "Em caso de falha do agente",
+    "onMemberUnavailable": "Se membro indisponível",
+    "maxTurns": "Turnos máx. (0 = ilimitado)",
+    "maxTurnsHelp": "Limite de segurança para o total de turnos do agente. O limite padrão do backend é 50.",
+    "policySkip": "Pular",
+    "policyRetry": "Tentar novamente",
+    "policyAbort": "Abortar",
+    "policyFail": "Falhar",
+    "hintDebate": "Atribua os papéis PRO e CON aos membros. Pro argumenta primeiro, depois Con, seguido de réplicas e julgamento.",
+    "hintDevilAdvocate": "Atribua o papel DEVIL_ADVOCATE a pelo menos um membro. Ele questionará o consenso do grupo.",
+    "hintPeerReview": "Cada membro critica individualmente o trabalho de todos os outros e depois revisa com base no feedback recebido.",
+    "hintDelphi": "Todos os membros respondem de forma independente e anônima. Após cada rodada, veem os resultados anônimos e podem ajustar. Turnos máx. controla o número de iterações anônimas.",
+    "hintTaskForce": "O moderador cria um plano de tarefas, atribui trabalho aos agentes em paralelo, depois verifica e sintetiza os resultados.",
+    "hintCustom": "Defina suas próprias fases manualmente. Fases personalizadas podem ser configuradas via API após a criação.",
+    "hintRoundTable": "Todos os membros compartilham suas opiniões, depois discutem os pontos de vista uns dos outros em várias rodadas antes que o moderador sintetize.",
+    "protocolSummary": "Protocolo"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
