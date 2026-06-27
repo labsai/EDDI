@@ -46,7 +46,7 @@ describe("getGroupTemplates", () => {
     const spyT = vi.fn((key: string) => key) as unknown as TFunction;
     getGroupTemplates(spyT);
     // Each template: name + description + each role displayName
-    // advisory: 2 + 5, code: 2 + 3, risk: 2 + 3, forecast: 2 + 4, debate: 2 + 4, task-force: 2 + 3 = 35
+    // advisory: 2 + 5, code: 2 + 3, risk: 2 + 3, forecast: 2 + 4, debate: 2 + 4, task-force: 2 + 4 = 35
     expect(spyT).toHaveBeenCalledTimes(35);
   });
 

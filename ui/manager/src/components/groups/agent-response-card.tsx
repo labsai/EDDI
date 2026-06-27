@@ -109,14 +109,8 @@ function tryParseStructuredItems(content: string | null): StructuredItem[] | nul
     return validateStructuredArray(JSON.parse(jsonStr));
   } catch { /* continue to fallback */ }
 
-  // 3. Fallback: sanitize newlines (LLMs sometimes produce unescaped newlines in strings)
-  //    Collapse all whitespace runs (newlines + spaces) into single spaces
-  try {
-    const sanitized = jsonStr.replace(/\s+/g, " ");
-    return validateStructuredArray(JSON.parse(sanitized));
-  } catch { /* continue to fallback */ }
-
-  // 4. Last resort: try to repair by escaping newlines within JSON strings
+  // 3. Fallback: repair by escaping unescaped newlines within JSON string values
+  //    (LLMs sometimes produce unescaped newlines in strings)
   try {
     const repaired = jsonStr.replace(
       /"(?:[^"\\]|\\.)*"/g,

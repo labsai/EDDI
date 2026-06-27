@@ -349,6 +349,7 @@ export function GroupDetailPage() {
                 onClick={() => setShowDiscussions(false)}
                 className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"
                 title={t("groups.hideDiscussions", "Hide discussions panel")}
+                aria-label={t("groups.hideDiscussions", "Hide discussions panel")}
               >
                 <PanelLeftClose className="h-3.5 w-3.5" />
               </button>
@@ -390,6 +391,7 @@ export function GroupDetailPage() {
                 onClick={() => setShowConfig(false)}
                 className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"
                 title={t("groups.hideConfig", "Hide config panel")}
+                aria-label={t("groups.hideConfig", "Hide config panel")}
               >
                 <PanelRightClose className="h-3.5 w-3.5" />
               </button>
