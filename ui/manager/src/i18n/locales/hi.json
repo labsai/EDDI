@@ -1491,7 +1491,11 @@
     "deleteGroupOnlyWarning": "इससे समूह हट जाएगा। सभी सदस्य एजेंट रखे जाएँगे।",
     "deleteGroupAndAgents": "समूह + सभी एजेंट हटाएँ",
     "deleteWithMembersSuccess": "समूह और सभी सदस्य एजेंट हटा दिए गए (सॉफ्ट-डिलीट)",
-    "deleteWithMembersWarning": "इससे समूह और सभी {{count}} सदस्य एजेंट सॉफ्ट-डिलीट हो जाएँगे। उन्हें पुनर्स्थापित किया जा सकता है।"
+    "deleteWithMembersWarning": "इससे समूह और सभी {{count}} सदस्य एजेंट सॉफ्ट-डिलीट हो जाएँगे। उन्हें पुनर्स्थापित किया जा सकता है।",
+    "hideDiscussions": "चर्चा पैनल छिपाएँ",
+    "showDiscussions": "चर्चा पैनल दिखाएँ",
+    "hideConfig": "कॉन्फ़िगरेशन पैनल छिपाएँ",
+    "showConfig": "कॉन्फ़िगरेशन पैनल दिखाएँ"
   },
   "taskBoard": {
     "title": "कार्य बोर्ड",

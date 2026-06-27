@@ -120,7 +120,7 @@ export function GroupCard({
         <p className="mt-0.5 font-mono text-xs text-muted-foreground/70 truncate" title={group.id}>
           {group.id}
         </p>
-        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground" title={group.description || undefined}>
           {group.description || t("groups.noDescription", "No description")}
         </p>
 
@@ -145,7 +145,7 @@ export function GroupCard({
                 ) : (
                   <Bot className="h-2.5 w-2.5" aria-hidden="true" />
                 )}
-                <span className="max-w-[6rem] truncate">{m.displayName}</span>
+                <span className="max-w-[6rem] truncate" title={m.displayName}>{m.displayName}</span>
               </span>
             ))}
             {members.length > 4 && (

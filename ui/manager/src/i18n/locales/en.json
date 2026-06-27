@@ -1533,7 +1533,11 @@
     "deleteGroupOnlyWarning": "This will delete the group. All member agents will be kept.",
     "deleteGroupAndAgents": "Delete Group + All Agents",
     "deleteWithMembersSuccess": "Group and all member agents deleted (soft-delete)",
-    "deleteWithMembersWarning": "This will soft-delete the group and all {{count}} member agents. They can be recovered."
+    "deleteWithMembersWarning": "This will soft-delete the group and all {{count}} member agents. They can be recovered.",
+    "hideDiscussions": "Hide discussions panel",
+    "showDiscussions": "Show discussions panel",
+    "hideConfig": "Hide config panel",
+    "showConfig": "Show config panel"
   },
   "taskBoard": {
     "title": "Task Board",

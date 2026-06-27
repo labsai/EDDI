@@ -1491,7 +1491,11 @@
     "deleteGroupOnlyWarning": "グループを削除します。すべてのメンバーエージェントは保持されます。",
     "deleteGroupAndAgents": "グループ + 全エージェントを削除",
     "deleteWithMembersSuccess": "グループと全メンバーエージェントを削除しました（ソフトデリート）",
-    "deleteWithMembersWarning": "グループと {{count}} 名のメンバーエージェントすべてをソフトデリートします。復元可能です。"
+    "deleteWithMembersWarning": "グループと {{count}} 名のメンバーエージェントすべてをソフトデリートします。復元可能です。",
+    "hideDiscussions": "ディスカッションパネルを非表示",
+    "showDiscussions": "ディスカッションパネルを表示",
+    "hideConfig": "設定パネルを非表示",
+    "showConfig": "設定パネルを表示"
   },
   "taskBoard": {
     "title": "タスクボード",

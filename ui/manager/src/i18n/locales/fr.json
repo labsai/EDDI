@@ -1491,7 +1491,11 @@
     "deleteGroupOnlyWarning": "Cela supprimera le groupe. Tous les agents membres seront conservés.",
     "deleteGroupAndAgents": "Supprimer le groupe + tous les agents",
     "deleteWithMembersSuccess": "Groupe et tous les agents membres supprimés (suppression douce)",
-    "deleteWithMembersWarning": "Cela effectuera une suppression douce du groupe et de tous les {{count}} agents membres. Ils pourront être récupérés."
+    "deleteWithMembersWarning": "Cela effectuera une suppression douce du groupe et de tous les {{count}} agents membres. Ils pourront être récupérés.",
+    "hideDiscussions": "Masquer le panneau de discussions",
+    "showDiscussions": "Afficher le panneau de discussions",
+    "hideConfig": "Masquer le panneau de configuration",
+    "showConfig": "Afficher le panneau de configuration"
   },
   "taskBoard": {
     "title": "Tableau des tâches",

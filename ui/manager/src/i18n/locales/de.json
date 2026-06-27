@@ -1491,7 +1491,11 @@
     "deleteGroupOnlyWarning": "Dies löscht die Gruppe. Alle Mitglieds-Agenten werden behalten.",
     "deleteGroupAndAgents": "Gruppe + alle Agenten löschen",
     "deleteWithMembersSuccess": "Gruppe und alle Mitglieds-Agenten gelöscht (Soft-Delete)",
-    "deleteWithMembersWarning": "Dies wird die Gruppe und alle {{count}} Mitglieds-Agenten per Soft-Delete löschen. Sie können wiederhergestellt werden."
+    "deleteWithMembersWarning": "Dies wird die Gruppe und alle {{count}} Mitglieds-Agenten per Soft-Delete löschen. Sie können wiederhergestellt werden.",
+    "hideDiscussions": "Diskussionsbereich ausblenden",
+    "showDiscussions": "Diskussionsbereich einblenden",
+    "hideConfig": "Konfigurationsbereich ausblenden",
+    "showConfig": "Konfigurationsbereich einblenden"
   },
   "taskBoard": {
     "title": "Aufgabenübersicht",

@@ -126,8 +126,8 @@ function TaskCard({
               className="text-[10px] text-primary/70 hover:text-primary font-medium mt-0.5 transition-colors"
             >
               {expanded
-                ? t("taskBoard.showLess", "show less")
-                : t("taskBoard.showMore", "show more")}
+                ? t("common.showLess", "Show less")
+                : t("common.showMore", "Show more")}
             </button>
           )}
         </div>
@@ -145,7 +145,7 @@ function TaskCard({
           >
             {initials}
           </div>
-          <span className="text-xs text-muted-foreground truncate">
+          <span className="text-xs text-muted-foreground truncate" title={task.displayName || task.assignedTo}>
             {task.displayName || task.assignedTo}
           </span>
         </div>
@@ -176,7 +176,7 @@ function TaskCard({
           ) : (
             <XCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
           )}
-          <span className="line-clamp-2">
+          <span className="line-clamp-2" title={verification.feedback || undefined}>
             {verification.feedback ||
               t("taskBoard.verified", "Verified")}
           </span>

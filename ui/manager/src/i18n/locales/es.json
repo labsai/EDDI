@@ -1491,7 +1491,11 @@
     "deleteGroupOnlyWarning": "Esto eliminará el grupo. Todos los agentes miembros se mantendrán.",
     "deleteGroupAndAgents": "Eliminar grupo + todos los agentes",
     "deleteWithMembersSuccess": "Grupo y todos los agentes miembros eliminados (eliminación suave)",
-    "deleteWithMembersWarning": "Esto eliminará suavemente el grupo y todos los {{count}} agentes miembros. Se podrán recuperar."
+    "deleteWithMembersWarning": "Esto eliminará suavemente el grupo y todos los {{count}} agentes miembros. Se podrán recuperar.",
+    "hideDiscussions": "Ocultar panel de discusiones",
+    "showDiscussions": "Mostrar panel de discusiones",
+    "hideConfig": "Ocultar panel de configuración",
+    "showConfig": "Mostrar panel de configuración"
   },
   "taskBoard": {
     "title": "Tablero de tareas",

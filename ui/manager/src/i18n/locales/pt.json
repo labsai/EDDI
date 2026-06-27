@@ -1491,7 +1491,11 @@
     "deleteGroupOnlyWarning": "Isso excluirá o grupo. Todos os agentes membros serão mantidos.",
     "deleteGroupAndAgents": "Excluir grupo + todos os agentes",
     "deleteWithMembersSuccess": "Grupo e todos os agentes membros excluídos (exclusão suave)",
-    "deleteWithMembersWarning": "Isso fará a exclusão suave do grupo e de todos os {{count}} agentes membros. Eles poderão ser recuperados."
+    "deleteWithMembersWarning": "Isso fará a exclusão suave do grupo e de todos os {{count}} agentes membros. Eles poderão ser recuperados.",
+    "hideDiscussions": "Ocultar painel de discussões",
+    "showDiscussions": "Mostrar painel de discussões",
+    "hideConfig": "Ocultar painel de configuração",
+    "showConfig": "Mostrar painel de configuração"
   },
   "taskBoard": {
     "title": "Quadro de tarefas",

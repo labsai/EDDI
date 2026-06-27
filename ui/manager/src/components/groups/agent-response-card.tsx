@@ -224,7 +224,7 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
             {t(`groups.entryType.${entry.type}`, info.label)}
           </Badge>
           {entry.targetAgentId && (
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-[10px] text-muted-foreground" title={entry.targetAgentId}>
               → {entry.targetAgentId.slice(0, 8)}…
             </span>
           )}
@@ -286,8 +286,8 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
                     {item.assignedTo && (
                       <div className="flex items-center gap-1 mt-1.5">
                         <User2 className="h-3 w-3 text-muted-foreground" />
-                        <span className="text-[10px] text-muted-foreground font-medium truncate max-w-[200px]">
-                          {item.assignedTo.slice(0, 12)}…
+                        <span className="text-[10px] text-muted-foreground font-medium truncate max-w-[200px]" title={item.assignedTo}>
+                          {item.assignedTo.length > 12 ? `${item.assignedTo.slice(0, 12)}…` : item.assignedTo}
                         </span>
                       </div>
                     )}
@@ -392,8 +392,8 @@ function ExpandableText({ text, className }: { text: string; className?: string 
           className="text-[10px] text-primary/70 hover:text-primary font-medium mt-0.5 transition-colors"
         >
           {expanded
-            ? t("taskBoard.showLess", "show less")
-            : t("taskBoard.showMore", "show more")}
+            ? t("common.showLess", "Show less")
+            : t("common.showMore", "Show more")}
         </button>
       )}
     </div>

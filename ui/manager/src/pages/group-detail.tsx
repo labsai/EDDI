@@ -338,6 +338,7 @@ export function GroupDetailPage() {
             onClick={() => setShowDiscussions(true)}
             className="shrink-0 flex items-center justify-center w-6 rounded-lg border border-border bg-card hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors max-lg:hidden"
             title={t("groups.showDiscussions", "Show discussions panel")}
+            aria-label={t("groups.showDiscussions", "Show discussions panel")}
           >
             <PanelLeftOpen className="h-3.5 w-3.5" />
           </button>
@@ -368,6 +369,7 @@ export function GroupDetailPage() {
             onClick={() => setShowConfig(true)}
             className="shrink-0 flex items-center justify-center w-6 rounded-lg border border-border bg-card hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors max-xl:hidden"
             title={t("groups.showConfig", "Show config panel")}
+            aria-label={t("groups.showConfig", "Show config panel")}
           >
             <PanelRightOpen className="h-3.5 w-3.5" />
           </button>

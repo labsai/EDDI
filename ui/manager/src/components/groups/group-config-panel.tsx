@@ -82,7 +82,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
       <div>
         <h3 className="text-sm font-bold text-foreground">{config.name}</h3>
         {config.description && (
-          <p className="mt-1 text-xs text-muted-foreground line-clamp-3">
+          <p className="mt-1 text-xs text-muted-foreground line-clamp-3" title={config.description}>
             {config.description}
           </p>
         )}
@@ -124,7 +124,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1">
-                  <p className="text-xs font-medium text-foreground truncate">
+                  <p className="text-xs font-medium text-foreground truncate" title={member.displayName}>
                     {member.displayName}
                   </p>
                   {member.speakingOrder != null && (
@@ -137,7 +137,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
                   )}
                 </div>
                 {member.agentId && (
-                  <p className="text-[10px] text-muted-foreground font-mono truncate">
+                  <p className="text-[10px] text-muted-foreground font-mono truncate" title={member.agentId}>
                     {member.agentId.slice(0, 12)}…
                   </p>
                 )}
@@ -205,7 +205,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
                   </Badge>
                 </div>
                 {task.description && (
-                  <p className="text-[10px] text-muted-foreground line-clamp-2">{task.description}</p>
+                  <p className="text-[10px] text-muted-foreground line-clamp-2" title={task.description}>{task.description}</p>
                 )}
                 <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                   <span>→ {task.assignToRole}</span>
@@ -284,6 +284,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
                 size="sm"
                 className="w-full text-muted-foreground border-border hover:bg-secondary/50"
                 onClick={() => setShowDeleteConfirm("group")}
+                disabled={deleteGroupMutation.isPending || deleteWithMembersMutation.isPending}
               >
                 <Trash2 className="h-3.5 w-3.5 me-1.5" />
                 {t("groups.deleteGroupOnly", "Delete Group Only")}
@@ -293,6 +294,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
                 size="sm"
                 className="w-full text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
                 onClick={() => setShowDeleteConfirm("all")}
+                disabled={deleteGroupMutation.isPending || deleteWithMembersMutation.isPending}
               >
                 <Trash2 className="h-3.5 w-3.5 me-1.5" />
                 {t("groups.deleteGroupAndAgents", "Delete Group + All Agents")}
