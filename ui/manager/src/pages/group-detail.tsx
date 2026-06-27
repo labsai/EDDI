@@ -376,8 +376,8 @@ export function GroupDetailPage() {
 
         {/* RIGHT: Config panel — hidden on small screens and in fullscreen */}
         {showConfig && !isFullscreen && (
-          <div className="w-72 shrink-0 rounded-xl border border-border bg-card overflow-hidden max-xl:hidden">
-            <GroupConfigPanel config={safeConfig} groupId={groupId} groupVersion={version} />
+          <div className="w-72 shrink-0 rounded-xl border border-border bg-card overflow-hidden flex flex-col max-xl:hidden">
+            <GroupConfigPanel config={safeConfig} groupId={groupId} groupVersion={version} className="flex-1 min-h-0" />
           </div>
         )}
       </div>

@@ -91,6 +91,7 @@ function TaskCard({
   const avatarColor = hashColor(task.assignedTo);
   const initials = getInitials(task.assignedTo);
   const priority = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG[3]!;
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <div
@@ -114,7 +115,22 @@ function TaskCard({
         {task.subject}
       </p>
       {task.description && (
-        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{task.description}</p>
+        <div className="mt-1">
+          <p className={cn("text-xs text-muted-foreground", !expanded && "line-clamp-2")}>
+            {task.description}
+          </p>
+          {task.description.length > 120 && (
+            <button
+              type="button"
+              onClick={() => setExpanded(!expanded)}
+              className="text-[10px] text-primary/70 hover:text-primary font-medium mt-0.5 transition-colors"
+            >
+              {expanded
+                ? t("taskBoard.showLess", "show less")
+                : t("taskBoard.showMore", "show more")}
+            </button>
+          )}
+        </div>
       )}
       {/* Agent + Priority row */}
       <div className="mt-2 flex items-center justify-between gap-2">

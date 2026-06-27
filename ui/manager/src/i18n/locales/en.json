@@ -1532,7 +1532,9 @@
     "unassigned": "Unassigned",
     "progress": "{{done}} of {{total}} tasks done",
     "verificationPassed": "Passed",
-    "verificationFailed": "Failed"
+    "verificationFailed": "Failed",
+    "showMore": "show more",
+    "showLess": "show less"
   },
   "groupWizard": {
     "title": "Group Setup Wizard",
