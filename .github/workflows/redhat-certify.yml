@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "EDDI version (e.g. 6.1.1)"
+        description: "EDDI version (e.g. 6.1.2)"
         required: true
         default: "6.1.2"
       release:
