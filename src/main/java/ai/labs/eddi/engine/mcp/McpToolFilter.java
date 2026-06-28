@@ -19,7 +19,7 @@ import java.util.Set;
  * Agent tools (calculator, datetime, websearch, etc.), which are meant ONLY for
  * internal Agent workflow use — not for external MCP clients.
  * <p>
- * This whitelist ensures only the 33 intended MCP tools are visible.
+ * This whitelist ensures only the intended MCP tools are visible.
  *
  * @author ginccc
  */
@@ -49,7 +49,12 @@ public class McpToolFilter implements ToolFilter {
             "list_agent_triggers", "create_agent_trigger", "update_agent_trigger", "delete_agent_trigger",
             // Group Conversations (Phase 10)
             "describe_discussion_styles", "list_groups", "read_group", "create_group", "update_group", "delete_group", "discuss_with_group",
-            "read_group_conversation", "list_group_conversations");
+            "read_group_conversation", "list_group_conversations", "start_group_discussion", "delete_group_conversation",
+            // Schedule Management
+            "create_schedule", "list_schedules", "read_schedule", "delete_schedule", "fire_schedule_now", "retry_failed_schedule",
+            // Channel Integrations
+            "list_channel_integrations", "read_channel_integration", "create_channel_integration", "update_channel_integration",
+            "delete_channel_integration");
 
     @Override
     public boolean test(ToolInfo toolInfo, FilterContext filterContext) {

@@ -10,7 +10,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | --------------------------- | ------------------------------------- |
 | `http://localhost:7070/mcp` | MCP server endpoint (default + admin) |
 
-## Available Tools (48)
+## Available Tools (55)
 
 ### Conversation Tools (11)
 
@@ -81,21 +81,33 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `fire_schedule_now`     | Manually trigger a schedule fire immediately. Useful for testing or one-off executions                                                                                                              |
 | `retry_failed_schedule` | Re-queue a dead-lettered schedule for another fire attempt after fixing the cause of failure                                                                                                        |
 
-### Group Conversation Tools (9)
+### Group Conversation Tools (11)
 
 | Tool                        | Description                                                                                                                                                |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `describe_discussion_styles` | Rich descriptions of all 5 discussion styles with phase flows, member roles, and use cases                                                                |
+| `describe_discussion_styles` | Rich descriptions of all 6 discussion styles with phase flows, member roles, and use cases                                                                |
 | `list_groups`               | List all group configurations with name, style, member count                                                                                               |
 | `read_group`                | Read a group configuration's full details                                                                                                                  |
-| `create_group`              | Create a group (members, moderator, style, roles, member types). Supports nested groups via `memberTypes=GROUP`                                           |
+| `create_group`              | Create a group (members, moderator, style, roles, member types, tasks). Supports nested groups via `memberTypes=GROUP` and pre-configured TASK_FORCE tasks via `tasks` param |
 | `update_group`              | Update a group configuration (full JSON replacement)                                                                                                       |
 | `delete_group`              | Delete a group configuration                                                                                                                               |
 | `discuss_with_group`        | Start a multi-agent discussion on a question. Returns full transcript + synthesized answer                                                                 |
 | `read_group_conversation`   | Read a group conversation transcript                                                                                                                       |
 | `list_group_conversations`  | List past group discussions for a group, with state and timestamps                                                                                         |
+| `start_group_discussion`    | Start a discussion asynchronously (returns immediately with groupConversationId). Poll with `read_group_conversation`                                     |
+| `delete_group_conversation` | Delete a group conversation and cascade-delete all member conversations                                                                                    |
 
 See [Group Conversations](group-conversations.md) for full style details, custom phases, and nested groups.
+
+### Channel Integration Tools (5)
+
+| Tool                            | Description                                                                                                     |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `list_channel_integrations`     | List all channel integrations with name, type, and target count                                                 |
+| `read_channel_integration`      | Read a channel integration's full configuration                                                                 |
+| `create_channel_integration`    | Create a new channel integration (Slack, Teams, etc.) with platform config and agent targets                    |
+| `update_channel_integration`    | Update an existing channel integration                                                                          |
+| `delete_channel_integration`    | Delete a channel integration (soft or permanent)                                                                |
 
 ## MCP Resources
 

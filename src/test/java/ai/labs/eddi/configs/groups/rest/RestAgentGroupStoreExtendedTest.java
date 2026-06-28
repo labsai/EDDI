@@ -17,11 +17,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.Date;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
+import org.mockito.ArgumentCaptor;
 
 /**
  * Extended tests for {@link RestAgentGroupStore} — syncDescriptor branches,
@@ -173,6 +175,67 @@ class RestAgentGroupStoreExtendedTest {
             // Should not throw — falls back to setDescriptor
             assertDoesNotThrow(() -> restStore.updateGroup("group1", 1, config));
             verify(documentDescriptorStore).setDescriptor(eq("group1"), eq(1), any(DocumentDescriptor.class));
+        }
+
+        @Test
+        @DisplayName("create path sets createdOn and lastModifiedOn timestamps")
+        void createsDescriptorWithTimestamps() throws Exception {
+            var config = new AgentGroupConfiguration();
+            config.setName("Timestamped Group");
+
+            IResourceId resourceId = createResourceId("tsGroup", 1);
+            when(groupStore.getCurrentResourceId("tsGroup")).thenReturn(resourceId);
+            when(documentDescriptorStore.readDescriptor("tsGroup", 1))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
+            when(groupStore.update(eq("tsGroup"), eq(1), any())).thenReturn(2);
+
+            long before = System.currentTimeMillis();
+            restStore.updateGroup("tsGroup", 1, config);
+            long after = System.currentTimeMillis();
+
+            var captor = ArgumentCaptor.forClass(DocumentDescriptor.class);
+            verify(documentDescriptorStore).createDescriptor(eq("tsGroup"), eq(1), captor.capture());
+
+            DocumentDescriptor captured = captor.getValue();
+            assertNotNull(captured.getCreatedOn(), "createdOn must be set on new descriptors");
+            assertNotNull(captured.getLastModifiedOn(), "lastModifiedOn must be set on new descriptors");
+            assertTrue(captured.getCreatedOn().getTime() >= before && captured.getCreatedOn().getTime() <= after,
+                    "createdOn should be within the test execution window");
+            assertEquals(captured.getCreatedOn(), captured.getLastModifiedOn(),
+                    "createdOn and lastModifiedOn should be identical for a new descriptor");
+        }
+
+        @Test
+        @DisplayName("update path refreshes lastModifiedOn when name changes")
+        void updateRefreshesLastModifiedOn() throws Exception {
+            var config = new AgentGroupConfiguration();
+            config.setName("Changed Name");
+
+            IResourceId resourceId = createResourceId("group1", 1);
+            when(groupStore.getCurrentResourceId("group1")).thenReturn(resourceId);
+
+            Date originalDate = new Date(1000L);
+            DocumentDescriptor existingDescriptor = new DocumentDescriptor();
+            existingDescriptor.setName("Original Name");
+            existingDescriptor.setCreatedOn(originalDate);
+            existingDescriptor.setLastModifiedOn(originalDate);
+            when(documentDescriptorStore.readDescriptor("group1", 1)).thenReturn(existingDescriptor);
+            when(groupStore.update("group1", 1, config)).thenReturn(2);
+
+            long before = System.currentTimeMillis();
+            restStore.updateGroup("group1", 1, config);
+
+            var captor = ArgumentCaptor.forClass(DocumentDescriptor.class);
+            verify(documentDescriptorStore).setDescriptor(eq("group1"), eq(1), captor.capture());
+
+            DocumentDescriptor captured = captor.getValue();
+            assertEquals(originalDate, captured.getCreatedOn(),
+                    "createdOn must NOT be changed on update");
+            assertNotNull(captured.getLastModifiedOn(), "lastModifiedOn must be set on update");
+            assertTrue(captured.getLastModifiedOn().getTime() >= before,
+                    "lastModifiedOn should be refreshed to current time");
+            assertTrue(captured.getLastModifiedOn().getTime() > originalDate.getTime(),
+                    "lastModifiedOn should be newer than the original");
         }
     }
 

@@ -246,4 +246,48 @@ class DiscussionStylePresetsTest {
         assertEquals(ContextScope.NONE, phases.get(0).contextScope());
         assertEquals(PhaseType.SYNTHESIS, phases.get(1).type());
     }
+
+    // --- TASK_FORCE ---
+
+    @Test
+    void taskForce_produces4Phases() {
+        List<DiscussionPhase> phases = DiscussionStylePresets.expand(DiscussionStyle.TASK_FORCE, 1);
+        assertEquals(4, phases.size());
+    }
+
+    @Test
+    void taskForce_phaseTypes() {
+        List<DiscussionPhase> phases = DiscussionStylePresets.expand(DiscussionStyle.TASK_FORCE, 1);
+        assertEquals(PhaseType.PLAN, phases.get(0).type());
+        assertEquals(PhaseType.EXECUTE, phases.get(1).type());
+        assertEquals(PhaseType.VERIFY, phases.get(2).type());
+        assertEquals(PhaseType.SYNTHESIS, phases.get(3).type());
+    }
+
+    @Test
+    void taskForce_turnOrders() {
+        List<DiscussionPhase> phases = DiscussionStylePresets.expand(DiscussionStyle.TASK_FORCE, 1);
+        assertEquals(TurnOrder.SEQUENTIAL, phases.get(0).turnOrder()); // PLAN
+        assertEquals(TurnOrder.PARALLEL, phases.get(1).turnOrder()); // EXECUTE
+        assertEquals(TurnOrder.SEQUENTIAL, phases.get(2).turnOrder()); // VERIFY
+        assertEquals(TurnOrder.SEQUENTIAL, phases.get(3).turnOrder()); // SYNTHESIS
+    }
+
+    @Test
+    void taskForce_contextScopes() {
+        List<DiscussionPhase> phases = DiscussionStylePresets.expand(DiscussionStyle.TASK_FORCE, 1);
+        assertEquals(ContextScope.FULL, phases.get(0).contextScope()); // PLAN
+        assertEquals(ContextScope.TASK_ONLY, phases.get(1).contextScope()); // EXECUTE
+        assertEquals(ContextScope.FULL, phases.get(2).contextScope()); // VERIFY
+        assertEquals(ContextScope.FULL, phases.get(3).contextScope()); // SYNTHESIS
+    }
+
+    @Test
+    void taskForce_participants() {
+        List<DiscussionPhase> phases = DiscussionStylePresets.expand(DiscussionStyle.TASK_FORCE, 1);
+        assertEquals("MODERATOR", phases.get(0).participants()); // PLAN
+        assertEquals("ALL", phases.get(1).participants()); // EXECUTE
+        assertEquals("MODERATOR", phases.get(2).participants()); // VERIFY
+        assertEquals("MODERATOR", phases.get(3).participants()); // SYNTHESIS
+    }
 }

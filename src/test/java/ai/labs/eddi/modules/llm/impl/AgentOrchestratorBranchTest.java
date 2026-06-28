@@ -100,7 +100,8 @@ class AgentOrchestratorBranchTest {
                 restAgentStore, restWorkflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter,
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
-                memorySnapshotService);
+                memorySnapshotService,
+                null, null, null, null, null);
     }
 
     // =========================================================

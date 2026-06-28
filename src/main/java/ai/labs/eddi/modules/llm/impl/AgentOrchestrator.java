@@ -5,19 +5,25 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
+import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
+import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.engine.setup.AgentSetupService;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -26,6 +32,10 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.UserMemoryTool;
 import ai.labs.eddi.modules.llm.tools.ConversationRecallTool;
+import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
+import ai.labs.eddi.modules.llm.tools.ConverseWithAgentTool;
+import ai.labs.eddi.modules.llm.tools.FindAgentsByCapabilityTool;
+import ai.labs.eddi.modules.llm.tools.TeardownAgentTool;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -67,6 +77,10 @@ class AgentOrchestrator {
     private static final String HTTPCALLS_TYPE = "eddi://ai.labs.httpcalls";
     private static final String MCPCALLS_TYPE = "eddi://ai.labs.mcpcalls";
 
+    /** Well-known data keys for dynamic agent lifecycle tracking. */
+    public static final String KEY_DYNAMIC_CREATED_AGENT_IDS = "dynamic:created_agent_ids";
+    public static final String KEY_DYNAMIC_RETAINED_AGENT_IDS = "dynamic:retained_agent_ids";
+
     // Built-in tools
     private final CalculatorTool calculatorTool;
     private final DateTimeTool dateTimeTool;
@@ -93,6 +107,13 @@ class AgentOrchestrator {
     private final TenantQuotaService tenantQuotaService;
     private final MemorySnapshotService memorySnapshotService;
 
+    // Dynamic agent creation dependencies
+    private final AgentSetupService agentSetupService;
+    private final CapabilityRegistryService capabilityRegistryService;
+    private final IConversationService conversationService;
+    private final IAgentFactory agentFactory;
+    private final IAgentStore agentStore;
+
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             FetchToolResponsePageTool fetchToolResponsePageTool,
@@ -100,7 +121,9 @@ class AgentOrchestrator {
             IRestAgentStore restAgentStore, IRestWorkflowStore restWorkflowStore, IResourceClientLibrary resourceClientLibrary,
             IApiCallExecutor apiCallExecutor, IJsonSerialization jsonSerialization, IMemoryItemConverter memoryItemConverter,
             IUserMemoryStore userMemoryStore, ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService,
-            MemorySnapshotService memorySnapshotService) {
+            MemorySnapshotService memorySnapshotService,
+            AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
+            IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore) {
         this.calculatorTool = calculatorTool;
         this.dateTimeTool = dateTimeTool;
         this.webSearchTool = webSearchTool;
@@ -123,6 +146,11 @@ class AgentOrchestrator {
         this.toolResponseTruncator = toolResponseTruncator;
         this.tenantQuotaService = tenantQuotaService;
         this.memorySnapshotService = memorySnapshotService;
+        this.agentSetupService = agentSetupService;
+        this.capabilityRegistryService = capabilityRegistryService;
+        this.conversationService = conversationService;
+        this.agentFactory = agentFactory;
+        this.agentStore = agentStore;
     }
 
     /**
@@ -535,6 +563,48 @@ class AgentOrchestrator {
                 addUserMemoryToolIfEnabled(tools, memory);
             if (whitelist.contains("conversationRecall"))
                 addConversationRecallToolIfEnabled(tools, task, memory);
+            // Dynamic agent tools (whitelist-gated, shared tracking lists)
+            {
+                List<String> sharedCreatedIds = new java.util.concurrent.CopyOnWriteArrayList<>();
+                Set<String> sharedRetainedIds = java.util.concurrent.ConcurrentHashMap.newKeySet();
+                String parentAgentId = memory.getAgentId();
+                String userId = memory.getUserId();
+                DynamicAgentConfig dynamicConfig = resolveDynamicAgentConfig(memory);
+
+                boolean anyDynamicToolAdded = false;
+                if (whitelist.contains("create_sub_agent") && agentSetupService != null && conversationService != null) {
+                    tools.add(new CreateSubAgentTool(agentSetupService,
+                            conversationService, parentAgentId, userId, dynamicConfig,
+                            sharedCreatedIds, sharedRetainedIds));
+                    LOGGER.debugf("[DYNAMIC] CreateSubAgentTool enabled for agent='%s'", sanitize(parentAgentId));
+                    anyDynamicToolAdded = true;
+                }
+                if (whitelist.contains("converse_with_agent") && conversationService != null) {
+                    tools.add(new ConverseWithAgentTool(conversationService, userId));
+                    LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s'", sanitize(parentAgentId));
+                }
+                if (whitelist.contains("find_agents_by_capability") && capabilityRegistryService != null) {
+                    tools.add(new FindAgentsByCapabilityTool(capabilityRegistryService));
+                    LOGGER.debugf("[DYNAMIC] FindAgentsByCapabilityTool enabled for agent='%s'", sanitize(parentAgentId));
+                }
+                if (whitelist.contains("teardown_agent") && agentFactory != null && agentStore != null) {
+                    tools.add(new TeardownAgentTool(agentFactory, agentStore, sharedCreatedIds, sharedRetainedIds));
+                    LOGGER.debugf("[DYNAMIC] TeardownAgentTool enabled for agent='%s'", sanitize(parentAgentId));
+                    anyDynamicToolAdded = true;
+                }
+
+                // Store tracking lists in memory step data so GroupConversationService
+                // can read them from the snapshot after each member turn and propagate
+                // to GroupConversation for lifecycle cleanup (Copilot PR review fix).
+                // The lists are stored by reference — after tool execution, they'll
+                // contain all agent IDs accumulated during this turn.
+                if (anyDynamicToolAdded) {
+                    memory.getCurrentStep().storeData(
+                            new ai.labs.eddi.engine.memory.model.Data<>(KEY_DYNAMIC_CREATED_AGENT_IDS, sharedCreatedIds));
+                    memory.getCurrentStep().storeData(
+                            new ai.labs.eddi.engine.memory.model.Data<>(KEY_DYNAMIC_RETAINED_AGENT_IDS, sharedRetainedIds));
+                }
+            }
         } else {
             // No whitelist — add all built-in tools
             tools.add(calculatorTool);
@@ -602,6 +672,49 @@ class AgentOrchestrator {
         tools.add(tool);
         LOGGER.infof("[RECALL] ConversationRecallTool enabled: summaryThroughStep=%d, maxRecallTurns=%d", throughStep,
                 summaryConfig.getMaxRecallTurns());
+    }
+
+    /**
+     * Resolves the DynamicAgentConfig for the current conversation. If the agent is
+     * participating in a group discussion, the group's {@link DynamicAgentConfig}
+     * is passed via context variable {@code dynamicAgentConfig} by
+     * {@code GroupConversationService}. If no group config is present (standalone
+     * agent), a permissive default is used.
+     *
+     * @param memory
+     *            the conversation memory to check for group context
+     * @return the resolved DynamicAgentConfig — group-level if available,
+     *         permissive default otherwise
+     */
+    private DynamicAgentConfig resolveDynamicAgentConfig(IConversationMemory memory) {
+        // Check if GroupConversationService injected a DynamicAgentConfig via context
+        var currentStep = memory.getCurrentStep();
+        if (currentStep != null) {
+            var contextData = currentStep.getLatestData("context:dynamicAgentConfig");
+            if (contextData != null) {
+                Object value = contextData.getResult();
+                if (value instanceof ai.labs.eddi.engine.model.Context ctx && ctx.getValue() instanceof DynamicAgentConfig groupConfig) {
+                    LOGGER.debugf("[DYNAMIC] Using group-level DynamicAgentConfig for agent='%s'", sanitize(memory.getAgentId()));
+                    return groupConfig;
+                }
+            }
+        }
+        // Fallback: standalone agent — use permissive defaults
+        return createDefaultDynamicConfig();
+    }
+
+    /**
+     * Creates a default DynamicAgentConfig for agents without explicit group
+     * config. Used when individual agents have dynamic agent tools in their
+     * whitelist.
+     */
+    private DynamicAgentConfig createDefaultDynamicConfig() {
+        var config = new DynamicAgentConfig();
+        config.setEnabled(true);
+        config.setAllowCreation(true);
+        config.setAllowRecruitment(true);
+        config.setAllowDelegation(true);
+        return config;
     }
 
     // --- Httpcall auto-discovery from workflow ---

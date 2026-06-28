@@ -122,7 +122,8 @@ class LlmTaskExtendedBranchTest {
                 mockSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, toolResponseTruncator,
                 mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
-                null, null);
+                null, null,
+                null, null, null, null, null);
     }
 
     private IConversationMemory setupMemory(List<String> actions) {
@@ -495,7 +496,8 @@ class LlmTaskExtendedBranchTest {
                     new TokenCounterFactory(), mock(ConversationSummarizer.class),
                     snippetService, gvr, cws, ims, trt,
                     mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
-                    null, null);
+                    null, null,
+                    null, null, null, null, null);
 
             var memory = setupMemory(List.of("action1"));
             when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
