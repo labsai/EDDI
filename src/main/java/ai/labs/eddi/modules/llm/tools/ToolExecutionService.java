@@ -351,6 +351,15 @@ public class ToolExecutionService {
                 meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
                 LOGGER.warn(String.format("Tool '%s' interrupted after %dms", toolName, executionTime));
                 return "Error: " + error;
+            } catch (ExecutionException e) {
+                // Unwrap the underlying cause from the Future wrapper
+                Throwable cause = e.getCause() != null ? e.getCause() : e;
+                long executionTime = System.currentTimeMillis() - startTime;
+                String error = cause.getMessage() != null ? cause.getMessage() : cause.getClass().getSimpleName();
+                trace.addFailedToolCall(toolName, arguments, error, executionTime, cost);
+                meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
+                LOGGER.error(String.format("Tool '%s' failed (%dms): %s", toolName, executionTime, error), cause);
+                return "Error executing tool: " + error;
             }
 
             String resultString = result != null ? result.toString() : "null";
