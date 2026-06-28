@@ -184,16 +184,41 @@ class GroupConversationServiceExtendedTest {
                     new GroupMember("a1", "Alice", 1, null));
             cfg.setModeratorAgentId("mod");
             setupStore(cfg);
-            stubAgent("a1", "Opinion A");
+
+            // Gate the first agent response so the async thread blocks until we release it.
+            // This guarantees the state is still IN_PROGRESS when we assert.
+            var gate = new java.util.concurrent.CountDownLatch(1);
+
+            when(agentFactory.getLatestReadyAgent(any(Environment.class), eq("a1")))
+                    .thenReturn(mock(IAgent.class));
+            when(conversationService.startConversation(any(Environment.class),
+                    eq("a1"), anyString(), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-a1", null));
+            doAnswer(inv -> {
+                gate.await(5, TimeUnit.SECONDS); // block until test releases
+                ConversationResponseHandler handler = inv.getArgument(8);
+                var snapshot = new SimpleConversationMemorySnapshot();
+                var output = new ConversationOutput();
+                output.put("output", List.of("Opinion A"));
+                snapshot.setConversationOutputs(new ArrayList<>(List.of(output)));
+                handler.onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(any(Environment.class), eq("a1"),
+                    anyString(), any(), any(), any(), any(InputData.class),
+                    anyBoolean(), any(ConversationResponseHandler.class));
+
             stubAgent("mod", "Synthesis");
 
             var result = service.startAndDiscussAsync(GROUP_ID, QUESTION, USER_ID, null);
 
+            // Assert while the async thread is still blocked on the gate
             assertNotNull(result);
             assertEquals("gc-1", result.getId());
             assertEquals(GROUP_ID, result.getGroupId());
             assertEquals(GroupConversationState.IN_PROGRESS, result.getState());
-            // Give async thread time to complete
+
+            // Release the gate so the async thread can finish cleanly
+            gate.countDown();
             Thread.sleep(500);
         }
 
