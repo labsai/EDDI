@@ -4,10 +4,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import DOMPurify from "dompurify";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, ClipboardList, CheckCircle2, ListOrdered, User2, XCircle } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import type { TranscriptEntry, TranscriptEntryType, DiscussionStyle } from "@/lib/api/groups";
+import type { TranscriptEntry, TranscriptEntryType, DiscussionStyle, TaskDefinition } from "@/lib/api/groups";
 import { ENTRY_TYPE_INFO } from "@/lib/api/groups";
 import { parseTranscriptContent, safeFormatDate } from "./group-utils";
 
@@ -21,18 +21,12 @@ const STYLE_BADGE_OVERRIDES: Partial<Record<DiscussionStyle, Partial<Record<Tran
     CHALLENGE: "destructive",
     DEFENSE: "success",
   },
+  TASK_FORCE: {
+    PLAN: "default",
+    TASK_RESULT: "success",
+    VERIFICATION: "warning",
+  },
 };
-
-interface AgentResponseCardProps {
-  entry: TranscriptEntry;
-  /** Show typing indicator instead of content */
-  isSpeaking?: boolean;
-  /** When true, render HTML content (sanitized via DOMPurify). Off by default for safety. */
-  allowHtml?: boolean;
-  /** Discussion style for style-aware badge colors */
-  discussionStyle?: DiscussionStyle;
-  className?: string;
-}
 
 /** Check if content contains HTML tags */
 function hasHtml(content: string): boolean {
@@ -49,6 +43,7 @@ function defaultBadgeVariant(
 ): "default" | "secondary" | "success" | "warning" | "destructive" | "outline" {
   switch (type) {
     case "SYNTHESIS":
+    case "PLAN":
       return "default";
     case "ERROR":
       return "destructive";
@@ -56,10 +51,12 @@ function defaultBadgeVariant(
       return "secondary";
     case "CRITIQUE":
     case "CHALLENGE":
+    case "VERIFICATION":
       return "warning";
     case "OPINION":
     case "REVISION":
     case "DEFENSE":
+    case "TASK_RESULT":
       return "success";
     default:
       return "outline";
@@ -69,17 +66,98 @@ function defaultBadgeVariant(
 /** Height in px above which we collapse a message (~6 lines of text) */
 const COLLAPSE_THRESHOLD = 144;
 
-export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyle, className }: AgentResponseCardProps) {
+/** Structured item from moderator's JSON output (plans, verifications, etc.) */
+interface StructuredItem {
+  subject: string;
+  description?: string;
+  assignedTo?: string;
+  priority?: number;
+  passed?: boolean;
+  feedback?: string;
+}
+
+/** Validate parsed array has structured items with 'subject' field */
+function validateStructuredArray(arr: unknown): StructuredItem[] | null {
+  if (!Array.isArray(arr) || arr.length === 0) return null;
+  if (typeof (arr[0] as Record<string, unknown>)?.subject !== "string") return null;
+  return arr as StructuredItem[];
+}
+
+/** Extract a JSON array substring from content (finds first `[` to last `]`) */
+function extractJsonArray(content: string): string | null {
+  const start = content.indexOf("[");
+  const end = content.lastIndexOf("]");
+  if (start === -1 || end === -1 || end <= start) return null;
+  return content.slice(start, end + 1);
+}
+
+/** Try to parse content as a JSON array of structured items.
+ *  Handles multiple scenarios:
+ *  1. Clean JSON array
+ *  2. JSON with unescaped newlines in string values (LLM output)
+ *  3. JSON array embedded within wrapper text
+ */
+function tryParseStructuredItems(content: string | null): StructuredItem[] | null {
+  if (!content) return null;
+
+  // 1. Try to extract a JSON array substring from the content
+  const jsonStr = extractJsonArray(content);
+  if (!jsonStr) return null;
+
+  // 2. Fast path: try standard JSON.parse
+  try {
+    return validateStructuredArray(JSON.parse(jsonStr));
+  } catch { /* continue to fallback */ }
+
+  // 3. Fallback: repair by escaping unescaped newlines within JSON string values
+  //    (LLMs sometimes produce unescaped newlines in strings)
+  try {
+    const repaired = jsonStr.replace(
+      /"(?:[^"\\]|\\.)*"/g,
+      (match) => match.replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t"),
+    );
+    return validateStructuredArray(JSON.parse(repaired));
+  } catch {
+    return null;
+  }
+}
+
+interface AgentResponseCardProps {
+  entry: TranscriptEntry;
+  isSpeaking?: boolean;
+  allowHtml?: boolean;
+  discussionStyle?: DiscussionStyle;
+  /** Pre-configured tasks from group config (for TASK_FORCE style PLAN entries) */
+  preConfiguredTasks?: TaskDefinition[];
+  className?: string;
+}
+
+export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyle, preConfiguredTasks, className }: AgentResponseCardProps) {
   const { t } = useTranslation();
   const info = ENTRY_TYPE_INFO[entry.type];
   const isSynthesis = entry.type === "SYNTHESIS";
   const isError = entry.type === "ERROR" || entry.type === "SKIPPED";
+  const isPlan = entry.type === "PLAN";
+  const isVerification = entry.type === "VERIFICATION";
+  const isTaskResult = entry.type === "TASK_RESULT";
 
   // Style-aware badge variants
   const badgeVar = (discussionStyle && STYLE_BADGE_OVERRIDES[discussionStyle]?.[entry.type])
     || defaultBadgeVariant(entry.type);
 
   const parsedContent = entry.content ? parseTranscriptContent(entry.content) : null;
+  // Try parsing as structured JSON array — check both raw and unwrapped content (no type gate)
+  let structuredItems = tryParseStructuredItems(entry.content) ?? tryParseStructuredItems(parsedContent);
+
+  // For PLAN entries with pre-configured tasks: convert TaskDefinition[] → StructuredItem[]
+  if (!structuredItems && isPlan && preConfiguredTasks && preConfiguredTasks.length > 0) {
+    structuredItems = preConfiguredTasks.map((task) => ({
+      subject: task.subject,
+      description: task.description,
+      assignedTo: task.assignToRole,
+      priority: task.priority,
+    }));
+  }
   // Only render as HTML if opt-in is enabled AND content actually contains HTML tags
   const renderAsHtml = allowHtml && parsedContent ? hasHtml(parsedContent) : false;
 
@@ -100,8 +178,14 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
         "flex gap-3 rounded-lg p-3 transition-colors",
         isSynthesis &&
           "border-2 border-primary/40 bg-primary/5 shadow-sm",
+        isPlan &&
+          "border border-sky-500/30 bg-sky-500/5",
+        isTaskResult &&
+          "border border-emerald-500/20 bg-emerald-500/5",
+        isVerification &&
+          "border border-amber-500/20 bg-amber-500/5",
         isError && "opacity-60",
-        !isSynthesis && !isError && "hover:bg-secondary/30",
+        !isSynthesis && !isError && !isPlan && !isTaskResult && !isVerification && "hover:bg-secondary/30",
         className
       )}
       data-testid={`transcript-entry-${entry.speakerAgentId}-${entry.phaseIndex}`}
@@ -114,7 +198,13 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
         )}
         title={entry.speakerDisplayName}
       >
-        {getInitials(entry.speakerDisplayName)}
+        {isPlan ? (
+          <ClipboardList className="h-4 w-4" />
+        ) : isVerification ? (
+          <CheckCircle2 className="h-4 w-4" />
+        ) : (
+          getInitials(entry.speakerDisplayName)
+        )}
       </div>
 
       {/* Content */}
@@ -125,10 +215,10 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
             {entry.speakerDisplayName}
           </span>
           <Badge variant={badgeVar} className="text-[10px] px-1.5 py-0">
-            {info.label}
+            {t(`groups.entryType.${entry.type}`, info.label)}
           </Badge>
           {entry.targetAgentId && (
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-[10px] text-muted-foreground" title={entry.targetAgentId}>
               → {entry.targetAgentId.slice(0, 8)}…
             </span>
           )}
@@ -144,6 +234,66 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:150ms]" />
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
             <span className="text-xs text-muted-foreground ms-1">{t("groups.responding", "responding…")}</span>
+          </div>
+        ) : structuredItems ? (
+          /* Render structured items (plans, verifications, etc.) instead of raw JSON */
+          <div className="space-y-2">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-2">
+              {isVerification ? (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              ) : (
+                <ListOrdered className="h-3.5 w-3.5" />
+              )}
+              {structuredItems.length} {structuredItems.length === 1 ? t("groups.item", "item") : t("groups.items", "items")}
+            </div>
+            {structuredItems.map((item, i) => {
+              const hasVerdict = item.passed !== undefined;
+              return (
+                <div
+                  key={i}
+                  className={cn(
+                    "flex items-start gap-3 rounded-lg border px-3 py-2.5",
+                    hasVerdict && item.passed && "border-emerald-500/30 bg-emerald-500/5",
+                    hasVerdict && !item.passed && "border-destructive/30 bg-destructive/5",
+                    !hasVerdict && "border-border/50 bg-secondary/30",
+                  )}
+                >
+                  {hasVerdict ? (
+                    item.passed ? (
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500 mt-0.5" />
+                    ) : (
+                      <XCircle className="h-4 w-4 shrink-0 text-destructive mt-0.5" />
+                    )
+                  ) : (
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-sky-500/20 text-sky-400 text-[10px] font-bold mt-0.5">
+                      {i + 1}
+                    </span>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-foreground leading-snug">{item.subject}</p>
+                    {item.description && (
+                      <ExpandableText text={item.description} className="mt-0.5" />
+                    )}
+                    {item.feedback && (
+                      <ExpandableText text={item.feedback} className="mt-0.5" />
+                    )}
+                    {item.assignedTo && (
+                      <div className="flex items-center gap-1 mt-1.5">
+                        <User2 className="h-3 w-3 text-muted-foreground" />
+                        <span className="text-[10px] text-muted-foreground font-medium truncate max-w-[200px]" title={item.assignedTo}>
+                          {item.assignedTo.length > 12 ? `${item.assignedTo.slice(0, 12)}…` : item.assignedTo}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  {item.priority != null && (
+                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 shrink-0">
+                      P{item.priority}
+                    </Badge>
+                  )}
+                </div>
+              );
+            })}
           </div>
         ) : parsedContent ? (
           <>
@@ -214,6 +364,32 @@ export function AgentResponseCard({ entry, isSpeaking, allowHtml, discussionStyl
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Clamped text with show more/less toggle for long content */
+function ExpandableText({ text, className }: { text: string; className?: string }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > 100;
+
+  return (
+    <div className={className}>
+      <p className={cn("text-xs text-muted-foreground leading-relaxed", !expanded && isLong && "line-clamp-2")}>
+        {text}
+      </p>
+      {isLong && (
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="text-[10px] text-primary/70 hover:text-primary font-medium mt-0.5 transition-colors"
+        >
+          {expanded
+            ? t("common.showLess", "Show less")
+            : t("common.showMore", "Show more")}
+        </button>
+      )}
     </div>
   );
 }

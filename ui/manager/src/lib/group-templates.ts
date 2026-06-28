@@ -102,6 +102,21 @@ export function getGroupTemplates(t: TFunction): GroupTemplate[] {
       ],
       moderatorSuggested: true,
     },
+    {
+      key: "task-force",
+      name: t("groupTemplates.taskForce"),
+      description: t("groupTemplates.taskForceDesc"),
+      icon: "🎯",
+      style: "TASK_FORCE",
+      maxRounds: 1,
+      roles: [
+        { displayName: t("groupTemplates.roles.projectLead"), role: "Lead" },
+        { displayName: t("groupTemplates.roles.researcher"), role: "Research" },
+        { displayName: t("groupTemplates.roles.implementer"), role: "Implementation" },
+        { displayName: t("groupTemplates.roles.qualityAssurance"), role: "QA" },
+      ],
+      moderatorSuggested: true,
+    },
   ];
 }
 

@@ -64,6 +64,17 @@ npm run test         # All Vitest tests pass
 npm run build        # Production build succeeds (includes tsc -b)
 ```
 
+### i18n — MANDATORY
+
+> **⚠️ Every time you add or modify keys in `en.json`, you MUST propagate those changes to ALL 10 other locale files before committing.**
+
+The project has **11 locales**: `en`, `de`, `fr`, `es`, `ar`, `zh`, `th`, `ja`, `ko`, `pt`, `hi`.
+
+1. Add new keys to `src/i18n/locales/en.json` first
+2. **Immediately** propagate translated versions to all other 10 locale files
+3. Verify with: `Get-ChildItem src/i18n/locales/*.json | Where-Object { Select-String -Path $_ -Pattern '"YOUR_KEY"' -Quiet } | Measure-Object` → must be **11**
+4. Do NOT leave this as a follow-up step — it must be done in the **same commit**
+
 ### After Completing Work
 
 1. **Update [`HANDOFF.md`](HANDOFF.md)**: new phase row, test counts, last commit

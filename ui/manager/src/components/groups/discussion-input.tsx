@@ -78,7 +78,7 @@ export function DiscussionInput({ onSubmit, isLoading, disabled }: DiscussionInp
           <button
             type="button"
             onClick={() => setDialogOpen(true)}
-            className="absolute end-2 top-2 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
+            className="absolute end-2 inset-y-0 my-auto h-fit rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors"
             title={t("groups.expandInput", "Expand input")}
           >
             <Expand className="h-3.5 w-3.5" />

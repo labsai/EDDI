@@ -8,7 +8,7 @@ const mockT = ((key: string) => key) as unknown as TFunction;
 describe("getGroupTemplates", () => {
   it("returns 5 templates", () => {
     const templates = getGroupTemplates(mockT);
-    expect(templates).toHaveLength(5);
+    expect(templates).toHaveLength(6);
   });
 
   it("each template has required fields", () => {
@@ -46,8 +46,8 @@ describe("getGroupTemplates", () => {
     const spyT = vi.fn((key: string) => key) as unknown as TFunction;
     getGroupTemplates(spyT);
     // Each template: name + description + each role displayName
-    // advisory: 2 + 5, code: 2 + 3, risk: 2 + 3, forecast: 2 + 4, debate: 2 + 4 = 29
-    expect(spyT).toHaveBeenCalledTimes(29);
+    // advisory: 2 + 5, code: 2 + 3, risk: 2 + 3, forecast: 2 + 4, debate: 2 + 4, task-force: 2 + 4 = 35
+    expect(spyT).toHaveBeenCalledTimes(35);
   });
 
   it("templates have unique keys", () => {

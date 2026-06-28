@@ -9,6 +9,7 @@ export const DISCUSSION_STYLES = [
   "DEVIL_ADVOCATE",
   "DELPHI",
   "DEBATE",
+  "TASK_FORCE",
   "CUSTOM",
 ] as const;
 export type DiscussionStyle = (typeof DISCUSSION_STYLES)[number];
@@ -22,6 +23,9 @@ export const PHASE_TYPES = [
   "ARGUE",
   "REBUTTAL",
   "SYNTHESIS",
+  "PLAN",
+  "EXECUTE",
+  "VERIFY",
 ] as const;
 export type PhaseType = (typeof PHASE_TYPES)[number];
 
@@ -32,7 +36,9 @@ export type ContextScope =
   | "FULL"
   | "LAST_PHASE"
   | "ANONYMOUS"
-  | "OWN_FEEDBACK";
+  | "OWN_FEEDBACK"
+  | "TASK_ONLY"
+  | "TASK_WITH_DEPS";
 
 export type MemberType = "AGENT" | "GROUP";
 
@@ -44,7 +50,8 @@ export type GroupConversationState =
   | "IN_PROGRESS"
   | "SYNTHESIZING"
   | "COMPLETED"
-  | "FAILED";
+  | "FAILED"
+  | "AWAITING_APPROVAL";
 
 export type TranscriptEntryType =
   | "QUESTION"
@@ -57,7 +64,10 @@ export type TranscriptEntryType =
   | "REBUTTAL"
   | "SYNTHESIS"
   | "ERROR"
-  | "SKIPPED";
+  | "SKIPPED"
+  | "PLAN"
+  | "TASK_RESULT"
+  | "VERIFICATION";
 
 // ─── Data Models ─────────────────────────────────────────────────
 
@@ -78,6 +88,7 @@ export interface DiscussionPhase {
   targetEachPeer: boolean;
   inputTemplate: string | null;
   repeats: number;
+  requiresApproval?: boolean;
 }
 
 export interface ProtocolConfig {
@@ -85,6 +96,67 @@ export interface ProtocolConfig {
   onAgentFailure: MemberFailurePolicy;
   maxRetries: number;
   onMemberUnavailable: MemberUnavailablePolicy;
+  maxTurns?: number;
+}
+
+// ─── Task Models ────────────────────────────────────────────────
+
+export type TaskStatus =
+  | "PENDING"
+  | "ASSIGNED"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "VERIFIED"
+  | "FAILED"
+  | "BLOCKED"
+  | "AWAITING_APPROVAL";
+
+export interface TaskItem {
+  id: string;
+  subject: string;
+  description: string;
+  status: TaskStatus;
+  assignedAgentId: string | null;
+  assignedDisplayName: string | null;
+  dependsOnIds: string[];
+  result: string | null;
+  verificationNote: string | null;
+  verified: boolean;
+  priority: number;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface SharedTaskList {
+  tasks: TaskItem[];
+}
+
+export interface TaskDefinition {
+  subject: string;
+  description: string;
+  assignToRole: string;
+  dependsOn: string[] | null;
+  priority: number;
+}
+
+export type LifecyclePolicy =
+  | "EPHEMERAL"
+  | "KEEP_DEPLOYED"
+  | "UNDEPLOY_ONLY"
+  | "AGENT_DECIDES";
+
+export interface DynamicAgentConfig {
+  enabled: boolean;
+  allowCreation: boolean;
+  allowRecruitment: boolean;
+  allowDelegation: boolean;
+  maxCreatedAgentsPerDiscussion: number;
+  maxRecruitedAgentsPerDiscussion: number;
+  maxDelegationsPerTask: number;
+  allowedProviders: string[];
+  allowedModels: Record<string, string[]>;
+  inheritParentModel: boolean;
+  lifecyclePolicy: LifecyclePolicy;
 }
 
 export interface AgentGroupConfiguration {
@@ -96,6 +168,10 @@ export interface AgentGroupConfiguration {
   maxRounds: number;
   phases: DiscussionPhase[] | null;
   protocol: ProtocolConfig | null;
+  /** Pre-configured tasks for TASK_FORCE style (skips PLAN phase) */
+  tasks?: TaskDefinition[];
+  /** Dynamic agent creation and recruitment configuration */
+  dynamicAgents?: DynamicAgentConfig;
 }
 
 export interface TranscriptEntry {
@@ -122,6 +198,14 @@ export interface GroupConversation {
   currentPhaseName: string | null;
   synthesizedAnswer: string | null;
   depth: number;
+  /** Task list for TASK_FORCE style discussions */
+  taskList: SharedTaskList | null;
+  /** Agents dynamically added during the discussion */
+  dynamicMembers: GroupMember[];
+  /** Agent IDs created during this discussion (for lifecycle cleanup) */
+  createdAgentIds: string[];
+  /** Agent IDs retained by creators (agent-decides policy) */
+  retainedAgentIds: string[];
   created: string;
   lastModified: string;
 }
@@ -257,21 +341,26 @@ export type GroupSSEEventType =
   | "phase_complete"
   | "synthesis_start"
   | "group_complete"
-  | "group_error";
+  | "group_error"
+  | "task_plan_created"
+  | "task_verified";
 
 export interface GroupSSEEvent {
   type: GroupSSEEventType;
   data: string;
 }
 
-/** Parsed event payloads for convenience */
+/** Parsed event payloads for convenience.
+ *  Field names match the backend's GroupStartEvent Java record. */
 export interface GroupStartPayload {
-  conversationId: string;
+  groupConversationId: string;
+  /** @deprecated Use groupConversationId — kept for backwards compatibility */
+  conversationId?: string;
   groupId: string;
   question: string;
   style: string;
-  phaseCount: number;
-  agentIds: string[];
+  totalPhases: number;
+  memberAgentIds: string[];
 }
 
 export interface PhaseStartPayload {
@@ -297,6 +386,9 @@ export interface SpeakerCompletePayload {
   content?: string;
   phaseIndex: number;
   phaseName: string;
+  /** Peer-targeted phase: the agent this response was aimed at */
+  targetAgentId?: string;
+  targetDisplayName?: string;
 }
 
 export interface PhaseCompletePayload {
@@ -315,6 +407,18 @@ export interface GroupCompletePayload {
 
 export interface GroupErrorPayload {
   error: string;
+}
+
+export interface TaskPlanCreatedPayload {
+  tasks: { id: string; subject: string; assignedTo: string; assignedAgentId?: string; priority: number }[];
+  preConfigured: boolean;
+}
+
+export interface TaskVerifiedPayload {
+  taskId: string;
+  taskSubject: string;
+  passed: boolean;
+  feedback: string;
 }
 
 /**
@@ -357,7 +461,8 @@ export async function* streamGroupDiscussion(
       const { done, value } = await reader.read();
       if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
+      // Normalise CRLF → LF so the split works regardless of server line-ending style
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
 
       // Parse SSE lines: "event: <type>\ndata: <data>\n\n"
       const parts = buffer.split("\n\n");
@@ -365,7 +470,7 @@ export async function* streamGroupDiscussion(
 
       for (const part of parts) {
         if (!part.trim()) continue;
-        let eventType: GroupSSEEventType = "group_start";
+        let eventType: GroupSSEEventType | null = null;
         let eventData = "";
 
         for (const line of part.split("\n")) {
@@ -377,7 +482,8 @@ export async function* streamGroupDiscussion(
           }
         }
 
-        if (eventData || eventType) {
+        // Only yield events with an explicit event: type (skip bare data-only chunks)
+        if (eventType) {
           yield { type: eventType, data: eventData };
         }
       }
@@ -445,7 +551,7 @@ export function groupGroupsByName(
   }
 
   return Array.from(grouped.values()).sort(
-    (a, b) => b.lastModifiedOn - a.lastModifiedOn
+    (a, b) => (b.lastModifiedOn || b.createdOn || 0) - (a.lastModifiedOn || a.createdOn || 0)
   );
 }
 
@@ -455,6 +561,7 @@ export type EnrichedGroupDescriptor = GroupDescriptor & {
   version: number;
   memberCount: number;
   style?: DiscussionStyle;
+  members: { displayName: string; memberType?: MemberType }[];
 };
 
 /**
@@ -482,11 +589,16 @@ export async function getEnrichedGroupDescriptors(
           description: config.description || g.description,
           memberCount: config.members?.length ?? 0,
           style: config.style,
+          members: (config.members ?? []).map((m) => ({
+            displayName: m.displayName,
+            memberType: m.memberType,
+          })),
         } satisfies EnrichedGroupDescriptor;
       } catch {
         return {
           ...g,
           memberCount: 0,
+          members: [],
         } satisfies EnrichedGroupDescriptor;
       }
     })
@@ -525,6 +637,11 @@ export const STYLE_INFO: Record<
     flow: "Pro Opening → Con Opening → Rebuttals → Judgment",
     icon: "⚖️",
   },
+  TASK_FORCE: {
+    label: "Task Force",
+    flow: "Plan → Execute → Verify → Synthesize",
+    icon: "🎯",
+  },
   CUSTOM: {
     label: "Custom",
     flow: "User-defined phases",
@@ -548,6 +665,9 @@ export const ENTRY_TYPE_INFO: Record<
   SYNTHESIS: { label: "Synthesis", color: "gold" },
   ERROR: { label: "Error", color: "destructive" },
   SKIPPED: { label: "Skipped", color: "muted" },
+  PLAN: { label: "Plan", color: "sky" },
+  TASK_RESULT: { label: "Task Result", color: "emerald" },
+  VERIFICATION: { label: "Verification", color: "amber" },
 };
 
 // ─── Bulk Operations ─────────────────────────────────────────────

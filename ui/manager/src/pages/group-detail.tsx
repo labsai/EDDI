@@ -3,8 +3,9 @@ import { useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  Users, Trash2, MessageSquareQuote, Clock,
+  Users, Trash2, MessageSquareQuote, Clock, Settings2,
   PanelRightOpen, PanelRightClose,
+  PanelLeftOpen, PanelLeftClose,
   Maximize2, Minimize2, History,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -28,12 +29,16 @@ import { STYLE_INFO, type DiscussionStyle, type AgentGroupConfiguration } from "
 import { STYLE_THEME } from "@/components/groups/discussion-transcript";
 import { safeFormatDate } from "@/components/groups/group-utils";
 
-const STATE_COLORS: Record<string, string> = {
-  COMPLETED: "text-emerald-500",
-  IN_PROGRESS: "text-amber-500",
-  SYNTHESIZING: "text-amber-500",
-  FAILED: "text-destructive",
-  CREATED: "text-muted-foreground",
+const DEFAULT_STATE = { label: "Created", color: "text-muted-foreground", dot: "bg-muted-foreground" } as const;
+
+const STATE_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
+  COMPLETED: { label: "Completed", color: "text-emerald-500", dot: "bg-emerald-500" },
+  IN_PROGRESS: { label: "In Progress", color: "text-amber-500", dot: "bg-amber-500" },
+  SYNTHESIZING: { label: "Synthesizing", color: "text-amber-500", dot: "bg-amber-500" },
+  FAILED: { label: "Failed", color: "text-destructive", dot: "bg-destructive" },
+  CREATED: DEFAULT_STATE,
+  AWAITING_APPROVAL: { label: "Awaiting Approval", color: "text-orange-500", dot: "bg-orange-500" },
+  ERROR: { label: "Error", color: "text-destructive", dot: "bg-destructive" },
 };
 
 export function GroupDetailPage() {
@@ -50,6 +55,7 @@ export function GroupDetailPage() {
   const queryClient = useQueryClient();
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [showConfig, setShowConfig] = useState(true);
+  const [showDiscussions, setShowDiscussions] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
 
@@ -90,16 +96,21 @@ export function GroupDetailPage() {
     toast.success(t("groups.discussionStarted", "Discussion started — streaming live"));
   }, [groupId, startStream, t]);
 
-  // When streaming completes, select the new conversation and refresh the list
+  // Invalidate conversation list when stream starts (so the new entry appears in sidebar)
+  // AND when it completes (so the state updates to COMPLETED)
   useEffect(() => {
-    if (streamState.state === "COMPLETED" && streamState.conversationId && !streamState.isStreaming) {
-      setSelectedConvId(streamState.conversationId);
-      // M2 fix: refresh conversation list so sidebar shows the new discussion
-      if (groupId) {
-        queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
-      }
+    if (
+      streamState.conversationId &&
+      groupId &&
+      (streamState.state === "IN_PROGRESS" || streamState.state === "COMPLETED")
+    ) {
+      queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
     }
-  }, [streamState.state, streamState.conversationId, streamState.isStreaming, groupId, queryClient]);
+    // Auto-select the completed conversation
+    if (streamState.state === "COMPLETED" && streamState.conversationId) {
+      setSelectedConvId(streamState.conversationId);
+    }
+  }, [streamState.state, streamState.conversationId, groupId, queryClient]);
 
   function handleDeleteConversation(convId: string) {
     if (!groupId) return;
@@ -168,19 +179,45 @@ export function GroupDetailPage() {
               onClick={() => handleSelectConversation(conv.id)}
               className={cn(
                 "w-full text-start rounded-lg px-3 py-2 transition-all group/item",
-                selectedConvId === conv.id && !isStreamActive
+                streamState.isStreaming && conv.id === streamState.conversationId
                   ? "bg-primary/10 border border-primary/30"
-                  : "hover:bg-secondary/50 border border-transparent"
+                  : selectedConvId === conv.id && !isStreamActive
+                    ? "bg-primary/10 border border-primary/30"
+                    : "hover:bg-secondary/50 border border-transparent"
               )}
+              aria-current={
+                (streamState.isStreaming && conv.id === streamState.conversationId) ||
+                (selectedConvId === conv.id && !isStreamActive)
+                  ? true
+                  : undefined
+              }
               data-testid={`discussion-item-${conv.id}`}
             >
               <p className="text-xs font-medium text-foreground line-clamp-2">
                 {conv.originalQuestion}
               </p>
               <div className="flex items-center gap-1.5 mt-1">
-                <span className={cn("text-[10px] font-medium", STATE_COLORS[conv.state])}>
-                  {conv.state}
-                </span>
+                {(() => {
+                  const cfg = STATE_CONFIG[conv.state] ?? DEFAULT_STATE;
+                  const isLive = streamState.isStreaming && conv.id === streamState.conversationId;
+                  return (
+                    <span
+                      className={cn("text-[10px] font-medium flex items-center gap-1", cfg.color)}
+                      aria-live={isLive ? "polite" : undefined}
+                      aria-label={isLive ? t("groups.liveDiscussion", "Live") : t(`groups.state.${conv.state}`, cfg.label)}
+                      data-testid={isLive ? "discussion-live-badge" : `discussion-state-${conv.id}`}
+                    >
+                      <span
+                        className={cn("h-1.5 w-1.5 rounded-full shrink-0", isLive ? "bg-current animate-pulse" : cfg.dot)}
+                        data-testid={`state-dot-${conv.id}`}
+                      />
+                      {isLive
+                        ? t("groups.liveDiscussion", "Live")
+                        : t(`groups.state.${conv.state}`, cfg.label)
+                      }
+                    </span>
+                  );
+                })()}
                 <span className="text-[10px] text-muted-foreground">
                   {safeFormatDate(conv.created, "date")}
                 </span>
@@ -191,6 +228,7 @@ export function GroupDetailPage() {
                   }}
                   className="ms-auto opacity-0 group-hover/item:opacity-100 rounded p-0.5 text-muted-foreground hover:text-destructive transition-all"
                   title={t("common.delete")}
+                  aria-label={t("common.delete")}
                 >
                   <Trash2 className="h-3 w-3" />
                 </button>
@@ -250,20 +288,31 @@ export function GroupDetailPage() {
             {discussionListContent}
           </HistoryDropdown>
 
-          {/* Config panel toggle */}
-          {!isFullscreen && (
+          {/* Discussions panel re-open — only shows when panel is hidden */}
+          {!isFullscreen && !showDiscussions && (
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setShowConfig(!showConfig)}
-              title={showConfig ? t("groups.hideConfig", "Hide config panel") : t("groups.showConfig", "Show config panel")}
+              onClick={() => setShowDiscussions(true)}
+              title={t("groups.showDiscussions", "Show discussions panel")}
+              aria-label={t("groups.showDiscussions", "Show discussions panel")}
+              className="max-lg:hidden"
+            >
+              <PanelLeftOpen className="h-4 w-4" />
+            </Button>
+          )}
+
+          {/* Config panel re-open — only shows when panel is hidden */}
+          {!isFullscreen && !showConfig && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowConfig(true)}
+              title={t("groups.showConfig", "Show config panel")}
+              aria-label={t("groups.showConfig", "Show config panel")}
               className="max-xl:hidden"
             >
-              {showConfig ? (
-                <PanelRightClose className="h-4 w-4" />
-              ) : (
-                <PanelRightOpen className="h-4 w-4" />
-              )}
+              <PanelRightOpen className="h-4 w-4" />
             </Button>
           )}
 
@@ -288,13 +337,22 @@ export function GroupDetailPage() {
       {/* Three-panel layout */}
       <div className="flex flex-1 min-h-0 mt-2 gap-2">
         {/* LEFT: Discussion history — hidden on small screens and in fullscreen */}
-        {!isFullscreen && (
+        {!isFullscreen && showDiscussions && (
           <div className="w-64 shrink-0 flex flex-col rounded-xl border border-border bg-card overflow-hidden max-lg:hidden">
-            <div className="p-3 border-b border-border">
+            <div className="p-3 border-b border-border flex items-center justify-between">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                 <Clock className="h-3 w-3" />
                 {t("groups.discussions", "Discussions")}
               </h3>
+              <button
+                type="button"
+                onClick={() => setShowDiscussions(false)}
+                className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"
+                title={t("groups.hideDiscussions", "Hide discussions panel")}
+                aria-label={t("groups.hideDiscussions", "Hide discussions panel")}
+              >
+                <PanelLeftClose className="h-3.5 w-3.5" />
+              </button>
             </div>
             <div className="flex-1 overflow-y-auto">
               {discussionListContent}
@@ -310,6 +368,7 @@ export function GroupDetailPage() {
               streamState={isStreamActive ? streamState : undefined}
               isLoading={convLoading && !!selectedConvId}
               discussionStyle={groupConfig.style as DiscussionStyle}
+              preConfiguredTasks={groupConfig.tasks}
             />
           </div>
           {/* Input always at the bottom of the transcript panel */}
@@ -321,8 +380,23 @@ export function GroupDetailPage() {
 
         {/* RIGHT: Config panel — hidden on small screens and in fullscreen */}
         {showConfig && !isFullscreen && (
-          <div className="w-72 shrink-0 rounded-xl border border-border bg-card overflow-hidden max-xl:hidden">
-            <GroupConfigPanel config={safeConfig} groupId={groupId} groupVersion={version} />
+          <div className="w-72 shrink-0 rounded-xl border border-border bg-card overflow-hidden flex flex-col max-xl:hidden">
+            <div className="p-3 border-b border-border flex items-center justify-between">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Settings2 className="h-3 w-3" />
+                {t("groups.configuration", "Configuration")}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowConfig(false)}
+                className="p-0.5 rounded hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"
+                title={t("groups.hideConfig", "Hide config panel")}
+                aria-label={t("groups.hideConfig", "Hide config panel")}
+              >
+                <PanelRightClose className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <GroupConfigPanel config={safeConfig} groupId={groupId} groupVersion={version} className="flex-1 min-h-0" />
           </div>
         )}
       </div>

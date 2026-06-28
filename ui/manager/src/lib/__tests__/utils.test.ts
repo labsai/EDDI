@@ -49,7 +49,7 @@ describe("formatRelativeTime", () => {
     expect(formatRelativeTime(Date.now() - 5 * 24 * 60 * 60 * 1000)).toBe("5d ago");
   });
 
-  it("returns 'just now' for 0 seconds difference", () => {
+  it("returns 'just now' for current time", () => {
     expect(formatRelativeTime(Date.now())).toBe("just now");
   });
 
@@ -63,6 +63,18 @@ describe("formatRelativeTime", () => {
 
   it("returns '1d ago' for exactly 24 hours", () => {
     expect(formatRelativeTime(Date.now() - 24 * 60 * 60 * 1000)).toBe("1d ago");
+  });
+
+  it("returns '—' for 0 timestamp", () => {
+    expect(formatRelativeTime(0)).toBe("—");
+  });
+
+  it("returns '—' for NaN timestamp", () => {
+    expect(formatRelativeTime(NaN)).toBe("—");
+  });
+
+  it("returns '—' for undefined timestamp", () => {
+    expect(formatRelativeTime(undefined as unknown as number)).toBe("—");
   });
 });
 

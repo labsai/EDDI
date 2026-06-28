@@ -6,8 +6,9 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { PhaseHeader } from "./phase-header";
 import { AgentResponseCard } from "./agent-response-card";
+import { TaskBoard } from "./task-board";
 import { parseTranscriptContent, safeFormatDate } from "./group-utils";
-import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle } from "@/lib/api/groups";
+import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle, SharedTaskList, TaskDefinition } from "@/lib/api/groups";
 import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -21,6 +22,8 @@ interface DiscussionTranscriptProps {
   isLoading?: boolean;
   /** Discussion style for visual theming */
   discussionStyle?: DiscussionStyle;
+  /** Pre-configured tasks from group config (for TASK_FORCE style) */
+  preConfiguredTasks?: TaskDefinition[];
 }
 
 interface PhaseGroup {
@@ -33,6 +36,7 @@ interface PhaseGroup {
 /** Style-aware accent colors for transcript theming */
 const STYLE_THEME: Record<DiscussionStyle, {
   accent: string;
+  dotColor: string;
   phaseAccent: string;
   questionBg: string;
   flowBg: string;
@@ -43,6 +47,7 @@ const STYLE_THEME: Record<DiscussionStyle, {
 }> = {
   ROUND_TABLE: {
     accent: "text-amber-500",
+    dotColor: "bg-amber-500",
     phaseAccent: "border-amber-500/30 bg-amber-500/5",
     questionBg: "bg-amber-500/5 border-b-amber-500/20",
     flowBg: "bg-amber-500/10",
@@ -53,6 +58,7 @@ const STYLE_THEME: Record<DiscussionStyle, {
   },
   PEER_REVIEW: {
     accent: "text-teal-500",
+    dotColor: "bg-teal-500",
     phaseAccent: "border-teal-500/30 bg-teal-500/5",
     questionBg: "bg-teal-500/5 border-b-teal-500/20",
     flowBg: "bg-teal-500/10",
@@ -63,6 +69,7 @@ const STYLE_THEME: Record<DiscussionStyle, {
   },
   DEVIL_ADVOCATE: {
     accent: "text-rose-500",
+    dotColor: "bg-rose-500",
     phaseAccent: "border-rose-500/30 bg-rose-500/5",
     questionBg: "bg-rose-500/5 border-b-rose-500/20",
     flowBg: "bg-rose-500/10",
@@ -73,6 +80,7 @@ const STYLE_THEME: Record<DiscussionStyle, {
   },
   DELPHI: {
     accent: "text-violet-500",
+    dotColor: "bg-violet-500",
     phaseAccent: "border-violet-500/30 bg-violet-500/5",
     questionBg: "bg-violet-500/5 border-b-violet-500/20",
     flowBg: "bg-violet-500/10",
@@ -83,6 +91,7 @@ const STYLE_THEME: Record<DiscussionStyle, {
   },
   DEBATE: {
     accent: "text-indigo-500",
+    dotColor: "bg-indigo-500",
     phaseAccent: "border-indigo-500/30 bg-indigo-500/5",
     questionBg: "bg-indigo-500/5 border-b-indigo-500/20",
     flowBg: "bg-indigo-500/10",
@@ -91,8 +100,20 @@ const STYLE_THEME: Record<DiscussionStyle, {
     progressText: "text-indigo-600 dark:text-indigo-400",
     progressBorder: "border-indigo-500/20",
   },
+  TASK_FORCE: {
+    accent: "text-orange-500",
+    dotColor: "bg-orange-500",
+    phaseAccent: "border-orange-500/30 bg-orange-500/5",
+    questionBg: "bg-orange-500/5 border-b-orange-500/20",
+    flowBg: "bg-orange-500/10",
+    flowText: "text-orange-600 dark:text-orange-400",
+    progressBg: "bg-orange-500/5",
+    progressText: "text-orange-600 dark:text-orange-400",
+    progressBorder: "border-orange-500/20",
+  },
   CUSTOM: {
     accent: "text-primary",
+    dotColor: "bg-primary",
     phaseAccent: "border-primary/30 bg-primary/5",
     questionBg: "bg-card/50",
     flowBg: "bg-primary/10",
@@ -114,6 +135,9 @@ function entryTypeToPhaseType(type: TranscriptEntryType): PhaseType {
     ARGUMENT: "ARGUE",
     REBUTTAL: "REBUTTAL",
     SYNTHESIS: "SYNTHESIS",
+    PLAN: "PLAN",
+    TASK_RESULT: "EXECUTE",
+    VERIFICATION: "VERIFY",
   };
   return map[type] || "OPINION";
 }
@@ -150,6 +174,7 @@ const STATE_VARIANTS: Record<string, { variant: "default" | "success" | "warning
   SYNTHESIZING: { variant: "warning" },
   COMPLETED: { variant: "success" },
   FAILED: { variant: "destructive" },
+  AWAITING_APPROVAL: { variant: "warning" },
 };
 
 /** Height above which synthesis content is collapsed */
@@ -160,6 +185,7 @@ export function DiscussionTranscript({
   streamState,
   isLoading,
   discussionStyle,
+  preConfiguredTasks,
 }: DiscussionTranscriptProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
@@ -260,6 +286,7 @@ export function DiscussionTranscript({
     SYNTHESIZING: t("groups.stateSynthesizing", "Synthesizing…"),
     COMPLETED: t("groups.stateCompleted", "Completed"),
     FAILED: t("groups.stateFailed", "Failed"),
+    AWAITING_APPROVAL: t("groups.stateAwaitingApproval", "Awaiting Approval"),
   };
   const stateLabel = discussionStateLabels[effectiveState] ?? effectiveState;
 
@@ -296,7 +323,7 @@ export function DiscussionTranscript({
               </Badge>
               {isStreaming && (
                 <Badge variant="outline" className={cn("text-[10px] animate-pulse border-current", theme.accent)}>
-                  ● LIVE
+                  {t("groups.liveIndicator", "● LIVE")}
                 </Badge>
               )}
               {/* Allow HTML toggle — opt-in for trusted content */}
@@ -311,7 +338,7 @@ export function DiscussionTranscript({
                 title={t("groups.allowHtmlTooltip", "When enabled, renders HTML content (sanitized). Use only with trusted agents.")}
               >
                 <Code className="h-3 w-3" />
-                HTML
+                {t("groups.htmlToggle", "HTML")}
               </button>
               <span className="text-[10px] text-muted-foreground ms-auto">
                 {safeFormatDate(effectiveCreated, "full")}
@@ -344,7 +371,7 @@ export function DiscussionTranscript({
                   {isCompleted && !isActive && (
                     <Check className="h-2.5 w-2.5" />
                   )}
-                  {step}
+                  {t(`groups.flow.${step.replace(/\s+/g, "")}`, step)}
                 </span>
                 {idx < flowSteps.length - 1 && (
                   <ArrowRight className="h-2.5 w-2.5 text-muted-foreground/50" />
@@ -357,6 +384,31 @@ export function DiscussionTranscript({
 
       {/* Transcript body */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+        {/* Task Board — placed at top for better visibility */}
+        {style === "TASK_FORCE" && streamState?.taskPlan && !conversation?.taskList && (
+          <TaskBoard
+            taskPlan={streamState.taskPlan}
+            tasksInProgress={streamState.tasksInProgress}
+            tasksCompleted={streamState.tasksCompleted}
+            taskVerifications={streamState.taskVerifications}
+            isStreaming={streamState.isStreaming}
+          />
+        )}
+        {/* Show empty task board placeholder during TASK_FORCE streaming before plan arrives */}
+        {style === "TASK_FORCE" && isStreaming && streamState && !streamState.taskPlan && !conversation?.taskList && (
+          <TaskBoard
+            taskPlan={null}
+            tasksInProgress={new Set()}
+            tasksCompleted={new Set()}
+            taskVerifications={new Map()}
+            isStreaming={true}
+          />
+        )}
+        {/* Also show task board for completed TASK_FORCE conversations loaded from API */}
+        {style === "TASK_FORCE" && !isStreaming && conversation?.taskList && (
+          <MemoizedApiTaskBoard taskList={conversation.taskList} t={t} />
+        )}
+
         {phases.map((phase, idx) => (
           <PhaseHeader
             key={`${phase.phaseIndex}-${phase.phaseName}-${idx}`}
@@ -376,6 +428,7 @@ export function DiscussionTranscript({
                 isSpeaking={activeSpeakers.has(entry.speakerAgentId) && entry.content === null}
                 allowHtml={allowHtml}
                 discussionStyle={style}
+                preConfiguredTasks={preConfiguredTasks}
               />
             ))}
           </PhaseHeader>
@@ -455,9 +508,9 @@ export function DiscussionTranscript({
         {(effectiveState === "IN_PROGRESS" || effectiveState === "SYNTHESIZING") && (
           <div className={cn("flex items-center gap-3 p-3 rounded-lg border", theme.progressBg, theme.progressBorder)}>
             <div className="flex gap-1">
-              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:0ms]", theme.accent.replace("text-", "bg-"))} />
-              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:150ms]", theme.accent.replace("text-", "bg-"))} />
-              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:300ms]", theme.accent.replace("text-", "bg-"))} />
+              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:0ms]", theme.dotColor)} />
+              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:150ms]", theme.dotColor)} />
+              <span className={cn("h-2 w-2 rounded-full animate-bounce [animation-delay:300ms]", theme.dotColor)} />
             </div>
             <span className={cn("text-sm font-medium", theme.progressText)}>
               {effectiveState === "SYNTHESIZING"
@@ -488,13 +541,53 @@ export function DiscussionTranscript({
   );
 }
 
+/** Memoized wrapper for API-loaded task boards to avoid re-creating Set/Map on every render */
+function MemoizedApiTaskBoard({ taskList, t }: { taskList: SharedTaskList; t: (key: string, fallback: string) => string }) {
+  const taskPlan = useMemo(
+    () => taskList.tasks.map(task => ({
+      id: task.id,
+      subject: task.subject,
+      assignedTo: task.assignedDisplayName || task.assignedAgentId || t("taskBoard.unassigned", "Unassigned"),
+      priority: task.priority,
+    })),
+    [taskList, t],
+  );
+  const tasksInProgress = useMemo(
+    () => new Set(taskList.tasks.filter(task => task.status === "IN_PROGRESS").map(task => task.id)),
+    [taskList],
+  );
+  const tasksCompleted = useMemo(
+    () => new Set(taskList.tasks.filter(task => task.status === "COMPLETED").map(task => task.id)),
+    [taskList],
+  );
+  const taskVerifications = useMemo(
+    () => new Map(
+      taskList.tasks
+        .filter(task => task.status === "VERIFIED" || task.verificationNote != null)
+        .map(task => [task.id, { passed: task.verified, feedback: task.verificationNote || "" }] as const),
+    ),
+    [taskList],
+  );
+
+  return (
+    <TaskBoard
+      taskPlan={taskPlan}
+      tasksInProgress={tasksInProgress}
+      tasksCompleted={tasksCompleted}
+      taskVerifications={taskVerifications}
+      isStreaming={false}
+    />
+  );
+}
+
 /** Phase flow steps per discussion style for the breadcrumb indicator */
 const STYLE_INFO_FLOW: Record<string, string[]> = {
   ROUND_TABLE: ["Opinion", "Discussion", "Synthesis"],
   PEER_REVIEW: ["Opinion", "Critique", "Revision", "Synthesis"],
   DEVIL_ADVOCATE: ["Opinion", "Challenge", "Defense", "Synthesis"],
-  DELPHI: ["Independent", "Anonymous", "Revised", "Synthesis"],
+  DELPHI: ["Independent", "Anonymous Sharing", "Revised", "Synthesis"],
   DEBATE: ["Pro Opening", "Con Opening", "Rebuttals", "Judgment"],
+  TASK_FORCE: ["Plan", "Execute", "Verify", "Synthesize"],
 };
 
 // Re-export for use in group-detail

@@ -128,6 +128,7 @@ const STYLE_COLORS: Record<DiscussionStyle, { bg: string; border: string; text: 
   DEVIL_ADVOCATE: { bg: "bg-rose-500/10", border: "border-rose-500/30", text: "text-rose-600 dark:text-rose-400", accent: "bg-rose-500" },
   DELPHI: { bg: "bg-violet-500/10", border: "border-violet-500/30", text: "text-violet-600 dark:text-violet-400", accent: "bg-violet-500" },
   DEBATE: { bg: "bg-indigo-500/10", border: "border-indigo-500/30", text: "text-indigo-600 dark:text-indigo-400", accent: "bg-indigo-500" },
+  TASK_FORCE: { bg: "bg-orange-500/10", border: "border-orange-500/30", text: "text-orange-600 dark:text-orange-400", accent: "bg-orange-500" },
   CUSTOM: { bg: "bg-secondary/20", border: "border-border", text: "text-foreground", accent: "bg-muted-foreground" },
 };
 

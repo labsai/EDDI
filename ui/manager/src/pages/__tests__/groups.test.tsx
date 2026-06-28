@@ -130,8 +130,8 @@ describe("GroupsPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Name")).toBeInTheDocument();
-      expect(screen.getByText("ID")).toBeInTheDocument();
-      expect(screen.getByText("Version")).toBeInTheDocument();
+      expect(screen.getByText("Style")).toBeInTheDocument();
+      expect(screen.getByText("Members")).toBeInTheDocument();
       expect(screen.getByText("Modified")).toBeInTheDocument();
       expect(screen.getByText("Actions")).toBeInTheDocument();
     });
@@ -457,6 +457,168 @@ describe("GroupsPage", () => {
       const listEl = screen.getByTestId("group-list");
       const links = listEl.querySelectorAll("a[href*='/manage/groups/']");
       expect(links.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  // ─── Table view columns & accessibility ─────────────────────────────
+
+  it("table view shows Style column header", async () => {
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getAllByTestId(/^group-card-/).length
+        ).toBeGreaterThanOrEqual(1);
+      },
+      { timeout: 10000 }
+    );
+
+    await user.click(screen.getByTestId("view-toggle-list"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Style")).toBeInTheDocument();
+    });
+  });
+
+  it("table view shows Members column header", async () => {
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getAllByTestId(/^group-card-/).length
+        ).toBeGreaterThanOrEqual(1);
+      },
+      { timeout: 10000 }
+    );
+
+    await user.click(screen.getByTestId("view-toggle-list"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Members")).toBeInTheDocument();
+    });
+  });
+
+  it("table view shows style badge with icon for each group", async () => {
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getAllByTestId(/^group-card-/).length
+        ).toBeGreaterThanOrEqual(1);
+      },
+      { timeout: 10000 }
+    );
+
+    await user.click(screen.getByTestId("view-toggle-list"));
+
+    await waitFor(() => {
+      // Style badges have data-testid="group-style-{id}"
+      const styleBadges = screen.getAllByTestId(/^group-style-/);
+      expect(styleBadges.length).toBeGreaterThanOrEqual(1);
+      // Each badge should have an aria-label like "Style: Round Table"
+      expect(styleBadges[0]!).toHaveAttribute("aria-label", expect.stringContaining("Style"));
+    });
+  });
+
+  it("table view shows member avatars with initials", async () => {
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getAllByTestId(/^group-card-/).length
+        ).toBeGreaterThanOrEqual(1);
+      },
+      { timeout: 10000 }
+    );
+
+    await user.click(screen.getByTestId("view-toggle-list"));
+
+    await waitFor(() => {
+      // Member avatar containers have data-testid="group-members-{id}"
+      const memberContainers = screen.getAllByTestId(/^group-members-/);
+      expect(memberContainers.length).toBeGreaterThanOrEqual(1);
+      // Each container should have role="list" with member listitems
+      expect(memberContainers[0]!).toHaveAttribute("role", "list");
+      // Member avatars show initials (single uppercase characters)
+      const items = memberContainers[0]!.querySelectorAll("[role='listitem']");
+      expect(items.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it("table rows have data-testid attributes", async () => {
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getAllByTestId(/^group-card-/).length
+        ).toBeGreaterThanOrEqual(1);
+      },
+      { timeout: 10000 }
+    );
+
+    await user.click(screen.getByTestId("view-toggle-list"));
+
+    await waitFor(() => {
+      const rows = screen.getAllByTestId(/^group-row-/);
+      expect(rows.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it("table rows have role='link' for accessibility", async () => {
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getAllByTestId(/^group-card-/).length
+        ).toBeGreaterThanOrEqual(1);
+      },
+      { timeout: 10000 }
+    );
+
+    await user.click(screen.getByTestId("view-toggle-list"));
+
+    await waitFor(() => {
+      const rows = screen.getAllByTestId(/^group-row-/);
+      expect(rows.length).toBeGreaterThanOrEqual(1);
+      for (const row of rows) {
+        expect(row).toHaveAttribute("role", "link");
+      }
+    });
+  });
+
+  it("table rows have tabIndex for keyboard accessibility", async () => {
+    renderPage();
+    const user = userEvent.setup();
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getAllByTestId(/^group-card-/).length
+        ).toBeGreaterThanOrEqual(1);
+      },
+      { timeout: 10000 }
+    );
+
+    await user.click(screen.getByTestId("view-toggle-list"));
+
+    await waitFor(() => {
+      const rows = screen.getAllByTestId(/^group-row-/);
+      expect(rows.length).toBeGreaterThanOrEqual(1);
+      for (const row of rows) {
+        expect(row).toHaveAttribute("tabindex", "0");
+      }
     });
   });
 });
