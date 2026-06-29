@@ -193,6 +193,19 @@ class InMemoryConversationCoordinatorTest {
     }
 
     @Test
+    void shouldRejectMaxDeadLettersBelowMinusOne() {
+        // -1 (unbounded) and 0 (retain none) are the only valid sentinels; -2 is a
+        // typo.
+        assertThrows(IllegalArgumentException.class, () -> new InMemoryConversationCoordinator(runtime, new SimpleMeterRegistry(), 10000, -2));
+    }
+
+    @Test
+    void shouldAcceptUnboundedAndZeroSentinels() {
+        assertDoesNotThrow(() -> new InMemoryConversationCoordinator(runtime, new SimpleMeterRegistry(), 10000, -1));
+        assertDoesNotThrow(() -> new InMemoryConversationCoordinator(runtime, new SimpleMeterRegistry(), 10000, 0));
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void shouldReportQueueDepths() {
         Callable<Void> task1 = mock(Callable.class);

@@ -50,6 +50,7 @@
 ### Review follow-ups (Copilot + CodeRabbit)
 - **`IRequest.setFollowRedirects` fails closed** — made it a non-default (abstract) interface method instead of a no-op default, so any new `IRequest` impl must honour it and cannot silently re-enable the redirect bypass.
 - **Coordinator eviction is O(n), not O(n²)** — compute the dead-letter excess once and evict that many, instead of calling `ConcurrentLinkedDeque.size()` per loop iteration.
+- **Coordinator dead-letter cap hardening** — reject `max-dead-letters < -1` at startup (only `-1`/`0`/positive are valid, so a typo like `-2` can't silently disable trimming), and serialize the add+trim under a small lock so concurrent failures enforce the cap deterministically (the existing `pollFirst` already evicts oldest-first, so the newest failures were never dropped — the lock just removes transient under-retention).
 - **`CronParser` Vixie star semantics** — a day field is "starred" (not restricted, takes the AND path) when it *begins* with `*`, so `*/2` is treated like `*` (was exact `equals("*")`, which wrongly took the OR path).
 - **`CronParser` field-aware parse errors** — `parseIntField()` wraps `NumberFormatException` into an `IllegalArgumentException` carrying the offending field (e.g. `*/abc` → "Invalid number 'abc' in field: …"), instead of leaking a vague low-level message.
 - **`CalculatorTool` guards before logging** — the length check now runs before the eager `LOGGER.debug("… " + expression)` concatenation, so an oversized payload is rejected without building/logging the big string.
