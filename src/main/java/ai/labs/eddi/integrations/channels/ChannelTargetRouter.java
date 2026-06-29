@@ -34,14 +34,15 @@ import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
  * (colon-required syntax: {@code keyword: message}).
  * <p>
  * Platform-agnostic: signing-secret aggregation and target resolution work for
- * any {@code channelType} registered in {@code REGISTERED_CHANNEL_TYPES}.
+ * any {@code channelType} accepted by the channel integration store validation
+ * (see {@code RestChannelIntegrationStore.REGISTERED_CHANNEL_TYPES}).
  * Platform-specific adapters (Slack, Teams, Discord, Telegram, WhatsApp)
  * provide their own webhook and event-handler classes.
  * <p>
  * <b>Fallback rule:</b> If any {@code ChannelIntegrationConfiguration} matches
- * a channelId, ALL legacy {@code ChannelConnector} entries for that channel are
- * ignored. Legacy entries only activate for channels with zero new-style
- * coverage.
+ * a channelType + channelId pair, ALL legacy {@code ChannelConnector} entries
+ * for that same type + channel are ignored. Legacy entries only activate for
+ * channels with zero new-style coverage of the same type.
  *
  * @since 6.1.0
  */
@@ -376,7 +377,7 @@ public class ChannelTargetRouter {
     private void refreshInternal() {
         var newIntegrationMap = new HashMap<String, ChannelIntegrationConfiguration>();
         var newSigningSecretsByType = new HashMap<String, Set<String>>();
-        var coveredChannelIds = new HashSet<String>();
+        var coveredChannelKeys = new HashSet<String>();
 
         // 1. Load new-style ChannelIntegrationConfigurations
         try {
@@ -398,7 +399,7 @@ public class ChannelTargetRouter {
                             resolvePlatformSecrets(copy);
                             String key = copy.getChannelType().toLowerCase(Locale.ROOT) + ":" + channelId;
                             newIntegrationMap.put(key, copy);
-                            coveredChannelIds.add(channelId);
+                            coveredChannelKeys.add(key); // type:channelId — scoped to prevent cross-type suppression
 
                             // Collect signing secrets per channel type
                             String ss = copy.getPlatformConfig().get("signingSecret");
@@ -440,8 +441,11 @@ public class ChannelTargetRouter {
 
                                 String chId = connector.getConfig().get("channelId");
 
-                                // Strict rule: new config wins, skip legacy
-                                if (chId != null && !coveredChannelIds.contains(chId)) {
+                                // Strict rule: new-style config wins, skip legacy
+                                // (scoped by type — only a new-style Slack config suppresses a legacy Slack
+                                // connector)
+                                String coveredKey = CHANNEL_TYPE_SLACK + ":" + chId;
+                                if (chId != null && !coveredChannelKeys.contains(coveredKey)) {
                                     String bt = resolveSecret(
                                             connector.getConfig().get("botToken"));
                                     String ss = resolveSecret(
@@ -468,7 +472,11 @@ public class ChannelTargetRouter {
             LOGGER.warn("Failed to scan legacy ChannelConnectors", e);
         }
 
-        // Atomic swap
+        // Swap cached references — each volatile write is individually atomic,
+        // but the three writes are NOT mutually atomic. A concurrent reader may
+        // briefly observe a mixed snapshot (e.g., new integrationMap with old
+        // signingSecretsByType). This is acceptable: the data converges within
+        // nanoseconds, and stale reads only affect a single request at worst.
         integrationMap = Map.copyOf(newIntegrationMap);
         legacyMap = Map.copyOf(newLegacyMap);
         // Freeze each per-type set, then freeze the outer map
