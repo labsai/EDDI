@@ -65,6 +65,14 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
 
     private static final int MAX_RETRIES = 3;
 
+    /**
+     * Upper bound on retained dead-letter entries. The active-conversation map is
+     * already capped; without this bound a storm of permanently-failing
+     * conversations would grow {@link #deadLetters} without limit. Oldest entries
+     * are evicted first (the dashboard inspects the most recent failures).
+     */
+    private static final int MAX_DEAD_LETTERS = 1000;
+
     private final Map<String, BlockingQueue<Callable<Void>>> conversationQueues = new ConcurrentHashMap<>();
     private final ConcurrentLinkedDeque<DeadLetterEntry> deadLetters = new ConcurrentLinkedDeque<>();
     private final AtomicLong totalProcessed = new AtomicLong(0);
@@ -184,6 +192,14 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
 
         deadLetters.addLast(new DeadLetterEntry(id, conversationId, error, timestamp, payload));
         totalDeadLettered.incrementAndGet();
+
+        // Bound memory: evict oldest entries beyond the cap. size() on a
+        // ConcurrentLinkedDeque is O(n), so only walk when we know we're over.
+        while (deadLetters.size() > MAX_DEAD_LETTERS) {
+            if (deadLetters.pollFirst() == null) {
+                break;
+            }
+        }
     }
 
     private void submitNext(String conversationId, BlockingQueue<Callable<Void>> queue) {

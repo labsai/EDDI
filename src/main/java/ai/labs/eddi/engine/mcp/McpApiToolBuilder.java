@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.mcp;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.apicalls.model.Request;
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
@@ -152,18 +153,34 @@ public final class McpApiToolBuilder {
 
     /**
      * Parse an OpenAPI spec from a JSON/YAML string or URL.
+     * <p>
+     * <b>Security:</b> when the input is a location (not inline content), it is
+     * required to be an {@code http}/{@code https} URL via
+     * {@link UrlValidationUtils#isValidHttpUrl(String)} before being fetched. This
+     * prevents the underlying swagger-parser {@code readLocation} from reading
+     * local files (e.g. {@code file:///etc/passwd}) or using other non-http schemes
+     * (classpath:, jar:, ftp:). Private/internal hosts are intentionally still
+     * permitted so internal OpenAPI specs remain discoverable (the calling REST/MCP
+     * surface is {@code eddi-admin}/{@code eddi-editor} gated). Inline JSON/YAML
+     * content is parsed directly without any network access.
      */
     public static OpenAPI parseSpec(String specInput) {
         var parseOptions = new ParseOptions();
         parseOptions.setResolve(true);
 
         SwaggerParseResult result;
-        if (specInput.trim().startsWith("{") || specInput.trim().startsWith("openapi")) {
-            // Inline JSON or YAML content
+        if (looksLikeInlineSpec(specInput)) {
+            // Inline JSON or YAML content — no network/file access.
             result = new OpenAPIV3Parser().readContents(specInput, null, parseOptions);
         } else {
-            // URL or file path
-            result = new OpenAPIV3Parser().readLocation(specInput, null, parseOptions);
+            // Remote location. Enforce an http(s) scheme so the parser's fetcher
+            // cannot read local files (file://), classpath/jar resources, or use
+            // other non-http schemes. Internal/private hosts stay allowed.
+            String location = specInput.trim();
+            if (!UrlValidationUtils.isValidHttpUrl(location)) {
+                throw new IllegalArgumentException("OpenAPI spec location must be an http or https URL");
+            }
+            result = new OpenAPIV3Parser().readLocation(location, null, parseOptions);
         }
 
         if (result == null || result.getOpenAPI() == null) {
@@ -176,6 +193,18 @@ public final class McpApiToolBuilder {
         }
 
         return result.getOpenAPI();
+    }
+
+    /**
+     * Heuristic: does the input look like an inline OpenAPI document (JSON/YAML
+     * content) rather than a remote location? A JSON object, an OpenAPI/Swagger
+     * marker, or any multi-line content is inline. A single-token string such as
+     * {@code https://host/openapi.json} is treated as a remote location and
+     * validated as a URL before fetching.
+     */
+    static boolean looksLikeInlineSpec(String specInput) {
+        String trimmed = specInput.trim();
+        return trimmed.startsWith("{") || trimmed.startsWith("openapi") || trimmed.startsWith("swagger") || trimmed.contains("\n");
     }
 
     /**

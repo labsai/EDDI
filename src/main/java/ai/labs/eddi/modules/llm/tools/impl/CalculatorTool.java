@@ -23,6 +23,12 @@ import java.util.function.DoubleUnaryOperator;
 public class CalculatorTool {
     private static final Logger LOGGER = Logger.getLogger(CalculatorTool.class);
 
+    /**
+     * Maximum accepted expression length — guards the recursive parser's stack
+     * depth.
+     */
+    private static final int MAX_EXPRESSION_LENGTH = 1000;
+
     @Tool("Performs mathematical calculations. Supports basic operations (+, -, *, /, ^, %), "
             + "functions (sqrt, pow, abs, ceil, floor, round, min, max, sin, cos, tan, atan, log, exp), "
             + "and constants (PI, E). Returns the numeric result.")
@@ -33,6 +39,13 @@ public class CalculatorTool {
 
             if (expression == null || expression.isBlank()) {
                 return "Error: Expression must not be empty.";
+            }
+
+            // Bound input length: the recursive-descent parser recurses on nested
+            // parentheses, so an over-long expression could exhaust the stack
+            // (StackOverflowError is an Error, not caught below).
+            if (expression.length() > MAX_EXPRESSION_LENGTH) {
+                return "Error: Expression too long (max " + MAX_EXPRESSION_LENGTH + " characters).";
             }
 
             double result = new SafeMathParser(expression).parse();
@@ -57,6 +70,10 @@ public class CalculatorTool {
         } catch (IllegalArgumentException e) {
             LOGGER.error("Calculation error: " + e.getMessage());
             return "Error: " + e.getMessage();
+        } catch (StackOverflowError e) {
+            // Defense-in-depth alongside the length cap: deeply nested input.
+            LOGGER.error("Calculation aborted: expression nesting too deep");
+            return "Error: Expression is too deeply nested.";
         } catch (Exception e) {
             LOGGER.error("Unexpected calculation error", e);
             return "Error: An unexpected error occurred during calculation.";

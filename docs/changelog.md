@@ -5,6 +5,46 @@
 
 ---
 
+## 🔒 Security & Algorithm Hardening — SSRF/File-Read, Cron, DoS Guards (2026-06-29)
+
+**Repo:** EDDI (`fix/security-and-algo-hardening`)
+**What changed:** Easy-to-fix findings from a code/security/algorithm review, plus algorithm-bug hunt. All changes are surgical and behavior-preserving for valid input.
+
+### Security fixes
+
+1. **Local-file read / non-http SSRF in OpenAPI spec discovery (`McpApiToolBuilder.parseSpec`)** — The `GET /apicallstore/apicalls/discover-endpoints?specUrl=…` endpoint (and `create_api_agent`) handed a user-supplied location straight to swagger-parser's `readLocation()`, which fetches URLs **and** reads local files (`file:///etc/passwd`) and resolves external `$ref`s. Now, when the input is a remote location (not inline content), it must be an `http(s)` URL (`UrlValidationUtils.isValidHttpUrl()`) — rejecting `file://` (local-file read), `classpath:`, `jar:`, and other non-http schemes. Inline JSON/YAML still parses with no network/file access. Inline-vs-location detection broadened via new `looksLikeInlineSpec()` (handles `swagger:` and multi-line YAML).
+   - **Scheme-only by design:** private/internal hosts stay allowed so internal OpenAPI discovery keeps working. The endpoint is `eddi-admin`/`eddi-editor` gated, so SSRF to private/metadata IPs via an `http(s)` spec URL is an accepted residual — as is the remote-`$ref` vector (swagger-parser has no clean toggle to disable only remote-ref resolution). Use full `UrlValidationUtils.validateUrl()` here if a deployment needs private-IP blocking.
+
+### Algorithm bugs found & fixed
+
+2. **`CronParser` — day-of-week `7` not accepted as Sunday.** Standard cron treats `0` and `7` as Sunday; the parser rejected `7` (range `0–6`) and, even if allowed, `DayOfWeek % 7` never yields `7`, so it would never match. Now `7` is accepted and normalized to `0` (`normalizeDaysOfWeek`).
+3. **`CronParser` — malformed fields crashed or silently never-fired.** `*/` threw `ArrayIndexOutOfBoundsException` (not a clean validation error); a reversed range like `5-1` produced an empty set → a schedule that never fires until the 2-year scan limit threw a confusing `IllegalStateException`. Both now throw a clear `IllegalArgumentException` at parse time (step structure + `start <= end` checks).
+4. **`CalculatorTool` — unbounded recursion DoS.** The recursive-descent `SafeMathParser` recurses on nested parens; a long/deeply-nested LLM-supplied expression could throw `StackOverflowError` (an `Error`, not caught by `calculate()`). Added a 1000-char input cap plus a defensive `StackOverflowError` catch.
+5. **`InMemoryConversationCoordinator` — unbounded dead-letter deque.** The active-conversation map was capped but `deadLetters` grew without limit under a failure storm. Added a `MAX_DEAD_LETTERS` (1000) cap with oldest-first eviction.
+
+### Algorithm bugs found — reported, NOT changed (behavior change too risky)
+
+- **`CronParser` dom/dow semantics:** uses **AND** of day-of-month and day-of-week; standard (Vixie) cron uses **OR** when both are restricted (e.g. `0 0 13 * FRI` should fire on the 13th *or* any Friday). The smart-skip logic is built around AND — flagged for a deliberate follow-up with dedicated tests.
+- **`ApiCallExecutor` retry backoff:** `delay * amountOfExecutions` is **linear**, despite the `exponentialBackoffDelayInMillis` field name. Flagged; changing retry timing needs its own decision.
+
+### Files changed
+- `engine/mcp/McpApiToolBuilder.java` — URL validation in `parseSpec`, `looksLikeInlineSpec()`
+- `engine/runtime/internal/CronParser.java` — DOW 7, step/range validation, `normalizeDaysOfWeek()`
+- `modules/llm/tools/impl/CalculatorTool.java` — length cap + `StackOverflowError` catch
+- `engine/runtime/internal/InMemoryConversationCoordinator.java` — dead-letter cap
+
+### Tests added
+- `McpApiToolBuilderTest` — +5 (file/classpath/metadata rejection, inline still works, classifier)
+- `CronParserTest` — +5 (DOW 7 = Sunday, 0≡7, reversed-range + malformed-step rejection)
+- `CalculatorToolTest` — +2 (over-long rejected, deep-nesting returns cleanly)
+- All affected suites green (176 tests, 0 failures); full `mvnw compile` clean.
+
+### Not addressed here (needs design decision, not "easy")
+- **httpcall execution SSRF** (`ApiCallExecutor`/`VertxHttpClient` follow redirects with no validation): blocking would break legitimate internal-API calls; needs an opt-in allowlist/flag.
+- **Open-by-default MCP/admin surface** and **role- vs tenant-based isolation** for config resources: architectural, out of scope for a hardening pass.
+
+---
+
 ## 🔒 PR Review Fixes — DynamicAgentConfig Propagation, Null Safety, Code Dedup (2026-06-26)
 
 **Repo:** EDDI (`feat/group-task-orchestration`)

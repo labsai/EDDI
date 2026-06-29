@@ -161,4 +161,38 @@ class CronParserTest {
         long interval = CronParser.computeMinIntervalSeconds("*/15 * * * *", UTC);
         assertEquals(900, interval); // 15 * 60
     }
+
+    // --- Day-of-week 7 = Sunday (standard cron compatibility) ---
+
+    @Test
+    void validate_acceptsDayOfWeek7AsSunday() {
+        assertDoesNotThrow(() -> CronParser.validate("0 0 * * 7"));
+    }
+
+    @Test
+    void computeNextFire_dayOfWeek7MatchesSunday() {
+        // 2024-01-06 is a Saturday; the next Sunday is 2024-01-07.
+        Instant saturday = ZonedDateTime.of(2024, 1, 6, 12, 0, 0, 0, UTC).toInstant();
+        Instant next = CronParser.computeNextFire("0 0 * * 7", saturday, UTC);
+        assertEquals(java.time.DayOfWeek.SUNDAY, next.atZone(UTC).getDayOfWeek());
+    }
+
+    @Test
+    void computeNextFire_dayOfWeek0AndDayOfWeek7AgreeOnSunday() {
+        Instant base = ZonedDateTime.of(2024, 1, 6, 12, 0, 0, 0, UTC).toInstant();
+        assertEquals(CronParser.computeNextFire("0 0 * * 0", base, UTC), CronParser.computeNextFire("0 0 * * 7", base, UTC));
+    }
+
+    // --- Malformed-field rejection (clean errors, not AIOOBE / silent never-fire)
+    // ---
+
+    @Test
+    void parseField_rejectsReversedRange() {
+        assertThrows(IllegalArgumentException.class, () -> CronParser.parseField("5-1", 0, 59));
+    }
+
+    @Test
+    void parseField_rejectsMalformedStep() {
+        assertThrows(IllegalArgumentException.class, () -> CronParser.parseField("*/", 0, 59));
+    }
 }

@@ -322,4 +322,42 @@ class McpApiToolBuilderTest {
         assertNotNull(getPet.getParameters());
         assertEquals("The pet ID", getPet.getParameters().get("petId"));
     }
+
+    // === Security: spec-location validation (SSRF + local file read) ===
+
+    @Test
+    void parseSpec_rejectsFileScheme() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.parseSpec("file:///etc/passwd"));
+        assertTrue(ex.getMessage().toLowerCase().contains("http"), "Expected scheme rejection, got: " + ex.getMessage());
+    }
+
+    @Test
+    void parseSpec_rejectsNonHttpScheme() {
+        assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.parseSpec("classpath:/internal-spec.yaml"));
+        assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.parseSpec("not-a-valid-url"));
+    }
+
+    @Test
+    void parseSpec_allowsInternalHttpHostAtSchemeGate() {
+        // Scheme-only policy: private/internal hosts are intentionally NOT rejected
+        // (internal OpenAPI discovery must keep working). The scheme gate accepts
+        // them — only a subsequent fetch/parse can fail, never the URL check itself.
+        assertTrue(McpApiToolBuilder.looksLikeInlineSpec("http://10.0.0.5/openapi.json") == false);
+        assertTrue(ai.labs.eddi.modules.llm.tools.UrlValidationUtils.isValidHttpUrl("http://169.254.169.254/latest/meta-data/"));
+        assertTrue(ai.labs.eddi.modules.llm.tools.UrlValidationUtils.isValidHttpUrl("http://internal-svc.cluster.local/spec.json"));
+    }
+
+    @Test
+    void parseSpec_acceptsInlineContentWithoutNetworkAccess() {
+        assertNotNull(McpApiToolBuilder.parseSpec(PETSTORE_SPEC));
+    }
+
+    @Test
+    void looksLikeInlineSpec_classifiesContentVsLocation() {
+        assertTrue(McpApiToolBuilder.looksLikeInlineSpec("{\"openapi\":\"3.0.0\"}"));
+        assertTrue(McpApiToolBuilder.looksLikeInlineSpec("openapi: 3.0.0\ninfo:\n  title: x"));
+        assertTrue(McpApiToolBuilder.looksLikeInlineSpec("swagger: \"2.0\"\ninfo: {}"));
+        assertFalse(McpApiToolBuilder.looksLikeInlineSpec("https://petstore.example.com/openapi.json"));
+        assertFalse(McpApiToolBuilder.looksLikeInlineSpec("file:///etc/passwd"));
+    }
 }

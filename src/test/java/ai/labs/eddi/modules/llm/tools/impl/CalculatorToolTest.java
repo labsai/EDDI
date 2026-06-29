@@ -361,4 +361,22 @@ class CalculatorToolTest {
         // Locale-independent check: result contains "212" and "fahrenheit"
         assertTrue(result.contains("212") && result.contains("fahrenheit"), "Expected 212 fahrenheit in: " + result);
     }
+
+    // === Robustness: stack-exhaustion guard ===
+
+    @Test
+    void testCalculate_RejectsOverlongExpression() {
+        String longExpr = "1" + "+1".repeat(600); // 1201 chars, > MAX_EXPRESSION_LENGTH
+        String result = calculatorTool.calculate(longExpr);
+        assertTrue(result.startsWith("Error: Expression too long"), "Expected length rejection, got: " + result);
+    }
+
+    @Test
+    void testCalculate_DeeplyNestedReturnsCleanlyWithoutError() {
+        // Within the length cap but heavily nested — must return a value, never
+        // throw StackOverflowError out of calculate().
+        String expr = "(".repeat(300) + "1" + ")".repeat(300);
+        String result = calculatorTool.calculate(expr);
+        assertEquals("1", result);
+    }
 }
