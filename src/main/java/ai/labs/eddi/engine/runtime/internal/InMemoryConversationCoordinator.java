@@ -197,10 +197,10 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
         totalDeadLettered.incrementAndGet();
 
         // Bound memory: evict oldest entries beyond the cap (maxDeadLetters < 0
-        // disables the cap). size() on a ConcurrentLinkedDeque is O(n), so only
-        // walk when we know we're over.
+        // disables the cap). size() on a ConcurrentLinkedDeque is O(n), so compute
+        // the excess once and evict that many rather than calling size() per loop.
         if (maxDeadLetters >= 0) {
-            while (deadLetters.size() > maxDeadLetters) {
+            for (int excess = deadLetters.size() - maxDeadLetters; excess > 0; excess--) {
                 if (deadLetters.pollFirst() == null) {
                     break;
                 }

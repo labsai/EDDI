@@ -81,10 +81,11 @@ public final class CronParser {
         Set<Integer> daysOfWeek = normalizeDaysOfWeek(parseField(substituteNames(parts[4], DOW_NAMES), 0, 7));
 
         // Standard (Vixie) cron: when BOTH day-of-month and day-of-week are
-        // restricted (neither is "*"), a day matches if EITHER field matches.
-        // If only one is restricted, the "*" field is always true, so the AND
-        // below naturally reduces to the restricted field.
-        boolean bothDayFieldsRestricted = !parts[2].trim().equals("*") && !parts[4].trim().equals("*");
+        // restricted, a day matches if EITHER field matches. A field is "starred"
+        // (not restricted) when it begins with "*" — this includes "*/2", matching
+        // Vixie's DOM_STAR/DOW_STAR flag. If only one is restricted, the starred
+        // field is always true, so the AND below reduces to the restricted field.
+        boolean bothDayFieldsRestricted = !parts[2].trim().startsWith("*") && !parts[4].trim().startsWith("*");
 
         // Walk forward minute-by-minute from 'after + 1 minute' (aligned to minute
         // boundary)
@@ -145,7 +146,7 @@ public final class CronParser {
                 if (stepParts.length != 2) {
                     throw new IllegalArgumentException("Invalid step expression '" + part + "' in field: " + field);
                 }
-                int step = Integer.parseInt(stepParts[1]);
+                int step = parseIntField(stepParts[1], field);
                 if (step <= 0)
                     throw new IllegalArgumentException("Step must be > 0: " + field);
                 int start = min;
@@ -156,10 +157,10 @@ public final class CronParser {
                         if (range.length != 2) {
                             throw new IllegalArgumentException("Invalid range expression '" + stepParts[0] + "' in field: " + field);
                         }
-                        start = Integer.parseInt(range[0]);
-                        end = Integer.parseInt(range[1]);
+                        start = parseIntField(range[0], field);
+                        end = parseIntField(range[1], field);
                     } else {
-                        start = Integer.parseInt(stepParts[0]);
+                        start = parseIntField(stepParts[0], field);
                     }
                 }
                 if (start > end) {
@@ -174,8 +175,8 @@ public final class CronParser {
                 if (range.length != 2) {
                     throw new IllegalArgumentException("Invalid range expression '" + part + "' in field: " + field);
                 }
-                int start = Integer.parseInt(range[0]);
-                int end = Integer.parseInt(range[1]);
+                int start = parseIntField(range[0], field);
+                int end = parseIntField(range[1], field);
                 if (start > end) {
                     throw new IllegalArgumentException("Range start must be <= end ('" + part + "') in field: " + field);
                 }
@@ -185,7 +186,7 @@ public final class CronParser {
             } else if (part.equals("*")) {
                 IntStream.rangeClosed(min, max).forEach(values::add);
             } else {
-                values.add(Integer.parseInt(part));
+                values.add(parseIntField(part, field));
             }
         }
 
@@ -196,6 +197,18 @@ public final class CronParser {
             }
         }
         return values;
+    }
+
+    /**
+     * Parse an integer cron token, wrapping low-level {@link NumberFormatException}
+     * into a field-aware {@link IllegalArgumentException} for actionable errors.
+     */
+    private static int parseIntField(String token, String field) {
+        try {
+            return Integer.parseInt(token.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid number '" + token + "' in field: " + field, e);
+        }
     }
 
     /**

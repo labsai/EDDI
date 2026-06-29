@@ -47,6 +47,16 @@
 - `ApiCallExecutor`/`A2AToolProviderManager`/`InMemoryConversationCoordinator` constructor-call sites updated across test files.
 - Mock-based suites green; A2A + embedded-server suites are unrunnable in the sandbox (JDK `HttpClient`/`HttpServer` can't open a selector) but compile and are exercised in CI.
 
+### Review follow-ups (Copilot + CodeRabbit)
+- **`IRequest.setFollowRedirects` fails closed** — made it a non-default (abstract) interface method instead of a no-op default, so any new `IRequest` impl must honour it and cannot silently re-enable the redirect bypass.
+- **Coordinator eviction is O(n), not O(n²)** — compute the dead-letter excess once and evict that many, instead of calling `ConcurrentLinkedDeque.size()` per loop iteration.
+- **`CronParser` Vixie star semantics** — a day field is "starred" (not restricted, takes the AND path) when it *begins* with `*`, so `*/2` is treated like `*` (was exact `equals("*")`, which wrongly took the OR path).
+- **`CronParser` field-aware parse errors** — `parseIntField()` wraps `NumberFormatException` into an `IllegalArgumentException` carrying the offending field (e.g. `*/abc` → "Invalid number 'abc' in field: …"), instead of leaking a vague low-level message.
+- **`CalculatorTool` guards before logging** — the length check now runs before the eager `LOGGER.debug("… " + expression)` concatenation, so an oversized payload is rejected without building/logging the big string.
+
+### Known residual (accepted, documented)
+- **OpenAPI external `$ref` resolution** (`McpApiToolBuilder`, `setResolve(true)`): the http(s) gate validates the top-level spec location but not external `$ref`s inside the spec, so a crafted spec can still make the parser fetch a remote/file ref. Disabling resolution (`setResolve(false)`) would also break legitimate in-document `#/components` refs that real specs rely on, so resolution is kept on. Mitigated by the `eddi-admin`/`eddi-editor` gate; a constrained ref-resolver is the proper (heavier) fix.
+
 ### Not addressed here (architectural — out of scope for a hardening pass)
 - **Open-by-default MCP/admin surface** and **role- vs tenant-based isolation** for config resources.
 - **Conversation-memory 16 MB BSON ceiling** — needs a proper step-archival design, not a quick guard.

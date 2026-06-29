@@ -35,18 +35,19 @@ public class CalculatorTool {
     public String calculate(@P("expression") String expression) {
 
         try {
-            LOGGER.debug("Calculating expression: " + expression);
-
             if (expression == null || expression.isBlank()) {
                 return "Error: Expression must not be empty.";
             }
 
-            // Bound input length: the recursive-descent parser recurses on nested
-            // parentheses, so an over-long expression could exhaust the stack
-            // (StackOverflowError is an Error, not caught below).
+            // Bound input length BEFORE logging/parsing: the recursive-descent parser
+            // recurses on nested parentheses, so an over-long expression could exhaust
+            // the stack (StackOverflowError is an Error, not caught below) and the
+            // eager log concatenation below would also process the oversized payload.
             if (expression.length() > MAX_EXPRESSION_LENGTH) {
                 return "Error: Expression too long (max " + MAX_EXPRESSION_LENGTH + " characters).";
             }
+
+            LOGGER.debug("Calculating expression: " + expression);
 
             double result = new SafeMathParser(expression).parse();
 

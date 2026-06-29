@@ -193,7 +193,16 @@ class CronParserTest {
 
     @Test
     void parseField_rejectsMalformedStep() {
-        assertThrows(IllegalArgumentException.class, () -> CronParser.parseField("*/", 0, 59));
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> CronParser.parseField("*/", 0, 59));
+        // Must be a field-aware cron error, not a leaked low-level parse message.
+        assertTrue(ex.getMessage().toLowerCase().contains("step") || ex.getMessage().toLowerCase().contains("field"),
+                "Expected a field-aware cron error, got: " + ex.getMessage());
+    }
+
+    @Test
+    void parseField_rejectsNonNumericStep() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> CronParser.parseField("*/abc", 0, 59));
+        assertTrue(ex.getMessage().contains("field"), "Expected field context in message, got: " + ex.getMessage());
     }
 
     // --- Standard cron dom/dow OR semantics (both fields restricted) ---
@@ -228,5 +237,16 @@ class CronParserTest {
         Instant base = ZonedDateTime.of(2024, 3, 15, 0, 0, 0, 0, UTC).toInstant();
         Instant next = CronParser.computeNextFire("0 0 1 * *", base, UTC);
         assertEquals(ZonedDateTime.of(2024, 4, 1, 0, 0, 0, 0, UTC).toInstant(), next);
+    }
+
+    @Test
+    void computeNextFire_starSlashStepInDayField_usesAndNotOr() {
+        // "0 0 */2 * 1": */2 day-of-month is "starred" (Vixie DOM_STAR), so this is
+        // AND with Mondays, not OR. */2 over 1..31 yields odd days; the next
+        // odd-numbered Monday after 2024-01-01 is 2024-01-15. (An OR reading would
+        // instead fire on the next odd day, 2024-01-03.)
+        Instant base = ZonedDateTime.of(2024, 1, 1, 0, 0, 0, 0, UTC).toInstant();
+        Instant next = CronParser.computeNextFire("0 0 */2 * 1", base, UTC);
+        assertEquals(ZonedDateTime.of(2024, 1, 15, 0, 0, 0, 0, UTC).toInstant(), next);
     }
 }

@@ -25,14 +25,13 @@ public interface IRequest {
     /**
      * Enable or disable automatic HTTP redirect following for this request.
      * <p>
-     * The default implementation is a no-op (preserves the client's configured
-     * behaviour); the Vert.x-backed implementation honours it. SSRF-protected
-     * callers disable redirects to prevent a {@code 3xx → internal host} bypass of
-     * URL validation.
+     * SSRF-protected callers disable redirects to prevent a
+     * {@code 3xx → internal host} bypass of URL validation. This is intentionally
+     * <b>not</b> a default no-op: any {@link IRequest} implementation must honour
+     * it (or explicitly throw) so a new client cannot silently re-enable the
+     * redirect bypass — it fails closed at compile time instead.
      */
-    default IRequest setFollowRedirects(boolean follow) {
-        return this;
-    }
+    IRequest setFollowRedirects(boolean follow);
 
     IResponse send() throws HttpRequestException;
 
