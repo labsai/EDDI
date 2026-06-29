@@ -116,7 +116,8 @@ class LlmTaskBranchTest {
                 mockSnippetService, globalVariableResolver, counterweightService,
                 identityMaskingService, toolResponseTruncator,
                 mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
-                null, null);
+                null, null,
+                null, null, null, null, null);
     }
 
     private IConversationMemory setupMemory(List<String> actions) {

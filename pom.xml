@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>ai.labs</groupId>
     <artifactId>eddi</artifactId>
-    <version>6.1.1</version>
+    <version>6.1.2</version>
     <properties>
         <compiler-plugin.version>3.15.0</compiler-plugin.version>
         <maven.compiler.source>25</maven.compiler.source>
@@ -16,10 +16,10 @@
         <quarkus.microprofile.version>3.0.0.Final</quarkus.microprofile.version>
         <quarkus.platform.artifact-id>quarkus-bom</quarkus.platform.artifact-id>
         <quarkus.platform.group-id>io.quarkus.platform</quarkus.platform.group-id>
-        <quarkus.platform.version>3.36.3</quarkus.platform.version>
-        <langchain4j-beta.version>1.16.3-beta26</langchain4j-beta.version>
-        <langchain4j.version>1.16.3</langchain4j.version>
-        <langchain4j-libs.version>1.16.3</langchain4j-libs.version>
+        <quarkus.platform.version>3.37.0</quarkus.platform.version>
+        <langchain4j-beta.version>1.17.0-beta27</langchain4j-beta.version>
+        <langchain4j.version>1.17.0</langchain4j.version>
+        <langchain4j-libs.version>1.17.0</langchain4j-libs.version>
         <jandex-maven-plugin.version>3.5.3</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
         <surefire-plugin.version>3.5.5</surefire-plugin.version>
@@ -27,7 +27,7 @@
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <war-plugin.version>3.4.0</war-plugin.version>
         <quarkus-mcp-server.version>1.13.0</quarkus-mcp-server.version>
-        <langchain4j-community.version>1.16.0-beta26</langchain4j-community.version>
+        <langchain4j-community.version>1.17.0-beta27</langchain4j-community.version>
         <skipITs>true</skipITs>
     </properties>
     <dependencyManagement>

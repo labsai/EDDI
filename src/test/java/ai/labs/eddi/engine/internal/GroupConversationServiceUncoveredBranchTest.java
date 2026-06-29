@@ -318,13 +318,15 @@ class GroupConversationServiceUncoveredBranchTest {
     class ExtractResponseMetadata {
 
         @Test
-        @DisplayName("no output or reply keys returns null")
+        @DisplayName("no output or reply keys returns empty string")
         void metadataOnly() throws Exception {
             var output = new ConversationOutput();
             output.put("actions", List.of("greet"));
             output.put("input", "hello");
             var snapshot = createSnapshot(output);
-            assertNull(invokeExtractResponse(snapshot));
+            // ConversationOutputExtractor returns null for metadata-only;
+            // GCS wrapper converts null → "" for backward compat
+            assertEquals("", invokeExtractResponse(snapshot));
         }
 
         @Test

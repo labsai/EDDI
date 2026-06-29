@@ -249,9 +249,10 @@ Most multi-agent frameworks (LangGraph, CrewAI, AutoGen) are Python/Node librari
 ### 🤖 Multi-Agent Orchestration
 
 - 🔀 **Intelligent Routing** — Direct conversations to different agents based on context, rules, and intent
-- 🗣️ **Group Conversations** — Multi-agent debates with 5 built-in discussion styles: Round Table, Peer Review, Devil's Advocate, Delphi, and Debate
+- 🗣️ **Group Conversations** — Multi-agent debates with 6 built-in discussion styles: Round Table, Peer Review, Devil's Advocate, Delphi, Debate, and Task Force
 - 💬 **Slack Integration** — Deploy agents to Slack channels and run multi-agent debates directly in threads
 - 🪆 **Nested Groups** — Compose groups of groups for tournament brackets, red-team vs blue-team, and panel reviews
+- 🤖 **Dynamic Agents** — Create, recruit, and delegate to new agents at runtime during group discussions with configurable guardrails
 - 👥 **Managed Conversations** — Intent-based auto-routing with one conversation per user per intent
 - 🎯 **Capability Matching** — Discover and route to agents by skill, confidence score, and custom attributes
 - 🧙 **Agent Father** — Meta-agent that creates other agents through conversation (ships out of the box)

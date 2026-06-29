@@ -599,7 +599,7 @@ class GroupConversationServiceTest {
         }
 
         @Test
-        void noOutputKeys_returnsNull() throws Exception {
+        void noOutputKeys_returnsEmptyString() throws Exception {
             var snapshot = new SimpleConversationMemorySnapshot();
             var output = new ConversationOutput();
             // Only pipeline metadata keys — no "output" or "reply" keys
@@ -607,11 +607,13 @@ class GroupConversationServiceTest {
             output.put("input", "some input");
             snapshot.setConversationOutputs(new LinkedList<>(List.of(output)));
 
-            assertNull(invoke(snapshot));
+            // ConversationOutputExtractor returns null for metadata-only;
+            // GCS wrapper converts null → "" for backward compat
+            assertEquals("", invoke(snapshot));
         }
 
         @Test
-        void hasOutputKeyButNoTexts_fallsBackToSerialization() throws Exception {
+        void hasOutputKeyButNoTexts_fallsBackToToString() throws Exception {
             var snapshot = new SimpleConversationMemorySnapshot();
             var output = new ConversationOutput();
             // Has an "output" key prefix but doesn't yield any text via known formats
@@ -620,10 +622,13 @@ class GroupConversationServiceTest {
             output.put("output-status", "done");
             snapshot.setConversationOutputs(new LinkedList<>(List.of(output)));
 
-            doReturn("{\"output-status\":\"done\"}").when(jsonSerialization).serialize(output);
-
+            // ConversationOutputExtractor uses toString() fallback (no
+            // jsonSerialization dependency). Just verify non-null and
+            // contains output key content.
             String result = invoke(snapshot);
-            assertEquals("{\"output-status\":\"done\"}", result);
+            assertNotNull(result, "Should fall back to toString()");
+            assertTrue(result.contains("output-status"), "Fallback should include output key");
+            assertTrue(result.contains("done"), "Fallback should include value");
         }
 
         @Test

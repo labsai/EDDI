@@ -94,7 +94,8 @@ class AgentOrchestratorExtendedTest {
                 mock(IResourceClientLibrary.class), mock(IApiCallExecutor.class),
                 mock(IJsonSerialization.class), mock(IMemoryItemConverter.class),
                 userMemoryStore, mock(ToolResponseTruncator.class),
-                mock(TenantQuotaService.class), memorySnapshotService);
+                mock(TenantQuotaService.class), memorySnapshotService,
+                null, null, null, null, null);
 
         mockMemory = mock(IConversationMemory.class);
         when(mockMemory.getUserMemoryConfig()).thenReturn(null);

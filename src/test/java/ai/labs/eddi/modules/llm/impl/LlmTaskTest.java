@@ -142,7 +142,8 @@ class LlmTaskTest {
                 counterweightService,
                 identityMaskingService,
                 toolResponseTruncator, tenantQuotaService,
-                memorySnapshotService, attachmentStore);
+                memorySnapshotService, attachmentStore,
+                null, null, null, null, null);
     }
 
     // ====================================================================

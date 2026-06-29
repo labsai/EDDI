@@ -15,6 +15,7 @@ Group Conversations enable multiple agents to discuss a question. Each agent par
 | `DEVIL_ADVOCATE` | Opinion → Challenge → Defense → Synthesis | Risk assessment, stress-testing |
 | `DELPHI` | Anonymous rounds → convergence → Synthesis | Forecasting, reducing groupthink |
 | `DEBATE` | Pro → Con → Rebuttals → Judge | Trade-off analysis, comparisons |
+| `TASK_FORCE` | Plan → Execute → Verify → Synthesis | Structured task decomposition, parallel execution |
 | `CUSTOM` | Define your own phases | Any workflow |
 
 ## Quick Start (MCP)
@@ -144,6 +145,9 @@ For full control, define phases directly:
 | `DEFENSE` | Defend position against challenges |
 | `ARGUE` | Present argument for a side (debate) |
 | `REBUTTAL` | Counter opposing arguments |
+| `PLAN` | Decompose the question into sub-tasks |
+| `EXECUTE` | Work on assigned sub-task |
+| `VERIFY` | Review and validate another member's work |
 | `SYNTHESIS` | Moderator produces balanced conclusion |
 
 ### Context Scopes
@@ -155,6 +159,126 @@ For full control, define phases directly:
 | `LAST_PHASE` | Only the previous phase's entries |
 | `ANONYMOUS` | Previous entries with speaker names removed |
 | `OWN_FEEDBACK` | Only feedback addressed to this agent |
+| `TASK_ONLY` | Only this agent's assigned task from the plan |
+| `TASK_WITH_DEPS` | Assigned task plus outputs from dependency tasks |
+
+### TASK_FORCE Configuration
+
+The TASK_FORCE style uses a 4-phase pipeline: **Plan → Execute → Verify → Synthesize**.
+
+1. **PLAN** — The moderator decomposes the goal into actionable tasks and assigns each to an agent
+2. **EXECUTE** — Agents execute their assigned tasks in parallel (each sees only `TASK_ONLY` or `TASK_WITH_DEPS` context)
+3. **VERIFY** — The moderator reviews each task result against the original goal
+4. **SYNTHESIS** — The moderator combines all verified results into a coherent final deliverable
+
+#### Pre-Configured Tasks
+
+Pass a `tasks` array to skip the PLAN phase entirely — useful for deterministic, repeatable workflows:
+
+```json
+{
+  "name": "Documentation Team",
+  "style": "TASK_FORCE",
+  "moderatorAgentId": "moderator-id",
+  "members": [
+    {"agentId": "researcher-id", "displayName": "Researcher"},
+    {"agentId": "writer-id", "displayName": "Writer"}
+  ],
+  "tasks": [
+    {
+      "subject": "Research topic",
+      "description": "Research the key trends and data points.",
+      "assignToRole": "Researcher",
+      "priority": 0
+    },
+    {
+      "subject": "Write article",
+      "description": "Using the research findings, write a 500-word article.",
+      "assignToRole": "Writer",
+      "dependsOn": ["Research topic"],
+      "priority": 1
+    }
+  ]
+}
+```
+
+When `tasks` is provided, the system posts `[System] "Pre-configured task plan: N tasks"` instead of invoking the moderator's LLM.
+
+#### Task Dependencies
+
+Use `dependsOn` to create sequential execution chains. Each entry references a task `subject`:
+
+- Tasks with no dependencies execute in **parallel**
+- Tasks with dependencies wait for their predecessors to complete
+- Dependent tasks receive their predecessor's output via the `TASK_WITH_DEPS` context scope
+- **Cycle detection** prevents circular dependency chains (fails fast at planning time)
+
+#### Task Statuses
+
+| Status | Meaning |
+|---|---|
+| `PENDING` | Waiting for dependencies or execution |
+| `ASSIGNED` | Assigned to an agent, waiting to start |
+| `IN_PROGRESS` | Currently being executed by an agent |
+| `COMPLETED` | Agent produced output |
+| `VERIFIED` | Moderator verified the result |
+| `FAILED` | Agent or verification failed |
+
+### Dynamic Agents
+
+During TASK_FORCE (or any group) discussions, agents with the appropriate LLM tools can **create, recruit, and delegate to new agents at runtime**:
+
+| Tool | Purpose |
+|---|---|
+| `CreateSubAgentTool` | Create a new ephemeral agent with a specific system prompt |
+| `ConverseWithAgentTool` | Delegate a sub-task to an existing deployed agent |
+| `FindAgentsByCapabilityTool` | Discover agents by capability keywords |
+| `TeardownAgentTool` | Clean up dynamically created agents |
+
+#### DynamicAgentConfig
+
+Guardrails for dynamic agent creation are configured per-group via `AgentGroupConfiguration.dynamicAgents`:
+
+```json
+{
+  "dynamicAgents": {
+    "enabled": true,
+    "allowCreation": true,
+    "allowRecruitment": true,
+    "allowDelegation": true,
+    "maxCreatedAgentsPerDiscussion": 5,
+    "maxRecruitedAgentsPerDiscussion": 10,
+    "maxDelegationsPerTask": 3,
+    "lifecyclePolicy": "ephemeral",
+    "inheritParentModel": true,
+    "allowedProviders": ["anthropic", "openai"],
+    "allowedModels": {
+      "anthropic": ["claude-sonnet-4-6"],
+      "openai": ["gpt-4o"]
+    }
+  }
+}
+```
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `enabled` | `false` | Master switch for dynamic agent capabilities |
+| `allowCreation` | `false` | Allow creating new agents (vs. only recruiting existing) |
+| `allowRecruitment` | `false` | Allow recruiting already-deployed agents into the discussion |
+| `allowDelegation` | `true` | Allow delegating sub-tasks to other agents |
+| `maxCreatedAgentsPerDiscussion` | `5` | Cap on new agents created per discussion |
+| `maxRecruitedAgentsPerDiscussion` | `10` | Cap on recruited agents per discussion |
+| `maxDelegationsPerTask` | `3` | Cap on delegations per task |
+| `lifecyclePolicy` | `EPHEMERAL` | `EPHEMERAL`, `KEEP_DEPLOYED`, `UNDEPLOY_ONLY`, or `AGENT_DECIDES` |
+| `inheritParentModel` | `true` | Created agents inherit the parent agent's model |
+| `allowedProviders` | `null` (any) | Whitelist of LLM providers |
+| `allowedModels` | `null` (any) | Per-provider model whitelist |
+
+Dynamic agents are tracked in `GroupConversation.dynamicMembers`, `createdAgentIds`, and `retainedAgentIds`.
+
+### Tenant Quota Enforcement
+
+If tenant quotas are enabled, `QuotaExceededException` is propagated regardless of the group's `onAgentFailure` policy — quota violations always abort the discussion to prevent runaway resource consumption.
 
 ## Protocol Configuration
 
@@ -203,7 +327,9 @@ For full control, define phases directly:
 | `delete_group` | Delete group config |
 | `discuss_with_group` | Start discussion, return transcript |
 | `read_group_conversation` | Read conversation transcript |
-| `list_group_conversations` | List past discussions |
+| `list_group_conversations`  | List past discussions for a group, with state and timestamps                                                                         |
+| `start_group_discussion`    | Start a discussion asynchronously (returns immediately). Poll with `read_group_conversation`                                         |
+| `delete_group_conversation` | Delete a group conversation and cascade-delete all member conversations                                                              |
 
 ## Slack Integration
 
@@ -229,6 +355,7 @@ All discussion styles use the same rendering pattern in Slack:
 | **DEVIL_ADVOCATE** | Agent posts → Challenger threads challenges → Agent threads defense → Synthesis |
 | **DEBATE** | PRO agent posts → CON agent posts → Rebuttals thread under opponents → Judge synthesizes |
 | **DELPHI** | Round 1 agents post → Round 2 agents post (convergence) → Synthesis |
+| **TASK_FORCE** | Moderator posts plan → Agents post task results → Verifiers thread under targets → Synthesis |
 
 ### Trigger Keywords
 

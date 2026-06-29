@@ -110,7 +110,8 @@ class AgentOrchestratorTest {
                 restAgentStore, restWorkflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter,
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
-                memorySnapshotService);
+                memorySnapshotService,
+                null, null, null, null, null);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -519,7 +520,8 @@ class AgentOrchestratorTest {
                 restAgentStore, restWorkflowStore, resourceClientLibrary,
                 apiCallExecutor, jsonSerialization, memoryItemConverter,
                 null, // null userMemoryStore
-                toolResponseTruncator, tenantQuotaService, memorySnapshotService);
+                toolResponseTruncator, tenantQuotaService, memorySnapshotService,
+                null, null, null, null, null);
 
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);

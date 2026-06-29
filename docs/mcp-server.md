@@ -81,19 +81,21 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `fire_schedule_now`     | Manually trigger a schedule fire immediately. Useful for testing or one-off executions                                                                                                              |
 | `retry_failed_schedule` | Re-queue a dead-lettered schedule for another fire attempt after fixing the cause of failure                                                                                                        |
 
-### Group Conversation Tools (9)
+### Group Conversation Tools (11)
 
 | Tool                        | Description                                                                                                                                                |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `describe_discussion_styles` | Rich descriptions of all 5 discussion styles with phase flows, member roles, and use cases                                                                |
+| `describe_discussion_styles` | Rich descriptions of all 6 discussion styles with phase flows, member roles, and use cases                                                                |
 | `list_groups`               | List all group configurations with name, style, member count                                                                                               |
 | `read_group`                | Read a group configuration's full details                                                                                                                  |
-| `create_group`              | Create a group (members, moderator, style, roles, member types). Supports nested groups via `memberTypes=GROUP`                                           |
+| `create_group`              | Create a group (members, moderator, style, roles, member types, tasks). Supports nested groups via `memberTypes=GROUP` and pre-configured TASK_FORCE tasks via `tasks` param |
 | `update_group`              | Update a group configuration (full JSON replacement)                                                                                                       |
 | `delete_group`              | Delete a group configuration                                                                                                                               |
 | `discuss_with_group`        | Start a multi-agent discussion on a question. Returns full transcript + synthesized answer                                                                 |
 | `read_group_conversation`   | Read a group conversation transcript                                                                                                                       |
 | `list_group_conversations`  | List past group discussions for a group, with state and timestamps                                                                                         |
+| `start_group_discussion`    | Start a discussion asynchronously (returns immediately with groupConversationId). Poll with `read_group_conversation`                                     |
+| `delete_group_conversation` | Delete a group conversation and cascade-delete all member conversations                                                                                    |
 
 See [Group Conversations](group-conversations.md) for full style details, custom phases, and nested groups.
 
@@ -123,13 +125,13 @@ See [GDPR / CCPA Compliance](gdpr-compliance.md) for data erasure, export, and r
 
 ### Channel Integration Tools (5)
 
-| Tool                           | Description                                                                |
-| ------------------------------ | -------------------------------------------------------------------------- |
-| `list_channel_integrations`    | List all channel integration configurations with name, type, target count  |
-| `read_channel_integration`     | Read a channel integration's full config (targets, triggers, platformConfig) |
-| `create_channel_integration`   | Create a new channel integration (Slack, etc.)                             |
-| `update_channel_integration`   | Update an existing channel integration configuration                       |
-| `delete_channel_integration`   | Delete a channel integration configuration                                 |
+| Tool                            | Description                                                                                                     |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `list_channel_integrations`     | List all channel integrations with name, type, and target count                                                 |
+| `read_channel_integration`      | Read a channel integration's full configuration                                                                 |
+| `create_channel_integration`    | Create a new channel integration (Slack, Teams, etc.) with platform config and agent targets                    |
+| `update_channel_integration`    | Update an existing channel integration                                                                          |
+| `delete_channel_integration`    | Delete a channel integration (soft or permanent)                                                                |
 
 See [Slack Integration](slack-integration.md) for Slack-specific setup and multi-agent thread discussions.
 
@@ -146,9 +148,13 @@ Configure the docs path with: `eddi.docs.path` (default: `docs/`, in Docker: `/d
 
 ## Quick Start
 
-### Claude Desktop Configuration
+### Client Configuration
 
-Add to `claude_desktop_config.json`:
+EDDI uses **Streamable HTTP** transport at `http://localhost:7070/mcp`. How you connect depends on your client's transport support.
+
+#### Direct HTTP (Streamable HTTP clients)
+
+Clients that natively support HTTP transport (e.g., IDE plugins, custom MCP clients) can connect directly:
 
 ```json
 {
@@ -159,6 +165,38 @@ Add to `claude_desktop_config.json`:
   }
 }
 ```
+
+#### stdio Bridge (Claude Desktop, Cursor, Windsurf, etc.)
+
+Many MCP clients — including Claude Desktop's `claude_desktop_config.json` — only support **stdio** transport (spawning a local subprocess). They cannot connect to HTTP endpoints directly.
+
+Use [`mcp-remote`](https://github.com/geelen/mcp-remote) to bridge the gap. It runs as a local stdio process and proxies requests to EDDI's HTTP endpoint:
+
+```json
+{
+  "mcpServers": {
+    "eddi": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:7070/mcp"]
+    }
+  }
+}
+```
+
+**Windows users** — if `npx` is not on your shell PATH, wrap via `cmd`:
+
+```json
+{
+  "mcpServers": {
+    "eddi": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "mcp-remote", "http://localhost:7070/mcp"]
+    }
+  }
+}
+```
+
+> **What is `mcp-remote`?** An open-source npm package ([github.com/geelen/mcp-remote](https://github.com/geelen/mcp-remote)) that acts as an invisible bridge between stdio-only MCP clients and HTTP-based MCP servers. It handles protocol translation, session management, and authentication. Requires Node.js 18+.
 
 ### Example Workflow
 
