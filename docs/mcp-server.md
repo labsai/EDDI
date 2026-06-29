@@ -166,6 +166,22 @@ Clients that natively support HTTP transport (e.g., IDE plugins, custom MCP clie
 }
 ```
 
+#### Antigravity (Google)
+
+Add EDDI as an MCP server in your Antigravity settings (`.gemini/config/settings.json` or workspace `.agents/settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "eddi": {
+      "serverUrl": "http://localhost:7070/mcp"
+    }
+  }
+}
+```
+
+Antigravity connects natively via Streamable HTTP — no bridge required.
+
 #### stdio Bridge (Claude Desktop, Cursor, Windsurf, etc.)
 
 Many MCP clients — including Claude Desktop's `claude_desktop_config.json` — only support **stdio** transport (spawning a local subprocess). They cannot connect to HTTP endpoints directly.
