@@ -209,6 +209,37 @@ Rejected adding 5 separate tools (read_task_list, list_dynamic_agents, discuss_t
 
 ---
 
+## 📄 README Audit & MCP Docs Update (2026-06-25)
+
+**Repo:** EDDI (`chore/readme-update`)
+**What changed:** Comprehensive README accuracy audit and stale data fixes.
+
+### README.md
+
+- **Removed hardcoded version**: Replaced `**Latest version: 6.1.0**` with a dynamic shields.io GitHub Release badge — auto-updates from GitHub Releases, no manual maintenance.
+- **Added UNIDO mention**: Added `UNIDO Trusted Partner` alongside Red Hat certification in the intro paragraph.
+- **Updated MCP tool count**: `42 tools` → `60+ tools` in both the Standards table and Documentation table.
+- **Updated Quarkus SDK example**: Replaced hardcoded `<version>6.1.0</version>` with `<version>LATEST</version>` and a comment linking to the quarkus-eddi releases page.
+
+### docs/mcp-server.md
+
+- **Updated header count**: `Available Tools (48)` → `Available Tools (63)`.
+- **Fixed stale reference**: Tool Filtering section still said "48 intended tools" → updated to 63.
+- **Added 3 missing tool sections** (15 tools total):
+  - **Memory Tools (8)**: `list_user_memories`, `get_visible_memories`, `search_user_memories`, `get_memory_by_key`, `upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`, `count_user_memories`
+  - **GDPR Tools (2)**: `delete_user_data`, `export_user_data`
+  - **Channel Integration Tools (5)**: `list_channel_integrations`, `read_channel_integration`, `create_channel_integration`, `update_channel_integration`, `delete_channel_integration`
+
+### Verification
+
+- All 63 `@Tool` annotations in `engine/mcp/` verified as `io.quarkiverse.mcp.server.Tool` (not langchain4j).
+- GitHub Releases API confirms proper releases exist (badge renders correctly).
+- All 3 new cross-links (`user-memory.md`, `gdpr-compliance.md`, `slack-integration.md`) verified present.
+
+**Files:** `README.md`, `docs/mcp-server.md`, `docs/changelog.md`
+
+---
+
 ## 🐛 Fix: Swagger UI CSP Regression — Duplicate Header Causes Inline Script Block (2026-06-23)
 
 
