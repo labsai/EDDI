@@ -73,6 +73,7 @@ public class ToolExecutionService {
         String toolName = method.getDeclaringClass().getSimpleName();
         String arguments = serializeArguments(args);
         long startTime = System.currentTimeMillis();
+        double cost = 0.0; // hoisted for visibility in catch blocks
 
         try {
             // 1. Check rate limit
@@ -102,7 +103,7 @@ public class ToolExecutionService {
             }
 
             // 3. Track cost
-            double cost = costTracker.trackToolCall(toolName, conversationId);
+            cost = costTracker.trackToolCall(toolName, conversationId);
 
             // 4. Execute tool
             Object result = method.invoke(toolInstance, args);
@@ -126,11 +127,9 @@ public class ToolExecutionService {
 
         } catch (Exception e) {
             long executionTime = System.currentTimeMillis() - startTime;
-            // Cost was already tracked in step 3 above (if we got past rate limit and
-            // cache)
             String error = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
 
-            trace.addFailedToolCall(toolName, arguments, error, executionTime, 0.0);
+            trace.addFailedToolCall(toolName, arguments, error, executionTime, cost);
 
             // Record failure metrics
             meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
