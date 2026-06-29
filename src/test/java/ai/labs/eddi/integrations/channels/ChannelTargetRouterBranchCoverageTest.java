@@ -242,14 +242,14 @@ class ChannelTargetRouterBranchCoverageTest {
     class GetSigningSecrets {
 
         @Test
-        @DisplayName("slack → returns slackSigningSecrets")
+        @DisplayName("slack → returns secrets from signingSecretsByType map")
         void slackSecrets() {
             var result = router.getSigningSecrets("slack");
             assertNotNull(result);
         }
 
         @Test
-        @DisplayName("other channel type → empty set")
+        @DisplayName("unregistered channel type → empty set")
         void otherType() {
             var result = router.getSigningSecrets("teams");
             assertTrue(result.isEmpty());

@@ -55,6 +55,9 @@ class ChannelTargetRouterRefreshTest {
     private SecretResolver secretResolver;
     private ChannelTargetRouter router;
 
+    /** Accumulated descriptors across multiple setupNewStyleConfigForType calls. */
+    private List<DocumentDescriptor> accumulatedDescriptors;
+
     @BeforeEach
     void setUp() throws Exception {
         channelStore = mock(IChannelIntegrationStore.class);
@@ -70,6 +73,8 @@ class ChannelTargetRouterRefreshTest {
         router = new ChannelTargetRouter(channelStore, descriptorStore, agentAdmin, agentStore,
                 secretResolver, cacheFactory);
 
+        accumulatedDescriptors = new ArrayList<>();
+
         // Default: no legacy agents
         when(agentAdmin.getDeploymentStatuses(any())).thenReturn(List.of());
     }
@@ -83,13 +88,31 @@ class ChannelTargetRouterRefreshTest {
                                                                 String botToken,
                                                                 String signingSecret)
             throws Exception {
+        return setupNewStyleConfigForType("slack", channelId, botToken, signingSecret,
+                CHANNEL_CONFIG_ID, "Test Slack Channel");
+    }
+
+    /**
+     * Set up the store mocks to return a channel integration config for any channel
+     * type. Each call uses a unique configId so multiple configs can coexist.
+     */
+    private ChannelIntegrationConfiguration setupNewStyleConfigForType(String channelType,
+                                                                       String channelId,
+                                                                       String botToken,
+                                                                       String signingSecret,
+                                                                       String configId,
+                                                                       String name)
+            throws Exception {
         var config = new ChannelIntegrationConfiguration();
-        config.setName("Test Slack Channel");
-        config.setChannelType("slack");
-        config.setPlatformConfig(new HashMap<>(Map.of(
-                "channelId", channelId,
-                "botToken", botToken,
-                "signingSecret", signingSecret)));
+        config.setName(name);
+        config.setChannelType(channelType);
+        var platformConfig = new HashMap<String, String>();
+        platformConfig.put("channelId", channelId);
+        platformConfig.put("botToken", botToken);
+        if (signingSecret != null) {
+            platformConfig.put("signingSecret", signingSecret);
+        }
+        config.setPlatformConfig(platformConfig);
         config.setDefaultTargetName("default-agent");
 
         var target = new ChannelTarget();
@@ -99,14 +122,20 @@ class ChannelTargetRouterRefreshTest {
         target.setTargetId(AGENT_ID);
         config.setTargets(List.of(target));
 
-        // Wire descriptor → config
+        // Wire descriptor → config (append to accumulated list)
         var descriptor = new DocumentDescriptor();
         URI resourceUri = URI.create("eddi://ai.labs.channel/channelstore/channels/"
-                + CHANNEL_CONFIG_ID + "?version=1");
+                + configId + "?version=1");
         descriptor.setResource(resourceUri);
+
+        // Track descriptors in a field — do NOT call the mock to read existing
+        // descriptors, as that would inflate invocation counts and break
+        // verify(times(N)) assertions in RefreshMechanism tests.
+        accumulatedDescriptors.add(descriptor);
+
         when(descriptorStore.readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean()))
-                .thenReturn(List.of(descriptor));
-        when(channelStore.read(eq(CHANNEL_CONFIG_ID), eq(1)))
+                .thenReturn(new ArrayList<>(accumulatedDescriptors));
+        when(channelStore.read(eq(configId), eq(1)))
                 .thenReturn(config);
 
         // Secret resolver: pass through (or resolve vault refs)
@@ -276,7 +305,7 @@ class ChannelTargetRouterRefreshTest {
     class SigningSecrets {
 
         @Test
-        @DisplayName("returns resolved signing secrets from new-style configs")
+        @DisplayName("returns resolved signing secrets from new-style Slack configs")
         void newStyleSigningSecrets() throws Exception {
             setupNewStyleConfig(CHANNEL_ID, "xoxb-token", "${eddivault:slack-signing}");
 
@@ -289,7 +318,7 @@ class ChannelTargetRouterRefreshTest {
         }
 
         @Test
-        @DisplayName("includes legacy signing secrets")
+        @DisplayName("includes legacy signing secrets under slack type")
         void legacySigningSecrets() throws Exception {
             when(descriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
                     .thenReturn(List.of());
@@ -303,13 +332,118 @@ class ChannelTargetRouterRefreshTest {
         }
 
         @Test
-        @DisplayName("returns empty for non-slack channel type")
-        void nonSlackReturnsEmpty() throws Exception {
+        @DisplayName("returns secrets only for the requested channel type — cross-type isolation")
+        void crossTypeIsolation() throws Exception {
+            // Set up a Slack config and a Telegram config with different secrets
+            setupNewStyleConfigForType("slack", CHANNEL_ID, "xoxb-token", "slack-secret",
+                    CHANNEL_CONFIG_ID, "Test Slack Channel");
+            setupNewStyleConfigForType("telegram", "tg-chat-123", "tg-bot-token", "telegram-secret",
+                    "aabbccddeeff001122aa", "Test Telegram Bot");
+
+            Set<String> slackSecrets = router.getSigningSecrets("slack");
+            Set<String> telegramSecrets = router.getSigningSecrets("telegram");
+
+            // Each type has exactly its own secret, not the other's
+            assertTrue(slackSecrets.contains("slack-secret"));
+            assertFalse(slackSecrets.contains("telegram-secret"),
+                    "Slack secrets must not contain Telegram's secret");
+
+            assertTrue(telegramSecrets.contains("telegram-secret"));
+            assertFalse(telegramSecrets.contains("slack-secret"),
+                    "Telegram secrets must not contain Slack's secret");
+        }
+
+        @Test
+        @DisplayName("collects secrets from multiple configs of the same channel type")
+        void multipleConfigsSameType() throws Exception {
+            setupNewStyleConfigForType("slack", CHANNEL_ID, "token-1", "secret-A",
+                    CHANNEL_CONFIG_ID, "Slack Channel 1");
+            setupNewStyleConfigForType("slack", "C99OTHERCHANNEL", "token-2", "secret-B",
+                    "ff00ff00ff00ff00ff00", "Slack Channel 2");
+
+            Set<String> secrets = router.getSigningSecrets("slack");
+
+            assertEquals(2, secrets.size());
+            assertTrue(secrets.containsAll(Set.of("secret-A", "secret-B")));
+        }
+
+        @Test
+        @DisplayName("getSigningSecrets is case-insensitive on channel type")
+        void caseInsensitiveLookup() throws Exception {
+            setupNewStyleConfigForType("discord", "guild-ch-1", "bot-token", "discord-secret",
+                    "1122334455667788aabb", "Test Discord Channel");
+
+            // All case variants should return the same secrets
+            Set<String> lower = router.getSigningSecrets("discord");
+            Set<String> upper = router.getSigningSecrets("DISCORD");
+            Set<String> mixed = router.getSigningSecrets("Discord");
+
+            assertEquals(lower, upper);
+            assertEquals(lower, mixed);
+            assertTrue(lower.contains("discord-secret"));
+        }
+
+        @Test
+        @DisplayName("returns empty set for channel type with no configs")
+        void unknownTypeReturnsEmpty() throws Exception {
             setupNewStyleConfig(CHANNEL_ID, "token", "secret");
 
             Set<String> secrets = router.getSigningSecrets("teams");
 
             assertTrue(secrets.isEmpty());
+        }
+
+        @Test
+        @DisplayName("returns empty set for null channel type")
+        void nullTypeReturnsEmpty() {
+            Set<String> secrets = router.getSigningSecrets(null);
+
+            assertTrue(secrets.isEmpty());
+        }
+
+        @Test
+        @DisplayName("config without signingSecret key does not contribute to secrets")
+        void configWithoutSigningSecretKey() throws Exception {
+            // Telegram might not use "signingSecret" as its key name
+            setupNewStyleConfigForType("telegram", "tg-chat-456", "tg-bot-token", null,
+                    "ccccddddeeeeffffaaaa", "Telegram No Secret");
+
+            Set<String> secrets = router.getSigningSecrets("telegram");
+
+            assertTrue(secrets.isEmpty(),
+                    "Config without signingSecret key should not appear in secrets map");
+        }
+
+        @Test
+        @DisplayName("config with blank signingSecret does not contribute to secrets")
+        void blankSigningSecretIgnored() throws Exception {
+            setupNewStyleConfigForType("slack", CHANNEL_ID, "token", "   ",
+                    CHANNEL_CONFIG_ID, "Slack with blank secret");
+
+            Set<String> secrets = router.getSigningSecrets("slack");
+
+            assertTrue(secrets.isEmpty(),
+                    "Blank signing secret should be excluded");
+        }
+
+        @Test
+        @DisplayName("legacy Slack secrets and new-style Slack secrets are combined")
+        void legacyAndNewStyleCombined() throws Exception {
+            // New-style config with one secret
+            setupNewStyleConfig(CHANNEL_ID, "xoxb-new", "new-style-secret");
+
+            // Legacy agent with a different secret on a different channel
+            setupLegacyAgent(AGENT_ID, "C99LEGACY", "xoxb-leg", "legacy-secret", null);
+            when(secretResolver.resolveValue("xoxb-leg")).thenReturn("xoxb-leg");
+            when(secretResolver.resolveValue("legacy-secret")).thenReturn("legacy-secret");
+
+            Set<String> secrets = router.getSigningSecrets("slack");
+
+            assertTrue(secrets.contains("new-style-secret"),
+                    "Should contain new-style secret");
+            assertTrue(secrets.contains("legacy-secret"),
+                    "Should contain legacy secret");
+            assertEquals(2, secrets.size());
         }
     }
 
