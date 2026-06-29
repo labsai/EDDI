@@ -80,6 +80,12 @@ public final class CronParser {
         Set<Integer> months = parseField(substituteNames(parts[3], MONTH_NAMES), 1, 12);
         Set<Integer> daysOfWeek = normalizeDaysOfWeek(parseField(substituteNames(parts[4], DOW_NAMES), 0, 7));
 
+        // Standard (Vixie) cron: when BOTH day-of-month and day-of-week are
+        // restricted (neither is "*"), a day matches if EITHER field matches.
+        // If only one is restricted, the "*" field is always true, so the AND
+        // below naturally reduces to the restricted field.
+        boolean bothDayFieldsRestricted = !parts[2].trim().equals("*") && !parts[4].trim().equals("*");
+
         // Walk forward minute-by-minute from 'after + 1 minute' (aligned to minute
         // boundary)
         ZonedDateTime candidate = after.atZone(zoneId).withSecond(0).withNano(0).plusMinutes(1);
@@ -88,9 +94,9 @@ public final class CronParser {
         ZonedDateTime limit = candidate.plusYears(2);
 
         while (candidate.isBefore(limit)) {
-            if (months.contains(candidate.getMonthValue()) && daysOfMonth.contains(candidate.getDayOfMonth())
-                    && daysOfWeek.contains(candidate.getDayOfWeek().getValue() % 7) // Java DayOfWeek: MON=1..SUN=7
-                    && hours.contains(candidate.getHour()) && minutes.contains(candidate.getMinute())) {
+            boolean dayMatches = dayMatches(candidate, daysOfMonth, daysOfWeek, bothDayFieldsRestricted);
+            if (months.contains(candidate.getMonthValue()) && dayMatches && hours.contains(candidate.getHour())
+                    && minutes.contains(candidate.getMinute())) {
                 return candidate.toInstant();
             }
 
@@ -99,8 +105,8 @@ public final class CronParser {
                 candidate = skipToNextMonth(candidate, months);
                 continue;
             }
-            // If day doesn't match, jump to next day
-            if (!daysOfMonth.contains(candidate.getDayOfMonth()) || !daysOfWeek.contains(candidate.getDayOfWeek().getValue() % 7)) {
+            // If day doesn't match (per OR/AND semantics above), jump to next day
+            if (!dayMatches) {
                 candidate = candidate.plusDays(1).withHour(0).withMinute(0);
                 continue;
             }
@@ -190,6 +196,17 @@ public final class CronParser {
             }
         }
         return values;
+    }
+
+    /**
+     * Determine whether the candidate's date matches the day-of-month and
+     * day-of-week sets, applying standard cron semantics: OR when both fields are
+     * restricted, AND otherwise.
+     */
+    private static boolean dayMatches(ZonedDateTime candidate, Set<Integer> daysOfMonth, Set<Integer> daysOfWeek, boolean bothRestricted) {
+        boolean domMatch = daysOfMonth.contains(candidate.getDayOfMonth());
+        boolean dowMatch = daysOfWeek.contains(candidate.getDayOfWeek().getValue() % 7); // Java DayOfWeek: MON=1..SUN=7
+        return bothRestricted ? (domMatch || dowMatch) : (domMatch && dowMatch);
     }
 
     /**

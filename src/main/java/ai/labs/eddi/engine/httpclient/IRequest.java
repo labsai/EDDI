@@ -22,6 +22,18 @@ public interface IRequest {
 
     IRequest setTimeout(long timeout, TimeUnit timeUnit);
 
+    /**
+     * Enable or disable automatic HTTP redirect following for this request.
+     * <p>
+     * The default implementation is a no-op (preserves the client's configured
+     * behaviour); the Vert.x-backed implementation honours it. SSRF-protected
+     * callers disable redirects to prevent a {@code 3xx → internal host} bypass of
+     * URL validation.
+     */
+    default IRequest setFollowRedirects(boolean follow) {
+        return this;
+    }
+
     IResponse send() throws HttpRequestException;
 
     Map<String, Object> toMap();

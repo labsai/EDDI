@@ -163,6 +163,12 @@ public class HttpClientWrapper implements IHttpClient {
         }
 
         @Override
+        public IRequest setFollowRedirects(boolean follow) {
+            request.followRedirects(follow);
+            return this;
+        }
+
+        @Override
         public IResponse send() throws HttpRequestException {
             CompletableFuture<IResponse> future = new CompletableFuture<>();
 

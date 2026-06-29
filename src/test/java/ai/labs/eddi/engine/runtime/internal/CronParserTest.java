@@ -195,4 +195,38 @@ class CronParserTest {
     void parseField_rejectsMalformedStep() {
         assertThrows(IllegalArgumentException.class, () -> CronParser.parseField("*/", 0, 59));
     }
+
+    // --- Standard cron dom/dow OR semantics (both fields restricted) ---
+
+    @Test
+    void computeNextFire_domOrDow_firesOnDayOfMonthEvenIfNotWeekday() {
+        // "0 0 13 * 5" = midnight on the 13th OR any Friday. 2024-01-13 is a Saturday.
+        // From the 12th (a Friday) at noon, the next fire is the 13th at 00:00 —
+        // proving day-of-month matches independently of weekday (OR, not AND).
+        Instant base = ZonedDateTime.of(2024, 1, 12, 12, 0, 0, 0, UTC).toInstant();
+        Instant next = CronParser.computeNextFire("0 0 13 * 5", base, UTC);
+        ZonedDateTime z = next.atZone(UTC);
+        assertEquals(13, z.getDayOfMonth());
+        assertEquals(java.time.DayOfWeek.SATURDAY, z.getDayOfWeek());
+    }
+
+    @Test
+    void computeNextFire_domOrDow_firesOnWeekdayEvenIfNotDayOfMonth() {
+        // From 2024-01-01 (a Monday), "0 0 13 * 5" next fires on Fri 2024-01-05 —
+        // a Friday that is not the 13th — proving weekday matches independently.
+        Instant base = ZonedDateTime.of(2024, 1, 1, 0, 0, 0, 0, UTC).toInstant();
+        Instant next = CronParser.computeNextFire("0 0 13 * 5", base, UTC);
+        ZonedDateTime z = next.atZone(UTC);
+        assertEquals(java.time.DayOfWeek.FRIDAY, z.getDayOfWeek());
+        assertEquals(5, z.getDayOfMonth());
+    }
+
+    @Test
+    void computeNextFire_singleDayFieldRestricted_staysAnd() {
+        // Only day-of-month restricted (dow is *): must fire strictly on the 1st,
+        // not on arbitrary weekdays.
+        Instant base = ZonedDateTime.of(2024, 3, 15, 0, 0, 0, 0, UTC).toInstant();
+        Instant next = CronParser.computeNextFire("0 0 1 * *", base, UTC);
+        assertEquals(ZonedDateTime.of(2024, 4, 1, 0, 0, 0, 0, UTC).toInstant(), next);
+    }
 }
