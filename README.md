@@ -272,7 +272,7 @@ EDDI implements open standards — not proprietary APIs:
 
 | Standard                                                             | Role                            | What It Enables                                                                                          |
 | -------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (60+ tools) + Client    | Control EDDI from Claude Desktop, Cursor, or any MCP client. Connect agents to external MCP tool servers |
+| **[MCP](https://modelcontextprotocol.io/)** (Model Context Protocol) | Server (60+ tools) + Client    | Control EDDI from Antigravity, Claude Desktop, Cursor, Windsurf, or any MCP client — [setup guide](docs/mcp-server.md#client-configuration). Connect agents to external MCP tool servers |
 | **[A2A](https://google.github.io/A2A/)** (Agent-to-Agent Protocol)   | Full implementation             | Cross-platform agent communication, Agent Cards, and skill discovery                                     |
 | **[OpenAPI](https://www.openapis.org/)** 3.1                         | Native generation + consumption | Auto-generated spec. Paste any OpenAPI spec → get a fully deployed API-calling agent                     |
 | **OAuth 2.0 / OIDC**                                                 | Keycloak integration            | Authentication, authorization, and multi-tenant isolation                                                |
