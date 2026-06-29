@@ -33,11 +33,12 @@ import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
  * the correct {@link ChannelTarget} based on configured trigger keywords
  * (colon-required syntax: {@code keyword: message}).
  * <p>
- * Platform-agnostic: signing-secret aggregation and target resolution work for
- * any {@code channelType} accepted by the channel integration store validation
- * (see {@code RestChannelIntegrationStore.REGISTERED_CHANNEL_TYPES}).
- * Platform-specific adapters (Slack, Teams, Discord, Telegram, WhatsApp)
- * provide their own webhook and event-handler classes.
+ * Platform-agnostic: signing-secret aggregation and target resolution are keyed
+ * by {@code channelType} so multiple platform adapters can coexist. Currently,
+ * only {@code slack} is registered/validated (see
+ * {@code RestChannelIntegrationStore.REGISTERED_CHANNEL_TYPES}).
+ * Platform-specific adapters provide their own webhook and event-handler
+ * classes.
  * <p>
  * <b>Fallback rule:</b> If any {@code ChannelIntegrationConfiguration} matches
  * a channelType + channelId pair, ALL legacy {@code ChannelConnector} entries
