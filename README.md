@@ -22,7 +22,6 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 - [💡 Why EDDI?](#-why-eddi)
 - [📸 See It In Action](#-see-it-in-action)
 - [✨ Features](#-features)
-- [🧩 Quarkus SDK](#-quarkus-sdk)
 - [📖 Documentation](#-documentation)
 - [📋 Compliance & Privacy](#-compliance--privacy)
 - [🏗️ Development](#️-development)
@@ -391,28 +390,6 @@ EDDI implements open standards — not proprietary APIs:
 - 📋 **Logs Panel** — Live SSE log streaming + searchable history
 - 🔑 **Secrets Manager** — Write-only vault UI with copy-reference support
 - 🌍 **11 Languages** — English, German, Spanish, French, Portuguese, Chinese, Japanese, Korean, Arabic (RTL), Hindi, Thai
-
----
-
-## 🧩 Quarkus SDK
-
-Building a Quarkus app that talks to EDDI? Use the **[quarkus-eddi](https://github.com/quarkiverse/quarkus-eddi)** extension:
-
-```xml
-<dependency>
-    <groupId>io.quarkiverse.eddi</groupId>
-    <artifactId>quarkus-eddi</artifactId>
-    <version>LATEST</version> <!-- Check https://github.com/quarkiverse/quarkus-eddi/releases -->
-</dependency>
-```
-
-```java
-@Inject EddiClient eddi;
-
-String answer = eddi.chat("my-agent", "Hello!");
-```
-
-Features: Dev Services (auto-starts EDDI in dev mode), fluent API, SSE streaming, `@EddiAgent` endpoint wiring, `@EddiTool` MCP bridge. See the [quarkus-eddi README](https://github.com/quarkiverse/quarkus-eddi) for full docs.
 
 ---
 
