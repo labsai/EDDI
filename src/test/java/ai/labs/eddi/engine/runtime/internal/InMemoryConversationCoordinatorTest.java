@@ -35,7 +35,7 @@ class InMemoryConversationCoordinatorTest {
     @BeforeEach
     void setUp() {
         runtime = mock(IRuntime.class);
-        coordinator = new InMemoryConversationCoordinator(runtime, new SimpleMeterRegistry(), 10000);
+        coordinator = new InMemoryConversationCoordinator(runtime, new SimpleMeterRegistry(), 10000, 1000);
     }
 
     // ==================== Status ====================
@@ -161,6 +161,39 @@ class InMemoryConversationCoordinatorTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void shouldCapDeadLettersAndEvictOldest() {
+        IRuntime localRuntime = mock(IRuntime.class);
+        // maxDeadLetters = 2
+        var capped = new InMemoryConversationCoordinator(localRuntime, new SimpleMeterRegistry(), 10000, 2);
+
+        causeDeadLetter(capped, localRuntime, "conv-1", mock(Callable.class));
+        causeDeadLetter(capped, localRuntime, "conv-2", mock(Callable.class));
+        causeDeadLetter(capped, localRuntime, "conv-3", mock(Callable.class));
+
+        // Cap is 2 → oldest (conv-1) evicted; all 3 still counted in the total.
+        assertEquals(2, capped.getDeadLetters().size());
+        assertEquals(3, capped.getTotalDeadLettered());
+        var ids = capped.getDeadLetters().stream().map(DeadLetterEntry::conversationId).toList();
+        assertTrue(ids.contains("conv-2") && ids.contains("conv-3"));
+        assertFalse(ids.contains("conv-1"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldNotCapDeadLettersWhenDisabled() {
+        IRuntime localRuntime = mock(IRuntime.class);
+        // maxDeadLetters = -1 → unbounded
+        var uncapped = new InMemoryConversationCoordinator(localRuntime, new SimpleMeterRegistry(), 10000, -1);
+
+        causeDeadLetter(uncapped, localRuntime, "c-1", mock(Callable.class));
+        causeDeadLetter(uncapped, localRuntime, "c-2", mock(Callable.class));
+        causeDeadLetter(uncapped, localRuntime, "c-3", mock(Callable.class));
+
+        assertEquals(3, uncapped.getDeadLetters().size());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void shouldReportQueueDepths() {
         Callable<Void> task1 = mock(Callable.class);
         Callable<Void> task2 = mock(Callable.class);
@@ -178,7 +211,7 @@ class InMemoryConversationCoordinatorTest {
     @SuppressWarnings("unchecked")
     void shouldRejectNewConversationAtCapacity() {
         // Create coordinator with maxActiveConversations=2
-        var smallCoordinator = new InMemoryConversationCoordinator(runtime, new SimpleMeterRegistry(), 2);
+        var smallCoordinator = new InMemoryConversationCoordinator(runtime, new SimpleMeterRegistry(), 2, 1000);
 
         Callable<Void> task1 = mock(Callable.class);
         Callable<Void> task2 = mock(Callable.class);
@@ -196,7 +229,7 @@ class InMemoryConversationCoordinatorTest {
     @SuppressWarnings("unchecked")
     void shouldAllowFollowUpToExistingConversationAtCapacity() {
         // Create coordinator with maxActiveConversations=2
-        var smallCoordinator = new InMemoryConversationCoordinator(runtime, new SimpleMeterRegistry(), 2);
+        var smallCoordinator = new InMemoryConversationCoordinator(runtime, new SimpleMeterRegistry(), 2, 1000);
 
         Callable<Void> task1 = mock(Callable.class);
         Callable<Void> task2 = mock(Callable.class);
@@ -282,12 +315,16 @@ class InMemoryConversationCoordinatorTest {
 
     @SuppressWarnings("unchecked")
     private void causeDeadLetter(String conversationId, Callable<Void> task) {
-        coordinator.submitInOrder(conversationId, task);
+        causeDeadLetter(coordinator, runtime, conversationId, task);
+    }
+
+    private void causeDeadLetter(InMemoryConversationCoordinator coord, IRuntime rt, String conversationId, Callable<Void> task) {
+        coord.submitInOrder(conversationId, task);
 
         // Simulate MAX_RETRIES (3) failures
         for (int i = 0; i < 3; i++) {
             ArgumentCaptor<IRuntime.IFinishedExecution<Void>> captor = ArgumentCaptor.forClass(IRuntime.IFinishedExecution.class);
-            verify(runtime, atLeast(1)).submitCallable(eq(task), captor.capture(), isNull());
+            verify(rt, atLeast(1)).submitCallable(eq(task), captor.capture(), isNull());
 
             List<IRuntime.IFinishedExecution<Void>> callbacks = captor.getAllValues();
             callbacks.get(callbacks.size() - 1).onFailure(new RuntimeException("forced failure"));

@@ -65,14 +65,6 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
 
     private static final int MAX_RETRIES = 3;
 
-    /**
-     * Upper bound on retained dead-letter entries. The active-conversation map is
-     * already capped; without this bound a storm of permanently-failing
-     * conversations would grow {@link #deadLetters} without limit. Oldest entries
-     * are evicted first (the dashboard inspects the most recent failures).
-     */
-    private static final int MAX_DEAD_LETTERS = 1000;
-
     private final Map<String, BlockingQueue<Callable<Void>>> conversationQueues = new ConcurrentHashMap<>();
     private final ConcurrentLinkedDeque<DeadLetterEntry> deadLetters = new ConcurrentLinkedDeque<>();
     private final AtomicLong totalProcessed = new AtomicLong(0);
@@ -83,14 +75,25 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
     private final MeterRegistry meterRegistry;
     private final int maxActiveConversations;
 
+    /**
+     * Upper bound on retained dead-letter entries. The active-conversation map is
+     * already capped; without this bound a storm of permanently-failing
+     * conversations would grow {@link #deadLetters} without limit. Oldest entries
+     * are evicted first (the dashboard inspects the most recent failures). Set to
+     * {@code -1} to disable the cap (unbounded).
+     */
+    private final int maxDeadLetters;
+
     private static final Logger log = Logger.getLogger(InMemoryConversationCoordinator.class);
 
     @Inject
     public InMemoryConversationCoordinator(IRuntime runtime, MeterRegistry meterRegistry,
-            @ConfigProperty(name = "eddi.coordinator.max-active-conversations", defaultValue = "10000") int maxActiveConversations) {
+            @ConfigProperty(name = "eddi.coordinator.max-active-conversations", defaultValue = "10000") int maxActiveConversations,
+            @ConfigProperty(name = "eddi.coordinator.max-dead-letters", defaultValue = "1000") int maxDeadLetters) {
         this.runtime = runtime;
         this.meterRegistry = meterRegistry;
         this.maxActiveConversations = maxActiveConversations;
+        this.maxDeadLetters = maxDeadLetters;
     }
 
     @PostConstruct
@@ -193,11 +196,14 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
         deadLetters.addLast(new DeadLetterEntry(id, conversationId, error, timestamp, payload));
         totalDeadLettered.incrementAndGet();
 
-        // Bound memory: evict oldest entries beyond the cap. size() on a
-        // ConcurrentLinkedDeque is O(n), so only walk when we know we're over.
-        while (deadLetters.size() > MAX_DEAD_LETTERS) {
-            if (deadLetters.pollFirst() == null) {
-                break;
+        // Bound memory: evict oldest entries beyond the cap (maxDeadLetters < 0
+        // disables the cap). size() on a ConcurrentLinkedDeque is O(n), so only
+        // walk when we know we're over.
+        if (maxDeadLetters >= 0) {
+            while (deadLetters.size() > maxDeadLetters) {
+                if (deadLetters.pollFirst() == null) {
+                    break;
+                }
             }
         }
     }

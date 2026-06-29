@@ -26,7 +26,7 @@
 5. **`CronParser` — malformed fields crashed or silently never-fired.** `*/` threw `ArrayIndexOutOfBoundsException` (not a clean validation error); a reversed range like `5-1` produced an empty set → a schedule that never fires until the 2-year scan limit threw a confusing `IllegalStateException`. Both now throw a clear `IllegalArgumentException` at parse time (step structure + `start <= end` checks).
 6. **`ApiCallExecutor` retry backoff was linear, not exponential.** `delay * amountOfExecutions` (linear) despite the `exponentialBackoffDelayInMillis` field name. Now true exponential — `base * 2^(attempt-1)` — with an overflow-safe shift and a 5-minute ceiling (`MAX_BACKOFF_MILLIS`). First retry delay is unchanged (`base`), so the change only affects later retries.
 7. **`CalculatorTool` — unbounded recursion DoS.** The recursive-descent `SafeMathParser` recurses on nested parens; a long/deeply-nested LLM-supplied expression could throw `StackOverflowError` (an `Error`, not caught by `calculate()`). Added a 1000-char input cap plus a defensive `StackOverflowError` catch.
-8. **`InMemoryConversationCoordinator` — unbounded dead-letter deque.** The active-conversation map was capped but `deadLetters` grew without limit under a failure storm. Added a `MAX_DEAD_LETTERS` (1000) cap with oldest-first eviction.
+8. **`InMemoryConversationCoordinator` — unbounded dead-letter deque.** The active-conversation map was capped but `deadLetters` grew without limit under a failure storm. Added a **configurable** cap (`eddi.coordinator.max-dead-letters`, default 1000; `-1` disables, `0` retains none) with oldest-first eviction — consistent with the existing `eddi.coordinator.max-active-conversations` property.
 
 ### Files changed
 - `engine/mcp/McpApiToolBuilder.java` — URL validation in `parseSpec`, `looksLikeInlineSpec()`
@@ -43,7 +43,8 @@
 - `ApiCallExecutorTest` — +6 (SSRF block internal URL, disable redirects on public, protection-off no-op; exponential curve, ceiling cap, no-retry zero)
 - `CronParserTest` — +6 (DOW 7 = Sunday, 0≡7, OR fires on dom and on weekday, single-restricted stays AND, reversed-range + malformed-step rejection)
 - `CalculatorToolTest` — +2 (over-long rejected, deep-nesting returns cleanly)
-- `ApiCallExecutor`/`A2AToolProviderManager` constructor-call sites updated across 8 test files.
+- `InMemoryConversationCoordinatorTest` — +2 (dead-letter cap evicts oldest; `-1` disables)
+- `ApiCallExecutor`/`A2AToolProviderManager`/`InMemoryConversationCoordinator` constructor-call sites updated across test files.
 - Mock-based suites green; A2A + embedded-server suites are unrunnable in the sandbox (JDK `HttpClient`/`HttpServer` can't open a selector) but compile and are exercised in CI.
 
 ### Not addressed here (architectural — out of scope for a hardening pass)
