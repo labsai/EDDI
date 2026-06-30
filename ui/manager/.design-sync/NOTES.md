@@ -64,6 +64,11 @@ Claude Design project: `408b967f-5a31-4a9f-85f7-f8794639218b` ("Design System").
 - Viewport changes in `cfg.overrides` trip `[CONFIG_STALE]` → need a full `package-build`,
   not a targeted preview-rebuild. `cardMode: column` edits did NOT (presentation-only).
 - The provider forces English; if the DS should preview other locales, change ds-providers.
+- **i18n direction caveat:** ds-providers uses an isolated English i18n instance for
+  preview *text*, but `@/i18n/config` still sets `<html dir/lang>` from the *host* locale
+  on import. On an LTR-locale build machine (the norm) this is correct; on an RTL-locale
+  build machine previews would render LTR English inside an RTL document (mirrored padding/
+  icons). If that ever matters, force `document.documentElement.dir = "ltr"` in ds-providers.
 - ds-entry / ds-providers import real app code (`@/components/...`, `@/i18n/config`,
   `@/components/layout/theme-provider`) — if those move, update the imports.
 
