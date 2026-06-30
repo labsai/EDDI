@@ -487,7 +487,7 @@ class ChannelTargetRouterDeepBranchTest {
         @Test
         @DisplayName("Slack signing secrets returned")
         void slackSecrets() throws Exception {
-            setField(router, "slackSigningSecrets", Set.of("sec1", "sec2"));
+            setField(router, "signingSecretsByType", Map.of("slack", Set.of("sec1", "sec2")));
             var secrets = router.getSigningSecrets("SLACK");
             assertEquals(2, secrets.size());
             assertTrue(secrets.contains("sec1"));
