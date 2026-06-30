@@ -1,8 +1,9 @@
+import type { ReactElement } from "react";
 import { ErrorBoundary } from "eddi-manager";
 
 // A child that throws so the boundary renders its fallback (the meaningful
 // state to preview — the happy path just renders children unchanged).
-function Boom(): React.ReactElement {
+function Boom(): ReactElement {
   throw new Error("Failed to load agent configuration");
 }
 

@@ -26,7 +26,9 @@ Use them as `bg-primary`, `text-primary-foreground`, `text-muted-foreground`,
 spacing (`p-5`, `gap-2`), radius
 (`rounded-lg`, `rounded-xl`), text (`text-sm`, `font-medium`), flex/grid.
 Dark mode: add the `dark` class to a root ancestor — tokens flip automatically.
-Every component accepts `className` to extend its styling (merged with `cn()`).
+Many components forward `className` to extend their styling (merged with `cn()`),
+but not all (e.g. `BackLink` only takes `to`/`label`) — check each component's
+`.d.ts` for whether `className` is in its props.
 
 ## Variant props (don't restyle — use the prop)
 

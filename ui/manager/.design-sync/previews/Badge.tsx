@@ -1,6 +1,7 @@
+import type { CSSProperties } from "react";
 import { Badge } from "eddi-manager";
 
-const row: React.CSSProperties = {
+const row: CSSProperties = {
   display: "flex",
   gap: 8,
   flexWrap: "wrap",

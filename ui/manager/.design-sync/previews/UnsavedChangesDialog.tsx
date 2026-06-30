@@ -1,8 +1,9 @@
+import type { CSSProperties } from "react";
 import { UnsavedChangesDialog } from "eddi-manager";
 
 // `transform` makes the dialog's fixed positioning resolve to this box so the
 // full dialog (title included) renders inside the card.
-const stage: React.CSSProperties = {
+const stage: CSSProperties = {
   position: "relative",
   transform: "translateZ(0)",
   height: 300,

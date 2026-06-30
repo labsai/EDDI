@@ -1,6 +1,7 @@
+import type { CSSProperties } from "react";
 import { Input } from "eddi-manager";
 
-const col: React.CSSProperties = {
+const col: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 12,
@@ -8,7 +9,7 @@ const col: React.CSSProperties = {
   maxWidth: 360,
 };
 
-const label: React.CSSProperties = {
+const label: CSSProperties = {
   fontSize: 13,
   fontWeight: 500,
   marginBottom: 6,

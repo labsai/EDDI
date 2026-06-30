@@ -1,7 +1,8 @@
+import type { CSSProperties } from "react";
 import { Button } from "eddi-manager";
 import { Plus, Trash2, Download } from "lucide-react";
 
-const row: React.CSSProperties = {
+const row: CSSProperties = {
   display: "flex",
   gap: 8,
   flexWrap: "wrap",
@@ -25,7 +26,7 @@ export const Sizes = () => (
     <Button size="sm">Small</Button>
     <Button size="md">Medium</Button>
     <Button size="lg">Large</Button>
-    <Button size="icon">
+    <Button size="icon" aria-label="Add">
       <Plus />
     </Button>
   </div>

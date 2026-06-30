@@ -48,4 +48,4 @@ execFileSync(process.execPath, [cli, "-i", inputPath, "-o", outPath, "--minify"]
   stdio: "inherit",
   cwd: repoRoot,
 });
-console.error("build-css: wrote " + outPath);
+console.log("build-css: wrote " + outPath);

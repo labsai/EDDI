@@ -1,9 +1,10 @@
+import type { CSSProperties } from "react";
 import { AccessibleDialog, Button } from "eddi-manager";
 
 // A `transform` on the wrapper establishes a containing block, so the dialog's
 // `position: fixed` resolves to THIS box (not the viewport) and the whole dialog
 // — title bar included — renders inside the preview card.
-const stage: React.CSSProperties = {
+const stage: CSSProperties = {
   position: "relative",
   transform: "translateZ(0)",
   height: 320,
