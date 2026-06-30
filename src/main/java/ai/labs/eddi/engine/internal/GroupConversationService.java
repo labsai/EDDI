@@ -1982,6 +1982,9 @@ public class GroupConversationService implements IGroupConversationService {
             return gc;
         }
 
+        // Save resume point before clearing
+        int resumePhaseIndex = gc.getPausedAtPhaseIndex();
+
         // Clear pause state and resume
         gc.setPausedAt(null);
         gc.setPausedAtPhaseIndex(-1);
@@ -2003,7 +2006,11 @@ public class GroupConversationService implements IGroupConversationService {
                 }
                 var groupConfig = groupStore.read(groupId, currentGroupId.getVersion());
                 var phases = resolvePhases(groupConfig);
-                executeDiscussion(gc, groupConfig, phases, question, listener);
+                // Skip already-completed phases by starting from resumePhaseIndex
+                var remainingPhases = resumePhaseIndex > 0 && resumePhaseIndex < phases.size()
+                        ? phases.subList(resumePhaseIndex, phases.size())
+                        : phases;
+                executeDiscussion(gc, groupConfig, remainingPhases, question, listener);
             } catch (Exception e) {
                 LOGGER.error("Failed to resume group discussion: " + groupConversationId, e);
                 gc.setState(GroupConversationState.FAILED);

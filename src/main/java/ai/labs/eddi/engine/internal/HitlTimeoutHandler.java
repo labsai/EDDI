@@ -29,6 +29,10 @@ public class HitlTimeoutHandler {
 
     public void handleTimeout(Map<String, Object> metadata) {
         String policyStr = (String) metadata.get("policy");
+        if (policyStr == null) {
+            LOGGER.error("HITL timeout metadata missing 'policy' key");
+            return;
+        }
         HitlTimeoutPolicy policy;
         try {
             policy = HitlTimeoutPolicy.valueOf(policyStr);
@@ -80,7 +84,9 @@ public class HitlTimeoutHandler {
     private void resumeGroup(Map<String, Object> metadata, HitlDecision decision) {
         String gcId = (String) metadata.get("conversationId");
         try {
-            groupConversationService.resumeDiscussion(gcId, decision, null);
+            var request = new GroupApprovalRequest();
+            request.setDecision(decision);
+            groupConversationService.resumeDiscussion(gcId, request, null);
             LOGGER.infof("HITL timeout auto-%s for group conversation %s", decision.getVerdict(), gcId);
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to auto-resume group conversation %s on HITL timeout", gcId);

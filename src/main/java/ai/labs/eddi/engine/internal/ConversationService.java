@@ -809,17 +809,16 @@ public class ConversationService implements IConversationService {
     @Override
     public void cancelConversation(String conversationId,
                                    ai.labs.eddi.engine.lifecycle.model.ControlSignal mode) {
-        // If actively running, the memory object is not tracked here — just set state
-        // directly.
-        // If AWAITING_HUMAN, transition to EXECUTION_INTERRUPTED.
         try {
-            if (!conversationMemoryStore.compareAndSetState(conversationId,
-                    ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED)) {
-                // Not in AWAITING_HUMAN — try cancelling IN_PROGRESS
-                conversationMemoryStore.compareAndSetState(conversationId,
+            boolean changed = conversationMemoryStore.compareAndSetState(conversationId,
+                    ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
+            if (!changed) {
+                changed = conversationMemoryStore.compareAndSetState(conversationId,
                         ConversationState.IN_PROGRESS, ConversationState.EXECUTION_INTERRUPTED);
             }
-            cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
+            if (changed) {
+                cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
+            }
         } catch (ResourceStoreException e) {
             LOGGER.error("Failed to cancel conversation: " + conversationId, e);
         }
@@ -867,8 +866,12 @@ public class ConversationService implements IConversationService {
             Callable<Void> resumeCallable = () -> {
                 try {
                     conversation.resume(decision, Map.of());
+                } catch (Exception e) {
+                    LOGGER.error("Error during conversation resume: " + conversationId, e);
+                    memory.setConversationState(ConversationState.ERROR);
                 } finally {
                     storeConversationMemory(memory, environment);
+                    cacheConversationState(conversationId, memory.getConversationState());
                 }
                 return null;
             };
