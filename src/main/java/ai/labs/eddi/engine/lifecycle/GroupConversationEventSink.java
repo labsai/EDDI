@@ -34,6 +34,9 @@ public final class GroupConversationEventSink {
     public static final String EVENT_GROUP_ERROR = "group_error";
     public static final String EVENT_TASK_PLAN_CREATED = "task_plan_created";
     public static final String EVENT_TASK_VERIFIED = "task_verified";
+    public static final String EVENT_CANCELLED = "cancelled";
+    public static final String EVENT_AWAITING_APPROVAL = "awaiting_approval";
+    public static final String EVENT_HITL_RESUME = "hitl_resume";
 
     // --- Event payloads ---
 
@@ -78,5 +81,14 @@ public final class GroupConversationEventSink {
     }
 
     public record TaskSummary(String id, String subject, String assignedTo, int priority) {
+    }
+
+    public record CancelledEvent(String reason, String cancelledBy) {
+    }
+
+    public record HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity) {
+    }
+
+    public record HitlResumeEvent(String verdict, String note, String decidedBy) {
     }
 }

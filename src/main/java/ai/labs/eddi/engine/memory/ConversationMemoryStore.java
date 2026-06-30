@@ -12,6 +12,8 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.Projections;
+import com.mongodb.client.model.Updates;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -154,6 +156,25 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     public List<String> getEndedConversationIds() {
         List<String> ids = new ArrayList<>();
         conversationCollectionDocument.find(Filters.eq(KEY_CONVERSATION_STATE, ENDED.toString()))
+                .forEach(document -> ids.add(document.get(OBJECT_ID).toString()));
+        return ids;
+    }
+
+    @Override
+    public boolean compareAndSetState(String conversationId, ConversationState expected, ConversationState target) {
+        var filter = Filters.and(
+                Filters.eq(OBJECT_ID, new ObjectId(conversationId)),
+                Filters.eq(KEY_CONVERSATION_STATE, expected.name()));
+        var update = new Document("$set", new Document(KEY_CONVERSATION_STATE, target.name()));
+        var result = conversationCollectionDocument.updateOne(filter, update);
+        return result.getModifiedCount() > 0;
+    }
+
+    @Override
+    public List<String> findConversationIdsByState(ConversationState state) {
+        List<String> ids = new ArrayList<>();
+        conversationCollectionDocument.find(Filters.eq(KEY_CONVERSATION_STATE, state.name()))
+                .projection(new Document(OBJECT_ID, 1))
                 .forEach(document -> ids.add(document.get(OBJECT_ID).toString()));
         return ids;
     }

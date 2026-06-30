@@ -111,6 +111,21 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
+    public void storeIfFieldEquals(IResource<T> newResource, String fieldName, String expectedValue)
+            throws IResourceStore.ResourceModifiedException {
+        Resource resource = checkInternalResource(newResource);
+        var result = currentCollection.updateOne(
+                Filters.and(
+                        Filters.eq(ID_FIELD, new ObjectId(resource.getId())),
+                        Filters.eq(fieldName, expectedValue)),
+                new Document("$set", resource.getMongoDocument()));
+        if (result.getMatchedCount() == 0) {
+            throw new IResourceStore.ResourceModifiedException(
+                    String.format("Resource field '%s' was not '%s' (id=%s)", fieldName, expectedValue, resource.getId()));
+        }
+    }
+
+    @Override
     public void createNew(IResource<T> currentResource) {
         Resource resource = checkInternalResource(currentResource);
         currentCollection.insertOne(resource.getMongoDocument());

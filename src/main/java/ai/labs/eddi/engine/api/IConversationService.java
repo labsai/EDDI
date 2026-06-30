@@ -180,6 +180,60 @@ public interface IConversationService {
 
     boolean redo(String conversationId) throws ResourceStoreException, ResourceNotFoundException;
 
+    // --- HITL lifecycle ---
+
+    /**
+     * Cancel a conversation with the given control signal.
+     *
+     * @param conversationId
+     *            the conversation to cancel
+     * @param mode
+     *            the cancellation mode (CANCEL_GRACEFUL or CANCEL_IMMEDIATE)
+     */
+    void cancelConversation(String conversationId,
+                            ai.labs.eddi.engine.lifecycle.model.ControlSignal mode);
+
+    /**
+     * Resume a paused (HITL) conversation with the given human decision.
+     *
+     * @param conversationId
+     *            the conversation to resume
+     * @param decision
+     *            the human approval/rejection decision
+     * @param responseHandler
+     *            optional callback — may be null for fire-and-forget
+     * @throws ResourceStoreException
+     *             on persistence failures or if conversation is not in
+     *             AWAITING_HUMAN state
+     * @throws ResourceNotFoundException
+     *             if the conversation is not found
+     */
+    void resumeConversation(String conversationId,
+                            ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
+                            ConversationResponseHandler responseHandler)
+            throws ResourceStoreException, ResourceNotFoundException;
+
+    /**
+     * Load the full conversation memory snapshot for a given conversationId.
+     *
+     * @throws ResourceStoreException
+     *             on persistence failures
+     * @throws ResourceNotFoundException
+     *             if the conversation is not found
+     */
+    ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
+            throws ResourceStoreException, ResourceNotFoundException;
+
+    /**
+     * List all conversations currently in AWAITING_HUMAN state.
+     *
+     * @return list of pending approval summaries (never null)
+     * @throws ResourceStoreException
+     *             on persistence failures
+     */
+    java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals()
+            throws ResourceStoreException;
+
     // --- Domain exceptions (no JAX-RS dependency) ---
 
     class AgentNotReadyException extends Exception {

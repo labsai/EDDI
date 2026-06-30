@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.memory.model;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.model.Deployment;
 
+import java.time.Instant;
 import java.util.Date;
 import java.util.LinkedList;
 import java.util.List;
@@ -22,6 +23,7 @@ public class SimpleConversationMemorySnapshot {
     private String userId;
     private Deployment.Environment environment;
     private ConversationState conversationState;
+    private Instant hitlPausedAt;
     private boolean undoAvailable;
     private boolean redoAvailable;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
@@ -141,6 +143,14 @@ public class SimpleConversationMemorySnapshot {
 
     public void setConversationState(ConversationState conversationState) {
         this.conversationState = conversationState;
+    }
+
+    public Instant getHitlPausedAt() {
+        return hitlPausedAt;
+    }
+
+    public void setHitlPausedAt(Instant hitlPausedAt) {
+        this.hitlPausedAt = hitlPausedAt;
     }
 
     public boolean isUndoAvailable() {

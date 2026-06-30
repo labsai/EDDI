@@ -66,6 +66,12 @@ public class ConversationMemoryUtilities {
         snapshot.setAgentId(conversationMemory.getAgentId());
         snapshot.setAgentVersion(conversationMemory.getAgentVersion());
         snapshot.setConversationState(conversationMemory.getConversationState());
+        snapshot.setHitlPausedWorkflowId(conversationMemory.getHitlPausedWorkflowId());
+        snapshot.setHitlPausedAbsoluteTaskIndex(conversationMemory.getHitlPausedAbsoluteTaskIndex());
+        snapshot.setHitlPausedAt(conversationMemory.getHitlPausedAt());
+        snapshot.setHitlPauseReason(conversationMemory.getHitlPauseReason());
+        snapshot.setHitlTimeoutPolicy(conversationMemory.getHitlTimeoutPolicy());
+        snapshot.setHitlApprovalTimeout(conversationMemory.getHitlApprovalTimeout());
         return snapshot;
     }
 
@@ -109,6 +115,12 @@ public class ConversationMemoryUtilities {
                 snapshot.getUserId());
 
         conversationMemory.setConversationState(snapshot.getConversationState());
+        conversationMemory.setHitlPausedWorkflowId(snapshot.getHitlPausedWorkflowId());
+        conversationMemory.setHitlPausedAbsoluteTaskIndex(snapshot.getHitlPausedAbsoluteTaskIndex());
+        conversationMemory.setHitlPausedAt(snapshot.getHitlPausedAt());
+        conversationMemory.setHitlPauseReason(snapshot.getHitlPauseReason());
+        conversationMemory.setHitlTimeoutPolicy(snapshot.getHitlTimeoutPolicy());
+        conversationMemory.setHitlApprovalTimeout(snapshot.getHitlApprovalTimeout());
         conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
 
         var redoSteps = iterateRedoCache(snapshot.getRedoCache());
@@ -206,6 +218,7 @@ public class ConversationMemoryUtilities {
         simpleSnapshot.setAgentId(conversationMemorySnapshot.getAgentId());
         simpleSnapshot.setAgentVersion(conversationMemorySnapshot.getAgentVersion());
         simpleSnapshot.setConversationState(conversationMemorySnapshot.getConversationState());
+        simpleSnapshot.setHitlPausedAt(conversationMemorySnapshot.getHitlPausedAt());
         simpleSnapshot.setEnvironment(conversationMemorySnapshot.getEnvironment());
         simpleSnapshot.setUndoAvailable(conversationMemorySnapshot.getConversationSteps().size() > 1);
         simpleSnapshot.setRedoAvailable(!conversationMemorySnapshot.getRedoCache().isEmpty());

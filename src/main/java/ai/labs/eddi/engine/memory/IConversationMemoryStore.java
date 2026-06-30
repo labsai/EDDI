@@ -33,6 +33,38 @@ public interface IConversationMemoryStore {
 
     List<String> getEndedConversationIds();
 
+    // === HITL ===
+
+    /**
+     * Atomically transition conversation state from {@code expected} to
+     * {@code target}. Returns true if the transition was performed, false if the
+     * current state did not match {@code expected}.
+     *
+     * @param conversationId
+     *            the conversation identifier
+     * @param expected
+     *            the state the conversation must currently be in
+     * @param target
+     *            the new state to set
+     * @return true if the state was changed
+     * @throws IResourceStore.ResourceStoreException
+     *             on persistence failures
+     */
+    boolean compareAndSetState(String conversationId, ConversationState expected, ConversationState target)
+            throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Find all conversation IDs currently in the given state.
+     *
+     * @param state
+     *            the state to filter by
+     * @return list of matching conversation IDs (never null)
+     * @throws IResourceStore.ResourceStoreException
+     *             on persistence failures
+     */
+    List<String> findConversationIdsByState(ConversationState state)
+            throws IResourceStore.ResourceStoreException;
+
     // === GDPR ===
 
     /**

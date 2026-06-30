@@ -4,11 +4,13 @@
  */
 package ai.labs.eddi.engine.api;
 
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.container.AsyncResponse;
@@ -177,4 +179,46 @@ public interface IRestAgentEngine {
     @Operation(summary = "Redo last undone step", description = "Re-applies a previously undone conversation step.")
     @APIResponse(responseCode = "200", description = "Redo successful.")
     Response redo(@PathParam("conversationId") String conversationId);
+
+    // --- Cancel ---
+
+    @POST
+    @Path("/{conversationId}/cancel")
+    @Operation(summary = "Cancel a conversation", description = "Gracefully cancels the conversation, stopping any in-progress processing.")
+    @APIResponse(responseCode = "200", description = "Conversation cancelled.")
+    @APIResponse(responseCode = "404", description = "Conversation not found.")
+    Response cancelConversation(@PathParam("conversationId") String conversationId);
+
+    // --- HITL (Human-in-the-Loop) ---
+
+    @POST
+    @Path("/{conversationId}/resume")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Resume a paused conversation",
+               description = "Submits a human decision (APPROVED/REJECTED) to resume a conversation that is in AWAITING_HUMAN state.")
+    @APIResponse(responseCode = "200", description = "Conversation resumed.")
+    @APIResponse(responseCode = "404", description = "Conversation not found.")
+    @APIResponse(responseCode = "409", description = "Conversation is not in AWAITING_HUMAN state.")
+    Response resumeConversation(@PathParam("conversationId") String conversationId,
+                                HitlDecision decision);
+
+    @GET
+    @NoCache
+    @Path("/{conversationId}/approval-status")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Get HITL approval status",
+               description = "Returns the approval status of a paused conversation. Use detail=full for the complete memory snapshot.")
+    @APIResponse(responseCode = "200", description = "Approval status.")
+    @APIResponse(responseCode = "404", description = "Conversation not found.")
+    Response getApprovalStatus(@PathParam("conversationId") String conversationId,
+                               @QueryParam("detail")
+                               @DefaultValue("summary") String detail);
+
+    @GET
+    @NoCache
+    @Path("/pending-approvals")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "List pending approvals", description = "Lists all conversations currently awaiting human approval.")
+    @APIResponse(responseCode = "200", description = "List of pending approvals.")
+    List<PendingApprovalSummary> listPendingApprovals();
 }

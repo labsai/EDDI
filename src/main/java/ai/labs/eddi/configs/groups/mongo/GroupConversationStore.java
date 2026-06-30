@@ -111,4 +111,35 @@ public class GroupConversationStore implements IGroupConversationStore {
         }
         return results;
     }
+
+    @Override
+    public void updateIfState(GroupConversation gc, GroupConversation.GroupConversationState expectedState)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException {
+        try {
+            IResourceStorage.IResource<GroupConversation> resource = storage.newResource(gc.getId(), SINGLE_VERSION, gc);
+            storage.storeIfFieldEquals(resource, "state", expectedState.name());
+        } catch (IOException e) {
+            throw new IResourceStore.ResourceStoreException("Failed conditional update: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public List<GroupConversation> findByState(GroupConversation.GroupConversationState state)
+            throws IResourceStore.ResourceStoreException {
+        var filters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{
+                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(List.of(
+                        new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("state", "^" + state.name() + "$")))};
+        List<IResourceStore.IResourceId> ids = storage.findResources(filters, "lastModified", 0, 1000);
+        List<GroupConversation> out = new ArrayList<>();
+        for (var id : ids) {
+            try {
+                GroupConversation gc = read(id.getId());
+                if (gc != null)
+                    out.add(gc);
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                LOGGER.warnf("Group conversation %s disappeared during findByState: %s", id.getId(), e.getMessage());
+            }
+        }
+        return out;
+    }
 }

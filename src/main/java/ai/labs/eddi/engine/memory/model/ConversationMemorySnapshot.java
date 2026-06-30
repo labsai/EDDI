@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.properties.model.Property;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import java.time.Instant;
 import java.util.*;
 
 /**
@@ -22,6 +23,12 @@ public class ConversationMemorySnapshot {
     private String userId;
     private Deployment.Environment environment;
     private ConversationState conversationState;
+    private String hitlPausedWorkflowId;
+    private int hitlPausedAbsoluteTaskIndex = -1;
+    private Instant hitlPausedAt;
+    private String hitlPauseReason;
+    private String hitlTimeoutPolicy;
+    private String hitlApprovalTimeout;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
     private Map<String, Property> conversationProperties = new LinkedHashMap<>();
     private List<ConversationStepSnapshot> conversationSteps = new LinkedList<>();
@@ -276,6 +283,54 @@ public class ConversationMemorySnapshot {
 
     public void setConversationState(ConversationState conversationState) {
         this.conversationState = conversationState;
+    }
+
+    public String getHitlPausedWorkflowId() {
+        return hitlPausedWorkflowId;
+    }
+
+    public void setHitlPausedWorkflowId(String hitlPausedWorkflowId) {
+        this.hitlPausedWorkflowId = hitlPausedWorkflowId;
+    }
+
+    public int getHitlPausedAbsoluteTaskIndex() {
+        return hitlPausedAbsoluteTaskIndex;
+    }
+
+    public void setHitlPausedAbsoluteTaskIndex(int hitlPausedAbsoluteTaskIndex) {
+        this.hitlPausedAbsoluteTaskIndex = hitlPausedAbsoluteTaskIndex;
+    }
+
+    public Instant getHitlPausedAt() {
+        return hitlPausedAt;
+    }
+
+    public void setHitlPausedAt(Instant hitlPausedAt) {
+        this.hitlPausedAt = hitlPausedAt;
+    }
+
+    public String getHitlPauseReason() {
+        return hitlPauseReason;
+    }
+
+    public void setHitlPauseReason(String hitlPauseReason) {
+        this.hitlPauseReason = hitlPauseReason;
+    }
+
+    public String getHitlTimeoutPolicy() {
+        return hitlTimeoutPolicy;
+    }
+
+    public void setHitlTimeoutPolicy(String hitlTimeoutPolicy) {
+        this.hitlTimeoutPolicy = hitlTimeoutPolicy;
+    }
+
+    public String getHitlApprovalTimeout() {
+        return hitlApprovalTimeout;
+    }
+
+    public void setHitlApprovalTimeout(String hitlApprovalTimeout) {
+        this.hitlApprovalTimeout = hitlApprovalTimeout;
     }
 
     public List<ConversationOutput> getConversationOutputs() {

@@ -276,6 +276,61 @@ public class SharedTaskList {
         return updated;
     }
 
+    // --- HITL task lifecycle ---
+
+    /** IN_PROGRESS → AWAITING_APPROVAL, preserving the agent's answer in result. */
+    public synchronized TaskItem submitForApproval(String taskId, String result) {
+        TaskItem t = requireTask(taskId);
+        if (t.status() != TaskStatus.IN_PROGRESS)
+            throw new IllegalStateException("submitForApproval '%s': expected IN_PROGRESS but was %s".formatted(taskId, t.status()));
+        TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.AWAITING_APPROVAL,
+                t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), result,
+                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt());
+        replaceTask(taskId, u);
+        return u;
+    }
+
+    /** AWAITING_APPROVAL → COMPLETED (result already stored). */
+    public synchronized TaskItem approveTask(String taskId) {
+        TaskItem t = requireTask(taskId);
+        if (t.status() != TaskStatus.AWAITING_APPROVAL)
+            throw new IllegalStateException("approveTask '%s': expected AWAITING_APPROVAL but was %s".formatted(taskId, t.status()));
+        TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.COMPLETED,
+                t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
+                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), Instant.now());
+        replaceTask(taskId, u);
+        return u;
+    }
+
+    /** AWAITING_APPROVAL → FAILED. */
+    public synchronized TaskItem rejectTask(String taskId, String rejectionNote) {
+        TaskItem t = requireTask(taskId);
+        if (t.status() != TaskStatus.AWAITING_APPROVAL)
+            throw new IllegalStateException("rejectTask '%s': expected AWAITING_APPROVAL but was %s".formatted(taskId, t.status()));
+        TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.FAILED,
+                t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
+                rejectionNote, false, t.priority(), t.createdAt(), Instant.now());
+        replaceTask(taskId, u);
+        return u;
+    }
+
+    /** IN_PROGRESS → ASSIGNED. */
+    public synchronized TaskItem resetToAssigned(String taskId) {
+        TaskItem t = requireTask(taskId);
+        if (t.status() != TaskStatus.IN_PROGRESS)
+            throw new IllegalStateException("resetToAssigned '%s': expected IN_PROGRESS but was %s".formatted(taskId, t.status()));
+        TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.ASSIGNED,
+                t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
+                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt());
+        replaceTask(taskId, u);
+        return u;
+    }
+
+    /** Post-join detection query for the per-task gate (Invariant 4). */
+    public synchronized boolean hasAwaitingApproval() {
+        return all().stream().anyMatch(t -> t.status() == TaskStatus.AWAITING_APPROVAL);
+    }
+
     // --- Internal helpers ---
 
     private boolean allDependenciesSatisfied(TaskItem task) {

@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
 
 import java.io.Serializable;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -121,6 +122,71 @@ public interface IConversationMemory extends Serializable {
      */
     default void setMemoryPolicy(AgentConfiguration.MemoryPolicy memoryPolicy) {
         // no-op by default
+    }
+
+    /**
+     * Mark this conversation as cancelled. Cooperative cancellation flag for HITL
+     * framework — tasks should check {@link #isCancelled()} and abort gracefully.
+     *
+     * @since 6.0.0
+     */
+    default void setCancelled(boolean cancelled) {
+    }
+
+    /**
+     * Check whether this conversation has been cancelled.
+     *
+     * @since 6.0.0
+     */
+    default boolean isCancelled() {
+        return false;
+    }
+
+    // === HITL pause bookmark ===
+
+    /** Workflow ID where the pipeline paused. */
+    default String getHitlPausedWorkflowId() {
+        return null;
+    }
+    default void setHitlPausedWorkflowId(String workflowId) {
+    }
+
+    /**
+     * Absolute task index within the paused workflow (the task that triggered
+     * PAUSE).
+     */
+    default int getHitlPausedAbsoluteTaskIndex() {
+        return -1;
+    }
+    default void setHitlPausedAbsoluteTaskIndex(int index) {
+    }
+
+    /** Timestamp when the conversation was paused. */
+    default Instant getHitlPausedAt() {
+        return null;
+    }
+    default void setHitlPausedAt(Instant pausedAt) {
+    }
+
+    /** Human-readable reason for the pause. */
+    default String getHitlPauseReason() {
+        return null;
+    }
+    default void setHitlPauseReason(String reason) {
+    }
+
+    /** Timeout policy (e.g. "auto_approve", "auto_reject", "expire"). */
+    default String getHitlTimeoutPolicy() {
+        return null;
+    }
+    default void setHitlTimeoutPolicy(String policy) {
+    }
+
+    /** Approval timeout duration (ISO-8601, e.g. "PT30M"). */
+    default String getHitlApprovalTimeout() {
+        return null;
+    }
+    default void setHitlApprovalTimeout(String timeout) {
     }
 
     interface IConversationStepStack {

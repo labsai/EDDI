@@ -26,4 +26,18 @@ public interface IGroupConversationStore {
     void delete(String id) throws IResourceStore.ResourceStoreException;
 
     List<GroupConversation> listByGroupId(String groupId, int index, int limit) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Update the group conversation only if it is currently in the expected state.
+     * Throws {@link IResourceStore.ResourceModifiedException} if the state does not
+     * match.
+     */
+    void updateIfState(GroupConversation gc, GroupConversation.GroupConversationState expectedState)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException;
+
+    /**
+     * Find all group conversations currently in the given state.
+     */
+    List<GroupConversation> findByState(GroupConversation.GroupConversationState state)
+            throws IResourceStore.ResourceStoreException;
 }

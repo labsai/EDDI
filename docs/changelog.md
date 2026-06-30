@@ -5,6 +5,60 @@
 
 ---
 
+## 🔁 HITL Framework — Human-in-the-Loop Pause/Resume for Conversations & Group Discussions (2026-06-30)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Plan:** `planning/hitl-framework-plan.md`
+**What changed:** Full implementation of the Human-in-the-Loop (HITL) framework enabling conversations and group discussions to pause mid-pipeline for human approval, then resume or reject.
+
+### Wave 0: Storage Primitives & Lifecycle Prerequisites
+
+1. **`IResourceStorage.storeIfFieldEquals`** — New CAS primitive for conditional updates on arbitrary JSON fields (not just `_version`). Implemented in both `MongoResourceStorage` (Filters.eq) and `PostgresResourceStorage` (`data->>?`). Used by group conversation store for atomic state transitions.
+2. **`ControlSignal` enum** — CONTINUE, CANCEL_GRACEFUL, CANCEL_IMMEDIATE, PAUSE. Used by `DiscussionControlToken` for thread-safe in-flight control.
+3. **`DiscussionControlToken`** — AtomicReference-based token shared between execution loops and external callers (cancel/pause). Includes `activeFuture` for immediate cancel interrupt.
+4. **`ConversationPauseException`** — Checked exception carrying pausedWorkflowId, absoluteTaskIndex, and reason. Mirrors `ConversationStopException` pattern.
+5. **Cancel infrastructure** — `IConversationMemory.setCancelled/isCancelled`, `GroupConversationState.CANCELLED`, `IGroupConversationStore.updateIfState/findByState`, SSE events (EVENT_CANCELLED, EVENT_AWAITING_APPROVAL, EVENT_HITL_RESUME).
+
+### Wave 1: Core HITL State Machine
+
+6. **`ConversationState.AWAITING_HUMAN`** — New state for paused conversations. Gates `say()` with "use the /resume endpoint" message.
+7. **HITL bookmark fields** — 6 fields on `ConversationMemorySnapshot` (hitlPausedWorkflowId, hitlPausedAbsoluteTaskIndex, hitlPausedAt, hitlPauseReason, hitlTimeoutPolicy, hitlApprovalTimeout) + corresponding `IConversationMemory` defaults + `ConversationMemory` implementation.
+8. **`HitlDecision`** / **`HitlTimeoutPolicy`** — Decision model (APPROVED/REJECTED + note + decidedBy) and timeout policy enum (AUTO_REJECT, AUTO_APPROVE, ABORT, WAIT_INDEFINITELY).
+9. **`LifecycleManager` extensions** — `executeLifecycleFromIndex()` for resume-from-task, `checkIfPauseConversationAction()` for PAUSE_CONVERSATION detection, cancel check in main loop.
+10. **`Conversation.resume()`** — Full resume flow: skip-before-paused-workflow → resume-from-index → run-remaining-workflows. Handles re-pause, rejected short-circuit, and finally-block with state normalization.
+
+### Wave 2: REST API & Resume Flow
+
+11. **`POST /{conversationId}/resume`** — Accepts `HitlDecision` body, CAS on AWAITING_HUMAN→IN_PROGRESS, reloads agent, submits resume via coordinator.
+12. **`GET /{conversationId}/approval-status`** — Summary or full detail of paused conversation.
+13. **`GET /pending-approvals`** — Lists all AWAITING_HUMAN conversations with PendingApprovalSummary.
+14. **`POST /{conversationId}/cancel`** — Cancels active or paused conversations.
+15. **`IConversationMemoryStore.compareAndSetState`** — Atomic CAS on conversation state for both MongoDB and PostgreSQL.
+16. **Timeout handler guard** — `waitForExecutionFinishOrTimeout` skips state overwrite when AWAITING_HUMAN (Invariant 10).
+
+### Wave 3: Group Discussion HITL
+
+17. **`GroupConversation` HITL fields** — pausedAtPhaseIndex, pausedTurnCount, pausedPhaseName, pausedAt, hitlPauseType (PHASE/TASK).
+18. **`SharedTaskList` HITL methods** — submitForApproval (IN_PROGRESS→AWAITING_APPROVAL), approveTask, rejectTask, resetToAssigned, hasAwaitingApproval.
+19. **`GroupConversationService` HITL** — cancelDiscussion (via DiscussionControlToken or direct DB), resumeDiscussion (task approvals + phase resume).
+20. **Group REST endpoints** — POST /{gcId}/cancel, POST /{gcId}/approve, POST /{gcId}/approve/stream (SSE), GET /{gcId}/approval-status.
+21. **`GroupApprovalRequest`** — REST body with HitlDecision + Map<String,String> taskApprovals for per-task verdicts.
+
+### Wave 4: Configuration, Timeout & Audit
+
+22. **`AgentConfiguration.HitlConfig`** — approvalTimeout (ISO-8601 duration), timeoutPolicy (default WAIT_INDEFINITELY).
+23. **`AgentGroupConfiguration.HitlConfig`** — Same + granularity (PHASE/TASK).
+24. **`HitlTimeoutHandler`** — @ApplicationScoped handler dispatched by ScheduleFireExecutor when hitlType=hitl_timeout schedule fires. Routes to auto-approve/reject/abort based on policy.
+25. **`ScheduleFireExecutor` integration** — Early return for hitl_timeout metadata in fire() method.
+
+### Files changed (38 total: 32 modified, 6 new)
+
+**New files:** `ControlSignal.java`, `DiscussionControlToken.java`, `ConversationPauseException.java`, `HitlDecision.java`, `HitlTimeoutPolicy.java`, `PendingApprovalSummary.java`, `GroupApprovalRequest.java`, `HitlTimeoutHandler.java`
+
+**Key invariants preserved:** (1) No typed POJOs in snapshot storage — bookmark fields are first-class. (2) Resume task index is absolute. (3) Group halt = set state + return. (4) Per-task approval detection = post-join scan. (5) Group CAS on state field. (9) Paused turns skip postConversationLifecycleTasks. (10) AWAITING_HUMAN is never overwritten by timeout handler.
+
+---
+
 ## 🔒 Security & Algorithm Hardening — SSRF/File-Read, Cron, DoS Guards (2026-06-29)
 
 **Repo:** EDDI (`fix/security-and-algo-hardening`)

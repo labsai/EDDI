@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
@@ -30,6 +31,7 @@ public class ConversationMemory implements IConversationMemory {
     private final Stack<ConversationOutput> conversationOutputs = new Stack<>();
     private final IConversationProperties conversationProperties = new ConversationProperties(this);
     private ConversationState conversationState;
+    private volatile boolean cancelled;
 
     /** Transient — never serialized to MongoDB. Set per-turn for SSE streaming. */
     private transient ConversationEventSink eventSink;
@@ -217,6 +219,85 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setMemoryPolicy(AgentConfiguration.MemoryPolicy memoryPolicy) {
         this.memoryPolicy = memoryPolicy;
+    }
+
+    @Override
+    public void setCancelled(boolean cancelled) {
+        this.cancelled = cancelled;
+    }
+
+    @Override
+    public boolean isCancelled() {
+        return cancelled;
+    }
+
+    // === HITL pause bookmark (transient — not serialized to DB) ===
+
+    private transient String hitlPausedWorkflowId;
+    private transient int hitlPausedAbsoluteTaskIndex = -1;
+    private transient java.time.Instant hitlPausedAt;
+    private transient String hitlPauseReason;
+    private transient String hitlTimeoutPolicy;
+    private transient String hitlApprovalTimeout;
+
+    @Override
+    public String getHitlPausedWorkflowId() {
+        return hitlPausedWorkflowId;
+    }
+
+    @Override
+    public void setHitlPausedWorkflowId(String workflowId) {
+        this.hitlPausedWorkflowId = workflowId;
+    }
+
+    @Override
+    public int getHitlPausedAbsoluteTaskIndex() {
+        return hitlPausedAbsoluteTaskIndex;
+    }
+
+    @Override
+    public void setHitlPausedAbsoluteTaskIndex(int index) {
+        this.hitlPausedAbsoluteTaskIndex = index;
+    }
+
+    @Override
+    public java.time.Instant getHitlPausedAt() {
+        return hitlPausedAt;
+    }
+
+    @Override
+    public void setHitlPausedAt(java.time.Instant pausedAt) {
+        this.hitlPausedAt = pausedAt;
+    }
+
+    @Override
+    public String getHitlPauseReason() {
+        return hitlPauseReason;
+    }
+
+    @Override
+    public void setHitlPauseReason(String reason) {
+        this.hitlPauseReason = reason;
+    }
+
+    @Override
+    public String getHitlTimeoutPolicy() {
+        return hitlTimeoutPolicy;
+    }
+
+    @Override
+    public void setHitlTimeoutPolicy(String policy) {
+        this.hitlTimeoutPolicy = policy;
+    }
+
+    @Override
+    public String getHitlApprovalTimeout() {
+        return hitlApprovalTimeout;
+    }
+
+    @Override
+    public void setHitlApprovalTimeout(String timeout) {
+        this.hitlApprovalTimeout = timeout;
     }
 
     public static final class ConversationStepStack implements IConversationStepStack {

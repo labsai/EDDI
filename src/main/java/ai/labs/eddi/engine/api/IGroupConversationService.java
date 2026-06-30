@@ -6,7 +6,9 @@ package ai.labs.eddi.engine.api;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 
 import java.util.List;
 
@@ -66,6 +68,14 @@ public interface IGroupConversationService {
      */
     List<GroupConversation> listGroupConversations(String groupId, int index, int limit) throws IResourceStore.ResourceStoreException;
 
+    void cancelDiscussion(String conversationId, ControlSignal mode);
+
+    GroupConversation resumeDiscussion(String groupConversationId,
+                                       GroupApprovalRequest request,
+                                       GroupDiscussionEventListener listener)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException,
+            IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException;
+
     // --- Event listener for SSE streaming ---
 
     interface GroupDiscussionEventListener {
@@ -88,6 +98,8 @@ public interface IGroupConversationService {
         default void onTaskPlanCreated(GroupConversationEventSink.TaskPlanCreatedEvent event) {
         }
         default void onTaskVerified(GroupConversationEventSink.TaskVerifiedEvent event) {
+        }
+        default void onHitlPause(GroupConversationEventSink.HitlPauseEvent event) {
         }
     }
 

@@ -270,6 +270,22 @@ public class AgentGroupConfiguration {
         this.dynamicAgents = dynamicAgents;
     }
 
+    /**
+     * Human-in-the-loop (HITL) configuration for group discussions. Controls
+     * approval timeouts, timeout policies, and granularity level.
+     *
+     * @since 6.0.0
+     */
+    private HitlConfig hitlConfig;
+
+    public HitlConfig getHitlConfig() {
+        return hitlConfig;
+    }
+
+    public void setHitlConfig(HitlConfig hitlConfig) {
+        this.hitlConfig = hitlConfig;
+    }
+
     // --- Task Definition ---
 
     /**
@@ -432,6 +448,43 @@ public class AgentGroupConfiguration {
         }
         public void setLifecyclePolicy(LifecyclePolicy lifecyclePolicy) {
             this.lifecyclePolicy = lifecyclePolicy != null ? lifecyclePolicy : LifecyclePolicy.EPHEMERAL;
+        }
+    }
+
+    /**
+     * HITL approval timeout configuration for group discussions. Extends the
+     * agent-level config with a {@code granularity} field to control at what level
+     * human approval is required (per phase, per turn, or per discussion).
+     *
+     * @since 6.0.0
+     */
+    public static class HitlConfig {
+        private String approvalTimeout;
+        private String timeoutPolicy = "WAIT_INDEFINITELY";
+        private String granularity = "PHASE";
+
+        public String getApprovalTimeout() {
+            return approvalTimeout;
+        }
+
+        public void setApprovalTimeout(String approvalTimeout) {
+            this.approvalTimeout = approvalTimeout;
+        }
+
+        public String getTimeoutPolicy() {
+            return timeoutPolicy;
+        }
+
+        public void setTimeoutPolicy(String timeoutPolicy) {
+            this.timeoutPolicy = timeoutPolicy;
+        }
+
+        public String getGranularity() {
+            return granularity;
+        }
+
+        public void setGranularity(String granularity) {
+            this.granularity = granularity;
         }
     }
 }

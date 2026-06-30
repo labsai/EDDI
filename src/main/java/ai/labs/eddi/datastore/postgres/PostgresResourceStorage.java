@@ -144,6 +144,30 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
+    public void storeIfFieldEquals(IResource<T> newResource, String fieldName, String expectedValue)
+            throws IResourceStore.ResourceModifiedException {
+        Resource pgResource = checkInternalResource(newResource);
+        String sql = """
+                UPDATE resources SET version = ?, data = ?::jsonb
+                WHERE id = ?::uuid AND collection_name = ? AND data->>? = ?
+                """;
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, pgResource.getVersion());
+            ps.setString(2, pgResource.getJson());
+            ps.setString(3, pgResource.getId());
+            ps.setString(4, collectionName);
+            ps.setString(5, fieldName);
+            ps.setString(6, expectedValue);
+            if (ps.executeUpdate() == 0) {
+                throw new IResourceStore.ResourceModifiedException(
+                        String.format("Resource field '%s' was not '%s' (id=%s)", fieldName, expectedValue, pgResource.getId()));
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to store resource with field check", e);
+        }
+    }
+
+    @Override
     public void createNew(IResource<T> resource) {
         Resource pgResource = checkInternalResource(resource);
         String sql = "INSERT INTO resources (id, collection_name, version, data) " + "VALUES (?::uuid, ?, ?, ?::jsonb)";

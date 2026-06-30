@@ -46,6 +46,9 @@ public class ScheduleFireExecutor {
     @Inject
     IScheduleStore scheduleStore;
 
+    @Inject
+    ai.labs.eddi.engine.internal.HitlTimeoutHandler hitlTimeoutHandler;
+
     /**
      * Execute a schedule fire. Returns the fire log entry.
      *
@@ -59,6 +62,15 @@ public class ScheduleFireExecutor {
      * @return the completed fire log
      */
     public ScheduleFireLog fire(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Map<String, Object> md = schedule.getMetadata();
+        if (md != null && "hitl_timeout".equals(md.get("hitlType"))) {
+            hitlTimeoutHandler.handleTimeout(md);
+            return new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(),
+                    schedule.getFireId(), schedule.getNextFire(), Instant.now(), Instant.now(),
+                    ScheduleConfiguration.FireStatus.COMPLETED.name(), instanceId,
+                    null, null, attemptNumber, 0.0);
+        }
+
         Instant startedAt = Instant.now();
         String fireLogId = UUID.randomUUID().toString();
         String conversationId = null;

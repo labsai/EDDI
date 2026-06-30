@@ -236,6 +236,39 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         }
     }
 
+    @Override
+    public boolean compareAndSetState(String conversationId, ConversationState expected, ConversationState target)
+            throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String sql = "UPDATE conversation_memories SET conversation_state = ? WHERE id = ?::uuid AND conversation_state = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, target.name());
+            ps.setString(2, conversationId);
+            ps.setString(3, expected.name());
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to compare-and-set conversation state", e);
+        }
+    }
+
+    @Override
+    public List<String> findConversationIdsByState(ConversationState state) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String sql = "SELECT id FROM conversation_memories WHERE conversation_state = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, state.name());
+            try (ResultSet rs = ps.executeQuery()) {
+                List<String> ids = new ArrayList<>();
+                while (rs.next()) {
+                    ids.add(rs.getString("id"));
+                }
+                return ids;
+            }
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to find conversations by state", e);
+        }
+    }
+
     // -- IResourceStore<ConversationMemorySnapshot> methods --
 
     @Override

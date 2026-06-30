@@ -10,8 +10,10 @@ import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.model.Data;
@@ -23,6 +25,7 @@ import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import org.jboss.logging.Logger;
 
+import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -211,6 +214,9 @@ public class Conversation implements IConversation {
         if (getConversationState() == ConversationState.IN_PROGRESS) {
             throw new ConversationNotReadyException("Conversation is currently IN_PROGRESS! Please try again later!");
         }
+        if (getConversationState() == ConversationState.AWAITING_HUMAN) {
+            throw new ConversationNotReadyException("Conversation is AWAITING_HUMAN approval. Use the /resume endpoint.");
+        }
     }
 
     private void postConversationLifecycleTasks() throws IResourceStore.ResourceStoreException {
@@ -293,17 +299,23 @@ public class Conversation implements IConversation {
         }
     }
 
-    private void executeConversationStep(List<IData<?>> lifecycleData, List<String> lifecycleTaskTypes) throws LifecycleException {
+    private void executeConversationStep(List<IData<?>> lifecycleData, List<String> lifecycleTaskTypes)
+            throws LifecycleException {
+        boolean paused = false;
         try {
             executeWorkflows(lifecycleData, lifecycleTaskTypes);
         } catch (ConversationStopException unused) {
             endConversation();
+        } catch (ConversationPauseException e) {
+            pauseConversation(e);
+            paused = true;
         }
-
-        try {
-            postConversationLifecycleTasks();
-        } catch (IResourceStore.ResourceStoreException e) {
-            throw new LifecycleException(e.getLocalizedMessage(), e);
+        if (!paused) {
+            try {
+                postConversationLifecycleTasks();
+            } catch (IResourceStore.ResourceStoreException e) {
+                throw new LifecycleException(e.getLocalizedMessage(), e);
+            }
         }
     }
 
@@ -419,12 +431,90 @@ public class Conversation implements IConversation {
         return contextData;
     }
 
-    private void executeWorkflows(List<IData<?>> data, List<String> lifecycleTaskTypes) throws LifecycleException, ConversationStopException {
+    private void executeWorkflows(List<IData<?>> data, List<String> lifecycleTaskTypes)
+            throws LifecycleException, ConversationStopException, ConversationPauseException {
         for (IExecutableWorkflow executableWorkflow : executableWorkflows) {
             conversationMemory.getCurrentStep().setCurrentWorkflowId(executableWorkflow.getWorkflowId());
             data.stream().filter(Objects::nonNull).forEach(datum -> conversationMemory.getCurrentStep().storeData(datum));
             ILifecycleManager lifecycleManager = executableWorkflow.getLifecycleManager();
             lifecycleManager.executeLifecycle(conversationMemory, lifecycleTaskTypes);
         }
+    }
+
+    private void pauseConversation(ConversationPauseException e) {
+        setConversationState(ConversationState.AWAITING_HUMAN);
+        conversationMemory.setHitlPausedWorkflowId(e.getPausedWorkflowId());
+        conversationMemory.setHitlPausedAbsoluteTaskIndex(e.getPausedAbsoluteTaskIndex());
+        conversationMemory.setHitlPausedAt(Instant.now());
+        conversationMemory.setHitlPauseReason(e.getPauseReason());
+    }
+
+    @Override
+    public void resume(HitlDecision decision, Map<String, Context> contexts)
+            throws LifecycleException, ConversationNotReadyException {
+        if (getConversationState() != ConversationState.AWAITING_HUMAN) {
+            throw new ConversationNotReadyException("Not in AWAITING_HUMAN state");
+        }
+        try {
+            setConversationState(ConversationState.IN_PROGRESS);
+            conversationMemory.getCurrentStep().storeData(new Data<>("hitl:decision_verdict", decision.getVerdict().name()));
+            if (decision.getNote() != null)
+                conversationMemory.getCurrentStep().storeData(new Data<>("hitl:decision_note", decision.getNote()));
+            if (decision.getDecidedBy() != null)
+                conversationMemory.getCurrentStep().storeData(new Data<>("hitl:decision_by", decision.getDecidedBy()));
+
+            if (decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED) {
+                clearHitlBookmark();
+                return;
+            }
+
+            String pausedWorkflowId = conversationMemory.getHitlPausedWorkflowId();
+            int resumeFromIndex = conversationMemory.getHitlPausedAbsoluteTaskIndex() + 1;
+            clearHitlBookmark();
+
+            boolean foundPaused = false;
+            for (IExecutableWorkflow workflow : executableWorkflows) {
+                String wfId = workflow.getWorkflowId();
+                conversationMemory.getCurrentStep().setCurrentWorkflowId(wfId);
+                if (!foundPaused) {
+                    if (wfId.equals(pausedWorkflowId)) {
+                        foundPaused = true;
+                        workflow.getLifecycleManager().executeLifecycleFromIndex(conversationMemory, resumeFromIndex);
+                    }
+                } else {
+                    workflow.getLifecycleManager().executeLifecycle(conversationMemory, null);
+                }
+            }
+        } catch (ConversationStopException unused) {
+            endConversation();
+        } catch (ConversationPauseException e) {
+            pauseConversation(e);
+        } catch (Exception e) {
+            setConversationState(ConversationState.ERROR);
+            throw new LifecycleException(e.getLocalizedMessage(), e);
+        } finally {
+            checkActionsForConversationEnd();
+            ConversationState finalState = getConversationState();
+            if (finalState == ConversationState.IN_PROGRESS)
+                setConversationState(ConversationState.READY);
+            if (finalState != ConversationState.AWAITING_HUMAN) {
+                try {
+                    postConversationLifecycleTasks();
+                } catch (IResourceStore.ResourceStoreException ex) {
+                    LOGGER.error("post-conversation tasks on resume failed", ex);
+                }
+            }
+            if (outputProvider != null)
+                outputProvider.renderOutput(conversationMemory);
+        }
+    }
+
+    private void clearHitlBookmark() {
+        conversationMemory.setHitlPausedWorkflowId(null);
+        conversationMemory.setHitlPausedAbsoluteTaskIndex(-1);
+        conversationMemory.setHitlPausedAt(null);
+        conversationMemory.setHitlPauseReason(null);
+        conversationMemory.setHitlTimeoutPolicy(null);
+        conversationMemory.setHitlApprovalTimeout(null);
     }
 }

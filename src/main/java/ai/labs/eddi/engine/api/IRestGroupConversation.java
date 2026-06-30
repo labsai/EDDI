@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.api;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -72,6 +73,50 @@ public interface IRestGroupConversation {
     @DefaultValue("0") Integer index,
                                                    @QueryParam("limit")
                                                    @DefaultValue("20") Integer limit);
+
+    @POST
+    @Path("/{groupConversationId}/cancel")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Cancel a group discussion", description = "Cancels an in-progress group discussion.")
+    @APIResponse(responseCode = "200", description = "Discussion cancelled.")
+    Response cancelDiscussion(@PathParam("groupId") String groupId,
+                              @PathParam("groupConversationId") String gcId);
+
+    @POST
+    @Path("/{groupConversationId}/approve")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Approve a paused group phase", description = "Resumes a paused group discussion after human approval.")
+    @APIResponse(responseCode = "200", description = "Discussion resumed.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    @APIResponse(responseCode = "409", description = "Concurrent modification conflict.")
+    Response approveGroupPhase(@PathParam("groupId") String groupId,
+                               @PathParam("groupConversationId") String gcId,
+                               GroupApprovalRequest request);
+
+    @POST
+    @Path("/{groupConversationId}/approve/stream")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.SERVER_SENT_EVENTS)
+    @Operation(summary = "Approve a paused group phase with SSE streaming",
+               description = "Resumes a paused group discussion and streams progress events via Server-Sent Events.")
+    @APIResponse(responseCode = "200", description = "SSE event stream of resumed discussion progress.")
+    void approveGroupPhaseStreaming(@PathParam("groupId") String groupId,
+                                    @PathParam("groupConversationId") String gcId,
+                                    GroupApprovalRequest request,
+                                    @Context SseEventSink eventSink,
+                                    @Context Sse sse);
+
+    @GET
+    @Path("/{groupConversationId}/approval-status")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Get group approval status", description = "Returns the current approval status of a group conversation.")
+    @APIResponse(responseCode = "200", description = "Approval status.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    Response getGroupApprovalStatus(@PathParam("groupId") String groupId,
+                                    @PathParam("groupConversationId") String gcId,
+                                    @QueryParam("detail")
+                                    @DefaultValue("summary") String detail);
 
     /**
      * Request body for starting a group discussion.

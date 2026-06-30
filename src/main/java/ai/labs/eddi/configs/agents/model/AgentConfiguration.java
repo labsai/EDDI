@@ -249,6 +249,22 @@ public class AgentConfiguration {
     }
 
     /**
+     * Human-in-the-loop (HITL) configuration. Controls approval timeouts and
+     * timeout policies for paused conversations.
+     *
+     * @since 6.0.0
+     */
+    private HitlConfig hitlConfig;
+
+    public HitlConfig getHitlConfig() {
+        return hitlConfig;
+    }
+
+    public void setHitlConfig(HitlConfig hitlConfig) {
+        this.hitlConfig = hitlConfig;
+    }
+
+    /**
      * Cryptographic identity for an agent. The public key is stored in the agent
      * configuration; the private key is in SecretsVault.
      *
@@ -825,6 +841,34 @@ public class AgentConfiguration {
             public void setTriggerOn(List<String> triggerOn) {
                 this.triggerOn = triggerOn;
             }
+        }
+    }
+
+    /**
+     * HITL approval timeout configuration. Controls what happens when a
+     * human-in-the-loop approval is not provided within the configured duration.
+     *
+     * @since 6.0.0
+     */
+    public static class HitlConfig {
+        /** ISO-8601 duration (e.g., "PT30S"), null = indefinite. */
+        private String approvalTimeout;
+        private String timeoutPolicy = "WAIT_INDEFINITELY";
+
+        public String getApprovalTimeout() {
+            return approvalTimeout;
+        }
+
+        public void setApprovalTimeout(String approvalTimeout) {
+            this.approvalTimeout = approvalTimeout;
+        }
+
+        public String getTimeoutPolicy() {
+            return timeoutPolicy;
+        }
+
+        public void setTimeoutPolicy(String timeoutPolicy) {
+            this.timeoutPolicy = timeoutPolicy;
         }
     }
 }

@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -78,60 +79,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             if (userId == null || userId.isBlank())
                 userId = "anonymous";
 
-            GroupDiscussionEventListener listener = new GroupDiscussionEventListener() {
-                @Override
-                public void onGroupStart(GroupConversationEventSink.GroupStartEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_START, toJson(event));
-                }
-
-                @Override
-                public void onPhaseStart(GroupConversationEventSink.PhaseStartEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_PHASE_START, toJson(event));
-                }
-
-                @Override
-                public void onSpeakerStart(GroupConversationEventSink.SpeakerStartEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_SPEAKER_START, toJson(event));
-                }
-
-                @Override
-                public void onSpeakerComplete(GroupConversationEventSink.SpeakerCompleteEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_SPEAKER_COMPLETE, toJson(event));
-                }
-
-                @Override
-                public void onPhaseComplete(GroupConversationEventSink.PhaseCompleteEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_PHASE_COMPLETE, toJson(event));
-                }
-
-                @Override
-                public void onSynthesisStart(GroupConversationEventSink.SynthesisStartEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_SYNTHESIS_START, toJson(event));
-                }
-
-                @Override
-                public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_COMPLETE, toJson(event));
-                    closeQuietly(eventSink);
-                }
-
-                @Override
-                public void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR, toJson(event));
-                    closeQuietly(eventSink);
-                }
-
-                @Override
-                public void onTaskPlanCreated(GroupConversationEventSink.TaskPlanCreatedEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_TASK_PLAN_CREATED, toJson(event));
-                }
-
-                @Override
-                public void onTaskVerified(GroupConversationEventSink.TaskVerifiedEvent event) {
-                    sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_TASK_VERIFIED, toJson(event));
-                }
-            };
-
+            var listener = createStreamingListener(eventSink, sse);
             groupConversationService.startAndDiscussAsync(groupId, request.question(), userId, listener);
 
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -191,7 +139,121 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
     }
 
+    @Override
+    public Response cancelDiscussion(String groupId, String gcId) {
+        groupConversationService.cancelDiscussion(gcId, ControlSignal.CANCEL_GRACEFUL);
+        try {
+            var gc = groupConversationService.readGroupConversation(gcId);
+            return Response.ok(gc).build();
+        } catch (Exception e) {
+            return Response.ok().build();
+        }
+    }
+
+    @Override
+    public Response approveGroupPhase(String groupId, String gcId, GroupApprovalRequest request) {
+        try {
+            var gc = groupConversationService.resumeDiscussion(gcId, request, null);
+            return Response.ok(gc).build();
+        } catch (IResourceStore.ResourceModifiedException e) {
+            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+        } catch (Exception e) {
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
+        }
+    }
+
+    @Override
+    public void approveGroupPhaseStreaming(String groupId, String gcId, GroupApprovalRequest request,
+                                           SseEventSink eventSink, Sse sse) {
+        var listener = createStreamingListener(eventSink, sse);
+        try {
+            groupConversationService.resumeDiscussion(gcId, request, listener);
+        } catch (IResourceStore.ResourceModifiedException e) {
+            sendEvent(eventSink, sse, "error", "{\"error\":\"" + e.getMessage() + "\"}");
+            closeQuietly(eventSink);
+        } catch (Exception e) {
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
+                    toJson(new GroupConversationEventSink.GroupErrorEvent(e.getMessage())));
+            closeQuietly(eventSink);
+        }
+    }
+
+    @Override
+    public Response getGroupApprovalStatus(String groupId, String gcId, String detail) {
+        try {
+            var gc = groupConversationService.readGroupConversation(gcId);
+            return Response.ok(gc).build();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+        } catch (Exception e) {
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
+        }
+    }
+
     // --- SSE Helpers ---
+
+    private GroupDiscussionEventListener createStreamingListener(SseEventSink eventSink, Sse sse) {
+        return new GroupDiscussionEventListener() {
+            @Override
+            public void onGroupStart(GroupConversationEventSink.GroupStartEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_START, toJson(event));
+            }
+
+            @Override
+            public void onPhaseStart(GroupConversationEventSink.PhaseStartEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_PHASE_START, toJson(event));
+            }
+
+            @Override
+            public void onSpeakerStart(GroupConversationEventSink.SpeakerStartEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_SPEAKER_START, toJson(event));
+            }
+
+            @Override
+            public void onSpeakerComplete(GroupConversationEventSink.SpeakerCompleteEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_SPEAKER_COMPLETE, toJson(event));
+            }
+
+            @Override
+            public void onPhaseComplete(GroupConversationEventSink.PhaseCompleteEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_PHASE_COMPLETE, toJson(event));
+            }
+
+            @Override
+            public void onSynthesisStart(GroupConversationEventSink.SynthesisStartEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_SYNTHESIS_START, toJson(event));
+            }
+
+            @Override
+            public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_COMPLETE, toJson(event));
+                closeQuietly(eventSink);
+            }
+
+            @Override
+            public void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR, toJson(event));
+                closeQuietly(eventSink);
+            }
+
+            @Override
+            public void onTaskPlanCreated(GroupConversationEventSink.TaskPlanCreatedEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_TASK_PLAN_CREATED, toJson(event));
+            }
+
+            @Override
+            public void onTaskVerified(GroupConversationEventSink.TaskVerifiedEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_TASK_VERIFIED, toJson(event));
+            }
+
+            @Override
+            public void onHitlPause(GroupConversationEventSink.HitlPauseEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_AWAITING_APPROVAL, toJson(event));
+            }
+        };
+    }
 
     private void sendEvent(SseEventSink eventSink, Sse sse, String eventName, String data) {
         if (eventSink.isClosed()) {

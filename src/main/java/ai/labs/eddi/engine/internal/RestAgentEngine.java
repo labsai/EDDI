@@ -10,7 +10,9 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -243,6 +245,60 @@ public class RestAgentEngine implements IRestAgentEngine {
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Failed to redo");
+        }
+    }
+
+    @Override
+    public Response cancelConversation(String conversationId) {
+        validateConversationOwnership(conversationId);
+        conversationService.cancelConversation(conversationId,
+                ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+        return Response.ok().build();
+    }
+
+    @Override
+    public Response resumeConversation(String conversationId, HitlDecision decision) {
+        validateConversationOwnership(conversationId);
+        String userId = identity.getPrincipal().getName();
+        decision.setDecidedBy(userId);
+        try {
+            conversationService.resumeConversation(conversationId, decision, null);
+            return Response.ok().build();
+        } catch (ResourceNotFoundException e) {
+            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+        } catch (ResourceStoreException e) {
+            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
+        }
+    }
+
+    @Override
+    public Response getApprovalStatus(String conversationId, String detail) {
+        validateConversationOwnership(conversationId);
+        try {
+            var snapshot = conversationService.getConversationMemorySnapshot(conversationId);
+            if ("full".equals(detail)) {
+                return Response.ok(snapshot).build();
+            }
+            var summary = Map.of(
+                    "conversationId", conversationId,
+                    "state", snapshot.getConversationState().name(),
+                    "pausedAt", snapshot.getHitlPausedAt() != null ? snapshot.getHitlPausedAt().toString() : "",
+                    "pauseReason", snapshot.getHitlPauseReason() != null ? snapshot.getHitlPauseReason() : "",
+                    "timeoutPolicy", snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy() : "");
+            return Response.ok(summary).build();
+        } catch (ResourceNotFoundException e) {
+            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+        } catch (ResourceStoreException e) {
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
+        }
+    }
+
+    @Override
+    public List<PendingApprovalSummary> listPendingApprovals() {
+        try {
+            return conversationService.listPendingApprovals();
+        } catch (ResourceStoreException e) {
+            throw new InternalServerErrorException(e.getMessage(), e);
         }
     }
 

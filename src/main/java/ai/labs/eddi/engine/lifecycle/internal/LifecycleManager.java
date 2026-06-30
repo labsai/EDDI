@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConversationStep;
@@ -190,7 +191,7 @@ public class LifecycleManager implements ILifecycleManager {
     @SuppressWarnings("null") // Objects.requireNonNullElse guarantees non-null but Eclipse JDT doesn't track
                               // it
     public void executeLifecycle(final IConversationMemory conversationMemory, List<String> lifecycleTaskTypes)
-            throws LifecycleException, ConversationStopException {
+            throws LifecycleException, ConversationStopException, ConversationPauseException {
 
         checkNotNull(conversationMemory, "conversationMemory");
 
@@ -213,6 +214,11 @@ public class LifecycleManager implements ILifecycleManager {
         // Execute each task in sequence
         for (int index = 0; index < lifecycleTasks.size(); index++) {
             ILifecycleTask task = lifecycleTasks.get(index);
+
+            // Cancel check (Wave 0)
+            if (conversationMemory.isCancelled()) {
+                throw new ConversationStopException();
+            }
 
             // Fail-fast: every task must have a non-null TaskId
             if (task.getId() == null) {
@@ -285,6 +291,7 @@ public class LifecycleManager implements ILifecycleManager {
 
                 // Check if task triggered a STOP_CONVERSATION action
                 checkIfStopConversationAction(conversationMemory);
+                checkIfPauseConversationAction(conversationMemory, index);
 
             } catch (LifecycleException | RuntimeException e) {
                 taskSpan.setStatus(StatusCode.ERROR, Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
@@ -319,6 +326,124 @@ public class LifecycleManager implements ILifecycleManager {
                 // both successful and failed task executions contribute to the
                 // duration histogram (failing tasks with long timeouts are especially
                 // important for latency monitoring during incidents).
+                long durationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
+                String taskId = task.getId().name();
+                String taskType = task.getType() != null ? task.getType() : "unknown";
+                String meterKey = taskId + "|" + taskType;
+                TASK_TIMERS.computeIfAbsent(meterKey, k -> Timer.builder("eddi.pipeline.task.duration")
+                        .tag("task.id", taskId)
+                        .tag("task.type", taskType)
+                        .description("Pipeline task execution duration")
+                        .publishPercentileHistogram()
+                        .register(Metrics.globalRegistry)).record(java.time.Duration.ofMillis(durationMs));
+
+                taskSpan.end();
+            }
+        }
+    }
+
+    @Override
+    public void executeLifecycleFromIndex(IConversationMemory conversationMemory, int startFromAbsoluteIndex)
+            throws LifecycleException, ConversationStopException, ConversationPauseException {
+
+        checkNotNull(conversationMemory, "conversationMemory");
+
+        var eventSink = conversationMemory.getEventSink();
+        var memoryPolicy = conversationMemory.getMemoryPolicy();
+        boolean strictWriteEnabled = memoryPolicy != null && memoryPolicy.isEffectivelyEnabled();
+
+        for (int index = startFromAbsoluteIndex; index < this.lifecycleTasks.size(); index++) {
+            ILifecycleTask task = this.lifecycleTasks.get(index);
+
+            if (conversationMemory.isCancelled()) {
+                throw new ConversationStopException();
+            }
+
+            if (task.getId() == null) {
+                throw new LifecycleException("Lifecycle task returned null TaskId: " + task.getClass().getName());
+            }
+
+            if (Thread.currentThread().isInterrupted()) {
+                throw new LifecycleException.LifecycleInterruptedException("Execution was interrupted!");
+            }
+
+            var currentStep = conversationMemory.getCurrentStep();
+            Map<String, IData<?>> dataIdentitiesBefore = Map.of();
+            Set<String> outputKeysBefore = Set.of();
+            List<String> actionsBefore = List.of();
+            if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
+                dataIdentitiesBefore = cs.snapshotDataIdentities();
+                outputKeysBefore = cs.snapshotOutputKeys();
+                IData<List<String>> preActionData = currentStep.getLatestData(ACTIONS);
+                if (preActionData != null && preActionData.getResult() != null) {
+                    actionsBefore = List.copyOf(preActionData.getResult());
+                }
+            }
+
+            @SuppressWarnings("null")
+            Span taskSpan = getTracer().spanBuilder("eddi.pipeline.task")
+                    .setAttribute("eddi.task.id", task.getId().name())
+                    .setAttribute("eddi.task.type", Objects.requireNonNullElse(task.getType(), "unknown"))
+                    .setAttribute("eddi.task.index", (long) index)
+                    .setAttribute("eddi.conversation.id",
+                            Objects.requireNonNullElse(conversationMemory.getConversationId(), "unknown"))
+                    .setAttribute("eddi.agent.id",
+                            Objects.requireNonNullElse(conversationMemory.getAgentId(), "unknown"))
+                    .startSpan();
+
+            long taskStartTime = System.nanoTime();
+
+            try (Scope ignored = taskSpan.makeCurrent()) {
+                var components = componentCache.getComponentMap(task.getId().name());
+                var componentKey = createComponentKey(workflowId.getId(), workflowId.getVersion(), index);
+                var component = components.getOrDefault(componentKey, null);
+
+                if (eventSink != null) {
+                    eventSink.onTaskStart(task.getId(), task.getType(), index);
+                }
+
+                task.execute(conversationMemory, component);
+
+                long durationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
+                Map<String, Object> summary = buildTaskSummary(conversationMemory, task);
+
+                if (eventSink != null) {
+                    eventSink.onTaskComplete(task.getId(), task.getType(), durationMs, summary);
+                }
+
+                var auditCollector = conversationMemory.getAuditCollector();
+                if (auditCollector != null) {
+                    AuditEntry auditEntry = buildAuditEntry(conversationMemory, task, index, durationMs, summary);
+                    auditCollector.collect(auditEntry);
+                }
+
+                checkIfStopConversationAction(conversationMemory);
+                checkIfPauseConversationAction(conversationMemory, index);
+
+            } catch (LifecycleException | RuntimeException e) {
+                taskSpan.setStatus(StatusCode.ERROR, Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
+                taskSpan.recordException(e);
+
+                String errTaskId = task.getId().name();
+                String errTaskType = task.getType() != null ? task.getType() : "unknown";
+                String errMeterKey = errTaskId + "|" + errTaskType;
+                TASK_ERROR_COUNTERS.computeIfAbsent(errMeterKey, k -> Counter.builder("eddi.pipeline.task.errors")
+                        .tag("task.id", errTaskId)
+                        .tag("task.type", errTaskType)
+                        .description("Pipeline task execution errors")
+                        .register(Metrics.globalRegistry)).increment();
+
+                if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
+                    String onFailureMode = resolveOnFailureMode(memoryPolicy);
+                    handleTaskFailure(cs, task, e, dataIdentitiesBefore,
+                            outputKeysBefore, actionsBefore, onFailureMode);
+                }
+
+                if (e instanceof LifecycleException le) {
+                    throw new LifecycleException("Error while executing lifecycle!", le);
+                }
+                throw new LifecycleException("Error while executing lifecycle!", e);
+            } finally {
                 long durationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
                 String taskId = task.getId().name();
                 String taskType = task.getType() != null ? task.getType() : "unknown";
@@ -474,6 +599,21 @@ public class LifecycleManager implements ILifecycleManager {
             if (result != null && result.contains(IConversation.STOP_CONVERSATION)) {
                 throw new ConversationStopException();
             }
+        }
+    }
+
+    /**
+     * Checks if the current step contains a PAUSE_CONVERSATION action. Opt-in is
+     * the presence of the action in behavior rules — no separate enabled flag.
+     */
+    private void checkIfPauseConversationAction(IConversationMemory conversationMemory, int absoluteTaskIndex)
+            throws ConversationPauseException {
+        IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(ACTIONS);
+        if (actionData == null)
+            return;
+        List<String> actions = actionData.getResult();
+        if (actions != null && actions.contains(IConversation.PAUSE_CONVERSATION)) {
+            throw new ConversationPauseException(workflowId.getId(), absoluteTaskIndex, "PAUSE_CONVERSATION action");
         }
     }
 

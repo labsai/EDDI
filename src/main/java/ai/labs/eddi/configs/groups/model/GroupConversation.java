@@ -39,6 +39,11 @@ public class GroupConversation {
     private List<String> createdAgentIds = Collections.synchronizedList(new ArrayList<>());
     /** Agent IDs explicitly retained by the creating agent (skip cleanup). */
     private Set<String> retainedAgentIds = ConcurrentHashMap.newKeySet();
+    private int pausedAtPhaseIndex = -1;
+    private int pausedTurnCount = 0;
+    private String pausedPhaseName;
+    private Instant pausedAt;
+    private HitlPauseType hitlPauseType;
     private Instant created;
     private Instant lastModified;
 
@@ -126,8 +131,14 @@ public class GroupConversation {
 
     public enum GroupConversationState {
         CREATED, IN_PROGRESS, SYNTHESIZING, COMPLETED, FAILED,
+        /** Discussion was cancelled before completion — HITL foundation (Phase 9b). */
+        CANCELLED,
         /** Paused for human approval — HITL foundation (Phase 9b). */
         AWAITING_APPROVAL
+    }
+
+    public enum HitlPauseType {
+        PHASE, TASK
     }
 
     // --- Getters/Setters ---
@@ -295,5 +306,50 @@ public class GroupConversation {
 
     public void setDynamicAgentConfig(AgentGroupConfiguration.DynamicAgentConfig dynamicAgentConfig) {
         this.dynamicAgentConfig = dynamicAgentConfig;
+    }
+
+    @JsonIgnore
+    public boolean isPaused() {
+        return pausedAt != null;
+    }
+
+    public int getPausedAtPhaseIndex() {
+        return pausedAtPhaseIndex;
+    }
+
+    public void setPausedAtPhaseIndex(int pausedAtPhaseIndex) {
+        this.pausedAtPhaseIndex = pausedAtPhaseIndex;
+    }
+
+    public int getPausedTurnCount() {
+        return pausedTurnCount;
+    }
+
+    public void setPausedTurnCount(int pausedTurnCount) {
+        this.pausedTurnCount = pausedTurnCount;
+    }
+
+    public String getPausedPhaseName() {
+        return pausedPhaseName;
+    }
+
+    public void setPausedPhaseName(String pausedPhaseName) {
+        this.pausedPhaseName = pausedPhaseName;
+    }
+
+    public Instant getPausedAt() {
+        return pausedAt;
+    }
+
+    public void setPausedAt(Instant pausedAt) {
+        this.pausedAt = pausedAt;
+    }
+
+    public HitlPauseType getHitlPauseType() {
+        return hitlPauseType;
+    }
+
+    public void setHitlPauseType(HitlPauseType hitlPauseType) {
+        this.hitlPauseType = hitlPauseType;
     }
 }

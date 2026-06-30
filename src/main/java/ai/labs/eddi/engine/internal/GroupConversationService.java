@@ -47,6 +47,8 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -1919,5 +1921,100 @@ public class GroupConversationService implements IGroupConversationService {
             LOGGER.warnf("Peer verification check failed for agent '%s': %s",
                     receivingAgentId, e.getMessage());
         }
+    }
+
+    // =================================================================
+    // HITL lifecycle — cancel & resume
+    // =================================================================
+
+    private final ConcurrentHashMap<String, DiscussionControlToken> activeTokens = new ConcurrentHashMap<>();
+
+    @Override
+    public void cancelDiscussion(String conversationId, ControlSignal mode) {
+        var token = activeTokens.get(conversationId);
+        if (token != null) {
+            if (mode == ControlSignal.CANCEL_IMMEDIATE) {
+                token.setSignal(ControlSignal.CANCEL_IMMEDIATE);
+                token.cancelActiveFuture();
+            } else {
+                token.setSignal(ControlSignal.CANCEL_GRACEFUL);
+            }
+        } else {
+            // Not actively running — update DB directly
+            try {
+                var gc = conversationStore.read(conversationId);
+                gc.setState(GroupConversationState.CANCELLED);
+                conversationStore.update(gc);
+            } catch (Exception e) {
+                LOGGER.error("Failed to cancel group conversation: " + conversationId, e);
+            }
+        }
+    }
+
+    @Override
+    public GroupConversation resumeDiscussion(String groupConversationId, GroupApprovalRequest request,
+                                              GroupDiscussionEventListener listener)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException,
+            IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
+
+        var gc = conversationStore.read(groupConversationId);
+        if (gc.getState() != GroupConversationState.AWAITING_APPROVAL) {
+            throw new GroupDiscussionException("Group conversation is not awaiting approval");
+        }
+
+        // Apply task-level approvals if present
+        if (request.getTaskApprovals() != null && gc.getTaskList() != null) {
+            for (var entry : request.getTaskApprovals().entrySet()) {
+                if ("APPROVED".equals(entry.getValue())) {
+                    gc.getTaskList().approveTask(entry.getKey());
+                } else {
+                    gc.getTaskList().rejectTask(entry.getKey(), "Rejected by human reviewer");
+                }
+            }
+        }
+
+        // Apply phase-level decision
+        var decision = request.getDecision();
+        if (decision != null && decision.getVerdict() == ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.REJECTED) {
+            gc.setState(GroupConversationState.FAILED);
+            gc.setPausedAt(null);
+            conversationStore.update(gc);
+            return gc;
+        }
+
+        // Clear pause state and resume
+        gc.setPausedAt(null);
+        gc.setPausedAtPhaseIndex(-1);
+        gc.setPausedTurnCount(0);
+        gc.setPausedPhaseName(null);
+        gc.setHitlPauseType(null);
+        gc.setState(GroupConversationState.IN_PROGRESS);
+
+        conversationStore.update(gc);
+
+        // Resume execution in background thread
+        var groupId = gc.getGroupId();
+        var question = gc.getOriginalQuestion();
+        executorService.submit(() -> {
+            try {
+                IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(groupId);
+                if (currentGroupId == null) {
+                    throw new IResourceStore.ResourceNotFoundException("Group not found: " + groupId);
+                }
+                var groupConfig = groupStore.read(groupId, currentGroupId.getVersion());
+                var phases = resolvePhases(groupConfig);
+                executeDiscussion(gc, groupConfig, phases, question, listener);
+            } catch (Exception e) {
+                LOGGER.error("Failed to resume group discussion: " + groupConversationId, e);
+                gc.setState(GroupConversationState.FAILED);
+                try {
+                    conversationStore.update(gc);
+                } catch (Exception ex) {
+                    LOGGER.error("Failed to update failed group state", ex);
+                }
+            }
+        });
+
+        return gc;
     }
 }

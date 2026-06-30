@@ -61,6 +61,17 @@ public interface IResourceStorage<T> {
     }
 
     /**
+     * Store a new version of a resource only if the JSON field {@code fieldName}
+     * currently equals {@code expectedValue}. Atomic compare-and-swap on an
+     * arbitrary indexed field (not _version). Default impl performs an
+     * unconditional store (NO locking) — backends override.
+     */
+    default void storeIfFieldEquals(IResource<T> newResource, String fieldName, String expectedValue)
+            throws IResourceStore.ResourceModifiedException {
+        store(newResource);
+    }
+
+    /**
      * Find resource IDs where the JSON data contains the given value at the given
      * path. Used by AgentStore/WorkflowStore for "find configs containing resource"
      * queries.

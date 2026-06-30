@@ -725,6 +725,12 @@ public class ConversationService implements IConversationService {
         try {
             future.get(agentTimeout, TimeUnit.SECONDS);
         } catch (TimeoutException | InterruptedException e) {
+            // Guard: do not overwrite AWAITING_HUMAN with EXECUTION_INTERRUPTED (Invariant
+            // 10)
+            ConversationState currentState = conversationMemoryStore.getConversationState(conversationId);
+            if (currentState == ConversationState.AWAITING_HUMAN) {
+                return;
+            }
             setConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
             String errorMessage = "Execution of Workflows interrupted or timed out.";
             contextLogger.setLoggingContext(loggingContext);
@@ -796,5 +802,112 @@ public class ConversationService implements IConversationService {
 
     private static String createReferenceForMetrics(String agentId, String conversationId) {
         return agentId.concat(":").concat(conversationId);
+    }
+
+    // --- HITL lifecycle ---
+
+    @Override
+    public void cancelConversation(String conversationId,
+                                   ai.labs.eddi.engine.lifecycle.model.ControlSignal mode) {
+        // If actively running, the memory object is not tracked here — just set state
+        // directly.
+        // If AWAITING_HUMAN, transition to EXECUTION_INTERRUPTED.
+        try {
+            if (!conversationMemoryStore.compareAndSetState(conversationId,
+                    ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED)) {
+                // Not in AWAITING_HUMAN — try cancelling IN_PROGRESS
+                conversationMemoryStore.compareAndSetState(conversationId,
+                        ConversationState.IN_PROGRESS, ConversationState.EXECUTION_INTERRUPTED);
+            }
+            cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
+        } catch (ResourceStoreException e) {
+            LOGGER.error("Failed to cancel conversation: " + conversationId, e);
+        }
+    }
+
+    @Override
+    public void resumeConversation(String conversationId,
+                                   ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
+                                   ConversationResponseHandler handler)
+            throws ResourceStoreException, ResourceNotFoundException {
+        if (!conversationMemoryStore.compareAndSetState(conversationId,
+                ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS)) {
+            throw new ResourceStoreException(
+                    "Conversation is not in AWAITING_HUMAN state (possible concurrent resume)");
+        }
+        cacheConversationState(conversationId, ConversationState.IN_PROGRESS);
+
+        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        if (snapshot == null) {
+            throw new ResourceNotFoundException("Conversation not found: " + conversationId);
+        }
+        var memory = convertConversationMemorySnapshot(snapshot);
+        memory.setConversationState(ConversationState.IN_PROGRESS);
+
+        String agentId = snapshot.getAgentId();
+        Integer agentVersion = snapshot.getAgentVersion();
+        Environment environment = snapshot.getEnvironment();
+
+        try {
+            IAgent agent = getAgent(environment, agentId, agentVersion);
+            if (agent == null) {
+                setConversationState(conversationId, ConversationState.ERROR);
+                throw new ResourceStoreException("Agent not deployed for resume (agentId=" + agentId + ", version=" + agentVersion + ")");
+            }
+
+            IConversation conversation = agent.continueConversation(memory,
+                    createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig()),
+                    handler != null ? returnMemory -> {
+                        var memorySnapshot = convertSimpleConversationMemorySnapshot(returnMemory, false, true, List.of());
+                        memorySnapshot.setEnvironment(environment);
+                        cacheConversationState(conversationId, memorySnapshot.getConversationState());
+                        handler.onComplete(memorySnapshot);
+                    } : null);
+
+            Callable<Void> resumeCallable = () -> {
+                try {
+                    conversation.resume(decision, Map.of());
+                } finally {
+                    storeConversationMemory(memory, environment);
+                }
+                return null;
+            };
+
+            conversationCoordinator.submitInOrder(conversationId, resumeCallable);
+        } catch (ServiceException | InstantiationException | IllegalAccessException e) {
+            setConversationState(conversationId, ConversationState.ERROR);
+            throw new ResourceStoreException("Failed to resume conversation: " + e.getLocalizedMessage(), e);
+        }
+    }
+
+    @Override
+    public ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
+            throws ResourceStoreException, ResourceNotFoundException {
+        var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+        if (snapshot == null) {
+            throw new ResourceNotFoundException("Conversation not found: " + conversationId);
+        }
+        return snapshot;
+    }
+
+    @Override
+    public java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals()
+            throws ResourceStoreException {
+        List<String> ids = conversationMemoryStore.findConversationIdsByState(ConversationState.AWAITING_HUMAN);
+        List<ai.labs.eddi.engine.model.PendingApprovalSummary> summaries = new ArrayList<>();
+        for (String id : ids) {
+            try {
+                var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(id);
+                if (snapshot != null) {
+                    summaries.add(new ai.labs.eddi.engine.model.PendingApprovalSummary(
+                            id, snapshot.getAgentId(), snapshot.getHitlPausedAt(),
+                            snapshot.getHitlPauseReason(), snapshot.getHitlTimeoutPolicy()));
+                }
+            } catch (Exception e) {
+                // skip deleted or inaccessible conversations
+                LOGGER.debugf("Skipping conversation %s while listing pending approvals: %s", id, e.getMessage());
+            }
+        }
+        return summaries;
     }
 }
