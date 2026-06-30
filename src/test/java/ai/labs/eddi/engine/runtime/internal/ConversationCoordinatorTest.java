@@ -33,7 +33,7 @@ class ConversationCoordinatorTest {
     @BeforeEach
     void setUp() {
         runtime = mock(IRuntime.class);
-        coordinator = new InMemoryConversationCoordinator(runtime, new SimpleMeterRegistry(), 10000);
+        coordinator = new InMemoryConversationCoordinator(runtime, new SimpleMeterRegistry(), 10000, 1000);
     }
 
     @Test

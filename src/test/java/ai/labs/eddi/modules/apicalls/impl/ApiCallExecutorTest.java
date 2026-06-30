@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.httpclient.ICompleteListener;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.IRuntime;
@@ -42,6 +43,8 @@ class ApiCallExecutorTest {
     private IWritableConversationStep currentStep;
     private IRequest mockRequest;
     private IResponse mockResponse;
+    private SecretResolver secretResolver;
+    private GlobalVariableResolver globalVariableResolver;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -49,12 +52,12 @@ class ApiCallExecutorTest {
         jsonSerialization = mock(IJsonSerialization.class);
         runtime = mock(IRuntime.class);
         prePostUtils = mock(PrePostUtils.class);
-        SecretResolver secretResolver = mock(SecretResolver.class);
+        secretResolver = mock(SecretResolver.class);
         when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
+        globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
-        executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver);
+        executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver, secretResolver, false);
 
         memory = mock(IConversationMemory.class);
         currentStep = mock(IWritableConversationStep.class);
@@ -464,6 +467,71 @@ class ApiCallExecutorTest {
     }
 
     // ==================== Helpers ====================
+
+    // ==================== SSRF Protection (opt-in) ====================
+
+    @Test
+    void execute_ssrfProtectionEnabled_blocksInternalUrl() {
+        ApiCallExecutor protectedExecutor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
+                secretResolver, true);
+        ApiCall call = createSimpleApiCall("ssrf-call", false);
+        // 169.254.169.254 is a literal IP (no DNS) blocked by UrlValidationUtils.
+        assertThrows(LifecycleException.class, () -> protectedExecutor.execute(call, memory, new HashMap<>(), "http://169.254.169.254"));
+    }
+
+    @Test
+    void execute_ssrfProtectionEnabled_disablesRedirectsOnPublicUrl() throws Exception {
+        ApiCallExecutor protectedExecutor = new ApiCallExecutor(httpClient, jsonSerialization, runtime, prePostUtils, globalVariableResolver,
+                secretResolver, true);
+        ApiCall call = createSimpleApiCall("redir-call", false);
+        setupSuccessResponse(200, "ok", "text/plain");
+        // 1.1.1.1 is a public literal IP — passes validation without a DNS lookup.
+        protectedExecutor.execute(call, memory, new HashMap<>(), "http://1.1.1.1");
+        verify(mockRequest).setFollowRedirects(false);
+    }
+
+    @Test
+    void execute_ssrfProtectionDisabled_allowsInternalUrlAndKeepsRedirects() throws Exception {
+        // Default executor (protection off): no validation, no redirect override.
+        ApiCall call = createSimpleApiCall("internal-call", false);
+        setupSuccessResponse(200, "ok", "text/plain");
+        executor.execute(call, memory, new HashMap<>(), "http://169.254.169.254");
+        verify(mockRequest, never()).setFollowRedirects(anyBoolean());
+    }
+
+    // ==================== Exponential Backoff Curve ====================
+
+    @Test
+    void getDelayInMillis_isExponentialNotLinear() {
+        ApiCall call = callWithBackoff(100);
+        assertEquals(100, ApiCallExecutor.getDelayInMillis(call, true, 1)); // 100 * 2^0
+        assertEquals(200, ApiCallExecutor.getDelayInMillis(call, true, 2)); // 100 * 2^1
+        assertEquals(400, ApiCallExecutor.getDelayInMillis(call, true, 3)); // 100 * 2^2
+        assertEquals(800, ApiCallExecutor.getDelayInMillis(call, true, 4)); // 100 * 2^3
+    }
+
+    @Test
+    void getDelayInMillis_cappedAtCeiling() {
+        ApiCall call = callWithBackoff(100_000);
+        // 100000 * 2^9 = 51,200,000 — capped to the 5-minute ceiling.
+        assertEquals(300_000, ApiCallExecutor.getDelayInMillis(call, true, 10));
+    }
+
+    @Test
+    void getDelayInMillis_noRetry_returnsZeroWithoutPreRequestDelay() {
+        ApiCall call = callWithBackoff(100);
+        assertEquals(0, ApiCallExecutor.getDelayInMillis(call, false, 3));
+    }
+
+    private ApiCall callWithBackoff(int baseDelayMillis) {
+        ApiCall call = createSimpleApiCall("backoff", false);
+        HttpPostResponse postResponse = new HttpPostResponse();
+        RetryApiCallInstruction retry = new RetryApiCallInstruction();
+        retry.setExponentialBackoffDelayInMillis(baseDelayMillis);
+        postResponse.setRetryApiCallInstruction(retry);
+        call.setPostResponse(postResponse);
+        return call;
+    }
 
     private ApiCall createSimpleApiCall(String name, boolean saveResponse) {
         ApiCall call = new ApiCall();

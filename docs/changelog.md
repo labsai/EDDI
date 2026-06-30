@@ -5,6 +5,65 @@
 
 ---
 
+## 🔒 Security & Algorithm Hardening — SSRF/File-Read, Cron, DoS Guards (2026-06-29)
+
+**Repo:** EDDI (`fix/security-and-algo-hardening`)
+**What changed:** Findings from a code/security/algorithm review and bug hunt. Most changes are surgical and behavior-preserving for valid input; the two intentional behavior corrections (cron dom/dow **OR** semantics, **exponential** retry backoff) are called out explicitly below. New SSRF protection is opt-in and **off by default**.
+
+### Security fixes
+
+1. **Local-file read / non-http SSRF in OpenAPI spec discovery (`McpApiToolBuilder.parseSpec`)** — The `GET /apicallstore/apicalls/discover-endpoints?specUrl=…` endpoint (and `create_api_agent`) handed a user-supplied location straight to swagger-parser's `readLocation()`, which fetches URLs **and** reads local files (`file:///etc/passwd`) and resolves external `$ref`s. Now, when the input is a remote location (not inline content), it must be an `http(s)` URL (`UrlValidationUtils.isValidHttpUrl()`) — rejecting `file://` (local-file read), `classpath:`, `jar:`, and other non-http schemes. Inline JSON/YAML still parses with no network/file access. Inline-vs-location detection broadened via new `looksLikeInlineSpec()` (handles `swagger:` and multi-line YAML).
+   - **Scheme-only by design:** private/internal hosts stay allowed so internal OpenAPI discovery keeps working. The endpoint is `eddi-admin`/`eddi-editor` gated, so SSRF to private/metadata IPs via an `http(s)` spec URL is an accepted residual — as is the remote-`$ref` vector (swagger-parser has no clean toggle to disable only remote-ref resolution). Use full `UrlValidationUtils.validateUrl()` here if a deployment needs private-IP blocking.
+2. **Opt-in SSRF protection for agent-driven outbound calls** — New `eddi.security.ssrf-protection.enabled` flag (**default off** to preserve internal-API calls in self-hosted deployments). When on:
+   - `ApiCallExecutor` (httpcalls): the fully-resolved, templated target URL is validated with `UrlValidationUtils.validateUrl()` (blocks private/loopback/link-local/CGNAT/cloud-metadata + non-http), and redirect-following is **disabled** per request (new `IRequest.setFollowRedirects`, honoured by the Vert.x `HttpClientWrapper`) so a `3xx → internal host` can't bypass validation.
+   - `A2AToolProviderManager` (peer Agent-Card fetch + `tasks/send`): both target URLs validated. The JDK client already defaults to `Redirect.NEVER`, so no redirect hop to re-check.
+   - **Scoped out intentionally:** `RemoteApiResourceSource` (admin-initiated import-from-URL) — admin explicitly targets a URL, internal-instance imports are common, and the JDK client is `Redirect.NEVER`. Forcing private-IP blocking there would break legitimate internal imports.
+
+### Algorithm bugs found & fixed
+
+3. **`CronParser` — day-of-week `7` not accepted as Sunday.** Standard cron treats `0` and `7` as Sunday; the parser rejected `7` (range `0–6`) and, even if allowed, `DayOfWeek % 7` never yields `7`, so it would never match. Now `7` is accepted and normalized to `0` (`normalizeDaysOfWeek`).
+4. **`CronParser` — dom/dow used AND instead of standard-cron OR.** When **both** day-of-month and day-of-week are restricted (neither is `*`), Vixie cron fires when **either** matches (e.g. `0 0 13 * FRI` = the 13th *or* any Friday). The parser ANDed them. Now `dayMatches()` applies OR when both fields are restricted, AND otherwise (single-restricted reduces to the restricted field, so existing schedules are unaffected). The smart-skip loop was reworked around `dayMatches`.
+5. **`CronParser` — malformed fields crashed or silently never-fired.** `*/` threw `ArrayIndexOutOfBoundsException` (not a clean validation error); a reversed range like `5-1` produced an empty set → a schedule that never fires until the 2-year scan limit threw a confusing `IllegalStateException`. Both now throw a clear `IllegalArgumentException` at parse time (step structure + `start <= end` checks).
+6. **`ApiCallExecutor` retry backoff was linear, not exponential.** `delay * amountOfExecutions` (linear) despite the `exponentialBackoffDelayInMillis` field name. Now true exponential — `base * 2^(attempt-1)` — with an overflow-safe shift and a 5-minute ceiling (`MAX_BACKOFF_MILLIS`). First retry delay is unchanged (`base`), so the change only affects later retries.
+7. **`CalculatorTool` — unbounded recursion DoS.** The recursive-descent `SafeMathParser` recurses on nested parens; a long/deeply-nested LLM-supplied expression could throw `StackOverflowError` (an `Error`, not caught by `calculate()`). Added a 1000-char input cap plus a defensive `StackOverflowError` catch.
+8. **`InMemoryConversationCoordinator` — unbounded dead-letter deque.** The active-conversation map was capped but `deadLetters` grew without limit under a failure storm. Added a **configurable** cap (`eddi.coordinator.max-dead-letters`, default 1000; `-1` disables, `0` retains none) with oldest-first eviction — consistent with the existing `eddi.coordinator.max-active-conversations` property.
+
+### Files changed
+- `engine/mcp/McpApiToolBuilder.java` — URL validation in `parseSpec`, `looksLikeInlineSpec()`
+- `modules/apicalls/impl/ApiCallExecutor.java` — opt-in SSRF validation + redirect disable; exponential backoff
+- `modules/llm/impl/A2AToolProviderManager.java` — opt-in URL validation on peer fetch/send
+- `engine/httpclient/IRequest.java` + `impl/HttpClientWrapper.java` — `setFollowRedirects` (default no-op; Vert.x honours it)
+- `engine/runtime/internal/CronParser.java` — DOW 7, OR semantics (`dayMatches`), step/range validation
+- `modules/llm/tools/impl/CalculatorTool.java` — length cap + `StackOverflowError` catch
+- `engine/runtime/internal/InMemoryConversationCoordinator.java` — dead-letter cap
+- `resources/application.properties` — documented `eddi.security.ssrf-protection.enabled`
+
+### Tests added
+- `McpApiToolBuilderTest` — +5 (file/classpath/non-http rejection, scheme-gate allows internal hosts, inline works, classifier)
+- `ApiCallExecutorTest` — +6 (SSRF block internal URL, disable redirects on public, protection-off no-op; exponential curve, ceiling cap, no-retry zero)
+- `CronParserTest` — +6 (DOW 7 = Sunday, 0≡7, OR fires on dom and on weekday, single-restricted stays AND, reversed-range + malformed-step rejection)
+- `CalculatorToolTest` — +2 (over-long rejected, deep-nesting returns cleanly)
+- `InMemoryConversationCoordinatorTest` — +2 (dead-letter cap evicts oldest; `-1` disables)
+- `ApiCallExecutor`/`A2AToolProviderManager`/`InMemoryConversationCoordinator` constructor-call sites updated across test files.
+- Mock-based suites green; A2A + embedded-server suites are unrunnable in the sandbox (JDK `HttpClient`/`HttpServer` can't open a selector) but compile and are exercised in CI.
+
+### Review follow-ups (Copilot + CodeRabbit)
+- **`IRequest.setFollowRedirects` fails closed** — made it a non-default (abstract) interface method instead of a no-op default, so any new `IRequest` impl must honour it and cannot silently re-enable the redirect bypass.
+- **Coordinator eviction is O(n), not O(n²)** — compute the dead-letter excess once and evict that many, instead of calling `ConcurrentLinkedDeque.size()` per loop iteration.
+- **Coordinator dead-letter cap hardening** — reject `max-dead-letters < -1` at startup (only `-1`/`0`/positive are valid, so a typo like `-2` can't silently disable trimming), and serialize the add+trim under a small lock so concurrent failures enforce the cap deterministically (the existing `pollFirst` already evicts oldest-first, so the newest failures were never dropped — the lock just removes transient under-retention).
+- **`CronParser` Vixie star semantics** — a day field is "starred" (not restricted, takes the AND path) when it *begins* with `*`, so `*/2` is treated like `*` (was exact `equals("*")`, which wrongly took the OR path).
+- **`CronParser` field-aware parse errors** — `parseIntField()` wraps `NumberFormatException` into an `IllegalArgumentException` carrying the offending field (e.g. `*/abc` → "Invalid number 'abc' in field: …"), instead of leaking a vague low-level message.
+- **`CalculatorTool` guards before logging** — the length check now runs before the eager `LOGGER.debug("… " + expression)` concatenation, so an oversized payload is rejected without building/logging the big string.
+
+### Known residual (accepted, documented)
+- **OpenAPI external `$ref` resolution** (`McpApiToolBuilder`, `setResolve(true)`): the http(s) gate validates the top-level spec location but not external `$ref`s inside the spec, so a crafted spec can still make the parser fetch a remote/file ref. Disabling resolution (`setResolve(false)`) would also break legitimate in-document `#/components` refs that real specs rely on, so resolution is kept on. Mitigated by the `eddi-admin`/`eddi-editor` gate; a constrained ref-resolver is the proper (heavier) fix.
+
+### Not addressed here (architectural — out of scope for a hardening pass)
+- **Open-by-default MCP/admin surface** and **role- vs tenant-based isolation** for config resources.
+- **Conversation-memory 16 MB BSON ceiling** — needs a proper step-archival design, not a quick guard.
+
+---
+
 ## 🔒 PR Review Fixes — DynamicAgentConfig Propagation, Null Safety, Code Dedup (2026-06-26)
 
 **Repo:** EDDI (`feat/group-task-orchestration`)

@@ -43,7 +43,7 @@ class A2AToolProviderManagerDeepBranchTest {
         doReturn("resolved-key").when(globalVariableResolver).resolveValue(anyString());
         doReturn("resolved-key").when(secretResolver).resolveValue(anyString());
 
-        manager = new A2AToolProviderManager(globalVariableResolver, secretResolver);
+        manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false);
 
         // Create a lightweight HTTP server for testing real HTTP calls
         httpServer = HttpServer.create(new InetSocketAddress(0), 0);

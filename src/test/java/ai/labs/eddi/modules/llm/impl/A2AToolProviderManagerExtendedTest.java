@@ -35,7 +35,7 @@ class A2AToolProviderManagerExtendedTest {
         when(secretResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
-        manager = new A2AToolProviderManager(globalVariableResolver, secretResolver);
+        manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false);
     }
 
     // ─── Discovery with unreachable agents ────────────────────────

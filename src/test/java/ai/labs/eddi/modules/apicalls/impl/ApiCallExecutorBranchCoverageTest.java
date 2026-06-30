@@ -69,7 +69,7 @@ class ApiCallExecutorBranchCoverageTest {
     void setUp() throws Exception {
         openMocks(this);
         executor = new ApiCallExecutor(httpClient, jsonSerialization, runtime,
-                prePostUtils, globalVariableResolver, secretResolver);
+                prePostUtils, globalVariableResolver, secretResolver, false);
 
         when(memory.getCurrentStep()).thenReturn(currentStep);
         when(mockRequest.toMap()).thenReturn(new HashMap<>());
