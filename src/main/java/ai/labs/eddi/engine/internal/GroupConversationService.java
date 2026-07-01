@@ -273,6 +273,16 @@ public class GroupConversationService implements IGroupConversationService {
             for (int phaseIdx = startPhaseIndex; phaseIdx < phases.size(); phaseIdx++) {
                 DiscussionPhase phase = phases.get(phaseIdx);
 
+                // NEW-3: Check control token at top of phase loop
+                var token = activeTokens.get(gc.getId());
+                if (token != null && token.shouldStop()) {
+                    gc.setState(GroupConversationState.CANCELLED);
+                    gc.setLastModified(Instant.now());
+                    conversationStore.update(gc);
+                    LOGGER.infof("Group discussion %s cancelled via control token at phase %d", gc.getId(), phaseIdx);
+                    return gc;
+                }
+
                 for (int repeat = 0; repeat < Math.max(phase.repeats(), 1); repeat++) {
 
                     // --- maxTurns safety cap ---
@@ -383,12 +393,14 @@ public class GroupConversationService implements IGroupConversationService {
             throw new GroupDiscussionException("Group discussion failed: " + e.getMessage(), e);
         } finally {
             timerGroupDiscussion.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
-            // Only clean up when the discussion is truly done — not when paused for HITL
+            // NEW-2: Always remove the control token — paused conversations have no
+            // running thread, so a lingering token causes cancel-of-paused to take
+            // the no-op signal branch. Resume re-registers a fresh token.
+            activeTokens.remove(gc.getId());
+            // Only clean up ephemeral agents when the discussion is truly done
             if (gc.getState() != GroupConversationState.AWAITING_APPROVAL) {
                 lastVerifiedIndex.remove(gc.getId());
                 cleanupEphemeralAgents(gc, config);
-                // MAJOR-5: Remove control token when discussion ends
-                activeTokens.remove(gc.getId());
             }
         }
     }
@@ -784,6 +796,11 @@ public class GroupConversationService implements IGroupConversationService {
             return;
         }
 
+        // Resolve HITL TASK-level flag locally (not available from executeDiscussion
+        // scope)
+        boolean taskLevelHitl = config.getHitlConfig() != null
+                && "TASK".equalsIgnoreCase(config.getHitlConfig().getGranularity());
+
         // Note: unlike executeParallelPhase, no transcript snapshot is needed here
         // because agents receive task-specific input via buildTaskExecutionInput(),
         // not transcript context.
@@ -796,6 +813,13 @@ public class GroupConversationService implements IGroupConversationService {
         // Tasks that become executable when their dependencies finish are picked up
         // in the next wave. This handles dependsOn chains across any depth.
         for (int wave = 0; wave < maxWaves; wave++) {
+            // NEW-3: Check control token at top of wave loop
+            var token = activeTokens.get(gc.getId());
+            if (token != null && token.shouldStop()) {
+                LOGGER.infof("EXECUTE wave loop cancelled via control token at wave %d", wave);
+                break;
+            }
+
             Map<String, List<TaskItem>> tasksByAgent = gc.getTaskList().findExecutableTasks().stream()
                     .filter(t -> t.assignedAgentId() != null)
                     .collect(Collectors.groupingBy(TaskItem::assignedAgentId));
@@ -846,9 +870,11 @@ public class GroupConversationService implements IGroupConversationService {
                                 gc.getTranscript().add(entry);
                             }
 
-                            // HITL TASK-level: submit for approval instead of auto-completing
-                            if (config.getHitlConfig() != null
-                                    && "TASK".equalsIgnoreCase(config.getHitlConfig().getGranularity())) {
+                            // HITL TASK-level: submit for approval only when BOTH
+                            // taskLevelHitl AND this phase requires approval. Otherwise
+                            // auto-complete. Without this check, TASK_FORCE phases
+                            // (requiresApproval=false) strand tasks in AWAITING_APPROVAL.
+                            if (taskLevelHitl && phase.requiresApproval()) {
                                 gc.getTaskList().submitForApproval(task.id(), entry.content());
                             } else {
                                 gc.getTaskList().completeTask(task.id(), entry.content());
@@ -883,8 +909,12 @@ public class GroupConversationService implements IGroupConversationService {
             // Wait for this wave — timeout based on max tasks per agent (H2 fix)
             int maxTasksPerAgent = tasksByAgent.values().stream().mapToInt(List::size).max().orElse(1);
             try {
-                CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
-                        .get(timeout * (long) maxTasksPerAgent, TimeUnit.SECONDS);
+                var allOf = CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new));
+                // NEW-3: Register the blocking future so IMMEDIATE cancel can interrupt
+                if (token != null) {
+                    token.setActiveFuture(allOf);
+                }
+                allOf.get(timeout * (long) maxTasksPerAgent, TimeUnit.SECONDS);
             } catch (TimeoutException e) {
                 LOGGER.warnf("Task execution timed out for group %s (wave %d)",
                         LogSanitizer.sanitize(gc.getGroupId()), wave + 1);
@@ -2098,8 +2128,23 @@ public class GroupConversationService implements IGroupConversationService {
             }
         }
 
-        // Apply phase-level decision
+        // AUTO_APPROVE fix: When TASK granularity + APPROVED verdict + no explicit
+        // taskApprovals (e.g., from timeout handler), auto-approve all
+        // AWAITING_APPROVAL
+        // tasks. Without this, resume re-enters the same TASK phase, tasks are still
+        // excluded by findExecutableTasks, and it re-pauses → infinite reschedule loop.
         var decision = request.getDecision();
+        if (decision != null
+                && decision.getVerdict() == ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.APPROVED
+                && request.getTaskApprovals() == null
+                && gc.getTaskList() != null
+                && gc.getHitlPauseType() == GroupConversation.HitlPauseType.TASK) {
+            gc.getTaskList().all().stream()
+                    .filter(t -> t.status() == SharedTaskList.TaskStatus.AWAITING_APPROVAL)
+                    .forEach(t -> gc.getTaskList().approveTask(t.id()));
+        }
+
+        // Apply phase-level decision
         if (decision != null && decision.getVerdict() == ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.REJECTED) {
             gc.setState(GroupConversationState.FAILED);
             gc.setPausedAt(null);

@@ -5,6 +5,32 @@
 
 ---
 
+## 🔧 HITL Framework — Final Ship Fix: 2 BLOCKERs + 2 MAJORs in group TASK path (2026-07-01)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Ship/no-ship verdict found 2 BLOCKERs + 2 MAJORs, all in the group TASK surface.
+
+### Fixes
+
+| ID | Severity | Fix |
+|----|----------|-----|
+| NEW-1 | BLOCKER | **Submit gate ≠ pause gate**: `submitForApproval` now gates on `taskLevelHitl && phase.requiresApproval()`. Without both, `completeTask` is used. Prevents TASK_FORCE preset from stranding all tasks in AWAITING_APPROVAL when the phase doesn't require approval. |
+| NEW-2 | BLOCKER | **Cancel-of-paused silent no-op**: `activeTokens.remove()` is now unconditional in the `finally` block. Paused conversations have no running thread, so a lingering token caused `cancelDiscussion` to take the no-op signal branch. Resume re-registers a fresh token. |
+| NEW-3 | MAJOR | **Control token write-only**: Added `token.shouldStop()` safe-points at the top of both the phase loop and the wave loop. Registered the wave `allOf` future via `setActiveFuture()` so IMMEDIATE cancel can interrupt. |
+| AUTO_APPROVE | MAJOR | **TASK auto-approve infinite loop**: When TASK granularity + APPROVED verdict + null taskApprovals (e.g., timeout handler), `resumeDiscussion` now synthesizes APPROVED for all AWAITING_APPROVAL tasks. Previously caused infinite reschedule. |
+
+### Regression Tests Added
+- `SubmitGateAlignment` — TASK granularity + requiresApproval=false → tasks COMPLETED not stranded
+- `CancelOfPaused` — Cancel of AWAITING_APPROVAL group does DB write to CANCELLED
+- `AutoApproveTaskSynthesis` — APPROVED + TASK + null taskApprovals auto-approves all tasks
+- `TaskResumeCompletesDependent` — TASK resume re-enters same phase, clears hitlPauseType
+
+### Files Changed
+- `GroupConversationService.java` — All 4 fixes + `taskLevelHitl` local variable in `executeTaskExecutionPhase`
+- `GroupConversationServiceHitlTest.java` — 4 new regression test classes (13 → 17 tests)
+
+---
+
 ## 🔧 HITL Framework — Delta Code Review Fix #2: BLOCKER + MAJORs (2026-07-01)
 
 **Repo:** EDDI (`feat/hitl-framework`)

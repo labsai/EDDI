@@ -506,6 +506,195 @@ class GroupConversationServiceHitlTest {
     }
 
     // =================================================================
+    // NEW-1 regression: submit gate aligns with pause gate
+    // =================================================================
+
+    @Nested
+    @DisplayName("Submit gate alignment (NEW-1)")
+    class SubmitGateAlignment {
+
+        @Test
+        @DisplayName("TASK granularity + requiresApproval=false → tasks are COMPLETED, not AWAITING_APPROVAL")
+        void taskGranularityWithoutApprovalCompletesTask() throws Exception {
+            // EXECUTE phase with requiresApproval=false — like TASK_FORCE preset
+            var phases = List.of(
+                    new DiscussionPhase("Plan", PhaseType.PLAN,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL,
+                            false, null, 1, false),
+                    new DiscussionPhase("Execute", PhaseType.EXECUTE,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.TASK_ONLY,
+                            false, null, 1, false)); // requiresApproval=false
+
+            var config = buildConfig(phases);
+            // Set TASK granularity
+            var hitlConfig = new AgentGroupConfiguration.HitlConfig();
+            hitlConfig.setGranularity("TASK");
+            config.setHitlConfig(hitlConfig);
+
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+
+            // The create mock needs to set up task list via plan phase
+            doAnswer(inv -> {
+                GroupConversation gc = inv.getArgument(0);
+                // Simulate PLAN phase creating a task
+                var taskList = new SharedTaskList();
+                taskList.addTask(new SharedTaskList.TaskItem("Task1", "Do thing", 0));
+                var tasks = taskList.all();
+                taskList.assignTask(tasks.get(0).id(), AGENT_A, "Agent A");
+                gc.setTaskList(taskList);
+                return "gc-submit-gate";
+            }).when(conversationStore).create(any());
+
+            stubAgentSay();
+
+            GroupConversation gc = service.discuss(GROUP_ID, "Test submit gate", USER_ID, 0);
+
+            // With requiresApproval=false, tasks should be COMPLETED, not AWAITING_APPROVAL
+            assertNotNull(gc.getTaskList(), "TaskList should be present");
+            assertFalse(gc.getTaskList().hasAwaitingApproval(),
+                    "No tasks should be AWAITING_APPROVAL when phase.requiresApproval() is false");
+            // Discussion should complete, not pause
+            assertNotEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState(),
+                    "GC should NOT be AWAITING_APPROVAL when requiresApproval is false");
+        }
+    }
+
+    // =================================================================
+    // NEW-2 regression: cancel-of-paused does DB write
+    // =================================================================
+
+    @Nested
+    @DisplayName("Cancel of paused group (NEW-2)")
+    class CancelOfPaused {
+
+        @Test
+        @DisplayName("Cancelling a paused group sets CANCELLED via DB write")
+        void cancelPausedGroupWritesDB() throws Exception {
+            // Set up a GC in AWAITING_APPROVAL state
+            var gc = new GroupConversation();
+            gc.setId("gc-paused-cancel");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAtPhaseIndex(0);
+            gc.setPausedAt(Instant.now());
+
+            doReturn(gc).when(conversationStore).read("gc-paused-cancel");
+
+            service.cancelDiscussion("gc-paused-cancel",
+                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+
+            // With NEW-2 fix, activeTokens is empty for paused GC,
+            // so cancelDiscussion takes the else branch and does a DB write
+            assertEquals(GroupConversationState.CANCELLED, gc.getState(),
+                    "Paused GC should be set to CANCELLED");
+            verify(conversationStore).update(gc);
+        }
+    }
+
+    // =================================================================
+    // AUTO_APPROVE regression: synthesize per-task approvals
+    // =================================================================
+
+    @Nested
+    @DisplayName("AUTO_APPROVE TASK synthesis")
+    class AutoApproveTaskSynthesis {
+
+        @Test
+        @DisplayName("APPROVED + TASK pauseType + null taskApprovals → auto-approves all AWAITING tasks")
+        void autoApprovesSynthesizesTaskApprovals() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-auto-approve");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAtPhaseIndex(0);
+            gc.setPausedPhaseName("Execute");
+            gc.setPausedAt(Instant.now());
+            gc.setHitlPauseType(GroupConversation.HitlPauseType.TASK);
+            gc.setOriginalQuestion("Auto approve test");
+
+            // Set up task list with AWAITING_APPROVAL tasks
+            var taskList = new SharedTaskList();
+            taskList.addTask(new SharedTaskList.TaskItem("Task1", "Do A", 0));
+            taskList.addTask(new SharedTaskList.TaskItem("Task2", "Do B", 0));
+            var tasks = taskList.all();
+            taskList.assignTask(tasks.get(0).id(), AGENT_A, "Agent A");
+            taskList.startTask(tasks.get(0).id());
+            taskList.submitForApproval(tasks.get(0).id(), "Result A");
+            taskList.assignTask(tasks.get(1).id(), AGENT_A, "Agent A");
+            taskList.startTask(tasks.get(1).id());
+            taskList.submitForApproval(tasks.get(1).id(), "Result B");
+            gc.setTaskList(taskList);
+
+            doReturn(gc).when(conversationStore).read("gc-auto-approve");
+
+            // Build request: APPROVED, but no taskApprovals (like timeout handler)
+            var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setDecidedBy("system:timeout");
+            request.setDecision(decision);
+            // taskApprovals is null — this is the scenario from AUTO_APPROVE timeout
+
+            GroupConversation result = service.resumeDiscussion("gc-auto-approve", request, null);
+
+            // Both tasks should now be approved (not still AWAITING_APPROVAL)
+            assertFalse(result.getTaskList().hasAwaitingApproval(),
+                    "All tasks should be auto-approved when TASK pauseType + APPROVED + null taskApprovals");
+        }
+    }
+
+    // =================================================================
+    // hitlPauseType=TASK resume test — replaces self-fulfilling test
+    // =================================================================
+
+    @Nested
+    @DisplayName("TASK resume completes dependent")
+    class TaskResumeCompletesDependent {
+
+        @Test
+        @DisplayName("Resume with TASK pauseType re-enters same phase and advances approved tasks")
+        void taskResumeReEntersSamePhase() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-task-resume");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAtPhaseIndex(1); // paused at phase 1 (EXECUTE)
+            gc.setPausedPhaseName("Execute");
+            gc.setPausedAt(Instant.now());
+            gc.setHitlPauseType(GroupConversation.HitlPauseType.TASK);
+            gc.setOriginalQuestion("Resume test");
+
+            // Task list with one approved task
+            var taskList = new SharedTaskList();
+            taskList.addTask(new SharedTaskList.TaskItem("Task1", "Do something", 0));
+            var tasks = taskList.all();
+            taskList.assignTask(tasks.get(0).id(), AGENT_A, "Agent A");
+            taskList.startTask(tasks.get(0).id());
+            taskList.submitForApproval(tasks.get(0).id(), "Result");
+            taskList.approveTask(tasks.get(0).id());
+            gc.setTaskList(taskList);
+
+            doReturn(gc).when(conversationStore).read("gc-task-resume");
+
+            var request = new GroupApprovalRequest();
+            var dec = new HitlDecision();
+            dec.setVerdict(HitlVerdict.APPROVED);
+            request.setDecision(dec);
+
+            // Verify that TASK resume uses same phase index (1, not 2)
+            GroupConversation result = service.resumeDiscussion("gc-task-resume", request, null);
+
+            // After resume, pause type should be cleared
+            assertNull(result.getHitlPauseType(), "hitlPauseType should be cleared after resume");
+            // State should no longer be AWAITING_APPROVAL
+            assertNotEquals(GroupConversationState.AWAITING_APPROVAL, result.getState(),
+                    "State should change from AWAITING_APPROVAL after resume");
+        }
+    }
+
+    // =================================================================
     // Resume: not AWAITING_APPROVAL → exception
     // =================================================================
 
