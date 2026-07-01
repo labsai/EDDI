@@ -27,6 +27,8 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,6 +59,8 @@ class ConversationServiceExtendedTest {
     private AuditLedgerService auditLedgerService;
     private GdprComplianceService gdprComplianceService;
     private TenantQuotaService tenantQuotaService;
+    private IScheduleStore scheduleStore;
+    private IAgentStore agentStore;
     private IUserMemoryStore userMemoryStore;
 
     private static final Environment ENV = Environment.production;
@@ -80,6 +84,8 @@ class ConversationServiceExtendedTest {
         auditLedgerService = mock(AuditLedgerService.class);
         gdprComplianceService = mock(GdprComplianceService.class);
         tenantQuotaService = mock(TenantQuotaService.class);
+        scheduleStore = mock(IScheduleStore.class);
+        agentStore = mock(IAgentStore.class);
         userMemoryStore = mock(IUserMemoryStore.class);
 
         when(tenantQuotaService.acquireConversationSlot()).thenReturn(QuotaCheckResult.OK);
@@ -93,7 +99,8 @@ class ConversationServiceExtendedTest {
         conversationService = new ConversationService(agentFactory, conversationMemoryStore,
                 conversationDescriptorStore, userMemoryStore, conversationCoordinator,
                 conversationSetup, cacheFactory, runtime, contextLogger, auditLedgerService,
-                gdprComplianceService, tenantQuotaService, meterRegistry, AGENT_TIMEOUT);
+                gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
+                meterRegistry, AGENT_TIMEOUT);
     }
 
     @Nested

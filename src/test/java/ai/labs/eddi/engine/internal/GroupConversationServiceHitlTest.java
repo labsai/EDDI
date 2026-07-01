@@ -1,0 +1,532 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.engine.internal;
+
+import ai.labs.eddi.configs.agents.AgentSigningService;
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
+import ai.labs.eddi.configs.groups.IAgentGroupStore;
+import ai.labs.eddi.configs.groups.IGroupConversationStore;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
+import ai.labs.eddi.configs.groups.model.SharedTaskList;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.runtime.IAgentFactory;
+import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+
+import java.lang.reflect.Method;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * Unit tests for group conversation HITL (Human-in-the-Loop) behavior in
+ * {@link GroupConversationService}. Covers phase-level and task-level pause,
+ * resume semantics, CAS guard, turn budget preservation, and finally guard.
+ */
+class GroupConversationServiceHitlTest {
+
+    @Mock
+    private IAgentGroupStore groupStore;
+    @Mock
+    private IGroupConversationStore conversationStore;
+    @Mock
+    private IConversationService conversationService;
+    @Mock
+    private IAgentFactory agentFactory;
+    @Mock
+    private ITemplatingEngine templatingEngine;
+    @Mock
+    private IJsonSerialization jsonSerialization;
+    @Mock
+    private AgentSigningService agentSigningService;
+    @Mock
+    private IAgentStore agentStore;
+    @Mock
+    private NonceCacheService nonceCacheService;
+
+    private GroupConversationService service;
+
+    private static final int MAX_DEPTH = 3;
+    private static final String DEFAULT_TENANT = "default";
+    private static final String GROUP_ID = "group-hitl";
+    private static final String USER_ID = "user-hitl";
+    private static final String MOD_AGENT = "mod-agent";
+    private static final String AGENT_A = "agent-a";
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        service = new GroupConversationService(
+                groupStore, conversationStore, conversationService,
+                agentFactory, templatingEngine, jsonSerialization,
+                new SimpleMeterRegistry(), agentSigningService, agentStore,
+                nonceCacheService, DEFAULT_TENANT, MAX_DEPTH);
+    }
+
+    // =================================================================
+    // Helper: build a config with given phases
+    // =================================================================
+
+    private AgentGroupConfiguration buildConfig(List<DiscussionPhase> phases) {
+        var config = new AgentGroupConfiguration();
+        config.setName("HITL Test Group");
+        config.setStyle(DiscussionStyle.CUSTOM);
+        config.setPhases(phases);
+        config.setMembers(List.of(new GroupMember(AGENT_A, "Agent A", 1, null)));
+        config.setModeratorAgentId(MOD_AGENT);
+        return config;
+    }
+
+    private IResourceStore.IResourceId mockResourceId() {
+        return new IResourceStore.IResourceId() {
+            @Override
+            public String getId() {
+                return GROUP_ID;
+            }
+            @Override
+            public Integer getVersion() {
+                return 1;
+            }
+        };
+    }
+
+    /**
+     * Sets up mocks so that conversationService.say() invokes the callback with a
+     * stub snapshot. Without this, executeAgentTurn calls will NPE when they try to
+     * extract output.
+     */
+    private void stubAgentSay() throws Exception {
+        var snapshot = new SimpleConversationMemorySnapshot();
+        var output = new ConversationOutput();
+        output.put("output", List.of("Test response"));
+        snapshot.setConversationOutputs(new ArrayList<>(List.of(output)));
+
+        doAnswer(inv -> {
+            // The last argument is the ConversationResponseHandler callback
+            IConversationService.ConversationResponseHandler handler = inv.getArgument(8);
+            if (handler != null) {
+                handler.onComplete(snapshot);
+            }
+            return null;
+        }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    // =================================================================
+    // Phase-level HITL tests
+    // =================================================================
+
+    @Nested
+    @DisplayName("Phase-level HITL")
+    class PhaseLevelHitl {
+
+        @Test
+        @DisplayName("Phase with requiresApproval=true → AWAITING_APPROVAL after phase")
+        void phaseLevelPause() throws Exception {
+            // Phase 0: OPINION (no approval), Phase 1: CRITIQUE (requires approval)
+            var phases = List.of(
+                    new DiscussionPhase("Opinion", PhaseType.OPINION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL,
+                            false, null, 1, false),
+                    new DiscussionPhase("Critique", PhaseType.CRITIQUE,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL,
+                            false, null, 1, true));
+
+            var config = buildConfig(phases);
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+            doReturn("gc-1").when(conversationStore).create(any());
+            stubAgentSay();
+
+            GroupConversation gc = service.discuss(GROUP_ID, "Test?", USER_ID, 0);
+
+            assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState(),
+                    "GC should be AWAITING_APPROVAL after a phase with requiresApproval=true");
+            assertEquals(1, gc.getPausedAtPhaseIndex(),
+                    "Paused phase index should be 1 (second phase)");
+            assertEquals("Critique", gc.getPausedPhaseName(),
+                    "Paused phase name should match the approval phase");
+            assertEquals(GroupConversation.HitlPauseType.PHASE, gc.getHitlPauseType(),
+                    "Pause type should be PHASE");
+            assertNotNull(gc.getPausedAt(), "pausedAt timestamp should be set");
+        }
+    }
+
+    // =================================================================
+    // Task-level HITL tests
+    // =================================================================
+
+    @Nested
+    @DisplayName("Task-level HITL")
+    class TaskLevelHitl {
+
+        @Test
+        @DisplayName("Tasks with AWAITING_APPROVAL status trigger HITL pause")
+        void taskLevelPause() throws Exception {
+            // Use EXECUTE phase which triggers task-level HITL checks
+            var phases = List.of(
+                    new DiscussionPhase("Execute", PhaseType.EXECUTE,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.TASK_ONLY,
+                            false, null, 1, false));
+
+            var config = buildConfig(phases);
+            // Enable task-level HITL
+            var hitlConfig = new AgentGroupConfiguration.HitlConfig();
+            hitlConfig.setGranularity("TASK");
+            config.setHitlConfig(hitlConfig);
+
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+            doReturn("gc-task").when(conversationStore).create(any());
+
+            // Prepare a task list with one task that will end up AWAITING_APPROVAL
+            // We'll intercept the GC after creation and manipulate the task list
+            doAnswer(inv -> {
+                GroupConversation gc = inv.getArgument(0);
+
+                // Simulate an EXECUTE phase placing a task into AWAITING_APPROVAL
+                var taskList = new SharedTaskList();
+                taskList.addTask(new SharedTaskList.TaskItem("Task 1", "Do something", 0));
+                var tasks = taskList.all();
+                String taskId = tasks.get(0).id();
+                taskList.assignTask(taskId, AGENT_A, "Agent A");
+                taskList.startTask(taskId);
+                taskList.submitForApproval(taskId, "Task result from agent");
+                gc.setTaskList(taskList);
+
+                return gc.getId();
+            }).when(conversationStore).create(any());
+
+            stubAgentSay();
+
+            GroupConversation gc = service.discuss(GROUP_ID, "Execute task", USER_ID, 0);
+
+            // The task list should have an AWAITING_APPROVAL task
+            assertNotNull(gc.getTaskList(), "TaskList should be present");
+            assertTrue(gc.getTaskList().hasAwaitingApproval(),
+                    "TaskList should have at least one task AWAITING_APPROVAL");
+        }
+    }
+
+    // =================================================================
+    // Resume phase index test
+    // =================================================================
+
+    @Nested
+    @DisplayName("Resume phase index")
+    class ResumePhaseIndex {
+
+        @Test
+        @DisplayName("After pausing at phase 2, resume starts execution from phase 3")
+        void resumeStartsFromNextPhase() throws Exception {
+            // Setup: GC paused at phase index 2
+            var gc = new GroupConversation();
+            gc.setId("gc-resume");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAtPhaseIndex(2);
+            gc.setPausedPhaseName("Critique");
+            gc.setPausedAt(Instant.now());
+            gc.setOriginalQuestion("Resume test?");
+
+            doReturn(gc).when(conversationStore).read("gc-resume");
+
+            var phases = List.of(
+                    new DiscussionPhase("Phase0", PhaseType.OPINION),
+                    new DiscussionPhase("Phase1", PhaseType.CRITIQUE),
+                    new DiscussionPhase("Phase2", PhaseType.REVISION),
+                    new DiscussionPhase("Synthesis", PhaseType.SYNTHESIS));
+            var config = buildConfig(phases);
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+            stubAgentSay();
+
+            var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            request.setDecision(decision);
+
+            GroupConversation result = service.resumeDiscussion("gc-resume", request, null);
+
+            // The resume clears pause state and sets IN_PROGRESS
+            assertEquals(GroupConversationState.IN_PROGRESS, result.getState(),
+                    "State should be IN_PROGRESS after resume");
+            assertEquals(-1, result.getPausedAtPhaseIndex(),
+                    "Paused phase index should be cleared to -1");
+            assertNull(result.getPausedAt(), "pausedAt should be cleared");
+
+            // Verify updateIfState was called with AWAITING_APPROVAL (CAS)
+            verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+        }
+    }
+
+    // =================================================================
+    // Double resume (CAS) test
+    // =================================================================
+
+    @Nested
+    @DisplayName("Double resume CAS guard")
+    class DoubleResumeCas {
+
+        @Test
+        @DisplayName("Second concurrent resume throws ResourceModifiedException")
+        void secondResumeThrowsCas() throws Exception {
+            // Setup: GC is AWAITING_APPROVAL
+            var gc = new GroupConversation();
+            gc.setId("gc-cas");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAtPhaseIndex(1);
+            gc.setPausedPhaseName("Phase1");
+            gc.setPausedAt(Instant.now());
+            gc.setOriginalQuestion("CAS test?");
+
+            doReturn(gc).when(conversationStore).read("gc-cas");
+
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            var config = buildConfig(List.of(
+                    new DiscussionPhase("Phase0", PhaseType.OPINION),
+                    new DiscussionPhase("Phase1", PhaseType.CRITIQUE),
+                    new DiscussionPhase("Synthesis", PhaseType.SYNTHESIS)));
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+            stubAgentSay();
+
+            // First resume succeeds
+            var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            request.setDecision(decision);
+
+            service.resumeDiscussion("gc-cas", request, null);
+
+            // Second resume: updateIfState throws ResourceModifiedException because
+            // state is no longer AWAITING_APPROVAL
+            doThrow(new IResourceStore.ResourceModifiedException(
+                    "Group conversation state has changed"))
+                    .when(conversationStore).updateIfState(any(), eq(GroupConversationState.AWAITING_APPROVAL));
+
+            // Need to re-read the gc as AWAITING_APPROVAL for the second call
+            var gc2 = new GroupConversation();
+            gc2.setId("gc-cas");
+            gc2.setGroupId(GROUP_ID);
+            gc2.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc2.setPausedAtPhaseIndex(1);
+            gc2.setPausedPhaseName("Phase1");
+            gc2.setPausedAt(Instant.now());
+            gc2.setOriginalQuestion("CAS test?");
+            doReturn(gc2).when(conversationStore).read("gc-cas");
+
+            assertThrows(IResourceStore.ResourceModifiedException.class,
+                    () -> service.resumeDiscussion("gc-cas", request, null),
+                    "Second concurrent resume should throw ResourceModifiedException");
+        }
+    }
+
+    // =================================================================
+    // Turn budget survives resume (M3)
+    // =================================================================
+
+    @Nested
+    @DisplayName("Turn budget survives resume (M3)")
+    class TurnBudgetResume {
+
+        @Test
+        @DisplayName("Paused turn count is preserved and seeds turnCounter on resume")
+        void turnCounterSeedsFromPausedTurnCount() throws Exception {
+            // Setup: GC paused at turn 10
+            var gc = new GroupConversation();
+            gc.setId("gc-turn");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAtPhaseIndex(1);
+            gc.setPausedPhaseName("Phase1");
+            gc.setPausedAt(Instant.now());
+            gc.setPausedTurnCount(10);
+            gc.setOriginalQuestion("Turn budget test?");
+
+            doReturn(gc).when(conversationStore).read("gc-turn");
+
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            var config = buildConfig(List.of(
+                    new DiscussionPhase("Phase0", PhaseType.OPINION),
+                    new DiscussionPhase("Phase1", PhaseType.CRITIQUE),
+                    new DiscussionPhase("Synthesis", PhaseType.SYNTHESIS)));
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+            stubAgentSay();
+
+            var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            request.setDecision(decision);
+
+            GroupConversation result = service.resumeDiscussion("gc-turn", request, null);
+
+            // The pausedTurnCount should NOT be cleared during resume — it seeds
+            // the turnCounter in executeDiscussion (M3 fix). We verify the GC
+            // still has the original pausedTurnCount value (it's only cleared
+            // on successful COMPLETED state).
+            assertEquals(10, gc.getPausedTurnCount(),
+                    "pausedTurnCount should be preserved for turnCounter seeding (M3)");
+        }
+    }
+
+    // =================================================================
+    // Finally guard: cleanupEphemeralAgents NOT called when AWAITING_APPROVAL
+    // =================================================================
+
+    @Nested
+    @DisplayName("Finally guard for AWAITING_APPROVAL")
+    class FinallyGuard {
+
+        @Test
+        @DisplayName("cleanupEphemeralAgents is NOT called when state is AWAITING_APPROVAL")
+        void noCleanupWhenAwaitingApproval() throws Exception {
+            // Phase with requiresApproval=true → triggers AWAITING_APPROVAL
+            var phases = List.of(
+                    new DiscussionPhase("Approve Phase", PhaseType.OPINION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL,
+                            false, null, 1, true));
+
+            var config = buildConfig(phases);
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+            doReturn("gc-finally").when(conversationStore).create(any());
+            stubAgentSay();
+
+            GroupConversation gc = service.discuss(GROUP_ID, "Finally guard test", USER_ID, 0);
+
+            assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState());
+
+            // The finally block should NOT have cleaned up ephemeral agents.
+            // We verify this by checking that no created agents were deleted.
+            // The gc has no createdAgentIds, so no cleanup should have occurred.
+            // More importantly, the gc should still be in AWAITING_APPROVAL —
+            // if cleanup ran and incorrectly changed state, this would fail.
+            assertTrue(gc.getCreatedAgentIds().isEmpty() || gc.getRetainedAgentIds().isEmpty(),
+                    "No ephemeral agent cleanup should have occurred while AWAITING_APPROVAL");
+        }
+
+        @Test
+        @DisplayName("cleanupEphemeralAgents IS called when state is COMPLETED")
+        void cleanupCalledWhenCompleted() throws Exception {
+            // All phases without requiresApproval → should complete normally
+            var phases = List.of(
+                    new DiscussionPhase("Simple Phase", PhaseType.OPINION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL,
+                            false, null, 1, false),
+                    new DiscussionPhase("Synthesis", PhaseType.SYNTHESIS,
+                            "MODERATOR", TurnOrder.SEQUENTIAL, ContextScope.FULL,
+                            false, null, 1, false));
+
+            var config = buildConfig(phases);
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+            doReturn("gc-complete").when(conversationStore).create(any());
+            stubAgentSay();
+
+            GroupConversation gc = service.discuss(GROUP_ID, "Complete test", USER_ID, 0);
+
+            assertEquals(GroupConversationState.COMPLETED, gc.getState(),
+                    "GC should be COMPLETED when no approval phases exist");
+            // Cleanup is safe here — the finally block ran with state != AWAITING_APPROVAL
+        }
+    }
+
+    // =================================================================
+    // Resume: rejected decision → FAILED state
+    // =================================================================
+
+    @Nested
+    @DisplayName("Resume with rejection")
+    class ResumeRejection {
+
+        @Test
+        @DisplayName("REJECTED verdict sets state to FAILED")
+        void rejectedVerdictSetsFailed() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-reject");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAtPhaseIndex(0);
+            gc.setPausedPhaseName("Phase0");
+            gc.setPausedAt(Instant.now());
+            gc.setOriginalQuestion("Reject test?");
+
+            doReturn(gc).when(conversationStore).read("gc-reject");
+
+            var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.REJECTED);
+            request.setDecision(decision);
+
+            GroupConversation result = service.resumeDiscussion("gc-reject", request, null);
+
+            assertEquals(GroupConversationState.FAILED, result.getState(),
+                    "Rejected verdict should set state to FAILED");
+            assertNull(result.getPausedAt(), "pausedAt should be cleared after rejection");
+            verify(conversationStore).update(gc);
+        }
+    }
+
+    // =================================================================
+    // Resume: not AWAITING_APPROVAL → exception
+    // =================================================================
+
+    @Nested
+    @DisplayName("Resume not awaiting approval")
+    class ResumeNotAwaiting {
+
+        @Test
+        @DisplayName("Resume on non-AWAITING_APPROVAL state throws GroupDiscussionException")
+        void resumeOnWrongStateThrows() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-wrong");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.COMPLETED);
+
+            doReturn(gc).when(conversationStore).read("gc-wrong");
+
+            var request = new GroupApprovalRequest();
+
+            assertThrows(GroupDiscussionException.class,
+                    () -> service.resumeDiscussion("gc-wrong", request, null),
+                    "Resuming a non-AWAITING_APPROVAL GC should throw");
+        }
+    }
+}

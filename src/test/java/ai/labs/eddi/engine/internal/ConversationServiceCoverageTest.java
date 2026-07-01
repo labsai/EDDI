@@ -29,6 +29,8 @@ import ai.labs.eddi.engine.runtime.IConversationSetup;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -76,6 +78,10 @@ class ConversationServiceCoverageTest {
     @Mock
     private TenantQuotaService tenantQuotaService;
     @Mock
+    private IScheduleStore scheduleStore;
+    @Mock
+    private IAgentStore agentStore;
+    @Mock
     private IUserMemoryStore userMemoryStore;
 
     private static final Environment ENV = Environment.production;
@@ -101,7 +107,7 @@ class ConversationServiceCoverageTest {
                 conversationMemoryStore, conversationDescriptorStore,
                 userMemoryStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService,
-                gdprComplianceService, tenantQuotaService,
+                gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
                 new SimpleMeterRegistry(), AGENT_TIMEOUT);
     }
 
