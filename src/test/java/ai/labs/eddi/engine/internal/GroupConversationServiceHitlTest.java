@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -90,7 +91,7 @@ class GroupConversationServiceHitlTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), agentSigningService, agentStore,
-                nonceCacheService, DEFAULT_TENANT, MAX_DEPTH);
+                mock(IScheduleStore.class), nonceCacheService, DEFAULT_TENANT, MAX_DEPTH);
     }
 
     // =================================================================
@@ -225,7 +226,7 @@ class GroupConversationServiceHitlTest {
                 taskList.submitForApproval(taskId, "Task result from agent");
                 gc.setTaskList(taskList);
 
-                return gc.getId();
+                return "gc-task";
             }).when(conversationStore).create(any());
 
             stubAgentSay();
@@ -500,7 +501,7 @@ class GroupConversationServiceHitlTest {
             assertEquals(GroupConversationState.FAILED, result.getState(),
                     "Rejected verdict should set state to FAILED");
             assertNull(result.getPausedAt(), "pausedAt should be cleared after rejection");
-            verify(conversationStore).update(gc);
+            verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
         }
     }
 

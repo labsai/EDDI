@@ -47,6 +47,14 @@ public class OwnershipValidator {
     }
 
     /**
+     * Returns whether the caller holds the admin role. Always returns {@code true}
+     * when authorization is disabled (all callers are effectively admin).
+     */
+    public boolean isAdmin(SecurityIdentity identity) {
+        return !authEnabled || identity.hasRole("eddi-admin");
+    }
+
+    /**
      * Asserts that the caller matches the requested {@code userId} or holds the
      * {@code eddi-admin} role.
      *
@@ -159,5 +167,26 @@ public class OwnershipValidator {
                     sanitize(resourceOwnerId));
             throw new ForbiddenException("Access denied: you do not own this " + resourceType);
         }
+    }
+
+    /**
+     * Strict variant of {@link #requireOwnerOrAdmin} that denies access when the
+     * resource has no owner. Use for state-changing operations (approve, cancel,
+     * reject) where fail-closed is safer than allowing anyone to modify unowned
+     * resources.
+     */
+    public void requireOwnerOrAdminStrict(SecurityIdentity identity, String resourceOwnerId, String resourceType) {
+        if (!authEnabled) {
+            return;
+        }
+        if (resourceOwnerId == null || resourceOwnerId.isBlank()) {
+            // MINOR-2: Fail-closed for state-changing ops on unowned resources
+            if (identity != null && identity.hasRole("eddi-admin")) {
+                return; // Admin can still act on unowned resources
+            }
+            LOGGER.warnf("Ownership check failed: %s has no owner — denying access for state-changing operation", resourceType);
+            throw new ForbiddenException("Access denied: " + resourceType + " has no owner");
+        }
+        requireOwnerOrAdmin(identity, resourceOwnerId, resourceType);
     }
 }

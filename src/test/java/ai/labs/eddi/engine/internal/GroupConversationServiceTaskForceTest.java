@@ -85,7 +85,7 @@ class GroupConversationServiceTaskForceTest {
         service = new GroupConversationService(
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
-                new SimpleMeterRegistry(), null, null, null, "default", 3);
+                new SimpleMeterRegistry(), null, null, null, null, "default", 3);
     }
 
     // =================================================================

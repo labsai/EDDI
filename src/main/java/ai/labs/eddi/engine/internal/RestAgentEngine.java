@@ -296,7 +296,28 @@ public class RestAgentEngine implements IRestAgentEngine {
     @Override
     public List<PendingApprovalSummary> listPendingApprovals() {
         try {
-            return conversationService.listPendingApprovals();
+            var all = conversationService.listPendingApprovals();
+
+            // MAJOR-6: Admin sees all; non-admin sees only their own conversations
+            if (ownershipValidator.isAdmin(identity)) {
+                return all;
+            }
+
+            String callerId = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
+            if (callerId == null || callerId.isBlank()) {
+                return List.of(); // Fail-closed: anonymous user sees nothing
+            }
+
+            return all.stream().filter(summary -> {
+                try {
+                    var descriptor = conversationDescriptorStore.readDescriptor(
+                            summary.getConversationId(), 0);
+                    return callerId.equals(descriptor.getUserId());
+                } catch (Exception e) {
+                    // Fail-closed: can't verify ownership → exclude
+                    return false;
+                }
+            }).toList();
         } catch (ResourceStoreException e) {
             throw new InternalServerErrorException(e.getMessage(), e);
         }

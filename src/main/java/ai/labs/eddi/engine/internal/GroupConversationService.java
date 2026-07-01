@@ -49,6 +49,8 @@ import io.micrometer.core.instrument.Timer;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -88,6 +90,7 @@ public class GroupConversationService implements IGroupConversationService {
     private final ExecutorService executorService;
     private final AgentSigningService agentSigningService;
     private final IAgentStore agentStore;
+    private final IScheduleStore scheduleStore;
     private final NonceCacheService nonceCacheService;
     private final String defaultTenantId;
 
@@ -104,7 +107,7 @@ public class GroupConversationService implements IGroupConversationService {
     @Inject
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
             IAgentFactory agentFactory, ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, MeterRegistry meterRegistry,
-            AgentSigningService agentSigningService, IAgentStore agentStore,
+            AgentSigningService agentSigningService, IAgentStore agentStore, IScheduleStore scheduleStore,
             NonceCacheService nonceCacheService,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.groups.max-depth", defaultValue = "3") int maxDepth) {
@@ -117,6 +120,7 @@ public class GroupConversationService implements IGroupConversationService {
         this.maxDepth = maxDepth;
         this.agentSigningService = agentSigningService;
         this.agentStore = agentStore;
+        this.scheduleStore = scheduleStore;
         this.nonceCacheService = nonceCacheService;
         this.defaultTenantId = defaultTenantId;
         // Virtual threads — lightweight, no pool sizing, ideal for parallel agent calls
@@ -231,7 +235,10 @@ public class GroupConversationService implements IGroupConversationService {
             throws GroupDiscussionException, IResourceStore.ResourceStoreException {
 
         long startTime = System.nanoTime();
-        counterGroupDiscussion.increment();
+        // MINOR-1: Only count/fire GROUP_START on fresh discussion, not resume
+        if (startPhaseIndex == 0) {
+            counterGroupDiscussion.increment();
+        }
 
         ProtocolConfig protocol = resolveProtocol(config);
         int maxTurns = protocol.maxTurns() > 0 ? protocol.maxTurns() : 50;
@@ -251,7 +258,11 @@ public class GroupConversationService implements IGroupConversationService {
         boolean taskLevelHitl = config.getHitlConfig() != null
                 && "TASK".equalsIgnoreCase(config.getHitlConfig().getGranularity());
 
-        if (listener != null) {
+        // MAJOR-5: Register control token so cancelDiscussion can signal in-flight
+        activeTokens.put(gc.getId(), new DiscussionControlToken());
+
+        // MINOR-1: Only fire GROUP_START on fresh discussion, not resume
+        if (startPhaseIndex == 0 && listener != null) {
             listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(gc.getId(), gc.getGroupId(), question,
                     config.getStyle() != null ? config.getStyle().name() : "ROUND_TABLE", phases.size(),
                     config.getMembers().stream().map(GroupMember::agentId).toList()));
@@ -314,18 +325,22 @@ public class GroupConversationService implements IGroupConversationService {
                     }
                 }
 
-                // --- HITL PHASE-level pause: after phase completes, check if human approval is
-                // needed ---
+                // --- HITL gates: PHASE and TASK are mutually exclusive ---
+                // MAJOR-1: Only check phase.requiresApproval() for the relevant granularity.
+                // TASK-level: gate on requiresApproval() AND taskLevelHitl AND tasks awaiting.
+                // PHASE-level: gate on requiresApproval() AND NOT taskLevelHitl.
                 if (phase.requiresApproval()) {
-                    commitPause(gc, phaseIdx, phase, "PHASE", turnCounter.get(), listener);
-                    return gc;
-                }
-
-                // --- HITL TASK-level pause: after task execution, check if any tasks await
-                // approval ---
-                if (taskLevelHitl && gc.getTaskList() != null && gc.getTaskList().hasAwaitingApproval()) {
-                    commitPause(gc, phaseIdx, phase, "TASK", turnCounter.get(), listener);
-                    return gc;
+                    if (taskLevelHitl) {
+                        // TASK granularity: pause only if tasks actually await approval
+                        if (gc.getTaskList() != null && gc.getTaskList().hasAwaitingApproval()) {
+                            commitPause(gc, phaseIdx, phase, "TASK", turnCounter.get(), listener);
+                            return gc;
+                        }
+                    } else {
+                        // PHASE granularity: pause after entire phase completes
+                        commitPause(gc, phaseIdx, phase, "PHASE", turnCounter.get(), listener);
+                        return gc;
+                    }
                 }
 
                 // Check again after inner repeat loop in case maxTurns was hit mid-repeat
@@ -372,6 +387,8 @@ public class GroupConversationService implements IGroupConversationService {
             if (gc.getState() != GroupConversationState.AWAITING_APPROVAL) {
                 lastVerifiedIndex.remove(gc.getId());
                 cleanupEphemeralAgents(gc, config);
+                // MAJOR-5: Remove control token when discussion ends
+                activeTokens.remove(gc.getId());
             }
         }
     }
@@ -393,9 +410,57 @@ public class GroupConversationService implements IGroupConversationService {
         gc.setHitlPauseType(GroupConversation.HitlPauseType.valueOf(granularity));
         conversationStore.update(gc);
 
+        // MAJOR-2: Schedule group timeout if configured
+        scheduleGroupHitlTimeout(gc);
+
         if (listener != null) {
             listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(
                     phaseIdx, phase.name(), "Requires human approval (" + granularity + ")", granularity));
+        }
+    }
+
+    /**
+     * Creates a one-shot schedule for group HITL timeout. Reads the group config's
+     * approvalTimeout + timeoutPolicy. No-ops if not configured or
+     * WAIT_INDEFINITELY.
+     */
+    private void scheduleGroupHitlTimeout(GroupConversation gc) {
+        try {
+            IResourceStore.IResourceId currentId = groupStore.getCurrentResourceId(gc.getGroupId());
+            if (currentId == null)
+                return;
+            var groupConfig = groupStore.read(gc.getGroupId(), currentId.getVersion());
+            var hitlConfig = groupConfig.getHitlConfig();
+            if (hitlConfig == null)
+                return;
+
+            String timeoutStr = hitlConfig.getApprovalTimeout();
+            String policy = hitlConfig.getTimeoutPolicy();
+            if (timeoutStr == null || timeoutStr.isBlank()
+                    || "WAIT_INDEFINITELY".equalsIgnoreCase(policy)) {
+                return;
+            }
+
+            java.time.Duration timeout = java.time.Duration.parse(timeoutStr);
+            Instant fireAt = Instant.now().plus(timeout);
+
+            var schedule = new ScheduleConfiguration();
+            schedule.setName("hitl-timeout-group-" + gc.getId());
+            schedule.setEnabled(true);
+            schedule.setOneTimeAt(fireAt.toString());
+            schedule.setNextFire(fireAt);
+            schedule.setCreatedAt(Instant.now());
+            schedule.setMetadata(java.util.Map.of(
+                    "hitlType", "hitl_timeout",
+                    "policy", policy != null ? policy : "WAIT_INDEFINITELY",
+                    "surface", "group",
+                    "conversationId", gc.getId()));
+            scheduleStore.createSchedule(schedule);
+            LOGGER.infof("Scheduled group HITL timeout for %s at %s (policy: %s)",
+                    gc.getId(), fireAt, policy);
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to schedule group HITL timeout for %s: %s",
+                    gc.getId(), e.getMessage());
         }
     }
 
@@ -1985,6 +2050,9 @@ public class GroupConversationService implements IGroupConversationService {
 
     @Override
     public void cancelDiscussion(String conversationId, ControlSignal mode) {
+        // MAJOR-3: Delete stale HITL timeout schedule
+        deleteGroupHitlTimeoutSchedule(conversationId);
+
         var token = activeTokens.get(conversationId);
         if (token != null) {
             if (mode == ControlSignal.CANCEL_IMMEDIATE) {
@@ -2016,6 +2084,9 @@ public class GroupConversationService implements IGroupConversationService {
             throw new GroupDiscussionException("Group conversation is not awaiting approval");
         }
 
+        // MAJOR-3: Delete stale HITL timeout schedule before resume
+        deleteGroupHitlTimeoutSchedule(groupConversationId);
+
         // Apply task-level approvals if present
         if (request.getTaskApprovals() != null && gc.getTaskList() != null) {
             for (var entry : request.getTaskApprovals().entrySet()) {
@@ -2032,12 +2103,17 @@ public class GroupConversationService implements IGroupConversationService {
         if (decision != null && decision.getVerdict() == ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.REJECTED) {
             gc.setState(GroupConversationState.FAILED);
             gc.setPausedAt(null);
-            conversationStore.update(gc);
+            // MAJOR-4: Use CAS to prevent concurrent approve clobbering reject
+            conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
             return gc;
         }
 
-        // Save resume point before clearing
+        // Save resume point and pause type before clearing
         int resumePhaseIndex = gc.getPausedAtPhaseIndex();
+        // BLOCKER: read hitlPauseType — TASK pauses mid-phase, so we must re-enter
+        // at the SAME phase (findExecutableTasks is idempotent for approved tasks).
+        // PHASE pauses after the phase completes, so resume at +1.
+        var pauseType = gc.getHitlPauseType();
 
         // Clear pause state but preserve pausedTurnCount — it seeds turnCounter on
         // resume (M3)
@@ -2052,8 +2128,11 @@ public class GroupConversationService implements IGroupConversationService {
         // Resume execution in background thread
         var groupId = gc.getGroupId();
         var question = gc.getOriginalQuestion();
-        // +1: the paused phase already completed; resume from the next one
-        int startFromPhase = resumePhaseIndex + 1;
+        // BLOCKER fix: TASK pauses mid-phase → re-enter at same phase (idempotent).
+        // PHASE pauses after phase completes → resume at +1.
+        int startFromPhase = (pauseType == GroupConversation.HitlPauseType.TASK)
+                ? resumePhaseIndex
+                : resumePhaseIndex + 1;
         executorService.submit(() -> {
             try {
                 IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(groupId);
@@ -2075,5 +2154,21 @@ public class GroupConversationService implements IGroupConversationService {
         });
 
         return gc;
+    }
+
+    /**
+     * Deletes any existing HITL timeout schedule for the given group conversation.
+     * Called on resume and cancel to prevent stale fires.
+     */
+    private void deleteGroupHitlTimeoutSchedule(String groupConversationId) {
+        try {
+            int deleted = scheduleStore.deleteSchedulesByName("hitl-timeout-group-" + groupConversationId);
+            if (deleted > 0) {
+                LOGGER.infof("Cleaned up %d group HITL timeout schedule(s) for %s", deleted, groupConversationId);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to delete group HITL timeout schedule for %s: %s",
+                    groupConversationId, e.getMessage());
+        }
     }
 }

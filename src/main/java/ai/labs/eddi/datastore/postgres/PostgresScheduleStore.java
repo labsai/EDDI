@@ -275,6 +275,22 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public int deleteSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("DELETE FROM eddi_schedules WHERE name = ?")) {
+            ps.setString(1, name);
+            int count = ps.executeUpdate();
+            if (count > 0) {
+                LOGGER.infof("Deleted %d HITL timeout schedule(s) with name '%s'", count, name);
+            }
+            return count;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to delete schedules by name: " + name, e);
+        }
+    }
+
+    @Override
     public List<ScheduleConfiguration> readAllSchedules(int limit) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection();

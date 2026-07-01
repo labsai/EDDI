@@ -53,6 +53,14 @@ public interface IScheduleStore {
      */
     int deleteSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException;
 
+    /**
+     * Delete all schedules with the given name. Used to clean up HITL timeout
+     * schedules when a conversation is resumed or cancelled.
+     *
+     * @return number of deleted schedules
+     */
+    int deleteSchedulesByName(String name) throws IResourceStore.ResourceStoreException;
+
     List<ScheduleConfiguration> readAllSchedules(int limit) throws IResourceStore.ResourceStoreException;
 
     List<ScheduleConfiguration> readSchedulesByAgentId(String agentId) throws IResourceStore.ResourceStoreException;

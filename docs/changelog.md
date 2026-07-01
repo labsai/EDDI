@@ -5,6 +5,37 @@
 
 ---
 
+## 🔧 HITL Framework — Delta Code Review Fix #2: BLOCKER + MAJORs (2026-07-01)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Delta code review identified 1 BLOCKER + 7 MAJORs + 2 MINORs in group TASK surface.
+
+### Fixes
+
+| ID | Severity | Fix |
+|----|----------|-----|
+| BLOCKER | BLOCKER | **TASK resume index**: `resumeDiscussion` now reads `hitlPauseType` before clearing. TASK resumes at same phase (re-entry idempotent via findExecutableTasks); PHASE resumes at +1. |
+| MAJOR-1 | MAJOR | **Mutual exclusion of PHASE/TASK gates**: TASK gate fires only when `phase.requiresApproval() AND taskLevelHitl AND hasAwaitingApproval()`. PHASE gate fires only when `NOT taskLevelHitl`. Eliminates double-pause. |
+| MAJOR-2 | MAJOR | **Group timeout scheduling**: `commitPause` now creates a one-shot `IScheduleStore` schedule for group HITL timeouts (reads `approvalTimeout` + `timeoutPolicy` from group config). |
+| MAJOR-3 | MAJOR | **Schedule deletion on resume/cancel**: Added `IScheduleStore.deleteSchedulesByName()` (MongoDB + PostgreSQL). Called in `ConversationService.resumeConversation`, `cancelConversation`, `GroupConversationService.resumeDiscussion`, and `cancelDiscussion`. |
+| MAJOR-4 | MAJOR | **REJECTED branch CAS**: Rejection now uses `updateIfState(gc, AWAITING_APPROVAL)` instead of plain `update(gc)` to prevent concurrent approve clobbering reject. |
+| MAJOR-5 | MAJOR | **activeTokens lifecycle**: `executeDiscussion` now registers control token at start (`activeTokens.put`) and removes it in `finally` block when discussion truly ends (not paused). |
+| MAJOR-6 | MAJOR | **listPendingApprovals ownership filter**: `RestAgentEngine.listPendingApprovals()` now filters by caller identity. Admin sees all; non-admin sees only their conversations. Added `OwnershipValidator.isAdmin()`. |
+| MINOR-1 | MINOR | **Metrics/events guard**: `counterGroupDiscussion.increment()` and `onGroupStart` only fire when `startPhaseIndex == 0` (fresh discussion, not resume). |
+| MINOR-2 | MINOR | **Fail-closed on null owner**: Added `OwnershipValidator.requireOwnerOrAdminStrict()` for state-changing ops where null-owner resources should deny access (admin exempted). |
+
+### Files Changed
+- `GroupConversationService.java` — BLOCKER, MAJOR-1/2/3/4/5, MINOR-1 fixes
+- `ConversationService.java` — MAJOR-3 schedule deletion on resume/cancel
+- `RestAgentEngine.java` — MAJOR-6 ownership filtering
+- `IScheduleStore.java` — MAJOR-3 new `deleteSchedulesByName` API
+- `MongoScheduleStore.java` — MAJOR-3 MongoDB implementation
+- `PostgresScheduleStore.java` — MAJOR-3 PostgreSQL implementation
+- `OwnershipValidator.java` — MAJOR-6 `isAdmin()`, MINOR-2 `requireOwnerOrAdminStrict()`
+- 6 test files — Constructor updated for new `IScheduleStore` param + test fixes
+
+---
+
 ## 🔁 HITL Framework — Human-in-the-Loop Pause/Resume for Conversations & Group Discussions (2026-06-30)
 
 **Repo:** EDDI (`feat/hitl-framework`)

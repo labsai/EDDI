@@ -212,6 +212,20 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public int deleteSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
+        try {
+            var result = scheduleCollection.deleteMany(eq("name", name));
+            int count = (int) result.getDeletedCount();
+            if (count > 0) {
+                LOGGER.infof("Deleted %d HITL timeout schedule(s) with name '%s'", count, name);
+            }
+            return count;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to delete schedules by name: " + name, e);
+        }
+    }
+
+    @Override
     public List<ScheduleConfiguration> readAllSchedules(int limit) throws IResourceStore.ResourceStoreException {
         // Fix #12: bounded result set
         return readSchedulesWithFilter(new Document(), limit);

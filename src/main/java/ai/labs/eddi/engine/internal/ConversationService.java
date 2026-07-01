@@ -825,6 +825,9 @@ public class ConversationService implements IConversationService {
     public void cancelConversation(String conversationId,
                                    ai.labs.eddi.engine.lifecycle.model.ControlSignal mode) {
         try {
+            // MAJOR-3: Delete stale HITL timeout schedule before cancel
+            deleteHitlTimeoutSchedule(conversationId);
+
             boolean changed = conversationMemoryStore.compareAndSetState(conversationId,
                     ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
             if (!changed) {
@@ -849,6 +852,8 @@ public class ConversationService implements IConversationService {
             throw new ResourceStoreException(
                     "Conversation is not in AWAITING_HUMAN state (possible concurrent resume)");
         }
+        // MAJOR-3: Delete stale HITL timeout schedule before resume
+        deleteHitlTimeoutSchedule(conversationId);
         cacheConversationState(conversationId, ConversationState.IN_PROGRESS);
 
         var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
@@ -971,6 +976,22 @@ public class ConversationService implements IConversationService {
                     conversationId, fireAt, policy);
         } catch (Exception e) {
             LOGGER.warnf("Failed to schedule HITL timeout for conversation %s: %s",
+                    conversationId, e.getMessage());
+        }
+    }
+
+    /**
+     * Deletes any existing HITL timeout schedule for the given conversation. Called
+     * on resume and cancel to prevent stale fires and duplicate schedules.
+     */
+    private void deleteHitlTimeoutSchedule(String conversationId) {
+        try {
+            int deleted = scheduleStore.deleteSchedulesByName("hitl-timeout-" + conversationId);
+            if (deleted > 0) {
+                LOGGER.infof("Cleaned up %d HITL timeout schedule(s) for conversation %s", deleted, conversationId);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to delete HITL timeout schedule for conversation %s: %s",
                     conversationId, e.getMessage());
         }
     }
