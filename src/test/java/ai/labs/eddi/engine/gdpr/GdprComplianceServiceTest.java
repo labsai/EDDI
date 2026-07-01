@@ -151,6 +151,70 @@ class GdprComplianceServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void deleteUserData_deletesAttachmentsWhenStorageAvailable() throws Exception {
+        // Given — attachment storage is resolvable
+        Instance<IAttachmentStorage> attachInstance = mock(Instance.class);
+        when(attachInstance.isResolvable()).thenReturn(true);
+        var attachmentStorage = mock(IAttachmentStorage.class);
+        when(attachInstance.get()).thenReturn(attachmentStorage);
+        when(attachmentStorage.deleteByConversation("conv-1")).thenReturn(2L);
+        when(attachmentStorage.deleteByConversation("conv-2")).thenReturn(3L);
+
+        var serviceWithAttachments = new GdprComplianceService(
+                userMemoryStore, conversationMemoryStore,
+                userConversationStore, databaseLogs, auditStore,
+                auditLedgerService, attachInstance);
+
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenReturn(List.of("conv-1", "conv-2"));
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID))
+                .thenReturn(2L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        // When
+        serviceWithAttachments.deleteUserData(USER_ID);
+
+        // Then
+        verify(attachmentStorage).deleteByConversation("conv-1");
+        verify(attachmentStorage).deleteByConversation("conv-2");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void deleteUserData_handlesAttachmentFailureGracefully() throws Exception {
+        // Given — attachment storage throws
+        Instance<IAttachmentStorage> attachInstance = mock(Instance.class);
+        when(attachInstance.isResolvable()).thenReturn(true);
+        var attachmentStorage = mock(IAttachmentStorage.class);
+        when(attachInstance.get()).thenReturn(attachmentStorage);
+
+        var serviceWithAttachments = new GdprComplianceService(
+                userMemoryStore, conversationMemoryStore,
+                userConversationStore, databaseLogs, auditStore,
+                auditLedgerService, attachInstance);
+
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenThrow(new RuntimeException("Attachment storage error"));
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID))
+                .thenReturn(0L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        // When — should not throw
+        GdprDeletionResult result = serviceWithAttachments.deleteUserData(USER_ID);
+
+        // Then — cascade continues
+        assertNotNull(result);
+        verify(conversationMemoryStore).deleteConversationsByUserId(USER_ID);
+    }
+
+    @Test
     void exportUserData_aggregatesAllStores() throws Exception {
         // Given
         var memory1 = mock(UserMemoryEntry.class);
@@ -207,6 +271,70 @@ class GdprComplianceServiceTest {
         assertTrue(export.conversations().isEmpty());
         assertTrue(export.managedConversations().isEmpty());
         assertTrue(export.auditEntries().isEmpty());
+    }
+
+    @Test
+    void exportUserData_skipsFailedSnapshotLoads() throws Exception {
+        // Given — one snapshot loads fine, the other fails
+        when(userMemoryStore.getAllEntries(USER_ID)).thenReturn(List.of());
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenReturn(List.of("conv-ok", "conv-fail"));
+
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setAgentId("agent-1");
+        snapshot.setAgentVersion(1);
+        snapshot.setConversationState(ConversationState.READY);
+        when(conversationMemoryStore.loadConversationMemorySnapshot("conv-ok"))
+                .thenReturn(snapshot);
+        when(conversationMemoryStore.loadConversationMemorySnapshot("conv-fail"))
+                .thenThrow(new RuntimeException("Corrupt snapshot"));
+
+        when(userConversationStore.getAllForUser(USER_ID)).thenReturn(List.of());
+        when(auditStore.getEntriesByUserId(eq(USER_ID), anyInt(), anyInt()))
+                .thenReturn(List.of());
+
+        // When
+        UserDataExport export = service.exportUserData(USER_ID);
+
+        // Then — only the successful one is included
+        assertEquals(1, export.conversations().size());
+        assertEquals("conv-ok", export.conversations().getFirst().conversationId());
+    }
+
+    @Test
+    void exportUserData_handlesMemoryStoreFailure() throws Exception {
+        // Given — memory store throws
+        when(userMemoryStore.getAllEntries(USER_ID))
+                .thenThrow(new RuntimeException("Memory store unavailable"));
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenReturn(List.of());
+        when(userConversationStore.getAllForUser(USER_ID)).thenReturn(List.of());
+        when(auditStore.getEntriesByUserId(eq(USER_ID), anyInt(), anyInt()))
+                .thenReturn(List.of());
+
+        // When — should not throw
+        UserDataExport export = service.exportUserData(USER_ID);
+
+        // Then — memories empty but export still succeeds
+        assertTrue(export.memories().isEmpty());
+    }
+
+    @Test
+    void exportUserData_handlesManagedConversationFailure() throws Exception {
+        // Given
+        when(userMemoryStore.getAllEntries(USER_ID)).thenReturn(List.of());
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenReturn(List.of());
+        when(userConversationStore.getAllForUser(USER_ID))
+                .thenThrow(new RuntimeException("Store unavailable"));
+        when(auditStore.getEntriesByUserId(eq(USER_ID), anyInt(), anyInt()))
+                .thenReturn(List.of());
+
+        // When
+        UserDataExport export = service.exportUserData(USER_ID);
+
+        // Then
+        assertTrue(export.managedConversations().isEmpty());
     }
 
     // ==================== Audit entries in export ====================
@@ -284,6 +412,16 @@ class GdprComplianceServiceTest {
     }
 
     @Test
+    void restrictProcessing_throwsRuntimeExceptionOnFailure() throws Exception {
+        // Given — upsert fails
+        doThrow(new RuntimeException("DB error")).when(userMemoryStore).upsert(any());
+
+        // When/Then — should propagate as RuntimeException
+        assertThrows(RuntimeException.class,
+                () -> service.restrictProcessing(USER_ID));
+    }
+
+    @Test
     void unrestrictProcessing_deletesRestrictionFlag() throws Exception {
         // Given — restriction exists
         var entry = new UserMemoryEntry(
@@ -312,6 +450,17 @@ class GdprComplianceServiceTest {
 
         // Then — deleteEntry should NOT be called
         verify(userMemoryStore, never()).deleteEntry(any());
+    }
+
+    @Test
+    void unrestrictProcessing_throwsRuntimeExceptionOnFailure() throws Exception {
+        // Given — getByKey fails
+        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
+                .thenThrow(new RuntimeException("DB error"));
+
+        // When/Then
+        assertThrows(RuntimeException.class,
+                () -> service.unrestrictProcessing(USER_ID));
     }
 
     @Test
@@ -362,5 +511,156 @@ class GdprComplianceServiceTest {
 
         // When/Then — should return true (fail-closed) for safety
         assertTrue(service.isProcessingRestricted(USER_ID));
+    }
+
+    @Test
+    void isProcessingRestricted_returnsFalseWhenValueIsNotTrue() throws Exception {
+        // Given — value is "false" not "true"
+        var entry = new UserMemoryEntry(
+                "entry-id", USER_ID, "_gdpr_processing_restricted", "false",
+                "gdpr", ai.labs.eddi.configs.properties.model.Property.Visibility.global,
+                null, List.of(), null, false, 0,
+                java.time.Instant.now(), java.time.Instant.now());
+        when(userMemoryStore.getByKey(USER_ID, "_gdpr_processing_restricted"))
+                .thenReturn(Optional.of(entry));
+
+        // When/Then
+        assertFalse(service.isProcessingRestricted(USER_ID));
+    }
+
+    @Test
+    void deleteUserData_continuesWhenConversationDeleteFails() throws Exception {
+        // Given
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID))
+                .thenThrow(new RuntimeException("Conversation store unavailable"));
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        // When
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        // Then — conversations count is 0, but cascade continued
+        assertEquals(0, result.conversationsDeleted());
+        verify(userConversationStore).deleteAllForUser(USER_ID);
+    }
+
+    @Test
+    void deleteUserData_continuesWhenMappingDeleteFails() throws Exception {
+        // Given
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(0L);
+        when(userConversationStore.deleteAllForUser(USER_ID))
+                .thenThrow(new RuntimeException("Mapping store unavailable"));
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        // When
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        // Then
+        assertEquals(0, result.conversationMappingsDeleted());
+        verify(databaseLogs).pseudonymizeByUserId(eq(USER_ID), anyString());
+    }
+
+    @Test
+    void deleteUserData_continuesWhenLogPseudonymizeFails() throws Exception {
+        // Given
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(0L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString()))
+                .thenThrow(new RuntimeException("Log store unavailable"));
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        // When
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        // Then
+        assertEquals(0, result.logsPseudonymized());
+        verify(auditStore).pseudonymizeByUserId(eq(USER_ID), anyString());
+    }
+
+    @Test
+    void deleteUserData_continuesWhenAuditPseudonymizeFails() throws Exception {
+        // Given
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(0L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString()))
+                .thenThrow(new RuntimeException("Audit store unavailable"));
+
+        // When
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        // Then
+        assertEquals(0, result.auditEntriesPseudonymized());
+        assertNotNull(result.completedAt());
+    }
+
+    @Test
+    void deleteUserData_submitsComplianceAuditEntry() throws Exception {
+        // Given
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(0L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+
+        // When
+        service.deleteUserData(USER_ID);
+
+        // Then — audit ledger should get a compliance entry
+        verify(auditLedgerService).submit(any());
+    }
+
+    @Test
+    void exportUserData_submitsComplianceAuditEntry() throws Exception {
+        // Given
+        when(userMemoryStore.getAllEntries(USER_ID)).thenReturn(List.of());
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of());
+        when(userConversationStore.getAllForUser(USER_ID)).thenReturn(List.of());
+        when(auditStore.getEntriesByUserId(eq(USER_ID), anyInt(), anyInt())).thenReturn(List.of());
+
+        // When
+        service.exportUserData(USER_ID);
+
+        // Then
+        verify(auditLedgerService).submit(any());
+    }
+
+    @Test
+    void deleteUserData_handlesAuditLedgerServiceFailure() throws Exception {
+        // Given — audit ledger submission throws
+        when(userMemoryStore.countEntries(USER_ID)).thenReturn(0L);
+        when(conversationMemoryStore.deleteConversationsByUserId(USER_ID)).thenReturn(0L);
+        when(userConversationStore.deleteAllForUser(USER_ID)).thenReturn(0L);
+        when(databaseLogs.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        when(auditStore.pseudonymizeByUserId(eq(USER_ID), anyString())).thenReturn(0L);
+        doThrow(new RuntimeException("Audit ledger unavailable")).when(auditLedgerService).submit(any());
+
+        // When — should not throw (audit failure must not break GDPR operation)
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        // Then
+        assertNotNull(result);
+    }
+
+    @Test
+    void exportUserData_handlesConversationListFailure() throws Exception {
+        // Given — getConversationIdsByUserId throws
+        when(userMemoryStore.getAllEntries(USER_ID)).thenReturn(List.of());
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID))
+                .thenThrow(new RuntimeException("Conversation store unavailable"));
+        when(userConversationStore.getAllForUser(USER_ID)).thenReturn(List.of());
+        when(auditStore.getEntriesByUserId(eq(USER_ID), anyInt(), anyInt())).thenReturn(List.of());
+
+        // When
+        UserDataExport export = service.exportUserData(USER_ID);
+
+        // Then — conversations list is empty but export succeeds
+        assertTrue(export.conversations().isEmpty());
     }
 }

@@ -11,20 +11,33 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
+import java.util.Optional;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for {@link RestManagerResource}. Tests directory traversal
- * prevention, invalid character blocking, fallback to manage.html, and error
- * handling.
+ * prevention, invalid character blocking, fallback to manage.html, auth config
+ * generation, and error handling.
  */
 class RestManagerResourceTest {
 
     private RestManagerResource resource;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         resource = new RestManagerResource();
+        // Set default field values via reflection since CDI fields aren't injected
+        setField("keycloakPublicUrl", Optional.empty());
+        setField("oidcAuthServerUrl", "");
+        setField("oidcEnabled", false);
+    }
+
+    private void setField(String fieldName, Object value) throws Exception {
+        Field f = RestManagerResource.class.getDeclaredField(fieldName);
+        f.setAccessible(true);
+        f.set(resource, value);
     }
 
     @Nested
@@ -138,6 +151,159 @@ class RestManagerResourceTest {
             } catch (Exception e) {
                 // Expected
             }
+        }
+    }
+
+    // ==================== Auth Config Tests ====================
+
+    @Nested
+    @DisplayName("fetchAuthConfig")
+    class AuthConfigTests {
+
+        @Test
+        @DisplayName("returns 'none' method when OIDC is disabled")
+        void oidcDisabled() throws Exception {
+            setField("oidcEnabled", false);
+
+            Response response = resource.fetchAuthConfig();
+
+            assertEquals(200, response.getStatus());
+            String body = (String) response.getEntity();
+            assertTrue(body.contains("method:\"none\""));
+            assertEquals("application/javascript", response.getMediaType().toString());
+        }
+
+        @Test
+        @DisplayName("returns 'keycloak' method when OIDC is enabled")
+        void oidcEnabled() throws Exception {
+            setField("oidcEnabled", true);
+            setField("keycloakPublicUrl", Optional.of("https://auth.example.com"));
+            setField("oidcAuthServerUrl", "https://auth.example.com/realms/eddi");
+
+            Response response = resource.fetchAuthConfig();
+
+            String body = (String) response.getEntity();
+            assertTrue(body.contains("method:\"keycloak\""));
+            assertTrue(body.contains("url:\"https://auth.example.com\""));
+            assertTrue(body.contains("realm:\"eddi\""));
+            assertTrue(body.contains("clientId:\"eddi-frontend\""));
+        }
+
+        @Test
+        @DisplayName("extracts realm from auth-server-url with /realms/ path")
+        void extractsRealmFromUrl() throws Exception {
+            setField("oidcEnabled", true);
+            setField("keycloakPublicUrl", Optional.empty());
+            setField("oidcAuthServerUrl", "https://auth.example.com/realms/my-realm");
+
+            Response response = resource.fetchAuthConfig();
+
+            String body = (String) response.getEntity();
+            assertTrue(body.contains("realm:\"my-realm\""));
+        }
+
+        @Test
+        @DisplayName("defaults realm to 'eddi' when auth-server-url is blank")
+        void defaultRealmWhenBlank() throws Exception {
+            setField("oidcEnabled", true);
+            setField("keycloakPublicUrl", Optional.empty());
+            setField("oidcAuthServerUrl", "");
+
+            Response response = resource.fetchAuthConfig();
+
+            String body = (String) response.getEntity();
+            assertTrue(body.contains("realm:\"eddi\""));
+        }
+
+        @Test
+        @DisplayName("defaults realm to 'eddi' when no /realms/ in URL")
+        void defaultRealmWhenNoRealmsPath() throws Exception {
+            setField("oidcEnabled", true);
+            setField("keycloakPublicUrl", Optional.empty());
+            setField("oidcAuthServerUrl", "https://auth.example.com/oidc");
+
+            Response response = resource.fetchAuthConfig();
+
+            String body = (String) response.getEntity();
+            assertTrue(body.contains("realm:\"eddi\""));
+        }
+
+        @Test
+        @DisplayName("extracts realm when URL has trailing slash")
+        void realmWithTrailingSlash() throws Exception {
+            setField("oidcEnabled", true);
+            setField("keycloakPublicUrl", Optional.empty());
+            setField("oidcAuthServerUrl", "https://auth.example.com/realms/test-realm/");
+
+            Response response = resource.fetchAuthConfig();
+
+            String body = (String) response.getEntity();
+            assertTrue(body.contains("realm:\"test-realm\""));
+        }
+
+        @Test
+        @DisplayName("extracts realm when URL has query parameters")
+        void realmWithQueryParams() throws Exception {
+            setField("oidcEnabled", true);
+            setField("keycloakPublicUrl", Optional.empty());
+            setField("oidcAuthServerUrl", "https://auth.example.com/realms/myrealm?foo=bar");
+
+            Response response = resource.fetchAuthConfig();
+
+            String body = (String) response.getEntity();
+            assertTrue(body.contains("realm:\"myrealm\""));
+        }
+
+        @Test
+        @DisplayName("extracts realm when URL has hash fragment")
+        void realmWithHash() throws Exception {
+            setField("oidcEnabled", true);
+            setField("keycloakPublicUrl", Optional.empty());
+            setField("oidcAuthServerUrl", "https://auth.example.com/realms/hashrealm#section");
+
+            Response response = resource.fetchAuthConfig();
+
+            String body = (String) response.getEntity();
+            assertTrue(body.contains("realm:\"hashrealm\""));
+        }
+
+        @Test
+        @DisplayName("omits url when keycloakPublicUrl is blank")
+        void omitsUrlWhenBlank() throws Exception {
+            setField("oidcEnabled", true);
+            setField("keycloakPublicUrl", Optional.of("   "));
+            setField("oidcAuthServerUrl", "https://auth.example.com/realms/eddi");
+
+            Response response = resource.fetchAuthConfig();
+
+            String body = (String) response.getEntity();
+            assertFalse(body.contains("url:\""));
+        }
+
+        @Test
+        @DisplayName("has no-cache header")
+        void noCacheHeader() throws Exception {
+            setField("oidcEnabled", false);
+
+            Response response = resource.fetchAuthConfig();
+
+            String cacheControl = response.getHeaderString("Cache-Control");
+            assertNotNull(cacheControl);
+            assertTrue(cacheControl.contains("no-cache"));
+        }
+
+        @Test
+        @DisplayName("escapes special characters in URL")
+        void escapesSpecialChars() throws Exception {
+            setField("oidcEnabled", true);
+            setField("keycloakPublicUrl", Optional.of("https://auth.example.com/path\"with\"quotes"));
+            setField("oidcAuthServerUrl", "https://auth.example.com/realms/eddi");
+
+            Response response = resource.fetchAuthConfig();
+
+            String body = (String) response.getEntity();
+            // Quotes should be escaped
+            assertTrue(body.contains("\\\""));
         }
     }
 }

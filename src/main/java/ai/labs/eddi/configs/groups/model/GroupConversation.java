@@ -4,11 +4,15 @@
  */
 package ai.labs.eddi.configs.groups.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Transcript record for a group conversation. Persisted with a single-version
@@ -22,14 +26,30 @@ public class GroupConversation {
     private String userId;
     private GroupConversationState state;
     private String originalQuestion;
-    private List<TranscriptEntry> transcript = new ArrayList<>();
-    private Map<String, String> memberConversationIds = new LinkedHashMap<>();
+    private List<TranscriptEntry> transcript = Collections.synchronizedList(new ArrayList<>());
+    private Map<String, String> memberConversationIds = new ConcurrentHashMap<>();
     private int currentPhaseIndex;
     private String currentPhaseName;
     private String synthesizedAnswer;
     private int depth;
+    private SharedTaskList taskList;
+    /** Agents dynamically added during the discussion (recruited or created). */
+    private List<AgentGroupConfiguration.GroupMember> dynamicMembers = Collections.synchronizedList(new ArrayList<>());
+    /** Agent IDs created during this discussion (for lifecycle cleanup). */
+    private List<String> createdAgentIds = Collections.synchronizedList(new ArrayList<>());
+    /** Agent IDs explicitly retained by the creating agent (skip cleanup). */
+    private Set<String> retainedAgentIds = ConcurrentHashMap.newKeySet();
     private Instant created;
     private Instant lastModified;
+
+    /**
+     * Transient reference to the group's dynamic agent configuration. Set by
+     * {@code GroupConversationService.executeDiscussion()} at the start of a
+     * discussion so that {@code executeAgentTurn()} can pass it to member agents
+     * via context. Never persisted to MongoDB or serialized to REST.
+     */
+    @JsonIgnore
+    private transient AgentGroupConfiguration.DynamicAgentConfig dynamicAgentConfig;
 
     /**
      * A single entry in the discussion transcript. Each entry records one agent's
@@ -95,11 +115,19 @@ public class GroupConversation {
     }
 
     public enum TranscriptEntryType {
-        QUESTION, OPINION, CRITIQUE, REVISION, CHALLENGE, DEFENSE, ARGUMENT, REBUTTAL, SYNTHESIS, ERROR, SKIPPED
+        QUESTION, OPINION, CRITIQUE, REVISION, CHALLENGE, DEFENSE, ARGUMENT, REBUTTAL, SYNTHESIS, ERROR, SKIPPED,
+        /** Task plan output from the PLAN phase. */
+        PLAN,
+        /** Task execution result from the EXECUTE phase. */
+        TASK_RESULT,
+        /** Verification assessment from the VERIFY phase. */
+        VERIFICATION
     }
 
     public enum GroupConversationState {
-        CREATED, IN_PROGRESS, SYNTHESIZING, COMPLETED, FAILED
+        CREATED, IN_PROGRESS, SYNTHESIZING, COMPLETED, FAILED,
+        /** Paused for human approval — HITL foundation (Phase 9b). */
+        AWAITING_APPROVAL
     }
 
     // --- Getters/Setters ---
@@ -149,7 +177,9 @@ public class GroupConversation {
     }
 
     public void setTranscript(List<TranscriptEntry> transcript) {
-        this.transcript = transcript;
+        this.transcript = transcript != null
+                ? Collections.synchronizedList(new ArrayList<>(transcript))
+                : Collections.synchronizedList(new ArrayList<>());
     }
 
     public Map<String, String> getMemberConversationIds() {
@@ -157,7 +187,9 @@ public class GroupConversation {
     }
 
     public void setMemberConversationIds(Map<String, String> memberConversationIds) {
-        this.memberConversationIds = memberConversationIds;
+        this.memberConversationIds = memberConversationIds != null
+                ? new ConcurrentHashMap<>(memberConversationIds)
+                : new ConcurrentHashMap<>();
     }
 
     public int getCurrentPhaseIndex() {
@@ -206,5 +238,62 @@ public class GroupConversation {
 
     public void setLastModified(Instant lastModified) {
         this.lastModified = lastModified;
+    }
+
+    public SharedTaskList getTaskList() {
+        return taskList;
+    }
+
+    public void setTaskList(SharedTaskList taskList) {
+        this.taskList = taskList;
+    }
+
+    public List<AgentGroupConfiguration.GroupMember> getDynamicMembers() {
+        return dynamicMembers;
+    }
+
+    public void setDynamicMembers(List<AgentGroupConfiguration.GroupMember> dynamicMembers) {
+        this.dynamicMembers = dynamicMembers != null
+                ? Collections.synchronizedList(new ArrayList<>(dynamicMembers))
+                : Collections.synchronizedList(new ArrayList<>());
+    }
+
+    /**
+     * Add a dynamically recruited or created member to the conversation.
+     * Thread-safe.
+     */
+    public void addDynamicMember(AgentGroupConfiguration.GroupMember member) {
+        dynamicMembers.add(member);
+    }
+
+    public List<String> getCreatedAgentIds() {
+        return createdAgentIds;
+    }
+
+    public void setCreatedAgentIds(List<String> createdAgentIds) {
+        this.createdAgentIds = createdAgentIds != null
+                ? Collections.synchronizedList(new ArrayList<>(createdAgentIds))
+                : Collections.synchronizedList(new ArrayList<>());
+    }
+
+    public Set<String> getRetainedAgentIds() {
+        return retainedAgentIds;
+    }
+
+    public void setRetainedAgentIds(Set<String> retainedAgentIds) {
+        Set<String> newSet = ConcurrentHashMap.newKeySet();
+        if (retainedAgentIds != null) {
+            newSet.addAll(retainedAgentIds);
+        }
+        this.retainedAgentIds = newSet;
+    }
+
+    @JsonIgnore
+    public AgentGroupConfiguration.DynamicAgentConfig getDynamicAgentConfig() {
+        return dynamicAgentConfig;
+    }
+
+    public void setDynamicAgentConfig(AgentGroupConfiguration.DynamicAgentConfig dynamicAgentConfig) {
+        this.dynamicAgentConfig = dynamicAgentConfig;
     }
 }

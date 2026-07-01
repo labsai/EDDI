@@ -255,4 +255,189 @@ class PrePostUtilsTest {
             verify(templatingEngine).processTemplate("Hello {{name}}", Map.of("name", "World"));
         }
     }
+
+    // ==================== executePropertyInstructions — property types
+    // ====================
+
+    @Nested
+    @DisplayName("executePropertyInstructions — various property value types")
+    class PropertyTypeTests {
+
+        private IConversationMemory memory;
+        private ai.labs.eddi.engine.memory.model.ConversationProperties conversationProperties;
+        private Map<String, Object> templateData;
+
+        @BeforeEach
+        void setupMemory() throws Exception {
+            memory = mock(IConversationMemory.class);
+            conversationProperties = mock(ai.labs.eddi.engine.memory.model.ConversationProperties.class);
+            when(memory.getConversationProperties()).thenReturn(conversationProperties);
+            when(conversationProperties.toMap()).thenReturn(new HashMap<>());
+            templateData = new HashMap<>();
+            when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(i -> i.getArgument(0));
+        }
+
+        @Test
+        @DisplayName("null propertyInstructions does nothing")
+        void nullInstructions() throws Exception {
+            prePostUtils.executePropertyInstructions(null, 200, false, memory, templateData);
+            verifyNoInteractions(memory);
+        }
+
+        @Test
+        @DisplayName("String property value stores as String")
+        void stringProperty() throws Exception {
+            var instruction = new PropertyInstruction();
+            instruction.setName("myProp");
+            instruction.setFromObjectPath("");
+            instruction.setValueString("hello");
+            instruction.setScope(Property.Scope.conversation);
+
+            prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
+
+            verify(conversationProperties).put(eq("myProp"), any(Property.class));
+        }
+
+        @Test
+        @DisplayName("validationError=true with runOnValidationError=true executes instruction")
+        void validationError_runsWhenFlagged() throws Exception {
+            var instruction = new PropertyInstruction();
+            instruction.setName("errorProp");
+            instruction.setFromObjectPath("");
+            instruction.setValueString("error_value");
+            instruction.setScope(Property.Scope.conversation);
+            instruction.setRunOnValidationError(true);
+
+            prePostUtils.executePropertyInstructions(List.of(instruction), 404, true, memory, templateData);
+
+            verify(conversationProperties).put(eq("errorProp"), any(Property.class));
+        }
+
+        @Test
+        @DisplayName("convertToObject converts JSON string to Map")
+        void convertToObject() throws Exception {
+            var instruction = new PropertyInstruction();
+            instruction.setName("jsonProp");
+            instruction.setFromObjectPath("");
+            instruction.setValueString("{\"key\":\"val\"}");
+            instruction.setScope(Property.Scope.conversation);
+            instruction.setConvertToObject(true);
+
+            Map<String, Object> deserialized = Map.of("key", "val");
+            when(jsonSerialization.deserialize("{\"key\":\"val\"}")).thenReturn(deserialized);
+
+            prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
+
+            verify(jsonSerialization).deserialize("{\"key\":\"val\"}");
+            verify(conversationProperties).put(eq("jsonProp"), any(Property.class));
+        }
+
+        @Test
+        @DisplayName("convertToObject with invalid JSON falls back to string")
+        void convertToObject_invalidJson() throws Exception {
+            var instruction = new PropertyInstruction();
+            instruction.setName("jsonProp");
+            instruction.setFromObjectPath("");
+            instruction.setValueString("{invalid}");
+            instruction.setScope(Property.Scope.conversation);
+            instruction.setConvertToObject(true);
+
+            when(jsonSerialization.deserialize("{invalid}")).thenThrow(new java.io.IOException("parse error"));
+
+            prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
+
+            verify(conversationProperties).put(eq("jsonProp"), any(Property.class));
+        }
+
+        @Test
+        @DisplayName("property value from fromObjectPath using PathNavigator")
+        void fromObjectPath() throws Exception {
+            var instruction = new PropertyInstruction();
+            instruction.setName("pathProp");
+            instruction.setFromObjectPath("context.result");
+            instruction.setScope(Property.Scope.conversation);
+
+            templateData.put("context", Map.of("result", "pathValue"));
+
+            prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
+
+            verify(conversationProperties).put(eq("pathProp"), any(Property.class));
+        }
+
+        @Test
+        @DisplayName("empty propertyValue (not String) stores empty string")
+        void emptyPropertyValue() throws Exception {
+            var instruction = new PropertyInstruction();
+            instruction.setName("emptyProp");
+            instruction.setFromObjectPath("nonexistent.path");
+            instruction.setScope(Property.Scope.conversation);
+
+            prePostUtils.executePropertyInstructions(List.of(instruction), 0, false, memory, templateData);
+
+            verify(conversationProperties).put(eq("emptyProp"), any(Property.class));
+        }
+    }
+
+    // ==================== buildListFromJson ====================
+
+    @Nested
+    @DisplayName("buildListFromJson Tests")
+    class BuildListFromJsonTests {
+
+        @Test
+        @DisplayName("builds list with filter expression")
+        void withFilter() throws Exception {
+            when(templatingEngine.processTemplate(anyString(), anyMap()))
+                    .thenReturn("[\"item1\",\"item2\"]");
+            when(jsonSerialization.deserialize(anyString(), eq(List.class)))
+                    .thenReturn(List.of("item1", "item2"));
+
+            List<Object> result = prePostUtils.buildListFromJson(
+                    "item", "items", "item.active", null, new HashMap<>());
+
+            assertEquals(2, result.size());
+        }
+
+        @Test
+        @DisplayName("builds list without filter expression")
+        void withoutFilter() throws Exception {
+            when(templatingEngine.processTemplate(anyString(), anyMap()))
+                    .thenReturn("[\"val\"]");
+            when(jsonSerialization.deserialize(anyString(), eq(List.class)))
+                    .thenReturn(List.of("val"));
+
+            List<Object> result = prePostUtils.buildListFromJson(
+                    "item", "items", null, null, new HashMap<>());
+
+            assertEquals(1, result.size());
+        }
+
+        @Test
+        @DisplayName("builds list with custom iteration value")
+        void withIterationValue() throws Exception {
+            when(templatingEngine.processTemplate(anyString(), anyMap()))
+                    .thenReturn("[{\"name\":\"test\"}]");
+            when(jsonSerialization.deserialize(anyString(), eq(List.class)))
+                    .thenReturn(List.of(Map.of("name", "test")));
+
+            List<Object> result = prePostUtils.buildListFromJson(
+                    "item", "items", null, "{\"name\":\"{item.name}\"}", new HashMap<>());
+
+            assertEquals(1, result.size());
+        }
+
+        @Test
+        @DisplayName("builds list with null iteration value uses default template")
+        void withNullIterationValue() throws Exception {
+            when(templatingEngine.processTemplate(anyString(), anyMap()))
+                    .thenReturn("[\"defaultVal\"]");
+            when(jsonSerialization.deserialize(anyString(), eq(List.class)))
+                    .thenReturn(List.of("defaultVal"));
+
+            List<Object> result = prePostUtils.buildListFromJson(
+                    "obj", "objects", null, "", new HashMap<>());
+
+            assertEquals(1, result.size());
+        }
+    }
 }

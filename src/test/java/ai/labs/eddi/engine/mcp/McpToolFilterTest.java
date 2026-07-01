@@ -10,6 +10,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.lang.reflect.Method;
+import java.util.LinkedHashSet;
+import java.util.Set;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -35,7 +39,13 @@ class McpToolFilterTest {
             "describe_discussion_styles", "list_groups", "read_group",
             "create_group", "update_group", "delete_group",
             "discuss_with_group", "read_group_conversation",
-            "list_group_conversations", "list_agent_configs"
+            "list_group_conversations", "list_agent_configs",
+            "start_group_discussion", "delete_group_conversation",
+            "create_schedule", "list_schedules", "read_schedule",
+            "delete_schedule", "fire_schedule_now", "retry_failed_schedule",
+            "list_channel_integrations", "read_channel_integration",
+            "create_channel_integration", "update_channel_integration",
+            "delete_channel_integration"
     })
     void test_whitelistedTools_returnsTrue(String toolName) {
         var toolInfo = mock(ToolInfo.class);
@@ -80,5 +90,62 @@ class McpToolFilterTest {
         var toolInfo = mock(ToolInfo.class);
         when(toolInfo.name()).thenReturn("List_Agents");
         assertFalse(filter.test(toolInfo, (FilterContext) null));
+    }
+
+    // --- Structural regression: all Mcp* @Tool methods must be whitelisted ---
+
+    /**
+     * Scans all {@code Mcp*} classes in the MCP package for methods annotated with
+     * {@code @Tool(name = "...")} and verifies every declared tool name is present
+     * in the {@link McpToolFilter} whitelist.
+     * <p>
+     * This prevents the common regression where a new MCP tool is added to a
+     * {@code Mcp*Tools} class but the developer forgets to register it in the
+     * filter — making the tool invisible to MCP clients.
+     */
+    @Test
+    void test_allMcpToolMethods_areWhitelisted() {
+        // Collect all @Tool-annotated method names from Mcp* classes
+        Set<String> declaredTools = new LinkedHashSet<>();
+        Class<?>[] mcpClasses = {
+                McpConversationTools.class,
+                McpAdminTools.class,
+                McpSetupTools.class,
+                McpGroupTools.class,
+        };
+
+        for (Class<?> clazz : mcpClasses) {
+            for (Method method : clazz.getDeclaredMethods()) {
+                var toolAnnotation = method.getAnnotation(
+                        io.quarkiverse.mcp.server.Tool.class);
+                if (toolAnnotation != null) {
+                    String annotatedName = toolAnnotation.name();
+                    // Quarkus MCP uses "<<element name>>" as the sentinel default
+                    // when no explicit name is set — fall back to method name.
+                    String name = (annotatedName.isEmpty()
+                            || annotatedName.startsWith("<<"))
+                                    ? method.getName()
+                                    : annotatedName;
+                    declaredTools.add(name);
+                }
+            }
+        }
+
+        assertFalse(declaredTools.isEmpty(),
+                "Should find at least one @Tool method in Mcp* classes");
+
+        // Verify each declared tool passes the filter
+        Set<String> missingTools = new LinkedHashSet<>();
+        for (String toolName : declaredTools) {
+            var toolInfo = mock(ToolInfo.class);
+            when(toolInfo.name()).thenReturn(toolName);
+            if (!filter.test(toolInfo, (FilterContext) null)) {
+                missingTools.add(toolName);
+            }
+        }
+
+        assertTrue(missingTools.isEmpty(),
+                "The following @Tool methods in Mcp* classes are NOT whitelisted in McpToolFilter. "
+                        + "Add them to the MCP_TOOLS set: " + missingTools);
     }
 }

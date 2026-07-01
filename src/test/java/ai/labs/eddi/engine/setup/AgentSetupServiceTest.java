@@ -20,10 +20,18 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import ai.labs.eddi.engine.api.IRestAgentAdministration;
+import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.secrets.ISecretProvider;
+import jakarta.ws.rs.core.Response;
+
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Tests for {@link AgentSetupService} — pure logic, config builders, and static
@@ -530,6 +538,242 @@ class AgentSetupServiceTest {
                     () -> service.setupAgent(request));
             // Should NOT be "API key is required"
             assertFalse(ex.getMessage().contains("API key is required"));
+        }
+    }
+
+    // ==================== createApiAgent validation ====================
+
+    @Nested
+    @DisplayName("createApiAgent validation")
+    class CreateApiAgentValidationTests {
+
+        @Test
+        @DisplayName("throws when agentName is null")
+        void nullAgentName() {
+            var request = new CreateApiAgentRequest(
+                    null, "prompt", "openapi: 3.0", "openai", "gpt-4",
+                    "sk-key", null, null, null, null, null, null, null);
+            var ex = assertThrows(AgentSetupService.AgentSetupException.class,
+                    () -> service.createApiAgent(request));
+            assertTrue(ex.getMessage().contains("Agent name is required"));
+        }
+
+        @Test
+        @DisplayName("throws when systemPrompt is blank")
+        void blankSystemPrompt() {
+            var request = new CreateApiAgentRequest(
+                    "My Agent", "   ", "openapi: 3.0", "openai", "gpt-4",
+                    "sk-key", null, null, null, null, null, null, null);
+            var ex = assertThrows(AgentSetupService.AgentSetupException.class,
+                    () -> service.createApiAgent(request));
+            assertTrue(ex.getMessage().contains("System prompt is required"));
+        }
+
+        @Test
+        @DisplayName("throws when openApiSpec is blank")
+        void blankOpenApiSpec() {
+            var request = new CreateApiAgentRequest(
+                    "My Agent", "You are helpful", "", "openai", "gpt-4",
+                    "sk-key", null, null, null, null, null, null, null);
+            var ex = assertThrows(AgentSetupService.AgentSetupException.class,
+                    () -> service.createApiAgent(request));
+            assertTrue(ex.getMessage().contains("OpenAPI spec is required"));
+        }
+
+        @Test
+        @DisplayName("throws when cloud provider has no API key")
+        void cloudProviderNoApiKey() {
+            var request = new CreateApiAgentRequest(
+                    "My Agent", "You are helpful", "openapi: 3.0", "openai", "gpt-4",
+                    null, null, null, null, null, null, null, null);
+            var ex = assertThrows(AgentSetupService.AgentSetupException.class,
+                    () -> service.createApiAgent(request));
+            assertTrue(ex.getMessage().contains("API key is required"));
+        }
+    }
+
+    // ==================== deployAndWait ====================
+
+    @Nested
+    @DisplayName("deployAndWait")
+    class DeployAndWaitTests {
+
+        IRestAgentAdministration agentAdmin;
+        AgentSetupService deployService;
+
+        @BeforeEach
+        void setUp() {
+            agentAdmin = mock(IRestAgentAdministration.class);
+            deployService = new AgentSetupService(
+                    mock(IRestInterfaceFactory.class), agentAdmin,
+                    mock(ISecretProvider.class), "http://localhost:11434");
+        }
+
+        @Test
+        @DisplayName("HTTP 200 with READY status → deployed=true")
+        void http200Ready() {
+            Response response = mock(Response.class);
+            when(response.getStatus()).thenReturn(200);
+            when(response.getEntity()).thenReturn(Map.of("status", "READY"));
+            when(agentAdmin.deployAgent(any(), anyString(), anyInt(), anyBoolean(), anyBoolean()))
+                    .thenReturn(response);
+
+            var result = deployService.deployAndWait(Deployment.Environment.test, "agent1", 1);
+            assertEquals(true, result.get("deployed"));
+            assertEquals("READY", result.get("deploymentStatus"));
+        }
+
+        @Test
+        @DisplayName("HTTP 200 with non-READY status → deployed=false, has deployWarning")
+        void http200NotReady() {
+            Response response = mock(Response.class);
+            when(response.getStatus()).thenReturn(200);
+            when(response.getEntity()).thenReturn(Map.of("status", "ERROR"));
+            when(agentAdmin.deployAgent(any(), anyString(), anyInt(), anyBoolean(), anyBoolean()))
+                    .thenReturn(response);
+
+            var result = deployService.deployAndWait(Deployment.Environment.test, "agent1", 1);
+            assertEquals(false, result.get("deployed"));
+            assertNotNull(result.get("deployWarning"));
+        }
+
+        @Test
+        @DisplayName("HTTP 200 parse error → deployed=false")
+        void http200ParseError() {
+            Response response = mock(Response.class);
+            when(response.getStatus()).thenReturn(200);
+            when(response.getEntity()).thenThrow(new ClassCastException("bad entity"));
+            when(agentAdmin.deployAgent(any(), anyString(), anyInt(), anyBoolean(), anyBoolean()))
+                    .thenReturn(response);
+
+            var result = deployService.deployAndWait(Deployment.Environment.test, "agent1", 1);
+            assertEquals(false, result.get("deployed"));
+            assertEquals("UNKNOWN", result.get("deploymentStatus"));
+            assertNotNull(result.get("deployWarning"));
+        }
+
+        @Test
+        @DisplayName("HTTP 202 → deployed=false, IN_PROGRESS")
+        void http202() {
+            Response response = mock(Response.class);
+            when(response.getStatus()).thenReturn(202);
+            when(agentAdmin.deployAgent(any(), anyString(), anyInt(), anyBoolean(), anyBoolean()))
+                    .thenReturn(response);
+
+            var result = deployService.deployAndWait(Deployment.Environment.test, "agent1", 1);
+            assertEquals(false, result.get("deployed"));
+            assertEquals("IN_PROGRESS", result.get("deploymentStatus"));
+        }
+
+        @Test
+        @DisplayName("other HTTP status → deployed=false, deployError")
+        void otherHttpStatus() {
+            Response response = mock(Response.class);
+            when(response.getStatus()).thenReturn(500);
+            when(agentAdmin.deployAgent(any(), anyString(), anyInt(), anyBoolean(), anyBoolean()))
+                    .thenReturn(response);
+
+            var result = deployService.deployAndWait(Deployment.Environment.test, "agent1", 1);
+            assertEquals(false, result.get("deployed"));
+            assertNotNull(result.get("deployError"));
+            assertTrue(result.get("deployError").toString().contains("500"));
+        }
+
+        @Test
+        @DisplayName("exception during deploy → deployed=false, deployError")
+        void deployException() {
+            when(agentAdmin.deployAgent(any(), anyString(), anyInt(), anyBoolean(), anyBoolean()))
+                    .thenThrow(new RuntimeException("connection refused"));
+
+            var result = deployService.deployAndWait(Deployment.Environment.test, "agent1", 1);
+            assertEquals(false, result.get("deployed"));
+            assertNotNull(result.get("deployError"));
+        }
+    }
+
+    // ==================== createWorkflowConfig (null parser) ====================
+
+    @Nested
+    @DisplayName("createWorkflowConfig with null parser")
+    class WorkflowConfigNullParserTests {
+
+        @Test
+        @DisplayName("null parserLocation omits parser step")
+        void nullParserOmitsStep() {
+            WorkflowConfiguration config = service.createWorkflowConfig(
+                    null, "/rules/r1", null, null, "/llm/l1", null);
+            var steps = config.getWorkflowSteps();
+            // behavior + langchain = 2 (no parser)
+            assertEquals(2, steps.size());
+            assertTrue(steps.get(0).getType().toString().contains("behavior"));
+            assertTrue(steps.get(1).getType().toString().contains("llm"));
+        }
+    }
+
+    // ==================== createLlmConfig additional providers
+    // ====================
+
+    @Nested
+    @DisplayName("createLlmConfig — additional providers")
+    class LlmConfigAdditionalProviderTests {
+
+        @Test
+        @DisplayName("jlama with null apiKey → no authToken param")
+        void jlamaNullApiKey() {
+            LlmConfiguration config = service.createLlmConfig(
+                    "jlama", "my-model", null, "prompt", false, null, null, null, false, false, null);
+            var params = config.tasks().getFirst().getParameters();
+            assertEquals("my-model", params.get("modelName"));
+            assertFalse(params.containsKey("authToken"));
+        }
+
+        @Test
+        @DisplayName("azure-openai with baseUrl → has endpoint")
+        void azureOpenaiEndpoint() {
+            LlmConfiguration config = service.createLlmConfig(
+                    "azure-openai", "gpt-4", "key", "prompt", false, null,
+                    "https://my-azure.openai.azure.com", null, false, false, null);
+            var params = config.tasks().getFirst().getParameters();
+            assertEquals("https://my-azure.openai.azure.com", params.get("endpoint"));
+        }
+
+        @Test
+        @DisplayName("azure-openai with promptResponseJson → has responseFormat=json")
+        void azureOpenaiResponseFormat() {
+            String json = AgentSetupService.buildPromptResponseJson(true, false);
+            LlmConfiguration config = service.createLlmConfig(
+                    "azure-openai", "gpt-4", "key", "prompt", false, null, null,
+                    json, true, false, null);
+            var params = config.tasks().getFirst().getParameters();
+            assertEquals("json", params.get("responseFormat"));
+        }
+
+        @Test
+        @DisplayName("oracle-genai → has modelName, no apiKey")
+        void oracleGenai() {
+            LlmConfiguration config = service.createLlmConfig(
+                    "oracle-genai", "cohere.command-r", null, "prompt", false, null, null, null, false, false, null);
+            var params = config.tasks().getFirst().getParameters();
+            assertEquals("cohere.command-r", params.get("modelName"));
+            assertFalse(params.containsKey("apiKey"));
+        }
+
+        @Test
+        @DisplayName("default provider with baseUrl → has baseUrl")
+        void defaultProviderBaseUrl() {
+            LlmConfiguration config = service.createLlmConfig(
+                    "some-custom-provider", "my-model", "key", "prompt", false, null,
+                    "https://custom-host.example.com", null, false, false, null);
+            var params = config.tasks().getFirst().getParameters();
+            assertEquals("https://custom-host.example.com", params.get("baseUrl"));
+        }
+
+        @Test
+        @DisplayName("conversationHistoryLimit is always 10")
+        void conversationHistoryLimit() {
+            LlmConfiguration config = service.createLlmConfig(
+                    "openai", "gpt-4", "key", "prompt", false, null, null, null, false, false, null);
+            assertEquals(10, config.tasks().getFirst().getConversationHistoryLimit());
         }
     }
 }

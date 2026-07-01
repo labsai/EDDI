@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.mcp;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.identity.SecurityIdentity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,8 +29,9 @@ class McpMemoryToolsTest {
         userMemoryStore = mock(IUserMemoryStore.class);
         jsonSerialization = mock(IJsonSerialization.class);
         var identity = mock(SecurityIdentity.class);
+        var ownershipValidator = mock(OwnershipValidator.class);
         // authEnabled=false so no role checks
-        tools = new McpMemoryTools(userMemoryStore, jsonSerialization, identity, false);
+        tools = new McpMemoryTools(userMemoryStore, jsonSerialization, identity, ownershipValidator, false);
     }
 
     // ==================== listUserMemories ====================

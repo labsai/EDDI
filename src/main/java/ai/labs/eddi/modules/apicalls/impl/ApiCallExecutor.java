@@ -14,10 +14,12 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.runtime.IRuntime;
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.secrets.SecretResolver;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
@@ -50,22 +52,30 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
     private static final Logger LOGGER = Logger.getLogger(ApiCallExecutor.class);
 
+    /**
+     * Ceiling for a single retry backoff delay (5 min) — bounds exponential growth.
+     */
+    private static final int MAX_BACKOFF_MILLIS = 300_000;
+
     private final IHttpClient httpClient;
     private final IJsonSerialization jsonSerialization;
     private final IRuntime runtime;
     private final PrePostUtils prePostUtils;
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
+    private final boolean ssrfProtectionEnabled;
 
     @Inject
     public ApiCallExecutor(IHttpClient httpClient, IJsonSerialization jsonSerialization, IRuntime runtime, PrePostUtils prePostUtils,
-            GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
+            GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
+            @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled) {
         this.httpClient = httpClient;
         this.jsonSerialization = jsonSerialization;
         this.runtime = runtime;
         this.prePostUtils = prePostUtils;
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
+        this.ssrfProtectionEnabled = ssrfProtectionEnabled;
     }
 
     @Override
@@ -244,13 +254,18 @@ public class ApiCallExecutor implements IApiCallExecutor {
         LOGGER.info(httpCallsName + format(" Execution time: %sms\n", duration));
     }
 
-    private static int getDelayInMillis(ApiCall call, boolean retryCall, int amountOfExecutions) {
+    // Package-private for unit testing of the backoff curve.
+    static int getDelayInMillis(ApiCall call, boolean retryCall, int amountOfExecutions) {
         int delayInMillis = 0;
 
         if (retryCall) {
-            Integer exponentialBackoffDelay = call.getPostResponse().getRetryApiCallInstruction().getExponentialBackoffDelayInMillis();
-            if (exponentialBackoffDelay != null) {
-                delayInMillis = exponentialBackoffDelay * amountOfExecutions;
+            Integer baseDelay = call.getPostResponse().getRetryApiCallInstruction().getExponentialBackoffDelayInMillis();
+            if (baseDelay != null && baseDelay > 0) {
+                // True exponential backoff: base * 2^(attempt-1), capped to avoid
+                // overflow and unbounded waits. (Previously linear: base * attempt.)
+                int exponent = Math.max(0, amountOfExecutions - 1);
+                long computed = (long) baseDelay << Math.min(exponent, 20);
+                delayInMillis = (int) Math.min(computed, MAX_BACKOFF_MILLIS);
             }
         }
 
@@ -326,8 +341,18 @@ public class ApiCallExecutor implements IApiCallExecutor {
         requestBody = globalVariableResolver.resolveValue(requestBody);
         requestBody = secretResolver.resolveValue(requestBody);
 
+        // SSRF protection (opt-in): validate the fully-resolved target and disable
+        // redirect-following so a 3xx cannot bounce the request to an internal host.
+        // Off by default to preserve calls to internal/private APIs.
+        if (ssrfProtectionEnabled) {
+            UrlValidationUtils.validateUrl(targetUri.toString());
+        }
+
         var method = IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase());
         IRequest request = httpClient.newRequest(targetUri, method);
+        if (ssrfProtectionEnabled) {
+            request.setFollowRedirects(false);
+        }
         if (!isNullOrEmpty(requestBody)) {
             String contentType = requestConfig.getContentType();
             request.setBodyEntity(requestBody, UTF_8, !isNullOrEmpty(contentType) ? contentType : TEXT_PLAIN);

@@ -60,7 +60,7 @@ public class HistorizedResourceStore<T> implements IResourceStore<T> {
         try {
             Integer newVersion = resource.getVersion() + 1;
             var newResource = resourceStorage.newResource(resource.getId(), newVersion, content);
-            resourceStorage.store(newResource);
+            resourceStorage.storeIfCurrentVersion(newResource, version);
             return newVersion;
         } catch (IOException e) {
             throw new ResourceStoreException(e.getLocalizedMessage(), e);

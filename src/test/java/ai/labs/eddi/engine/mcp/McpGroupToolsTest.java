@@ -58,6 +58,7 @@ class McpGroupToolsTest {
         assertTrue(result.contains("DEVIL_ADVOCATE"));
         assertTrue(result.contains("DELPHI"));
         assertTrue(result.contains("DEBATE"));
+        assertTrue(result.contains("TASK_FORCE"));
     }
 
     // --- list_groups ---
@@ -119,7 +120,7 @@ class McpGroupToolsTest {
     void createGroup_defaultStyle_usesRoundTable() throws Exception {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/new-id?version=1")).build());
 
-        String result = tools.create_group("Panel", "desc", "a1,a2", "Alice,Bob", null, null, null, null, null, null);
+        String result = tools.create_group("Panel", "desc", "a1,a2", "Alice,Bob", null, null, null, null, null, null, null);
 
         assertTrue(result.contains("ROUND_TABLE"));
         assertTrue(result.contains("2 members"));
@@ -140,7 +141,7 @@ class McpGroupToolsTest {
     void createGroup_peerReviewStyle() throws Exception {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/id?version=1")).build());
 
-        String result = tools.create_group("Review", null, "a1,a2,a3", null, null, null, "mod1", "PEER_REVIEW", "1", null);
+        String result = tools.create_group("Review", null, "a1,a2,a3", null, null, null, "mod1", "PEER_REVIEW", "1", null, null);
 
         assertTrue(result.contains("PEER_REVIEW"));
 
@@ -158,7 +159,7 @@ class McpGroupToolsTest {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/id?version=1")).build());
 
         tools.create_group("DA Panel", null, "a1,a2,a3", "Optimist,Pragmatist,Skeptic", "PARTICIPANT,PARTICIPANT,DEVIL_ADVOCATE", null, "mod1",
-                "DEVIL_ADVOCATE", null, null);
+                "DEVIL_ADVOCATE", null, null, null);
 
         ArgumentCaptor<AgentGroupConfiguration> captor = ArgumentCaptor.forClass(AgentGroupConfiguration.class);
         verify(groupStore).createGroup(captor.capture());
@@ -173,7 +174,7 @@ class McpGroupToolsTest {
     void createGroup_invalidStyle_fallsBackToRoundTable() throws Exception {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/id")).build());
 
-        tools.create_group("Test", null, "a1", null, null, null, null, "INVALID", null, null);
+        tools.create_group("Test", null, "a1", null, null, null, null, "INVALID", null, null, null);
 
         ArgumentCaptor<AgentGroupConfiguration> captor = ArgumentCaptor.forClass(AgentGroupConfiguration.class);
         verify(groupStore).createGroup(captor.capture());
@@ -185,7 +186,7 @@ class McpGroupToolsTest {
     void createGroup_handlesException() {
         when(groupStore.createGroup(any())).thenThrow(new RuntimeException("Insert failed"));
 
-        String result = tools.create_group("Test", null, "a1", null, null, null, null, null, null, null);
+        String result = tools.create_group("Test", null, "a1", null, null, null, null, null, null, null, null);
 
         assertTrue(result.contains("error"));
     }
@@ -194,7 +195,7 @@ class McpGroupToolsTest {
     void createGroup_withGroupMembers() throws Exception {
         when(groupStore.createGroup(any())).thenReturn(Response.created(URI.create("/groupstore/groups/id?version=1")).build());
 
-        tools.create_group("Meta Panel", null, "g1,g2", "Team A,Team B", null, "GROUP,GROUP", "mod1", "ROUND_TABLE", null, null);
+        tools.create_group("Meta Panel", null, "g1,g2", "Team A,Team B", null, "GROUP,GROUP", "mod1", "ROUND_TABLE", null, null, null);
 
         ArgumentCaptor<AgentGroupConfiguration> captor = ArgumentCaptor.forClass(AgentGroupConfiguration.class);
         verify(groupStore).createGroup(captor.capture());
@@ -314,5 +315,109 @@ class McpGroupToolsTest {
         String result = tools.list_group_conversations("g1", null, null);
 
         assertTrue(result.contains("error"));
+    }
+
+    // --- start_group_discussion (async) ---
+
+    @Test
+    void startGroupDiscussion_returnsIdAndState() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc-async-1");
+        gc.setState(GroupConversation.GroupConversationState.IN_PROGRESS);
+        when(groupConversationService.startAndDiscussAsync("g1", "Build it", "user1", null)).thenReturn(gc);
+        when(jsonSerialization.serialize(any(java.util.Map.class))).thenReturn(
+                "{\"groupConversationId\":\"gc-async-1\",\"state\":\"IN_PROGRESS\",\"message\":\"Discussion started.\"}");
+
+        String result = tools.start_group_discussion("g1", "Build it", "user1");
+
+        assertTrue(result.contains("gc-async-1"), "Should contain conversation ID");
+        assertTrue(result.contains("IN_PROGRESS"), "Should indicate in-progress state");
+        verify(groupConversationService).startAndDiscussAsync("g1", "Build it", "user1", null);
+
+        // Verify the Map passed to serialize contains the right keys
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<java.util.Map<String, Object>> captor = ArgumentCaptor.forClass(java.util.Map.class);
+        verify(jsonSerialization).serialize(captor.capture());
+        var map = captor.getValue();
+        assertEquals("gc-async-1", map.get("groupConversationId"));
+        assertEquals("IN_PROGRESS", map.get("state"));
+        assertNotNull(map.get("message"), "Should include polling instructions");
+    }
+
+    @Test
+    void startGroupDiscussion_defaultsToMcpClient() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc-async-2");
+        gc.setState(GroupConversation.GroupConversationState.IN_PROGRESS);
+        when(groupConversationService.startAndDiscussAsync(any(), any(), any(), any())).thenReturn(gc);
+
+        tools.start_group_discussion("g1", "Q?", null);
+
+        verify(groupConversationService).startAndDiscussAsync("g1", "Q?", "mcp-client", null);
+    }
+
+    @Test
+    void startGroupDiscussion_handlesBlankUserId() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc-async-3");
+        gc.setState(GroupConversation.GroupConversationState.IN_PROGRESS);
+        when(groupConversationService.startAndDiscussAsync(any(), any(), any(), any())).thenReturn(gc);
+
+        tools.start_group_discussion("g1", "Q?", "  ");
+
+        verify(groupConversationService).startAndDiscussAsync("g1", "Q?", "mcp-client", null);
+    }
+
+    @Test
+    void startGroupDiscussion_handlesException() throws Exception {
+        when(groupConversationService.startAndDiscussAsync(any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("Group not found"));
+
+        String result = tools.start_group_discussion("g1", "Q?", null);
+
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("Group not found"));
+    }
+
+    // --- delete_group_conversation ---
+
+    @Test
+    void deleteGroupConversation_success() throws Exception {
+        tools.delete_group_conversation("gc-del-1");
+
+        verify(groupConversationService).deleteGroupConversation("gc-del-1");
+    }
+
+    @Test
+    void deleteGroupConversation_returnsConfirmation() throws Exception {
+        String result = tools.delete_group_conversation("gc-del-1");
+
+        assertEquals("Deleted group conversation gc-del-1", result);
+    }
+
+    @Test
+    void deleteGroupConversation_handlesException() throws Exception {
+        doThrow(new RuntimeException("Not found")).when(groupConversationService).deleteGroupConversation("gc-bad");
+
+        String result = tools.delete_group_conversation("gc-bad");
+
+        assertTrue(result.contains("error"));
+        assertTrue(result.contains("Not found"));
+    }
+
+    // --- @Blocking annotation ---
+
+    @Test
+    void discussWithGroup_hasBlockingAnnotation() throws Exception {
+        var method = McpGroupTools.class.getMethod("discuss_with_group", String.class, String.class, String.class);
+        assertNotNull(method.getAnnotation(io.smallrye.common.annotation.Blocking.class),
+                "discuss_with_group must be annotated with @Blocking to avoid blocking the Vert.x event loop");
+    }
+
+    @Test
+    void startGroupDiscussion_doesNotHaveBlockingAnnotation() throws Exception {
+        var method = McpGroupTools.class.getMethod("start_group_discussion", String.class, String.class, String.class);
+        assertNull(method.getAnnotation(io.smallrye.common.annotation.Blocking.class),
+                "start_group_discussion is async and should NOT have @Blocking");
     }
 }

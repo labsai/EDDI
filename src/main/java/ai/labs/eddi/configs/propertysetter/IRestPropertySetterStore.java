@@ -22,7 +22,7 @@ import java.util.List;
  * @author ginccc
  */
 @Path("/propertysetterstore/propertysetters")
-@Tag(name = "Properties")
+@Tag(name = "Configuration / Properties", description = "User property storage and setter configuration")
 @RolesAllowed({"eddi-admin", "eddi-editor"})
 public interface IRestPropertySetterStore extends IRestVersionInfo {
     String resourceBaseType = "eddi://ai.labs.property";

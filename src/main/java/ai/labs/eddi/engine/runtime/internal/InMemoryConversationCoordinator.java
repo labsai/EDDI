@@ -67,6 +67,8 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
 
     private final Map<String, BlockingQueue<Callable<Void>>> conversationQueues = new ConcurrentHashMap<>();
     private final ConcurrentLinkedDeque<DeadLetterEntry> deadLetters = new ConcurrentLinkedDeque<>();
+    /** Serializes dead-letter add+trim so the cap is enforced deterministically. */
+    private final Object deadLetterLock = new Object();
     private final AtomicLong totalProcessed = new AtomicLong(0);
     private final AtomicLong totalDeadLettered = new AtomicLong(0);
     private final AtomicLong deadLetterIdCounter = new AtomicLong(0);
@@ -75,14 +77,29 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
     private final MeterRegistry meterRegistry;
     private final int maxActiveConversations;
 
+    /**
+     * Upper bound on retained dead-letter entries. The active-conversation map is
+     * already capped; without this bound a storm of permanently-failing
+     * conversations would grow {@link #deadLetters} without limit. Oldest entries
+     * are evicted first (the dashboard inspects the most recent failures). Set to
+     * {@code -1} to disable the cap (unbounded).
+     */
+    private final int maxDeadLetters;
+
     private static final Logger log = Logger.getLogger(InMemoryConversationCoordinator.class);
 
     @Inject
     public InMemoryConversationCoordinator(IRuntime runtime, MeterRegistry meterRegistry,
-            @ConfigProperty(name = "eddi.coordinator.max-active-conversations", defaultValue = "10000") int maxActiveConversations) {
+            @ConfigProperty(name = "eddi.coordinator.max-active-conversations", defaultValue = "10000") int maxActiveConversations,
+            @ConfigProperty(name = "eddi.coordinator.max-dead-letters", defaultValue = "1000") int maxDeadLetters) {
+        if (maxDeadLetters < -1) {
+            throw new IllegalArgumentException(
+                    "eddi.coordinator.max-dead-letters must be >= -1 (-1 = unbounded, 0 = retain none), got " + maxDeadLetters);
+        }
         this.runtime = runtime;
         this.meterRegistry = meterRegistry;
         this.maxActiveConversations = maxActiveConversations;
+        this.maxDeadLetters = maxDeadLetters;
     }
 
     @PostConstruct
@@ -182,8 +199,23 @@ public class InMemoryConversationCoordinator implements IConversationCoordinator
         String payload = String.format("{\"conversationId\":\"%s\",\"error\":\"%s\",\"timestamp\":%d}", conversationId, error.replace("\"", "\\\""),
                 timestamp);
 
-        deadLetters.addLast(new DeadLetterEntry(id, conversationId, error, timestamp, payload));
         totalDeadLettered.incrementAndGet();
+
+        // Serialize add+trim so concurrent failures enforce the cap deterministically
+        // (without the lock, parallel trims could transiently leave the deque a few
+        // entries below the cap). pollFirst() evicts the oldest; the just-added entry
+        // is at the tail, so the newest failures are always retained (for cap > 0).
+        // size() on a ConcurrentLinkedDeque is O(n), so the excess is computed once.
+        synchronized (deadLetterLock) {
+            deadLetters.addLast(new DeadLetterEntry(id, conversationId, error, timestamp, payload));
+            if (maxDeadLetters >= 0) {
+                for (int excess = deadLetters.size() - maxDeadLetters; excess > 0; excess--) {
+                    if (deadLetters.pollFirst() == null) {
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     private void submitNext(String conversationId, BlockingQueue<Callable<Void>> queue) {

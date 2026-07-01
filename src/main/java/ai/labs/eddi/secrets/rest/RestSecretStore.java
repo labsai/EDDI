@@ -117,7 +117,7 @@ public class RestSecretStore implements IRestSecretStore {
                 return Response.status(Response.Status.CREATED).entity(responseRef).build();
             }
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorf("Failed to store secret: %s/%s — %s", sanitize(tenantId), sanitize(keyName), e.getMessage());
+            LOGGER.error("Failed to store secret: " + sanitize(tenantId) + "/" + sanitize(keyName), e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to store secret")).build();
         }
     }
@@ -142,7 +142,7 @@ public class RestSecretStore implements IRestSecretStore {
         } catch (ISecretProvider.SecretNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "Secret not found")).build();
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorf("Failed to delete secret: %s/%s — %s", sanitize(tenantId), sanitize(keyName), e.getMessage());
+            LOGGER.error("Failed to delete secret: " + sanitize(tenantId) + "/" + sanitize(keyName), e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to delete secret")).build();
         }
     }
@@ -165,7 +165,7 @@ public class RestSecretStore implements IRestSecretStore {
         } catch (ISecretProvider.SecretNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(Map.of("error", "Secret not found")).build();
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorf("Failed to get secret metadata: %s/%s — %s", sanitize(tenantId), sanitize(keyName), e.getMessage());
+            LOGGER.error("Failed to get secret metadata: " + sanitize(tenantId) + "/" + sanitize(keyName), e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to get metadata")).build();
         }
     }
@@ -184,7 +184,7 @@ public class RestSecretStore implements IRestSecretStore {
         try {
             return Response.ok(secretProvider.listKeys(tenantId)).build();
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorf("Failed to list secrets: %s — %s", sanitize(tenantId), e.getMessage());
+            LOGGER.error("Failed to list secrets for tenant: " + sanitize(tenantId), e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "Failed to list secrets")).build();
         }
     }
@@ -218,7 +218,7 @@ public class RestSecretStore implements IRestSecretStore {
             return Response.ok(Map.of("tenantId", tenantId, "secretsReEncrypted", count, "message",
                     "DEK rotated successfully. " + count + " secrets re-encrypted.")).build();
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorf("Failed to rotate DEK for tenant %s: %s", sanitize(tenantId), e.getMessage());
+            LOGGER.error("Failed to rotate DEK for tenant: " + sanitize(tenantId), e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "DEK rotation failed: " + e.getMessage())).build();
         }
     }
@@ -249,8 +249,37 @@ public class RestSecretStore implements IRestSecretStore {
             return Response.ok(Map.of("deksReEncrypted", count, "message", "KEK rotated successfully. " + count + " DEKs re-encrypted. "
                     + "IMPORTANT: Update the EDDI_VAULT_MASTER_KEY environment variable to the new key and restart.")).build();
         } catch (ISecretProvider.SecretProviderException e) {
-            LOGGER.errorf("Failed to rotate KEK: %s", e.getMessage());
+            LOGGER.error("Failed to rotate KEK", e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(Map.of("error", "KEK rotation failed: " + e.getMessage())).build();
+        }
+    }
+
+    @Override
+    public Response resetTenant(String tenantId) {
+        var unavailable = vaultUnavailableResponse();
+        if (unavailable.isPresent())
+            return unavailable.get();
+
+        try {
+            validateId(tenantId, "tenantId");
+        } catch (IllegalArgumentException e) {
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+        }
+
+        try {
+            int deletedSecrets = secretProvider.resetTenant(tenantId);
+            secretResolver.invalidateAll();
+            return Response.ok(Map.of(
+                    "tenantId", tenantId,
+                    "secretsDeleted", deletedSecrets,
+                    "message", "Vault reset for tenant '" + tenantId + "'. "
+                            + deletedSecrets + " secret(s) deleted, DEK removed. "
+                            + "The next secret store operation will generate a fresh DEK with the current master key."))
+                    .build();
+        } catch (ISecretProvider.SecretProviderException e) {
+            LOGGER.error("Failed to reset vault for tenant: " + sanitize(tenantId), e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(Map.of("error", "Vault reset failed: " + e.getMessage())).build();
         }
     }
 }

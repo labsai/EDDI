@@ -161,4 +161,92 @@ class CronParserTest {
         long interval = CronParser.computeMinIntervalSeconds("*/15 * * * *", UTC);
         assertEquals(900, interval); // 15 * 60
     }
+
+    // --- Day-of-week 7 = Sunday (standard cron compatibility) ---
+
+    @Test
+    void validate_acceptsDayOfWeek7AsSunday() {
+        assertDoesNotThrow(() -> CronParser.validate("0 0 * * 7"));
+    }
+
+    @Test
+    void computeNextFire_dayOfWeek7MatchesSunday() {
+        // 2024-01-06 is a Saturday; the next Sunday is 2024-01-07.
+        Instant saturday = ZonedDateTime.of(2024, 1, 6, 12, 0, 0, 0, UTC).toInstant();
+        Instant next = CronParser.computeNextFire("0 0 * * 7", saturday, UTC);
+        assertEquals(java.time.DayOfWeek.SUNDAY, next.atZone(UTC).getDayOfWeek());
+    }
+
+    @Test
+    void computeNextFire_dayOfWeek0AndDayOfWeek7AgreeOnSunday() {
+        Instant base = ZonedDateTime.of(2024, 1, 6, 12, 0, 0, 0, UTC).toInstant();
+        assertEquals(CronParser.computeNextFire("0 0 * * 0", base, UTC), CronParser.computeNextFire("0 0 * * 7", base, UTC));
+    }
+
+    // --- Malformed-field rejection (clean errors, not AIOOBE / silent never-fire)
+    // ---
+
+    @Test
+    void parseField_rejectsReversedRange() {
+        assertThrows(IllegalArgumentException.class, () -> CronParser.parseField("5-1", 0, 59));
+    }
+
+    @Test
+    void parseField_rejectsMalformedStep() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> CronParser.parseField("*/", 0, 59));
+        // Must be a field-aware cron error, not a leaked low-level parse message.
+        assertTrue(ex.getMessage().toLowerCase().contains("step") || ex.getMessage().toLowerCase().contains("field"),
+                "Expected a field-aware cron error, got: " + ex.getMessage());
+    }
+
+    @Test
+    void parseField_rejectsNonNumericStep() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> CronParser.parseField("*/abc", 0, 59));
+        assertTrue(ex.getMessage().contains("field"), "Expected field context in message, got: " + ex.getMessage());
+    }
+
+    // --- Standard cron dom/dow OR semantics (both fields restricted) ---
+
+    @Test
+    void computeNextFire_domOrDow_firesOnDayOfMonthEvenIfNotWeekday() {
+        // "0 0 13 * 5" = midnight on the 13th OR any Friday. 2024-01-13 is a Saturday.
+        // From the 12th (a Friday) at noon, the next fire is the 13th at 00:00 —
+        // proving day-of-month matches independently of weekday (OR, not AND).
+        Instant base = ZonedDateTime.of(2024, 1, 12, 12, 0, 0, 0, UTC).toInstant();
+        Instant next = CronParser.computeNextFire("0 0 13 * 5", base, UTC);
+        ZonedDateTime z = next.atZone(UTC);
+        assertEquals(13, z.getDayOfMonth());
+        assertEquals(java.time.DayOfWeek.SATURDAY, z.getDayOfWeek());
+    }
+
+    @Test
+    void computeNextFire_domOrDow_firesOnWeekdayEvenIfNotDayOfMonth() {
+        // From 2024-01-01 (a Monday), "0 0 13 * 5" next fires on Fri 2024-01-05 —
+        // a Friday that is not the 13th — proving weekday matches independently.
+        Instant base = ZonedDateTime.of(2024, 1, 1, 0, 0, 0, 0, UTC).toInstant();
+        Instant next = CronParser.computeNextFire("0 0 13 * 5", base, UTC);
+        ZonedDateTime z = next.atZone(UTC);
+        assertEquals(java.time.DayOfWeek.FRIDAY, z.getDayOfWeek());
+        assertEquals(5, z.getDayOfMonth());
+    }
+
+    @Test
+    void computeNextFire_singleDayFieldRestricted_staysAnd() {
+        // Only day-of-month restricted (dow is *): must fire strictly on the 1st,
+        // not on arbitrary weekdays.
+        Instant base = ZonedDateTime.of(2024, 3, 15, 0, 0, 0, 0, UTC).toInstant();
+        Instant next = CronParser.computeNextFire("0 0 1 * *", base, UTC);
+        assertEquals(ZonedDateTime.of(2024, 4, 1, 0, 0, 0, 0, UTC).toInstant(), next);
+    }
+
+    @Test
+    void computeNextFire_starSlashStepInDayField_usesAndNotOr() {
+        // "0 0 */2 * 1": */2 day-of-month is "starred" (Vixie DOM_STAR), so this is
+        // AND with Mondays, not OR. */2 over 1..31 yields odd days; the next
+        // odd-numbered Monday after 2024-01-01 is 2024-01-15. (An OR reading would
+        // instead fire on the next odd day, 2024-01-03.)
+        Instant base = ZonedDateTime.of(2024, 1, 1, 0, 0, 0, 0, UTC).toInstant();
+        Instant next = CronParser.computeNextFire("0 0 */2 * 1", base, UTC);
+        assertEquals(ZonedDateTime.of(2024, 1, 15, 0, 0, 0, 0, UTC).toInstant(), next);
+    }
 }

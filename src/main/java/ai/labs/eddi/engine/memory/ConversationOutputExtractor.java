@@ -1,0 +1,124 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.engine.memory;
+
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.modules.output.model.OutputItem;
+import org.jboss.logging.Logger;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Shared utility for extracting human-readable text from a conversation memory
+ * snapshot. Consolidates logic that was duplicated across
+ * {@code GroupConversationService}, {@code CreateSubAgentTool}, and
+ * {@code ConverseWithAgentTool}.
+ *
+ * <p>
+ * Handles three output formats:
+ * <ol>
+ * <li>Nested {@code output} array — items may be plain Strings,
+ * {@link OutputItem} POJOs, or Maps with a {@code text} key</li>
+ * <li>Flat keys like {@code output:text:*} — legacy format</li>
+ * <li>Fallback: {@code toString()} on the entire output map</li>
+ * </ol>
+ *
+ * @since 6.0.0
+ */
+public final class ConversationOutputExtractor {
+
+    private static final Logger LOGGER = Logger.getLogger(ConversationOutputExtractor.class);
+
+    private ConversationOutputExtractor() {
+        // Utility class
+    }
+
+    /**
+     * Extracts the human-readable response text from the last conversation output
+     * in a snapshot.
+     *
+     * @param snapshot
+     *            the conversation memory snapshot (may be null)
+     * @return the extracted text, or {@code null} if no meaningful output is found
+     *         (e.g., pipeline metadata only)
+     */
+    public static String extractResponse(SimpleConversationMemorySnapshot snapshot) {
+        if (snapshot == null || snapshot.getConversationOutputs() == null) {
+            return null;
+        }
+        List<ConversationOutput> outputs = snapshot.getConversationOutputs();
+        if (outputs.isEmpty()) {
+            return null;
+        }
+        ConversationOutput lastOutput = outputs.get(outputs.size() - 1);
+        if (lastOutput == null) {
+            return null;
+        }
+
+        var texts = new ArrayList<String>();
+
+        // Format 1: Nested "output" array — may contain TextOutputItem POJOs or Maps
+        Object outputArray = lastOutput.get("output");
+        if (outputArray instanceof List<?> list) {
+            for (var item : list) {
+                if (item instanceof String s) {
+                    texts.add(s);
+                } else if (item instanceof OutputItem oi && oi.toString() != null) {
+                    // TextOutputItem.toString() returns the text field
+                    texts.add(oi.toString());
+                } else if (item instanceof Map<?, ?> map) {
+                    Object text = map.get("text");
+                    if (text instanceof String s) {
+                        texts.add(s);
+                    }
+                }
+            }
+            if (!texts.isEmpty()) {
+                return String.join("\n", texts);
+            }
+        }
+
+        // Format 2: Flat keys like "output:text:*"
+        for (var entry : lastOutput.entrySet()) {
+            if (entry.getKey() instanceof String key && key.startsWith("output:text:")) {
+                Object val = entry.getValue();
+                if (val instanceof String s) {
+                    texts.add(s);
+                } else if (val instanceof List<?> list) {
+                    for (var item : list) {
+                        if (item instanceof String s)
+                            texts.add(s);
+                        else if (item instanceof Map<?, ?> map && map.get("text") instanceof String s)
+                            texts.add(s);
+                    }
+                } else if (val instanceof Map<?, ?> map && map.get("text") instanceof String s) {
+                    texts.add(s);
+                }
+            }
+        }
+
+        if (!texts.isEmpty()) {
+            return String.join("\n", texts);
+        }
+
+        // Check if the output contains any actual LLM-generated content.
+        // Output keys follow patterns like "output", "output:text:*", "reply".
+        // If none are present, the map only contains pipeline metadata
+        // (e.g. "actions", "input", "context") — return null to avoid
+        // serializing raw metadata as a group discussion response.
+        boolean hasAnyOutput = lastOutput.keySet().stream()
+                .anyMatch(k -> k instanceof String s &&
+                        (s.startsWith("output") || s.startsWith("reply")));
+        if (!hasAnyOutput) {
+            return null;
+        }
+
+        // Fallback: serialize the entire output map
+        return lastOutput.toString();
+    }
+}

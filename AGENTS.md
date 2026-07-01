@@ -105,7 +105,8 @@ Follow this order unless the user explicitly requests something different.
 | 7     | Security & Compliance    | Secrets Vault, Audit Ledger (EU AI Act), tenant quota stub                                          |
 | 8     | MCP Integration          | MCP Server (33 tools), MCP Client, agent discovery, managed conversations                           |
 | 8c    | RAG Foundation           | Config-driven vector store retrieval, pgvector, httpCall RAG                                        |
-| 10    | Group Conversations      | Multi-agent debate orchestration, 5 styles, group-of-groups                                         |
+| 10    | Group Conversations      | Multi-agent debate orchestration, 6 styles (incl. Task Force), group-of-groups                      |
+| 10b   | Dynamic Agents           | Runtime agent creation/recruitment/delegation, DynamicAgentConfig guardrails, lifecycle policies, SharedTaskList |
 | —     | A2A Protocol             | Agent-to-Agent peer communication, Agent Cards, skill discovery                                     |
 | —     | Multi-Model Cascading    | Sequential model escalation with confidence routing                                                 |
 | —     | LLM Provider Expansion   | 7 → 12 providers (Mistral, Azure OpenAI, Bedrock, Oracle GenAI)                                     |
@@ -120,7 +121,7 @@ Follow this order unless the user explicitly requests something different.
 | —     | GDPR/CCPA Framework      | Cascading erasure, data portability, Art. 18 restriction, per-category retention                    |
 | —     | Commit Flags             | Strict write discipline for memory — uncommit failed task data, error digest injection              |
 | —     | Template Preview         | REST endpoint for previewing resolved system prompts with sample/live data                          |
-| —     | RC2 Hardening            | 3,500+ unit tests, 550+ integration tests, branding overhaul, rules deserialization fix             |
+| —     | Test Coverage            | 9,000+ tests, >90% instruction / >80% branch coverage, OpenSSF Gold compliance                     |
 | —     | Security Hardening v6.0.2 | SSRF prevention, SafeHttpClient, auth guard, vault salt, security headers, CodeQL + Trivy CI       |
 
 ### In Progress / Upcoming

@@ -32,6 +32,8 @@ public final class GroupConversationEventSink {
     public static final String EVENT_SYNTHESIS_COMPLETE = "synthesis_complete";
     public static final String EVENT_GROUP_COMPLETE = "group_complete";
     public static final String EVENT_GROUP_ERROR = "group_error";
+    public static final String EVENT_TASK_PLAN_CREATED = "task_plan_created";
+    public static final String EVENT_TASK_VERIFIED = "task_verified";
 
     // --- Event payloads ---
 
@@ -67,5 +69,14 @@ public final class GroupConversationEventSink {
     }
 
     public record GroupErrorEvent(String error) {
+    }
+
+    public record TaskPlanCreatedEvent(List<TaskSummary> tasks, boolean preConfigured) {
+    }
+
+    public record TaskVerifiedEvent(String taskId, String taskSubject, boolean passed, String feedback) {
+    }
+
+    public record TaskSummary(String id, String subject, String assignedTo, int priority) {
     }
 }

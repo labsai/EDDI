@@ -9,7 +9,10 @@ import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.ws.rs.core.Response;
+import ai.labs.eddi.secrets.impl.VaultSecretProvider;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -259,5 +262,274 @@ class RestSecretStoreTest {
         assertEquals(201, resp.getStatus());
         Map<String, Object> body = (Map<String, Object>) resp.getEntity();
         assertEquals("${vault:acme-corp/dbPassword}", body.get("reference"));
+    }
+
+    // ─── storeSecret — error paths ───
+
+    @Nested
+    @DisplayName("storeSecret error paths")
+    class StoreSecretErrors {
+
+        @Test
+        @DisplayName("should return 500 when store throws SecretProviderException")
+        void returns500OnProviderException() throws Exception {
+            when(secretProvider.getMetadata(any()))
+                    .thenThrow(new ISecretProvider.SecretNotFoundException("not found"));
+            doThrow(new ISecretProvider.SecretProviderException("IO error"))
+                    .when(secretProvider).store(any(), any(), any(), any());
+
+            Response resp = rest.storeSecret("default", "myKey",
+                    new IRestSecretStore.SecretRequest("secret123", "desc", null));
+
+            assertEquals(500, resp.getStatus());
+        }
+
+        @Test
+        @DisplayName("should return 400 when tenantId is null")
+        void returns400ForNullTenantId() {
+            Response resp = rest.storeSecret(null, "key",
+                    new IRestSecretStore.SecretRequest("val", null, null));
+            assertEquals(400, resp.getStatus());
+        }
+
+        @Test
+        @DisplayName("should return 400 when value is null in body")
+        void returns400ForNullValue() {
+            Response resp = rest.storeSecret("default", "key",
+                    new IRestSecretStore.SecretRequest(null, null, null));
+            assertEquals(400, resp.getStatus());
+        }
+    }
+
+    // ─── deleteSecret — additional error paths ───
+
+    @Nested
+    @DisplayName("deleteSecret additional paths")
+    class DeleteSecretAdditional {
+
+        @Test
+        @DisplayName("should return 503 when vault is unavailable")
+        void returns503WhenUnavailable() {
+            when(secretProvider.isAvailable()).thenReturn(false);
+            Response resp = rest.deleteSecret("default", "myKey");
+            assertEquals(503, resp.getStatus());
+        }
+
+        @Test
+        @DisplayName("should return 500 when delete throws SecretProviderException")
+        void returns500OnProviderException() throws Exception {
+            doThrow(new ISecretProvider.SecretProviderException("IO error"))
+                    .when(secretProvider).delete(any());
+
+            Response resp = rest.deleteSecret("default", "myKey");
+            assertEquals(500, resp.getStatus());
+        }
+    }
+
+    // ─── getSecretMetadata — additional paths ───
+
+    @Nested
+    @DisplayName("getSecretMetadata additional paths")
+    class GetMetadataAdditional {
+
+        @Test
+        @DisplayName("should return 503 when vault is unavailable")
+        void returns503WhenUnavailable() {
+            when(secretProvider.isAvailable()).thenReturn(false);
+            Response resp = rest.getSecretMetadata("default", "myKey");
+            assertEquals(503, resp.getStatus());
+        }
+
+        @Test
+        @DisplayName("should return 500 when getMetadata throws SecretProviderException")
+        void returns500OnProviderException() throws Exception {
+            when(secretProvider.getMetadata(any()))
+                    .thenThrow(new ISecretProvider.SecretProviderException("corrupt data"));
+
+            Response resp = rest.getSecretMetadata("default", "myKey");
+            assertEquals(500, resp.getStatus());
+        }
+
+        @Test
+        @DisplayName("should return 400 for invalid tenantId")
+        void returns400ForInvalidTenantId() {
+            Response resp = rest.getSecretMetadata("../evil", "myKey");
+            assertEquals(400, resp.getStatus());
+        }
+
+        @Test
+        @DisplayName("should return 400 for invalid keyName")
+        void returns400ForInvalidKeyName() {
+            Response resp = rest.getSecretMetadata("default", "key with spaces");
+            assertEquals(400, resp.getStatus());
+        }
+    }
+
+    // ─── listSecrets — additional paths ───
+
+    @Nested
+    @DisplayName("listSecrets additional paths")
+    class ListSecretsAdditional {
+
+        @Test
+        @DisplayName("should return 503 when vault is unavailable")
+        void returns503WhenUnavailable() {
+            when(secretProvider.isAvailable()).thenReturn(false);
+            Response resp = rest.listSecrets("default");
+            assertEquals(503, resp.getStatus());
+        }
+
+        @Test
+        @DisplayName("should return 500 when listKeys throws SecretProviderException")
+        void returns500OnProviderException() throws Exception {
+            when(secretProvider.listKeys("default"))
+                    .thenThrow(new ISecretProvider.SecretProviderException("DB error"));
+
+            Response resp = rest.listSecrets("default");
+            assertEquals(500, resp.getStatus());
+        }
+    }
+
+    // ─── rotateKek — additional paths ───
+
+    @Nested
+    @DisplayName("rotateKek additional paths")
+    class RotateKekAdditional {
+
+        @Test
+        @DisplayName("should return 503 when vault is unavailable")
+        void returns503WhenUnavailable() {
+            when(secretProvider.isAvailable()).thenReturn(false);
+            Response resp = rest.rotateKek(
+                    new IRestSecretStore.KekRotationRequest("oldkey123", "test-new-master-key"));
+            assertEquals(503, resp.getStatus());
+        }
+
+        @Test
+        @DisplayName("should return 500 when provider is not VaultSecretProvider")
+        void returns500WhenNotVaultProvider() {
+            // Default mock is ISecretProvider (not VaultSecretProvider)
+            Response resp = rest.rotateKek(
+                    new IRestSecretStore.KekRotationRequest("oldkey123", "test-new-master-key"));
+            assertEquals(500, resp.getStatus());
+        }
+
+        @Test
+        @DisplayName("should return 200 on successful KEK rotation with VaultSecretProvider")
+        @SuppressWarnings("unchecked")
+        void returns200OnSuccess() throws Exception {
+            var vaultProvider = mock(VaultSecretProvider.class);
+            when(vaultProvider.isAvailable()).thenReturn(true);
+            when(vaultProvider.rotateKek("oldkey123", "test-new-master-key")).thenReturn(5);
+            var vaultRest = new RestSecretStore(vaultProvider, secretResolver);
+
+            Response resp = vaultRest.rotateKek(
+                    new IRestSecretStore.KekRotationRequest("oldkey123", "test-new-master-key"));
+
+            assertEquals(200, resp.getStatus());
+            Map<String, Object> body = (Map<String, Object>) resp.getEntity();
+            assertEquals(5, body.get("deksReEncrypted"));
+            verify(secretResolver).invalidateAll();
+        }
+
+        @Test
+        @DisplayName("should return 500 when VaultSecretProvider.rotateKek throws")
+        void returns500OnRotateKekFailure() throws Exception {
+            var vaultProvider = mock(VaultSecretProvider.class);
+            when(vaultProvider.isAvailable()).thenReturn(true);
+            when(vaultProvider.rotateKek(any(), any()))
+                    .thenThrow(new ISecretProvider.SecretProviderException("Key derivation failed"));
+            var vaultRest = new RestSecretStore(vaultProvider, secretResolver);
+
+            Response resp = vaultRest.rotateKek(
+                    new IRestSecretStore.KekRotationRequest("oldkey123", "test-new-master-key"));
+
+            assertEquals(500, resp.getStatus());
+        }
+
+        @Test
+        @DisplayName("should return 400 when newMasterKey is null")
+        void returns400WhenNewKeyNull() {
+            Response resp = rest.rotateKek(
+                    new IRestSecretStore.KekRotationRequest("oldkey123", null));
+            assertEquals(400, resp.getStatus());
+        }
+
+        @Test
+        @DisplayName("should return 400 when oldMasterKey is blank")
+        void returns400WhenOldKeyBlank() {
+            Response resp = rest.rotateKek(
+                    new IRestSecretStore.KekRotationRequest("   ", "test-new-master-key"));
+            assertEquals(400, resp.getStatus());
+        }
+    }
+
+    // ─── resetTenant ───
+
+    @Nested
+    @DisplayName("resetTenant")
+    class ResetTenantTests {
+
+        @Test
+        @DisplayName("should return 200 with secretsDeleted count on success")
+        @SuppressWarnings("unchecked")
+        void returns200OnSuccess() throws Exception {
+            when(secretProvider.resetTenant("default")).thenReturn(3);
+
+            Response resp = rest.resetTenant("default");
+
+            assertEquals(200, resp.getStatus());
+            Map<String, Object> body = (Map<String, Object>) resp.getEntity();
+            assertEquals(3, body.get("secretsDeleted"));
+            assertNotNull(body.get("message"));
+            assertEquals("default", body.get("tenantId"));
+        }
+
+        @Test
+        @DisplayName("should return 503 when vault is unavailable")
+        void returns503WhenUnavailable() {
+            when(secretProvider.isAvailable()).thenReturn(false);
+
+            Response resp = rest.resetTenant("default");
+
+            assertEquals(503, resp.getStatus());
+        }
+
+        @Test
+        @DisplayName("should return 400 for path-traversal tenantId")
+        void returns400ForPathTraversalTenantId() {
+            Response resp = rest.resetTenant("../etc/passwd");
+
+            assertEquals(400, resp.getStatus());
+        }
+
+        @Test
+        @DisplayName("should return 400 for blank tenantId")
+        void returns400ForBlankTenantId() {
+            Response resp = rest.resetTenant(" ");
+
+            assertEquals(400, resp.getStatus());
+        }
+
+        @Test
+        @DisplayName("should return 500 when provider throws SecretProviderException")
+        void returns500OnProviderException() throws Exception {
+            when(secretProvider.resetTenant("default"))
+                    .thenThrow(new ISecretProvider.SecretProviderException("DEK corrupted"));
+
+            Response resp = rest.resetTenant("default");
+
+            assertEquals(500, resp.getStatus());
+        }
+
+        @Test
+        @DisplayName("should invalidate all cached secrets on success")
+        void invalidatesCacheOnSuccess() throws Exception {
+            when(secretProvider.resetTenant("default")).thenReturn(2);
+
+            rest.resetTenant("default");
+
+            verify(secretResolver).invalidateAll();
+        }
     }
 }

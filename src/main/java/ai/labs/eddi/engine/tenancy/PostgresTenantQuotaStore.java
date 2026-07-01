@@ -12,6 +12,7 @@ import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import javax.sql.DataSource;
@@ -72,9 +73,31 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized = false;
 
+    // Bootstrap config — stored as fields for lazy initialization in ensureSchema()
+    private final String defaultTenantId;
+    private final TenantQuota defaultQuota;
+
     @Inject
-    public PostgresTenantQuotaStore(Instance<DataSource> dataSourceInstance) {
+    public PostgresTenantQuotaStore(Instance<DataSource> dataSourceInstance,
+            @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
+            @ConfigProperty(name = "eddi.tenant.quota.enabled", defaultValue = "false") boolean enabled,
+            @ConfigProperty(name = "eddi.tenant.quota.max-conversations-per-day", defaultValue = "-1") int maxConvPerDay,
+            @ConfigProperty(name = "eddi.tenant.quota.max-agents-per-tenant", defaultValue = "-1") int maxAgents,
+            @ConfigProperty(name = "eddi.tenant.quota.max-api-calls-per-minute", defaultValue = "-1") int maxApiCalls,
+            @ConfigProperty(name = "eddi.tenant.quota.max-monthly-cost-usd", defaultValue = "-1") double maxCost) {
+
         this.dataSourceInstance = dataSourceInstance;
+        this.defaultTenantId = defaultTenantId;
+        this.defaultQuota = new TenantQuota(defaultTenantId, maxConvPerDay, maxAgents, maxApiCalls, maxCost, enabled);
+    }
+
+    /**
+     * Test-only constructor — no CDI injection, no bootstrap.
+     */
+    PostgresTenantQuotaStore(Instance<DataSource> dataSourceInstance) {
+        this.dataSourceInstance = dataSourceInstance;
+        this.defaultTenantId = null;
+        this.defaultQuota = null;
     }
 
     private synchronized void ensureSchema() {
@@ -84,8 +107,17 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_QUOTAS_TABLE);
             stmt.execute(CREATE_USAGE_TABLE);
-            schemaInitialized = true;
             LOGGER.info("PostgresTenantQuotaStore initialized (tables=tenant_quotas, tenant_usage)");
+
+            // Bootstrap default tenant quota if none exists (parity with
+            // InMemoryTenantQuotaStore).
+            // Uses INSERT ... ON CONFLICT DO NOTHING so an existing quota is never
+            // overwritten.
+            if (defaultTenantId != null && defaultQuota != null) {
+                bootstrapDefaultQuota(conn, defaultQuota);
+            }
+
+            schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize tenant quota tables", e);
         }
@@ -93,18 +125,80 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
 
     // ─── Quota Configuration ───
 
-    @Override
-    public TenantQuota getQuota(String tenantId) {
-        ensureSchema();
-        try (Connection conn = dataSourceInstance.get().getConnection();
-                PreparedStatement ps = conn.prepareStatement(
-                        "SELECT * FROM tenant_quotas WHERE tenant_id = ?")) {
+    /**
+     * Bootstrap-only insert using ON CONFLICT DO NOTHING — never overwrites an
+     * existing quota.
+     */
+    private void bootstrapDefaultQuota(Connection conn, TenantQuota quota) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                """
+                        INSERT INTO tenant_quotas (tenant_id, max_conversations_per_day, max_agents_per_tenant,
+                                                   max_api_calls_per_minute, max_monthly_cost_usd, enabled)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (tenant_id) DO NOTHING
+                        """)) {
+            ps.setString(1, quota.tenantId());
+            ps.setInt(2, quota.maxConversationsPerDay());
+            ps.setInt(3, quota.maxAgentsPerTenant());
+            ps.setInt(4, quota.maxApiCallsPerMinute());
+            ps.setDouble(5, quota.maxMonthlyCostUsd());
+            ps.setBoolean(6, quota.enabled());
+            int inserted = ps.executeUpdate();
+            if (inserted > 0) {
+                LOGGER.infof("Bootstrapped default tenant quota: tenantId=%s, enabled=%s, maxConv=%d, maxAgents=%d, maxApi=%d, maxCost=%.2f",
+                        quota.tenantId(), quota.enabled(), quota.maxConversationsPerDay(),
+                        quota.maxAgentsPerTenant(), quota.maxApiCallsPerMinute(), quota.maxMonthlyCostUsd());
+            }
+        }
+    }
+
+    /**
+     * Internal quota lookup reusing an existing connection (used during bootstrap).
+     */
+    private TenantQuota getQuotaInternal(Connection conn, String tenantId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT * FROM tenant_quotas WHERE tenant_id = ?")) {
             ps.setString(1, tenantId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     return toQuota(rs);
                 }
             }
+        }
+        return null;
+    }
+
+    /**
+     * Internal quota upsert reusing an existing connection (used during bootstrap).
+     */
+    private void setQuotaInternal(Connection conn, TenantQuota quota) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                """
+                        INSERT INTO tenant_quotas (tenant_id, max_conversations_per_day, max_agents_per_tenant,
+                                                   max_api_calls_per_minute, max_monthly_cost_usd, enabled)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT (tenant_id) DO UPDATE SET
+                            max_conversations_per_day = EXCLUDED.max_conversations_per_day,
+                            max_agents_per_tenant = EXCLUDED.max_agents_per_tenant,
+                            max_api_calls_per_minute = EXCLUDED.max_api_calls_per_minute,
+                            max_monthly_cost_usd = EXCLUDED.max_monthly_cost_usd,
+                            enabled = EXCLUDED.enabled
+                        """)) {
+            ps.setString(1, quota.tenantId());
+            ps.setInt(2, quota.maxConversationsPerDay());
+            ps.setInt(3, quota.maxAgentsPerTenant());
+            ps.setInt(4, quota.maxApiCallsPerMinute());
+            ps.setDouble(5, quota.maxMonthlyCostUsd());
+            ps.setBoolean(6, quota.enabled());
+            ps.executeUpdate();
+        }
+    }
+
+    @Override
+    public TenantQuota getQuota(String tenantId) {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            return getQuotaInternal(conn, tenantId);
         } catch (SQLException e) {
             LOGGER.warnf("Failed to read quota for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
         }
@@ -114,26 +208,8 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
     @Override
     public void setQuota(TenantQuota quota) {
         ensureSchema();
-        try (Connection conn = dataSourceInstance.get().getConnection();
-                PreparedStatement ps = conn.prepareStatement(
-                        """
-                                INSERT INTO tenant_quotas (tenant_id, max_conversations_per_day, max_agents_per_tenant,
-                                                           max_api_calls_per_minute, max_monthly_cost_usd, enabled)
-                                VALUES (?, ?, ?, ?, ?, ?)
-                                ON CONFLICT (tenant_id) DO UPDATE SET
-                                    max_conversations_per_day = EXCLUDED.max_conversations_per_day,
-                                    max_agents_per_tenant = EXCLUDED.max_agents_per_tenant,
-                                    max_api_calls_per_minute = EXCLUDED.max_api_calls_per_minute,
-                                    max_monthly_cost_usd = EXCLUDED.max_monthly_cost_usd,
-                                    enabled = EXCLUDED.enabled
-                                """)) {
-            ps.setString(1, quota.tenantId());
-            ps.setInt(2, quota.maxConversationsPerDay());
-            ps.setInt(3, quota.maxAgentsPerTenant());
-            ps.setInt(4, quota.maxApiCallsPerMinute());
-            ps.setDouble(5, quota.maxMonthlyCostUsd());
-            ps.setBoolean(6, quota.enabled());
-            ps.executeUpdate();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            setQuotaInternal(conn, quota);
         } catch (SQLException e) {
             LOGGER.errorf("Failed to set quota for tenant '%s': %s", sanitize(quota.tenantId()), sanitize(e.getMessage()));
         }

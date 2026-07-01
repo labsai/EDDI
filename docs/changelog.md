@@ -2,6 +2,526 @@
 
 > **Purpose:** Living document tracking all changes, decisions, and reasoning during implementation. Updated as work progresses for easy reference and review.
 
+
+---
+
+## 🔒 Security & Algorithm Hardening — SSRF/File-Read, Cron, DoS Guards (2026-06-29)
+
+**Repo:** EDDI (`fix/security-and-algo-hardening`)
+**What changed:** Findings from a code/security/algorithm review and bug hunt. Most changes are surgical and behavior-preserving for valid input; the two intentional behavior corrections (cron dom/dow **OR** semantics, **exponential** retry backoff) are called out explicitly below. New SSRF protection is opt-in and **off by default**.
+
+### Security fixes
+
+1. **Local-file read / non-http SSRF in OpenAPI spec discovery (`McpApiToolBuilder.parseSpec`)** — The `GET /apicallstore/apicalls/discover-endpoints?specUrl=…` endpoint (and `create_api_agent`) handed a user-supplied location straight to swagger-parser's `readLocation()`, which fetches URLs **and** reads local files (`file:///etc/passwd`) and resolves external `$ref`s. Now, when the input is a remote location (not inline content), it must be an `http(s)` URL (`UrlValidationUtils.isValidHttpUrl()`) — rejecting `file://` (local-file read), `classpath:`, `jar:`, and other non-http schemes. Inline JSON/YAML still parses with no network/file access. Inline-vs-location detection broadened via new `looksLikeInlineSpec()` (handles `swagger:` and multi-line YAML).
+   - **Scheme-only by design:** private/internal hosts stay allowed so internal OpenAPI discovery keeps working. The endpoint is `eddi-admin`/`eddi-editor` gated, so SSRF to private/metadata IPs via an `http(s)` spec URL is an accepted residual — as is the remote-`$ref` vector (swagger-parser has no clean toggle to disable only remote-ref resolution). Use full `UrlValidationUtils.validateUrl()` here if a deployment needs private-IP blocking.
+2. **Opt-in SSRF protection for agent-driven outbound calls** — New `eddi.security.ssrf-protection.enabled` flag (**default off** to preserve internal-API calls in self-hosted deployments). When on:
+   - `ApiCallExecutor` (httpcalls): the fully-resolved, templated target URL is validated with `UrlValidationUtils.validateUrl()` (blocks private/loopback/link-local/CGNAT/cloud-metadata + non-http), and redirect-following is **disabled** per request (new `IRequest.setFollowRedirects`, honoured by the Vert.x `HttpClientWrapper`) so a `3xx → internal host` can't bypass validation.
+   - `A2AToolProviderManager` (peer Agent-Card fetch + `tasks/send`): both target URLs validated. The JDK client already defaults to `Redirect.NEVER`, so no redirect hop to re-check.
+   - **Scoped out intentionally:** `RemoteApiResourceSource` (admin-initiated import-from-URL) — admin explicitly targets a URL, internal-instance imports are common, and the JDK client is `Redirect.NEVER`. Forcing private-IP blocking there would break legitimate internal imports.
+
+### Algorithm bugs found & fixed
+
+3. **`CronParser` — day-of-week `7` not accepted as Sunday.** Standard cron treats `0` and `7` as Sunday; the parser rejected `7` (range `0–6`) and, even if allowed, `DayOfWeek % 7` never yields `7`, so it would never match. Now `7` is accepted and normalized to `0` (`normalizeDaysOfWeek`).
+4. **`CronParser` — dom/dow used AND instead of standard-cron OR.** When **both** day-of-month and day-of-week are restricted (neither is `*`), Vixie cron fires when **either** matches (e.g. `0 0 13 * FRI` = the 13th *or* any Friday). The parser ANDed them. Now `dayMatches()` applies OR when both fields are restricted, AND otherwise (single-restricted reduces to the restricted field, so existing schedules are unaffected). The smart-skip loop was reworked around `dayMatches`.
+5. **`CronParser` — malformed fields crashed or silently never-fired.** `*/` threw `ArrayIndexOutOfBoundsException` (not a clean validation error); a reversed range like `5-1` produced an empty set → a schedule that never fires until the 2-year scan limit threw a confusing `IllegalStateException`. Both now throw a clear `IllegalArgumentException` at parse time (step structure + `start <= end` checks).
+6. **`ApiCallExecutor` retry backoff was linear, not exponential.** `delay * amountOfExecutions` (linear) despite the `exponentialBackoffDelayInMillis` field name. Now true exponential — `base * 2^(attempt-1)` — with an overflow-safe shift and a 5-minute ceiling (`MAX_BACKOFF_MILLIS`). First retry delay is unchanged (`base`), so the change only affects later retries.
+7. **`CalculatorTool` — unbounded recursion DoS.** The recursive-descent `SafeMathParser` recurses on nested parens; a long/deeply-nested LLM-supplied expression could throw `StackOverflowError` (an `Error`, not caught by `calculate()`). Added a 1000-char input cap plus a defensive `StackOverflowError` catch.
+8. **`InMemoryConversationCoordinator` — unbounded dead-letter deque.** The active-conversation map was capped but `deadLetters` grew without limit under a failure storm. Added a **configurable** cap (`eddi.coordinator.max-dead-letters`, default 1000; `-1` disables, `0` retains none) with oldest-first eviction — consistent with the existing `eddi.coordinator.max-active-conversations` property.
+
+### Files changed
+- `engine/mcp/McpApiToolBuilder.java` — URL validation in `parseSpec`, `looksLikeInlineSpec()`
+- `modules/apicalls/impl/ApiCallExecutor.java` — opt-in SSRF validation + redirect disable; exponential backoff
+- `modules/llm/impl/A2AToolProviderManager.java` — opt-in URL validation on peer fetch/send
+- `engine/httpclient/IRequest.java` + `impl/HttpClientWrapper.java` — `setFollowRedirects` (default no-op; Vert.x honours it)
+- `engine/runtime/internal/CronParser.java` — DOW 7, OR semantics (`dayMatches`), step/range validation
+- `modules/llm/tools/impl/CalculatorTool.java` — length cap + `StackOverflowError` catch
+- `engine/runtime/internal/InMemoryConversationCoordinator.java` — dead-letter cap
+- `resources/application.properties` — documented `eddi.security.ssrf-protection.enabled`
+
+### Tests added
+- `McpApiToolBuilderTest` — +5 (file/classpath/non-http rejection, scheme-gate allows internal hosts, inline works, classifier)
+- `ApiCallExecutorTest` — +6 (SSRF block internal URL, disable redirects on public, protection-off no-op; exponential curve, ceiling cap, no-retry zero)
+- `CronParserTest` — +6 (DOW 7 = Sunday, 0≡7, OR fires on dom and on weekday, single-restricted stays AND, reversed-range + malformed-step rejection)
+- `CalculatorToolTest` — +2 (over-long rejected, deep-nesting returns cleanly)
+- `InMemoryConversationCoordinatorTest` — +2 (dead-letter cap evicts oldest; `-1` disables)
+- `ApiCallExecutor`/`A2AToolProviderManager`/`InMemoryConversationCoordinator` constructor-call sites updated across test files.
+- Mock-based suites green; A2A + embedded-server suites are unrunnable in the sandbox (JDK `HttpClient`/`HttpServer` can't open a selector) but compile and are exercised in CI.
+
+### Review follow-ups (Copilot + CodeRabbit)
+- **`IRequest.setFollowRedirects` fails closed** — made it a non-default (abstract) interface method instead of a no-op default, so any new `IRequest` impl must honour it and cannot silently re-enable the redirect bypass.
+- **Coordinator eviction is O(n), not O(n²)** — compute the dead-letter excess once and evict that many, instead of calling `ConcurrentLinkedDeque.size()` per loop iteration.
+- **Coordinator dead-letter cap hardening** — reject `max-dead-letters < -1` at startup (only `-1`/`0`/positive are valid, so a typo like `-2` can't silently disable trimming), and serialize the add+trim under a small lock so concurrent failures enforce the cap deterministically (the existing `pollFirst` already evicts oldest-first, so the newest failures were never dropped — the lock just removes transient under-retention).
+- **`CronParser` Vixie star semantics** — a day field is "starred" (not restricted, takes the AND path) when it *begins* with `*`, so `*/2` is treated like `*` (was exact `equals("*")`, which wrongly took the OR path).
+- **`CronParser` field-aware parse errors** — `parseIntField()` wraps `NumberFormatException` into an `IllegalArgumentException` carrying the offending field (e.g. `*/abc` → "Invalid number 'abc' in field: …"), instead of leaking a vague low-level message.
+- **`CalculatorTool` guards before logging** — the length check now runs before the eager `LOGGER.debug("… " + expression)` concatenation, so an oversized payload is rejected without building/logging the big string.
+
+### Known residual (accepted, documented)
+- **OpenAPI external `$ref` resolution** (`McpApiToolBuilder`, `setResolve(true)`): the http(s) gate validates the top-level spec location but not external `$ref`s inside the spec, so a crafted spec can still make the parser fetch a remote/file ref. Disabling resolution (`setResolve(false)`) would also break legitimate in-document `#/components` refs that real specs rely on, so resolution is kept on. Mitigated by the `eddi-admin`/`eddi-editor` gate; a constrained ref-resolver is the proper (heavier) fix.
+
+### Not addressed here (architectural — out of scope for a hardening pass)
+- **Open-by-default MCP/admin surface** and **role- vs tenant-based isolation** for config resources.
+- **Conversation-memory 16 MB BSON ceiling** — needs a proper step-archival design, not a quick guard.
+
+---
+
+## 🔒 PR Review Fixes — DynamicAgentConfig Propagation, Null Safety, Code Dedup (2026-06-26)
+
+**Repo:** EDDI (`feat/group-task-orchestration`)
+**What changed:** 5 fixes addressing Copilot PR review findings.
+
+### Fixes
+
+1. **HIGH: DynamicAgentConfig propagation** — Group-level guardrails were silently ignored. Fix: GCS stores config on GC (transient), passes via context to AgentOrchestrator which reads it from memory.
+2. **MEDIUM: Null-safe DynamicAgentConfig** — Constructor defaults null to disabled config.
+3. **MEDIUM: Null-safe provider allow-list** — `Objects::nonNull` filter before `equalsIgnoreCase()`.
+4. **MEDIUM: Null-safe model allow-list** — Filters for both null map values and null list entries.
+5. **LOW: extractResponse() deduplication** — Shared `ConversationOutputExtractor` utility replacing 3 copies.
+
+### Files Changed
+- `GroupConversation.java` — Transient `dynamicAgentConfig` field (`@JsonIgnore`)
+- `GroupConversationService.java` — Config propagation + `extractResponse()` delegation
+- `AgentOrchestrator.java` — `resolveDynamicAgentConfig()` reads group config from context
+- `CreateSubAgentTool.java` — Null-safe constructor + allow-lists + `extractResponse()` delegation
+- `ConverseWithAgentTool.java` — `extractResponse()` delegation
+- `ConversationOutputExtractor.java` — **[NEW]** Shared utility
+
+### Tests Added
+- `ConversationOutputExtractorTest` — 11 tests
+- `DynamicAgentToolsTest` — 7 new null-safety tests
+
+---
+
+## 🔧 MCP Group Tools — Async Discussion, Delete, @Blocking Fix (2026-06-26)
+
+**Repo:** EDDI (`feat/group-task-orchestration`)
+**What changed:** 3 MCP improvements for Task Force group discussions.
+
+### Changes
+- **Bug fix**: `discuss_with_group` was missing `@Blocking` — a multi-minute TASK_FORCE discussion would block the Vert.x event loop thread, potentially freezing the MCP server. Now correctly annotated (matches `talk_to_agent` pattern in McpConversationTools).
+- **New tool**: `start_group_discussion` — async variant that returns immediately with `groupConversationId` + `IN_PROGRESS` state. Client polls with `read_group_conversation`. Uses existing `startAndDiscussAsync()` backend method.
+- **New tool**: `delete_group_conversation` — REST-MCP parity gap. DELETE endpoint existed in REST API but had no MCP equivalent.
+- **Improved docs**: Tool descriptions now document what data `read_group_conversation` returns (task list, tracking lists, state) so MCP clients know they don't need separate tools for task inspection.
+
+### Design Decision
+Rejected adding 5 separate tools (read_task_list, list_dynamic_agents, discuss_task, clone_group, describe_task_force_syntax) — all proposed data is already available via existing tools. Avoided tool sprawl (project already has 63 MCP tools).
+
+### Coverage
+- McpGroupTools: 91.79% instruction, 81.25% branch, 100% methods
+- 9 new tests (31 total in McpGroupToolsTest): async success/defaults/blank/error, delete success/confirmation/error, @Blocking annotation reflection tests
+- Full suite: 9,611 tests, 0 failures
+
+---
+
+## 🧪 Comprehensive Branch Coverage for Dynamic Agent System (2026-06-25)
+
+**Repo:** EDDI (`feat/group-task-orchestration`)
+**What changed:** Added 60+ targeted unit tests to cover all uncovered branches in the Task Force / Dynamic Agent feature. Coverage improved from 0.88→0.89 instructions (unit tests only; CI with integration tests will exceed 0.90/0.80 thresholds).
+
+### Files Modified (Tests)
+- **DynamicAgentToolsTest** (+25 tests): initialMessage flow, extractResponse all branches, blank params, empty allow-lists, retain=false, general exceptions
+- **TaskListParserTest** (+22 tests): all JSON key aliases, null/empty members, markdown formats, long text truncation, null displayName safety
+- **SharedTaskListTest** (+12 tests): findTasksForAgent(null), wrong status transitions, nonexistent ID exceptions, failTask from various states, setTasks(null)
+- **AgentGroupConfigurationTest** (+12 tests): LifecyclePolicy toJson/fromJson, TaskDefinition constructors, DiscussionPhase requiresApproval
+
+### Notes
+- Local `mvnw verify` shows 0.89/0.78 because ITs are skipped. CI runs `-DskipITs=false` → exceeds thresholds.
+- Total test count: 9,573 (0 failures, 0 errors)
+
+---
+
+## 🔧 Dynamic Agent System — Critical Code Review Fixes (2026-06-25)
+
+
+**Repo:** EDDI (`feat/group-task-orchestration`)
+**What changed:** 3-reviewer code review uncovered 6 critical bugs and 8 medium issues. All critical and key medium issues fixed.
+
+### Critical Fixes
+- **C1: Shared tracking lists** — `AgentOrchestrator` was creating separate `createdAgentIds`/`retainedAgentIds` per whitelist tool call. TeardownAgentTool couldn't see agents created by CreateSubAgentTool. Fixed: shared lists created once, passed to all tools.
+- **C2: Retain flag non-functional** — `CreateSubAgentTool` accepted `retain=true` but never populated `retainedAgentIds`. Agents were auto-deleted despite LLM requesting retention. Fixed: wired `Set<String> retainedAgentIds` to constructor + `retainedAgentIds.add(agentId)` when retain=true.
+- **C3: Double quota counting** — `CreateSubAgentTool` called `acquireConversationSlot()` then `startConversation()` also called it internally. Each creation burned 2 quota slots. Fixed: removed explicit quota call from tool.
+- **C4: Transcript race condition** — `GroupConversation.transcript` was a plain `ArrayList` accessed from parallel virtual threads. Fixed: `Collections.synchronizedList(new ArrayList<>())` + null-safe setter.
+- **C5: Dead ERROR detection** — `ConverseWithAgentTool.extractResponse()` returned `""` instead of `null`, making `response == null` check dead code. Fixed: returns `null` for empty/missing outputs.
+- **C6: Zero test coverage** — `ConverseWithAgentTool` had 154 lines of untested code. Added 8 tests covering new conversation, existing conversation, validation, timeout, error state, empty response.
+
+### Medium Fixes
+- **M1: LifecyclePolicy enum** — `lifecyclePolicy` changed from `String` to `LifecyclePolicy` enum with `@JsonValue`/`@JsonCreator` for kebab-case JSON. Typos now fail at deserialization instead of silently skipping cleanup.
+- **M2: synchronizedList streaming** — `findMemberIncludingDynamic()` now wraps `findMember(dynamicMembers)` in `synchronized(dynamicMembers)` block.
+- **M3: Cycle detection** — `SharedTaskList.detectCycles()` now called after task list dependency resolution. Circular deps throw `GroupDiscussionException` fail-fast.
+- **M5: unretainAgent()** — New `@Tool` method on `TeardownAgentTool` to remove retention flags.
+- **M6: Agent removal after teardown** — `createdAgentIds.remove(agentId)` after successful undeploy, so counter accurately reflects active agents.
+- **M10: Case-insensitive guardrails** — Provider/model allow-list checks now use `equalsIgnoreCase()`.
+
+### Test Updates
+- `DynamicAgentToolsTest`: +8 ConverseWithAgentTool tests, updated quota test, updated enum assertions
+- `GroupConversationTest`: Updated enum count assertions (TranscriptEntryType 11→14, GroupConversationState 5→6)
+- **9,486 tests pass, 0 failures**
+
+---
+
+## ✨ Dynamic Agent System — Create, Recruit, Delegate (2026-06-25)
+
+
+**Repo:** EDDI (`feat/group-task-orchestration`)
+**What changed:** LLM agents in TASK_FORCE group conversations can now dynamically create, recruit, converse with, and teardown other agents at runtime. This enables agentic patterns where a moderator or specialist agent can spin up sub-agents on-the-fly to accomplish tasks.
+
+### Config Model
+- **`DynamicAgentConfig`** — new inner class on `AgentGroupConfiguration` with config switches for creation, recruitment, delegation, guardrails (provider/model whitelists, per-discussion caps), and lifecycle policy (ephemeral/keep-deployed/undeploy-only/agent-decides)
+- **`GroupConversation`** — added `dynamicMembers`, `createdAgentIds`, `retainedAgentIds` fields for runtime tracking
+
+### 4 LLM Tools (all `@Vetoed`, per-invocation constructed)
+- **`CreateSubAgentTool`** — creates + deploys agent via `AgentSetupService`, quota-gated, guardrail-validated, optional initial message
+- **`ConverseWithAgentTool`** — send messages to any deployed agent, supports multi-turn via conversationId
+- **`FindAgentsByCapabilityTool`** — discover agents by skill via `CapabilityRegistryService`
+- **`TeardownAgentTool`** — undeploy/delete created agents + `retainAgent` for lifecycle override
+
+### Wiring
+- `AgentOrchestrator` + `LlmTask` — 5 new CDI dependencies, whitelist-gated tool names: `create_sub_agent`, `converse_with_agent`, `find_agents_by_capability`, `teardown_agent`
+- `GroupConversationService` — `findMemberIncludingDynamic()` for task assignment to dynamic members, `cleanupEphemeralAgents()` in finally block with lifecycle policy enforcement
+
+### Tests
+- **`DynamicAgentToolsTest`** — 22 tests: CreateSubAgent (8), FindAgents (4), Teardown (5), DynamicAgentConfig (2), GroupConversation fields (6)
+- All existing test files updated for new constructor signatures (11 files)
+
+---
+
+## 🐛 Fix: Tenant Quota Enforcement in Group Conversations (2026-06-25)
+
+**Repo:** EDDI (`feat/group-task-orchestration`)
+**What changed:** `QuotaExceededException` from `ConversationService` was being silently caught and treated as a per-agent skip/retry. Now detected at 4 levels and causes immediate abort — prevents burning N round-trips when quota is exhausted.
+
+- `executeAgentTurn` → `startConversation()`: immediate `GroupDiscussionException`
+- `executeAgentTurn` → `say()`: unwrap from `ExecutionException`, abort (bypasses retry policy)
+- Task execution loop: quota error exits the agent's `CompletableFuture` immediately
+- Parallel phase: quota propagates through `CompletionException`, cancels remaining futures
+- Review fix: quota errors in task loop now propagate regardless of `onAgentFailure` policy (was silently lost with SKIP policy)
+- +3 regression tests (startConversation quota, say() quota, no-retry-even-with-RETRY-policy). Total: 112 tests, 0 failures.
+
+---
+
+## 🐛 Fix: Final Review — Duplicate Task Bug, Regression Tests (2026-06-25)
+
+**Repo:** EDDI (`feat/group-task-orchestration`)
+**What changed:** Second review pass found 3 remaining issues (1 CRITICAL, 1 MEDIUM, 1 dead code). All fixed. Added comprehensive regression tests.
+
+- **C1-final**: `addTask→updateTask` — pre-configured dependency resolution was APPENDING tasks with same ID instead of REPLACING, silently breaking dependency ordering
+- **M1-final**: `setMemberConversationIds` defensively wraps in `ConcurrentHashMap` (MongoDB deserialization was replacing with `LinkedHashMap`)
+- **Dead code**: Removed unused `snapshotTranscript` from `executeTaskExecutionPhase`
+- **New**: `SharedTaskList.updateTask()` public synchronized method
+- **Regression tests**: +20 tests covering `resolveTaskAssignment` (7), `tryParseVerificationJson` (6), `handleTaskFailure` (2), `setMemberConversationIds` (2), `updateTask` (3). Total: 109 tests, 0 failures.
+
+---
+
+## 🐛 Fix: TASK_FORCE Code Review — Thread Safety, Verification Parser, Error Handling (2026-06-25)
+
+**Repo:** EDDI (`feat/group-task-orchestration`)
+**What changed:** Three-pass code review identified 4 CRITICAL, 6 HIGH, and 4 MEDIUM issues. All fixed.
+
+### Critical Fixes (C1–C4)
+- **Thread safety**: All `SharedTaskList` public methods now `synchronized` — prevents race conditions during parallel EXECUTE phase
+- **ConcurrentHashMap**: `GroupConversation.memberConversationIds` changed from `LinkedHashMap` to `ConcurrentHashMap`
+- **Dependency resolution**: Pre-configured `TaskDefinition.dependsOn` subjects now resolved to actual task IDs (was silently dropped)
+- **Null guard**: `resolveTaskAssignment` null returns no longer crash `assignTask`
+
+### High Fixes (H1–H6)
+- **Transcript snapshot**: EXECUTE phase now takes `List.copyOf(gc.getTranscript())` before launching parallel futures (consistent with `executeParallelPhase`)
+- **Timeout semantics**: Changed from `timeout × agentCount` to `timeout × maxTasksPerAgent` (agents run in parallel, tasks per agent are sequential)
+- **Round-robin assignment**: `resolveTaskAssignment("ALL")` now distributes evenly across non-moderator members (was always picking first)
+- **Verification parser**: Dedicated JSON parser reads `passed` boolean directly (was using heuristic `contains("fail")`)
+- **IllegalStateException**: Now caught alongside `GroupDiscussionException` in parallel EXECUTE lambda
+- **Error events**: New `handleTaskFailure()` method emits transcript entry + SSE event for failed tasks
+
+### Medium Fixes (M1–M4)
+- **Slack**: `TASK_FORCE` added to `EXPANDED_STYLES` set
+- **Cycle detection**: Changed from `ArrayList.contains()` O(n) to `HashSet.contains()` O(1)
+- **Fallback**: `singleTaskFallback` now preserves LLM output as task description (was discarding it)
+- **HITL placeholders**: `BLOCKED` and `AWAITING_APPROVAL` statuses documented as Phase 9b placeholders
+
+### Documentation Updates (6 files)
+- `architecture.md`, `group-conversations.md`, `README.md`, `AGENTS.md`, `mcp-server.md`, `slack-integration.md`, `HANDOFF.md` — all updated from "5 styles" to "6 styles" with TASK_FORCE entries
+
+### New Tests (+18 tests)
+- `SharedTaskListTest`: +11 tests (null findById, nonexistent IDs, verified deps, multiple deps, self-ref cycles, defensive copy, concurrent stress)
+- `TaskListParserTest`: +7 tests (empty array, code-fenced JSON, empty members, missing fields, round-robin, tier-3 output preservation)
+
+---
+
+## ✨ Feature: TASK_FORCE Group Orchestration — Collaborative Task Accomplishment (2026-06-25)
+
+**Repo:** EDDI (`feat/group-task-orchestration`)
+**What changed:** Added a new `TASK_FORCE` discussion style to group conversations. Instead of debating, agents collaborate to accomplish concrete tasks together via a PLAN → EXECUTE → VERIFY → SYNTHESIS pipeline.
+
+### Key Design Decisions
+
+1. **Config-driven**: Tasks can be pre-configured in `AgentGroupConfiguration.tasks[]` (skips PLAN phase) or dynamically generated by the LLM via `TaskListParser` (three-tier fallback: JSON → Markdown → single task).
+2. **Reuses existing infrastructure**: Task execution goes through normal agent pipelines. No new REST endpoints.
+3. **State embedded in GroupConversation**: `SharedTaskList` is a field on `GroupConversation`, persisted as part of the MongoDB document.
+4. **HITL forward-compatible**: `AWAITING_APPROVAL` state added to both `GroupConversationState` and `TaskStatus` for Phase 9b.
+5. **Parallel execution**: Tasks for different agents run in parallel; tasks for the same agent run sequentially.
+
+### Files Changed (4 new, 12 modified)
+
+- **New**: `SharedTaskList.java`, `TaskListParser.java`, `SharedTaskListTest.java` (18 tests), `TaskListParserTest.java` (12 tests)
+- **Model**: `AgentGroupConfiguration.java` (TASK_FORCE style + enums), `GroupConversation.java` (taskList field + entry types)
+- **Orchestration**: `GroupConversationService.java` (~400 LOC task phase logic), `DiscussionStylePresets.java` (expansion + templates)
+- **API**: `GroupConversationEventSink.java`, `IGroupConversationService.java`, `RestGroupConversation.java`, `RestAgentGroupStore.java`, `McpGroupTools.java`, `SlackGroupDiscussionListener.java`
+- **Tests**: `DiscussionStylePresetsTest.java` (+5 tests), `McpGroupToolsTest.java` (fixed for new param)
+
+---
+
+## 📄 README Audit & MCP Docs Update (2026-06-25)
+
+**Repo:** EDDI (`chore/readme-update`)
+**What changed:** Comprehensive README accuracy audit and stale data fixes.
+
+### README.md
+
+- **Removed hardcoded version**: Replaced `**Latest version: 6.1.0**` with a dynamic shields.io GitHub Release badge — auto-updates from GitHub Releases, no manual maintenance.
+- **Added UNIDO mention**: Added `UNIDO Trusted Partner` alongside Red Hat certification in the intro paragraph.
+- **Updated MCP tool count**: `42 tools` → `60+ tools` in both the Standards table and Documentation table.
+- **Updated Quarkus SDK example**: Replaced hardcoded `<version>6.1.0</version>` with `<version>LATEST</version>` and a comment linking to the quarkus-eddi releases page.
+
+### docs/mcp-server.md
+
+- **Updated header count**: `Available Tools (48)` → `Available Tools (63)`.
+- **Fixed stale reference**: Tool Filtering section still said "48 intended tools" → updated to 63.
+- **Added 3 missing tool sections** (15 tools total):
+  - **Memory Tools (8)**: `list_user_memories`, `get_visible_memories`, `search_user_memories`, `get_memory_by_key`, `upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`, `count_user_memories`
+  - **GDPR Tools (2)**: `delete_user_data`, `export_user_data`
+  - **Channel Integration Tools (5)**: `list_channel_integrations`, `read_channel_integration`, `create_channel_integration`, `update_channel_integration`, `delete_channel_integration`
+
+### Verification
+
+- All 63 `@Tool` annotations in `engine/mcp/` verified as `io.quarkiverse.mcp.server.Tool` (not langchain4j).
+- GitHub Releases API confirms proper releases exist (badge renders correctly).
+- All 3 new cross-links (`user-memory.md`, `gdpr-compliance.md`, `slack-integration.md`) verified present.
+
+**Files:** `README.md`, `docs/mcp-server.md`, `docs/changelog.md`
+
+---
+
+## 🐛 Fix: Swagger UI CSP Regression — Duplicate Header Causes Inline Script Block (2026-06-23)
+
+
+**Repo:** EDDI (`fix/swagger-csp-duplicate-header`)
+**What changed:** Swagger UI showed a blank page on Docker with `Content-Security-Policy` blocking inline scripts (`script-src-elem` violation).
+
+### Root Cause
+The original CSP fix (June 3) used two `quarkus.http.filter` entries with order-based precedence, assuming the higher-order Swagger filter would *replace* the default filter's CSP header. In reality, **both filters fire and both add a `Content-Security-Policy` header** to the response. Per the CSP spec, when a browser receives multiple CSP headers it enforces the **intersection** (most restrictive) — so the default filter's `script-src 'self'` blocked Swagger's inline scripts regardless of the relaxed swagger filter.
+
+The CI smoke test only checked `/q/health/ready` for header *presence*, never the Swagger UI path, and never checked for duplicate headers — so the bug was never caught.
+
+### Fix
+Changed the default CSP filter regex from `/.*` to `/(?!q/swagger-ui(/|$)).*` — a negative lookahead that excludes exactly `/q/swagger-ui` and `/q/swagger-ui/...`. This ensures only **one** CSP header is sent per path: the strict one for the application and the relaxed one for Swagger UI.
+
+**Files:** `application.properties`, `docs/changelog.md`
+
+---
+
+## Swagger UI Overhaul, Manager Update & Version 6.1.1 (2026-06-23)
+
+**Repo:** EDDI (`feat/swagger-ui-overhaul`)
+**What changed:** Complete overhaul of Swagger UI, version bump to 6.1.1, Manager frontend asset update, and Docker base image bump.
+
+### Tag Taxonomy (40 tags, 9 categories)
+
+All `@Tag` annotations updated from flat names to category-based hierarchy (`Category / Subcategory`) for logical grouping in Swagger UI. The `@OpenAPIDefinition` tag array in `OpenApiConfig.java` defines the canonical taxonomy.
+
+- **Agents**: Setup, Agents, Administration, Agent Groups
+- **Configuration**: Workflows, LLM, Behavior Rules, Dictionary, Output, API Calls, MCP Calls, Properties, Prompt Snippets, Global Variables
+- **Conversations**: Conversations, Group Conversations, Conversation Store, Attachments
+- **Integrations**: A2A Protocol, Capability Registry, Channel Integrations, Slack Webhook
+- **Knowledge & Memory**: RAG Knowledge Bases, RAG Ingestion, User Memory
+- **Security**: Authentication, Secrets Vault, Audit Trail, GDPR / Privacy, Tenant Quotas
+- **Administration**: Backup, Schedules, Coordinator Admin, Orphan Admin, Log Admin, Descriptors
+- **Tools**: Tool History, Template Preview, Standalone NLP
+- **UI**: Chat UI
+
+All 49 REST interface `@Tag` annotations now include `description` attributes (SmallRye was silently dropping `@OpenAPIDefinition` descriptions when interface-level `@Tag` lacked one).
+
+4 previously untagged endpoints received new `@Tag` annotations:
+- `ILogoutEndpoint` → `Security / Authentication`
+- `RestSlackWebhook` → `Integrations / Slack Webhook`
+- `RestToolHistory` → `Tools / Tool History` (+ added missing `@ApplicationScoped`)
+- `RestA2AEndpoint` → `Integrations / A2A Protocol` (capability endpoints tagged `Integrations / Capability Registry`)
+
+### OpenApiTagSortFilter (new)
+
+New `OASFilter` implementation (`OpenApiTagSortFilter.java`) sorts tags alphabetically at build time, producing stable ordering. Fixed `UnsupportedOperationException` caused by sorting SmallRye's unmodifiable tag list. Swagger UI config: `quarkus.swagger-ui.tags-sorter=alpha`, `quarkus.swagger-ui.theme=original`.
+
+### Swagger UI Light/Dark Mode
+
+Complete rewrite of `META-INF/branding/style.css` with proper dual-theme support:
+- **Light mode** (default): white backgrounds, dark text, amber-600 (`#d97706`) accents
+- **Dark mode** (lamp toggle → `html.dark-mode`): EDDI Manager palette — zinc-950 bg, zinc-900 surfaces, amber-500 accents
+- Topbar stays dark (`#18181b`) in both modes for brand consistency with logo
+- EDDI amber accents on Authorize, Execute, Explore, and Try-it-out buttons
+- Version badge `6.1.1` with WCAG AAA contrast; OAS 3.1 badge demoted to subtle gray
+- HTTP verb tinted operation blocks (blue GET, green POST, amber PUT, red DELETE, purple PATCH)
+- Logo renamed `eddi-logo.png` → `logo.png` (Quarkus auto-detection convention)
+
+### Version Bump → 6.1.1
+
+Updated across: `pom.xml`, `application.properties` (×3 fields), `OpenApiConfig.java`, `Dockerfile`, `Chart.yaml`, `eddi-deployment.yaml`, `quickstart.yaml`, `redhat-certify.yml`.
+
+### Docker Base Image
+
+Bumped Red Hat UBI9 OpenJDK 25 runtime digest (`sha256:0f4e04...` → `sha256:2aed9f...`).
+
+### Manager Frontend
+
+Updated `manage.html` asset references to latest EDDI-Manager build. Removed old bundle artifacts (~4,000 lines of obsolete JS/CSS).
+
+**Files changed:** 100 files, +1,107 / −4,041 lines
+
+---
+
+## 📦 Safe Dependency Bumps (2026-06-19)
+
+**Repo:** EDDI (`chore/bump-safe-deps`)
+**What changed:** Bumped two dependencies to their latest stable patch/minor versions. Both are drop-in upgrades with no breaking changes.
+
+- **`quarkus-mcp-server.version`**: `1.12.1` → `1.13.0` — adds lazy SSE initialization for Streamable HTTP transport (defers SSE setup until first API call)
+- **`swagger-parser`**: `2.1.42` → `2.1.44` — bug fix for unsafe Yaml instantiation in ReferenceVisitor
+
+**File:** `pom.xml`
+**Verified:** `mvnw compile` passes cleanly.
+
+---
+
+## 🔒 OpenSSF Scorecard — SAST on All Commits (2026-06-18)
+
+**Repo:** EDDI (`fix/code-review-bugs`)
+**What changed:** Changed the CodeQL SAST job gate in `ci.yml` from a pure path-filter condition to a hybrid: always run on `push` to `main`, but still skip docs-only PRs. The previous `if: needs.detect-changes.outputs.code == 'true'` condition was causing CodeQL to be skipped on Dependabot merge commits, resulting in OpenSSF Scorecard warning: "28 commits out of 30 are checked with a SAST tool."
+
+- **File:** `.github/workflows/ci.yml` — `codeql` job now uses `github.event_name == 'push' || needs.detect-changes.outputs.code == 'true'`
+- **Rationale:** OpenSSF Scorecard only checks commits on the default branch (push events), so CodeQL must always run on push. For PRs, the path filter still saves ~3 min of CI time on docs-only changes since PR checks don't affect the scorecard.
+
+---
+
+## 🐛 Bug Fixes from Code Review — 4 Concurrency & Null Safety Issues (2026-06-10)
+
+**Repo:** EDDI (`fix/code-review-bugs`)
+**What changed:** Fixed 4 verified bugs from code review (priority HIGH to MEDIUM). All fixes include regression tests.
+
+### Fix #1 — PropertySetterTask NPE on blank input (HIGH)
+
+- **Root cause:** `CATCH_ANY_INPUT_AS_PROPERTY` handler dereferences `getLatestData("input:initial")` without null check. When a client sends an empty/whitespace-only message, `Conversation.storeUserInputInMemory` skips storing `input:initial` → `getLatestData` returns null → NPE → pipeline dies → conversation enters ERROR state.
+- **Fix:** Added null guards for both `initialInputData` and `initialInput`.
+- **Tests:** 3 new tests — missing `input:initial`, null result, empty string result.
+- **Files:** `PropertySetterTask.java`, `PropertySetterTaskTest.java`
+
+### Fix #2 — Config version race condition (HIGH PG / MEDIUM-LOW Mongo)
+
+- **Root cause:** `HistorizedResourceStore.update()` does non-atomic read→increment→write. Two concurrent edits both read version N, both write N+1 — last write wins silently. On PostgreSQL: `ON CONFLICT DO UPDATE` silently merges history. On MongoDB: history `insertOne` throws unhandled `MongoWriteException` (HTTP 500 instead of 409).
+- **Fix:** Introduced optimistic locking via `storeIfCurrentVersion()` default method on `IResourceStorage`. MongoDB overrides with version-conditioned `updateOne` (check `matchedCount`). PostgreSQL overrides with `UPDATE WHERE version = ?` (check affected rows). History inserts hardened: Mongo catches duplicate-key 11000; Postgres uses `ON CONFLICT DO NOTHING`.
+- **Tests:** 1 new test for concurrent modification detection (mock throws `ResourceModifiedException`); existing update test updated to verify `storeIfCurrentVersion` delegation.
+- **Files:** `IResourceStorage.java`, `MongoResourceStorage.java`, `PostgresResourceStorage.java`, `HistorizedResourceStore.java`, `HistorizedResourceStoreTest.java`
+
+### Fix #3 — ComponentCache HashMap race (MEDIUM)
+
+- **Root cause:** `ComponentCache` is `@ApplicationScoped` (singleton) using plain `HashMap`. `computeIfAbsent` on `HashMap` is not thread-safe. Concurrent reads (every conversation turn via `LifecycleManager`) and writes (lazy agent deployment via `WorkflowStoreClientLibrary`) can corrupt the map.
+- **Fix:** Replaced `HashMap` with `ConcurrentHashMap` for both outer and inner maps.
+- **Tests:** 1 new concurrent stress test (8 threads, 500 ops each, mixed read/write).
+- **Files:** `ComponentCache.java`, `ComponentCacheTest.java`
+
+### Fix #4 — Zombie-write snapshot clobber after timeout (MEDIUM)
+
+- **Root cause:** When an agent times out, `future.cancel(true)` sets the interrupt flag but doesn't stop threads blocked in non-interruptible I/O (LLM HTTP calls). When the call eventually completes, `onComplete` callback fires → `storeConversationMemory` → unconditional `replaceOne` overwrites the newer conversation state.
+- **Fix:** Check `Thread.currentThread().isInterrupted()` before calling `onComplete()`. If interrupted, route to `onFailure()` instead (with log warning).
+- **Tests:** 2 new tests — cancelled thread routes to `onFailure`; non-interrupted thread still routes to `onComplete`.
+- **Files:** `BaseRuntime.java`, `BaseRuntimeTest.java`
+
+### Design Decisions
+
+- **Optimistic locking as default method:** `storeIfCurrentVersion()` was added as a `default` method on the `IResourceStorage` interface (delegating to `store()`) rather than an abstract method. This avoids breaking all existing implementations while letting backends opt into conditional writes. The Javadoc clearly states that the default does _not_ provide optimistic locking.
+- **Interrupt check over Future.isCancelled():** The zombie-write fix checks `Thread.currentThread().isInterrupted()` inside the submitted lambda rather than inspecting `Future.isCancelled()` from outside, because the interrupt flag is the only signal visible from within the executing thread after a non-interruptible I/O completes.
+- **Return null on interruption:** When the interrupt flag is set, the lambda now returns `null` instead of the stale result. This prevents callers who `future.get()` the returned Future from receiving a stale value that was already routed to `onFailure`.
+- **ConcurrentHashMap over synchronized blocks:** For `ComponentCache`, `ConcurrentHashMap` was chosen over `Collections.synchronizedMap` or explicit locking because `computeIfAbsent` provides exactly the atomic read-or-create semantics needed, with better concurrency than full map locking.
+- **No conversation context in BaseRuntime logs:** `BaseRuntime` is generic executor infrastructure with no access to conversation/agent IDs. The warning log includes the thread name for traceability; richer context is logged by the downstream `onFailure` callback in `ConversationService`.
+
+---
+
+## 🛡️ Security Audit Remediation — IDOR Prevention & Ownership Validation (2026-06-10)
+
+**Repo:** EDDI (`fix/security-audit-idor-remediation`)
+**What changed:** Addressed 5 findings from a comprehensive security audit. Added resource ownership validation across all conversation, user memory, and group conversation REST endpoints. Hardened GDPR, A2A, and MCP annotations.
+
+### Finding: IDOR — Conversations (HIGH → FIXED)
+- **Problem:** Any authenticated user with `eddi-user` role could read/modify ANY conversation by guessing the conversationId. No ownership validation existed despite `ConversationDescriptor` having a `userId` field.
+- **Fix:** `RestAgentEngine` now injects `SecurityIdentity`, `OwnershipValidator`, and `IConversationDescriptorStore`. All conversation-scoped endpoints (`readConversation`, `say`, `endConversation`, `undo`, `redo`, `rerun`, `readConversationLog`, `getConversationState`) validate that the caller owns the conversation. `startConversation` validates that the provided `userId` matches the caller's identity (admins can set any userId).
+
+### Finding: IDOR — User Memory (HIGH → FIXED)
+- **Problem:** Any authenticated user could read/delete another user's persistent memories via the `/usermemorystore/memories/{userId}` endpoints.
+- **Fix:** `RestUserMemoryStore` now injects `SecurityIdentity` and `OwnershipValidator`. All endpoints validate that the `{userId}` path parameter matches the authenticated caller. `upsertMemory` validates against the `userId` in the request body.
+
+### Finding: IDOR — Group Conversations (HIGH → FIXED)
+- **Problem:** Any authenticated user could read/delete any group conversation.
+- **Fix:** `RestGroupConversation` now validates ownership on `readGroupConversation` and `deleteGroupConversation`. `listGroupConversations` filters results to only the caller's conversations. `discuss`/`discussStreaming` validate the provided userId.
+
+### Finding: GDPR Annotation on Implementation Only (MEDIUM → FIXED)
+- **Problem:** `@RolesAllowed("eddi-admin")` was only on `RestGdprAdmin` implementation, not the `IRestGdprAdmin` interface. Fragile to refactoring.
+- **Fix:** Moved `@RolesAllowed("eddi-admin")` to the interface level.
+
+### Finding: A2A Endpoint Annotation Clarity (MEDIUM → FIXED)
+- **Problem:** A2A GET discovery endpoints had no explicit security annotations, making intent unclear.
+- **Fix:** Added `@PermitAll` to all 5 GET discovery endpoints to document intentional public access per A2A protocol spec.
+
+### Finding: MCP Memory Ownership (NEW → FIXED)
+- **Problem:** MCP memory read tools (`list_user_memories`, `get_visible_memories`, etc.) accepted `userId` as a tool parameter without validating against the caller's identity.
+- **Fix:** `McpMemoryTools` now injects `OwnershipValidator` and calls `validateUserAccess()` in all 5 read-only MCP memory tools (initially via `McpToolUtils.requireOwnerOrAdmin()`, consolidated to direct `OwnershipValidator` use in code review hardening below).
+
+### New Component: OwnershipValidator
+- Centralized `@ApplicationScoped` utility for ownership checks
+- Three methods: `validateUserAccess()`, `validateAndResolveUserId()`, `requireOwnerOrAdmin()`
+- All checks are no-ops when `authorization.enabled=false` (dev mode)
+- `eddi-admin` role bypasses all ownership checks
+- Legacy data without ownership (null/blank userId) is allowed through gracefully
+- WARN-level audit logging on all ownership check failures
+
+### Dropped Finding: MCP Unauthenticated by Default
+- **Rationale:** When OIDC is disabled, ALL endpoints are unauthenticated — MCP is not uniquely vulnerable. `AuthStartupGuard` already prevents accidental unauthenticated production deployments. Not a finding.
+
+**Files:** `OwnershipValidator.java` [NEW], `RestAgentEngine.java`, `RestUserMemoryStore.java`, `RestGroupConversation.java`, `IRestGdprAdmin.java`, `RestGdprAdmin.java`, `RestA2AEndpoint.java`, `McpToolUtils.java`, `McpMemoryTools.java`
+
+### Code Review Hardening (2026-06-10)
+
+**Repo:** EDDI (`fix/security-audit-idor-remediation`)
+**What changed:** Addressed all findings from the post-implementation code review.
+
+- **M1 — MCP ownership consolidation:** Removed duplicate `requireOwnerOrAdmin` static method from `McpToolUtils`. `McpMemoryTools` now injects `OwnershipValidator` directly and calls `validateUserAccess()` — single source of truth for ownership logic.
+- **M3 — PII in WARN logs:** `OwnershipValidator` WARN messages no longer include caller/user IDs. Full details are logged at DEBUG level only, reducing compliance risk.
+- **M4 — Narrow catch clause:** `RestAgentEngine.validateConversationOwnership()` now catches `ResourceNotFoundException` and `ResourceStoreException` specifically instead of generic `Exception`, preventing unexpected errors from being silently swallowed.
+- **BUG-2 — deleteMemory ownership:** Added `findEntryById(String entryId)` to `IUserMemoryStore` with MongoDB and PostgreSQL implementations. `RestUserMemoryStore.deleteMemory()` now looks up the entry, validates ownership via `validateUserAccess()`, and returns 404 if not found.
+
+**Files:** `OwnershipValidator.java`, `RestAgentEngine.java`, `RestUserMemoryStore.java`, `McpToolUtils.java`, `McpMemoryTools.java`, `IUserMemoryStore.java`, `MongoUserMemoryStore.java`, `PostgresUserMemoryStore.java`
+
+### Test Coverage for Security Fixes (2026-06-10)
+
+**Repo:** EDDI (`fix/security-audit-idor-remediation`)
+**What changed:** Added 36 new tests covering all security-critical ownership validation logic.
+
+- **OwnershipValidatorTest [NEW]:** 24 tests across 4 nested groups — `validateUserAccess`, `validateAndResolveUserId`, `requireOwnerOrAdmin`, `isAuthEnabled`. Covers auth on/off, admin bypass, legacy null owner, caller mismatch → ForbiddenException.
+- **RestAgentEngineTest — OwnershipValidation:** 5 tests — admin userId override, impersonation rejection, non-owner read/end, descriptor-not-found graceful skip.
+- **RestUserMemoryStoreTest — DeleteMemory:** 3 tests — owner match → 204, not found → 404, non-owner → ForbiddenException.
+- **RestGroupConversationTest — OwnershipValidation:** 4 tests — non-owner read/delete, userId resolution in discuss, list filtering for non-admin.
+- **Existing test fixes:** Updated `RestAgentEngineTest`, `RestGroupConversationTest`, `McpMemoryToolsTest` stubs for new constructor parameters and ownership lookup patterns.
+
+**Total:** 184 security-related tests, 0 failures, 0 errors.
+**Files:** `OwnershipValidatorTest.java` [NEW], `RestAgentEngineTest.java`, `RestUserMemoryStoreTest.java`, `RestGroupConversationTest.java`, `McpMemoryToolsTest.java`
+
+### GitHub Advanced Security / CodeQL Remediation (2026-06-10)
+
+**Repo:** EDDI (`fix/security-audit-idor-remediation`)
+**What changed:** Addressed 12 CodeQL "Log Injection" findings and 5 Copilot validation-order findings from automated PR review.
+
+- **Log Injection — RestAgentEngine:** `validateConversationOwnership()` now sanitizes `conversationId` via `LogSanitizer.sanitize()` before logging.
+- **Log Injection — OwnershipValidator:** All 3 debug-level log statements (`validateUserAccess`, `validateAndResolveUserId`, `requireOwnerOrAdmin`) now sanitize user-provided values (`callerId`, `requestedUserId`, `resourceOwnerId`, `resourceType`) via `LogSanitizer.sanitize()`.
+- **Fail-closed ownership check:** `RestAgentEngine.validateConversationOwnership()` now throws `ForbiddenException` on `ResourceStoreException` instead of silently skipping the ownership check. Previous fail-open behavior could allow unauthorized access during transient DB errors.
+- **MCP validation order:** In `McpMemoryTools`, all 5 read-only tools (`listUserMemories`, `getVisibleMemories`, `searchUserMemories`, `getMemoryByKey`, `countUserMemories`) now validate `userId` is non-null/non-blank **before** calling `ownershipValidator.validateUserAccess()`. Previously, a missing `userId` with auth enabled would throw `ForbiddenException` instead of the intended `"userId is required"` error JSON.
+- **Changelog clarity:** Updated MCP ownership entry (line 32-35) to reflect final state — `OwnershipValidator.validateUserAccess()` is the sole mechanism, not `requireOwnerOrAdmin()` in `McpToolUtils`.
+
+**Files:** `RestAgentEngine.java`, `OwnershipValidator.java`, `McpMemoryTools.java`, `docs/changelog.md`
+
 ---
 
 ## 🐛 Fix: Swagger UI Broken by CSP — Per-Path Filter Override (2026-06-03)

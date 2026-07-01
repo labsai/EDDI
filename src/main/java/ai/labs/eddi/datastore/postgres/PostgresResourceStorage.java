@@ -119,6 +119,31 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
+    public void storeIfCurrentVersion(IResource<T> newResource, int expectedCurrentVersion)
+            throws IResourceStore.ResourceModifiedException {
+        Resource pgResource = checkInternalResource(newResource);
+        String sql = """
+                UPDATE resources SET version = ?, data = ?::jsonb
+                WHERE id = ?::uuid AND collection_name = ? AND version = ?
+                """;
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, pgResource.getVersion());
+            ps.setString(2, pgResource.getJson());
+            ps.setString(3, pgResource.getId());
+            ps.setString(4, collectionName);
+            ps.setInt(5, expectedCurrentVersion);
+            int rows = ps.executeUpdate();
+            if (rows == 0) {
+                throw new IResourceStore.ResourceModifiedException(
+                        String.format("Resource was modified concurrently (id=%s, expected version=%d)",
+                                pgResource.getId(), expectedCurrentVersion));
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to store resource with version check", e);
+        }
+    }
+
+    @Override
     public void createNew(IResource<T> resource) {
         Resource pgResource = checkInternalResource(resource);
         String sql = "INSERT INTO resources (id, collection_name, version, data) " + "VALUES (?::uuid, ?, ?, ?::jsonb)";
@@ -236,8 +261,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T> {
         String sql = """
                 INSERT INTO resources_history (id, collection_name, version, data, deleted)
                 VALUES (?::uuid, ?, ?, ?::jsonb, ?)
-                ON CONFLICT (id, collection_name, version) DO UPDATE
-                SET data = EXCLUDED.data, deleted = EXCLUDED.deleted
+                ON CONFLICT (id, collection_name, version) DO NOTHING
                 """;
         try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, pgHistory.getId());

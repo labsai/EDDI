@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.output.model.QuickReply;
+import ai.labs.eddi.modules.output.model.types.ImageOutputItem;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +23,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 import static ai.labs.eddi.modules.templating.ITemplatingEngine.TemplateMode.TEXT;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /**
@@ -234,5 +236,104 @@ public class OutputTemplateTaskTest {
     }
 
     private record TestContextObject(String key, String value) {
+    }
+
+    // ==================== Additional coverage tests ====================
+
+    @Test
+    public void getId_returnsCorrectId() {
+        assertEquals("ai.labs.templating", outputTemplateTask.getId().name());
+    }
+
+    @Test
+    public void getType_returnsOutput() {
+        assertEquals("output", outputTemplateTask.getType());
+    }
+
+    @Test
+    public void getExtensionDescriptor_returnsDescriptor() {
+        var descriptor = outputTemplateTask.getExtensionDescriptor();
+        assertNotNull(descriptor);
+        assertEquals("Templating", descriptor.getDisplayName());
+    }
+
+    @Test
+    public void executeTask_emptyOutputAndQuickReplies() throws Exception {
+        when(currentStep.getAllData(eq("output"))).thenReturn(new LinkedList<>());
+        when(currentStep.getAllData(eq("quickReplies"))).thenReturn(new LinkedList<>());
+        when(currentStep.getAllData(eq("context"))).thenReturn(null);
+
+        outputTemplateTask.execute(conversationMemory, null);
+
+        // Should not fail, no data to store
+        verify(currentStep, never()).storeData(any());
+    }
+
+    @Test
+    public void executeTask_withImageOutputItem() throws Exception {
+        when(currentStep.getAllData(eq("context"))).thenReturn(null);
+
+        var imageOutput = new ImageOutputItem("https://example.com/{context}.png", "alt text {context}");
+        when(currentStep.getAllData(eq("output"))).then(invocation -> {
+            LinkedList<IData<ImageOutputItem>> ret = new LinkedList<>();
+            ret.add(new MockData<>("output:image:someAction", imageOutput));
+            return ret;
+        });
+        when(currentStep.getAllData(eq("quickReplies"))).thenReturn(new LinkedList<>());
+
+        when(templatingEngine.processTemplate(eq("https://example.com/{context}.png"), anyMap(), any()))
+                .thenReturn("https://example.com/resolved.png");
+        when(templatingEngine.processTemplate(eq("alt text {context}"), anyMap(), any()))
+                .thenReturn("alt text resolved");
+
+        when(dataFactory.createData(anyString(), any())).thenAnswer(i -> new Data<>(i.getArgument(0), i.getArgument(1)));
+
+        outputTemplateTask.execute(conversationMemory, null);
+
+        verify(templatingEngine).processTemplate(eq("https://example.com/{context}.png"), anyMap(), any());
+        verify(templatingEngine).processTemplate(eq("alt text {context}"), anyMap(), any());
+    }
+
+    @Test
+    public void executeTask_withMapOutput() throws Exception {
+        when(currentStep.getAllData(eq("context"))).thenReturn(null);
+
+        var mapOutput = new java.util.LinkedHashMap<String, Object>();
+        mapOutput.put("key1", "value with {template}");
+        mapOutput.put("key2", 42); // non-string value - should not be templated
+
+        when(currentStep.getAllData(eq("output"))).then(invocation -> {
+            LinkedList<IData<Object>> ret = new LinkedList<>();
+            ret.add(new MockData<>("output:text:mapAction", mapOutput));
+            return ret;
+        });
+        when(currentStep.getAllData(eq("quickReplies"))).thenReturn(new LinkedList<>());
+
+        when(templatingEngine.processTemplate(eq("value with {template}"), anyMap(), any()))
+                .thenReturn("value with resolved");
+        when(dataFactory.createData(anyString(), any())).thenAnswer(i -> new Data<>(i.getArgument(0), i.getArgument(1)));
+
+        outputTemplateTask.execute(conversationMemory, null);
+
+        verify(templatingEngine).processTemplate(eq("value with {template}"), anyMap(), any());
+    }
+
+    @Test
+    public void executeTask_templateEngineThrows_doesNotCrash() throws Exception {
+        when(currentStep.getAllData(eq("context"))).thenReturn(null);
+
+        var textOutput = new TextOutputItem("This will {fail}");
+        when(currentStep.getAllData(eq("output"))).then(invocation -> {
+            LinkedList<IData<TextOutputItem>> ret = new LinkedList<>();
+            ret.add(new MockData<>("output:text:failAction", textOutput));
+            return ret;
+        });
+        when(currentStep.getAllData(eq("quickReplies"))).thenReturn(new LinkedList<>());
+
+        when(templatingEngine.processTemplate(eq("This will {fail}"), anyMap(), any()))
+                .thenThrow(new ITemplatingEngine.TemplateEngineException("Template error", new RuntimeException("cause")));
+
+        // Should not throw
+        assertDoesNotThrow(() -> outputTemplateTask.execute(conversationMemory, null));
     }
 }

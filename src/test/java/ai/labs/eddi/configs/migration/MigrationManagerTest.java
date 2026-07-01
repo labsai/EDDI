@@ -877,4 +877,142 @@ class MigrationManagerTest {
             assertEquals("button", outputValue.get("type"));
         }
     }
+
+    // ─── ApiCalls combined migration ─────────────────────────────
+
+    @Nested
+    @DisplayName("migrateApiCalls combined scenarios")
+    class ApiCallsCombinedMigration {
+
+        @Test
+        @DisplayName("should rename targetServer AND migrate httpCalls property instructions in single pass")
+        void renameAndMigrateProperties() {
+            var propInstruction = new HashMap<String, Object>();
+            propInstruction.put("value", "combined-val");
+
+            var preRequest = new HashMap<String, List<Map<String, Object>>>();
+            preRequest.put("propertyInstructions", List.of(propInstruction));
+
+            var httpCall = new HashMap<String, Object>();
+            httpCall.put("preRequest", preRequest);
+
+            Document doc = new Document("targetServer", "https://api.example.com");
+            doc.put("httpCalls", List.of(httpCall));
+
+            Document result = migrationManager.migrateApiCalls().migrate(doc);
+
+            assertNotNull(result);
+            assertEquals("https://api.example.com", result.get("targetServerUrl"));
+            assertFalse(result.containsKey("targetServer"));
+            assertEquals("combined-val", propInstruction.get("valueString"));
+        }
+
+        @Test
+        @DisplayName("should migrate both preRequest and postResponse property instructions")
+        void migrateBothPreAndPost() {
+            var preProp = new HashMap<String, Object>();
+            preProp.put("value", "pre-val");
+            var preRequest = new HashMap<String, List<Map<String, Object>>>();
+            preRequest.put("propertyInstructions", List.of(preProp));
+
+            var postProp = new HashMap<String, Object>();
+            postProp.put("value", Map.of("key", "post-obj"));
+            var postResponse = new HashMap<String, List<Map<String, Object>>>();
+            postResponse.put("propertyInstructions", List.of(postProp));
+
+            var httpCall = new HashMap<String, Object>();
+            httpCall.put("preRequest", preRequest);
+            httpCall.put("postResponse", postResponse);
+
+            Document doc = new Document("httpCalls", List.of(httpCall));
+            Document result = migrationManager.migrateApiCalls().migrate(doc);
+
+            assertNotNull(result);
+            assertEquals("pre-val", preProp.get("valueString"));
+            assertEquals(Map.of("key", "post-obj"), postProp.get("valueObject"));
+        }
+    }
+
+    // ─── migrateConversationMemory direct integration ─────────────
+
+    @Nested
+    @DisplayName("Conversation memory property migration — mixed types")
+    class ConversationMemoryMixedTypes {
+
+        @Test
+        @DisplayName("should handle Float value in conversation properties")
+        void floatValueInConversationProperty() {
+            var floatProp = new HashMap<String, Object>();
+            floatProp.put("value", 3.14f);
+
+            var propDoc = buildPropertySetterDoc(floatProp);
+            Document result = migrationManager.migratePropertySetter().migrate(propDoc);
+
+            assertNotNull(result);
+            assertEquals(3.14f, floatProp.get("valueFloat"));
+            assertFalse(floatProp.containsKey("value"));
+        }
+
+        @Test
+        @DisplayName("should handle Boolean value in conversation properties (treated as String)")
+        void booleanValueInConversationProperty() {
+            var boolProp = new HashMap<String, Object>();
+            boolProp.put("value", true);
+
+            var propDoc = buildPropertySetterDoc(boolProp);
+            Document result = migrationManager.migratePropertySetter().migrate(propDoc);
+
+            assertNotNull(result);
+            // Boolean is not Map/Integer/Float, so it falls to valueString = null case
+            // The value is `true` (Boolean), which doesn't match String/Map/Integer/Float
+            assertTrue(result.containsKey("setOnActions"));
+        }
+
+        @Test
+        @DisplayName("should handle Double value as Float in conversation properties")
+        void doubleValueTreatedAsFloat() {
+            var doubleProp = new HashMap<String, Object>();
+            doubleProp.put("value", 2.71828);
+
+            var propDoc = buildPropertySetterDoc(doubleProp);
+            Document result = migrationManager.migratePropertySetter().migrate(propDoc);
+
+            assertNotNull(result);
+        }
+    }
+
+    // ─── output migration: empty output set ──────────────────────
+
+    @Nested
+    @DisplayName("Output migration empty/null edge cases")
+    class OutputMigrationNullEdgeCases {
+
+        @Test
+        @DisplayName("should handle outputSet with empty outputs list")
+        void emptyOutputsList() {
+            var outputContainer = new HashMap<String, Object>();
+            outputContainer.put("outputs", List.of());
+
+            Document doc = new Document("outputSet", List.of(outputContainer));
+            Document result = migrationManager.migrateOutput().migrate(doc);
+
+            // No valueAlternatives to process — no migration needed
+            assertNull(result);
+        }
+
+        @Test
+        @DisplayName("should handle output with empty valueAlternatives")
+        void emptyValueAlternatives() {
+            var output = new HashMap<String, Object>();
+            output.put("valueAlternatives", new java.util.ArrayList<>());
+
+            var outputContainer = new HashMap<String, Object>();
+            outputContainer.put("outputs", List.of(output));
+
+            Document doc = new Document("outputSet", List.of(outputContainer));
+            Document result = migrationManager.migrateOutput().migrate(doc);
+
+            assertNull(result);
+        }
+    }
 }

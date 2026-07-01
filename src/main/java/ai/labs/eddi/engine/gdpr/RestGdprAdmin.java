@@ -4,7 +4,6 @@
  */
 package ai.labs.eddi.engine.gdpr;
 
-import jakarta.annotation.security.RolesAllowed;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
@@ -20,7 +19,6 @@ import org.jboss.logging.Logger;
  * @since 6.0.0
  */
 @ApplicationScoped
-@RolesAllowed("eddi-admin")
 public class RestGdprAdmin implements IRestGdprAdmin {
 
     private static final Logger LOGGER = Logger.getLogger(RestGdprAdmin.class);

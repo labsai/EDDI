@@ -42,7 +42,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * @since 6.0.0
  */
 @Path("/conversations")
-@Tag(name = "Attachments")
+@Tag(name = "Conversations / Attachments", description = "Upload and manage binary conversation attachments")
 public class RestAttachmentUpload {
 
     private static final Logger LOGGER = Logger.getLogger(RestAttachmentUpload.class);

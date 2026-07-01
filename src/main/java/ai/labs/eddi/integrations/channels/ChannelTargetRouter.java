@@ -33,14 +33,17 @@ import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
  * the correct {@link ChannelTarget} based on configured trigger keywords
  * (colon-required syntax: {@code keyword: message}).
  * <p>
- * Currently Slack-only with a platform-agnostic internal model; Teams/Discord
- * adapters will extend the platform-specific paths (signing secret aggregation,
- * legacy fallback) when added.
+ * Platform-agnostic: signing-secret aggregation and target resolution are keyed
+ * by {@code channelType} so multiple platform adapters can coexist. Currently,
+ * only {@code slack} is registered/validated (see
+ * {@code RestChannelIntegrationStore.REGISTERED_CHANNEL_TYPES}).
+ * Platform-specific adapters provide their own webhook and event-handler
+ * classes.
  * <p>
  * <b>Fallback rule:</b> If any {@code ChannelIntegrationConfiguration} matches
- * a channelId, ALL legacy {@code ChannelConnector} entries for that channel are
- * ignored. Legacy entries only activate for channels with zero new-style
- * coverage.
+ * a channelType + channelId pair, ALL legacy {@code ChannelConnector} entries
+ * for that same type + channel are ignored. Legacy entries only activate for
+ * channels with zero new-style coverage of the same type.
  *
  * @since 6.1.0
  */
@@ -68,8 +71,8 @@ public class ChannelTargetRouter {
      */
     private volatile Map<String, ChannelIntegrationConfiguration> integrationMap = Map.of();
 
-    /** All unique signing secrets for Slack (from both new + legacy configs). */
-    private volatile Set<String> slackSigningSecrets = Set.of();
+    /** Signing secrets per channel type (from both new + legacy configs). */
+    private volatile Map<String, Set<String>> signingSecretsByType = Map.of();
 
     /** Legacy channelId → LegacyTarget for backward compat. */
     private volatile Map<String, LegacyTarget> legacyMap = Map.of();
@@ -229,10 +232,7 @@ public class ChannelTargetRouter {
     public Set<String> getSigningSecrets(String channelType) {
         refreshIfNeeded();
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
-        if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
-            return slackSigningSecrets;
-        }
-        return Set.of();
+        return signingSecretsByType.getOrDefault(normalizedType, Set.of());
     }
 
     /**
@@ -377,8 +377,8 @@ public class ChannelTargetRouter {
 
     private void refreshInternal() {
         var newIntegrationMap = new HashMap<String, ChannelIntegrationConfiguration>();
-        var newSigningSecrets = new HashSet<String>();
-        var coveredChannelIds = new HashSet<String>();
+        var newSigningSecretsByType = new HashMap<String, Set<String>>();
+        var coveredChannelKeys = new HashSet<String>();
 
         // 1. Load new-style ChannelIntegrationConfigurations
         try {
@@ -400,15 +400,15 @@ public class ChannelTargetRouter {
                             resolvePlatformSecrets(copy);
                             String key = copy.getChannelType().toLowerCase(Locale.ROOT) + ":" + channelId;
                             newIntegrationMap.put(key, copy);
-                            coveredChannelIds.add(channelId);
+                            coveredChannelKeys.add(key); // type:channelId — scoped to prevent cross-type suppression
 
-                            // Collect signing secrets for Slack
-                            if (CHANNEL_TYPE_SLACK.equals(
-                                    config.getChannelType().toLowerCase(Locale.ROOT))) {
-                                String ss = copy.getPlatformConfig().get("signingSecret");
-                                if (ss != null && !ss.isBlank()) {
-                                    newSigningSecrets.add(ss);
-                                }
+                            // Collect signing secrets per channel type
+                            String ss = copy.getPlatformConfig().get("signingSecret");
+                            if (ss != null && !ss.isBlank()) {
+                                String type = copy.getChannelType().toLowerCase(Locale.ROOT);
+                                newSigningSecretsByType
+                                        .computeIfAbsent(type, k -> new HashSet<>())
+                                        .add(ss);
                             }
                         }
                     }
@@ -442,8 +442,11 @@ public class ChannelTargetRouter {
 
                                 String chId = connector.getConfig().get("channelId");
 
-                                // Strict rule: new config wins, skip legacy
-                                if (chId != null && !coveredChannelIds.contains(chId)) {
+                                // Strict rule: new-style config wins, skip legacy
+                                // (scoped by type — only a new-style Slack config suppresses a legacy Slack
+                                // connector)
+                                String coveredKey = CHANNEL_TYPE_SLACK + ":" + chId;
+                                if (chId != null && !coveredChannelKeys.contains(coveredKey)) {
                                     String bt = resolveSecret(
                                             connector.getConfig().get("botToken"));
                                     String ss = resolveSecret(
@@ -453,7 +456,9 @@ public class ChannelTargetRouter {
                                             new LegacyTarget(agentId, bt, ss,
                                                     gid != null && !gid.isBlank() ? gid : null));
                                     if (ss != null && !ss.isBlank()) {
-                                        newSigningSecrets.add(ss);
+                                        newSigningSecretsByType
+                                                .computeIfAbsent(CHANNEL_TYPE_SLACK, k -> new HashSet<>())
+                                                .add(ss);
                                     }
                                 }
                             }
@@ -468,13 +473,21 @@ public class ChannelTargetRouter {
             LOGGER.warn("Failed to scan legacy ChannelConnectors", e);
         }
 
-        // Atomic swap
+        // Swap cached references — each volatile write is individually atomic,
+        // but the three writes are NOT mutually atomic. A concurrent reader may
+        // briefly observe a mixed snapshot (e.g., new integrationMap with old
+        // signingSecretsByType). This is acceptable: the data converges within
+        // nanoseconds, and stale reads only affect a single request at worst.
         integrationMap = Map.copyOf(newIntegrationMap);
         legacyMap = Map.copyOf(newLegacyMap);
-        slackSigningSecrets = Set.copyOf(newSigningSecrets);
+        // Freeze each per-type set, then freeze the outer map
+        var frozenSecrets = new HashMap<String, Set<String>>();
+        newSigningSecretsByType.forEach((type, secrets) -> frozenSecrets.put(type, Set.copyOf(secrets)));
+        signingSecretsByType = Map.copyOf(frozenSecrets);
 
-        LOGGER.debugf("Channel target router refreshed: %d integrations, %d legacy, %d signing secrets",
-                newIntegrationMap.size(), newLegacyMap.size(), newSigningSecrets.size());
+        int totalSecrets = frozenSecrets.values().stream().mapToInt(Set::size).sum();
+        LOGGER.debugf("Channel target router refreshed: %d integrations, %d legacy, %d signing secrets across %d channel types",
+                newIntegrationMap.size(), newLegacyMap.size(), totalSecrets, frozenSecrets.size());
     }
 
     /**

@@ -9,12 +9,16 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IRestGroupConversation.DiscussRequest;
+import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.ForbiddenException;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -27,13 +31,18 @@ class RestGroupConversationTest {
 
     private IGroupConversationService groupService;
     private IJsonSerialization jsonSerialization;
+    private SecurityIdentity identity;
+    private OwnershipValidator ownershipValidator;
     private RestGroupConversation restGroupConversation;
 
     @BeforeEach
     void setUp() {
         groupService = mock(IGroupConversationService.class);
         jsonSerialization = mock(IJsonSerialization.class);
-        restGroupConversation = new RestGroupConversation(groupService, jsonSerialization);
+        identity = mock(SecurityIdentity.class);
+        ownershipValidator = mock(OwnershipValidator.class);
+        when(ownershipValidator.validateAndResolveUserId(any(), any())).thenAnswer(inv -> inv.getArgument(1));
+        restGroupConversation = new RestGroupConversation(groupService, jsonSerialization, identity, ownershipValidator);
     }
 
     @Nested
@@ -149,6 +158,10 @@ class RestGroupConversationTest {
         @Test
         @DisplayName("should return 200 on successful delete")
         void success() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
+
             Response response = restGroupConversation.deleteGroupConversation("group-1", "gc-1");
 
             assertEquals(200, response.getStatus());
@@ -158,6 +171,9 @@ class RestGroupConversationTest {
         @Test
         @DisplayName("should propagate ResourceStoreException")
         void storeError() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
             doThrow(new IResourceStore.ResourceStoreException("Delete failed"))
                     .when(groupService).deleteGroupConversation("gc-1");
 
@@ -204,6 +220,81 @@ class RestGroupConversationTest {
 
             assertThrows(IResourceStore.ResourceStoreException.class,
                     () -> restGroupConversation.listGroupConversations("group-1", 0, 10));
+        }
+    }
+
+    @Nested
+    @DisplayName("OwnershipValidation")
+    class OwnershipValidation {
+
+        @Test
+        @DisplayName("should throw ForbiddenException when caller does not own group conversation (read)")
+        void readGroupConversation_rejectsNonOwner() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setUserId("other-user");
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
+            doThrow(new ForbiddenException("Access denied"))
+                    .when(ownershipValidator).requireOwnerOrAdmin(identity, "other-user", "group conversation");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restGroupConversation.readGroupConversation("group-1", "gc-1"));
+        }
+
+        @Test
+        @DisplayName("should throw ForbiddenException when caller does not own group conversation (delete)")
+        void deleteGroupConversation_rejectsNonOwner() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            gc.setUserId("other-user");
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
+            doThrow(new ForbiddenException("Access denied"))
+                    .when(ownershipValidator).requireOwnerOrAdmin(identity, "other-user", "group conversation");
+
+            assertThrows(ForbiddenException.class,
+                    () -> restGroupConversation.deleteGroupConversation("group-1", "gc-1"));
+            verify(groupService, never()).deleteGroupConversation(anyString());
+        }
+
+        @Test
+        @DisplayName("should resolve userId via validator during discuss")
+        void discuss_resolvesUserId() throws Exception {
+            when(ownershipValidator.validateAndResolveUserId(identity, "user-1"))
+                    .thenReturn("admin-resolved");
+            var gc = new GroupConversation();
+            gc.setId("gc-1");
+            when(groupService.discuss("group-1", "Hello", "admin-resolved", 0)).thenReturn(gc);
+
+            Response response = restGroupConversation.discuss("group-1",
+                    new DiscussRequest("Hello", "user-1"));
+
+            assertEquals(201, response.getStatus());
+            verify(groupService).discuss("group-1", "Hello", "admin-resolved", 0);
+        }
+
+        @Test
+        @DisplayName("should filter list to owned conversations for non-admin users")
+        void listGroupConversations_filtersForNonAdmin() throws Exception {
+            when(ownershipValidator.isAuthEnabled()).thenReturn(true);
+            when(identity.isAnonymous()).thenReturn(false);
+            when(identity.hasRole("eddi-admin")).thenReturn(false);
+            var principal = mock(java.security.Principal.class);
+            when(principal.getName()).thenReturn("user-1");
+            when(identity.getPrincipal()).thenReturn(principal);
+
+            var gc1 = new GroupConversation();
+            gc1.setId("gc-1");
+            gc1.setUserId("user-1");
+            var gc2 = new GroupConversation();
+            gc2.setId("gc-2");
+            gc2.setUserId("other-user");
+            when(groupService.listGroupConversations("group-1", 0, 10))
+                    .thenReturn(new ArrayList<>(List.of(gc1, gc2)));
+
+            List<GroupConversation> result = restGroupConversation.listGroupConversations("group-1", 0, 10);
+
+            assertEquals(1, result.size());
+            assertEquals("gc-1", result.get(0).getId());
         }
     }
 }

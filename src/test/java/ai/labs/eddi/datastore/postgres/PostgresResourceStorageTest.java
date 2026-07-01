@@ -220,6 +220,365 @@ class PostgresResourceStorageTest {
         assertEquals(expected, data);
     }
 
+    // ─── createNew ────────────────────────────────────────────────
+
+    @Test
+    void shouldCreateNewResource() throws Exception {
+        TestConfig config = new TestConfig("val");
+        when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"val\"}");
+
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource("new-id", 1, config);
+
+        reset(connection);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+
+        storage.createNew(resource);
+
+        verify(preparedStatement).setString(1, "new-id");
+        verify(preparedStatement).setString(2, "test_collection");
+        verify(preparedStatement).setInt(3, 1);
+        verify(preparedStatement).setString(4, "{\"name\":\"val\"}");
+        verify(preparedStatement).executeUpdate();
+    }
+
+    @Test
+    void createNew_sqlException_throwsRuntimeException() throws Exception {
+        TestConfig config = new TestConfig("val");
+        when(jsonSerialization.serialize(config)).thenReturn("{}");
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource("id1", 1, config);
+
+        reset(connection);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("Duplicate"));
+
+        assertThrows(RuntimeException.class, () -> storage.createNew(resource));
+    }
+
+    // ─── storeHistory ──────────────────────────────────────────
+
+    @Test
+    void shouldStoreHistory() throws Exception {
+        TestConfig config = new TestConfig("val");
+        when(jsonSerialization.serialize(config)).thenReturn("{\"name\":\"val\"}");
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource("id1", 2, config);
+        IResourceStorage.IHistoryResource<TestConfig> history = storage.newHistoryResourceFor(resource, false);
+
+        reset(connection);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+
+        storage.store(history);
+
+        verify(preparedStatement).setString(1, "id1");
+        verify(preparedStatement).setString(2, "test_collection");
+        verify(preparedStatement).setInt(3, 2);
+        verify(preparedStatement).setString(4, "{\"name\":\"val\"}");
+        verify(preparedStatement).setBoolean(5, false);
+        verify(preparedStatement).executeUpdate();
+    }
+
+    @Test
+    void storeHistory_sqlException_throwsRuntimeException() throws Exception {
+        TestConfig config = new TestConfig("v");
+        when(jsonSerialization.serialize(config)).thenReturn("{}");
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource("id1", 1, config);
+        IResourceStorage.IHistoryResource<TestConfig> history = storage.newHistoryResourceFor(resource, true);
+
+        reset(connection);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("DB error"));
+
+        assertThrows(RuntimeException.class, () -> storage.store(history));
+    }
+
+    // ─── readHistoryLatest ─────────────────────────────────────
+
+    @Test
+    void shouldReadHistoryLatest() throws Exception {
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("id")).thenReturn("id1");
+        when(resultSet.getInt("version")).thenReturn(3);
+        when(resultSet.getString("data")).thenReturn("{\"name\":\"latest\"}");
+        when(resultSet.getBoolean("deleted")).thenReturn(true);
+
+        IResourceStorage.IHistoryResource<TestConfig> latest = storage.readHistoryLatest("id1");
+
+        assertNotNull(latest);
+        assertEquals("id1", latest.getId());
+        assertEquals(3, latest.getVersion());
+        assertTrue(latest.isDeleted());
+    }
+
+    @Test
+    void readHistoryLatest_notFound_returnsNull() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        IResourceStorage.IHistoryResource<TestConfig> latest = storage.readHistoryLatest("missing");
+
+        assertNull(latest);
+    }
+
+    @Test
+    void readHistoryLatest_sqlException_throwsRuntimeException() throws Exception {
+        when(preparedStatement.executeQuery()).thenThrow(new SQLException("DB error"));
+
+        assertThrows(RuntimeException.class, () -> storage.readHistoryLatest("id1"));
+    }
+
+    // ─── getCurrentVersion UUID error handling ─────────────────
+
+    @Test
+    void getCurrentVersion_invalidUuid_returnsMinusOne() throws Exception {
+        when(preparedStatement.executeQuery()).thenThrow(
+                new SQLException("invalid input syntax for type uuid"));
+
+        Integer version = storage.getCurrentVersion("not-a-uuid");
+
+        assertEquals(-1, version);
+    }
+
+    @Test
+    void getCurrentVersion_otherSqlException_throwsRuntimeException() throws Exception {
+        when(preparedStatement.executeQuery()).thenThrow(new SQLException("Other error"));
+
+        assertThrows(RuntimeException.class, () -> storage.getCurrentVersion("id1"));
+    }
+
+    @Test
+    void getCurrentVersion_nullMessage_throwsRuntimeException() throws Exception {
+        when(preparedStatement.executeQuery()).thenThrow(new SQLException((String) null));
+
+        assertThrows(RuntimeException.class, () -> storage.getCurrentVersion("id1"));
+    }
+
+    // ─── findResourceIdsContaining ─────────────────────────────
+
+    @Test
+    void findResourceIdsContaining_returnsResults() throws Exception {
+        when(resultSet.next()).thenReturn(true, false);
+        when(resultSet.getString("id")).thenReturn("id1");
+        when(resultSet.getInt("version")).thenReturn(1);
+
+        var results = storage.findResourceIdsContaining("actions", "my_action");
+
+        assertEquals(1, results.size());
+        assertEquals("id1", results.getFirst().getId());
+        assertEquals(1, results.getFirst().getVersion());
+    }
+
+    @Test
+    void findResourceIdsContaining_emptyResult() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        var results = storage.findResourceIdsContaining("actions", "missing_action");
+
+        assertTrue(results.isEmpty());
+    }
+
+    @Test
+    void findResourceIdsContaining_sqlException_throwsRuntimeException() throws Exception {
+        when(preparedStatement.executeQuery()).thenThrow(new SQLException("DB error"));
+
+        assertThrows(RuntimeException.class,
+                () -> storage.findResourceIdsContaining("actions", "val"));
+    }
+
+    // ─── findHistoryResourceIdsContaining ──────────────────────
+
+    @Test
+    void findHistoryResourceIdsContaining_returnsResults() throws Exception {
+        when(resultSet.next()).thenReturn(true, true, false);
+        when(resultSet.getString("id")).thenReturn("h1", "h2");
+        when(resultSet.getInt("version")).thenReturn(1, 2);
+
+        var results = storage.findHistoryResourceIdsContaining("field", "value");
+
+        assertEquals(2, results.size());
+    }
+
+    @Test
+    void findHistoryResourceIdsContaining_sqlException_throwsRuntimeException() throws Exception {
+        when(preparedStatement.executeQuery()).thenThrow(new SQLException("DB error"));
+
+        assertThrows(RuntimeException.class,
+                () -> storage.findHistoryResourceIdsContaining("field", "val"));
+    }
+
+    // ─── findResources with filter types ───────────────────────
+
+    @Test
+    void findResources_withStringFilter() throws Exception {
+        when(resultSet.next()).thenReturn(true, false);
+        when(resultSet.getString("id")).thenReturn("id1");
+        when(resultSet.getInt("version")).thenReturn(1);
+
+        var filter = new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("name", "test.*");
+        var queryFilters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(
+                java.util.List.of(filter));
+
+        var results = storage.findResources(
+                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{queryFilters},
+                "name", 0, 10);
+
+        assertEquals(1, results.size());
+    }
+
+    @Test
+    void findResources_withBooleanFilter() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        var filter = new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("enabled", true);
+        var queryFilters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(
+                java.util.List.of(filter));
+
+        var results = storage.findResources(
+                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{queryFilters},
+                null, 0, 5);
+
+        assertTrue(results.isEmpty());
+    }
+
+    @Test
+    void findResources_withOtherFilter() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        // Integer filter — goes through the else branch (toString)
+        var filter = new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("count", 42);
+        var queryFilters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(
+                java.util.List.of(filter));
+
+        var results = storage.findResources(
+                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{queryFilters},
+                null, 0, 0); // limit < 1 should default to 20
+
+        assertTrue(results.isEmpty());
+    }
+
+    @Test
+    void findResources_withOrConnector() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        var filter1 = new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("name", "a");
+        var filter2 = new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("name", "b");
+        var queryFilters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(
+                ai.labs.eddi.datastore.IResourceFilter.QueryFilters.ConnectingType.OR,
+                java.util.List.of(filter1, filter2));
+
+        var results = storage.findResources(
+                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{queryFilters},
+                "name", 5, 10);
+
+        assertTrue(results.isEmpty());
+    }
+
+    @Test
+    void findResources_sqlException_throwsRuntimeException() throws Exception {
+        when(preparedStatement.executeQuery()).thenThrow(new SQLException("DB error"));
+
+        var queryFilters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(java.util.List.of());
+
+        assertThrows(RuntimeException.class,
+                () -> storage.findResources(
+                        new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{queryFilters},
+                        null, 0, 10));
+    }
+
+    // ─── removeAllPermanently — rollback on error ──────────────
+
+    @Test
+    void removeAllPermanently_rollbackOnError() throws Exception {
+        reset(connection);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        // First delete succeeds, second throws
+        when(preparedStatement.executeUpdate())
+                .thenReturn(1)
+                .thenThrow(new SQLException("History delete failed"));
+
+        assertThrows(RuntimeException.class, () -> storage.removeAllPermanently("id1"));
+        verify(connection).rollback();
+    }
+
+    // ─── checkInternalResource — wrong type ────────────────────
+
+    @Test
+    void store_wrongResourceType_throwsIllegalArgumentException() {
+        @SuppressWarnings("unchecked")
+        IResourceStorage.IResource<TestConfig> fakeResource = mock(IResourceStorage.IResource.class);
+
+        assertThrows(IllegalArgumentException.class, () -> storage.store(fakeResource));
+    }
+
+    @Test
+    void storeHistory_wrongResourceType_throwsIllegalArgumentException() {
+        @SuppressWarnings("unchecked")
+        IResourceStorage.IHistoryResource<TestConfig> fakeHistory = mock(IResourceStorage.IHistoryResource.class);
+
+        assertThrows(IllegalArgumentException.class, () -> storage.store(fakeHistory));
+    }
+
+    @Test
+    void newHistoryResourceFor_wrongResourceType_throwsIllegalArgumentException() {
+        @SuppressWarnings("unchecked")
+        IResourceStorage.IResource<TestConfig> fakeResource = mock(IResourceStorage.IResource.class);
+
+        assertThrows(IllegalArgumentException.class, () -> storage.newHistoryResourceFor(fakeResource, false));
+    }
+
+    // ─── read/remove SQL exceptions ────────────────────────────
+
+    @Test
+    void read_sqlException_throwsRuntimeException() throws Exception {
+        when(preparedStatement.executeQuery()).thenThrow(new SQLException("Read error"));
+
+        assertThrows(RuntimeException.class, () -> storage.read("id1", 1));
+    }
+
+    @Test
+    void remove_sqlException_throwsRuntimeException() throws Exception {
+        reset(connection);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("Delete error"));
+
+        assertThrows(RuntimeException.class, () -> storage.remove("id1"));
+    }
+
+    @Test
+    void store_sqlException_throwsRuntimeException() throws Exception {
+        TestConfig config = new TestConfig("v");
+        when(jsonSerialization.serialize(config)).thenReturn("{}");
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource("id1", 1, config);
+
+        reset(connection);
+        when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("Store error"));
+
+        assertThrows(RuntimeException.class, () -> storage.store(resource));
+    }
+
+    @Test
+    void readHistory_sqlException_throwsRuntimeException() throws Exception {
+        when(preparedStatement.executeQuery()).thenThrow(new SQLException("History error"));
+
+        assertThrows(RuntimeException.class, () -> storage.readHistory("id1", 1));
+    }
+
+    // ─── Resource.getData deserializes correctly ───────────────
+
+    @Test
+    void historyResource_getData_deserializesJson() throws Exception {
+        TestConfig expected = new TestConfig("historical");
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("id")).thenReturn("id1");
+        when(resultSet.getInt("version")).thenReturn(2);
+        when(resultSet.getString("data")).thenReturn("{\"name\":\"historical\"}");
+        when(resultSet.getBoolean("deleted")).thenReturn(false);
+        when(jsonSerialization.deserialize("{\"name\":\"historical\"}", TestConfig.class)).thenReturn(expected);
+
+        IResourceStorage.IHistoryResource<TestConfig> history = storage.readHistory("id1", 2);
+        TestConfig data = history.getData();
+
+        assertEquals(expected, data);
+    }
+
     // Simple test POJO
     record TestConfig(String name) {
     }

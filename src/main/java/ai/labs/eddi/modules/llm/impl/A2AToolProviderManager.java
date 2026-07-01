@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
@@ -14,6 +15,7 @@ import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.service.tool.ToolExecutor;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
@@ -42,6 +44,7 @@ public class A2AToolProviderManager {
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
     private final HttpClient httpClient;
+    private final boolean ssrfProtectionEnabled;
 
     /** Cached Agent Card data per URL to avoid re-fetching on every request. */
     private final Map<String, CachedAgentInfo> agentCache = new ConcurrentHashMap<>();
@@ -63,9 +66,13 @@ public class A2AToolProviderManager {
     }
 
     @Inject
-    public A2AToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver) {
+    public A2AToolProviderManager(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
+            @ConfigProperty(name = "eddi.security.ssrf-protection.enabled", defaultValue = "false") boolean ssrfProtectionEnabled) {
         this.globalVariableResolver = globalVariableResolver;
         this.secretResolver = secretResolver;
+        this.ssrfProtectionEnabled = ssrfProtectionEnabled;
+        // JDK HttpClient defaults to Redirect.NEVER, so validating the target URL
+        // is sufficient — there is no redirect hop to re-validate.
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
 
@@ -184,6 +191,10 @@ public class A2AToolProviderManager {
 
         String cardUrl = agentUrl + "/agent.json";
 
+        if (ssrfProtectionEnabled) {
+            UrlValidationUtils.validateUrl(cardUrl);
+        }
+
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder().uri(URI.create(cardUrl))
                 .timeout(Duration.ofMillis(config.getTimeoutMs() != null ? config.getTimeoutMs() : 30000)).GET();
 
@@ -248,6 +259,10 @@ public class A2AToolProviderManager {
         jsonRpc.put("params", params);
 
         String body = MAPPER.writeValueAsString(jsonRpc);
+
+        if (ssrfProtectionEnabled) {
+            UrlValidationUtils.validateUrl(agentUrl);
+        }
 
         HttpRequest.Builder requestBuilder = HttpRequest.newBuilder().uri(URI.create(agentUrl))
                 .timeout(Duration.ofMillis(config.getTimeoutMs() != null ? config.getTimeoutMs() : 30000)).header("Content-Type", "application/json")

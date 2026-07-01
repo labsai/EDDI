@@ -53,6 +53,15 @@ public interface IUserMemoryStore {
 
     void deleteEntry(String entryId) throws IResourceStore.ResourceStoreException;
 
+    /**
+     * Finds a memory entry by its ID. Used for ownership validation before
+     * deletion.
+     *
+     * @return the entry, or empty if not found
+     * @since 6.1.0
+     */
+    Optional<UserMemoryEntry> findEntryById(String entryId) throws IResourceStore.ResourceStoreException;
+
     // === Queries ===
 
     /**

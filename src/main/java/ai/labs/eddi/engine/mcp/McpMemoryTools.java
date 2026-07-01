@@ -20,6 +20,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import ai.labs.eddi.engine.security.OwnershipValidator;
+
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.requireRole;
 
@@ -41,14 +43,17 @@ public class McpMemoryTools {
     private final IUserMemoryStore userMemoryStore;
     private final IJsonSerialization jsonSerialization;
     private final SecurityIdentity identity;
+    private final OwnershipValidator ownershipValidator;
     private final boolean authEnabled;
 
     @Inject
     public McpMemoryTools(IUserMemoryStore userMemoryStore, IJsonSerialization jsonSerialization, SecurityIdentity identity,
+            OwnershipValidator ownershipValidator,
             @ConfigProperty(name = "authorization.enabled", defaultValue = "false") boolean authEnabled) {
         this.userMemoryStore = userMemoryStore;
         this.jsonSerialization = jsonSerialization;
         this.identity = identity;
+        this.ownershipValidator = ownershipValidator;
         this.authEnabled = authEnabled;
     }
 
@@ -59,6 +64,7 @@ public class McpMemoryTools {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
+        ownershipValidator.validateUserAccess(identity, userId);
         try {
             var entries = userMemoryStore.getAllEntries(userId);
             int maxEntries = limit != null && limit > 0 ? limit : 50;
@@ -88,6 +94,7 @@ public class McpMemoryTools {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
+        ownershipValidator.validateUserAccess(identity, userId);
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         try {
@@ -115,6 +122,7 @@ public class McpMemoryTools {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
+        ownershipValidator.validateUserAccess(identity, userId);
         if (query == null || query.isBlank())
             return errorJson("query is required");
         try {
@@ -138,6 +146,7 @@ public class McpMemoryTools {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
+        ownershipValidator.validateUserAccess(identity, userId);
         if (key == null || key.isBlank())
             return errorJson("key is required");
         try {
@@ -225,6 +234,7 @@ public class McpMemoryTools {
         requireRole(identity, authEnabled, "eddi-viewer");
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
+        ownershipValidator.validateUserAccess(identity, userId);
         try {
             long count = userMemoryStore.countEntries(userId);
             return jsonSerialization.serialize(Map.of("userId", userId, "count", count));

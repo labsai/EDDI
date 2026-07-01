@@ -1,0 +1,157 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.engine.memory;
+
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import org.junit.jupiter.api.Test;
+
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Unit tests for {@link ConversationOutputExtractor} — the shared utility that
+ * extracts human-readable text from conversation memory snapshots.
+ */
+class ConversationOutputExtractorTest {
+
+    // --- Null / empty input ---
+
+    @Test
+    void extractResponse_nullSnapshot_returnsNull() {
+        assertNull(ConversationOutputExtractor.extractResponse(null));
+    }
+
+    @Test
+    void extractResponse_nullOutputs_returnsNull() {
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationOutputs(null);
+        assertNull(ConversationOutputExtractor.extractResponse(snapshot));
+    }
+
+    @Test
+    void extractResponse_emptyOutputs_returnsNull() {
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationOutputs(new LinkedList<>());
+        assertNull(ConversationOutputExtractor.extractResponse(snapshot));
+    }
+
+    // --- Format 1: Nested "output" array with plain strings ---
+
+    @Test
+    void extractResponse_outputArrayWithStrings_joinsThem() {
+        var output = new ConversationOutput();
+        output.put("output", List.of("Hello", "World"));
+        var snapshot = snapshotWith(output);
+
+        assertEquals("Hello\nWorld", ConversationOutputExtractor.extractResponse(snapshot));
+    }
+
+    @Test
+    void extractResponse_outputArrayWithSingleString() {
+        var output = new ConversationOutput();
+        output.put("output", List.of("Only one"));
+        var snapshot = snapshotWith(output);
+
+        assertEquals("Only one", ConversationOutputExtractor.extractResponse(snapshot));
+    }
+
+    // --- Format 1: Nested "output" array with Map items (text key) ---
+
+    @Test
+    void extractResponse_outputArrayWithMapItems_extractsTextKey() {
+        var output = new ConversationOutput();
+        output.put("output", List.of(Map.of("text", "From map"), Map.of("text", "Another")));
+        var snapshot = snapshotWith(output);
+
+        assertEquals("From map\nAnother", ConversationOutputExtractor.extractResponse(snapshot));
+    }
+
+    @Test
+    void extractResponse_outputArrayWithMixedItems() {
+        var output = new ConversationOutput();
+        output.put("output", List.of("Plain text", Map.of("text", "Map text")));
+        var snapshot = snapshotWith(output);
+
+        assertEquals("Plain text\nMap text", ConversationOutputExtractor.extractResponse(snapshot));
+    }
+
+    // --- Format 2: Flat keys like "output:text:*" ---
+
+    @Test
+    void extractResponse_flatOutputTextKey_extractsValue() {
+        var output = new ConversationOutput();
+        output.put("output:text:greeting", "Hello from flat key");
+        var snapshot = snapshotWith(output);
+
+        assertEquals("Hello from flat key", ConversationOutputExtractor.extractResponse(snapshot));
+    }
+
+    @Test
+    void extractResponse_flatOutputTextKey_withListValue() {
+        var output = new ConversationOutput();
+        output.put("output:text:items", List.of("First", "Second"));
+        var snapshot = snapshotWith(output);
+
+        assertEquals("First\nSecond", ConversationOutputExtractor.extractResponse(snapshot));
+    }
+
+    // --- Metadata-only output (no "output" or "reply" keys) ---
+
+    @Test
+    void extractResponse_metadataOnly_returnsNull() {
+        var output = new ConversationOutput();
+        output.put("actions", List.of("greet"));
+        output.put("input", "Hello");
+        var snapshot = snapshotWith(output);
+
+        assertNull(ConversationOutputExtractor.extractResponse(snapshot));
+    }
+
+    // --- Fallback: output key exists but not extractable as text ---
+
+    @Test
+    void extractResponse_fallbackToString() {
+        var output = new ConversationOutput();
+        output.put("output", 42); // Not a List → falls through format 1
+        var snapshot = snapshotWith(output);
+
+        // Should hit fallback toString() because "output" key exists
+        String result = ConversationOutputExtractor.extractResponse(snapshot);
+        assertNotNull(result, "Should fall back to toString()");
+        assertTrue(result.contains("output"), "Fallback should include the output key");
+    }
+
+    // --- Multiple outputs: always uses the LAST one ---
+
+    @Test
+    void extractResponse_multipleOutputs_usesLast() {
+        var first = new ConversationOutput();
+        first.put("output", List.of("First output"));
+        var second = new ConversationOutput();
+        second.put("output", List.of("Second output"));
+        var outputs = new LinkedList<ConversationOutput>();
+        outputs.add(first);
+        outputs.add(second);
+
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationOutputs(outputs);
+
+        assertEquals("Second output", ConversationOutputExtractor.extractResponse(snapshot));
+    }
+
+    // --- Helper ---
+
+    private static SimpleConversationMemorySnapshot snapshotWith(ConversationOutput output) {
+        var outputs = new LinkedList<ConversationOutput>();
+        outputs.add(output);
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationOutputs(outputs);
+        return snapshot;
+    }
+}

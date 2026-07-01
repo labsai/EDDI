@@ -22,6 +22,17 @@ public interface IRequest {
 
     IRequest setTimeout(long timeout, TimeUnit timeUnit);
 
+    /**
+     * Enable or disable automatic HTTP redirect following for this request.
+     * <p>
+     * SSRF-protected callers disable redirects to prevent a
+     * {@code 3xx → internal host} bypass of URL validation. This is intentionally
+     * <b>not</b> a default no-op: any {@link IRequest} implementation must honour
+     * it (or explicitly throw) so a new client cannot silently re-enable the
+     * redirect bypass — it fails closed at compile time instead.
+     */
+    IRequest setFollowRedirects(boolean follow);
+
     IResponse send() throws HttpRequestException;
 
     Map<String, Object> toMap();

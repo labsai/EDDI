@@ -54,7 +54,7 @@ public final class CronParser {
         parseField(parts[1], 0, 23); // hour
         parseField(parts[2], 1, 31); // day of month
         parseField(substituteNames(parts[3], MONTH_NAMES), 1, 12); // month
-        parseField(substituteNames(parts[4], DOW_NAMES), 0, 6); // day of week
+        parseField(substituteNames(parts[4], DOW_NAMES), 0, 7); // day of week (0 and 7 both = Sunday)
     }
 
     /**
@@ -78,7 +78,14 @@ public final class CronParser {
         Set<Integer> hours = parseField(parts[1], 0, 23);
         Set<Integer> daysOfMonth = parseField(parts[2], 1, 31);
         Set<Integer> months = parseField(substituteNames(parts[3], MONTH_NAMES), 1, 12);
-        Set<Integer> daysOfWeek = parseField(substituteNames(parts[4], DOW_NAMES), 0, 6);
+        Set<Integer> daysOfWeek = normalizeDaysOfWeek(parseField(substituteNames(parts[4], DOW_NAMES), 0, 7));
+
+        // Standard (Vixie) cron: when BOTH day-of-month and day-of-week are
+        // restricted, a day matches if EITHER field matches. A field is "starred"
+        // (not restricted) when it begins with "*" — this includes "*/2", matching
+        // Vixie's DOM_STAR/DOW_STAR flag. If only one is restricted, the starred
+        // field is always true, so the AND below reduces to the restricted field.
+        boolean bothDayFieldsRestricted = !parts[2].trim().startsWith("*") && !parts[4].trim().startsWith("*");
 
         // Walk forward minute-by-minute from 'after + 1 minute' (aligned to minute
         // boundary)
@@ -88,9 +95,9 @@ public final class CronParser {
         ZonedDateTime limit = candidate.plusYears(2);
 
         while (candidate.isBefore(limit)) {
-            if (months.contains(candidate.getMonthValue()) && daysOfMonth.contains(candidate.getDayOfMonth())
-                    && daysOfWeek.contains(candidate.getDayOfWeek().getValue() % 7) // Java DayOfWeek: MON=1..SUN=7
-                    && hours.contains(candidate.getHour()) && minutes.contains(candidate.getMinute())) {
+            boolean dayMatches = dayMatches(candidate, daysOfMonth, daysOfWeek, bothDayFieldsRestricted);
+            if (months.contains(candidate.getMonthValue()) && dayMatches && hours.contains(candidate.getHour())
+                    && minutes.contains(candidate.getMinute())) {
                 return candidate.toInstant();
             }
 
@@ -99,8 +106,8 @@ public final class CronParser {
                 candidate = skipToNextMonth(candidate, months);
                 continue;
             }
-            // If day doesn't match, jump to next day
-            if (!daysOfMonth.contains(candidate.getDayOfMonth()) || !daysOfWeek.contains(candidate.getDayOfWeek().getValue() % 7)) {
+            // If day doesn't match (per OR/AND semantics above), jump to next day
+            if (!dayMatches) {
                 candidate = candidate.plusDays(1).withHour(0).withMinute(0);
                 continue;
             }
@@ -136,7 +143,10 @@ public final class CronParser {
             if (part.contains("/")) {
                 // Step: */15 or 1-30/5
                 String[] stepParts = part.split("/");
-                int step = Integer.parseInt(stepParts[1]);
+                if (stepParts.length != 2) {
+                    throw new IllegalArgumentException("Invalid step expression '" + part + "' in field: " + field);
+                }
+                int step = parseIntField(stepParts[1], field);
                 if (step <= 0)
                     throw new IllegalArgumentException("Step must be > 0: " + field);
                 int start = min;
@@ -144,11 +154,17 @@ public final class CronParser {
                 if (!stepParts[0].equals("*")) {
                     if (stepParts[0].contains("-")) {
                         String[] range = stepParts[0].split("-");
-                        start = Integer.parseInt(range[0]);
-                        end = Integer.parseInt(range[1]);
+                        if (range.length != 2) {
+                            throw new IllegalArgumentException("Invalid range expression '" + stepParts[0] + "' in field: " + field);
+                        }
+                        start = parseIntField(range[0], field);
+                        end = parseIntField(range[1], field);
                     } else {
-                        start = Integer.parseInt(stepParts[0]);
+                        start = parseIntField(stepParts[0], field);
                     }
+                }
+                if (start > end) {
+                    throw new IllegalArgumentException("Range start must be <= end ('" + part + "') in field: " + field);
                 }
                 for (int i = start; i <= end; i += step) {
                     values.add(i);
@@ -156,15 +172,21 @@ public final class CronParser {
             } else if (part.contains("-")) {
                 // Range: 1-5
                 String[] range = part.split("-");
-                int start = Integer.parseInt(range[0]);
-                int end = Integer.parseInt(range[1]);
+                if (range.length != 2) {
+                    throw new IllegalArgumentException("Invalid range expression '" + part + "' in field: " + field);
+                }
+                int start = parseIntField(range[0], field);
+                int end = parseIntField(range[1], field);
+                if (start > end) {
+                    throw new IllegalArgumentException("Range start must be <= end ('" + part + "') in field: " + field);
+                }
                 for (int i = start; i <= end; i++) {
                     values.add(i);
                 }
             } else if (part.equals("*")) {
                 IntStream.rangeClosed(min, max).forEach(values::add);
             } else {
-                values.add(Integer.parseInt(part));
+                values.add(parseIntField(part, field));
             }
         }
 
@@ -175,6 +197,44 @@ public final class CronParser {
             }
         }
         return values;
+    }
+
+    /**
+     * Parse an integer cron token, wrapping low-level {@link NumberFormatException}
+     * into a field-aware {@link IllegalArgumentException} for actionable errors.
+     */
+    private static int parseIntField(String token, String field) {
+        try {
+            return Integer.parseInt(token.trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid number '" + token + "' in field: " + field, e);
+        }
+    }
+
+    /**
+     * Determine whether the candidate's date matches the day-of-month and
+     * day-of-week sets, applying standard cron semantics: OR when both fields are
+     * restricted, AND otherwise.
+     */
+    private static boolean dayMatches(ZonedDateTime candidate, Set<Integer> daysOfMonth, Set<Integer> daysOfWeek, boolean bothRestricted) {
+        boolean domMatch = daysOfMonth.contains(candidate.getDayOfMonth());
+        boolean dowMatch = daysOfWeek.contains(candidate.getDayOfWeek().getValue() % 7); // Java DayOfWeek: MON=1..SUN=7
+        return bothRestricted ? (domMatch || dowMatch) : (domMatch && dowMatch);
+    }
+
+    /**
+     * Normalize day-of-week 7 to 0 (both denote Sunday in standard cron). Java's
+     * {@code DayOfWeek.getValue() % 7} yields 0 for Sunday, so a parsed value of 7
+     * would otherwise never match.
+     */
+    private static Set<Integer> normalizeDaysOfWeek(Set<Integer> daysOfWeek) {
+        if (!daysOfWeek.contains(7)) {
+            return daysOfWeek;
+        }
+        Set<Integer> normalized = new TreeSet<>(daysOfWeek);
+        normalized.remove(7);
+        normalized.add(0);
+        return normalized;
     }
 
     private static String substituteNames(String field, Map<String, String> names) {

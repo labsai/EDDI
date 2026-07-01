@@ -21,7 +21,7 @@ import java.util.Set;
  * @since 6.0.0
  */
 @Path("/capabilities")
-@Tag(name = "06. Capability Registry", description = "A2A agent capability discovery")
+@Tag(name = "Integrations / Capability Registry", description = "A2A agent capability discovery")
 public interface IRestCapabilityRegistry {
 
     @GET

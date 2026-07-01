@@ -47,12 +47,13 @@ class AgentGroupConfigurationTest {
 
     @Test
     void style_allValues() {
-        assertEquals(6, DiscussionStyle.values().length);
+        assertEquals(7, DiscussionStyle.values().length);
         assertNotNull(DiscussionStyle.valueOf("ROUND_TABLE"));
         assertNotNull(DiscussionStyle.valueOf("PEER_REVIEW"));
         assertNotNull(DiscussionStyle.valueOf("DEVIL_ADVOCATE"));
         assertNotNull(DiscussionStyle.valueOf("DELPHI"));
         assertNotNull(DiscussionStyle.valueOf("DEBATE"));
+        assertNotNull(DiscussionStyle.valueOf("TASK_FORCE"));
         assertNotNull(DiscussionStyle.valueOf("CUSTOM"));
     }
 
@@ -135,7 +136,7 @@ class AgentGroupConfigurationTest {
 
     @Test
     void phaseType_allValues() {
-        assertEquals(8, PhaseType.values().length);
+        assertEquals(11, PhaseType.values().length);
         assertNotNull(PhaseType.valueOf("OPINION"));
         assertNotNull(PhaseType.valueOf("CRITIQUE"));
         assertNotNull(PhaseType.valueOf("REVISION"));
@@ -144,16 +145,21 @@ class AgentGroupConfigurationTest {
         assertNotNull(PhaseType.valueOf("ARGUE"));
         assertNotNull(PhaseType.valueOf("REBUTTAL"));
         assertNotNull(PhaseType.valueOf("SYNTHESIS"));
+        assertNotNull(PhaseType.valueOf("PLAN"));
+        assertNotNull(PhaseType.valueOf("EXECUTE"));
+        assertNotNull(PhaseType.valueOf("VERIFY"));
     }
 
     @Test
     void contextScope_allValues() {
-        assertEquals(5, ContextScope.values().length);
+        assertEquals(7, ContextScope.values().length);
         assertNotNull(ContextScope.valueOf("NONE"));
         assertNotNull(ContextScope.valueOf("FULL"));
         assertNotNull(ContextScope.valueOf("LAST_PHASE"));
         assertNotNull(ContextScope.valueOf("ANONYMOUS"));
         assertNotNull(ContextScope.valueOf("OWN_FEEDBACK"));
+        assertNotNull(ContextScope.valueOf("TASK_ONLY"));
+        assertNotNull(ContextScope.valueOf("TASK_WITH_DEPS"));
     }
 
     @Test
@@ -233,5 +239,110 @@ class AgentGroupConfigurationTest {
         assertEquals(2, MemberType.values().length);
         assertNotNull(MemberType.valueOf("AGENT"));
         assertNotNull(MemberType.valueOf("GROUP"));
+    }
+
+    // ==================== LifecyclePolicy ====================
+
+    @Test
+    void lifecyclePolicy_toJson_allValues() {
+        assertEquals("ephemeral", LifecyclePolicy.EPHEMERAL.toJson());
+        assertEquals("keep-deployed", LifecyclePolicy.KEEP_DEPLOYED.toJson());
+        assertEquals("undeploy-only", LifecyclePolicy.UNDEPLOY_ONLY.toJson());
+        assertEquals("agent-decides", LifecyclePolicy.AGENT_DECIDES.toJson());
+    }
+
+    @Test
+    void lifecyclePolicy_fromJson_validValues() {
+        assertEquals(LifecyclePolicy.EPHEMERAL, LifecyclePolicy.fromJson("ephemeral"));
+        assertEquals(LifecyclePolicy.KEEP_DEPLOYED, LifecyclePolicy.fromJson("keep-deployed"));
+        assertEquals(LifecyclePolicy.UNDEPLOY_ONLY, LifecyclePolicy.fromJson("undeploy-only"));
+        assertEquals(LifecyclePolicy.AGENT_DECIDES, LifecyclePolicy.fromJson("agent-decides"));
+    }
+
+    @Test
+    void lifecyclePolicy_fromJson_null() {
+        assertEquals(LifecyclePolicy.EPHEMERAL, LifecyclePolicy.fromJson(null));
+    }
+
+    @Test
+    void lifecyclePolicy_fromJson_uppercase() {
+        assertEquals(LifecyclePolicy.EPHEMERAL, LifecyclePolicy.fromJson("EPHEMERAL"));
+    }
+
+    @Test
+    void lifecyclePolicy_fromJson_invalid() {
+        assertThrows(IllegalArgumentException.class,
+                () -> LifecyclePolicy.fromJson("unknown-value"));
+    }
+
+    // ==================== TaskDefinition ====================
+
+    @Test
+    void taskDefinition_fullConstructor() {
+        var td = new TaskDefinition("Subject", "Desc", "ROLE:analyst", List.of("dep1"), 2);
+
+        assertEquals("Subject", td.subject());
+        assertEquals("Desc", td.description());
+        assertEquals("ROLE:analyst", td.assignToRole());
+        assertEquals(List.of("dep1"), td.dependsOn());
+        assertEquals(2, td.priority());
+    }
+
+    @Test
+    void taskDefinition_convenienceConstructor() {
+        var td = new TaskDefinition("Subject", "Desc");
+
+        assertEquals("Subject", td.subject());
+        assertEquals("Desc", td.description());
+        assertEquals("ALL", td.assignToRole());
+        assertTrue(td.dependsOn().isEmpty());
+        assertEquals(0, td.priority());
+    }
+
+    @Test
+    void taskDefinition_nullSubject_throws() {
+        assertThrows(NullPointerException.class,
+                () -> new TaskDefinition(null, "Desc"));
+    }
+
+    @Test
+    void taskDefinition_nullDescription_throws() {
+        assertThrows(NullPointerException.class,
+                () -> new TaskDefinition("Subject", null));
+    }
+
+    @Test
+    void taskDefinition_nullDependsOn_defaultsToEmptyList() {
+        var td = new TaskDefinition("Subject", "Desc", "ALL", null, 0);
+
+        assertNotNull(td.dependsOn());
+        assertTrue(td.dependsOn().isEmpty());
+    }
+
+    @Test
+    void taskDefinition_nullAssignToRole_defaultsToALL() {
+        var td = new TaskDefinition("Subject", "Desc", null, List.of(), 0);
+
+        assertEquals("ALL", td.assignToRole());
+    }
+
+    // ==================== DiscussionPhase ====================
+
+    @Test
+    void discussionPhase_requiresApprovalTrue() {
+        var phase = new DiscussionPhase(
+                "PHASE", PhaseType.OPINION, "ALL",
+                TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, true);
+
+        assertTrue(phase.requiresApproval());
+    }
+
+    @Test
+    void discussionPhase_requiresApprovalFalse() {
+        var phase = new DiscussionPhase(
+                "PHASE", PhaseType.OPINION, "ALL",
+                TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, false);
+
+        assertFalse(phase.requiresApproval());
     }
 }

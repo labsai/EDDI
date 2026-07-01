@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventLis
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import org.jboss.logging.Logger;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -24,9 +25,8 @@ import java.util.concurrent.TimeUnit;
  * response lives in a thread reply. Peer feedback threads under the target
  * agent's message; revisions thread under the agent's own message.
  * <p>
- * Compact mode code paths remain as a safety net for potential future styles
- * but are currently unreachable ({@code EXPANDED_STYLES} contains all 5
- * styles).
+ * Compact mode code paths remain as a fallback for styles not in
+ * {@code EXPANDED_STYLES} (e.g. {@code CUSTOM}).
  *
  * @since 6.0.0
  */
@@ -40,7 +40,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
      * mode (single thread) is too hard to follow with multiple agents.
      */
     private static final Set<String> EXPANDED_STYLES = Set.of(
-            "ROUND_TABLE", "PEER_REVIEW", "DEVIL_ADVOCATE", "DEBATE", "DELPHI");
+            "ROUND_TABLE", "PEER_REVIEW", "DEVIL_ADVOCATE", "DEBATE", "DELPHI", "TASK_FORCE");
 
     private final SlackWebApiClient slackApi;
     private final String authToken;
@@ -186,6 +186,50 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         } finally {
             completionLatch.countDown();
         }
+    }
+
+    @Override
+    public void onTaskPlanCreated(GroupConversationEventSink.TaskPlanCreatedEvent event) {
+        List<GroupConversationEventSink.TaskSummary> tasks = event.tasks();
+        if (tasks == null || tasks.isEmpty()) {
+            return;
+        }
+
+        var sb = new StringBuilder();
+        sb.append(event.preConfigured()
+                ? "📝 *Task plan loaded* (pre-configured)\n"
+                : "📝 *Task plan created*\n");
+
+        for (int i = 0; i < tasks.size(); i++) {
+            var task = tasks.get(i);
+            sb.append(String.format("%d. *%s*", i + 1, task.subject()));
+            if (task.assignedTo() != null && !task.assignedTo().isBlank()) {
+                sb.append(String.format(" — assigned to _%s_", task.assignedTo()));
+            }
+            if (task.priority() > 0) {
+                sb.append(String.format(" [P%d]", task.priority()));
+            }
+            sb.append('\n');
+        }
+
+        String threadTs = expandedMode ? null : userThreadTs;
+        postSafe(channelId, threadTs, sb.toString().stripTrailing());
+    }
+
+    @Override
+    public void onTaskVerified(GroupConversationEventSink.TaskVerifiedEvent event) {
+        String emoji = event.passed() ? "✅" : "❌";
+        String status = event.passed() ? "passed" : "failed";
+
+        var sb = new StringBuilder();
+        sb.append(String.format("%s *Task %s* — %s\n", emoji, event.taskSubject(), status));
+
+        if (event.feedback() != null && !event.feedback().isBlank()) {
+            sb.append(String.format("> %s\n", event.feedback().replace("\n", "\n> ")));
+        }
+
+        String threadTs = expandedMode ? null : userThreadTs;
+        postSafe(channelId, threadTs, sb.toString().stripTrailing());
     }
 
     // ─── Posting strategies ───

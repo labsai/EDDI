@@ -8,6 +8,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
+import org.mockito.InOrder;
+
 import static org.mockito.Mockito.*;
 
 /**
@@ -95,8 +97,35 @@ class HistorizedResourceStoreTest {
         Integer newVersion = store.update("id1", 1, "updated");
 
         assertEquals(2, newVersion);
-        verify(storage).store(historyResource); // archived old version
-        verify(storage).store(newResource); // stored new version
+        // Verify ordering: history MUST be archived BEFORE the conditional store.
+        // If swapped, a successful storeIfCurrentVersion followed by a failed
+        // history archive could leave the update without a corresponding history entry.
+        InOrder inOrder = inOrder(storage);
+        inOrder.verify(storage).store(historyResource); // archived old version first
+        inOrder.verify(storage).storeIfCurrentVersion(newResource, 1); // then conditional store
+    }
+
+    @Test
+    void shouldThrowResourceModifiedWhenConcurrentUpdate() throws Exception {
+        IResourceStorage.IResource<String> currentResource = mock(IResourceStorage.IResource.class);
+        when(storage.read("id1", 1)).thenReturn(currentResource);
+        when(currentResource.getId()).thenReturn("id1");
+        when(currentResource.getVersion()).thenReturn(1);
+
+        IResourceStorage.IHistoryResource<String> historyResource = mock(IResourceStorage.IHistoryResource.class);
+        when(storage.newHistoryResourceFor(currentResource, false)).thenReturn(historyResource);
+
+        IResourceStorage.IResource<String> newResource = mock(IResourceStorage.IResource.class);
+        when(storage.newResource("id1", 2, "updated")).thenReturn(newResource);
+
+        doThrow(new IResourceStore.ResourceModifiedException("concurrent edit"))
+                .when(storage).storeIfCurrentVersion(newResource, 1);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> store.update("id1", 1, "updated"));
+
+        // History should still have been archived before the conditional store failed
+        verify(storage).store(historyResource);
     }
 
     @Test

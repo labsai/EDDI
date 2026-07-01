@@ -85,6 +85,10 @@ public interface IGroupConversationService {
         }
         default void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
         }
+        default void onTaskPlanCreated(GroupConversationEventSink.TaskPlanCreatedEvent event) {
+        }
+        default void onTaskVerified(GroupConversationEventSink.TaskVerifiedEvent event) {
+        }
     }
 
     // --- Exceptions ---

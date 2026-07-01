@@ -4,205 +4,306 @@
  */
 package ai.labs.eddi.datastore.mongo;
 
+import ai.labs.eddi.datastore.IResourceFilter;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import com.mongodb.client.FindIterable;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
+import com.mongodb.client.MongoDatabase;
+import org.bson.Document;
+import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
-/**
- * Integration tests for {@link MongoResourceStorage} using Testcontainers.
- *
- * @since 6.0.0
- */
-@DisplayName("MongoResourceStorage IT")
-class MongoResourceStorageTest extends MongoTestBase {
+@SuppressWarnings("unchecked")
+class MongoResourceStorageTest {
 
-    private static MongoResourceStorage<Map<String, Object>> storage;
+    private static final String COLLECTION_NAME = "testcollection";
+    private static final String VALID_ID = "aabbccddeeff112233445566";
 
-    @BeforeAll
-    @SuppressWarnings("unchecked") // Map.class → Class<Map> erasure
-    static void init() {
-        storage = new MongoResourceStorage<>(getDatabase(), "test_resources",
-                documentBuilder, (Class<Map<String, Object>>) (Class<?>) Map.class);
-    }
+    private MongoCollection<Document> currentCollection;
+    private MongoCollection<Document> historyCollection;
+    private IDocumentBuilder documentBuilder;
+    private MongoResourceStorage<String> storage;
 
     @BeforeEach
-    void clean() {
-        dropCollections("test_resources", "test_resources.history");
+    void setUp() {
+        MongoDatabase database = mock(MongoDatabase.class);
+        currentCollection = mock(MongoCollection.class);
+        historyCollection = mock(MongoCollection.class);
+        documentBuilder = mock(IDocumentBuilder.class);
+
+        when(database.getCollection(COLLECTION_NAME)).thenReturn(currentCollection);
+        when(database.getCollection(COLLECTION_NAME + ".history")).thenReturn(historyCollection);
+
+        storage = new MongoResourceStorage<>(database, COLLECTION_NAME, documentBuilder, String.class);
     }
 
-    @Test
-    @DisplayName("newResource + store — creates with auto-generated ID")
-    void storeNew() throws IOException {
-        IResourceStorage.IResource<Map<String, Object>> resource = storage.newResource(Map.of("name", "test"));
-        storage.store(resource);
+    // ==================== newResource ====================
 
-        assertNotNull(resource.getId());
+    @Test
+    @DisplayName("newResource(content) — creates resource with version 1")
+    void newResourceContent() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+
+        IResourceStorage.IResource<String> resource = storage.newResource("test");
+        assertNotNull(resource);
         assertEquals(1, resource.getVersion());
     }
 
     @Test
-    @DisplayName("store + read round-trip")
-    void storeAndRead() throws IOException {
-        IResourceStorage.IResource<Map<String, Object>> resource = storage.newResource(Map.of("name", "round-trip"));
+    @DisplayName("newResource(id, version, content) — creates resource with specified id/version")
+    void newResourceIdVersion() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+
+        IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 5, "test");
+        assertNotNull(resource);
+        assertEquals(VALID_ID, resource.getId());
+        assertEquals(5, resource.getVersion());
+    }
+
+    // ==================== store ====================
+
+    @Test
+    @DisplayName("store — insertOne when resource has no id")
+    void storeNewResource() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        IResourceStorage.IResource<String> resource = storage.newResource("test");
+
         storage.store(resource);
-
-        IResourceStorage.IResource<Map<String, Object>> read = storage.read(resource.getId(), 1);
-        assertNotNull(read);
-        Map<String, Object> data = read.getData();
-        assertEquals("round-trip", data.get("name"));
+        verify(currentCollection).insertOne(any(Document.class));
     }
 
     @Test
-    @DisplayName("read non-existent — returns null")
-    void readNonExistent() {
-        IResourceStorage.IResource<Map<String, Object>> read = storage.read(new ObjectId().toString(), 1);
-        assertNull(read);
+    @DisplayName("store — updateOne with upsert when resource has id")
+    void storeExistingResource() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 1, "test");
+
+        storage.store(resource);
+        verify(currentCollection).updateOne(any(Bson.class), any(Document.class), any());
     }
 
     @Test
-    @DisplayName("newResource with explicit ID and version")
-    void newResourceWithId() throws IOException {
-        String id = new ObjectId().toString();
-        IResourceStorage.IResource<Map<String, Object>> resource = storage.newResource(id, 3, Map.of("key", "val"));
-
-        assertEquals(id, resource.getId());
-        assertEquals(3, resource.getVersion());
+    @DisplayName("store — rejects external resource implementations")
+    void storeExternalResource() {
+        IResourceStorage.IResource<String> fakeResource = mock(IResourceStorage.IResource.class);
+        assertThrows(IllegalArgumentException.class, () -> storage.store(fakeResource));
     }
 
+    // ==================== createNew ====================
+
     @Test
-    @DisplayName("createNew — inserts without upsert")
-    void createNew() throws IOException {
-        IResourceStorage.IResource<Map<String, Object>> resource = storage.newResource(Map.of("mode", "create"));
+    @DisplayName("createNew — always insertOne")
+    void createNew() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        IResourceStorage.IResource<String> resource = storage.newResource("test");
+
         storage.createNew(resource);
+        verify(currentCollection).insertOne(any(Document.class));
+    }
 
-        assertNotNull(resource.getId());
+    // ==================== read ====================
+
+    @Test
+    @DisplayName("read — returns resource when found")
+    void readFound() {
+        Document doc = new Document("_id", new ObjectId(VALID_ID))
+                .append("_version", 1)
+                .append("data", "test");
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(currentCollection.find(any(Document.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(doc);
+
+        IResourceStorage.IResource<String> result = storage.read(VALID_ID, 1);
+        assertNotNull(result);
+        assertEquals(1, result.getVersion());
     }
 
     @Test
-    @DisplayName("store with existing ID — upserts")
-    void storeUpsert() throws IOException {
-        IResourceStorage.IResource<Map<String, Object>> resource = storage.newResource(Map.of("version", "1"));
-        storage.store(resource);
-        String id = resource.getId();
+    @DisplayName("read — returns null when not found")
+    void readNotFound() {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(currentCollection.find(any(Document.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(null);
 
-        IResourceStorage.IResource<Map<String, Object>> updated = storage.newResource(id, 2, Map.of("version", "2"));
-        storage.store(updated);
-
-        IResourceStorage.IResource<Map<String, Object>> read = storage.read(id, 2);
-        assertNotNull(read);
-        assertEquals("2", read.getData().get("version"));
+        IResourceStorage.IResource<String> result = storage.read(VALID_ID, 1);
+        assertNull(result);
     }
 
-    @Test
-    @DisplayName("getCurrentVersion — returns version number")
-    void getCurrentVersion() throws IOException {
-        IResourceStorage.IResource<Map<String, Object>> resource = storage.newResource(Map.of("x", "y"));
-        storage.store(resource);
-
-        Integer version = storage.getCurrentVersion(resource.getId());
-        assertEquals(1, version);
-    }
-
-    @Test
-    @DisplayName("getCurrentVersion non-existent — returns -1")
-    void getCurrentVersionNonExistent() {
-        assertEquals(-1, storage.getCurrentVersion(new ObjectId().toString()));
-    }
+    // ==================== remove ====================
 
     @Test
     @DisplayName("remove — deletes from current collection")
-    void remove() throws IOException {
-        IResourceStorage.IResource<Map<String, Object>> resource = storage.newResource(Map.of("del", "me"));
-        storage.store(resource);
-        String id = resource.getId();
+    void remove() {
+        storage.remove(VALID_ID);
+        verify(currentCollection).deleteOne(any(Document.class));
+    }
 
-        storage.remove(id);
-        assertNull(storage.read(id, 1));
+    // ==================== removeAllPermanently ====================
+
+    @Test
+    @DisplayName("removeAllPermanently — deletes from both collections")
+    void removeAllPermanently() {
+        storage.removeAllPermanently(VALID_ID);
+        verify(currentCollection).deleteOne(any(Document.class));
+        verify(historyCollection).deleteMany(any(Document.class));
+    }
+
+    // ==================== readHistory ====================
+
+    @Test
+    @DisplayName("readHistory — returns history resource when found")
+    void readHistoryFound() {
+        Document idDoc = new Document("_id", new ObjectId(VALID_ID)).append("_version", 2);
+        Document doc = new Document("_id", idDoc).append("data", "old");
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(historyCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(doc);
+
+        IResourceStorage.IHistoryResource<String> result = storage.readHistory(VALID_ID, 2);
+        assertNotNull(result);
+        assertEquals(VALID_ID, result.getId());
+        assertEquals(2, result.getVersion());
     }
 
     @Test
-    @DisplayName("history resource — store and read")
-    void historyResource() throws IOException {
-        IResourceStorage.IResource<Map<String, Object>> resource = storage.newResource(Map.of("historic", "data"));
-        storage.store(resource);
+    @DisplayName("readHistory — returns null when not found")
+    void readHistoryNotFound() {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(historyCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(null);
 
-        IResourceStorage.IHistoryResource<Map<String, Object>> history = storage.newHistoryResourceFor(resource, false);
+        assertNull(storage.readHistory(VALID_ID, 2));
+    }
+
+    // ==================== readHistoryLatest ====================
+
+    @Test
+    @DisplayName("readHistoryLatest — returns latest history")
+    void readHistoryLatest() {
+        when(historyCollection.countDocuments(any(Document.class))).thenReturn(1L);
+
+        Document idDoc = new Document("_id", new ObjectId(VALID_ID)).append("_version", 3);
+        Document doc = new Document("_id", idDoc).append("data", "latest");
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(historyCollection.find(any(Document.class))).thenReturn(iterable);
+        when(iterable.sort(any(Document.class))).thenReturn(iterable);
+        when(iterable.limit(1)).thenReturn(iterable);
+        when(iterable.first()).thenReturn(doc);
+
+        IResourceStorage.IHistoryResource<String> result = storage.readHistoryLatest(VALID_ID);
+        assertNotNull(result);
+    }
+
+    @Test
+    @DisplayName("readHistoryLatest — returns null when no history")
+    void readHistoryLatestEmpty() {
+        when(historyCollection.countDocuments(any(Document.class))).thenReturn(0L);
+
+        assertNull(storage.readHistoryLatest(VALID_ID));
+    }
+
+    // ==================== newHistoryResourceFor ====================
+
+    @Test
+    @DisplayName("newHistoryResourceFor — creates history with deleted flag")
+    void newHistoryResourceForDeleted() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 1, "test");
+
+        IResourceStorage.IHistoryResource<String> history = storage.newHistoryResourceFor(resource, true);
+        assertNotNull(history);
+        assertTrue(history.isDeleted());
+    }
+
+    @Test
+    @DisplayName("newHistoryResourceFor — creates history without deleted flag")
+    void newHistoryResourceForNotDeleted() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 1, "test");
+
+        IResourceStorage.IHistoryResource<String> history = storage.newHistoryResourceFor(resource, false);
+        assertNotNull(history);
+        assertFalse(history.isDeleted());
+    }
+
+    // ==================== getCurrentVersion ====================
+
+    @Test
+    @DisplayName("getCurrentVersion — returns version when found")
+    void getCurrentVersionFound() {
+        Document doc = new Document("_version", 3);
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(currentCollection.find(any(Document.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(doc);
+
+        assertEquals(3, storage.getCurrentVersion(VALID_ID));
+    }
+
+    @Test
+    @DisplayName("getCurrentVersion — returns -1 when not found")
+    void getCurrentVersionNotFound() {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(currentCollection.find(any(Document.class))).thenReturn(iterable);
+        when(iterable.first()).thenReturn(null);
+
+        assertEquals(-1, storage.getCurrentVersion(VALID_ID));
+    }
+
+    // ==================== store(IHistoryResource) ====================
+
+    @Test
+    @DisplayName("store(IHistoryResource) — inserts into history collection")
+    void storeHistoryResource() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 1, "test");
+        IResourceStorage.IHistoryResource<String> history = storage.newHistoryResourceFor(resource, false);
+
         storage.store(history);
-
-        IResourceStorage.IHistoryResource<Map<String, Object>> readHistory = storage.readHistory(resource.getId(), 1);
-        assertNotNull(readHistory);
-        assertFalse(readHistory.isDeleted());
+        verify(historyCollection).insertOne(any(Document.class));
     }
 
+    // ==================== findResourceIdsContaining ====================
+
     @Test
-    @DisplayName("history resource deleted flag")
-    void historyResourceDeleted() throws IOException {
-        IResourceStorage.IResource<Map<String, Object>> resource = storage.newResource(Map.of("about_to_delete", "yes"));
-        storage.store(resource);
+    @DisplayName("findResourceIdsContaining — returns matching resource IDs")
+    void findResourceIdsContaining() {
+        Document doc = new Document("_id", new ObjectId(VALID_ID)).append("_version", 1);
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(currentCollection.find(any(Document.class))).thenReturn(iterable);
 
-        IResourceStorage.IHistoryResource<Map<String, Object>> history = storage.newHistoryResourceFor(resource, true);
-        storage.store(history);
+        doAnswer(inv -> {
+            java.util.function.Consumer<Document> consumer = inv.getArgument(0);
+            consumer.accept(doc);
+            return null;
+        }).when(iterable).forEach(any(java.util.function.Consumer.class));
 
-        IResourceStorage.IHistoryResource<Map<String, Object>> readHistory = storage.readHistory(resource.getId(), 1);
-        assertNotNull(readHistory);
-        assertTrue(readHistory.isDeleted());
+        List<IResourceStore.IResourceId> result = storage.findResourceIdsContaining("field.path", "value");
+        assertEquals(1, result.size());
+        assertEquals(VALID_ID, result.getFirst().getId());
     }
 
-    @Test
-    @DisplayName("removeAllPermanently — deletes current + history")
-    void removeAllPermanently() throws IOException {
-        IResourceStorage.IResource<Map<String, Object>> resource = storage.newResource(Map.of("purge", "all"));
-        storage.store(resource);
-
-        IResourceStorage.IHistoryResource<Map<String, Object>> history = storage.newHistoryResourceFor(resource, false);
-        storage.store(history);
-
-        storage.removeAllPermanently(resource.getId());
-        assertNull(storage.read(resource.getId(), 1));
-        assertNull(storage.readHistory(resource.getId(), 1));
-    }
+    // ==================== Resource.getData ====================
 
     @Test
-    @DisplayName("readHistoryLatest — returns most recent version")
-    void readHistoryLatest() throws IOException {
-        IResourceStorage.IResource<Map<String, Object>> resource = storage.newResource(Map.of("v", "1"));
-        storage.store(resource);
-        String id = resource.getId();
+    @DisplayName("Resource.getData — delegates to documentBuilder")
+    void resourceGetData() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"data\":\"test\"}");
+        when(documentBuilder.build(any(Document.class), eq(String.class))).thenReturn("parsed-value");
 
-        // Store version 1 history
-        IResourceStorage.IHistoryResource<Map<String, Object>> h1 = storage.newHistoryResourceFor(resource, false);
-        storage.store(h1);
-
-        // Store version 2 history
-        IResourceStorage.IResource<Map<String, Object>> v2 = storage.newResource(id, 2, Map.of("v", "2"));
-        IResourceStorage.IHistoryResource<Map<String, Object>> h2 = storage.newHistoryResourceFor(v2, false);
-        storage.store(h2);
-
-        IResourceStorage.IHistoryResource<Map<String, Object>> latest = storage.readHistoryLatest(id);
-        assertNotNull(latest);
-        assertEquals(2, latest.getVersion());
-    }
-
-    @Test
-    @DisplayName("readHistoryLatest non-existent — returns null")
-    void readHistoryLatestNonExistent() {
-        assertNull(storage.readHistoryLatest(new ObjectId().toString()));
-    }
-
-    @Test
-    @DisplayName("findResourceIdsContaining — searches by JSON path")
-    void findResourceIds() throws IOException {
-        storage.store(storage.newResource(Map.of("tags", List.of("ai", "chatbot"))));
-        storage.store(storage.newResource(Map.of("tags", List.of("web"))));
-
-        List<IResourceStore.IResourceId> results = storage.findResourceIdsContaining("tags", "ai");
-        assertEquals(1, results.size());
+        IResourceStorage.IResource<String> resource = storage.newResource("test");
+        assertEquals("parsed-value", resource.getData());
     }
 }

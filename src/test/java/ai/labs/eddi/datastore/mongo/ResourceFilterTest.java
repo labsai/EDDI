@@ -66,7 +66,7 @@ class ResourceFilterTest {
             when(iterable.skip(anyInt())).thenReturn(iterable);
 
             MongoCursor<Document> cursor = mock(MongoCursor.class);
-            when(iterable.iterator()).thenReturn(cursor);
+            doReturn(cursor).when(iterable).iterator();
             when(cursor.hasNext()).thenReturn(true, false);
             when(cursor.next()).thenReturn(doc);
 
@@ -93,7 +93,7 @@ class ResourceFilterTest {
             when(iterable.limit(anyInt())).thenReturn(iterable);
 
             MongoCursor<Document> cursor = mock(MongoCursor.class);
-            when(iterable.iterator()).thenReturn(cursor);
+            doReturn(cursor).when(iterable).iterator();
             when(cursor.hasNext()).thenReturn(false);
 
             List<Object> result = filter.readResources(
@@ -117,7 +117,7 @@ class ResourceFilterTest {
             when(iterable.limit(anyInt())).thenReturn(iterable);
 
             MongoCursor<Document> cursor = mock(MongoCursor.class);
-            when(iterable.iterator()).thenReturn(cursor);
+            doReturn(cursor).when(iterable).iterator();
             when(cursor.hasNext()).thenReturn(false);
 
             List<Object> result = filter.readResources(
@@ -139,7 +139,7 @@ class ResourceFilterTest {
             when(iterable.limit(anyInt())).thenReturn(iterable);
 
             MongoCursor<Document> cursor = mock(MongoCursor.class);
-            when(iterable.iterator()).thenReturn(cursor);
+            doReturn(cursor).when(iterable).iterator();
             when(cursor.hasNext()).thenReturn(false);
 
             filter.readResources(new QueryFilters[]{queryFilters}, null, null);
@@ -160,7 +160,7 @@ class ResourceFilterTest {
             when(iterable.limit(anyInt())).thenReturn(iterable);
 
             MongoCursor<Document> cursor = mock(MongoCursor.class);
-            when(iterable.iterator()).thenReturn(cursor);
+            doReturn(cursor).when(iterable).iterator();
             when(cursor.hasNext()).thenReturn(false);
 
             filter.readResources(new QueryFilters[]{queryFilters}, null, 0);
@@ -182,7 +182,7 @@ class ResourceFilterTest {
             when(iterable.skip(anyInt())).thenReturn(iterable);
 
             MongoCursor<Document> cursor = mock(MongoCursor.class);
-            when(iterable.iterator()).thenReturn(cursor);
+            doReturn(cursor).when(iterable).iterator();
             when(cursor.hasNext()).thenReturn(false);
 
             filter.readResources(new QueryFilters[]{queryFilters}, 2, 10);
@@ -205,7 +205,7 @@ class ResourceFilterTest {
             when(iterable.skip(anyInt())).thenReturn(iterable);
 
             MongoCursor<Document> cursor = mock(MongoCursor.class);
-            when(iterable.iterator()).thenReturn(cursor);
+            doReturn(cursor).when(iterable).iterator();
             when(cursor.hasNext()).thenReturn(false);
 
             filter.readResources(new QueryFilters[]{queryFilters}, 0, 10);
@@ -230,7 +230,7 @@ class ResourceFilterTest {
             when(iterable.limit(anyInt())).thenReturn(iterable);
 
             MongoCursor<Document> cursor = mock(MongoCursor.class);
-            when(iterable.iterator()).thenReturn(cursor);
+            doReturn(cursor).when(iterable).iterator();
             when(cursor.hasNext()).thenReturn(false);
 
             List<Object> result = filter.readResources(
@@ -253,7 +253,7 @@ class ResourceFilterTest {
             when(iterable.limit(anyInt())).thenReturn(iterable);
 
             MongoCursor<Document> cursor = mock(MongoCursor.class);
-            when(iterable.iterator()).thenReturn(cursor);
+            doReturn(cursor).when(iterable).iterator();
             when(cursor.hasNext()).thenReturn(false);
 
             filter.readResources(new QueryFilters[]{queryFilters}, null, 5, "name", "lastModifiedOn");

@@ -245,6 +245,23 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         }
     }
 
+    @Override
+    public Optional<UserMemoryEntry> findEntryById(String entryId) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String sql = "SELECT * FROM usermemories WHERE id = ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, entryId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return Optional.of(resultSetToEntry(rs));
+                }
+            }
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to find memory entry by id", e);
+        }
+        return Optional.empty();
+    }
+
     // === Queries ===
 
     @Override

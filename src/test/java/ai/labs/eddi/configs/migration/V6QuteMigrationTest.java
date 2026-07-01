@@ -78,7 +78,7 @@ class V6QuteMigrationTest {
         MongoCursor<Document> cursor = mock(MongoCursor.class);
         when(cursor.hasNext()).thenReturn(true, false);
         when(cursor.next()).thenReturn(doc);
-        when(iterable.iterator()).thenReturn(cursor);
+        doReturn(cursor).when(iterable).iterator();
         when(col.find()).thenReturn(iterable);
         when(database.getCollection(anyString())).thenReturn(col);
 
@@ -108,7 +108,7 @@ class V6QuteMigrationTest {
         MongoCursor<Document> cursor = mock(MongoCursor.class);
         when(cursor.hasNext()).thenReturn(true, false);
         when(cursor.next()).thenReturn(doc);
-        when(iterable.iterator()).thenReturn(cursor);
+        doReturn(cursor).when(iterable).iterator();
         when(col.find()).thenReturn(iterable);
         when(database.getCollection(anyString())).thenReturn(col);
 
@@ -150,7 +150,7 @@ class V6QuteMigrationTest {
         MongoCursor<Document> cursor = mock(MongoCursor.class);
         when(cursor.hasNext()).thenReturn(true, false);
         when(cursor.next()).thenReturn(doc);
-        when(iterable.iterator()).thenReturn(cursor);
+        doReturn(cursor).when(iterable).iterator();
         when(col.find()).thenReturn(iterable);
         when(database.getCollection(anyString())).thenReturn(col);
 

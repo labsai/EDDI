@@ -147,4 +147,72 @@ class BaseRuntimeTest {
             rt.getScheduledExecutorService().shutdownNow();
         });
     }
+
+    @Test
+    @DisplayName("submitCallable with interrupted thread routes to onFailure instead of onComplete")
+    void submitCallable_cancelledRoutesToOnFailure() throws Exception {
+        CompletableFuture<String> onCompleteCalled = new CompletableFuture<>();
+        CompletableFuture<Throwable> onFailureCalled = new CompletableFuture<>();
+
+        // Sets the interrupt flag to simulate the scenario where future.cancel(true)
+        // was called during a non-interruptible I/O operation (e.g., LLM HTTP call).
+        // The callable completes normally but the interrupt flag remains set.
+        Future<String> future = runtime.submitCallable(
+                () -> {
+                    Thread.currentThread().interrupt(); // simulate interrupt flag left by cancel(true)
+                    return "stale-result";
+                },
+                new IRuntime.IFinishedExecution<>() {
+                    @Override
+                    public void onComplete(String result) {
+                        onCompleteCalled.complete(result);
+                    }
+
+                    @Override
+                    public void onFailure(Throwable t) {
+                        onFailureCalled.complete(t);
+                    }
+                },
+                null);
+
+        // onFailure should be called with InterruptedException
+        Throwable failure = onFailureCalled.get(5, TimeUnit.SECONDS);
+        assertInstanceOf(InterruptedException.class, failure);
+        assertTrue(failure.getMessage().contains("cancellation"));
+
+        // onComplete should NOT have been called
+        assertFalse(onCompleteCalled.isDone(),
+                "onComplete should not be called when thread was interrupted");
+
+        // Future must return null — NOT the stale "stale-result" value.
+        // This prevents callers who do future.get() from receiving data
+        // that was already routed to onFailure.
+        assertNull(future.get(5, TimeUnit.SECONDS),
+                "Future should return null when thread was interrupted to prevent stale result leakage");
+    }
+
+    @Test
+    @DisplayName("submitCallable without interruption still calls onComplete normally")
+    // Pair test with submitCallable_cancelledRoutesToOnFailure — confirms the
+    // interrupt-checking code path doesn't affect normal (non-cancelled) execution.
+    void submitCallable_noInterruption_callsOnComplete() throws Exception {
+        CompletableFuture<String> completed = new CompletableFuture<>();
+
+        runtime.submitCallable(
+                () -> "normal-result",
+                new IRuntime.IFinishedExecution<>() {
+                    @Override
+                    public void onComplete(String result) {
+                        completed.complete(result);
+                    }
+
+                    @Override
+                    public void onFailure(Throwable t) {
+                        completed.completeExceptionally(t);
+                    }
+                },
+                null);
+
+        assertEquals("normal-result", completed.get(5, TimeUnit.SECONDS));
+    }
 }
