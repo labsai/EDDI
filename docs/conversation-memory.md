@@ -563,7 +563,7 @@ LifecycleManager.executeLifecycle(memory)
   ├─→ Input Parser
   ├─→ Behavior Rules → emit actions
   ├─→ PropertySetterTask → set properties based on actions
-  ├─→ HttpCallsTask → execute API calls based on actions
+  ├─→ ApiCallsTask → execute API calls based on actions
   ├─→ LlmTask → call LLM based on actions
   └─→ OutputGenerationTask → format response
 ```
