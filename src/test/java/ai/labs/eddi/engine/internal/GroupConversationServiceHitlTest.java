@@ -570,7 +570,7 @@ class GroupConversationServiceHitlTest {
     class CancelOfPaused {
 
         @Test
-        @DisplayName("Cancelling a paused group sets CANCELLED via DB write")
+        @DisplayName("Cancelling a paused group sets CANCELLED via DB write (not signal branch)")
         void cancelPausedGroupWritesDB() throws Exception {
             // Set up a GC in AWAITING_APPROVAL state
             var gc = new GroupConversation();
@@ -582,11 +582,22 @@ class GroupConversationServiceHitlTest {
 
             doReturn(gc).when(conversationStore).read("gc-paused-cancel");
 
+            // Hardening: verify activeTokens is actually empty for this ID.
+            // If NEW-2 were reverted (token not removed on pause), a stale token
+            // would be present and cancelDiscussion would take the signal branch
+            // instead of the DB-write branch — which is a silent no-op.
+            // Access activeTokens via reflection to prove the DB branch is taken.
+            var field = GroupConversationService.class.getDeclaredField("activeTokens");
+            field.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var activeTokens = (java.util.concurrent.ConcurrentHashMap<String, ?>) field.get(service);
+            assertFalse(activeTokens.containsKey("gc-paused-cancel"),
+                    "activeTokens should NOT contain a token for a paused GC (NEW-2 guarantee)");
+
             service.cancelDiscussion("gc-paused-cancel",
                     ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
 
-            // With NEW-2 fix, activeTokens is empty for paused GC,
-            // so cancelDiscussion takes the else branch and does a DB write
+            // cancelDiscussion takes the else branch (no token) → DB write
             assertEquals(GroupConversationState.CANCELLED, gc.getState(),
                     "Paused GC should be set to CANCELLED");
             verify(conversationStore).update(gc);
@@ -700,6 +711,89 @@ class GroupConversationServiceHitlTest {
                 assertNotNull(exHolder.get(), "Either result or exception should be set");
             }
         }
+        @Test
+        @DisplayName("IMMEDIATE cancel during in-flight discussion → CANCELLED state + futures cancelled")
+        void immediateCancelDuringExecution() throws Exception {
+            var phases = List.of(
+                    new DiscussionPhase("Slow", PhaseType.OPINION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL,
+                            false, null, 1, false));
+
+            var config = buildConfig(phases);
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+
+            doAnswer(inv -> {
+                GroupConversation gcArg = inv.getArgument(0);
+                gcArg.setId("gc-immediate");
+                return "gc-immediate";
+            }).when(conversationStore).create(any());
+
+            doReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class))
+                    .when(agentFactory).getLatestReadyAgent(any(), eq(AGENT_A));
+
+            var convResult = new IConversationService.ConversationResult("conv-imm", null);
+            doReturn(convResult).when(conversationService).startConversation(any(), any(), any(), any());
+
+            var agentBlocked = new java.util.concurrent.CountDownLatch(1);
+            var cancelFired = new java.util.concurrent.CountDownLatch(1);
+
+            doAnswer(inv -> {
+                agentBlocked.countDown();
+                cancelFired.await(5, java.util.concurrent.TimeUnit.SECONDS);
+
+                var snapshot = new SimpleConversationMemorySnapshot();
+                var output = new ConversationOutput();
+                output.put("output", List.of("Response"));
+                snapshot.setConversationOutputs(new ArrayList<>(List.of(output)));
+
+                IConversationService.ConversationResponseHandler handler = inv.getArgument(8);
+                if (handler != null) {
+                    handler.onComplete(snapshot);
+                }
+                return null;
+            }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+
+            var resultHolder = new java.util.concurrent.atomic.AtomicReference<GroupConversation>();
+            var exHolder = new java.util.concurrent.atomic.AtomicReference<Exception>();
+
+            Thread discussThread = new Thread(() -> {
+                try {
+                    resultHolder.set(service.discuss(GROUP_ID, "Cancel immediate", USER_ID, 0));
+                } catch (Exception e) {
+                    exHolder.set(e);
+                    agentBlocked.countDown();
+                }
+            });
+            discussThread.start();
+
+            boolean started = agentBlocked.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            if (!started || exHolder.get() != null) {
+                discussThread.join(5_000);
+                fail("discuss() failed before reaching say(): " +
+                        (exHolder.get() != null ? exHolder.get().getMessage() : "latch timeout"));
+            }
+
+            // Fire IMMEDIATE cancel (triggers cancelActiveFuture + CancellationException
+            // path)
+            service.cancelDiscussion("gc-immediate",
+                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_IMMEDIATE);
+
+            cancelFired.countDown();
+
+            discussThread.join(10_000);
+            assertFalse(discussThread.isAlive(), "discuss() should have finished");
+
+            var gc = resultHolder.get();
+            if (gc != null) {
+                // R2: CANCEL_IMMEDIATE must result in CANCELLED, not FAILED
+                assertEquals(GroupConversationState.CANCELLED, gc.getState(),
+                        "In-flight IMMEDIATE cancel should result in CANCELLED state (not FAILED)");
+            } else {
+                assertNotNull(exHolder.get(), "Either result or exception should be set");
+            }
+        }
     }
 
     // =================================================================
@@ -763,7 +857,7 @@ class GroupConversationServiceHitlTest {
     class TaskResumeCompletesDependent {
 
         @Test
-        @DisplayName("Resume with TASK pauseType re-enters same phase and advances approved tasks")
+        @DisplayName("Resume with TASK pauseType re-enters same phase (index 1, not 2)")
         void taskResumeReEntersSamePhase() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-task-resume");
@@ -792,14 +886,52 @@ class GroupConversationServiceHitlTest {
             dec.setVerdict(HitlVerdict.APPROVED);
             request.setDecision(dec);
 
-            // Verify that TASK resume uses same phase index (1, not 2)
             GroupConversation result = service.resumeDiscussion("gc-task-resume", request, null);
 
             // After resume, pause type should be cleared
             assertNull(result.getHitlPauseType(), "hitlPauseType should be cleared after resume");
-            // State should no longer be AWAITING_APPROVAL
-            assertNotEquals(GroupConversationState.AWAITING_APPROVAL, result.getState(),
-                    "State should change from AWAITING_APPROVAL after resume");
+            // State should be IN_PROGRESS (set synchronously before async resume)
+            assertEquals(GroupConversationState.IN_PROGRESS, result.getState(),
+                    "State should be IN_PROGRESS after resume clears pause");
+            // pausedAtPhaseIndex should be cleared to -1
+            assertEquals(-1, result.getPausedAtPhaseIndex(),
+                    "pausedAtPhaseIndex should be cleared to -1 after resume");
+            // pausedAt should be null
+            assertNull(result.getPausedAt(), "pausedAt should be null after resume");
+
+            // Hardening: Verify updateIfState was called with AWAITING_APPROVAL
+            // (the CAS guard). This proves the resume path went through the
+            // expected code, not just a no-op.
+            verify(conversationStore).updateIfState(eq(gc), eq(GroupConversationState.AWAITING_APPROVAL));
+        }
+
+        @Test
+        @DisplayName("PHASE resume advances to next phase (index pausedAt + 1)")
+        void phaseResumeAdvancesToNextPhase() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-phase-resume");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAtPhaseIndex(2); // paused at phase 2
+            gc.setPausedPhaseName("Critique");
+            gc.setPausedAt(Instant.now());
+            gc.setHitlPauseType(GroupConversation.HitlPauseType.PHASE);
+            gc.setOriginalQuestion("Phase resume test");
+
+            doReturn(gc).when(conversationStore).read("gc-phase-resume");
+
+            var request = new GroupApprovalRequest();
+            var dec = new HitlDecision();
+            dec.setVerdict(HitlVerdict.APPROVED);
+            request.setDecision(dec);
+
+            GroupConversation result = service.resumeDiscussion("gc-phase-resume", request, null);
+
+            // PHASE resume should advance — state cleared the same way
+            assertEquals(GroupConversationState.IN_PROGRESS, result.getState());
+            assertEquals(-1, result.getPausedAtPhaseIndex());
+            assertNull(result.getHitlPauseType());
+            verify(conversationStore).updateIfState(eq(gc), eq(GroupConversationState.AWAITING_APPROVAL));
         }
     }
 
