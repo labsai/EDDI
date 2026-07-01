@@ -57,6 +57,28 @@
 
 **Key invariants preserved:** (1) No typed POJOs in snapshot storage — bookmark fields are first-class. (2) Resume task index is absolute. (3) Group halt = set state + return. (4) Per-task approval detection = post-join scan. (5) Group CAS on state field. (9) Paused turns skip postConversationLifecycleTasks. (10) AWAITING_HUMAN is never overwritten by timeout handler.
 
+### Bug Fixes — Code Review Round (2026-07-01)
+
+**B1: Regular resume always landed in ERROR.** `ConversationService.resumeConversation()` set in-memory state to `IN_PROGRESS` at line 844, but `Conversation.resume()` guards `if (state != AWAITING_HUMAN) throw`. The DB CAS was correct (AWAITING_HUMAN → IN_PROGRESS), but the in-memory state loaded from the updated snapshot was already IN_PROGRESS. **Fix:** set in-memory state to `AWAITING_HUMAN` so `resume()`'s own guard passes — it does its own transition at line 459.
+
+**B2: Group discussion never paused.** `phase.requiresApproval()` / `submitForApproval()` / `hasAwaitingApproval()` had zero consumers — nothing set `AWAITING_APPROVAL`. **Fix:** Added `commitPause()` helper. After each phase completes, if `requiresApproval()` → pause. For TASK granularity, `submitForApproval()` replaces `completeTask()`, and `hasAwaitingApproval()` is checked after the join. Guarded `COMPLETED` assignment and `finally` cleanup block against AWAITING_APPROVAL state.
+
+**B3+M2: Group REST endpoints missing ownership checks (IDOR).** `cancelDiscussion`, `approveGroupPhase`, `approveGroupPhaseStreaming`, and `getGroupApprovalStatus` had no ownership validation. **Fix:** Added `validateGroupConversationOwnership()` (mirrors RestAgentEngine pattern) and `setDecidedByFromIdentity()` to all 4 endpoints.
+
+**B4: Group double-resume race.** `resumeDiscussion` used `update(gc)` — plain write. **Fix:** `updateIfState(gc, AWAITING_APPROVAL)` → `ResourceModifiedException` on concurrent resume → 409 Conflict.
+
+**M1: Timeout schedule never created.** The `HitlTimeoutHandler` consumer was wired but no producer created schedules on pause. **Fix:** Injected `IScheduleStore` + `IAgentStore` into `ConversationService`. After `storeConversationMemory` detects `AWAITING_HUMAN`, `scheduleHitlTimeout()` loads agent config, checks for `approvalTimeout` + non-WAIT_INDEFINITELY policy, and creates a one-shot schedule with `hitlType=hitl_timeout` metadata.
+
+**M3: Turn budget reset on resume.** `turnCounter` was initialized to `0` in `executeDiscussion`, and `pausedTurnCount` was reset to `0` in `resumeDiscussion`. **Fix:** Seed `turnCounter` from `gc.getPausedTurnCount()`. Don't reset `pausedTurnCount` in `resumeDiscussion` — only clear it on successful COMPLETED.
+
+**Minor: Phase resume index.** Replaced `subList` hack in `resumeDiscussion` with `startPhaseIndex` parameter on `executeDiscussion`. Uses `pausedAtPhaseIndex + 1` (paused phase already completed). Fixes absolute index corruption.
+
+**Minor: Bookmark mismatch guard.** `Conversation.resume()` silently no-oped when `pausedWorkflowId` wasn't found. Now throws `LifecycleException` with descriptive message.
+
+**Minor: SSE leak on group HITL pause.** `onHitlPause` listener in `RestGroupConversation` didn't close the SSE sink. Client connections would leak until timeout. Now calls `closeQuietly(eventSink)`.
+
+**Files changed:** `ConversationService.java`, `GroupConversationService.java`, `RestGroupConversation.java`, `Conversation.java`
+
 ---
 
 ## 🔒 Security & Algorithm Hardening — SSRF/File-Read, Cron, DoS Guards (2026-06-29)

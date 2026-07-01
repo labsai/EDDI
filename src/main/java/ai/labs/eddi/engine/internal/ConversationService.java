@@ -4,8 +4,10 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -37,6 +39,8 @@ import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
+import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
@@ -46,6 +50,8 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -83,6 +89,8 @@ public class ConversationService implements IConversationService {
     private final TenantQuotaService tenantQuotaService;
     private final int agentTimeout;
     private final IConversationSetup conversationSetup;
+    private final IScheduleStore scheduleStore;
+    private final IAgentStore agentStore;
     private final ICache<String, ConversationState> conversationStateCache;
 
     // Metrics
@@ -108,7 +116,8 @@ public class ConversationService implements IConversationService {
             IConversationDescriptorStore conversationDescriptorStore, IUserMemoryStore userMemoryStore,
             IConversationCoordinator conversationCoordinator, IConversationSetup conversationSetup, ICacheFactory cacheFactory, IRuntime runtime,
             IContextLogger contextLogger, AuditLedgerService auditLedgerService, GdprComplianceService gdprComplianceService,
-            TenantQuotaService tenantQuotaService, MeterRegistry meterRegistry,
+            TenantQuotaService tenantQuotaService, IScheduleStore scheduleStore, IAgentStore agentStore,
+            MeterRegistry meterRegistry,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.agentFactory = agentFactory;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -116,6 +125,8 @@ public class ConversationService implements IConversationService {
         this.userMemoryStore = userMemoryStore;
         this.conversationCoordinator = conversationCoordinator;
         this.conversationSetup = conversationSetup;
+        this.scheduleStore = scheduleStore;
+        this.agentStore = agentStore;
         this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
         this.runtime = runtime;
         this.contextLogger = contextLogger;
@@ -695,6 +706,10 @@ public class ConversationService implements IConversationService {
                         public void onComplete(Void result) {
                             try {
                                 storeConversationMemory(conversationMemory, environment);
+                                // M1: Schedule HITL timeout if conversation paused
+                                if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                                    scheduleHitlTimeout(conversationId, conversationMemory.getAgentId());
+                                }
                             } catch (ResourceStoreException e) {
                                 logConversationError(loggingContext, conversationId, e);
                             }
@@ -841,7 +856,7 @@ public class ConversationService implements IConversationService {
             throw new ResourceNotFoundException("Conversation not found: " + conversationId);
         }
         var memory = convertConversationMemorySnapshot(snapshot);
-        memory.setConversationState(ConversationState.IN_PROGRESS);
+        memory.setConversationState(ConversationState.AWAITING_HUMAN);
 
         String agentId = snapshot.getAgentId();
         Integer agentVersion = snapshot.getAgentVersion();
@@ -912,5 +927,51 @@ public class ConversationService implements IConversationService {
             }
         }
         return summaries;
+    }
+
+    /**
+     * Creates a one-shot schedule that fires the {@link HitlTimeoutHandler} when
+     * the configured approval timeout expires. No-ops if the agent has no timeout
+     * configured or uses WAIT_INDEFINITELY policy.
+     */
+    private void scheduleHitlTimeout(String conversationId, String agentId) {
+        try {
+            IResourceStore.IResourceId currentId = agentStore.getCurrentResourceId(agentId);
+            if (currentId == null)
+                return;
+            AgentConfiguration agentConfig = agentStore.read(agentId, currentId.getVersion());
+            AgentConfiguration.HitlConfig hitlConfig = agentConfig.getHitlConfig();
+            if (hitlConfig == null)
+                return;
+
+            String timeoutStr = hitlConfig.getApprovalTimeout();
+            String policy = hitlConfig.getTimeoutPolicy();
+            if (timeoutStr == null || timeoutStr.isBlank()
+                    || "WAIT_INDEFINITELY".equalsIgnoreCase(policy)) {
+                return;
+            }
+
+            Duration timeout = Duration.parse(timeoutStr);
+            Instant fireAt = Instant.now().plus(timeout);
+
+            var schedule = new ScheduleConfiguration();
+            schedule.setName("hitl-timeout-" + conversationId);
+            schedule.setAgentId(agentId);
+            schedule.setOneTimeAt(fireAt.toString());
+            schedule.setEnabled(true);
+            schedule.setNextFire(fireAt);
+            schedule.setCreatedAt(Instant.now());
+            schedule.setMetadata(Map.of(
+                    "hitlType", "hitl_timeout",
+                    "policy", policy != null ? policy : "WAIT_INDEFINITELY",
+                    "surface", "regular",
+                    "conversationId", conversationId));
+            scheduleStore.createSchedule(schedule);
+            LOGGER.infof("Scheduled HITL timeout for conversation %s at %s (policy: %s)",
+                    conversationId, fireAt, policy);
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to schedule HITL timeout for conversation %s: %s",
+                    conversationId, e.getMessage());
+        }
     }
 }

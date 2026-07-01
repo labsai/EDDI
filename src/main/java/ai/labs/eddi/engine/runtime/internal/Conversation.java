@@ -485,6 +485,11 @@ public class Conversation implements IConversation {
                     workflow.getLifecycleManager().executeLifecycle(conversationMemory, null);
                 }
             }
+            if (!foundPaused) {
+                LOGGER.warnf("Resume: pausedWorkflowId '%s' not found in executable workflows", pausedWorkflowId);
+                setConversationState(ConversationState.ERROR);
+                throw new LifecycleException("Paused workflow '" + pausedWorkflowId + "' no longer exists (config drift)");
+            }
         } catch (ConversationStopException unused) {
             endConversation();
         } catch (ConversationPauseException e) {

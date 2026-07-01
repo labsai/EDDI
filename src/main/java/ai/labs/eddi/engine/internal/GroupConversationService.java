@@ -175,7 +175,7 @@ public class GroupConversationService implements IGroupConversationService {
         }
 
         GroupConversation gc = createGroupConversation(groupId, question, userId, depth);
-        return executeDiscussion(gc, config, phases, question, listener);
+        return executeDiscussion(gc, config, phases, question, listener, 0);
     }
 
     @Override
@@ -208,7 +208,7 @@ public class GroupConversationService implements IGroupConversationService {
         // creation)
         executorService.submit(() -> {
             try {
-                executeDiscussion(gc, config, phases, question, listener);
+                executeDiscussion(gc, config, phases, question, listener, 0);
             } catch (Exception e) {
                 LOGGER.errorf("Async group discussion failed for %s: %s", groupId, e.getMessage());
                 if (listener != null) {
@@ -227,7 +227,7 @@ public class GroupConversationService implements IGroupConversationService {
      * synthesis_start for correct semantic ordering.
      */
     private GroupConversation executeDiscussion(GroupConversation gc, AgentGroupConfiguration config, List<DiscussionPhase> phases, String question,
-                                                GroupDiscussionEventListener listener)
+                                                GroupDiscussionEventListener listener, int startPhaseIndex)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException {
 
         long startTime = System.nanoTime();
@@ -242,8 +242,14 @@ public class GroupConversationService implements IGroupConversationService {
         gc.setDynamicAgentConfig(config.getDynamicAgents());
 
         // AtomicInteger: shared across the phase loop; parallel phases increment
-        // from virtual threads. Mutable counter avoids passing & returning counts.
-        var turnCounter = new java.util.concurrent.atomic.AtomicInteger(0);
+        // from virtual threads. Seed from pausedTurnCount to preserve budget across
+        // resumes (M3).
+        var turnCounter = new java.util.concurrent.atomic.AtomicInteger(
+                gc.getPausedTurnCount() > 0 ? gc.getPausedTurnCount() : 0);
+
+        // Resolve HITL granularity from group config
+        boolean taskLevelHitl = config.getHitlConfig() != null
+                && "TASK".equalsIgnoreCase(config.getHitlConfig().getGranularity());
 
         if (listener != null) {
             listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent(gc.getId(), gc.getGroupId(), question,
@@ -253,7 +259,7 @@ public class GroupConversationService implements IGroupConversationService {
 
         try {
             // Execute each phase
-            for (int phaseIdx = 0; phaseIdx < phases.size(); phaseIdx++) {
+            for (int phaseIdx = startPhaseIndex; phaseIdx < phases.size(); phaseIdx++) {
                 DiscussionPhase phase = phases.get(phaseIdx);
 
                 for (int repeat = 0; repeat < Math.max(phase.repeats(), 1); repeat++) {
@@ -308,6 +314,20 @@ public class GroupConversationService implements IGroupConversationService {
                     }
                 }
 
+                // --- HITL PHASE-level pause: after phase completes, check if human approval is
+                // needed ---
+                if (phase.requiresApproval()) {
+                    commitPause(gc, phaseIdx, phase, "PHASE", turnCounter.get(), listener);
+                    return gc;
+                }
+
+                // --- HITL TASK-level pause: after task execution, check if any tasks await
+                // approval ---
+                if (taskLevelHitl && gc.getTaskList() != null && gc.getTaskList().hasAwaitingApproval()) {
+                    commitPause(gc, phaseIdx, phase, "TASK", turnCounter.get(), listener);
+                    return gc;
+                }
+
                 // Check again after inner repeat loop in case maxTurns was hit mid-repeat
                 if (turnCounter.get() >= maxTurns) {
                     break;
@@ -319,7 +339,12 @@ public class GroupConversationService implements IGroupConversationService {
                     .reduce((first, second) -> second) // last one
                     .ifPresent(e -> gc.setSynthesizedAnswer(e.content()));
 
+            // Don't overwrite AWAITING_APPROVAL with COMPLETED
+            if (gc.getState() == GroupConversationState.AWAITING_APPROVAL) {
+                return gc;
+            }
             gc.setState(GroupConversationState.COMPLETED);
+            gc.setPausedTurnCount(0); // Clear turn budget state on successful completion
             gc.setLastModified(Instant.now());
             conversationStore.update(gc);
 
@@ -343,11 +368,34 @@ public class GroupConversationService implements IGroupConversationService {
             throw new GroupDiscussionException("Group discussion failed: " + e.getMessage(), e);
         } finally {
             timerGroupDiscussion.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
-            // Clean up incremental verification cursor — conversation is done
-            lastVerifiedIndex.remove(gc.getId());
-            // Ephemeral agent cleanup — undeploy/delete agents created during this
-            // discussion
-            cleanupEphemeralAgents(gc, config);
+            // Only clean up when the discussion is truly done — not when paused for HITL
+            if (gc.getState() != GroupConversationState.AWAITING_APPROVAL) {
+                lastVerifiedIndex.remove(gc.getId());
+                cleanupEphemeralAgents(gc, config);
+            }
+        }
+    }
+
+    /**
+     * Commits an HITL pause to the group conversation — sets AWAITING_APPROVAL,
+     * records pause metadata, persists, and fires the SSE event.
+     */
+    private void commitPause(GroupConversation gc, int phaseIdx,
+                             AgentGroupConfiguration.DiscussionPhase phase,
+                             String granularity, int currentTurnCount,
+                             GroupDiscussionEventListener listener)
+            throws IResourceStore.ResourceStoreException {
+        gc.setState(GroupConversationState.AWAITING_APPROVAL);
+        gc.setPausedAt(Instant.now());
+        gc.setPausedAtPhaseIndex(phaseIdx);
+        gc.setPausedPhaseName(phase.name());
+        gc.setPausedTurnCount(currentTurnCount);
+        gc.setHitlPauseType(GroupConversation.HitlPauseType.valueOf(granularity));
+        conversationStore.update(gc);
+
+        if (listener != null) {
+            listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(
+                    phaseIdx, phase.name(), "Requires human approval (" + granularity + ")", granularity));
         }
     }
 
@@ -733,7 +781,13 @@ public class GroupConversationService implements IGroupConversationService {
                                 gc.getTranscript().add(entry);
                             }
 
-                            gc.getTaskList().completeTask(task.id(), entry.content());
+                            // HITL TASK-level: submit for approval instead of auto-completing
+                            if (config.getHitlConfig() != null
+                                    && "TASK".equalsIgnoreCase(config.getHitlConfig().getGranularity())) {
+                                gc.getTaskList().submitForApproval(task.id(), entry.content());
+                            } else {
+                                gc.getTaskList().completeTask(task.id(), entry.content());
+                            }
 
                             if (listener != null) {
                                 listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
@@ -1985,19 +2039,21 @@ public class GroupConversationService implements IGroupConversationService {
         // Save resume point before clearing
         int resumePhaseIndex = gc.getPausedAtPhaseIndex();
 
-        // Clear pause state and resume
+        // Clear pause state but preserve pausedTurnCount — it seeds turnCounter on
+        // resume (M3)
         gc.setPausedAt(null);
         gc.setPausedAtPhaseIndex(-1);
-        gc.setPausedTurnCount(0);
         gc.setPausedPhaseName(null);
         gc.setHitlPauseType(null);
         gc.setState(GroupConversationState.IN_PROGRESS);
 
-        conversationStore.update(gc);
+        conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
 
         // Resume execution in background thread
         var groupId = gc.getGroupId();
         var question = gc.getOriginalQuestion();
+        // +1: the paused phase already completed; resume from the next one
+        int startFromPhase = resumePhaseIndex + 1;
         executorService.submit(() -> {
             try {
                 IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(groupId);
@@ -2006,11 +2062,7 @@ public class GroupConversationService implements IGroupConversationService {
                 }
                 var groupConfig = groupStore.read(groupId, currentGroupId.getVersion());
                 var phases = resolvePhases(groupConfig);
-                // Skip already-completed phases by starting from resumePhaseIndex
-                var remainingPhases = resumePhaseIndex > 0 && resumePhaseIndex < phases.size()
-                        ? phases.subList(resumePhaseIndex, phases.size())
-                        : phases;
-                executeDiscussion(gc, groupConfig, remainingPhases, question, listener);
+                executeDiscussion(gc, groupConfig, phases, question, listener, startFromPhase);
             } catch (Exception e) {
                 LOGGER.error("Failed to resume group discussion: " + groupConversationId, e);
                 gc.setState(GroupConversationState.FAILED);
