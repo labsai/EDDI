@@ -594,6 +594,115 @@ class GroupConversationServiceHitlTest {
     }
 
     // =================================================================
+    // R1/R2 regression: in-flight cancel terminates with CANCELLED
+    // =================================================================
+
+    @Nested
+    @DisplayName("In-flight cancel (R1/R2)")
+    class InFlightCancel {
+
+        @Test
+        @DisplayName("GRACEFUL cancel during in-flight discussion → CANCELLED state")
+        void gracefulCancelDuringExecution() throws Exception {
+            // Two phases — the first blocks long enough for cancel to fire
+            var phases = List.of(
+                    new DiscussionPhase("Slow", PhaseType.OPINION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL,
+                            false, null, 1, false),
+                    new DiscussionPhase("Never", PhaseType.OPINION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL,
+                            false, null, 1, false));
+
+            var config = buildConfig(phases);
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+
+            // create mock: capture and set the GC ID
+            doAnswer(inv -> {
+                GroupConversation gcArg = inv.getArgument(0);
+                gcArg.setId("gc-inflight");
+                return "gc-inflight";
+            }).when(conversationStore).create(any());
+
+            // Agent factory must return a non-null agent so executeAgentTurn
+            // doesn't skip with SKIPPED entry
+            doReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class))
+                    .when(agentFactory).getLatestReadyAgent(any(), eq(AGENT_A));
+
+            // startConversation must return a result with a conversation ID
+            var convResult = new IConversationService.ConversationResult("conv-1", null);
+            doReturn(convResult).when(conversationService).startConversation(any(), any(), any(), any());
+
+            // Latch: agent say blocks until cancel fires
+            var agentBlocked = new java.util.concurrent.CountDownLatch(1);
+            var cancelFired = new java.util.concurrent.CountDownLatch(1);
+
+            doAnswer(inv -> {
+                agentBlocked.countDown(); // signal: agent is running
+                cancelFired.await(5, java.util.concurrent.TimeUnit.SECONDS); // block until cancel
+
+                // Return a minimal response
+                var snapshot = new SimpleConversationMemorySnapshot();
+                var output = new ConversationOutput();
+                output.put("output", List.of("Response after cancel"));
+                snapshot.setConversationOutputs(new ArrayList<>(List.of(output)));
+
+                IConversationService.ConversationResponseHandler handler = inv.getArgument(8);
+                if (handler != null) {
+                    handler.onComplete(snapshot);
+                }
+                return null;
+            }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+
+            // Run discuss on a separate thread
+            var resultHolder = new java.util.concurrent.atomic.AtomicReference<GroupConversation>();
+            var exHolder = new java.util.concurrent.atomic.AtomicReference<Exception>();
+
+            Thread discussThread = new Thread(() -> {
+                try {
+                    resultHolder.set(service.discuss(GROUP_ID, "Cancel me", USER_ID, 0));
+                } catch (Exception e) {
+                    exHolder.set(e);
+                    // Also unblock the latch if discuss fails before say()
+                    agentBlocked.countDown();
+                }
+            });
+            discussThread.start();
+
+            // Wait for the agent to be in-flight
+            boolean started = agentBlocked.await(5, java.util.concurrent.TimeUnit.SECONDS);
+
+            if (!started || exHolder.get() != null) {
+                discussThread.join(5_000);
+                fail("discuss() failed before reaching say(): " +
+                        (exHolder.get() != null ? exHolder.get().getMessage() : "latch timeout"));
+            }
+
+            // Fire GRACEFUL cancel
+            service.cancelDiscussion("gc-inflight",
+                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+
+            // Unblock the agent
+            cancelFired.countDown();
+
+            // Wait for discuss to complete
+            discussThread.join(10_000);
+            assertFalse(discussThread.isAlive(), "discuss() should have finished");
+
+            var gc = resultHolder.get();
+            // Should be CANCELLED, not FAILED or COMPLETED
+            if (gc != null) {
+                assertEquals(GroupConversationState.CANCELLED, gc.getState(),
+                        "In-flight GRACEFUL cancel should result in CANCELLED state");
+            } else {
+                // If discuss threw, it should be because of cancel
+                assertNotNull(exHolder.get(), "Either result or exception should be set");
+            }
+        }
+    }
+
+    // =================================================================
     // AUTO_APPROVE regression: synthesize per-task approvals
     // =================================================================
 

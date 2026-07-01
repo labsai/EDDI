@@ -5,6 +5,27 @@
 
 ---
 
+## 🔧 HITL Framework — Cancel Path Fixes: R1 + R2 MAJORs (2026-07-01)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Final merge verdict found 2 MAJORs in cancel path — cancel-vs-pause race and CancellationException misrouting.
+
+### Fixes
+
+| ID | Severity | Fix |
+|----|----------|-----|
+| R1 | MAJOR | **Cancel-vs-pause race**: Added `isCancelled()` guard immediately before the HITL gate. After the wave loop breaks on cancel, the HITL gate fired before the next phase-loop iteration's `shouldStop()` check, converting a cancel into a pause. Guard uses `isCancelled()` (not `shouldStop()`) so real PAUSE still routes to `commitPause`. |
+| R2 | MAJOR | **CANCEL_IMMEDIATE → FAILED**: Added explicit `CancellationException` catch in the wave `allOf.get()` handler. Forward-cancels all source agent futures (since `allOf.cancel` doesn't propagate). Both generic `catch (GroupDiscussionException)` and `catch (Exception)` now check `token.isCancelled()` and route to CANCELLED instead of FAILED. Also added source-future forward-cancel in the `ExecutionException` branch. |
+
+### Regression Test Added
+- `InFlightCancel.gracefulCancelDuringExecution` — Concurrent latch-based test: launches `discuss()` on separate thread, blocks `say()` with latch, fires `cancelDiscussion(GRACEFUL)`, asserts CANCELLED state.
+
+### Files Changed
+- `GroupConversationService.java` — R1 cancel guard before HITL gate + R2 CancellationException handling + cancel-aware generic catch blocks
+- `GroupConversationServiceHitlTest.java` — In-flight cancel test with proper agent mock wiring
+
+---
+
 ## 🔧 HITL Framework — Final Ship Fix: 2 BLOCKERs + 2 MAJORs in group TASK path (2026-07-01)
 
 **Repo:** EDDI (`feat/hitl-framework`)

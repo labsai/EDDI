@@ -335,6 +335,21 @@ public class GroupConversationService implements IGroupConversationService {
                     }
                 }
 
+                // R1: Check for cancel BEFORE the HITL gate. After the wave loop
+                // breaks on a cancel signal, control reaches here before the next
+                // phase-loop iteration's shouldStop() check. Using isCancelled()
+                // (not shouldStop()) so a real PAUSE still routes to commitPause.
+                {
+                    var cancelToken = activeTokens.get(gc.getId());
+                    if (cancelToken != null && cancelToken.isCancelled()) {
+                        gc.setState(GroupConversationState.CANCELLED);
+                        gc.setLastModified(Instant.now());
+                        conversationStore.update(gc);
+                        LOGGER.infof("Group discussion %s cancelled before HITL gate at phase %d", gc.getId(), phaseIdx);
+                        return gc;
+                    }
+                }
+
                 // --- HITL gates: PHASE and TASK are mutually exclusive ---
                 // MAJOR-1: Only check phase.requiresApproval() for the relevant granularity.
                 // TASK-level: gate on requiresApproval() AND taskLevelHitl AND tasks awaiting.
@@ -380,12 +395,28 @@ public class GroupConversationService implements IGroupConversationService {
             return gc;
 
         } catch (GroupDiscussionException e) {
+            // R2: If the exception was caused by a cancel, route to CANCELLED
+            var cancelToken = activeTokens.get(gc.getId());
+            if (cancelToken != null && cancelToken.isCancelled()) {
+                gc.setState(GroupConversationState.CANCELLED);
+                gc.setLastModified(Instant.now());
+                conversationStore.update(gc);
+                return gc;
+            }
             failConversation(gc);
             if (listener != null) {
                 listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
             }
             throw e;
         } catch (Exception e) {
+            // R2: If the exception was caused by a cancel, route to CANCELLED
+            var cancelToken = activeTokens.get(gc.getId());
+            if (cancelToken != null && cancelToken.isCancelled()) {
+                gc.setState(GroupConversationState.CANCELLED);
+                gc.setLastModified(Instant.now());
+                conversationStore.update(gc);
+                return gc;
+            }
             failConversation(gc);
             if (listener != null) {
                 listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(e.getMessage()));
@@ -920,12 +951,21 @@ public class GroupConversationService implements IGroupConversationService {
                         LogSanitizer.sanitize(gc.getGroupId()), wave + 1);
                 futures.forEach(f -> f.cancel(true));
                 break;
+            } catch (java.util.concurrent.CancellationException e) {
+                // R2: CANCEL_IMMEDIATE fires allOf.cancel(true) → CancellationException.
+                // Forward-cancel all source agent futures (allOf.cancel doesn't propagate).
+                LOGGER.infof("Wave cancelled via CANCEL_IMMEDIATE for group %s (wave %d)",
+                        LogSanitizer.sanitize(gc.getGroupId()), wave + 1);
+                futures.forEach(f -> f.cancel(true));
+                break;
             } catch (ExecutionException | InterruptedException e) {
                 LOGGER.warnf("Task execution error for group %s: %s",
                         LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(e.getMessage()));
                 if (e instanceof InterruptedException) {
                     Thread.currentThread().interrupt();
                 }
+                // R2: Forward-cancel remaining source futures on any error
+                futures.forEach(f -> f.cancel(true));
                 break;
             }
 
