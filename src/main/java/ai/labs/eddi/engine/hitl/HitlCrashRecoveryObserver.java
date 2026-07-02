@@ -97,12 +97,21 @@ public class HitlCrashRecoveryObserver {
         this.recoverInProgress = recoverInProgress;
     }
 
+    /** Upper bound of paused conversations scanned per recovery pass. */
+    private static final int RECOVERY_SCAN_LIMIT = 10_000;
+
     void onStartup(@Observes StartupEvent event) {
         if (!enabled) {
             LOGGER.info("HITL crash recovery disabled via config.");
             return;
         }
+        // Run OFF the boot path: a deployment with many paused conversations must
+        // not block application readiness on the repair sweep.
+        Thread.ofVirtual().name("hitl-crash-recovery").start(this::runRecovery);
+    }
 
+    /** Package-private for tests — runs one full recovery pass synchronously. */
+    void runRecovery() {
         LOGGER.info("HITL crash recovery running...");
         int rearmedRegular = repairRegularPaused();
         int recoveredInProgress = recoverRegularInProgress();
@@ -119,22 +128,27 @@ public class HitlCrashRecoveryObserver {
 
     private int repairRegularPaused() {
         try {
-            List<String> pausedIds = conversationMemoryStore
-                    .findConversationIdsByState(ConversationState.AWAITING_HUMAN);
+            // Projected summaries — policy, timeout, pausedAt, and agentId come
+            // from the bounded projection query; the (potentially multi-MB) full
+            // documents are never loaded, and WAIT_INDEFINITELY pauses are skipped
+            // without any further read.
+            var summaries = conversationMemoryStore.findPendingApprovalSummaries(RECOVERY_SCAN_LIMIT);
+            if (summaries.size() >= RECOVERY_SCAN_LIMIT) {
+                LOGGER.warnf("HITL crash recovery: paused-conversation scan hit the %d bound — "
+                        + "some pauses may not have been checked this pass", RECOVERY_SCAN_LIMIT);
+            }
             int count = 0;
-            for (String conversationId : pausedIds) {
+            for (var summary : summaries) {
+                String conversationId = summary.getConversationId();
                 try {
-                    var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
-                    if (snapshot == null)
-                        continue;
-
-                    HitlTimeoutPolicy policy = parsePolicy(snapshot.getHitlTimeoutPolicy());
+                    HitlTimeoutPolicy policy = parsePolicy(summary.getTimeoutPolicy());
                     if (policy == HitlTimeoutPolicy.WAIT_INDEFINITELY) {
                         continue; // legitimate indefinite pause — never touch
                     }
                     if (rearmSchedule("hitl-timeout-" + conversationId, "regular", conversationId,
-                            snapshot.getAgentId(), policy, snapshot.getHitlApprovalTimeout(),
-                            snapshot.getHitlPausedAt())) {
+                            summary.getAgentId(), policy, summary.getApprovalTimeout(),
+                            summary.getPausedAt(),
+                            () -> conversationMemoryStore.getConversationState(conversationId) == ConversationState.AWAITING_HUMAN)) {
                         count++;
                     }
                 } catch (Exception e) {
@@ -174,7 +188,8 @@ public class HitlCrashRecoveryObserver {
                             if (policy != HitlTimeoutPolicy.WAIT_INDEFINITELY) {
                                 rearmSchedule("hitl-timeout-" + conversationId, "regular", conversationId,
                                         snapshot.getAgentId(), policy, snapshot.getHitlApprovalTimeout(),
-                                        snapshot.getHitlPausedAt());
+                                        snapshot.getHitlPausedAt(),
+                                        () -> conversationMemoryStore.getConversationState(conversationId) == ConversationState.AWAITING_HUMAN);
                             }
                         }
                     } else {
@@ -208,7 +223,14 @@ public class HitlCrashRecoveryObserver {
                         continue;
                     }
                     if (rearmSchedule("hitl-timeout-group-" + gc.getId(), "group", gc.getId(),
-                            null, policy, gc.getHitlApprovalTimeout(), gc.getPausedAt())) {
+                            null, policy, gc.getHitlApprovalTimeout(), gc.getPausedAt(),
+                            () -> {
+                                try {
+                                    return groupConversationStore.read(gc.getId()).getState() == GroupConversationState.AWAITING_APPROVAL;
+                                } catch (Exception e) {
+                                    return true; // cannot verify — keep the schedule
+                                }
+                            })) {
                         count++;
                     }
                 } catch (Exception e) {
@@ -228,11 +250,15 @@ public class HitlCrashRecoveryObserver {
      * time (pausedAt + timeout), or {@link #REARM_GRACE} after startup if the due
      * time already passed. Safe against both lost and still-intact schedules.
      *
-     * @return true if a schedule was (re-)created
+     * @param stillPaused
+     *            re-checked AFTER the schedule is created — a resume/cancel may
+     *            land between the sweep read and the create; the freshly created
+     *            schedule is withdrawn if the pause is gone
+     * @return true if a schedule was (re-)created and kept
      */
     private boolean rearmSchedule(String scheduleName, String surface, String conversationId,
                                   String agentId, HitlTimeoutPolicy policy, String approvalTimeout,
-                                  Instant pausedAt) {
+                                  Instant pausedAt, java.util.function.BooleanSupplier stillPaused) {
         if (approvalTimeout == null || approvalTimeout.isBlank() || pausedAt == null) {
             LOGGER.warnf("Cannot re-arm HITL timeout for %s: missing approvalTimeout/pausedAt in bookmark",
                     conversationId);
@@ -269,6 +295,23 @@ public class HitlCrashRecoveryObserver {
                     "surface", surface,
                     "conversationId", conversationId));
             scheduleStore.createSchedule(schedule);
+
+            // Re-check AFTER creating: a resume/cancel landing between the sweep
+            // read and the create would otherwise leave an armed timeout on a
+            // conversation that is no longer paused.
+            try {
+                if (stillPaused != null && !stillPaused.getAsBoolean()) {
+                    scheduleStore.deleteSchedulesByName(scheduleName);
+                    LOGGER.infof("Withdrew re-armed HITL timeout for %s — no longer paused", conversationId);
+                    return false;
+                }
+            } catch (Exception e) {
+                // Cannot verify — keep the schedule; the timeout handler's
+                // resume/cancel is CAS-guarded and no-ops on a non-paused state.
+                LOGGER.debugf("Post-rearm state re-check failed for %s: %s (keeping schedule)",
+                        conversationId, e.getMessage());
+            }
+
             LOGGER.infof("Re-armed HITL timeout for %s (%s) at %s (policy: %s)",
                     conversationId, surface, fireAt, policy);
             return true;

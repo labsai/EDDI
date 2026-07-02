@@ -88,6 +88,10 @@ public class MongoScheduleStore implements IScheduleStore {
                 new IndexOptions().name("idx_schedules_due"));
         scheduleCollection.createIndex(Indexes.ascending(AGENT_ID), new IndexOptions().name("idx_schedules_agentId"));
         scheduleCollection.createIndex(Indexes.ascending(TENANT_ID), new IndexOptions().name("idx_schedules_tenantId"));
+        // HITL timeout schedules are deleted/re-armed by name on every pause,
+        // resume, cancel, and crash-recovery pass — without this index each of
+        // those is a collection scan.
+        scheduleCollection.createIndex(Indexes.ascending("name"), new IndexOptions().name("idx_schedules_name"));
 
         // Fire log indexes
         fireLogCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(SCHEDULE_ID), Indexes.descending(STARTED_AT)),

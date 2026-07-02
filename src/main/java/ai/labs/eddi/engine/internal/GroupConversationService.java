@@ -645,6 +645,7 @@ public class GroupConversationService implements IGroupConversationService {
                             gc.getId(), null, gc.getUserId(), gc.getPausedAt(),
                             gc.getHitlPauseReason(), gc.getHitlTimeoutPolicy());
                     summary.setGroupId(gc.getGroupId());
+                    summary.setApprovalTimeout(gc.getHitlApprovalTimeout());
                     return summary;
                 })
                 .toList();

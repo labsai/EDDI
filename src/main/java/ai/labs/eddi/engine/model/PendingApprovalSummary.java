@@ -19,6 +19,8 @@ public class PendingApprovalSummary {
     private Instant pausedAt;
     private String pauseReason;
     private String timeoutPolicy;
+    /** ISO-8601 duration of the configured approval timeout (may be null). */
+    private String approvalTimeout;
 
     public PendingApprovalSummary() {
     }
@@ -76,5 +78,11 @@ public class PendingApprovalSummary {
     }
     public void setTimeoutPolicy(String timeoutPolicy) {
         this.timeoutPolicy = timeoutPolicy;
+    }
+    public String getApprovalTimeout() {
+        return approvalTimeout;
+    }
+    public void setApprovalTimeout(String approvalTimeout) {
+        this.approvalTimeout = approvalTimeout;
     }
 }

@@ -308,10 +308,12 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                     try {
                         var snapshot = loadConversationMemorySnapshot(id);
                         if (snapshot != null) {
-                            out.add(new ai.labs.eddi.engine.model.PendingApprovalSummary(
+                            var summary = new ai.labs.eddi.engine.model.PendingApprovalSummary(
                                     id, snapshot.getAgentId(), snapshot.getUserId(),
                                     snapshot.getHitlPausedAt(), snapshot.getHitlPauseReason(),
-                                    snapshot.getHitlTimeoutPolicy()));
+                                    snapshot.getHitlTimeoutPolicy());
+                            summary.setApprovalTimeout(snapshot.getHitlApprovalTimeout());
+                            out.add(summary);
                         }
                     } catch (Exception e) {
                         LOGGER.warnf("Skipping conversation %s in pending-approvals listing: %s", id, e.getMessage());

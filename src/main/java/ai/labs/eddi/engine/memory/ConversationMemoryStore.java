@@ -187,26 +187,30 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(int limit) {
-        // Bounded projected reads: ids come from the indexed state query, each
-        // summary is a projected point-read — the (potentially multi-MB)
+        // Bounded projected reads: ids come from the indexed state query — bounded
+        // at the DB via .limit, never materializing every paused id — and each
+        // summary is a projected point-read, so the (potentially multi-MB)
         // step/output data of paused conversations is never deserialized. The id
         // is set explicitly, mirroring loadConversationMemorySnapshot.
         List<ai.labs.eddi.engine.model.PendingApprovalSummary> out = new ArrayList<>();
-        List<String> ids = findConversationIdsByState(ConversationState.AWAITING_HUMAN);
+        List<String> ids = new ArrayList<>();
+        conversationCollectionDocument.find(Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.name()))
+                .projection(new Document(OBJECT_ID, 1))
+                .limit(limit)
+                .forEach(document -> ids.add(document.get(OBJECT_ID).toString()));
         for (String conversationId : ids) {
-            if (out.size() >= limit) {
-                break;
-            }
             var snapshot = conversationCollectionObject
                     .find(new Document(OBJECT_ID, new ObjectId(conversationId)))
                     .projection(Projections.include(KEY_AGENT_ID, "userId",
-                            "hitlPausedAt", "hitlPauseReason", "hitlTimeoutPolicy"))
+                            "hitlPausedAt", "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout"))
                     .first();
             if (snapshot != null) {
-                out.add(new ai.labs.eddi.engine.model.PendingApprovalSummary(
+                var summary = new ai.labs.eddi.engine.model.PendingApprovalSummary(
                         conversationId, snapshot.getAgentId(), snapshot.getUserId(),
                         snapshot.getHitlPausedAt(), snapshot.getHitlPauseReason(),
-                        snapshot.getHitlTimeoutPolicy()));
+                        snapshot.getHitlTimeoutPolicy());
+                summary.setApprovalTimeout(snapshot.getHitlApprovalTimeout());
+                out.add(summary);
             }
         }
         return out;
