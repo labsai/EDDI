@@ -275,7 +275,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                 """);
 
         if (groupIds != null && !groupIds.isEmpty()) {
-            sql.append(" OR (visibility = 'group' AND group_ids ?| ARRAY[");
+            sql.append(" OR (visibility = 'group' AND group_ids ??| ARRAY[");
             for (int i = 0; i < groupIds.size(); i++) {
                 sql.append(i > 0 ? ",?" : "?");
             }

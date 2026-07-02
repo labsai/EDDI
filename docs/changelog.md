@@ -323,6 +323,34 @@
 
 ---
 
+## 🐛 Fix: PostgreSQL group conversations broken — JDBC `?|` operator escape (2026-07-02)
+
+**Repo:** EDDI (`fix/postgres-group-conversation-jdbc-escape`)
+**Severity:** Critical — **all** group conversations fail on PostgreSQL; MongoDB unaffected.
+
+### Root cause
+
+`PostgresUserMemoryStore.getVisibleEntries()` builds a dynamic SQL query that uses PostgreSQL's `?|` (array overlap) operator for group-scoped visibility filtering. The JDBC driver interpreted the `?` in `?|` as a bind parameter placeholder, inflating the expected parameter count by one. This caused `PSQLException: No value specified for parameter 5` every time `groupIds` was non-empty.
+
+Group conversations always pass a `groupId` context when starting agent sub-conversations (`GroupConversationService.executeAgentTurn()` → `startConversation()` with `groupId` in context), so this bug was triggered on **every** group conversation turn — making group conversations completely non-functional on PostgreSQL.
+
+### Fix
+
+- **`PostgresUserMemoryStore.java`**: Changed `?|` to `??|` (JDBC escape syntax for a literal `?`). Single character fix.
+
+### Regression guard
+
+- **`PostgresUserMemoryStoreTest.java`**: Added two integration tests (Testcontainers PostgreSQL) that exercise `getVisibleEntries` with non-empty `groupIds`:
+  1. `groupIdsDoNotBreakQuery` — verifies the query doesn't throw with non-empty groupIds (would have caught this bug directly)
+  2. `groupScopedEntriesVisible` — verifies group-scoped entries are correctly returned when groupIds match, and excluded when they don't
+
+### Why existing tests missed it
+
+- The **unit test** (`PostgresUserMemoryStoreUnitTest.getVisibleEntries_withGroupIds_includesGroupClause`) tested with non-empty groupIds but mocked the JDBC PreparedStatement — never sent actual SQL to PostgreSQL, so the `?` parsing was invisible.
+- The **integration test** (`PostgresUserMemoryStoreTest.selfAndGlobalVisible`) ran against real PostgreSQL but only tested with `groupIds = null` — never exercised the group visibility branch.
+
+---
+
 ## 🔒 Security & Algorithm Hardening — SSRF/File-Read, Cron, DoS Guards (2026-06-29)
 
 **Repo:** EDDI (`fix/security-and-algo-hardening`)
