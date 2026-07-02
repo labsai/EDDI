@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
@@ -972,9 +973,9 @@ public class ConversationService implements IConversationService {
                 return;
 
             String timeoutStr = hitlConfig.getApprovalTimeout();
-            String policy = hitlConfig.getTimeoutPolicy();
+            var policy = hitlConfig.getTimeoutPolicy();
             if (timeoutStr == null || timeoutStr.isBlank()
-                    || "WAIT_INDEFINITELY".equalsIgnoreCase(policy)) {
+                    || policy == AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY) {
                 return;
             }
 
@@ -990,7 +991,7 @@ public class ConversationService implements IConversationService {
             schedule.setCreatedAt(Instant.now());
             schedule.setMetadata(Map.of(
                     "hitlType", "hitl_timeout",
-                    "policy", policy != null ? policy : "WAIT_INDEFINITELY",
+                    "policy", policy != null ? policy.name() : "WAIT_INDEFINITELY",
                     "surface", "regular",
                     "conversationId", conversationId));
             scheduleStore.createSchedule(schedule);

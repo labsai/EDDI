@@ -203,7 +203,7 @@ class GroupConversationServiceHitlTest {
             var config = buildConfig(phases);
             // Enable task-level HITL
             var hitlConfig = new AgentGroupConfiguration.HitlConfig();
-            hitlConfig.setGranularity("TASK");
+            hitlConfig.setGranularity(AgentGroupConfiguration.HitlGranularity.TASK);
             config.setHitlConfig(hitlConfig);
 
             var resId = mockResourceId();
@@ -528,7 +528,7 @@ class GroupConversationServiceHitlTest {
             var config = buildConfig(phases);
             // Set TASK granularity
             var hitlConfig = new AgentGroupConfiguration.HitlConfig();
-            hitlConfig.setGranularity("TASK");
+            hitlConfig.setGranularity(AgentGroupConfiguration.HitlGranularity.TASK);
             config.setHitlConfig(hitlConfig);
 
             var resId = mockResourceId();

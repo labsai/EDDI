@@ -4,6 +4,7 @@
 package ai.labs.eddi.configs.agents.model;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -36,7 +37,7 @@ class AgentConfigurationHitlTest {
         @Test
         @DisplayName("timeoutPolicy defaults to 'WAIT_INDEFINITELY'")
         void timeoutPolicyDefault() {
-            assertEquals("WAIT_INDEFINITELY", config.getTimeoutPolicy());
+            assertEquals(AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY, config.getTimeoutPolicy());
         }
     }
 
@@ -63,8 +64,8 @@ class AgentConfigurationHitlTest {
         @Test
         @DisplayName("timeoutPolicy round-trip")
         void timeoutPolicy() {
-            config.setTimeoutPolicy("AUTO_APPROVE");
-            assertEquals("AUTO_APPROVE", config.getTimeoutPolicy());
+            config.setTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_APPROVE);
+            assertEquals(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_APPROVE, config.getTimeoutPolicy());
         }
 
         @Test
@@ -100,13 +101,13 @@ class AgentConfigurationHitlTest {
         void roundTrip() {
             HitlConfig config = new HitlConfig();
             config.setApprovalTimeout("PT30S");
-            config.setTimeoutPolicy("AUTO_REJECT");
+            config.setTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_REJECT);
 
             agentConfig.setHitlConfig(config);
 
             assertNotNull(agentConfig.getHitlConfig());
             assertEquals("PT30S", agentConfig.getHitlConfig().getApprovalTimeout());
-            assertEquals("AUTO_REJECT", agentConfig.getHitlConfig().getTimeoutPolicy());
+            assertEquals(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_REJECT, agentConfig.getHitlConfig().getTimeoutPolicy());
         }
 
         @Test

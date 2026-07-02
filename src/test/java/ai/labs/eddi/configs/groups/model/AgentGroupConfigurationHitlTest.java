@@ -36,13 +36,13 @@ class AgentGroupConfigurationHitlTest {
         @Test
         @DisplayName("timeoutPolicy defaults to 'WAIT_INDEFINITELY'")
         void timeoutPolicyDefault() {
-            assertEquals("WAIT_INDEFINITELY", config.getTimeoutPolicy());
+            assertEquals(AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY, config.getTimeoutPolicy());
         }
 
         @Test
         @DisplayName("granularity defaults to 'PHASE'")
         void granularityDefault() {
-            assertEquals("PHASE", config.getGranularity());
+            assertEquals(AgentGroupConfiguration.HitlGranularity.PHASE, config.getGranularity());
         }
     }
 
@@ -69,15 +69,15 @@ class AgentGroupConfigurationHitlTest {
         @Test
         @DisplayName("timeoutPolicy round-trip")
         void timeoutPolicy() {
-            config.setTimeoutPolicy("AUTO_APPROVE");
-            assertEquals("AUTO_APPROVE", config.getTimeoutPolicy());
+            config.setTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_APPROVE);
+            assertEquals(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_APPROVE, config.getTimeoutPolicy());
         }
 
         @Test
         @DisplayName("granularity round-trip")
         void granularity() {
-            config.setGranularity("TASK");
-            assertEquals("TASK", config.getGranularity());
+            config.setGranularity(AgentGroupConfiguration.HitlGranularity.TASK);
+            assertEquals(AgentGroupConfiguration.HitlGranularity.TASK, config.getGranularity());
         }
 
         @Test
@@ -89,11 +89,11 @@ class AgentGroupConfigurationHitlTest {
         }
 
         @Test
-        @DisplayName("granularity can be changed from PHASE to DISCUSSION")
+        @DisplayName("granularity can be changed from PHASE to TASK")
         void granularityChange() {
-            assertEquals("PHASE", config.getGranularity());
-            config.setGranularity("DISCUSSION");
-            assertEquals("DISCUSSION", config.getGranularity());
+            assertEquals(AgentGroupConfiguration.HitlGranularity.PHASE, config.getGranularity());
+            config.setGranularity(AgentGroupConfiguration.HitlGranularity.TASK);
+            assertEquals(AgentGroupConfiguration.HitlGranularity.TASK, config.getGranularity());
         }
     }
 
@@ -121,15 +121,15 @@ class AgentGroupConfigurationHitlTest {
         void roundTrip() {
             HitlConfig config = new HitlConfig();
             config.setApprovalTimeout("PT5M");
-            config.setTimeoutPolicy("AUTO_REJECT");
-            config.setGranularity("TASK");
+            config.setTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_REJECT);
+            config.setGranularity(AgentGroupConfiguration.HitlGranularity.TASK);
 
             groupConfig.setHitlConfig(config);
 
             assertNotNull(groupConfig.getHitlConfig());
             assertEquals("PT5M", groupConfig.getHitlConfig().getApprovalTimeout());
-            assertEquals("AUTO_REJECT", groupConfig.getHitlConfig().getTimeoutPolicy());
-            assertEquals("TASK", groupConfig.getHitlConfig().getGranularity());
+            assertEquals(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_REJECT, groupConfig.getHitlConfig().getTimeoutPolicy());
+            assertEquals(AgentGroupConfiguration.HitlGranularity.TASK, groupConfig.getHitlConfig().getGranularity());
         }
 
         @Test

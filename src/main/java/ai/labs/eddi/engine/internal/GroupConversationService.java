@@ -256,7 +256,7 @@ public class GroupConversationService implements IGroupConversationService {
 
         // Resolve HITL granularity from group config
         boolean taskLevelHitl = config.getHitlConfig() != null
-                && "TASK".equalsIgnoreCase(config.getHitlConfig().getGranularity());
+                && config.getHitlConfig().getGranularity() == AgentGroupConfiguration.HitlGranularity.TASK;
 
         // MAJOR-5: Register control token so cancelDiscussion can signal in-flight
         activeTokens.put(gc.getId(), new DiscussionControlToken());
@@ -476,7 +476,7 @@ public class GroupConversationService implements IGroupConversationService {
                 return;
             var config = groupStore.read(gc.getGroupId(), resId.getVersion());
             if (config.getHitlConfig() != null) {
-                gc.setHitlTimeoutPolicy(config.getHitlConfig().getTimeoutPolicy());
+                gc.setHitlTimeoutPolicy(config.getHitlConfig().getTimeoutPolicy().name());
                 gc.setHitlApprovalTimeout(config.getHitlConfig().getApprovalTimeout());
             }
         } catch (Exception e) {
@@ -501,9 +501,9 @@ public class GroupConversationService implements IGroupConversationService {
                 return;
 
             String timeoutStr = hitlConfig.getApprovalTimeout();
-            String policy = hitlConfig.getTimeoutPolicy();
+            var policy = hitlConfig.getTimeoutPolicy();
             if (timeoutStr == null || timeoutStr.isBlank()
-                    || "WAIT_INDEFINITELY".equalsIgnoreCase(policy)) {
+                    || policy == AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY) {
                 return;
             }
 
@@ -518,7 +518,7 @@ public class GroupConversationService implements IGroupConversationService {
             schedule.setCreatedAt(Instant.now());
             schedule.setMetadata(java.util.Map.of(
                     "hitlType", "hitl_timeout",
-                    "policy", policy != null ? policy : "WAIT_INDEFINITELY",
+                    "policy", policy != null ? policy.name() : "WAIT_INDEFINITELY",
                     "surface", "group",
                     "conversationId", gc.getId()));
             scheduleStore.createSchedule(schedule);
@@ -858,7 +858,7 @@ public class GroupConversationService implements IGroupConversationService {
         // Resolve HITL TASK-level flag locally (not available from executeDiscussion
         // scope)
         boolean taskLevelHitl = config.getHitlConfig() != null
-                && "TASK".equalsIgnoreCase(config.getHitlConfig().getGranularity());
+                && config.getHitlConfig().getGranularity() == AgentGroupConfiguration.HitlGranularity.TASK;
 
         // Note: unlike executeParallelPhase, no transcript snapshot is needed here
         // because agents receive task-specific input via buildTaskExecutionInput(),
@@ -2223,7 +2223,7 @@ public class GroupConversationService implements IGroupConversationService {
             if (resId != null) {
                 var config = groupStore.read(gc.getGroupId(), resId.getVersion());
                 if (config.getHitlConfig() != null) {
-                    retryOnReject = "RETRY".equalsIgnoreCase(config.getHitlConfig().getOnTaskRejection());
+                    retryOnReject = config.getHitlConfig().getOnTaskRejection() == AgentGroupConfiguration.HitlRejectionPolicy.RETRY;
                 }
             }
         } catch (Exception e) {

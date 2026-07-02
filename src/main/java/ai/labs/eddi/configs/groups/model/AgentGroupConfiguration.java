@@ -460,10 +460,9 @@ public class AgentGroupConfiguration {
      */
     public static class HitlConfig {
         private String approvalTimeout;
-        private String timeoutPolicy = "WAIT_INDEFINITELY";
-        private String granularity = "PHASE";
-        /** Task rejection policy: FAIL (default) or RETRY. */
-        private String onTaskRejection = "FAIL";
+        private HitlTimeoutPolicy timeoutPolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
+        private HitlGranularity granularity = HitlGranularity.PHASE;
+        private HitlRejectionPolicy onTaskRejection = HitlRejectionPolicy.FAIL;
 
         public String getApprovalTimeout() {
             return approvalTimeout;
@@ -473,28 +472,40 @@ public class AgentGroupConfiguration {
             this.approvalTimeout = approvalTimeout;
         }
 
-        public String getTimeoutPolicy() {
+        public HitlTimeoutPolicy getTimeoutPolicy() {
             return timeoutPolicy;
         }
 
-        public void setTimeoutPolicy(String timeoutPolicy) {
+        public void setTimeoutPolicy(HitlTimeoutPolicy timeoutPolicy) {
             this.timeoutPolicy = timeoutPolicy;
         }
 
-        public String getGranularity() {
+        public HitlGranularity getGranularity() {
             return granularity;
         }
 
-        public void setGranularity(String granularity) {
+        public void setGranularity(HitlGranularity granularity) {
             this.granularity = granularity;
         }
 
-        public String getOnTaskRejection() {
+        public HitlRejectionPolicy getOnTaskRejection() {
             return onTaskRejection;
         }
 
-        public void setOnTaskRejection(String onTaskRejection) {
+        public void setOnTaskRejection(HitlRejectionPolicy onTaskRejection) {
             this.onTaskRejection = onTaskRejection;
         }
+    }
+
+    public enum HitlGranularity {
+        PHASE, TASK
+    }
+
+    public enum HitlTimeoutPolicy {
+        WAIT_INDEFINITELY, AUTO_APPROVE, AUTO_REJECT, ABORT
+    }
+
+    public enum HitlRejectionPolicy {
+        FAIL, RETRY
     }
 }
