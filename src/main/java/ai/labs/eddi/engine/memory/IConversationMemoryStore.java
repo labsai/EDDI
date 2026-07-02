@@ -81,6 +81,30 @@ public interface IConversationMemoryStore {
             throws IResourceStore.ResourceStoreException;
 
     /**
+     * Owner-filtered variant of {@link #findPendingApprovalSummaries(int)}. The
+     * limit must apply AFTER restricting to the given owner, so a non-admin
+     * caller's approval inbox cannot be starved by other users' backlog.
+     * Implementations must push the owner filter into the query; this default
+     * exists only as a bridge while the backends adopt it and inherits the
+     * post-limit filtering weakness it is meant to remove.
+     *
+     * @param ownerUserId
+     *            only summaries whose userId equals this value are returned
+     * @param limit
+     *            maximum number of summaries to return
+     * @return summaries of paused conversations owned by the user (never null)
+     * @throws IResourceStore.ResourceStoreException
+     *             on persistence failures
+     */
+    default List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(
+                                                                                                String ownerUserId, int limit)
+            throws IResourceStore.ResourceStoreException {
+        return findPendingApprovalSummaries(limit).stream()
+                .filter(summary -> java.util.Objects.equals(ownerUserId, summary.getUserId()))
+                .toList();
+    }
+
+    /**
      * Removes the persisted HITL pause bookmark fields from a conversation
      * document. Called when a pause is terminally resolved OUTSIDE resume (cancel,
      * end-while-paused) — a stale bookmark would otherwise round-trip through every
