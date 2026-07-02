@@ -855,6 +855,12 @@ public class AgentConfiguration {
         /** ISO-8601 duration (e.g., "PT30S"), null = indefinite. */
         private String approvalTimeout;
         private HitlTimeoutPolicy timeoutPolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
+        /**
+         * Designer-supplied reason shown to approvers in pending-approval listings and
+         * approval-status (e.g. "Deletion requires manager sign-off"). Answers "what am
+         * I approving?" — falls back to a generic reason when absent.
+         */
+        private String pauseReason;
 
         public String getApprovalTimeout() {
             return approvalTimeout;
@@ -869,7 +875,19 @@ public class AgentConfiguration {
         }
 
         public void setTimeoutPolicy(HitlTimeoutPolicy timeoutPolicy) {
-            this.timeoutPolicy = timeoutPolicy;
+            // JSON "timeoutPolicy": null must not wipe the default (mirrors the
+            // group-level HitlConfig setters)
+            if (timeoutPolicy != null) {
+                this.timeoutPolicy = timeoutPolicy;
+            }
+        }
+
+        public String getPauseReason() {
+            return pauseReason;
+        }
+
+        public void setPauseReason(String pauseReason) {
+            this.pauseReason = pauseReason;
         }
     }
 }

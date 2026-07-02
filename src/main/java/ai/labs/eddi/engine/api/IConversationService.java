@@ -85,11 +85,22 @@ public interface IConversationService {
     /**
      * Process a user input (say) or rerun the last step. Results are delivered via
      * the responseHandler callback.
+     * <p>
+     * <b>Handler contract:</b> exactly one handler method is invoked on every
+     * accepted call — {@code onComplete} when the turn executed (the snapshot may
+     * carry state {@code AWAITING_HUMAN} if THIS turn paused the conversation), or
+     * {@code onSkipped} when the turn was dropped without consuming the input
+     * (conversation paused or busy at execution time). Calls rejected up-front
+     * throw instead and never invoke the handler.
      *
      * @throws AgentMismatchException
      *             if agentId doesn't match the conversation's agent
      * @throws ConversationEndedException
      *             if the conversation has already ended
+     * @throws ConversationAwaitingApprovalException
+     *             if the conversation is awaiting a human decision — the input is
+     *             NOT consumed; a reviewer must resolve the pause via
+     *             {@link #resumeConversation} (or cancel) first
      * @throws ResourceNotFoundException
      *             if the conversation is not found
      */
@@ -100,6 +111,17 @@ public interface IConversationService {
     @FunctionalInterface
     interface ConversationResponseHandler {
         void onComplete(SimpleConversationMemorySnapshot snapshot);
+
+        /**
+         * The turn was dropped WITHOUT consuming the input — the conversation was
+         * paused ({@code AWAITING_HUMAN}) or busy ({@code IN_PROGRESS}) by the time the
+         * queued turn executed. The snapshot reflects the persisted state; the user's
+         * message was not processed. Defaults to {@link #onComplete} so callback
+         * consumers that only inspect the snapshot state keep working.
+         */
+        default void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+            onComplete(snapshot);
+        }
     }
 
     /**
@@ -115,6 +137,15 @@ public interface IConversationService {
         void onComplete(SimpleConversationMemorySnapshot snapshot);
 
         void onError(Throwable error);
+
+        /**
+         * The turn was dropped without consuming the input (see
+         * {@link ConversationResponseHandler#onSkipped}). Defaults to
+         * {@link #onComplete} so the stream always terminates.
+         */
+        default void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+            onComplete(snapshot);
+        }
     }
 
     /**
@@ -211,8 +242,21 @@ public interface IConversationService {
      * @throws ResourceStoreException
      *             on persistence failures
      */
+    default CancelOutcome cancelConversation(String conversationId,
+                                             ai.labs.eddi.engine.lifecycle.model.ControlSignal mode)
+            throws ResourceStoreException {
+        return cancelConversation(conversationId, mode, null);
+    }
+
+    /**
+     * Cancel with actor attribution: {@code cancelledBy} identifies who terminated
+     * the pending approval (a principal name, or a {@code system:*} identifier for
+     * automated cancellations) and is recorded in the audit trail. {@code null} is
+     * recorded as {@code unknown}.
+     */
     CancelOutcome cancelConversation(String conversationId,
-                                     ai.labs.eddi.engine.lifecycle.model.ControlSignal mode)
+                                     ai.labs.eddi.engine.lifecycle.model.ControlSignal mode,
+                                     String cancelledBy)
             throws ResourceStoreException;
 
     /**
@@ -261,6 +305,15 @@ public interface IConversationService {
     java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals(int limit)
             throws ResourceStoreException;
 
+    /**
+     * Owner-scoped variant of {@link #listPendingApprovals(int)}: only summaries
+     * owned by {@code ownerUserId} are returned, and the limit applies AFTER that
+     * restriction — a non-admin caller's approval inbox cannot be starved by other
+     * users' backlog.
+     */
+    java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
+            throws ResourceStoreException;
+
     // --- Domain exceptions (no JAX-RS dependency) ---
 
     class AgentNotReadyException extends Exception {
@@ -283,6 +336,18 @@ public interface IConversationService {
 
     class ConversationEndedException extends Exception {
         public ConversationEndedException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * The conversation is paused awaiting a human decision (HITL) — user input is
+     * rejected without being consumed until a reviewer resolves the pause via
+     * {@code resumeConversation} or a cancel. Maps to HTTP 409 at the REST layer
+     * (mirrors {@link ConversationEndedException} → 410).
+     */
+    class ConversationAwaitingApprovalException extends Exception {
+        public ConversationAwaitingApprovalException(String message) {
             super(message);
         }
     }

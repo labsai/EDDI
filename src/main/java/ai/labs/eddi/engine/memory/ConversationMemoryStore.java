@@ -57,6 +57,8 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_CONVERSATION_STATE));
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_AGENT_ID));
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_AGENT_VERSION));
+        // owner-scoped pending-approvals inbox: filter by (state, userId) in-query
+        conversationCollectionDocument.createIndex(Indexes.ascending(KEY_CONVERSATION_STATE, "userId"));
     }
 
     @Override
@@ -184,34 +186,47 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         return ids;
     }
 
+    /**
+     * Projected fields for pending-approval summaries — never the full document.
+     */
+    private static final Bson PENDING_SUMMARY_PROJECTION = Projections.include(KEY_AGENT_ID, "userId",
+            "hitlPausedAt", "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout");
+
     @Override
     public List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(int limit) {
-        // Bounded projected reads: ids come from the indexed state query — bounded
-        // at the DB via .limit, never materializing every paused id — and each
-        // summary is a projected point-read, so the (potentially multi-MB)
-        // step/output data of paused conversations is never deserialized. The id
-        // is set explicitly, mirroring loadConversationMemorySnapshot.
+        // Single bounded, projected query on the indexed state field — the
+        // (potentially multi-MB) step/output data of paused conversations is
+        // never deserialized, and there are no per-id point-reads (this listing
+        // is polled and backs the crash-recovery sweep).
+        return collectPendingSummaries(
+                conversationCollectionObject.find(Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.name()))
+                        .projection(PENDING_SUMMARY_PROJECTION)
+                        .limit(limit));
+    }
+
+    @Override
+    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(String ownerUserId, int limit) {
+        // Owner filter INSIDE the query: the limit applies after the restriction,
+        // so a user's inbox is complete even behind a large global backlog.
+        return collectPendingSummaries(
+                conversationCollectionObject.find(Filters.and(
+                        Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.name()),
+                        Filters.eq("userId", ownerUserId)))
+                        .projection(PENDING_SUMMARY_PROJECTION)
+                        .limit(limit));
+    }
+
+    private List<ai.labs.eddi.engine.model.PendingApprovalSummary> collectPendingSummaries(
+                                                                                           com.mongodb.client.FindIterable<ConversationMemorySnapshot> snapshots) {
         List<ai.labs.eddi.engine.model.PendingApprovalSummary> out = new ArrayList<>();
-        List<String> ids = new ArrayList<>();
-        conversationCollectionDocument.find(Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.name()))
-                .projection(new Document(OBJECT_ID, 1))
-                .limit(limit)
-                .forEach(document -> ids.add(document.get(OBJECT_ID).toString()));
-        for (String conversationId : ids) {
-            var snapshot = conversationCollectionObject
-                    .find(new Document(OBJECT_ID, new ObjectId(conversationId)))
-                    .projection(Projections.include(KEY_AGENT_ID, "userId",
-                            "hitlPausedAt", "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout"))
-                    .first();
-            if (snapshot != null) {
-                var summary = new ai.labs.eddi.engine.model.PendingApprovalSummary(
-                        conversationId, snapshot.getAgentId(), snapshot.getUserId(),
-                        snapshot.getHitlPausedAt(), snapshot.getHitlPauseReason(),
-                        snapshot.getHitlTimeoutPolicy());
-                summary.setApprovalTimeout(snapshot.getHitlApprovalTimeout());
-                out.add(summary);
-            }
-        }
+        snapshots.forEach(snapshot -> {
+            var summary = new ai.labs.eddi.engine.model.PendingApprovalSummary(
+                    snapshot.getConversationId(), snapshot.getAgentId(), snapshot.getUserId(),
+                    snapshot.getHitlPausedAt(), snapshot.getHitlPauseReason(),
+                    snapshot.getHitlTimeoutPolicy());
+            summary.setApprovalTimeout(snapshot.getHitlApprovalTimeout());
+            out.add(summary);
+        });
         return out;
     }
 

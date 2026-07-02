@@ -231,7 +231,13 @@ public class ConversationMemory implements IConversationMemory {
         return cancelled;
     }
 
-    // === HITL pause bookmark (transient — not serialized to DB) ===
+    // === HITL pause bookmark ===
+    // The `transient` keyword only exempts these fields from Java serialization of
+    // this LIVE object — they ARE persisted: ConversationMemoryUtilities copies
+    // them onto ConversationMemorySnapshot, which is what gets stored in the DB
+    // and restored on load. Clearing them here without persisting the snapshot
+    // does NOT clear the stored bookmark (that's what clearHitlBookmark on the
+    // store is for).
 
     private transient String hitlPausedWorkflowId;
     private transient int hitlPausedAbsoluteTaskIndex = -1;

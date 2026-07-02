@@ -81,22 +81,23 @@ class RestAgentEngineHitlTest {
     class CancelConversation {
 
         @Test
-        @DisplayName("returns 200 OK when the service reports CANCELLED")
+        @DisplayName("returns 200 OK when the service reports CANCELLED, attributing the caller")
         void returns200Ok() throws Exception {
             doReturn(IConversationService.CancelOutcome.CANCELLED)
-                    .when(conversationService).cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL);
+                    .when(conversationService).cancelConversation(eq(CONVERSATION_ID), eq(ControlSignal.CANCEL_GRACEFUL), any());
 
             Response response = restAgentEngine.cancelConversation(CONVERSATION_ID);
 
             assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
-            verify(conversationService).cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL);
+            // the cancelling principal is threaded through for audit attribution
+            verify(conversationService).cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL, USER_ID);
         }
 
         @Test
         @DisplayName("returns 404 when the conversation does not exist")
         void returns404WhenUnknown() throws Exception {
             doReturn(IConversationService.CancelOutcome.NOT_FOUND)
-                    .when(conversationService).cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL);
+                    .when(conversationService).cancelConversation(eq(CONVERSATION_ID), eq(ControlSignal.CANCEL_GRACEFUL), any());
 
             Response response = restAgentEngine.cancelConversation(CONVERSATION_ID);
 
@@ -107,7 +108,7 @@ class RestAgentEngineHitlTest {
         @DisplayName("returns 409 when there is nothing to cancel")
         void returns409WhenNothingToCancel() throws Exception {
             doReturn(IConversationService.CancelOutcome.NOTHING_TO_CANCEL)
-                    .when(conversationService).cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL);
+                    .when(conversationService).cancelConversation(eq(CONVERSATION_ID), eq(ControlSignal.CANCEL_GRACEFUL), any());
 
             Response response = restAgentEngine.cancelConversation(CONVERSATION_ID);
 
@@ -154,21 +155,21 @@ class RestAgentEngineHitlTest {
         }
 
         @Test
-        @DisplayName("non-admin sees ONLY their own conversations (mixed ownership filtered)")
+        @DisplayName("non-admin uses the owner-scoped query (filter applied before the limit)")
         void nonAdminSeesOnlyOwn() throws Exception {
             doReturn(false).when(ownershipValidator).isAdmin(identity);
             doReturn(false).when(ownershipValidator).isApprover(identity);
-            doReturn(List.of(
-                    summaryOwnedBy("conv-mine", USER_ID),
-                    summaryOwnedBy("conv-theirs", "someone-else"),
-                    summaryOwnedBy("conv-unowned", null)))
-                    .when(conversationService).listPendingApprovals(anyInt());
+            // the owner filter is pushed into the query — the service is invoked
+            // with the caller's id, never post-filtered from the global listing
+            doReturn(List.of(summaryOwnedBy("conv-mine", USER_ID)))
+                    .when(conversationService).listPendingApprovals(eq(USER_ID), anyInt());
 
             List<PendingApprovalSummary> result = restAgentEngine.listPendingApprovals(200);
 
-            // fail-closed: other users' AND ownerless conversations are excluded
             assertEquals(1, result.size());
             assertEquals("conv-mine", result.get(0).getConversationId());
+            verify(conversationService).listPendingApprovals(USER_ID, 200);
+            verify(conversationService, never()).listPendingApprovals(anyInt());
         }
 
         @Test

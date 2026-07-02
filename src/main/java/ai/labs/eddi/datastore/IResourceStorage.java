@@ -63,12 +63,23 @@ public interface IResourceStorage<T> {
     /**
      * Store a new version of a resource only if the JSON field {@code fieldName}
      * currently equals {@code expectedValue}. Atomic compare-and-swap on an
-     * arbitrary indexed field (not _version). Default impl performs an
-     * unconditional store (NO locking) — backends override.
+     * arbitrary indexed field (not _version).
+     * <p>
+     * Zero-match outcomes are distinguished so callers can report honestly:
+     * {@link IResourceStore.ResourceNotFoundException} when the resource no longer
+     * exists (REST: 404), {@link IResourceStore.ResourceModifiedException} when it
+     * exists but the field value did not match (a genuine CAS conflict — REST:
+     * 409).
+     * <p>
+     * There is deliberately NO fallback default: silently degrading a CAS to an
+     * unconditional store would defeat every race-hardening built on it. New
+     * backends must implement this.
      */
     default void storeIfFieldEquals(IResource<T> newResource, String fieldName, String expectedValue)
-            throws IResourceStore.ResourceModifiedException {
-        store(newResource);
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        throw new UnsupportedOperationException(
+                "storeIfFieldEquals is not implemented by " + getClass().getName()
+                        + " — a compare-and-swap must never silently degrade to an unconditional store");
     }
 
     /**

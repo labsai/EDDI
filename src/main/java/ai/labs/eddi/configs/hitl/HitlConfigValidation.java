@@ -21,6 +21,11 @@ public final class HitlConfigValidation {
     private HitlConfigValidation() {
     }
 
+    /**
+     * Upper bound for the designer-supplied pause reason (approver-facing text).
+     */
+    public static final int MAX_PAUSE_REASON_LENGTH = 500;
+
     /** Validates the agent-level HITL config; no-op when absent. */
     public static void validate(AgentConfiguration.HitlConfig hitlConfig) {
         if (hitlConfig == null) {
@@ -29,6 +34,12 @@ public final class HitlConfigValidation {
         validateApprovalTimeout(hitlConfig.getApprovalTimeout(),
                 hitlConfig.getTimeoutPolicy() != null
                         && hitlConfig.getTimeoutPolicy() != HitlTimeoutPolicy.WAIT_INDEFINITELY);
+        if (hitlConfig.getPauseReason() != null
+                && hitlConfig.getPauseReason().length() > MAX_PAUSE_REASON_LENGTH) {
+            throw new IllegalArgumentException(
+                    "hitlConfig.pauseReason exceeds the maximum length of " + MAX_PAUSE_REASON_LENGTH
+                            + " characters — it is approver-facing summary text, not documentation");
+        }
     }
 
     /** Validates the group-level HITL config; no-op when absent. */

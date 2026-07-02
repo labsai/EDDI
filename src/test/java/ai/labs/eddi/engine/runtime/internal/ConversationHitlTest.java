@@ -170,7 +170,7 @@ class ConversationHitlTest {
             memory.setHitlPausedAbsoluteTaskIndex(2);
 
             var conv = createConversation();
-            conv.resume(decision(HitlVerdict.APPROVED), Map.of());
+            conv.resume(decision(HitlVerdict.APPROVED));
 
             // Should call executeLifecycleFromIndex with resumeFromIndex = 2 + 1 = 3
             verify(lifecycleManager).executeLifecycleFromIndex(memory, 3);
@@ -184,7 +184,7 @@ class ConversationHitlTest {
             memory.setHitlPausedAbsoluteTaskIndex(0);
 
             var conv = createConversation();
-            conv.resume(decision(HitlVerdict.APPROVED, "looks good", "admin"), Map.of());
+            conv.resume(decision(HitlVerdict.APPROVED, "looks good", "admin"));
 
             // Verify decision data was stored in current step
             var step = memory.getCurrentStep();
@@ -208,7 +208,7 @@ class ConversationHitlTest {
                     "actions", List.of("delete_account", IConversation.PAUSE_CONVERSATION)));
 
             var conv = createConversation();
-            conv.resume(decision(HitlVerdict.APPROVED), Map.of());
+            conv.resume(decision(HitlVerdict.APPROVED));
 
             var actionsData = memory.getCurrentStep().<List<String>>getLatestData("actions");
             assertNotNull(actionsData);
@@ -226,7 +226,7 @@ class ConversationHitlTest {
             memory.setHitlPausedAbsoluteTaskIndex(0);
 
             var conv = createConversation();
-            conv.resume(decision(HitlVerdict.APPROVED, "verified by phone", "supervisor"), Map.of());
+            conv.resume(decision(HitlVerdict.APPROVED, "verified by phone", "supervisor"));
 
             // {{memory.current.hitlDecision}} — conversationOutput, not raw step data
             var output = memory.getCurrentStep().getConversationOutput();
@@ -243,7 +243,7 @@ class ConversationHitlTest {
             memory.setConversationState(ConversationState.AWAITING_HUMAN);
 
             var conv = createConversation();
-            conv.resume(decision(HitlVerdict.REJECTED), Map.of());
+            conv.resume(decision(HitlVerdict.REJECTED));
 
             // REJECTED should NOT call executeLifecycleFromIndex or executeLifecycle
             verify(lifecycleManager, never()).executeLifecycleFromIndex(any(), anyInt());
@@ -260,7 +260,7 @@ class ConversationHitlTest {
             memory.setHitlPauseReason("some reason");
 
             var conv = createConversation();
-            conv.resume(decision(HitlVerdict.REJECTED), Map.of());
+            conv.resume(decision(HitlVerdict.REJECTED));
 
             assertNull(memory.getHitlPausedWorkflowId());
             assertEquals(-1, memory.getHitlPausedAbsoluteTaskIndex());
@@ -276,7 +276,7 @@ class ConversationHitlTest {
             var conv = createConversation();
 
             var ex = assertThrows(ConversationNotReadyException.class,
-                    () -> conv.resume(decision(HitlVerdict.APPROVED), Map.of()));
+                    () -> conv.resume(decision(HitlVerdict.APPROVED)));
             assertTrue(ex.getMessage().contains("AWAITING_HUMAN"));
         }
 
@@ -288,7 +288,7 @@ class ConversationHitlTest {
             var conv = createConversation();
 
             assertThrows(ConversationNotReadyException.class,
-                    () -> conv.resume(decision(HitlVerdict.APPROVED), Map.of()));
+                    () -> conv.resume(decision(HitlVerdict.APPROVED)));
         }
 
         @Test
@@ -303,7 +303,7 @@ class ConversationHitlTest {
                     .when(lifecycleManager).executeLifecycleFromIndex(any(), anyInt());
 
             var conv = createConversation();
-            conv.resume(decision(HitlVerdict.APPROVED), Map.of());
+            conv.resume(decision(HitlVerdict.APPROVED));
 
             // Should be AWAITING_HUMAN again (from the second pause)
             assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
@@ -322,7 +322,7 @@ class ConversationHitlTest {
             memory.setHitlPausedAbsoluteTaskIndex(0);
 
             var conv = createConversation();
-            conv.resume(decision(HitlVerdict.APPROVED), Map.of());
+            conv.resume(decision(HitlVerdict.APPROVED));
 
             // After successful resume without another pause/stop, state should be READY
             assertEquals(ConversationState.READY, memory.getConversationState());
@@ -336,7 +336,7 @@ class ConversationHitlTest {
             memory.setHitlPausedAbsoluteTaskIndex(0);
 
             var conv = createConversation();
-            conv.resume(decision(HitlVerdict.APPROVED), Map.of());
+            conv.resume(decision(HitlVerdict.APPROVED));
 
             verify(outputRenderer).renderOutput(memory);
         }
@@ -352,7 +352,7 @@ class ConversationHitlTest {
                     .when(lifecycleManager).executeLifecycleFromIndex(any(), anyInt());
 
             var conv = createConversation();
-            conv.resume(decision(HitlVerdict.APPROVED), Map.of());
+            conv.resume(decision(HitlVerdict.APPROVED));
 
             assertEquals(ConversationState.ENDED, memory.getConversationState());
         }

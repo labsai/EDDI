@@ -173,8 +173,27 @@ public class RestAgentEngine implements IRestAgentEngine {
         response.setTimeout(agentTimeout, TimeUnit.SECONDS);
         response.setTimeoutHandler(asyncResp -> asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
 
+        // onSkipped: the queued turn was dropped without consuming the input
+        // (pause/busy committed after the request was accepted) — answer honestly
+        // with 409 instead of letting the request run into the timeout handler.
+        var responseHandler = new ConversationResponseHandler() {
+            @Override
+            public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                response.resume(snapshot);
+            }
+
+            @Override
+            public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                String reason = snapshot.getConversationState() == ConversationState.AWAITING_HUMAN
+                        ? "Conversation is awaiting human approval — your message was not processed;"
+                                + " a reviewer must resolve it via POST /agents/" + conversationId + "/resume (or cancel)"
+                        : "Conversation is processing another turn — your message was not processed; retry shortly";
+                response.resume(Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(reason).build());
+            }
+        };
+
         try {
-            conversationService.say(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly, response::resume);
+            conversationService.say(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly, responseHandler);
         } catch (AgentMismatchException e) {
             LOGGER.warn("Agent mismatch for conversation " + conversationId + ": " + e.getMessage());
             response.resume(Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity("Agent version mismatch").build());
@@ -183,6 +202,9 @@ public class RestAgentEngine implements IRestAgentEngine {
             response.resume(new NotFoundException("Agent is not deployed or not ready"));
         } catch (ConversationEndedException e) {
             response.resume(Response.status(Response.Status.GONE).entity("Conversation has ended").build());
+        } catch (ConversationAwaitingApprovalException e) {
+            // docs/hitl.md: say() into a paused conversation is REJECTED — promptly
+            response.resume(Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN).entity(e.getMessage()).build());
         } catch (ProcessingRestrictedException e) {
             LOGGER.warnf("GDPR processing restricted: %s", e.getMessage());
             response.resume(Response.status(Response.Status.FORBIDDEN).type(TEXT_PLAIN).entity(e.getMessage()).build());
@@ -252,8 +274,9 @@ public class RestAgentEngine implements IRestAgentEngine {
     public Response cancelConversation(String conversationId) {
         validateConversationOwnership(conversationId, true);
         try {
+            String cancelledBy = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
             var outcome = conversationService.cancelConversation(conversationId,
-                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL, cancelledBy);
             return switch (outcome) {
                 case CANCELLED -> Response.ok().build();
                 case NOT_FOUND -> Response.status(Response.Status.NOT_FOUND)
@@ -270,7 +293,7 @@ public class RestAgentEngine implements IRestAgentEngine {
     }
 
     /** Upper bound for the free-text reviewer note persisted with a decision. */
-    private static final int MAX_HITL_NOTE_LENGTH = 4096;
+    private static final int MAX_HITL_NOTE_LENGTH = HitlDecision.MAX_NOTE_LENGTH;
 
     @Override
     public Response resumeConversation(String conversationId, HitlDecision decision) {
@@ -325,12 +348,15 @@ public class RestAgentEngine implements IRestAgentEngine {
             // Bookmark fields describe the pause — suppress them once the
             // conversation left AWAITING_HUMAN so stale fields (e.g. after a
             // cancel that predates bookmark clearing) never mislead dashboards.
+            // approvalTimeout lets a UI render the auto-decision deadline
+            // (pausedAt + approvalTimeout) without extra round trips.
             var summary = Map.of(
                     "conversationId", conversationId,
                     "state", snapshot.getConversationState().name(),
                     "pausedAt", paused && snapshot.getHitlPausedAt() != null ? snapshot.getHitlPausedAt().toString() : "",
                     "pauseReason", paused && snapshot.getHitlPauseReason() != null ? snapshot.getHitlPauseReason() : "",
-                    "timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy() : "");
+                    "timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy() : "",
+                    "approvalTimeout", paused && snapshot.getHitlApprovalTimeout() != null ? snapshot.getHitlApprovalTimeout() : "");
             return Response.ok(summary).build();
         } catch (ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
@@ -342,13 +368,13 @@ public class RestAgentEngine implements IRestAgentEngine {
     @Override
     public List<PendingApprovalSummary> listPendingApprovals(Integer limit) {
         try {
-            var all = conversationService.listPendingApprovals(limit != null ? limit : 200);
+            int effectiveLimit = limit != null ? limit : 200;
 
             // MAJOR-6: Admins and designated approvers see all; other callers see
             // only their own conversations (an approver who can decide approvals
             // must also be able to list them).
             if (ownershipValidator.isAdmin(identity) || ownershipValidator.isApprover(identity)) {
-                return all;
+                return conversationService.listPendingApprovals(effectiveLimit);
             }
 
             String callerId = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
@@ -356,11 +382,9 @@ public class RestAgentEngine implements IRestAgentEngine {
                 return List.of(); // Fail-closed: anonymous user sees nothing
             }
 
-            // Ownership from the projected summary (no per-row descriptor reads);
-            // fail-closed: summaries without an owner are excluded for non-admins.
-            return all.stream()
-                    .filter(summary -> callerId.equals(summary.getUserId()))
-                    .toList();
+            // Owner filter is applied INSIDE the query (before the limit), so the
+            // caller's inbox is complete even behind a large global backlog.
+            return conversationService.listPendingApprovals(callerId, effectiveLimit);
         } catch (ResourceStoreException e) {
             throw new InternalServerErrorException(e.getMessage(), e);
         }
@@ -395,6 +419,14 @@ public class RestAgentEngine implements IRestAgentEngine {
         } catch (ForbiddenException e) {
             throw e;
         } catch (ResourceNotFoundException e) {
+            if (hitlOperation && !ownershipValidator.isAdmin(identity) && !ownershipValidator.isApprover(identity)) {
+                // Fail-closed for HITL state changes: a conversation without a
+                // descriptor (legacy/corruption) has no verifiable owner — only
+                // admins/approvers may decide its approvals.
+                LOGGER.warnf("HITL operation on conversation %s denied: no descriptor to verify ownership against",
+                        sanitize(conversationId));
+                throw new ForbiddenException("Access denied: conversation ownership cannot be verified");
+            }
             // Descriptor not found — let the actual operation handle it
             LOGGER.debugf("Conversation descriptor not found for %s", sanitize(conversationId));
             return null;

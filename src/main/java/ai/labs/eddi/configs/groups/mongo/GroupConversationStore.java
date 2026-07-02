@@ -34,6 +34,15 @@ public class GroupConversationStore implements IGroupConversationStore {
     private static final Logger LOGGER = Logger.getLogger(GroupConversationStore.class);
     private static final int SINGLE_VERSION = 1;
 
+    /**
+     * Ids are hex ObjectIds or UUIDs — no regex metacharacters. This makes plain
+     * anchoring ({@code ^id$}) an exact match on BOTH regex engines. Never use
+     * {@link Pattern#quote} here: its {@code \Q...\E} output is Java-specific and
+     * rejected by PostgreSQL's regex engine (the DB-agnostic findResources maps
+     * String filters to {@code ~} on Postgres and to a Mongo regex on MongoDB).
+     */
+    private static final Pattern SAFE_ID = Pattern.compile("[A-Za-z0-9-]+");
+
     private final IResourceStorage<GroupConversation> storage;
 
     @Inject
@@ -91,13 +100,19 @@ public class GroupConversationStore implements IGroupConversationStore {
         // queries.
         // This is a placeholder that works with both DB backends.
         var results = new ArrayList<GroupConversation>();
+        if (!SAFE_ID.matcher(groupId).matches()) {
+            // no stored group can carry such an id — honest empty result, and the
+            // value never reaches either backend's regex engine
+            LOGGER.warnf("listByGroupId called with non-id value — returning empty");
+            return results;
+        }
         try {
-            // Anchor + quote: findResources turns a String filter value into an
-            // unanchored Mongo regex, so a raw groupId would substring-match other
-            // groups. Exact match is the only correct semantics here.
+            // Anchored exact match (see SAFE_ID): findResources turns a String
+            // filter value into an unanchored regex, so a raw groupId would
+            // substring-match other groups.
             var filter = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(
                     java.util.List.of(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter(
-                            "groupId", "^" + Pattern.quote(groupId) + "$")));
+                            "groupId", "^" + groupId + "$")));
             var resourceIds = storage.findResources(new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{filter}, "lastModified", index, limit);
             for (var resourceId : resourceIds) {
                 try {
@@ -123,6 +138,11 @@ public class GroupConversationStore implements IGroupConversationStore {
         try {
             IResourceStorage.IResource<GroupConversation> resource = storage.newResource(gc.getId(), SINGLE_VERSION, gc);
             storage.storeIfFieldEquals(resource, "state", expectedState.name());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // deleted-vs-mismatch distinction from the storage CAS: surface the
+            // deletion as its own (unchecked) type so callers can answer 404
+            throw new GroupConversationGoneException(
+                    "Group conversation " + gc.getId() + " no longer exists", e);
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException("Failed conditional update: " + e.getMessage(), e);
         }
@@ -140,11 +160,14 @@ public class GroupConversationStore implements IGroupConversationStore {
         var filterList = new ArrayList<ai.labs.eddi.datastore.IResourceFilter.QueryFilter>();
         filterList.add(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("state", "^" + state.name() + "$"));
         if (groupId != null) {
-            // Anchor + quote: findResources treats a String filter as an unanchored
-            // regex, so a raw groupId would leak conversations from other groups whose
-            // id contains it as a substring. Exact match only.
+            if (!SAFE_ID.matcher(groupId).matches()) {
+                LOGGER.warnf("findByState called with non-id groupId — returning empty");
+                return new ArrayList<>();
+            }
+            // Anchored exact match (see SAFE_ID): a raw groupId would leak
+            // conversations from other groups whose id contains it as a substring.
             filterList.add(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter(
-                    "groupId", "^" + Pattern.quote(groupId) + "$"));
+                    "groupId", "^" + groupId + "$"));
         }
         var filters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{
                 new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(filterList)};
@@ -158,6 +181,11 @@ public class GroupConversationStore implements IGroupConversationStore {
             } catch (IResourceStore.ResourceNotFoundException e) {
                 LOGGER.warnf("Group conversation %s disappeared during findByState: %s", id.getId(), e.getMessage());
             }
+        }
+        if (ids.size() >= limit) {
+            // never truncate silently — callers (pending listings, crash recovery)
+            // must be able to see that there were more results than the cap
+            LOGGER.warnf("findByState(%s) hit its limit of %d — results are truncated", state, limit);
         }
         return out;
     }

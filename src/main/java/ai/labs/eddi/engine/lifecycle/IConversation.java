@@ -38,14 +38,12 @@ public interface IConversation {
      *
      * @param decision
      *            the human verdict (APPROVED / REJECTED)
-     * @param contexts
-     *            additional context variables for the resumed pipeline
      * @throws LifecycleException
      *             on pipeline errors
      * @throws ConversationNotReadyException
      *             if the conversation is not in a resumable state
      */
-    void resume(HitlDecision decision, Map<String, Context> contexts) throws LifecycleException, ConversationNotReadyException;
+    void resume(HitlDecision decision) throws LifecycleException, ConversationNotReadyException;
 
     interface IConversationOutputRenderer {
         void renderOutput(IConversationMemory conversationMemory);

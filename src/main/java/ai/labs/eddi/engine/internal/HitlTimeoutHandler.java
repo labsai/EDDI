@@ -105,7 +105,7 @@ public class HitlTimeoutHandler {
         String conversationId = (String) metadata.get("conversationId");
         try {
             conversationService.cancelConversation(conversationId,
-                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL, "system:timeout");
             LOGGER.infof("HITL timeout ABORT for conversation %s", conversationId);
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to abort conversation %s on HITL timeout", conversationId);

@@ -204,7 +204,7 @@ class ConversationServiceResumeTest {
             resumeCallable.call();
 
             // Assert: conversation.resume() was invoked with APPROVED decision
-            verify(conversation).resume(eq(decision), anyMap());
+            verify(conversation).resume(eq(decision));
 
             // Assert: memory was stored after resume
             verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
@@ -271,7 +271,7 @@ class ConversationServiceResumeTest {
 
             // Assert: resume was called with REJECTED verdict (Conversation.resume handles
             // the short-circuit)
-            verify(conversation).resume(eq(decision), anyMap());
+            verify(conversation).resume(eq(decision));
         }
     }
 
@@ -360,7 +360,7 @@ class ConversationServiceResumeTest {
                 memory.setHitlPausedAt(Instant.now());
                 memory.setHitlPauseReason("PAUSE_CONVERSATION action");
                 return null;
-            }).when(conversation).resume(any(HitlDecision.class), anyMap());
+            }).when(conversation).resume(any(HitlDecision.class));
 
             HitlDecision decision = new HitlDecision();
             decision.setVerdict(HitlVerdict.APPROVED);
@@ -463,7 +463,7 @@ class ConversationServiceResumeTest {
             // Simulate that Conversation.resume() throws LifecycleException when workflow
             // is not found
             doThrow(new LifecycleException("Paused workflow 'nonexistent-workflow' no longer exists (config drift)"))
-                    .when(conversation).resume(any(HitlDecision.class), anyMap());
+                    .when(conversation).resume(any(HitlDecision.class));
 
             @SuppressWarnings("unchecked")
             ArgumentCaptor<Callable<Void>> callableCaptor = ArgumentCaptor.forClass(Callable.class);
@@ -480,7 +480,7 @@ class ConversationServiceResumeTest {
             callableCaptor.getValue().call();
 
             // Assert: conversation.resume() was attempted
-            verify(conversation).resume(eq(decision), anyMap());
+            verify(conversation).resume(eq(decision));
 
             // Assert: memory was stored (the finally block in resumeCallable always stores)
             verify(conversationMemoryStore).storeConversationMemorySnapshot(any());

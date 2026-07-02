@@ -160,7 +160,8 @@ class HitlTimeoutHandlerTest {
 
             handler.handleTimeout(metadata);
 
-            verify(conversationService).cancelConversation("conv-123", ControlSignal.CANCEL_GRACEFUL);
+            // system-attributed so the cancellation audit entry names the actor
+            verify(conversationService).cancelConversation("conv-123", ControlSignal.CANCEL_GRACEFUL, "system:timeout");
             verifyNoInteractions(groupConversationService);
         }
 

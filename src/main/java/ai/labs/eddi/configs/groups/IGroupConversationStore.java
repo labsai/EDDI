@@ -29,11 +29,26 @@ public interface IGroupConversationStore {
 
     /**
      * Update the group conversation only if it is currently in the expected state.
-     * Throws {@link IResourceStore.ResourceModifiedException} if the state does not
-     * match.
+     * Throws {@link IResourceStore.ResourceModifiedException} if the conversation
+     * exists but the state does not match (CAS conflict — REST: 409), and
+     * {@link GroupConversationGoneException} (unchecked) if the conversation was
+     * deleted concurrently (REST: 404) — the two zero-match outcomes are
+     * deliberately distinguishable so callers never report a deletion as a state
+     * conflict.
      */
     void updateIfState(GroupConversation gc, GroupConversation.GroupConversationState expectedState)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException;
+
+    /**
+     * The group conversation targeted by a conditional update no longer exists.
+     * Unchecked so existing CAS call sites keep compiling; surfaces that expose the
+     * operation should map it to 404 rather than a 409 conflict.
+     */
+    class GroupConversationGoneException extends RuntimeException {
+        public GroupConversationGoneException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
 
     /**
      * Find all group conversations currently in the given state.

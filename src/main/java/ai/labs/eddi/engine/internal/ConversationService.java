@@ -55,6 +55,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.Consumer;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.*;
 import static ai.labs.eddi.utils.RestUtilities.createURI;
@@ -355,6 +356,16 @@ public class ConversationService implements IConversationService {
                 throw new AgentMismatchException(message);
             }
 
+            // HITL fast-fail: a paused conversation cannot consume input — reject
+            // promptly (REST: 409) instead of dropping the turn into the 60s
+            // watchdog. Checked BEFORE quota/reference bookkeeping so nothing
+            // leaks. The queued-say guard below remains as the race backstop.
+            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                throw new ConversationAwaitingApprovalException(
+                        "Conversation is awaiting human approval — a reviewer must resolve it via"
+                                + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
+            }
+
             IAgent agent = getAgent(environment, agentId, agentVersion);
             if (agent == null) {
                 String msg = "Agent not deployed (environment=%s, conversationId=%s, version=%s)";
@@ -390,6 +401,18 @@ public class ConversationService implements IConversationService {
                         responseHandler.onComplete(memorySnapshot);
                     });
 
+            // Handler contract: a skipped turn (pause/busy committed by the time the
+            // queued turn executed) must still complete the response — with the
+            // persisted state and WITHOUT the metrics reference leaking.
+            Consumer<IConversationMemory> notifySkipped = skippedMemory -> {
+                SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(skippedMemory,
+                        returnDetailed, returnCurrentStepOnly, returningFields);
+                memorySnapshot.setEnvironment(environment);
+                recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
+                responseHandler.onSkipped(memorySnapshot);
+            };
+
             if (conversation.isEnded()) {
                 throw new ConversationEndedException("Conversation has ended!");
             }
@@ -418,10 +441,10 @@ public class ConversationService implements IConversationService {
             }
 
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    executeConversation);
+                    executeConversation, notifySkipped);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
-        } catch (ProcessingRestrictedException | QuotaExceededException e) {
+        } catch (ProcessingRestrictedException | QuotaExceededException | ConversationAwaitingApprovalException e) {
             throw e; // thrown before processingConversationReferences.add()
         } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
             processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
@@ -459,6 +482,14 @@ public class ConversationService implements IConversationService {
                 String message = "Supplied agentId (%s) is incompatible with conversationId (%s)";
                 message = String.format(message, agentId, conversationId);
                 throw new AgentMismatchException(message);
+            }
+
+            // HITL fast-fail (mirrors say()): reject input into a paused
+            // conversation promptly instead of leaving the SSE stream dangling.
+            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                throw new ConversationAwaitingApprovalException(
+                        "Conversation is awaiting human approval — a reviewer must resolve it via"
+                                + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
             }
 
             IAgent agent = getAgent(environment, agentId, agentVersion);
@@ -542,11 +573,22 @@ public class ConversationService implements IConversationService {
                 return null;
             };
 
+            // Handler contract (mirrors say()): a skipped turn must terminate the
+            // stream with the persisted state instead of leaving it open.
+            Consumer<IConversationMemory> notifySkipped = skippedMemory -> {
+                SimpleConversationMemorySnapshot memorySnapshot = convertSimpleConversationMemorySnapshot(skippedMemory,
+                        returnDetailed, returnCurrentStepOnly, returningFields);
+                memorySnapshot.setEnvironment(environment);
+                recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
+                streamingHandler.onSkipped(memorySnapshot);
+            };
+
             Callable<Void> processUserInput = processConversationStep(environment, conversationMemory, conversationId, loggingContext,
-                    executeConversation);
+                    executeConversation, notifySkipped);
 
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
-        } catch (ProcessingRestrictedException | QuotaExceededException e) {
+        } catch (ProcessingRestrictedException | QuotaExceededException | ConversationAwaitingApprovalException e) {
             throw e; // thrown before processingConversationReferences.add()
         } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException e) {
             processingConversationReferences.remove(createReferenceForMetrics(agentId, conversationId));
@@ -769,31 +811,48 @@ public class ConversationService implements IConversationService {
     }
 
     private Callable<Void> processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
-                                                   Map<String, String> loggingContext, Callable<Void> executeConversation) {
+                                                   Map<String, String> loggingContext, Callable<Void> executeConversation,
+                                                   Consumer<IConversationMemory> skipNotifier) {
         return () -> {
             // Queued-say guard: this memory copy was loaded at REST-request time;
             // a previously queued turn may have committed a pause (or a resume may
             // be executing) in the meantime. Skip the turn entirely — executing it
             // against the stale snapshot would end with a full-document store that
             // silently overwrites the pause (destroying the pending approval and
-            // orphaning its timeout schedule). Behavior matches a say into an
-            // in-progress conversation: the turn is dropped with a log entry.
+            // orphaning its timeout schedule). The skip notifier completes the
+            // caller's response handler with the persisted state, so the client
+            // gets a prompt, honest answer instead of a watchdog timeout.
             ConversationState persistedState = conversationMemoryStore.getConversationState(conversationId);
             if (persistedState == ConversationState.AWAITING_HUMAN || persistedState == ConversationState.IN_PROGRESS) {
                 conversationMemory.setConversationState(persistedState);
                 contextLogger.setLoggingContext(loggingContext);
                 LOGGER.warnf("Skipping queued turn for conversation %s: persisted state is %s (turn arrived before the state change)",
                         conversationId, persistedState);
+                if (skipNotifier != null) {
+                    skipNotifier.accept(conversationMemory);
+                }
                 return null;
             }
+
+            // Zombie-pause guard: the state loaded WITH the snapshot at request
+            // time — on a backend whose snapshot state diverged from the CAS'd
+            // state column, this can still claim AWAITING_HUMAN even though the
+            // pause was terminally resolved (persistedState above says otherwise).
+            // Never execute against, persist, or re-arm a pause this turn did not
+            // produce.
+            final ConversationState memoryStateAtSubmit = conversationMemory.getConversationState();
 
             // #2: register the live memory so cancelConversation can signal the
             // running pipeline via setCancelled (checked at task boundaries).
             inFlightConversations.put(conversationId, conversationMemory);
             try {
-                runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory, executeConversation);
+                runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory,
+                        executeConversation, memoryStateAtSubmit);
             } finally {
-                inFlightConversations.remove(conversationId);
+                // value-conditional: only the leg that registered this memory may
+                // unregister — a plain remove(key) could evict a NEWER execution's
+                // entry and defeat its cooperative cancel.
+                inFlightConversations.remove(conversationId, conversationMemory);
             }
             return null;
         };
@@ -801,22 +860,34 @@ public class ConversationService implements IConversationService {
 
     private void runGuardedConversationStep(Map<String, String> loggingContext, String conversationId,
                                             Environment environment, IConversationMemory conversationMemory,
-                                            Callable<Void> executeConversation) {
+                                            Callable<Void> executeConversation, ConversationState memoryStateAtSubmit) {
         waitForExecutionFinishOrTimeout(loggingContext, conversationId,
                 runtime.submitCallable(executeConversation, new IRuntime.IFinishedExecution<>() {
                     @Override
                     public void onComplete(Void result) {
                         try {
+                            boolean awaitingHuman = conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN;
+                            if (awaitingHuman && memoryStateAtSubmit == ConversationState.AWAITING_HUMAN) {
+                                // Stale pause carried in from the loaded snapshot —
+                                // this turn did not pause (it was skipped/rejected
+                                // by the pipeline). Persisting would resurrect a
+                                // terminally resolved approval as a zombie and
+                                // re-arm its timeout. Drop the result.
+                                contextLogger.setLoggingContext(loggingContext);
+                                LOGGER.warnf("Discarding turn result for conversation %s: snapshot carried a stale "
+                                        + "AWAITING_HUMAN state this turn did not produce", conversationId);
+                                return;
+                            }
                             // #6: copy the agent's timeout policy into the bookmark
                             // BEFORE persisting so approval-status/pending-approvals
                             // report it and crash recovery can distinguish
                             // WAIT_INDEFINITELY pauses from lost-schedule ones.
-                            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                            if (awaitingHuman) {
                                 populateHitlTimeoutBookmark(conversationMemory);
                             }
                             storeConversationMemory(conversationMemory, environment);
                             // M1: Schedule HITL timeout if conversation paused
-                            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                            if (awaitingHuman) {
                                 counterHitlPause.increment();
                                 scheduleHitlTimeout(conversationId, conversationMemory);
                             }
@@ -931,7 +1002,8 @@ public class ConversationService implements IConversationService {
 
     @Override
     public CancelOutcome cancelConversation(String conversationId,
-                                            ai.labs.eddi.engine.lifecycle.model.ControlSignal mode)
+                                            ai.labs.eddi.engine.lifecycle.model.ControlSignal mode,
+                                            String cancelledBy)
             throws ResourceStoreException {
         ConversationState currentState = conversationMemoryStore.getConversationState(conversationId);
         if (currentState == null) {
@@ -970,7 +1042,7 @@ public class ConversationService implements IConversationService {
                 } catch (Exception e) {
                     LOGGER.warnf("Failed to clear HITL bookmark on cancel of %s: %s", conversationId, e.getMessage());
                 }
-                auditHitlCancellation(conversationId, mode);
+                auditHitlCancellation(conversationId, mode, cancelledBy);
             }
             return CancelOutcome.CANCELLED;
         }
@@ -1045,7 +1117,7 @@ public class ConversationService implements IConversationService {
                 // No schedule re-arm: an undeployed agent would otherwise loop
                 // timeout→restore→re-arm forever; the policy resumes after the
                 // next restart (crash recovery) or a manual resume.
-                inFlightConversations.remove(conversationId);
+                inFlightConversations.remove(conversationId, memory);
                 restorePauseAfterFailedResume(conversationId, memory, false);
                 throw new IllegalStateException("Agent not deployed for resume (agentId=" + agentId + ", version=" + agentVersion
                         + ") — the conversation remains AWAITING_HUMAN; redeploy the agent and retry");
@@ -1070,17 +1142,22 @@ public class ConversationService implements IConversationService {
             Map<String, String> loggingContext = contextLogger.createLoggingContext(environment, agentId, conversationId, memory.getUserId());
 
             Callable<Void> resumeCallable = () -> {
-                // #3: a cancel may have landed between the CAS and this execution
-                // (flag on the registered memory, or DB-only in the tiny
-                // pre-registration window). Abort without persisting.
+                // #3: a cancel or a terminal end may have landed between the CAS
+                // and this execution (flag on the registered memory, or DB-only in
+                // the tiny pre-registration window). Abort without persisting —
+                // an accepted resume must never resurrect a cancelled or ENDED
+                // conversation.
+                ConversationState persistedNow = conversationMemoryStore.getConversationState(conversationId);
                 if (memory.isCancelled()
-                        || conversationMemoryStore.getConversationState(conversationId) == ConversationState.EXECUTION_INTERRUPTED) {
+                        || persistedNow == ConversationState.EXECUTION_INTERRUPTED
+                        || persistedNow == ConversationState.ENDED) {
                     memory.setCancelled(true);
-                    LOGGER.infof("Resume of conversation %s aborted: cancelled before execution", conversationId);
+                    LOGGER.infof("Resume of conversation %s aborted: cancelled/ended before execution (state=%s)",
+                            conversationId, persistedNow);
                     return null;
                 }
                 try {
-                    conversation.resume(decision, Map.of());
+                    conversation.resume(decision);
                 } catch (Exception e) {
                     LOGGER.error("Error during conversation resume: " + conversationId, e);
                     memory.setConversationState(ConversationState.ERROR);
@@ -1137,7 +1214,8 @@ public class ConversationService implements IConversationService {
                     waitForExecutionFinishOrTimeout(loggingContext, conversationId,
                             runtime.submitCallable(resumeCallable, resumeFinished, null));
                 } finally {
-                    inFlightConversations.remove(conversationId);
+                    // value-conditional: never evict a newer execution's registration
+                    inFlightConversations.remove(conversationId, memory);
                 }
                 return null;
             };
@@ -1147,7 +1225,7 @@ public class ConversationService implements IConversationService {
             } catch (RuntimeException e) {
                 // #5: coordinator saturation (RejectedExecutionException) or any
                 // submit failure — the callable will never run; restore the pause.
-                inFlightConversations.remove(conversationId);
+                inFlightConversations.remove(conversationId, memory);
                 restorePauseAfterFailedResume(conversationId, memory, true);
                 throw new ResourceStoreException("Failed to enqueue resume for conversation " + conversationId
                         + ": " + e.getLocalizedMessage() + " — the conversation remains AWAITING_HUMAN; retry later", e);
@@ -1168,7 +1246,7 @@ public class ConversationService implements IConversationService {
             // and submitInOrder (e.g. an unchecked exception from continueConversation)
             // must restore the pause and drop the in-flight registration — otherwise
             // the conversation is left stuck IN_PROGRESS with a leaked registry entry.
-            inFlightConversations.remove(conversationId);
+            inFlightConversations.remove(conversationId, memory);
             restorePauseAfterFailedResume(conversationId, memory, true);
             throw new ResourceStoreException("Failed to resume conversation: " + e.getLocalizedMessage(), e);
         }
@@ -1206,9 +1284,10 @@ public class ConversationService implements IConversationService {
 
     /**
      * Audits the termination of a pending human approval by cancel/ABORT — cancels
-     * are HITL decisions too and must appear in the oversight trail.
+     * are HITL decisions too and must be attributable in the oversight trail.
      */
-    private void auditHitlCancellation(String conversationId, ai.labs.eddi.engine.lifecycle.model.ControlSignal mode) {
+    private void auditHitlCancellation(String conversationId, ai.labs.eddi.engine.lifecycle.model.ControlSignal mode,
+                                       String cancelledBy) {
         if (!auditLedgerService.isEnabled()) {
             return;
         }
@@ -1216,6 +1295,8 @@ public class ConversationService implements IConversationService {
             var detail = new LinkedHashMap<String, Object>();
             detail.put("verdict", "CANCELLED");
             detail.put("mode", mode != null ? mode.name() : "CANCEL_GRACEFUL");
+            detail.put("decidedBy", cancelledBy != null ? cancelledBy : "unknown");
+            detail.put("automated", cancelledBy != null && cancelledBy.startsWith("system:"));
             auditLedgerService.submit(new ai.labs.eddi.engine.audit.model.AuditEntry(
                     UUID.randomUUID().toString(), conversationId, null, null, null,
                     null, -1, "hitl.approval", "hitl", -1, 0L,
@@ -1271,7 +1352,14 @@ public class ConversationService implements IConversationService {
             if (agentConfig == null)
                 return;
             AgentConfiguration.HitlConfig hitlConfig = agentConfig.getHitlConfig();
-            if (hitlConfig == null || hitlConfig.getTimeoutPolicy() == null)
+            if (hitlConfig == null)
+                return;
+            // Designer-supplied pause reason answers "what am I approving?" in the
+            // approval inbox; the generic reason set at pause time stays otherwise.
+            if (!isNullOrEmpty(hitlConfig.getPauseReason())) {
+                memory.setHitlPauseReason(hitlConfig.getPauseReason());
+            }
+            if (hitlConfig.getTimeoutPolicy() == null)
                 return;
             memory.setHitlTimeoutPolicy(hitlConfig.getTimeoutPolicy().name());
             memory.setHitlApprovalTimeout(hitlConfig.getApprovalTimeout());
@@ -1316,6 +1404,14 @@ public class ConversationService implements IConversationService {
         // #17: bounded, projection-based listing — never deserializes full
         // conversation documents on the Mongo backend.
         return conversationMemoryStore.findPendingApprovalSummaries(Math.max(1, Math.min(limit, 1000)));
+    }
+
+    @Override
+    public java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals(String ownerUserId, int limit)
+            throws ResourceStoreException {
+        // Owner filter is pushed into the query so the limit applies AFTER the
+        // restriction — a non-admin inbox can't be starved by others' backlog.
+        return conversationMemoryStore.findPendingApprovalSummaries(ownerUserId, Math.max(1, Math.min(limit, 1000)));
     }
 
     /**

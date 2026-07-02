@@ -457,7 +457,7 @@ public class Conversation implements IConversation {
     }
 
     @Override
-    public void resume(HitlDecision decision, Map<String, Context> contexts)
+    public void resume(HitlDecision decision)
             throws LifecycleException, ConversationNotReadyException {
         if (getConversationState() != ConversationState.AWAITING_HUMAN) {
             throw new ConversationNotReadyException("Not in AWAITING_HUMAN state");
@@ -485,13 +485,21 @@ public class Conversation implements IConversation {
                     new Property("hitlVerdict", decision.getVerdict().name(), Scope.conversation));
 
             if (decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED) {
-                // Emit a public output so UIs render rejection feedback
-                var rejectionData = new Data<>("output", List.of(
-                        "This action was rejected by a human reviewer."
-                                + (decision.getNote() != null ? " Reason: " + decision.getNote() : "")));
+                String rejectionMessage = "This action was rejected by a human reviewer."
+                        + (decision.getNote() != null ? " Reason: " + decision.getNote() : "");
+                // Public step data for snapshot consumers + ConversationOutput so
+                // log generation and UIs (which read conversationOutputs["output"])
+                // actually render the rejection feedback.
+                var rejectionData = new Data<>(MemoryKeys.OUTPUT_PREFIX, List.of(rejectionMessage));
                 rejectionData.setPublic(true);
                 currentStep.storeData(rejectionData);
+                currentStep.addConversationOutputList(MemoryKeys.OUTPUT_PREFIX, List.of(rejectionMessage));
                 clearHitlBookmark();
+                // The step's ACTIONS data still contains PAUSE_CONVERSATION from the
+                // paused turn — strip it (as the APPROVED path does) so a later
+                // rerun/undo of this step can never re-trigger the gate from stale
+                // action data.
+                stripPauseAction(currentStep);
                 return;
             }
 
@@ -572,14 +580,14 @@ public class Conversation implements IConversation {
      * LifecycleManager is bypassed, the stale action is no longer present.
      */
     private void stripPauseAction(IConversationMemory.IWritableConversationStep step) {
-        IData<List<String>> actionData = step.getLatestData("actions");
+        IData<List<String>> actionData = step.getLatestData(ACTIONS.key());
         if (actionData == null)
             return;
         List<String> actions = actionData.getResult();
         if (actions != null && actions.contains(IConversation.PAUSE_CONVERSATION)) {
             List<String> cleaned = new java.util.ArrayList<>(actions);
             cleaned.remove(IConversation.PAUSE_CONVERSATION);
-            IData<List<String>> replacement = new Data<>("actions", cleaned);
+            IData<List<String>> replacement = new Data<>(ACTIONS.key(), cleaned);
             step.storeData(replacement);
         }
     }

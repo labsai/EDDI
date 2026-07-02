@@ -10,8 +10,24 @@ package ai.labs.eddi.engine.lifecycle.model;
  */
 public class HitlDecision {
 
+    /**
+     * Upper bound for the free-text reviewer note — the single source of truth for
+     * every surface that accepts a decision body (regular resume, group approve,
+     * channel integrations).
+     */
+    public static final int MAX_NOTE_LENGTH = 4096;
+
     public enum HitlVerdict {
-        APPROVED, REJECTED
+        APPROVED, REJECTED;
+
+        /**
+         * Case-insensitive parsing on every surface — "approved" and "APPROVED" are the
+         * same human intent; rejecting on casing is needless 400 noise.
+         */
+        @com.fasterxml.jackson.annotation.JsonCreator
+        public static HitlVerdict fromString(String value) {
+            return value == null ? null : HitlVerdict.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+        }
     }
 
     private HitlVerdict verdict;

@@ -5,6 +5,53 @@
 
 ---
 
+## 🔧 HITL Production-Readiness Remediation — storage parity + say-path contract (2026-07-03, session 5)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+**Trigger:** A 92-agent adversarial review of the branch confirmed 46 findings (1 CRITICAL, 7 HIGH, 18 MEDIUM, 20 LOW). This entry covers the storage-layer and regular-surface batches; parallel batches (schedule security/sweeps, group surface) land as separate commits from their own branches.
+
+### CRITICAL — PostgreSQL conversation-state duality (the Postgres zombie)
+
+State was persisted twice on Postgres: in the indexed `conversation_state` column (updated by CAS/cancel) AND inside the JSONB snapshot (read by loads). A cancelled or ABORT-timed-out pause kept reporting `AWAITING_HUMAN` from the stale document — wedging `say()`, showing phantom pauses in approval-status, and letting the next user message resurrect the terminated approval as a zombie (full-document store flips the column back, re-arms a timeout; a later approve fails into ERROR). Fixes, defense in depth:
+
+- **Column wins on load** — `loadConversationMemorySnapshot`/`loadActiveConversationMemorySnapshot` overwrite the deserialized state with the `conversation_state` column (`applyStateColumn`).
+- **Writers converge the document** — `setConversationState` and `compareAndSetState` also `jsonb_set` the JSONB `conversationState` in the same statement.
+- **Say-path zombie guard** — `runGuardedConversationStep.onComplete` discards a turn result whose `AWAITING_HUMAN` state was already present at submit time (a stale pause the turn did not produce is never re-persisted or re-armed).
+
+### HIGH — say() into a paused conversation: honest 409 instead of a 60s hang
+
+`say()`/`sayStreaming()` now **fast-fail** with a new `ConversationAwaitingApprovalException` → REST 409 with an actionable body (matches the docs' "say() is rejected" promise, mirrors ENDED→410). The queued-say race backstop now completes the response via a new `ConversationResponseHandler.onSkipped(snapshot)` (default: delegates to `onComplete`) instead of dropping the turn into the 408 watchdog — and the `processingConversationReferences` gauge entry is removed on every exit path (was a permanent leak per dropped request). `RestAgentEngine` maps skipped turns to 409 ("awaiting approval" vs "busy — retry"). Callback consumers (group, Slack, MCP) are unaffected: the default `onSkipped` delivers the snapshot whose state they already inspect.
+
+### Storage-layer fixes (DB-agnostic parity)
+
+| Fix | Detail |
+|-----|--------|
+| Postgres regex 500s | `GroupConversationStore` built filters with `Pattern.quote` (`\Q…\E`) — valid in Mongo's PCRE, **rejected by PostgreSQL's regex engine** → group listing + pending-approvals 500'd on PG. Replaced with charset-validated plain anchoring (`^id$`; ids are hex/UUID, no metacharacters). Non-id input → honest empty result. |
+| Projected pending summaries | Postgres now runs ONE projected query (JSONB field extraction, `hitlPausedAt` round-tripped through the same Jackson mapper) instead of `1+limit` full-document deserializations; Mongo now runs ONE projected query instead of N+1 point-reads. |
+| Owner-scoped inbox | `findPendingApprovalSummaries(ownerUserId, limit)` implemented on both backends — the owner filter is INSIDE the query, so the limit applies after the restriction (a non-admin's inbox can no longer be starved by other users' backlog). New Mongo compound index `(conversationState, userId)`. `RestAgentEngine` uses it for non-admin/non-approver callers. |
+| CAS 404-vs-409 | `storeIfFieldEquals` (both backends) now distinguishes "document deleted" (`ResourceNotFoundException`) from "field mismatch" (`ResourceModifiedException`) via an existence check on zero-match. `GroupConversationStore.updateIfState` surfaces deletion as unchecked `GroupConversationGoneException` (kept unchecked so existing CAS call sites compile; surfaces map it to 404). The `IResourceStorage` default no longer silently degrades the CAS to an unconditional store — it throws `UnsupportedOperationException`. |
+| Truncation visibility | `findByState` WARNs when it hits its limit (pending listings / crash recovery must never truncate silently). |
+
+### Regular-surface fixes
+
+- **End-vs-resume race:** the resume pre-execution guard now also aborts on persisted `ENDED` (previously only `EXECUTION_INTERRUPTED`) — an accepted resume can no longer resurrect an ended conversation.
+- **Cooperative-cancel integrity:** all `inFlightConversations.remove(key)` calls are now value-conditional `remove(key, memory)` — a finishing leg can no longer evict a newer execution's registration.
+- **Cancel attribution (EU AI Act):** `cancelConversation(id, mode, cancelledBy)` threads the actor into the `hitl.approval` audit entry (`decidedBy` + `automated`); REST passes the principal, `HitlTimeoutHandler` passes `system:timeout`. Old 2-arg signature delegates (`unknown`).
+- **Configurable pause reason:** new optional `hitlConfig.pauseReason` (agent-level, ≤500 chars, validated at save/import) flows into the bookmark → pending-approvals/approval-status answer "what am I approving?". Falls back to the generic constant.
+- **approval-status payload** now includes `approvalTimeout` so UIs can render the auto-decision deadline.
+- **Fail-closed HITL authz:** resume/cancel/approval-status on a conversation whose descriptor is missing now require admin/approver (was: ownership check silently skipped).
+- **REJECTED-path visibility:** the rejection message is now written to `ConversationOutput["output"]` (UIs/log generator actually render it) and the stale `PAUSE_CONVERSATION` action is stripped on the REJECTED path (as on APPROVED).
+- **Verdict parsing** is case-insensitive on all surfaces (`HitlVerdict.fromString` @JsonCreator); note-length cap single-sourced as `HitlDecision.MAX_NOTE_LENGTH`.
+- **`IConversation.resume(decision)`** — dead `contexts` parameter removed (CodeQL).
+- Misleading "transient — not serialized" comment on the HITL bookmark fields corrected (they ARE persisted via the snapshot).
+
+### Deliberately deferred
+
+- Bookmark value-object refactor (6 flat fields → 1 object): cosmetic, touches the persisted snapshot shape late in the branch — deferred.
+- `RestGroupConversation`'s duplicated note-length constant: consolidation phase (group-surface files owned by a parallel batch).
+
+---
+
 ## 🔧 HITL PR Review Response — Copilot + CodeRabbit (2026-07-02, session 4)
 
 **Repo:** EDDI (`feat/hitl-framework`, PR #585)
