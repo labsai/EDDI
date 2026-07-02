@@ -8,11 +8,14 @@ import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
+import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import io.quarkus.runtime.StartupEvent;
+import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
@@ -23,6 +26,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Startup observer that REPAIRS HITL state after a crash or restart — it never
@@ -78,28 +82,40 @@ public class HitlCrashRecoveryObserver {
     private final IConversationMemoryStore conversationMemoryStore;
     private final IGroupConversationStore groupConversationStore;
     private final IScheduleStore scheduleStore;
+    private final IConversationService conversationService;
     private final boolean enabled;
     private final boolean recoverInProgress;
+    private final Optional<Duration> pendingMaxAge;
 
     @Inject
     public HitlCrashRecoveryObserver(
             IConversationMemoryStore conversationMemoryStore,
             IGroupConversationStore groupConversationStore,
             IScheduleStore scheduleStore,
+            IConversationService conversationService,
             @ConfigProperty(name = "eddi.hitl.crash-recovery.enabled",
                             defaultValue = "true") boolean enabled,
             @ConfigProperty(name = "eddi.hitl.crash-recovery.recover-in-progress",
-                            defaultValue = "true") boolean recoverInProgress) {
+                            defaultValue = "true") boolean recoverInProgress,
+            @ConfigProperty(name = "eddi.hitl.pending.max-age") Optional<Duration> pendingMaxAge) {
         this.conversationMemoryStore = conversationMemoryStore;
         this.groupConversationStore = groupConversationStore;
         this.scheduleStore = scheduleStore;
+        this.conversationService = conversationService;
         this.enabled = enabled;
         this.recoverInProgress = recoverInProgress;
+        this.pendingMaxAge = pendingMaxAge;
     }
 
     /** Upper bound of paused conversations scanned per recovery pass. */
     private static final int RECOVERY_SCAN_LIMIT = 10_000;
 
+    /** Upper bound of paused conversations scanned per retention sweep. */
+    private static final int RETENTION_SCAN_LIMIT = 10_000;
+
+    // 'event' is the required CDI observer trigger — the method fires on
+    // StartupEvent regardless of whether the payload is read.
+    @SuppressWarnings("unused")
     void onStartup(@Observes StartupEvent event) {
         if (!enabled) {
             LOGGER.info("HITL crash recovery disabled via config.");
@@ -123,6 +139,59 @@ public class HitlCrashRecoveryObserver {
                     rearmedRegular, rearmedGroup, recoveredInProgress);
         } else {
             LOGGER.info("HITL crash recovery: nothing to repair.");
+        }
+    }
+
+    /**
+     * Optional retention sweep for abandoned pending approvals. Under the default
+     * WAIT_INDEFINITELY policy a pause never expires, so forgotten approvals
+     * accumulate without bound. Set {@code eddi.hitl.pending.max-age} (an ISO-8601
+     * duration, e.g. {@code P30D}) to auto-cancel pauses older than the threshold.
+     * OFF by default (property empty): no pause is ever cancelled by this sweep,
+     * preserving the WAIT_INDEFINITELY contract for deployments that want it.
+     * <p>
+     * Cancellation goes through {@link IConversationService#cancelConversation}, so
+     * each reaped pause is audited (EU AI Act) and its timeout schedule disarmed —
+     * never a raw state write.
+     * <p>
+     * The property is read once at startup. See {@code docs/hitl.md} (owned by a
+     * later phase) for the operator-facing description.
+     */
+    @Scheduled(every = "${eddi.hitl.pending.sweep-interval:6h}", delayed = "5m", identity = "hitl-pending-retention")
+    void sweepExpiredPendingApprovals() {
+        if (!enabled || pendingMaxAge.isEmpty()) {
+            return; // retention disabled — the default
+        }
+        Duration maxAge = pendingMaxAge.get();
+        if (maxAge.isZero() || maxAge.isNegative()) {
+            return; // non-positive age is treated as OFF
+        }
+        Instant cutoff = Instant.now().minus(maxAge);
+        int cancelled = 0;
+        try {
+            var summaries = conversationMemoryStore.findPendingApprovalSummaries(RETENTION_SCAN_LIMIT);
+            for (var summary : summaries) {
+                Instant pausedAt = summary.getPausedAt();
+                if (pausedAt == null || pausedAt.isAfter(cutoff)) {
+                    continue; // unknown age or still within retention
+                }
+                String conversationId = summary.getConversationId();
+                try {
+                    // cancelConversation is CAS-guarded: it no-ops if the pause was
+                    // resumed/cancelled between the scan and here.
+                    var outcome = conversationService.cancelConversation(conversationId, ControlSignal.CANCEL_GRACEFUL);
+                    if (outcome == IConversationService.CancelOutcome.CANCELLED) {
+                        cancelled++;
+                    }
+                } catch (Exception e) {
+                    LOGGER.warnf("Failed to auto-cancel expired pending approval %s: %s", conversationId, e.getMessage());
+                }
+            }
+            if (cancelled > 0) {
+                LOGGER.warnf("HITL pending-approval retention: auto-cancelled %d pause(s) older than %s", cancelled, maxAge);
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Error during HITL pending-approval retention sweep: %s", e.getMessage());
         }
     }
 

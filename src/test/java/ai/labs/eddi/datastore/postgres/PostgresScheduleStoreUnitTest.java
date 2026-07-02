@@ -5,6 +5,7 @@
 package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
@@ -38,6 +39,7 @@ class PostgresScheduleStoreUnitTest {
     private ResultSet resultSet;
     @SuppressWarnings("unchecked")
     private Instance<DataSource> dataSourceInstance;
+    private IJsonSerialization jsonSerialization;
     private PostgresScheduleStore sut;
 
     @BeforeEach
@@ -48,6 +50,7 @@ class PostgresScheduleStoreUnitTest {
         preparedStatement = mock(PreparedStatement.class);
         resultSet = mock(ResultSet.class);
         dataSourceInstance = mock(Instance.class);
+        jsonSerialization = mock(IJsonSerialization.class);
 
         when(dataSourceInstance.get()).thenReturn(dataSource);
         when(dataSource.getConnection()).thenReturn(connection);
@@ -55,7 +58,7 @@ class PostgresScheduleStoreUnitTest {
         when(connection.prepareStatement(anyString())).thenReturn(preparedStatement);
         when(preparedStatement.executeQuery()).thenReturn(resultSet);
 
-        sut = new PostgresScheduleStore(dataSourceInstance);
+        sut = new PostgresScheduleStore(dataSourceInstance, jsonSerialization, 100);
     }
 
     // ─── createSchedule ─────────────────────────────────────────
@@ -594,7 +597,7 @@ class PostgresScheduleStoreUnitTest {
         Instance<DataSource> failInstance = mock(Instance.class);
         when(failInstance.get()).thenReturn(failDs);
 
-        var freshStore = new PostgresScheduleStore(failInstance);
+        var freshStore = new PostgresScheduleStore(failInstance, jsonSerialization, 100);
 
         // when/then — ensureSchema catches the error, but subsequent DB calls fail
         assertThrows(IResourceStore.ResourceStoreException.class,

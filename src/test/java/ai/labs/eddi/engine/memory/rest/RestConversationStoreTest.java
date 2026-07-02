@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.IAttachmentStorage;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
@@ -39,6 +40,7 @@ class RestConversationStoreTest {
     private IDocumentDescriptorStore documentDescriptorStore;
     private IConversationDescriptorStore conversationDescriptorStore;
     private IConversationMemoryStore conversationMemoryStore;
+    private IConversationService conversationService;
     private IUserMemoryStore userMemoryStore;
     private IRuntime runtime;
     private Instance<IAttachmentStorage> attachmentStorageInstance;
@@ -51,6 +53,7 @@ class RestConversationStoreTest {
         documentDescriptorStore = mock(IDocumentDescriptorStore.class);
         conversationDescriptorStore = mock(IConversationDescriptorStore.class);
         conversationMemoryStore = mock(IConversationMemoryStore.class);
+        conversationService = mock(IConversationService.class);
         userMemoryStore = mock(IUserMemoryStore.class);
         runtime = mock(IRuntime.class);
         attachmentStorageInstance = mock(Instance.class);
@@ -59,7 +62,7 @@ class RestConversationStoreTest {
 
         restConversationStore = new RestConversationStore(
                 documentDescriptorStore, conversationDescriptorStore,
-                conversationMemoryStore, userMemoryStore, runtime,
+                conversationMemoryStore, conversationService, userMemoryStore, runtime,
                 30, 90, attachmentStorageInstance);
     }
 
@@ -141,6 +144,32 @@ class RestConversationStoreTest {
         }
 
         @Test
+        @DisplayName("Finding #44: HITL cleanup before permanently deleting a paused conversation")
+        void permanentDelete_paused_runsHitlCleanupFirst() throws Exception {
+            when(conversationMemoryStore.getConversationState("conv-paused"))
+                    .thenReturn(ConversationState.AWAITING_HUMAN);
+
+            restConversationStore.deleteConversationLog("conv-paused", true);
+
+            // endConversation disarms the schedule, clears the bookmark, audits,
+            // and clears the cached state before the document is removed.
+            verify(conversationService).endConversation("conv-paused");
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-paused");
+        }
+
+        @Test
+        @DisplayName("Finding #44: no HITL cleanup for a non-paused permanent delete")
+        void permanentDelete_notPaused_skipsHitlCleanup() throws Exception {
+            when(conversationMemoryStore.getConversationState("conv-ready"))
+                    .thenReturn(ConversationState.READY);
+
+            restConversationStore.deleteConversationLog("conv-ready", true);
+
+            verify(conversationService, never()).endConversation(any());
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-ready");
+        }
+
+        @Test
         @DisplayName("should not delete snapshot when flag is false")
         void nonPermanentDelete() throws Exception {
             restConversationStore.deleteConversationLog("conv-1", false);
@@ -164,7 +193,7 @@ class RestConversationStoreTest {
 
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime,
                     30, 90, attachmentStorageInstance);
 
             store.deleteConversationLog("conv-1", true);
@@ -182,7 +211,7 @@ class RestConversationStoreTest {
 
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime,
                     30, 90, attachmentStorageInstance);
 
             // Should not throw — logs warning and continues
@@ -346,6 +375,38 @@ class RestConversationStoreTest {
             verify(conversationMemoryStore).setConversationState("conv-1", ConversationState.ENDED);
             verify(conversationMemoryStore).setConversationState("conv-2", ConversationState.ENDED);
         }
+
+        @Test
+        @DisplayName("Finding #26: routes AWAITING_HUMAN through HITL-aware endConversation")
+        void pausedGoesThroughService() throws Exception {
+            var paused = new ConversationStatus();
+            paused.setConversationId("conv-paused");
+            paused.setConversationState(ConversationState.AWAITING_HUMAN);
+            when(conversationDescriptorStore.readDescriptor("conv-paused", 0))
+                    .thenReturn(new ConversationDescriptor());
+
+            restConversationStore.endActiveConversations(List.of(paused));
+
+            verify(conversationService).endConversation("conv-paused");
+            // Must NOT take the raw ENDED write path for a paused conversation.
+            verify(conversationMemoryStore, never())
+                    .setConversationState(eq("conv-paused"), any());
+        }
+
+        @Test
+        @DisplayName("Finding #26: non-paused conversations still use the raw ENDED write")
+        void activeUsesRawWrite() throws Exception {
+            var ready = new ConversationStatus();
+            ready.setConversationId("conv-ready");
+            ready.setConversationState(ConversationState.READY);
+            when(conversationDescriptorStore.readDescriptor("conv-ready", 0))
+                    .thenReturn(new ConversationDescriptor());
+
+            restConversationStore.endActiveConversations(List.of(ready));
+
+            verify(conversationMemoryStore).setConversationState("conv-ready", ConversationState.ENDED);
+            verify(conversationService, never()).endConversation(any());
+        }
     }
 
     @Nested
@@ -357,7 +418,7 @@ class RestConversationStoreTest {
         void skipsWhenZero() {
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime,
                     30, 0, attachmentStorageInstance);
 
             // Should not throw
@@ -371,7 +432,7 @@ class RestConversationStoreTest {
         void skipsWhenNull() {
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime,
                     30, null, attachmentStorageInstance);
 
             store.cleanupOldUserMemories();
@@ -384,7 +445,7 @@ class RestConversationStoreTest {
         void submitsTaskWhenPositive() {
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime,
                     30, 90, attachmentStorageInstance);
 
             store.cleanupOldUserMemories();
@@ -783,7 +844,7 @@ class RestConversationStoreTest {
 
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime,
                     30, 90, attachmentStorageInstance);
 
             when(conversationMemoryStore.getEndedConversationIds())
@@ -1045,7 +1106,7 @@ class RestConversationStoreTest {
 
             var store = new RestConversationStore(
                     documentDescriptorStore, conversationDescriptorStore,
-                    conversationMemoryStore, userMemoryStore, runtime,
+                    conversationMemoryStore, conversationService, userMemoryStore, runtime,
                     30, 90, attachmentStorageInstance);
 
             store.deleteConversationLog("conv-1", false);

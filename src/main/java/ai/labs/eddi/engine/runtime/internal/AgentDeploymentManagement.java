@@ -258,9 +258,25 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
         var conversationMemorySnapshots = conversationMemoryStore.loadActiveConversationMemorySnapshot(agentId, agentVersion);
 
+        int sparedPausedConversations = 0;
         for (var conversationMemory : conversationMemorySnapshots) {
+            // A paused (AWAITING_HUMAN) conversation is a live pending approval:
+            // ending it here with a raw setConversationState(ENDED) would leave its
+            // armed timeout schedule and HITL bookmark behind, skip the EU AI Act
+            // oversight audit, and destroy the pause that getActiveConversationCount
+            // deliberately excludes so it survives undeploy. Skip it — reaping
+            // paused conversations needs an explicit, audited HITL-aware policy
+            // (see the HITL pending-approval retention sweep).
+            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                sparedPausedConversations++;
+                continue;
+            }
+
             var documentDescriptor = documentDescriptorStore.readDescriptor(conversationMemory.getAgentId(), conversationMemory.getAgentVersion());
 
+            // NOTE: age is derived from the AGENT document's lastModifiedOn, not the
+            // conversation's — a pre-existing heuristic that predates the HITL branch
+            // and is intentionally left unchanged here.
             var timeOfLastInteractionInConversation = documentDescriptor.getLastModifiedOn();
 
             var isOlderThanMaximumAmountOfDays = isOlderThanDays(
@@ -278,6 +294,13 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
 
                 LOGGER.info(message);
             }
+        }
+
+        if (sparedPausedConversations > 0) {
+            LOGGER.info(format(
+                    "Spared %d paused (AWAITING_HUMAN) conversation(s) of Agent (id: %s, version: %d) from the idle sweep — "
+                            + "their pending approvals are preserved",
+                    sparedPausedConversations, agentId, agentVersion));
         }
     }
 

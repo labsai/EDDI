@@ -55,7 +55,7 @@ class MongoScheduleStoreBranchTest {
         doReturn(scheduleCollection).when(database).getCollection("eddi_schedules");
         doReturn(fireLogCollection).when(database).getCollection("eddi_schedule_fire_logs");
 
-        store = new MongoScheduleStore(database, jsonSerialization, documentBuilder);
+        store = new MongoScheduleStore(database, jsonSerialization, documentBuilder, 100);
     }
 
     // ==================== readSchedule error paths ====================

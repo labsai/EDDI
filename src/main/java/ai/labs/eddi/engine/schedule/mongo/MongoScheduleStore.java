@@ -21,6 +21,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.bson.Document;
 import org.bson.conversions.Bson;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
@@ -76,10 +77,20 @@ public class MongoScheduleStore implements IScheduleStore {
     private final IDocumentBuilder documentBuilder;
     private final IJsonSerialization jsonSerialization;
 
+    /**
+     * Max schedules claimed per poll cycle. Raise for deployments that must drain
+     * large bursts of one-shot HITL timeouts quickly (they are dispatched
+     * concurrently by the poller); the CAS claim still guarantees exactly-once
+     * execution across the cluster.
+     */
+    private final int pollBatchSize;
+
     @Inject
-    public MongoScheduleStore(MongoDatabase database, IJsonSerialization jsonSerialization, IDocumentBuilder documentBuilder) {
+    public MongoScheduleStore(MongoDatabase database, IJsonSerialization jsonSerialization, IDocumentBuilder documentBuilder,
+            @ConfigProperty(name = "eddi.schedule.poll-batch-size", defaultValue = "100") int pollBatchSize) {
         this.jsonSerialization = jsonSerialization;
         this.documentBuilder = documentBuilder;
+        this.pollBatchSize = pollBatchSize > 0 ? pollBatchSize : 100;
         this.scheduleCollection = database.getCollection(COLLECTION_SCHEDULES);
         this.fireLogCollection = database.getCollection(COLLECTION_FIRE_LOGS);
 
@@ -259,7 +270,7 @@ public class MongoScheduleStore implements IScheduleStore {
 
             Bson filter = and(eq(ENABLED, true), lte(NEXT_FIRE, nowMs), or(pendingFilter, leaseExpiredFilter, retryDueFilter));
 
-            return readSchedulesWithFilter(filter, 100);
+            return readSchedulesWithFilter(filter, pollBatchSize);
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to find due schedules", e);
         }

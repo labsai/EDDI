@@ -52,6 +52,29 @@ State was persisted twice on Postgres: in the indexed `conversation_state` colum
 
 ---
 
+## 🔒 HITL Schedule Security, Sweeps & Retention — WS-C (2026-07-03)
+
+**Repo:** EDDI (`fix/hitl-ws-c-schedules`, branched from `feat/hitl-framework`)
+**Trigger:** Confirmed code-review findings (5, 7, 17, 26, 32, 44) on schedule security, idle/undeploy sweeps, poller scalability, and pause retention.
+
+| Finding | Fix |
+|---------|-----|
+| #5 (HIGH, security) | **Editor could bypass the HITL approval gate via the schedule REST surface.** `RestScheduleStore` now: (a) `fireNow` **refuses** any schedule with `metadata.hitlType=="hitl_timeout"` — for **everyone** including admins — returning **409 Conflict** directing to `/agents/{id}/resume` or `/cancel` (manual firing side-steps the /resume owner/admin/approver audit gate); (b) `updateSchedule`/`deleteSchedule`/`enableSchedule`/`disableSchedule` on a HITL schedule require `eddi-admin`, else **403 Forbidden** (detected via the STORED schedule so a doctored request body can't hide the marker); (c) `readAllSchedules` **redacts** HITL schedules for non-admins so they can't be enumerated. Internal firing via `SchedulePollerService` is unaffected (it bypasses REST). **Parity enabler:** `PostgresScheduleStore` never persisted `metadata` (Mongo did via full-doc serialization) — added a `metadata JSONB` column (+ idempotent `ADD COLUMN IF NOT EXISTS` upgrade, `IJsonSerialization` round-trip). Without this the HITL timeout fast-path never fired on Postgres AND the security guard couldn't recognize HITL schedules there. |
+| #7 (HIGH) | `AgentDeploymentManagement.endOldConversationsWithOldAgents` now **skips AWAITING_HUMAN** conversations (mirrors the deliberate `getActiveConversationCount` exclusion) instead of force-ENDing them with a raw non-CAS write (which left armed schedules, stale bookmarks, and no audit). Logs at INFO how many paused conversations were spared. The pre-existing agent-document-age heuristic for non-paused conversations is left unchanged with an explanatory comment. |
+| #17 (MEDIUM, scalability) | Poll batch size is now configurable (`eddi.schedule.poll-batch-size`, default 100) in **both** stores; `SchedulePollerService` **claims all due schedules on the poll thread (CAS before dispatch)** then **fires the claimed ones concurrently on virtual threads** (`newVirtualThreadPerTaskExecutor`) with **per-fire error isolation** — a mass HITL-timeout burst no longer serializes behind one thread and starves Dream/maintenance schedules. Exactly-once cluster semantics preserved. |
+| #26 (MEDIUM) | `RestConversationStore.endActiveConversations` routes AWAITING_HUMAN conversations through the HITL-aware `IConversationService.endConversation` (schedule disarm + bookmark clear + audit + in-flight-resume signal) instead of a raw ENDED write; non-paused conversations keep the raw path. |
+| #44 (LOW) | `RestConversationStore.deleteConversationLog(deletePermanently=true)` now calls `endConversation` for an AWAITING_HUMAN conversation **before** deleting the document — disarming the leaked one-shot schedule, clearing the bookmark, auditing, and invalidating the cached state — via the existing public service method. |
+| #32 (LOW) | New **optional** pause-retention sweep in `HitlCrashRecoveryObserver` (`@Scheduled`): `eddi.hitl.pending.max-age` (ISO-8601, default empty=OFF) auto-cancels pauses older than the threshold via `cancelConversation` (audited, schedule-disarmed); `eddi.hitl.pending.sweep-interval` (default 6h). Reuses the existing poller/scheduling infra — no new scheduler. |
+| CodeQL | `HitlCrashRecoveryObserver.onStartup(@Observes StartupEvent event)` — silenced the "unused parameter" alert with `@SuppressWarnings("unused")` + comment; the param is the required CDI observer trigger. |
+
+**REST status codes chosen:** manual fire of a HITL schedule → **409 Conflict** (operation not permitted for anyone; directs to /resume|/cancel). Non-admin mutate/disable/delete of a HITL schedule → **403 Forbidden**.
+
+**New config properties:** `eddi.schedule.poll-batch-size` (default 100), `eddi.hitl.pending.max-age` (default empty/OFF), `eddi.hitl.pending.sweep-interval` (default 6h) — documented in `application.properties`. `docs/hitl.md` (owned by a later phase) should document the retention property for operators.
+
+**Tests (pure JUnit/Mockito):** RestScheduleStore HITL guards (editor/admin fire+mutate+redact); AgentDeploymentManagement paused-skip; SchedulePollerService concurrent dispatch + per-fire error isolation + claim-before-dispatch; RestConversationStore paused end/delete routing; HitlCrashRecoveryObserver retention sweep (OFF-by-default, cancels-expired, non-positive=OFF); PostgresScheduleStore metadata round-trip.
+
+---
+
 ## 🔧 HITL PR Review Response — Copilot + CodeRabbit (2026-07-02, session 4)
 
 **Repo:** EDDI (`feat/hitl-framework`, PR #585)
