@@ -226,12 +226,32 @@ Config: `eddi.hitl.crash-recovery.enabled` (default `true`), `eddi.hitl.crash-re
 - **Pause retention (optional)**: `eddi.hitl.pending.max-age` (ISO-8601 duration, default **off**) auto-cancels pauses older than the threshold — audited, schedule-disarmed, via the normal cancel path; `eddi.hitl.pending.sweep-interval` (default 6h) controls the sweep cadence. Under the default `WAIT_INDEFINITELY` policy, pauses otherwise accumulate until decided.
 - **Mass-timeout drain**: due schedules are claimed in configurable batches (`eddi.schedule.poll-batch-size`, default 100) and fired concurrently on virtual threads with per-fire error isolation.
 
+## Slack Integration
+
+The Slack channel integration is HITL-aware end to end. Configuration lives in the Slack `ChannelIntegrationConfiguration.platformConfig` (both keys optional):
+
+| Key | Description |
+|-----|-------------|
+| `hitlApprovalChannel` | Slack channel id that receives approval notifications when a conversation pauses. |
+| `hitlApproverUserIds` | Comma-separated Slack user ids allowed to decide via buttons. **Without this list, buttons are not rendered and interactive decisions are rejected — fail-closed.** |
+
+Behavior:
+
+- **In-thread pause notice** — when a turn pauses, the thread receives the output so far plus "⏸️ awaiting human approval" with the `pauseReason`. Messages sent while paused get "Still awaiting approval" instead of a generic error (the input is not consumed).
+- **Approval inbox message** — if `hitlApprovalChannel` is set, an interactive Block Kit message is posted there (conversation, agent, reason, timeout deadline) with Approve/Reject buttons. Only the pause reason is shared — no conversation content (data minimization).
+- **Deciding from Slack** — buttons post to `POST /integrations/slack/interactive` (configure this as the Slack app's *Interactivity Request URL*; requests are signature-verified like the events webhook). The acting Slack user must be in `hitlApproverUserIds`; decisions are attributed `decidedBy: slack:<userId>` in the audit trail. Double-clicks and already-decided races update the message ("already resolved") without error spam. Group pauses work the same way (the button value carries `group:<conversationId>` and routes to the group approve machinery).
+- **Continuation push** — when the pause is resolved (human, Slack button, or `system:timeout`), the originating thread automatically receives the verdict and the resumed conversation's output — no polling. This works cross-pod: the resume fires an async CDI event (`HitlResumeCompletedEvent`) and the Slack observer resolves the thread from the persistent conversation mapping.
+- **Group discussions** — Slack-driven group discussions post pause/resume/cancel notices (and `member_pause_skipped` explanations) into their thread.
+
+**Delegated/managed conversations** (agent-to-agent tools, MCP `chat_managed`): when a nested conversation pauses, the calling tool receives a structured `PAUSED_FOR_APPROVAL` result naming the conversation and reason instead of hanging — the delegated approval stays pending (it is *not* auto-cancelled; a reviewer decides, then the tool can be re-invoked).
+
 ## Known Limitations (v1)
 
 - **Member-level HITL inside a group**: a member agent's own `PAUSE_CONVERSATION` rule firing during a group turn is not supported — the turn is recorded as SKIPPED with an explanatory note, the member's stranded pause is auto-cancelled (audited as `system:group`), and a `member_pause_skipped` SSE event is emitted. Use group-level HITL (`requiresApproval`) instead.
 - **Nested groups**: `requiresApproval` inside a sub-group of a group-of-groups is not supported — the sub-pause is cancelled and the member turn is recorded as SKIPPED with an explanatory note.
 - **Cross-pod cancel of an actively-running turn**: the cooperative cancel flag is per-pod; the DB CAS covers paused states cluster-wide, and a running group leg re-checks the persisted state at every phase boundary, so a cross-pod cancel takes effect at the next boundary.
 - **Tool-level HITL** (pausing inside an LLM tool call) is deferred.
+- **Managed REST conversations** (`RestAgentManagement`): a managed intent mapping stays pinned to a paused conversation until it is resumed or reset — a managed `say` against it answers `409` promptly, but the mapping is not automatically re-created while the approval is pending.
 - **Upgrade notes**:
   - `DiscussionPhase.requiresApproval` existed before this feature as an inert placeholder. Stored group configs that set it to `true` will begin pausing for approval after this upgrade.
   - `PAUSE_CONVERSATION` is a **newly reserved action name**. A stored behavior-rule config that already emitted an action with this exact name will begin pausing conversations after this upgrade — rename such actions before upgrading.
