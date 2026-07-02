@@ -10,6 +10,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -168,7 +169,8 @@ public class RestGroupConversation implements IRestGroupConversation {
             }
             var gc = groupConversationService.readGroupConversation(gcId);
             return Response.ok(gc).build();
-        } catch (IResourceStore.ResourceNotFoundException e) {
+        } catch (IResourceStore.ResourceNotFoundException
+                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
         } catch (Exception e) {
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
@@ -176,7 +178,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     }
 
     /** Upper bound for the free-text reviewer note persisted with a decision. */
-    private static final int MAX_HITL_NOTE_LENGTH = 4096;
+    private static final int MAX_HITL_NOTE_LENGTH = HitlDecision.MAX_NOTE_LENGTH;
 
     @Override
     public Response approveGroupPhase(String groupId, String gcId, GroupApprovalRequest request) {
@@ -198,7 +200,9 @@ public class RestGroupConversation implements IRestGroupConversation {
             return Response.ok(gc).build();
         } catch (IResourceStore.ResourceModifiedException e) {
             return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
-        } catch (IResourceStore.ResourceNotFoundException e) {
+        } catch (IResourceStore.ResourceNotFoundException
+                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
+            // deleted concurrently — a genuine 404, not a state conflict
             return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
         } catch (IGroupConversationService.GroupDiscussionException e) {
             // #12: wrong-state (e.g., double-approve) → 409, not 500
@@ -239,7 +243,8 @@ public class RestGroupConversation implements IRestGroupConversation {
         var listener = createStreamingListener(eventSink, sse);
         try {
             groupConversationService.resumeDiscussion(gcId, request, listener);
-        } catch (IResourceStore.ResourceModifiedException | IllegalArgumentException e) {
+        } catch (IResourceStore.ResourceModifiedException | IllegalArgumentException
+                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
             sendErrorEvent(eventSink, sse, e.getMessage());
             closeQuietly(eventSink);
         } catch (IGroupConversationService.GroupDiscussionException e) {

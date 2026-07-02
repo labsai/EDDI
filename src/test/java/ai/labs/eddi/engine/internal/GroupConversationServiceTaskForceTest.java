@@ -430,7 +430,8 @@ class GroupConversationServiceTaskForceTest {
             var method = GroupConversationService.class.getDeclaredMethod(
                     "executeAgentTurn", GroupMember.class, GroupConversation.class,
                     String.class, AgentGroupConfiguration.ProtocolConfig.class,
-                    int.class, DiscussionPhase.class, String.class);
+                    int.class, DiscussionPhase.class, String.class,
+                    GroupDiscussionEventListener.class);
             method.setAccessible(true);
 
             var member = new GroupMember("agent-1", "Agent One", 0, "MEMBER");
@@ -451,7 +452,7 @@ class GroupConversationServiceTaskForceTest {
                     .thenThrow(new QuotaExceededException("Conversation limit reached"));
 
             var ex = assertThrows(java.lang.reflect.InvocationTargetException.class,
-                    () -> method.invoke(service, member, gc, "test input", protocol, 0, phase, null));
+                    () -> method.invoke(service, member, gc, "test input", protocol, 0, phase, null, null));
 
             assertInstanceOf(GroupDiscussionException.class, ex.getCause());
             assertTrue(ex.getCause().getMessage().contains("Tenant quota exceeded"));
@@ -464,7 +465,8 @@ class GroupConversationServiceTaskForceTest {
             var method = GroupConversationService.class.getDeclaredMethod(
                     "executeAgentTurn", GroupMember.class, GroupConversation.class,
                     String.class, AgentGroupConfiguration.ProtocolConfig.class,
-                    int.class, DiscussionPhase.class, String.class);
+                    int.class, DiscussionPhase.class, String.class,
+                    GroupDiscussionEventListener.class);
             method.setAccessible(true);
 
             var member = new GroupMember("agent-1", "Agent One", 0, "MEMBER");
@@ -489,7 +491,7 @@ class GroupConversationServiceTaskForceTest {
                             any(), any(), any(), any(), anyBoolean(), any());
 
             var ex = assertThrows(java.lang.reflect.InvocationTargetException.class,
-                    () -> method.invoke(service, member, gc, "test input", protocol, 0, phase, null));
+                    () -> method.invoke(service, member, gc, "test input", protocol, 0, phase, null, null));
 
             assertInstanceOf(GroupDiscussionException.class, ex.getCause());
             assertTrue(ex.getCause().getMessage().contains("Tenant quota exceeded"));
@@ -502,7 +504,8 @@ class GroupConversationServiceTaskForceTest {
             var method = GroupConversationService.class.getDeclaredMethod(
                     "executeAgentTurn", GroupMember.class, GroupConversation.class,
                     String.class, AgentGroupConfiguration.ProtocolConfig.class,
-                    int.class, DiscussionPhase.class, String.class);
+                    int.class, DiscussionPhase.class, String.class,
+                    GroupDiscussionEventListener.class);
             method.setAccessible(true);
 
             var member = new GroupMember("agent-1", "Agent One", 0, "MEMBER");
@@ -525,7 +528,7 @@ class GroupConversationServiceTaskForceTest {
                             any(), any(), any(), any(), anyBoolean(), any());
 
             var ex = assertThrows(java.lang.reflect.InvocationTargetException.class,
-                    () -> method.invoke(service, member, gc, "test input", protocol, 0, phase, null));
+                    () -> method.invoke(service, member, gc, "test input", protocol, 0, phase, null, null));
 
             assertInstanceOf(GroupDiscussionException.class, ex.getCause());
             // Verify say() was called exactly once (no retries)

@@ -469,6 +469,10 @@ public class GroupConversationService implements IGroupConversationService {
                     notifyCancelled(persisted, listener);
                 }
                 return persisted;
+            } catch (IGroupConversationStore.GroupConversationGoneException e) {
+                // deleted while the leg was running — nothing to persist into
+                LOGGER.infof("Group discussion %s was deleted while running — discarding its result", gc.getId());
+                return gc;
             }
 
             if (listener != null) {
@@ -686,6 +690,9 @@ public class GroupConversationService implements IGroupConversationService {
             // release paused-state resources for a conversation still paused in DB.
             gc.setState(GroupConversationState.AWAITING_APPROVAL);
             LOGGER.infof("Pause→cancel conversion for GC %s lost a state race — leaving persisted state", gc.getId());
+        } catch (IGroupConversationStore.GroupConversationGoneException e) {
+            // deleted concurrently — nothing left to cancel
+            LOGGER.infof("Pause→cancel conversion for GC %s skipped — conversation was deleted", gc.getId());
         } catch (Exception e) {
             gc.setState(GroupConversationState.AWAITING_APPROVAL);
             LOGGER.warnf("Failed to convert just-committed pause of GC %s to CANCELLED: %s",
@@ -1976,7 +1983,7 @@ public class GroupConversationService implements IGroupConversationService {
                 member.agentId(), gc.getId(), phaseIdx);
         try {
             conversationService.cancelConversation(convId,
-                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL, "system:group");
         } catch (Exception e) {
             // Best-effort — still record SKIPPED so the discussion terminates cleanly.
             LOGGER.warnf("Failed to cancel stranded member pause %s: %s", convId, e.getMessage());
@@ -2711,10 +2718,9 @@ public class GroupConversationService implements IGroupConversationService {
         gc.setHitlApprovalTimeout(null);
         gc.setState(GroupConversationState.IN_PROGRESS);
 
-        // TODO(merge WS-A): updateIfState currently signals both "deleted" and
-        // "state mismatch" as ResourceModifiedException (→409). Once WS-A adds the
-        // 404-vs-409 distinction, a concurrent DELETE of a paused discussion should
-        // surface here as 404 rather than a misleading 409 conflict.
+        // Zero-match outcomes are distinguished by the store: a concurrent DELETE
+        // surfaces as (unchecked) GroupConversationGoneException → REST 404, a
+        // genuine state race as ResourceModifiedException → REST 409.
         conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
         // Delete timeout schedule only after CAS succeeds (Phase 5e) — if CAS
         // fails, the schedule is preserved so the timeout can still fire.

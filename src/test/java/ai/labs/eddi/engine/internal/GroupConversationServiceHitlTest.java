@@ -1434,9 +1434,10 @@ class GroupConversationServiceHitlTest {
 
             GroupConversation gc = service.discuss(GROUP_ID, "Question?", USER_ID, 0);
 
-            // The stranded member pause must have been cancelled.
+            // The stranded member pause must have been cancelled, attributed to the
+            // group system actor in the audit trail.
             verify(conversationService).cancelConversation(eq("member-conv"),
-                    eq(ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL));
+                    eq(ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL), eq("system:group"));
 
             // The member turn is recorded SKIPPED with the explanatory note — never
             // as an empty OPINION contribution.
