@@ -268,6 +268,114 @@ class RestGroupConversationHitlTest {
     }
 
     // =================================================================
+    // Note cap — group approve
+    // =================================================================
+
+    @Nested
+    @DisplayName("Decision note cap")
+    class NoteCap {
+
+        @Test
+        @DisplayName("approve with a note longer than 4096 chars → 400, service never called")
+        void oversizedNoteRejected() throws Exception {
+            asUser(OWNER_ID);
+            var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setNote("x".repeat(4097));
+            request.setDecision(decision);
+
+            Response response = restGroupConversation.approveGroupPhase(GROUP_ID, GC_ID, request);
+
+            assertEquals(400, response.getStatus(), "oversized note must be rejected with 400");
+            verify(groupService, never()).resumeDiscussion(anyString(), any(), any());
+        }
+    }
+
+    // =================================================================
+    // Pending approvals listing — summaries + visibility filter
+    // =================================================================
+
+    @Nested
+    @DisplayName("Pending approvals listing")
+    class PendingApprovalsListing {
+
+        private ai.labs.eddi.engine.model.PendingApprovalSummary summaryOwnedBy(String gcId, String ownerId) {
+            var summary = new ai.labs.eddi.engine.model.PendingApprovalSummary(
+                    gcId, null, ownerId, java.time.Instant.now(), "needs review", "WAIT_INDEFINITELY");
+            summary.setGroupId(GROUP_ID);
+            return summary;
+        }
+
+        @Test
+        @DisplayName("admin sees all of the group's pending summaries")
+        void adminSeesAll() throws Exception {
+            asAdmin(ADMIN_ID);
+            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(java.util.List.of(
+                    summaryOwnedBy("gc-1", OWNER_ID), summaryOwnedBy("gc-2", "someone-else")));
+
+            var result = restGroupConversation.listGroupPendingApprovals(GROUP_ID, 100);
+
+            assertEquals(2, result.size());
+        }
+
+        @Test
+        @DisplayName("approver sees all of the group's pending summaries")
+        void approverSeesAll() throws Exception {
+            var principal = mock(java.security.Principal.class);
+            when(principal.getName()).thenReturn("reviewer");
+            when(identity.getPrincipal()).thenReturn(principal);
+            when(identity.hasRole("eddi-admin")).thenReturn(false);
+            when(identity.hasRole("eddi-approver")).thenReturn(true);
+            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(java.util.List.of(
+                    summaryOwnedBy("gc-1", OWNER_ID), summaryOwnedBy("gc-2", "someone-else")));
+
+            var result = restGroupConversation.listGroupPendingApprovals(GROUP_ID, 100);
+
+            assertEquals(2, result.size());
+        }
+
+        @Test
+        @DisplayName("regular user sees ONLY their own conversations")
+        void ownerSeesOnlyOwn() throws Exception {
+            asUser(OWNER_ID);
+            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(java.util.List.of(
+                    summaryOwnedBy("gc-mine", OWNER_ID),
+                    summaryOwnedBy("gc-theirs", "someone-else"),
+                    summaryOwnedBy("gc-unowned", null)));
+
+            var result = restGroupConversation.listGroupPendingApprovals(GROUP_ID, 100);
+
+            assertEquals(1, result.size());
+            assertEquals("gc-mine", result.get(0).getConversationId());
+        }
+
+        @Test
+        @DisplayName("caller without a principal sees nothing (fail-closed)")
+        void anonymousSeesNothing() throws Exception {
+            when(identity.getPrincipal()).thenReturn(null);
+            when(identity.hasRole(anyString())).thenReturn(false);
+            when(groupService.listGroupPendingApprovals(eq(GROUP_ID), anyInt())).thenReturn(java.util.List.of(
+                    summaryOwnedBy("gc-1", OWNER_ID)));
+
+            var result = restGroupConversation.listGroupPendingApprovals(GROUP_ID, 100);
+
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("null limit param defaults to 100")
+        void nullLimitDefaults() throws Exception {
+            asAdmin(ADMIN_ID);
+            when(groupService.listGroupPendingApprovals(GROUP_ID, 100)).thenReturn(java.util.List.of());
+
+            restGroupConversation.listGroupPendingApprovals(GROUP_ID, null);
+
+            verify(groupService).listGroupPendingApprovals(GROUP_ID, 100);
+        }
+    }
+
+    // =================================================================
     // Approval status — detail param + approver read scope
     // =================================================================
 

@@ -964,6 +964,225 @@ class GroupConversationServiceHitlTest {
     }
 
     // =================================================================
+    // taskApprovals validation — 400-class errors BEFORE any mutation
+    // =================================================================
+
+    @Nested
+    @DisplayName("taskApprovals validation")
+    class TaskApprovalsValidation {
+
+        /** Paused GC with one task AWAITING_APPROVAL and one merely ASSIGNED. */
+        private GroupConversation pausedGcWithTasks() {
+            var gc = new GroupConversation();
+            gc.setId("gc-approvals");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAtPhaseIndex(0);
+            gc.setPausedPhaseName("Execute");
+            gc.setPausedAt(Instant.now());
+            gc.setHitlPauseType(GroupConversation.HitlPauseType.TASK);
+            gc.setOriginalQuestion("Validation test");
+
+            var taskList = new SharedTaskList();
+            taskList.addTask(new SharedTaskList.TaskItem("Awaiting task", "Do A", 0));
+            taskList.addTask(new SharedTaskList.TaskItem("Assigned task", "Do B", 0));
+            var tasks = taskList.all();
+            taskList.assignTask(tasks.get(0).id(), AGENT_A, "Agent A");
+            taskList.startTask(tasks.get(0).id());
+            taskList.submitForApproval(tasks.get(0).id(), "Result A");
+            taskList.assignTask(tasks.get(1).id(), AGENT_A, "Agent A");
+            gc.setTaskList(taskList);
+            return gc;
+        }
+
+        private GroupApprovalRequest approvedRequest(java.util.Map<String, String> taskApprovals) {
+            var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            request.setDecision(decision);
+            request.setTaskApprovals(taskApprovals);
+            return request;
+        }
+
+        @Test
+        @DisplayName("unknown taskId → IllegalArgumentException, nothing mutated, CAS never attempted")
+        void unknownTaskIdRejected() throws Exception {
+            var gc = pausedGcWithTasks();
+            doReturn(gc).when(conversationStore).read("gc-approvals");
+
+            var ex = assertThrows(IllegalArgumentException.class,
+                    () -> service.resumeDiscussion("gc-approvals",
+                            approvedRequest(java.util.Map.of("no-such-task", "APPROVED")), null));
+            assertTrue(ex.getMessage().contains("no-such-task"), ex.getMessage());
+
+            assertTrue(gc.getTaskList().hasAwaitingApproval(), "no task may be mutated on a rejected request");
+            assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState(), "pause must survive");
+            verify(conversationStore, never()).updateIfState(any(), any());
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+        }
+
+        @Test
+        @DisplayName("taskId not awaiting approval → IllegalArgumentException with the task status")
+        void wrongStateTaskRejected() throws Exception {
+            var gc = pausedGcWithTasks();
+            doReturn(gc).when(conversationStore).read("gc-approvals");
+            String assignedTaskId = gc.getTaskList().all().stream()
+                    .filter(t -> t.status() == TaskStatus.ASSIGNED)
+                    .findFirst().orElseThrow().id();
+
+            var ex = assertThrows(IllegalArgumentException.class,
+                    () -> service.resumeDiscussion("gc-approvals",
+                            approvedRequest(java.util.Map.of(assignedTaskId, "APPROVED")), null));
+            assertTrue(ex.getMessage().contains("not awaiting approval"), ex.getMessage());
+            verify(conversationStore, never()).updateIfState(any(), any());
+        }
+
+        @Test
+        @DisplayName("invalid decision VALUE → IllegalArgumentException, nothing mutated")
+        void invalidValueRejected() throws Exception {
+            var gc = pausedGcWithTasks();
+            doReturn(gc).when(conversationStore).read("gc-approvals");
+            String awaitingTaskId = gc.getTaskList().all().stream()
+                    .filter(t -> t.status() == TaskStatus.AWAITING_APPROVAL)
+                    .findFirst().orElseThrow().id();
+
+            var ex = assertThrows(IllegalArgumentException.class,
+                    () -> service.resumeDiscussion("gc-approvals",
+                            approvedRequest(java.util.Map.of(awaitingTaskId, "MAYBE")), null));
+            assertTrue(ex.getMessage().contains("APPROVED or REJECTED"), ex.getMessage());
+
+            assertTrue(gc.getTaskList().hasAwaitingApproval(), "no task may be mutated on a rejected request");
+            verify(conversationStore, never()).updateIfState(any(), any());
+        }
+
+        @Test
+        @DisplayName("case-insensitive values are accepted ('approved')")
+        void caseInsensitiveValueAccepted() throws Exception {
+            var gc = pausedGcWithTasks();
+            doReturn(gc).when(conversationStore).read("gc-approvals");
+            String awaitingTaskId = gc.getTaskList().all().stream()
+                    .filter(t -> t.status() == TaskStatus.AWAITING_APPROVAL)
+                    .findFirst().orElseThrow().id();
+
+            service.resumeDiscussion("gc-approvals",
+                    approvedRequest(java.util.Map.of(awaitingTaskId, "approved")), null);
+
+            assertFalse(gc.getTaskList().hasAwaitingApproval(), "lowercase 'approved' must be accepted");
+        }
+
+        @Test
+        @DisplayName("explicit empty map {} behaves like the approve-all shortcut")
+        void emptyMapIsApproveAllShortcut() throws Exception {
+            var gc = pausedGcWithTasks();
+            doReturn(gc).when(conversationStore).read("gc-approvals");
+
+            service.resumeDiscussion("gc-approvals", approvedRequest(java.util.Map.of()), null);
+
+            assertFalse(gc.getTaskList().hasAwaitingApproval(),
+                    "an explicit {} must auto-approve like an absent map — otherwise the phase instantly re-pauses");
+        }
+    }
+
+    // =================================================================
+    // Audit emission — EU AI Act human-oversight trail
+    // =================================================================
+
+    @Nested
+    @DisplayName("HITL audit emission")
+    class AuditEmission {
+
+        private ai.labs.eddi.engine.audit.AuditLedgerService auditLedger;
+        private GroupConversationService auditedService;
+
+        @BeforeEach
+        void setUpAuditedService() {
+            auditLedger = mock(ai.labs.eddi.engine.audit.AuditLedgerService.class);
+            when(auditLedger.isEnabled()).thenReturn(true);
+            auditedService = new GroupConversationService(
+                    groupStore, conversationStore, conversationService,
+                    agentFactory, templatingEngine, jsonSerialization,
+                    new SimpleMeterRegistry(), agentSigningService, agentStore,
+                    scheduleStore, nonceCacheService, auditLedger, DEFAULT_TENANT, MAX_DEPTH);
+        }
+
+        private GroupConversation pausedGc(String id) {
+            var gc = new GroupConversation();
+            gc.setId(id);
+            gc.setGroupId(GROUP_ID);
+            gc.setUserId(USER_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAtPhaseIndex(0);
+            gc.setPausedPhaseName("Gate");
+            gc.setPausedAt(Instant.now());
+            gc.setHitlPauseType(GroupConversation.HitlPauseType.PHASE);
+            gc.setOriginalQuestion("Audit test");
+            return gc;
+        }
+
+        @Test
+        @DisplayName("resume decision emits an hitl.approval entry with verdict + automated flag")
+        void resumeEmitsApprovalAuditEntry() throws Exception {
+            var gc = pausedGc("gc-audit-resume");
+            doReturn(gc).when(conversationStore).read("gc-audit-resume");
+
+            var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            decision.setDecidedBy("system:timeout");
+            decision.setNote("auto");
+            request.setDecision(decision);
+
+            auditedService.resumeDiscussion("gc-audit-resume", request, null);
+
+            var captor = org.mockito.ArgumentCaptor.forClass(ai.labs.eddi.engine.audit.model.AuditEntry.class);
+            verify(auditLedger).submit(captor.capture());
+            var entry = captor.getValue();
+            assertEquals("hitl.approval", entry.taskId(), "audit event type must be hitl.approval");
+            assertEquals("gc-audit-resume", entry.conversationId());
+            assertEquals("APPROVED", entry.output().get("verdict"));
+            assertEquals(Boolean.TRUE, entry.output().get("automated"),
+                    "system:timeout decisions must be flagged automated");
+            assertEquals("group", entry.output().get("surface"));
+        }
+
+        @Test
+        @DisplayName("cancel of a pending approval emits an hitl.approval entry with verdict CANCELLED")
+        void cancelOfPausedEmitsCancellationAuditEntry() throws Exception {
+            var gc = pausedGc("gc-audit-cancel");
+            doReturn(gc).when(conversationStore).read("gc-audit-cancel");
+            // cleanupAfterTerminalState loads the group config — let it no-op
+            doReturn(null).when(groupStore).getCurrentResourceId(GROUP_ID);
+
+            boolean cancelled = auditedService.cancelDiscussion("gc-audit-cancel",
+                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+
+            assertTrue(cancelled);
+            var captor = org.mockito.ArgumentCaptor.forClass(ai.labs.eddi.engine.audit.model.AuditEntry.class);
+            verify(auditLedger).submit(captor.capture());
+            var entry = captor.getValue();
+            assertEquals("hitl.approval", entry.taskId());
+            assertEquals("CANCELLED", entry.output().get("verdict"));
+            assertEquals("CANCEL_GRACEFUL", entry.output().get("mode"));
+        }
+
+        @Test
+        @DisplayName("no audit entries when the ledger is disabled")
+        void noEntriesWhenDisabled() throws Exception {
+            when(auditLedger.isEnabled()).thenReturn(false);
+            var gc = pausedGc("gc-audit-off");
+            doReturn(gc).when(conversationStore).read("gc-audit-off");
+
+            var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            request.setDecision(decision);
+            auditedService.resumeDiscussion("gc-audit-off", request, null);
+
+            verify(auditLedger, never()).submit(any());
+        }
+    }
+
+    // =================================================================
     // hitlPauseType=TASK resume test — replaces self-fulfilling test
     // =================================================================
 

@@ -266,6 +266,90 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
 
     // ─── Helpers ────────────────────────────────────────────────
 
+    // ─── HITL primitives ─────────────────────────────────────────
+
+    @Nested
+    @DisplayName("HITL primitives")
+    class HitlPrimitives {
+
+        @Test
+        @DisplayName("compareAndSetState succeeds only from the expected state")
+        void compareAndSetState() throws Exception {
+            var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            String id = store.storeConversationMemorySnapshot(snapshot);
+
+            assertFalse(store.compareAndSetState(id, ConversationState.READY, ConversationState.IN_PROGRESS),
+                    "CAS from a wrong expected state must fail");
+            assertEquals(ConversationState.AWAITING_HUMAN, store.getConversationState(id));
+
+            assertTrue(store.compareAndSetState(id, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS));
+            assertEquals(ConversationState.IN_PROGRESS, store.getConversationState(id));
+
+            assertFalse(store.compareAndSetState(id, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS),
+                    "a second identical CAS must lose");
+        }
+
+        @Test
+        @DisplayName("findConversationIdsByState returns only matching conversations")
+        void findConversationIdsByState() throws Exception {
+            String paused = store.storeConversationMemorySnapshot(
+                    createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN));
+            store.storeConversationMemorySnapshot(
+                    createSnapshot(null, "agent1", 1, "user1", ConversationState.READY));
+
+            List<String> ids = store.findConversationIdsByState(ConversationState.AWAITING_HUMAN);
+
+            assertEquals(List.of(paused), ids);
+        }
+
+        @Test
+        @DisplayName("findPendingApprovalSummaries projects the bookmark incl. approvalTimeout and honors the limit")
+        void findPendingApprovalSummaries() throws Exception {
+            var pausedSnapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            pausedSnapshot.setHitlPausedAt(java.time.Instant.now());
+            pausedSnapshot.setHitlPauseReason("needs review");
+            pausedSnapshot.setHitlTimeoutPolicy("AUTO_REJECT");
+            pausedSnapshot.setHitlApprovalTimeout("PT30M");
+            String id = store.storeConversationMemorySnapshot(pausedSnapshot);
+            store.storeConversationMemorySnapshot(
+                    createSnapshot(null, "agent1", 1, "user2", ConversationState.AWAITING_HUMAN));
+
+            var summaries = store.findPendingApprovalSummaries(10);
+            assertEquals(2, summaries.size());
+            var summary = summaries.stream()
+                    .filter(s -> id.equals(s.getConversationId()))
+                    .findFirst().orElseThrow();
+            assertEquals("agent1", summary.getAgentId());
+            assertEquals("user1", summary.getUserId());
+            assertEquals("needs review", summary.getPauseReason());
+            assertEquals("AUTO_REJECT", summary.getTimeoutPolicy());
+            assertEquals("PT30M", summary.getApprovalTimeout());
+            assertNotNull(summary.getPausedAt());
+
+            assertEquals(1, store.findPendingApprovalSummaries(1).size(), "limit must bound the result");
+        }
+
+        @Test
+        @DisplayName("clearHitlBookmark removes the bookmark fields but keeps the conversation")
+        void clearHitlBookmark() throws Exception {
+            var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPausedAt(java.time.Instant.now());
+            snapshot.setHitlPauseReason("needs review");
+            snapshot.setHitlTimeoutPolicy("AUTO_REJECT");
+            snapshot.setHitlApprovalTimeout("PT30M");
+            String id = store.storeConversationMemorySnapshot(snapshot);
+
+            store.clearHitlBookmark(id);
+
+            var loaded = store.loadConversationMemorySnapshot(id);
+            assertNotNull(loaded, "the conversation itself must survive");
+            assertNull(loaded.getHitlPausedAt());
+            assertNull(loaded.getHitlPauseReason());
+            assertNull(loaded.getHitlTimeoutPolicy());
+            assertNull(loaded.getHitlApprovalTimeout());
+        }
+    }
+
     private static ConversationMemorySnapshot createSnapshot(String id, String agentId,
                                                              int agentVersion, String userId,
                                                              ConversationState state) {

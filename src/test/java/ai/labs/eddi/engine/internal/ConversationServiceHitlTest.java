@@ -246,6 +246,62 @@ class ConversationServiceHitlTest {
     }
 
     // =========================================================================
+    // undo/redo HITL gate
+    // =========================================================================
+
+    @Nested
+    @DisplayName("undo/redo HITL gate")
+    class UndoRedoGate {
+
+        private void stubSnapshotInState(ConversationState state) throws Exception {
+            var snapshot = createHitlSnapshot(CONVERSATION_ID, AGENT_ID, Instant.now(),
+                    "gate", "WAIT_INDEFINITELY");
+            snapshot.setConversationState(state);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        }
+
+        @Test
+        @DisplayName("undo returns false while AWAITING_HUMAN — nothing stored")
+        void undoBlockedWhilePaused() throws Exception {
+            stubSnapshotInState(ConversationState.AWAITING_HUMAN);
+
+            assertFalse(conversationService.undo(ENV, AGENT_ID, CONVERSATION_ID),
+                    "undo while paused would corrupt the HITL bookmark");
+            verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+        }
+
+        @Test
+        @DisplayName("redo returns false while AWAITING_HUMAN — nothing stored")
+        void redoBlockedWhilePaused() throws Exception {
+            stubSnapshotInState(ConversationState.AWAITING_HUMAN);
+
+            assertFalse(conversationService.redo(ENV, AGENT_ID, CONVERSATION_ID),
+                    "redo while paused would corrupt the HITL bookmark");
+            verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+        }
+
+        @Test
+        @DisplayName("undo returns false while IN_PROGRESS (a resume is executing)")
+        void undoBlockedWhileInProgress() throws Exception {
+            stubSnapshotInState(ConversationState.IN_PROGRESS);
+
+            assertFalse(conversationService.undo(ENV, AGENT_ID, CONVERSATION_ID),
+                    "undo during IN_PROGRESS would write a persisted IN_PROGRESS outside the resume CAS");
+            verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+        }
+
+        @Test
+        @DisplayName("redo returns false while IN_PROGRESS (a resume is executing)")
+        void redoBlockedWhileInProgress() throws Exception {
+            stubSnapshotInState(ConversationState.IN_PROGRESS);
+
+            assertFalse(conversationService.redo(ENV, AGENT_ID, CONVERSATION_ID),
+                    "redo during IN_PROGRESS would race the executing resume");
+            verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+        }
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 

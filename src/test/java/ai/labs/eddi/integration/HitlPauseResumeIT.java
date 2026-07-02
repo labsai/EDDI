@@ -196,15 +196,28 @@ public class HitlPauseResumeIT extends BaseIntegrationIT {
                 .then().assertThat().statusCode(409);
     }
 
+    @Test
+    @DisplayName("redo is rejected with 409 while the conversation is paused")
+    void redoRejectedWhilePaused() throws Exception {
+        sendUserInput(agentResourceId.id(), conversationResourceId.id(), "delete", false, false);
+        waitForState("AWAITING_HUMAN");
+
+        given().post("agents/" + conversationResourceId.id() + "/redo")
+                .then().assertThat().statusCode(409);
+    }
+
     // ==================== Helpers ====================
 
     /** Polls the conversation until it reaches the expected state (max ~10s). */
     private void waitForState(String expectedState) throws InterruptedException {
         String lastState = null;
         for (int i = 0; i < 40; i++) {
-            Response response = given().get("agents/" + conversationResourceId.id() + "/status");
+            // Poll the DB-backed approval-status endpoint — /status serves a
+            // per-pod cache that can briefly lag behind CAS state transitions,
+            // which makes state-wait assertions flaky.
+            Response response = given().get("agents/" + conversationResourceId.id() + "/approval-status");
             if (response.statusCode() == 200) {
-                lastState = response.getBody().asString().replace("\"", "").trim();
+                lastState = response.jsonPath().getString("state");
                 if (expectedState.equals(lastState)) {
                     return;
                 }

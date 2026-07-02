@@ -199,6 +199,52 @@ class RestAgentEngineHitlTest {
     }
 
     // =========================================================================
+    // resumeConversation — input bounds
+    // =========================================================================
+
+    @Nested
+    @DisplayName("resumeConversation input validation")
+    class ResumeInputValidation {
+
+        @Test
+        @DisplayName("decision note longer than 4096 chars → 400, service never called")
+        void oversizedNoteRejected() throws Exception {
+            var decision = new ai.labs.eddi.engine.lifecycle.model.HitlDecision();
+            decision.setVerdict(ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.APPROVED);
+            decision.setNote("x".repeat(4097));
+
+            Response response = restAgentEngine.resumeConversation(CONVERSATION_ID, decision);
+
+            assertEquals(400, response.getStatus(), "oversized note must be rejected with 400");
+            verify(conversationService, never()).resumeConversation(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("note of exactly 4096 chars is accepted")
+        void maxLengthNoteAccepted() throws Exception {
+            var decision = new ai.labs.eddi.engine.lifecycle.model.HitlDecision();
+            decision.setVerdict(ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.APPROVED);
+            decision.setNote("x".repeat(4096));
+
+            Response response = restAgentEngine.resumeConversation(CONVERSATION_ID, decision);
+
+            assertEquals(200, response.getStatus());
+            verify(conversationService).resumeConversation(eq(CONVERSATION_ID), any(), any());
+        }
+
+        @Test
+        @DisplayName("missing verdict → 400, service never called")
+        void missingVerdictRejected() throws Exception {
+            var decision = new ai.labs.eddi.engine.lifecycle.model.HitlDecision();
+
+            Response response = restAgentEngine.resumeConversation(CONVERSATION_ID, decision);
+
+            assertEquals(400, response.getStatus());
+            verify(conversationService, never()).resumeConversation(anyString(), any(), any());
+        }
+    }
+
+    // =========================================================================
     // getApprovalStatus — approver read scope
     // =========================================================================
 
