@@ -359,4 +359,47 @@ class SlackGroupDiscussionListenerTest {
                 agentId, displayName, response, 0, "Opinion",
                 targetAgentId, targetDisplayName);
     }
+
+    // ─── HITL ───
+
+    @Test
+    void onHitlPause_postsThreadNotice() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "needs sign-off", "phase"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("awaiting approval"));
+    }
+
+    @Test
+    void onHitlPause_withApprovalChannelAndApprovers_postsButtons() {
+        var withHitl = new SlackGroupDiscussionListener(slackApi, AUTH_TOKEN, CHANNEL, USER_THREAD,
+                "C_APPROVAL", "U1,U2");
+        withHitl.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+
+        // Interactive block message posted to the approval channel with group value
+        verify(slackApi).postBlocksMessage(eq(AUTH_TOKEN), eq("C_APPROVAL"), isNull(), anyList(), anyString());
+    }
+
+    @Test
+    void onHitlPause_noApprovalChannel_noBlockMessage() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+        verify(slackApi, never()).postBlocksMessage(any(), any(), any(), anyList(), anyString());
+    }
+
+    @Test
+    void onHitlResume_postsVerdict() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        listener.onHitlResume(new GroupConversationEventSink.HitlResumeEvent("APPROVED", "looks good", "slack:U1"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("approved"));
+    }
+
+    @Test
+    void onMemberPauseSkipped_postsWarning() {
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        listener.onMemberPauseSkipped(new GroupConversationEventSink.MemberPauseSkippedEvent(
+                "a1", "Alice", 0, "Phase 1", "gated action"));
+        verify(slackApi).postMessage(eq(AUTH_TOKEN), eq(CHANNEL), eq(USER_THREAD), contains("skipped"));
+    }
 }

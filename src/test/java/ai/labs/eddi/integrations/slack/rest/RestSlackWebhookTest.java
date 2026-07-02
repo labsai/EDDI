@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.slack.rest;
 
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.slack.SlackEventHandler;
+import ai.labs.eddi.integrations.slack.SlackInteractivityHandler;
 import ai.labs.eddi.integrations.slack.SlackSignatureVerifier;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.ws.rs.core.Response;
@@ -22,13 +23,15 @@ import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for {@link RestSlackWebhook}. Covers signature verification, URL
- * verification challenge, event dispatching, and disabled/error paths.
+ * verification challenge, event dispatching, the interactivity endpoint, and
+ * disabled/error paths.
  */
 class RestSlackWebhookTest {
 
     private ChannelTargetRouter channelTargetRouter;
     private SlackSignatureVerifier signatureVerifier;
     private SlackEventHandler eventHandler;
+    private SlackInteractivityHandler interactivityHandler;
     private ObjectMapper objectMapper;
     private RestSlackWebhook webhook;
 
@@ -37,10 +40,11 @@ class RestSlackWebhookTest {
         channelTargetRouter = mock(ChannelTargetRouter.class);
         signatureVerifier = mock(SlackSignatureVerifier.class);
         eventHandler = mock(SlackEventHandler.class);
+        interactivityHandler = mock(SlackInteractivityHandler.class);
         objectMapper = new ObjectMapper();
 
         webhook = new RestSlackWebhook(channelTargetRouter, signatureVerifier,
-                eventHandler, objectMapper);
+                eventHandler, interactivityHandler, objectMapper);
     }
 
     // ─── Signature verification ───────────────────────────────────────────────
@@ -161,6 +165,81 @@ class RestSlackWebhookTest {
             Response response = webhook.handleEvents("not json", "sig", "ts");
 
             assertEquals(400, response.getStatus());
+        }
+    }
+
+    // ─── Interactivity endpoint ───────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Interactivity endpoint")
+    class Interactivity {
+
+        private static final String FORM_BODY = "payload=%7B%22type%22%3A%22block_actions%22%7D"; // {"type":"block_actions"}
+
+        @Test
+        @DisplayName("returns 403 + does not dispatch when signature is invalid")
+        void rejectsBadSignature() {
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
+            when(signatureVerifier.verify(eq("ts"), eq(FORM_BODY), eq("bad-sig"), any()))
+                    .thenReturn(false);
+
+            Response response = webhook.handleInteractive(FORM_BODY, "bad-sig", "ts");
+
+            assertEquals(403, response.getStatus());
+            verifyNoInteractions(interactivityHandler);
+        }
+
+        @Test
+        @DisplayName("returns 403 when signature header is absent")
+        void rejectsAbsentSignature() {
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
+            when(signatureVerifier.verify(isNull(), eq(FORM_BODY), isNull(), any()))
+                    .thenReturn(false);
+
+            Response response = webhook.handleInteractive(FORM_BODY, null, null);
+
+            assertEquals(403, response.getStatus());
+            verifyNoInteractions(interactivityHandler);
+        }
+
+        @Test
+        @DisplayName("verifies against the RAW body, then dispatches decoded payload async")
+        void dispatchesDecodedPayload() {
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
+            when(signatureVerifier.verify(eq("ts"), eq(FORM_BODY), eq("sig"), any()))
+                    .thenReturn(true);
+
+            Response response = webhook.handleInteractive(FORM_BODY, "sig", "ts");
+
+            assertEquals(200, response.getStatus());
+            verify(interactivityHandler).handlePayloadAsync("{\"type\":\"block_actions\"}");
+        }
+
+        @Test
+        @DisplayName("returns 400 when payload param is missing")
+        void missingPayload() {
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
+
+            Response response = webhook.handleInteractive("foo=bar", "sig", "ts");
+
+            assertEquals(400, response.getStatus());
+            verifyNoInteractions(interactivityHandler);
+        }
+
+        @Test
+        @DisplayName("extractPayloadParam decodes the URL-encoded payload")
+        void extractPayloadParamDecodes() {
+            String body = "payload=%7B%22a%22%3A1%7D&other=x";
+            assertEquals("{\"a\":1}", RestSlackWebhook.extractPayloadParam(body));
+        }
+
+        @Test
+        @DisplayName("extractPayloadParam returns null when absent")
+        void extractPayloadParamAbsent() {
+            assertNull(RestSlackWebhook.extractPayloadParam("foo=bar"));
+            assertNull(RestSlackWebhook.extractPayloadParam(""));
+            assertNull(RestSlackWebhook.extractPayloadParam(null));
         }
     }
 }

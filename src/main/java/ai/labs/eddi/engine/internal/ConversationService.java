@@ -13,6 +13,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
@@ -47,6 +48,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -95,6 +97,14 @@ public class ConversationService implements IConversationService {
     private final IAgentStore agentStore;
     private final ICache<String, ConversationState> conversationStateCache;
 
+    /**
+     * Fires {@link HitlResumeCompletedEvent} when a resume settles to a non-paused
+     * state. Async so a slow channel observer never blocks the engine; observer
+     * failures are isolated from the resume. Delivery adapters (Slack, …) observe
+     * this event to push the outcome to the originating surface.
+     */
+    private final Event<HitlResumeCompletedEvent> hitlResumeCompletedEvent;
+
     // Metrics
     private final Timer timerConversationStart;
     private final Timer timerConversationEnd;
@@ -130,7 +140,7 @@ public class ConversationService implements IConversationService {
             IConversationCoordinator conversationCoordinator, IConversationSetup conversationSetup, ICacheFactory cacheFactory, IRuntime runtime,
             IContextLogger contextLogger, AuditLedgerService auditLedgerService, GdprComplianceService gdprComplianceService,
             TenantQuotaService tenantQuotaService, IScheduleStore scheduleStore, IAgentStore agentStore,
-            MeterRegistry meterRegistry,
+            MeterRegistry meterRegistry, Event<HitlResumeCompletedEvent> hitlResumeCompletedEvent,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.agentFactory = agentFactory;
         this.conversationMemoryStore = conversationMemoryStore;
@@ -147,6 +157,7 @@ public class ConversationService implements IConversationService {
         this.gdprComplianceService = gdprComplianceService;
         this.tenantQuotaService = tenantQuotaService;
         this.agentTimeout = agentTimeout;
+        this.hitlResumeCompletedEvent = hitlResumeCompletedEvent;
         this.processingConversationReferences = new CopyOnWriteArrayList<>();
 
         this.timerConversationStart = meterRegistry.timer("eddi_conversation_start_duration");
@@ -1186,6 +1197,13 @@ public class ConversationService implements IConversationService {
                         if (memory.getConversationState() == ConversationState.AWAITING_HUMAN) {
                             counterHitlPause.increment();
                             scheduleHitlTimeout(conversationId, memory);
+                        } else {
+                            // Resume settled to a non-paused outcome — notify channel
+                            // observers (Slack, …) so the originating surface can push
+                            // the continuation without polling. Fired async and
+                            // best-effort: a failing observer must never affect the
+                            // persisted resume above.
+                            fireHitlResumeCompleted(conversationId, environment, memory, decision);
                         }
                     } catch (ResourceStoreException e) {
                         logConversationError(loggingContext, conversationId, e);
@@ -1279,6 +1297,29 @@ public class ConversationService implements IConversationService {
                     Instant.now(), null, null));
         } catch (Exception e) {
             LOGGER.warnf("Failed to submit HITL audit entry for %s: %s", conversationId, e.getMessage());
+        }
+    }
+
+    /**
+     * Fires {@link HitlResumeCompletedEvent} asynchronously after a resume has been
+     * persisted to a non-paused state. Building the snapshot and firing the event
+     * are wrapped so any failure here (serialization, no observers, …) is logged
+     * and swallowed — the resume itself has already succeeded and must not be
+     * affected by delivery-side concerns.
+     */
+    private void fireHitlResumeCompleted(String conversationId, Environment environment,
+                                         IConversationMemory memory,
+                                         ai.labs.eddi.engine.lifecycle.model.HitlDecision decision) {
+        try {
+            var snapshot = convertSimpleConversationMemorySnapshot(memory, false, true, List.of());
+            snapshot.setEnvironment(environment);
+            hitlResumeCompletedEvent.fireAsync(new HitlResumeCompletedEvent(
+                    conversationId,
+                    decision != null ? decision.getVerdict() : null,
+                    decision != null ? decision.getDecidedBy() : null,
+                    snapshot));
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to fire HITL resume-completed event for %s: %s", conversationId, e.getMessage());
         }
     }
 

@@ -79,7 +79,7 @@ class ConversationServiceReadLogTest {
                 conversationDescriptorStore, userMemoryStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService, gdprComplianceService,
                 tenantQuotaService, scheduleStore, agentStore,
-                new SimpleMeterRegistry(), 60);
+                new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), 60);
     }
 
     private ConversationMemorySnapshot createEmptySnapshot() {

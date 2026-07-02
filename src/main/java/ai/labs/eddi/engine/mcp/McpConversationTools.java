@@ -507,21 +507,64 @@ public class McpConversationTools {
 
             // Step 1: Get or create the user conversation for this intent
             var userConversation = getOrCreateManagedConversation(intent, userId, env);
+            var conversationId = userConversation.getConversationId();
 
-            // Step 2: Send the message using the existing sendMessageAndWait helper
-            var snapshot = sendMessageAndWait(userConversation.getConversationId(), message);
+            // Step 2: Send the message using the existing sendMessageAndWait helper.
+            // Finding 25: a managed conversation already paused for human approval
+            // throws synchronously — report the pending approval instead of hanging
+            // on the timeout and returning a generic error on every call. The
+            // mapping is intentionally preserved (NOT recreated) so re-invoking
+            // after approval continues the same conversation.
+            SimpleConversationMemorySnapshot snapshot;
+            try {
+                snapshot = sendMessageAndWait(conversationId, message);
+            } catch (IConversationService.ConversationAwaitingApprovalException e) {
+                return pausedForApprovalJson(intent, userId, userConversation.getAgentId(), conversationId);
+            }
+
+            // Finding 25: this turn itself paused for approval — same structured
+            // signal so the MCP client can inform its user and re-invoke later.
+            if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                return pausedForApprovalJson(intent, userId, userConversation.getAgentId(), conversationId);
+            }
 
             // Step 3: Build response
-            var result = buildConversationResponse(snapshot, userConversation.getConversationId());
+            var result = buildConversationResponse(snapshot, conversationId);
             result.putFirst("intent", intent);
             result.putFirst("userId", userId);
             result.putFirst("agentId", userConversation.getAgentId());
-            result.putFirst("conversationId", userConversation.getConversationId());
+            result.putFirst("conversationId", conversationId);
             result.putFirst("environment", userConversation.getEnvironment().name());
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.errorv("MCP chat_managed failed for intent={0}, userId={1}: {2}", intent, userId, e.getMessage());
             return errorJson("Failed to chat via managed agent: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Structured, actionable JSON for a managed conversation awaiting human
+     * approval (finding 25). The MCP client should relay this to its user rather
+     * than retrying blindly — the pause is intentional and must not be
+     * auto-cancelled. Re-invoke {@code chat_managed} with the same intent+userId
+     * after a reviewer decides.
+     */
+    private String pausedForApprovalJson(String intent, String userId, String agentId, String conversationId) {
+        var result = new LinkedHashMap<String, Object>();
+        result.put("status", "PAUSED_FOR_APPROVAL");
+        result.put("intent", intent);
+        result.put("userId", userId);
+        result.put("agentId", agentId);
+        result.put("conversationId", conversationId);
+        result.put("conversationState", ConversationState.AWAITING_HUMAN.name());
+        result.put("message", "The managed agent's conversation " + conversationId
+                + " requires human approval before it can continue. A reviewer must decide via "
+                + "POST /agents/" + conversationId + "/resume (APPROVED or REJECTED); "
+                + "re-invoke chat_managed with the same intent and userId afterwards to continue.");
+        try {
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            return errorJson("Conversation " + conversationId + " is awaiting human approval");
         }
     }
 

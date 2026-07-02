@@ -112,7 +112,7 @@ class ConversationServiceResumeTest {
                 userMemoryStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
-                new SimpleMeterRegistry(), AGENT_TIMEOUT);
+                new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), AGENT_TIMEOUT);
 
         // The resume path pre-checks existence via getConversationState (404 vs 409)
         doReturn(ConversationState.AWAITING_HUMAN)

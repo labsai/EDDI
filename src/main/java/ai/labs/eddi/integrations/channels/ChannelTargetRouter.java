@@ -247,6 +247,35 @@ public class ChannelTargetRouter {
     }
 
     /**
+     * Find the integration whose {@code hitlApprovalChannel} equals
+     * {@code approvalChannelId}. Used by the interactivity endpoint to resolve
+     * which integration owns an approval message (and thus which approver list and
+     * bot token govern the decision).
+     *
+     * @return the owning integration, or empty if none is configured to post HITL
+     *         approvals to this channel
+     */
+    public Optional<ChannelIntegrationConfiguration> getIntegrationByApprovalChannel(String channelType,
+                                                                                     String approvalChannelId) {
+        refreshIfNeeded();
+        if (approvalChannelId == null || approvalChannelId.isBlank()) {
+            return Optional.empty();
+        }
+        String prefix = (channelType != null ? channelType.toLowerCase(Locale.ROOT) : "") + ":";
+        for (var entry : integrationMap.entrySet()) {
+            if (!entry.getKey().startsWith(prefix)) {
+                continue;
+            }
+            var cfg = entry.getValue();
+            if (cfg.getPlatformConfig() != null
+                    && approvalChannelId.equals(cfg.getPlatformConfig().get("hitlApprovalChannel"))) {
+                return Optional.of(cfg);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
      * Get the bot token for a channel, checking new-style integrations first, then
      * legacy. Returns {@code null} if no token is configured for this channel.
      */

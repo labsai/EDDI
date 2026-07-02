@@ -5,6 +5,30 @@
 
 ---
 
+## 🔌 HITL — Slack integration + nested-consumer bridges (2026-07-03, WS-E)
+
+**Repo:** EDDI (`feat/hitl-ws-e-slack`, branched from `feat/hitl-framework`)
+**Scope:** Human-in-the-loop support in the Slack channel adapter, plus finding 25 (nested/managed/delegated conversation consumers stranded by a pause).
+
+### Slack HITL surface
+
+- **In-thread pause notice (`SlackEventHandler`):** when a say returns an `AWAITING_HUMAN` snapshot, the output-so-far is posted followed by a pause notice ("⏸️ This conversation is awaiting human approval" + pause reason from the HITL bookmark). A `ConversationAwaitingApprovalException` on subsequent messages posts "Still awaiting approval — a reviewer must decide…" instead of the generic error. Follow-up (group-thread) replies get the same handling.
+- **Approver notification + Approve/Reject buttons (config-driven, fail-closed):** two new **optional** `ChannelIntegrationConfiguration.platformConfig` keys — `hitlApprovalChannel` (Slack channel id for approval notifications) and `hitlApproverUserIds` (comma-separated Slack user ids allowed to decide). On pause, an interactive Block Kit message is posted to the approval channel (conversationId, agent, reason, timeout policy/deadline). Buttons are rendered **only** when `hitlApproverUserIds` is set (otherwise notification-only). Data minimization: only the pause reason is included, never the user's message.
+- **Interactivity endpoint (`RestSlackWebhook`):** new `POST /integrations/slack/interactive` (form-urlencoded, `payload` param). Verifies the Slack signature over the RAW body with the existing `SlackSignatureVerifier` + router signing secrets, acks 200 within 3s, processes async on a virtual thread (`SlackInteractivityHandler`). Handles `block_actions` (`hitl_approve`/`hitl_reject`). AUTHZ is fail-closed against the owning integration's approver list; `decidedBy` is always derived server-side (`slack:<userId>`). On success it `chat.update`s the message ("✅ Approved by …" / "⛔ Rejected"), removing buttons; an already-decided/timed-out click resolves to the `IllegalStateException` path and updates the message without error-spam (idempotent double-click).
+- **Continuation push after resume (CDI event):** `ConversationService` fires a new async CDI event `ai.labs.eddi.engine.events.HitlResumeCompletedEvent` when a resume settles to a non-paused state (in `resumeFinished.onComplete`, after `storeConversationMemory`, `fireAsync` so observers never block the engine; failures isolated). `SlackHitlResumeObserver` observes it, resolves the conversation's Slack routing via the new reverse-lookup `IUserConversationStore.readUserConversationByConversationId` (implemented on both Mongo + Postgres for parity), and posts the verdict + continuation output to the originating channel/thread. Timeout (`system:timeout`) and cancellation outcomes flow through the same event.
+- **Group discussions (`SlackGroupDiscussionListener`):** implemented the HITL listener callbacks — `onHitlPause` (thread notice + approval-channel buttons whose action value carries `group:<groupConversationId>`, routed to `resumeDiscussion`), `onHitlResume` (verdict), `onMemberPauseSkipped`, and `onCancelled`.
+- **Shared helpers:** `SlackHitlSupport` (config keys, Block Kit builders, approver authz, and the Slack-friendly response-text extraction refactored out of `SlackEventHandler`); `SlackWebApiClient` gained `postBlocksMessage` + `updateMessage` (chat.update), reusing a shared send/parse helper with the existing retry/backoff classification.
+
+### Finding 25 — nested/managed/delegated consumers
+
+- `ConverseWithAgentTool`, `McpConversationTools#chat_managed`, and `CreateSubAgentTool` now detect the delegated conversation pausing (AWAITING_HUMAN snapshot **or** `ConversationAwaitingApprovalException`) and return a structured, actionable `PAUSED_FOR_APPROVAL` result (with the conversationId and the `/resume` instruction) instead of "[no response]" or a 60s hang. The nested pause is **not** auto-cancelled (a delegated approval may be intended) and managed mappings are preserved so re-invoking after approval continues the same conversation.
+
+### Tests
+
+Plain JUnit/Mockito (no Quarkus boot): `SlackHitlSupportTest`, `SlackInteractivityHandlerTest`, `SlackHitlResumeObserverTest`, `ConverseWithAgentToolHitlTest`, `McpConversationToolsHitlTest`, plus additions to `SlackEventHandlerTest`, `SlackGroupDiscussionListenerTest`, `RestSlackWebhookTest`. Covers signature rejection on `/interactive`, unauthorized user cannot decide, authorized resume with `decidedBy=slack:…`, double-click no error-spam, buttons omitted without approvers, observer posts to the right channel/thread and ignores non-Slack conversations, and the bridges' PAUSED_FOR_APPROVAL result. `docs/hitl.md` needs a new "Slack" section (docs phase — not edited here).
+
+---
+
 ## 🔧 HITL Production-Readiness Remediation — storage parity + say-path contract (2026-07-03, session 5)
 
 **Repo:** EDDI (`feat/hitl-framework`, PR #585)

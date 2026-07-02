@@ -100,7 +100,7 @@ class ConversationServiceExtendedTest {
                 conversationDescriptorStore, userMemoryStore, conversationCoordinator,
                 conversationSetup, cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
-                meterRegistry, AGENT_TIMEOUT);
+                meterRegistry, ConversationServiceTestFixtures.hitlResumeEvent(), AGENT_TIMEOUT);
     }
 
     @Nested

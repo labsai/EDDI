@@ -164,6 +164,25 @@ class SlackEventHandlerTest {
         assertTrue(result.contains("Explain more?"));
     }
 
+    // ─── formatTimeoutInfo (HITL) ───
+
+    @Test
+    void formatTimeoutInfo_nullPolicy_returnsNull() {
+        assertNull(SlackEventHandler.formatTimeoutInfo(null, "PT1H"));
+        assertNull(SlackEventHandler.formatTimeoutInfo("", "PT1H"));
+    }
+
+    @Test
+    void formatTimeoutInfo_policyOnly() {
+        assertEquals("WAIT_INDEFINITELY", SlackEventHandler.formatTimeoutInfo("WAIT_INDEFINITELY", null));
+        assertEquals("WAIT_INDEFINITELY", SlackEventHandler.formatTimeoutInfo("WAIT_INDEFINITELY", ""));
+    }
+
+    @Test
+    void formatTimeoutInfo_policyAndTimeout() {
+        assertEquals("AUTO_REJECT (PT1H)", SlackEventHandler.formatTimeoutInfo("AUTO_REJECT", "PT1H"));
+    }
+
     // ─── Helpers ───
 
     /**

@@ -78,6 +78,26 @@ public class PostgresUserConversationStore implements IUserConversationStore {
     }
 
     @Override
+    public UserConversation readUserConversationByConversationId(String conversationId) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        // Reverse lookup on the JSONB payload — conversationId lives inside the
+        // serialized UserConversation (no dedicated column). LIMIT 1: a
+        // conversationId maps to at most one mapping (parity with Mongo).
+        String sql = "SELECT data FROM user_conversations WHERE data->>'conversationId' = ? LIMIT 1";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, conversationId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return jsonSerialization.deserialize(rs.getString("data"), UserConversation.class);
+                }
+            }
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
+        return null;
+    }
+
+    @Override
     public void createUserConversation(UserConversation userConversation)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceAlreadyExistsException {
         ensureSchema();

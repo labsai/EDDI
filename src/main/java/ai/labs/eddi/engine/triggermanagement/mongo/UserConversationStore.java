@@ -36,6 +36,7 @@ public class UserConversationStore implements IUserConversationStore {
     private static final String COLLECTION_USER_CONVERSATIONS = "userconversations";
     private static final String INTENT_FIELD = "intent";
     private static final String USER_ID_FIELD = "userId";
+    private static final String CONVERSATION_ID_FIELD = "conversationId";
     private final MongoCollection<Document> collection;
     private final IDocumentBuilder documentBuilder;
     private final IJsonSerialization jsonSerialization;
@@ -58,6 +59,20 @@ public class UserConversationStore implements IUserConversationStore {
         RuntimeUtilities.checkNotNull(userId, USER_ID_FIELD);
 
         return userConversationStore.readUserConversation(intent, userId);
+    }
+
+    @Override
+    public UserConversation readUserConversationByConversationId(String conversationId) throws IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(conversationId, CONVERSATION_ID_FIELD);
+        try {
+            Document document = collection.find(new Document(CONVERSATION_ID_FIELD, conversationId)).first();
+            if (document == null) {
+                return null;
+            }
+            return documentBuilder.build(document, UserConversation.class);
+        } catch (IOException e) {
+            throw new IResourceStore.ResourceStoreException(e.getLocalizedMessage(), e);
+        }
     }
 
     @Override
