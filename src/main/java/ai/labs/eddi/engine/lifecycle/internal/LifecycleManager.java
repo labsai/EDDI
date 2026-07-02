@@ -230,19 +230,20 @@ public class LifecycleManager implements ILifecycleManager {
                 throw new LifecycleException.LifecycleInterruptedException("Execution was interrupted!");
             }
 
-            // Snapshot state before task execution (for rollback on failure)
+            // Snapshot actions before task execution — always captured for
+            // delta-based PAUSE_CONVERSATION detection (Blocker #1 fix).
+            // Also used by strict-write rollback when enabled.
             var currentStep = conversationMemory.getCurrentStep();
+            IData<List<String>> preActionData = currentStep.getLatestData(ACTIONS);
+            List<String> actionsBefore = (preActionData != null && preActionData.getResult() != null)
+                    ? List.copyOf(preActionData.getResult())
+                    : List.of();
+
             Map<String, IData<?>> dataIdentitiesBefore = Map.of();
             Set<String> outputKeysBefore = Set.of();
-            List<String> actionsBefore = List.of();
             if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
                 dataIdentitiesBefore = cs.snapshotDataIdentities();
                 outputKeysBefore = cs.snapshotOutputKeys();
-                // Capture pre-failure actions for Bug 3 fix
-                IData<List<String>> preActionData = currentStep.getLatestData(ACTIONS);
-                if (preActionData != null && preActionData.getResult() != null) {
-                    actionsBefore = List.copyOf(preActionData.getResult());
-                }
             }
 
             // === OpenTelemetry: create span per task ===
@@ -291,7 +292,7 @@ public class LifecycleManager implements ILifecycleManager {
 
                 // Check if task triggered a STOP_CONVERSATION action
                 checkIfStopConversationAction(conversationMemory);
-                checkIfPauseConversationAction(conversationMemory, index);
+                checkIfPauseConversationAction(conversationMemory, index, actionsBefore);
 
             } catch (LifecycleException | RuntimeException e) {
                 taskSpan.setStatus(StatusCode.ERROR, Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
@@ -367,17 +368,19 @@ public class LifecycleManager implements ILifecycleManager {
                 throw new LifecycleException.LifecycleInterruptedException("Execution was interrupted!");
             }
 
+            // Snapshot actions before task execution — always captured for
+            // delta-based PAUSE_CONVERSATION detection (Blocker #1 fix).
             var currentStep = conversationMemory.getCurrentStep();
+            IData<List<String>> preActionData = currentStep.getLatestData(ACTIONS);
+            List<String> actionsBefore = (preActionData != null && preActionData.getResult() != null)
+                    ? List.copyOf(preActionData.getResult())
+                    : List.of();
+
             Map<String, IData<?>> dataIdentitiesBefore = Map.of();
             Set<String> outputKeysBefore = Set.of();
-            List<String> actionsBefore = List.of();
             if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
                 dataIdentitiesBefore = cs.snapshotDataIdentities();
                 outputKeysBefore = cs.snapshotOutputKeys();
-                IData<List<String>> preActionData = currentStep.getLatestData(ACTIONS);
-                if (preActionData != null && preActionData.getResult() != null) {
-                    actionsBefore = List.copyOf(preActionData.getResult());
-                }
             }
 
             @SuppressWarnings("null")
@@ -418,7 +421,7 @@ public class LifecycleManager implements ILifecycleManager {
                 }
 
                 checkIfStopConversationAction(conversationMemory);
-                checkIfPauseConversationAction(conversationMemory, index);
+                checkIfPauseConversationAction(conversationMemory, index, actionsBefore);
 
             } catch (LifecycleException | RuntimeException e) {
                 taskSpan.setStatus(StatusCode.ERROR, Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
@@ -603,16 +606,28 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     /**
-     * Checks if the current step contains a PAUSE_CONVERSATION action. Opt-in is
-     * the presence of the action in behavior rules — no separate enabled flag.
+     * Checks if the current step contains a PAUSE_CONVERSATION action that was
+     * <em>newly added</em> by the just-executed task. This delta-based check
+     * prevents the re-pause loop (Blocker #1): on resume, the stale
+     * PAUSE_CONVERSATION action from the prior turn is already in the step's
+     * ACTIONS data, but it must not re-trigger the pause.
+     *
+     * @param actionsBeforeTask
+     *            actions snapshot taken before the task executed; if
+     *            PAUSE_CONVERSATION was already present, the task did not add it
+     *            and no pause is thrown.
      */
-    private void checkIfPauseConversationAction(IConversationMemory conversationMemory, int absoluteTaskIndex)
+    private void checkIfPauseConversationAction(IConversationMemory conversationMemory,
+                                                int absoluteTaskIndex,
+                                                List<String> actionsBeforeTask)
             throws ConversationPauseException {
         IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(ACTIONS);
         if (actionData == null)
             return;
         List<String> actions = actionData.getResult();
-        if (actions != null && actions.contains(IConversation.PAUSE_CONVERSATION)) {
+        if (actions != null
+                && actions.contains(IConversation.PAUSE_CONVERSATION)
+                && !actionsBeforeTask.contains(IConversation.PAUSE_CONVERSATION)) {
             throw new ConversationPauseException(workflowId.getId(), absoluteTaskIndex, "PAUSE_CONVERSATION action");
         }
     }

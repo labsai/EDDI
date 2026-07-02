@@ -258,6 +258,11 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public Response resumeConversation(String conversationId, HitlDecision decision) {
+        if (decision == null || decision.getVerdict() == null) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Request body must include a 'verdict' field (APPROVED or REJECTED)")
+                    .build();
+        }
         validateConversationOwnership(conversationId);
         String userId = identity.getPrincipal().getName();
         decision.setDecidedBy(userId);

@@ -457,13 +457,33 @@ public class Conversation implements IConversation {
         }
         try {
             setConversationState(ConversationState.IN_PROGRESS);
+
+            // Store decision in step data (internal — not template-visible via colon keys)
             conversationMemory.getCurrentStep().storeData(new Data<>("hitl:decision_verdict", decision.getVerdict().name()));
             if (decision.getNote() != null)
                 conversationMemory.getCurrentStep().storeData(new Data<>("hitl:decision_note", decision.getNote()));
             if (decision.getDecidedBy() != null)
                 conversationMemory.getCurrentStep().storeData(new Data<>("hitl:decision_by", decision.getDecidedBy()));
 
+            // Decision visibility (Phase 1b): make verdict accessible in templates
+            // and behavior rules. ConversationOutput → {memory.current.hitlDecision},
+            // property → {properties.hitlVerdict} for next-turn behavior rule matching.
+            var currentStep = conversationMemory.getCurrentStep();
+            currentStep.addConversationOutputString("hitlDecision", decision.getVerdict().name());
+            if (decision.getNote() != null) {
+                currentStep.addConversationOutputString("hitlDecisionNote", decision.getNote());
+            }
+            var props = conversationMemory.getConversationProperties();
+            props.put("hitlVerdict",
+                    new Property("hitlVerdict", decision.getVerdict().name(), Scope.conversation));
+
             if (decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED) {
+                // Emit a public output so UIs render rejection feedback
+                var rejectionData = new Data<>("output", List.of(
+                        "This action was rejected by a human reviewer."
+                                + (decision.getNote() != null ? " Reason: " + decision.getNote() : "")));
+                rejectionData.setPublic(true);
+                currentStep.storeData(rejectionData);
                 clearHitlBookmark();
                 return;
             }
@@ -471,6 +491,13 @@ public class Conversation implements IConversation {
             String pausedWorkflowId = conversationMemory.getHitlPausedWorkflowId();
             int resumeFromIndex = conversationMemory.getHitlPausedAbsoluteTaskIndex() + 1;
             clearHitlBookmark();
+
+            // Belt-and-braces for Blocker #1: strip PAUSE_CONVERSATION from the
+            // step's ACTIONS data before re-entering the pipeline. The primary
+            // fix is the delta-based check in LifecycleManager; this ensures
+            // stale actions can never re-trigger even if the delta check is
+            // bypassed by a code path that doesn't snapshot actionsBefore.
+            stripPauseAction(currentStep);
 
             boolean foundPaused = false;
             for (IExecutableWorkflow workflow : executableWorkflows) {
@@ -521,5 +548,23 @@ public class Conversation implements IConversation {
         conversationMemory.setHitlPauseReason(null);
         conversationMemory.setHitlTimeoutPolicy(null);
         conversationMemory.setHitlApprovalTimeout(null);
+    }
+
+    /**
+     * Strips the PAUSE_CONVERSATION action from the step's ACTIONS data.
+     * Belt-and-braces for Blocker #1: even if the delta-based check in
+     * LifecycleManager is bypassed, the stale action is no longer present.
+     */
+    private void stripPauseAction(IConversationMemory.IWritableConversationStep step) {
+        IData<List<String>> actionData = step.getLatestData("actions");
+        if (actionData == null)
+            return;
+        List<String> actions = actionData.getResult();
+        if (actions != null && actions.contains(IConversation.PAUSE_CONVERSATION)) {
+            List<String> cleaned = new java.util.ArrayList<>(actions);
+            cleaned.remove(IConversation.PAUSE_CONVERSATION);
+            IData<List<String>> replacement = new Data<>("actions", cleaned);
+            step.storeData(replacement);
+        }
     }
 }

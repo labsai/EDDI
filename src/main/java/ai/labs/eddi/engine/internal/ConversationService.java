@@ -523,6 +523,11 @@ public class ConversationService implements IConversationService {
             throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException {
 
         validateParams(environment, agentId, conversationId);
+        // #5: undo during AWAITING_HUMAN would corrupt the HITL bookmark
+        var cachedState = conversationStateCache.get(conversationId);
+        if (cachedState == ConversationState.AWAITING_HUMAN) {
+            throw new ResourceStoreException("Cannot undo while conversation is awaiting human approval");
+        }
         long startTime = System.nanoTime();
         try {
             IConversationMemory conversationMemory = loadAndValidateConversationMemory(agentId, conversationId);
@@ -553,6 +558,11 @@ public class ConversationService implements IConversationService {
             throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException {
 
         validateParams(environment, agentId, conversationId);
+        // #5: redo during AWAITING_HUMAN would corrupt the HITL bookmark
+        var cachedState = conversationStateCache.get(conversationId);
+        if (cachedState == ConversationState.AWAITING_HUMAN) {
+            throw new ResourceStoreException("Cannot redo while conversation is awaiting human approval");
+        }
         long startTime = System.nanoTime();
         try {
             IConversationMemory conversationMemory = loadAndValidateConversationMemory(agentId, conversationId);
@@ -892,6 +902,11 @@ public class ConversationService implements IConversationService {
                 } finally {
                     storeConversationMemory(memory, environment);
                     cacheConversationState(conversationId, memory.getConversationState());
+                    // #3: If the resumed turn re-paused (another PAUSE_CONVERSATION
+                    // action fired), arm a new timeout schedule — same as the say path.
+                    if (memory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                        scheduleHitlTimeout(conversationId, memory.getAgentId());
+                    }
                 }
                 return null;
             };

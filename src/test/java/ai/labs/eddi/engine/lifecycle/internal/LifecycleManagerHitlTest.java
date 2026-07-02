@@ -116,9 +116,12 @@ class LifecycleManagerHitlTest {
             var memory = mockMemory();
             var currentStep = memory.getCurrentStep();
 
-            // After task executes, actions contain PAUSE_CONVERSATION
+            // Delta-based check: before task runs → no actions; after task →
+            // PAUSE_CONVERSATION
             var actionData = mock(IData.class);
-            when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+            when(currentStep.getLatestData(ACTIONS))
+                    .thenReturn(null) // snapshot before task
+                    .thenReturn(actionData); // check after task
             when(actionData.getResult()).thenReturn(List.of(IConversation.PAUSE_CONVERSATION));
 
             var ex = assertThrows(ConversationPauseException.class,
@@ -319,9 +322,9 @@ class LifecycleManagerHitlTest {
         }
 
         @Test
-        @DisplayName("executeLifecycleFromIndex detects PAUSE_CONVERSATION")
+        @DisplayName("executeLifecycleFromIndex does NOT re-pause on stale PAUSE_CONVERSATION (Blocker #1)")
         @SuppressWarnings("unchecked")
-        void fromIndexDetectsPause() throws Exception {
+        void fromIndexIgnoresStaleAction() throws Exception {
             var task0 = mockTask("parser", "input");
             var task1 = mockTask("behavior", "behavior_rules");
 
@@ -331,18 +334,72 @@ class LifecycleManagerHitlTest {
             var memory = mockMemory();
             var currentStep = memory.getCurrentStep();
 
+            // Seed stale PAUSE_CONVERSATION — already present BEFORE task1 runs
             var actionData = mock(IData.class);
             when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
             when(actionData.getResult()).thenReturn(List.of(IConversation.PAUSE_CONVERSATION));
 
-            // Start from index 1 — only task1 runs, then pause is detected
+            // Start from index 1 — action was already there, delta-based check
+            // sees it in actionsBefore and does NOT re-pause
+            assertDoesNotThrow(
+                    () -> lifecycleManager.executeLifecycleFromIndex(memory, 1));
+
+            verify(task0, never()).execute(any(), any());
+            verify(task1).execute(eq(memory), any());
+        }
+
+        @Test
+        @DisplayName("executeLifecycleFromIndex detects newly-added PAUSE_CONVERSATION")
+        @SuppressWarnings("unchecked")
+        void fromIndexDetectsNewPause() throws Exception {
+            var task0 = mockTask("parser", "input");
+            var task1 = mockTask("behavior", "behavior_rules");
+
+            lifecycleManager.addLifecycleTask(task0);
+            lifecycleManager.addLifecycleTask(task1);
+
+            var memory = mockMemory();
+            var currentStep = memory.getCurrentStep();
+
+            // Before task1 runs: no actions. Task1 adds PAUSE_CONVERSATION.
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS))
+                    .thenReturn(null) // first call: snapshot before task
+                    .thenReturn(actionData); // second call: check after task
+            when(actionData.getResult()).thenReturn(List.of(IConversation.PAUSE_CONVERSATION));
+
+            // Start from index 1 — action is new, delta check fires
             var ex = assertThrows(ConversationPauseException.class,
                     () -> lifecycleManager.executeLifecycleFromIndex(memory, 1));
 
-            // Index should be 1 (absolute position of task1)
             assertEquals(1, ex.getPausedAbsoluteTaskIndex());
             verify(task0, never()).execute(any(), any());
             verify(task1).execute(eq(memory), any());
+        }
+
+        @Test
+        @DisplayName("executeLifecycle detects PAUSE_CONVERSATION from fresh task execution")
+        @SuppressWarnings("unchecked")
+        void executeLifecycleDetectsFreshPause() throws Exception {
+            var task0 = mockTask("behavior", "behavior_rules");
+
+            lifecycleManager.addLifecycleTask(task0);
+
+            var memory = mockMemory();
+            var currentStep = memory.getCurrentStep();
+
+            // Before task0: no actions. Task0 adds PAUSE_CONVERSATION.
+            var actionData = mock(IData.class);
+            when(currentStep.getLatestData(ACTIONS))
+                    .thenReturn(null)
+                    .thenReturn(actionData);
+            when(actionData.getResult()).thenReturn(List.of(IConversation.PAUSE_CONVERSATION));
+
+            var ex = assertThrows(ConversationPauseException.class,
+                    () -> lifecycleManager.executeLifecycle(memory, null));
+
+            assertEquals(0, ex.getPausedAbsoluteTaskIndex());
+            verify(task0).execute(eq(memory), any());
         }
 
         @Test

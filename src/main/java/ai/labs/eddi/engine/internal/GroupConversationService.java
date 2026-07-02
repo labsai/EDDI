@@ -2132,9 +2132,18 @@ public class GroupConversationService implements IGroupConversationService {
                 token.setSignal(ControlSignal.CANCEL_GRACEFUL);
             }
         } else {
-            // Not actively running — update DB directly
+            // Not actively running — update DB directly with state guard (#9)
             try {
                 var gc = conversationStore.read(conversationId);
+                var state = gc.getState();
+                // Only cancel from non-terminal states — guard against
+                // overwriting COMPLETED or FAILED after a race.
+                if (state == GroupConversationState.COMPLETED
+                        || state == GroupConversationState.CANCELLED
+                        || state == GroupConversationState.FAILED) {
+                    LOGGER.infof("Cancel skipped: GC %s already in terminal state %s", conversationId, state);
+                    return;
+                }
                 gc.setState(GroupConversationState.CANCELLED);
                 conversationStore.update(gc);
             } catch (Exception e) {

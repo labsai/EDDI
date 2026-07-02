@@ -5,6 +5,46 @@
 
 ---
 
+## 🔧 HITL Review Fixes — Phases 1–5 (partial) (2026-07-02)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** 7-phase implementation plan from code review (1 BLOCKER + 21 MAJORs).
+
+### Fixes Implemented
+
+| ID | Severity | Phase | Fix |
+|----|----------|-------|-----|
+| #1 | **BLOCKER** | 1a | **Resume re-pause loop**: `checkIfPauseConversationAction` is now delta-based — only throws if the just-executed task *added* `PAUSE_CONVERSATION` (not if it was stale from the prior turn). Belt-and-braces: `Conversation.resume()` strips `PAUSE_CONVERSATION` from step ACTIONS before re-entering the pipeline. |
+| #1b | MAJOR | 1b | **Decision visibility**: Verdict stored as conversation output (`hitlDecision`) and conversation-scoped property (`hitlVerdict`) for template/behavior-rule access. REJECTED emits public output. |
+| #8 | MAJOR | 2a | **Request body validation**: Null/missing verdict → 400 on both REST surfaces (regular + group + streaming). |
+| #12 | MAJOR | 5g | **Double-approve → 409**: `GroupDiscussionException` caught and mapped to 409 Conflict (was falling through to 500). |
+| #9 | MAJOR | 3a | **Group cancel state guard**: No-token branch validates state before writing CANCELLED — terminal states (COMPLETED/CANCELLED/FAILED) cannot be overwritten. |
+| #3 | MAJOR | 3b | **Timeout rescheduling on re-pause**: Resume callable's `finally` block arms a new HITL timeout if the conversation re-paused to AWAITING_HUMAN. |
+| #5 | MAJOR | 4a | **Undo/redo gate**: Undo and redo blocked during AWAITING_HUMAN state (would corrupt the HITL bookmark). |
+
+### Test Changes
+- `pauseActionThrowsPause`: Updated for delta-based semantics (sequential mock: null → actionData)
+- `fromIndexDetectsPause` → split into `fromIndexIgnoresStaleAction` (stale action = no re-pause) + `fromIndexDetectsNewPause` (new action = re-pause)
+- New: `executeLifecycleDetectsFreshPause` — verifies fresh pause on `executeLifecycle`
+
+### Files Changed
+- `LifecycleManager.java` — Delta-based `checkIfPauseConversationAction`, unconditional `actionsBefore` snapshot
+- `Conversation.java` — `stripPauseAction` helper, decision visibility, rejection output
+- `ConversationService.java` — Undo/redo gate, timeout rescheduling on re-pause
+- `RestAgentEngine.java` — Resume body validation
+- `RestGroupConversation.java` — Approve body validation, `GroupDiscussionException` → 409
+- `GroupConversationService.java` — Cancel state guard in no-token branch
+- `LifecycleManagerHitlTest.java` — 3 new/fixed delta-based pause tests
+
+### In Progress / Next
+- Phase 2b: HitlConfig unification (shared class, enums)
+- Phase 3: Full cancel matrix, crash recovery, discriminating status codes
+- Phase 4b–d: Security hardening, audit trail, metrics
+- Phase 5: Group API correctness (task rejection, nested guard, config drift)
+- Phase 6–7: Architecture dedup, integration tests, dead code cleanup
+
+---
+
 ## 🔧 HITL Framework — Cancel Path Fixes: R1 + R2 MAJORs (2026-07-01)
 
 **Repo:** EDDI (`feat/hitl-framework`)

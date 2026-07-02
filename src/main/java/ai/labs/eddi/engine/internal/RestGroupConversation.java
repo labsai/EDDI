@@ -153,6 +153,11 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     @Override
     public Response approveGroupPhase(String groupId, String gcId, GroupApprovalRequest request) {
+        if (request == null || request.getDecision() == null || request.getDecision().getVerdict() == null) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Request body must include a 'decision' with a 'verdict' field (APPROVED or REJECTED)")
+                    .build();
+        }
         validateGroupConversationOwnership(gcId);
         setDecidedByFromIdentity(request);
         try {
@@ -162,6 +167,9 @@ public class RestGroupConversation implements IRestGroupConversation {
             return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+        } catch (IGroupConversationService.GroupDiscussionException e) {
+            // #12: wrong-state (e.g., double-approve) → 409, not 500
+            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
         } catch (Exception e) {
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
         }
@@ -170,12 +178,21 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public void approveGroupPhaseStreaming(String groupId, String gcId, GroupApprovalRequest request,
                                            SseEventSink eventSink, Sse sse) {
+        if (request == null || request.getDecision() == null || request.getDecision().getVerdict() == null) {
+            sendEvent(eventSink, sse, "error",
+                    "{\"error\":\"Request body must include a 'decision' with a 'verdict' field\"}");
+            closeQuietly(eventSink);
+            return;
+        }
         validateGroupConversationOwnership(gcId);
         setDecidedByFromIdentity(request);
         var listener = createStreamingListener(eventSink, sse);
         try {
             groupConversationService.resumeDiscussion(gcId, request, listener);
         } catch (IResourceStore.ResourceModifiedException e) {
+            sendEvent(eventSink, sse, "error", "{\"error\":\"" + e.getMessage() + "\"}");
+            closeQuietly(eventSink);
+        } catch (IGroupConversationService.GroupDiscussionException e) {
             sendEvent(eventSink, sse, "error", "{\"error\":\"" + e.getMessage() + "\"}");
             closeQuietly(eventSink);
         } catch (Exception e) {
