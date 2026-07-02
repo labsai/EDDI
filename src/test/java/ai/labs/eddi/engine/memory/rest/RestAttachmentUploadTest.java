@@ -339,6 +339,15 @@ class RestAttachmentUploadTest {
             var list = (List<Attachment>) response.getEntity();
             assertTrue(list.isEmpty());
         }
+
+        @Test
+        void shouldReturn500WhenListFails() throws Exception {
+            when(attachmentStore.listByConversation("conv-err")).thenThrow(new RuntimeException("db down"));
+
+            Response response = captureAsync(ar -> endpoint.listAttachments("conv-err", ar));
+
+            assertEquals(500, response.getStatus());
+        }
     }
 
     // ==================== Delete Tests ====================
@@ -371,6 +380,15 @@ class RestAttachmentUploadTest {
             @SuppressWarnings("unchecked")
             var body = (Map<String, Object>) response.getEntity();
             assertEquals(0L, body.get("deletedCount"));
+        }
+
+        @Test
+        void shouldReturn500WhenDeleteAllFails() throws Exception {
+            when(attachmentStore.deleteByConversation("conv-err")).thenThrow(new RuntimeException("db down"));
+
+            Response response = captureAsync(ar -> endpoint.deleteAttachments("conv-err", ar));
+
+            assertEquals(500, response.getStatus());
         }
     }
 
@@ -418,6 +436,16 @@ class RestAttachmentUploadTest {
             @SuppressWarnings("unchecked")
             var body = (Map<String, Object>) response.getEntity();
             assertEquals("ATTACHMENT_ACCESS_DENIED", body.get("code"));
+        }
+
+        @Test
+        void shouldReturn500OnUnexpectedError() throws Exception {
+            when(attachmentStore.getMetadata("ref-1", "conv-1"))
+                    .thenThrow(new RuntimeException("unexpected"));
+
+            Response response = captureAsync(ar -> endpoint.downloadAttachment("conv-1", "ref-1", ar));
+
+            assertEquals(500, response.getStatus());
         }
 
         @Test

@@ -61,6 +61,32 @@ class ModelCapabilityServiceTest {
                     provider + "/" + model + " vision should be " + expected);
         }
 
+        @ParameterizedTest
+        @ValueSource(strings = {
+                "llava", "bakllava", "some-vision-model", "pixtral-12b",
+                "anthropic.claude-3-haiku", "anthropic.claude-opus", "anthropic.claude-sonnet",
+                "amazon.nova-lite", "amazon.nova-pro", "amazon.nova-premier",
+                "meta.llama3.2-vision", "meta.llama-3.2-90b", "meta.llama3-2-11b",
+                "gemma3-27b", "gemma-3-12b", "qwen2-vl-7b", "qwen2.5-vl-7b",
+                "minicpm-v-2.6", "moondream2"})
+        void modelDependentProviderUpgradesForKnownVisionModels(String model) {
+            // bedrock is model-dependent → these known vision models flip it on
+            assertTrue(service.supportsVision("bedrock", model),
+                    "bedrock/" + model + " should be vision-capable");
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {
+                "gpt-3.5-turbo", "text-davinci-003", "davinci-002", "babbage-002",
+                "text-embedding-3-large", "some-embed-model", "embed-english-v3",
+                "text-moderation-latest", "mistral-embed", "mistral-7b-instruct", "mixtral-8x22b"})
+        void visionFirstProviderDowngradesForKnownTextOnlyModels(String model) {
+            // openai/mistral are vision-first → these text-only models flip vision off
+            String provider = model.startsWith("mistral") || model.startsWith("mixtral") ? "mistral" : "openai";
+            assertFalse(service.supportsVision(provider, model),
+                    provider + "/" + model + " should not be vision-capable");
+        }
+
         @Test
         void blankProviderIsUnsupported() {
             assertFalse(service.supportsVision("", "gpt-4o"));

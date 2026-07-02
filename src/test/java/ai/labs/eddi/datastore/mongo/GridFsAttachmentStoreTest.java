@@ -269,6 +269,20 @@ class GridFsAttachmentStoreTest {
         assertArrayEquals("legacy".getBytes(), result);
     }
 
+    @Test
+    void load_nullOwnerMetadata_allowsAccess() throws Exception {
+        // metadata present but conversationId absent → owner check skipped
+        ObjectId id = new ObjectId();
+        whenFindFirst(mockFile(id, null, "text/plain", List.of(), "uuid-1"));
+        doAnswer(inv -> {
+            OutputStream out = inv.getArgument(1);
+            out.write("ok".getBytes());
+            return null;
+        }).when(gridFSBucket).downloadToStream(eq(id), any(OutputStream.class));
+
+        assertArrayEquals("ok".getBytes(), sut.load("uuid-1", "any-conv"));
+    }
+
     // ─── getMetadata() ──────────────────────────────────────────
 
     @Test
@@ -291,6 +305,27 @@ class GridFsAttachmentStoreTest {
     void getMetadata_notFound_throws() {
         whenFindFirst(null);
         assertThrows(AttachmentStoreException.class, () -> sut.getMetadata("missing", "conv-1"));
+    }
+
+    @Test
+    void getMetadata_grantedConversation_returnsMetadata() throws Exception {
+        whenFindFirst(mockFile(new ObjectId(), "conv-owner", "application/pdf", List.of("conv-guest"), "uuid-1"));
+        Attachment meta = sut.getMetadata("uuid-1", "conv-guest");
+        assertEquals("application/pdf", meta.mimeType());
+    }
+
+    @Test
+    void getMetadata_nullMetadataDefaults() throws Exception {
+        ObjectId id = new ObjectId();
+        GridFSFile f = mock(GridFSFile.class);
+        when(f.getFilename()).thenReturn("x.bin");
+        when(f.getLength()).thenReturn(9L);
+        when(f.getMetadata()).thenReturn(null);
+        whenFindFirst(f);
+
+        Attachment meta = sut.getMetadata("uuid-1", "conv-1");
+        assertEquals("application/octet-stream", meta.mimeType());
+        assertEquals("uuid-1", meta.storageRef());
     }
 
     // ─── grantAccess() ──────────────────────────────────────────

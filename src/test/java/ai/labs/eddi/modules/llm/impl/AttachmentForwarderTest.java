@@ -305,6 +305,85 @@ class AttachmentForwarderTest {
     }
 
     @Test
+    void aggregateCapExceeded_skipsSecondWithNote() {
+        var small = newForwarder(10L * 1024 * 1024, 4); // 4-byte aggregate budget
+        Attachment a = new Attachment();
+        a.setMimeType("image/png");
+        a.setFileName("a.png");
+        a.setBase64Data(Base64.getEncoder().encodeToString("abc".getBytes())); // 3 bytes
+        Attachment b = new Attachment();
+        b.setMimeType("image/png");
+        b.setFileName("b.png");
+        b.setBase64Data(Base64.getEncoder().encodeToString("de".getBytes())); // 2 bytes → 3+2 > 4
+        mockAttachments(a, b);
+        List<ChatMessage> messages = messages(UserMessage.from("look"));
+
+        small.forward(messages, memory, "openai", "gpt-4o");
+
+        // a inlined (ImageContent), b noted (aggregate budget)
+        UserMessage enhanced = (UserMessage) messages.get(0);
+        assertInstanceOf(ImageContent.class, enhanced.contents().get(1));
+        assertTrue(((TextContent) enhanced.contents().get(2)).text().contains("attachment budget"));
+    }
+
+    @Test
+    void downloadNon200_addsNote() throws Exception {
+        mockAttachments(urlImage());
+        @SuppressWarnings("unchecked")
+        HttpResponse<byte[]> resp = mock(HttpResponse.class);
+        when(resp.statusCode()).thenReturn(500);
+        doReturn(resp).when(httpClient).sendValidated(any(), any());
+        List<ChatMessage> messages = messages(UserMessage.from("look"));
+
+        forwarder.forward(messages, memory, "gemini", "gemini-2.0-flash"); // needs download
+
+        Content c = ((UserMessage) messages.get(0)).contents().get(1);
+        assertTrue(((TextContent) c).text().contains("download failed"));
+    }
+
+    @Test
+    void downloadException_addsNote() throws Exception {
+        mockAttachments(urlImage());
+        doThrow(new java.io.IOException("boom")).when(httpClient).sendValidated(any(), any());
+        List<ChatMessage> messages = messages(UserMessage.from("look"));
+
+        forwarder.forward(messages, memory, "gemini", "gemini-2.0-flash");
+
+        Content c = ((UserMessage) messages.get(0)).contents().get(1);
+        assertTrue(((TextContent) c).text().contains("could not be fetched"));
+    }
+
+    @Test
+    void textWithNoExtractableContent_addsNote() {
+        Attachment att = new Attachment();
+        att.setMimeType("text/plain");
+        att.setFileName("empty.txt");
+        att.setBase64Data(""); // decodes to empty
+        mockAttachments(att);
+        List<ChatMessage> messages = messages(UserMessage.from("read"));
+
+        forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+        Content c = ((UserMessage) messages.get(0)).contents().get(1);
+        assertTrue(((TextContent) c).text().contains("no extractable text"));
+    }
+
+    @Test
+    void invalidBase64_addsNote() {
+        Attachment att = new Attachment();
+        att.setMimeType("image/png");
+        att.setFileName("bad.png");
+        att.setBase64Data("!!!not-base64!!!");
+        mockAttachments(att);
+        List<ChatMessage> messages = messages(UserMessage.from("look"));
+
+        forwarder.forward(messages, memory, "openai", "gpt-4o");
+
+        Content c = ((UserMessage) messages.get(0)).contents().get(1);
+        assertTrue(((TextContent) c).text().contains("invalid base64"));
+    }
+
+    @Test
     void noContentSource_skipped() {
         Attachment att = new Attachment(); // NONE
         att.setMimeType("image/png");
