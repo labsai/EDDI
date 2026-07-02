@@ -99,6 +99,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     public GroupConversation readGroupConversation(String groupId, String groupConversationId) {
         try {
             GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
+            requireGroupMembership(groupId, groupConversationId, gc);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
             return gc;
         } catch (ForbiddenException e) {
@@ -112,6 +113,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     public Response deleteGroupConversation(String groupId, String groupConversationId) {
         try {
             GroupConversation gc = groupConversationService.readGroupConversation(groupConversationId);
+            requireGroupMembership(groupId, groupConversationId, gc);
             ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
             groupConversationService.deleteGroupConversation(groupConversationId);
             return Response.ok().build();
@@ -119,6 +121,18 @@ public class RestGroupConversation implements IRestGroupConversation {
             throw e;
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
+        }
+    }
+
+    /**
+     * Guards against a wrong-group path: the target conversation must belong to
+     * {groupId}, else 404 — so the {groupId} path parameter is meaningful and
+     * read/delete cannot act on a conversation under an arbitrary group.
+     */
+    private void requireGroupMembership(String groupId, String gcId, GroupConversation gc) {
+        if (groupId != null && gc != null && !groupId.equals(gc.getGroupId())) {
+            throw new jakarta.ws.rs.NotFoundException(
+                    "Group conversation " + gcId + " does not belong to group " + groupId);
         }
     }
 
@@ -142,7 +156,7 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     @Override
     public Response cancelDiscussion(String groupId, String gcId) {
-        validateGroupConversationOwnership(gcId, true);
+        validateGroupConversationOwnership(groupId, gcId, true);
         try {
             boolean cancelled = groupConversationService.cancelDiscussion(gcId, ControlSignal.CANCEL_GRACEFUL);
             if (!cancelled) {
@@ -177,7 +191,7 @@ public class RestGroupConversation implements IRestGroupConversation {
                     .entity("Decision note exceeds the maximum length of " + MAX_HITL_NOTE_LENGTH + " characters")
                     .build();
         }
-        validateGroupConversationOwnership(gcId, true);
+        validateGroupConversationOwnership(groupId, gcId, true);
         setDecidedByFromIdentity(request);
         try {
             var gc = groupConversationService.resumeDiscussion(gcId, request, null);
@@ -211,7 +225,16 @@ public class RestGroupConversation implements IRestGroupConversation {
             closeQuietly(eventSink);
             return;
         }
-        validateGroupConversationOwnership(gcId, true);
+        try {
+            validateGroupConversationOwnership(groupId, gcId, true);
+        } catch (jakarta.ws.rs.NotFoundException e) {
+            // Streaming endpoint has no Response to return — surface the mismatch as
+            // a terminal SSE error instead of letting a WebApplicationException abort
+            // the stream opaquely.
+            sendErrorEvent(eventSink, sse, e.getMessage());
+            closeQuietly(eventSink);
+            return;
+        }
         setDecidedByFromIdentity(request);
         var listener = createStreamingListener(eventSink, sse);
         try {
@@ -244,7 +267,7 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     @Override
     public Response getGroupApprovalStatus(String groupId, String gcId, String detail) {
-        validateGroupConversationOwnership(gcId, true);
+        validateGroupConversationOwnership(groupId, gcId, true);
         try {
             var gc = groupConversationService.readGroupConversation(gcId);
             boolean paused = gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL;
@@ -292,28 +315,39 @@ public class RestGroupConversation implements IRestGroupConversation {
      * the pattern in RestAgentEngine.validateConversationOwnership.
      */
     private void validateGroupConversationOwnership(String gcId) {
-        validateGroupConversationOwnership(gcId, false);
+        validateGroupConversationOwnership(null, gcId, false);
     }
 
     /**
+     * @param groupId
+     *            when non-null, also verifies the target conversation belongs to
+     *            this group — a mismatch (or unknown conversation) yields 404 so
+     *            approve/cancel/status cannot act on a conversation under the wrong
+     *            group path (CodeQL: unused path param → consistency hole).
      * @param hitlOperation
      *            if true, uses strict ownership + approver role check
      */
-    private void validateGroupConversationOwnership(String gcId, boolean hitlOperation) {
+    private void validateGroupConversationOwnership(String groupId, String gcId, boolean hitlOperation) {
+        GroupConversation gc;
         try {
-            var gc = groupConversationService.readGroupConversation(gcId);
-            if (hitlOperation) {
-                ownershipValidator.requireOwnerAdminOrApprover(identity, gc.getUserId(), "group conversation");
-            } else {
-                ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
-            }
-        } catch (ForbiddenException e) {
-            throw e;
+            gc = groupConversationService.readGroupConversation(gcId);
         } catch (IResourceStore.ResourceNotFoundException e) {
             // Let the actual operation handle the 404
             LOGGER.debugf("Group conversation not found for ownership check: %s", gcId);
+            return;
         } catch (Exception e) {
             throw new ForbiddenException("Access denied: unable to verify group conversation ownership");
+        }
+        // Membership check first: a wrong-group path must look like "not found" here,
+        // never leak the conversation's existence or owner via an authz error.
+        if (groupId != null && !groupId.equals(gc.getGroupId())) {
+            throw new jakarta.ws.rs.NotFoundException(
+                    "Group conversation " + gcId + " does not belong to group " + groupId);
+        }
+        if (hitlOperation) {
+            ownershipValidator.requireOwnerAdminOrApprover(identity, gc.getUserId(), "group conversation");
+        } else {
+            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
         }
     }
 

@@ -2576,6 +2576,19 @@ public class GroupConversationService implements IGroupConversationService {
         // approve-all shortcut) — otherwise {} approves nothing and the resumed
         // phase instantly re-pauses.
         boolean hasTaskApprovals = request.getTaskApprovals() != null && !request.getTaskApprovals().isEmpty();
+        // #30: a task-level body against a PHASE-paused (or task-list-less)
+        // conversation must fail 400 — not be silently ignored and treated as a
+        // plain phase approve. Reject before the CAS so the operator sees the error
+        // instead of an unexpected full resume.
+        if (hasTaskApprovals
+                && (gc.getTaskList() == null || gc.getHitlPauseType() == GroupConversation.HitlPauseType.PHASE)) {
+            throw new IllegalArgumentException(
+                    "taskApprovals were provided but this conversation has no task-level approval to apply "
+                            + "(it is " + (gc.getHitlPauseType() == GroupConversation.HitlPauseType.PHASE
+                                    ? "paused at PHASE granularity"
+                                    : "paused without a task list")
+                            + "); omit taskApprovals to approve the phase");
+        }
         if (hasTaskApprovals && gc.getTaskList() != null) {
             // #13: validate the WHOLE map up front — unknown taskIds, tasks not
             // awaiting approval, and unknown decision VALUES must fail as a
@@ -2678,6 +2691,14 @@ public class GroupConversationService implements IGroupConversationService {
         // at the SAME phase (findExecutableTasks is idempotent for approved tasks).
         // PHASE pauses after the phase completes, so resume at +1.
         var pauseType = gc.getHitlPauseType();
+        // #29: capture the timeout-policy bookmark BEFORE it is nulled below, so a
+        // failed resume whose config re-read also fails can restore the ORIGINAL
+        // finite policy instead of silently disarming it (persisting null →
+        // WAIT_INDEFINITELY). #35: capture the original pausedAt for the same reason
+        // — a restore must not shift a re-armed timeout's due time forward.
+        final String savedTimeoutPolicy = gc.getHitlTimeoutPolicy();
+        final String savedApprovalTimeout = gc.getHitlApprovalTimeout();
+        final Instant originalPausedAt = gc.getPausedAt();
 
         // Clear pause state but preserve pausedTurnCount — it seeds turnCounter on
         // resume (M3)
@@ -2694,8 +2715,10 @@ public class GroupConversationService implements IGroupConversationService {
         // Delete timeout schedule only after CAS succeeds (Phase 5e) — if CAS
         // fails, the schedule is preserved so the timeout can still fire.
         deleteGroupHitlTimeoutSchedule(groupConversationId);
-        counterGroupHitlResume.increment();
-        auditHitlDecision(gc, decision);
+        // #35: the metric + audit entry are deliberately NOT written here — they are
+        // deferred until the resume is actually enqueued (below), mirroring the
+        // regular surface. A submit failure rolls the pause back, so a rolled-back
+        // attempt must not pollute the resume metric or the EU-AI-Act audit trail.
 
         // The resume is committed — tell SSE subscribers the discussion is live
         // again (the stream stays open for the resumed discussion's events).
@@ -2715,8 +2738,11 @@ public class GroupConversationService implements IGroupConversationService {
                 ? resumePhaseIndex
                 : resumePhaseIndex + 1;
 
-        // Saved bookmark fields for pause restoration on transient failures
-        final Instant savedPausedAt = Instant.now();
+        // Saved bookmark fields for pause restoration on transient failures.
+        // #35: restore with the ORIGINAL pausedAt so a re-armed timeout keeps its
+        // due time (pausedAt + approvalTimeout) instead of shifting forward to the
+        // resume-attempt instant.
+        final Instant savedPausedAt = originalPausedAt != null ? originalPausedAt : Instant.now();
         final int savedPhaseIndex = resumePhaseIndex;
         final String savedPhaseName = pausedPhaseName;
         final var savedPauseType = pauseType;
@@ -2764,7 +2790,8 @@ public class GroupConversationService implements IGroupConversationService {
                                 TranscriptEntryType.ERROR, Instant.now(), driftMessage, null));
                         // Restore the pause instead of destroying the approval: the
                         // operator can fix the config and approve again, or cancel.
-                        restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, groupConfig);
+                        restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, groupConfig,
+                                savedTimeoutPolicy, savedApprovalTimeout);
                         // A cancel signalled in this window must win over the restore
                         convertPauseToCancelIfSignalled(gc, listener);
                         activeTokens.remove(gc.getId());
@@ -2779,7 +2806,8 @@ public class GroupConversationService implements IGroupConversationService {
                 // Transient failure BEFORE executeDiscussion (store hiccup, config
                 // unreadable): restore the pause instead of failing the discussion
                 // terminally — symmetric with the regular surface.
-                restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, null);
+                restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, null,
+                        savedTimeoutPolicy, savedApprovalTimeout);
                 // A cancel signalled in this window must win over the restore
                 convertPauseToCancelIfSignalled(gc, listener);
                 activeTokens.remove(gc.getId());
@@ -2806,10 +2834,17 @@ public class GroupConversationService implements IGroupConversationService {
             // above already consumed the pause; restore it so the approval remains
             // actionable instead of leaving an IN_PROGRESS zombie.
             activeTokens.remove(gc.getId());
-            restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, null);
+            restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, null,
+                    savedTimeoutPolicy, savedApprovalTimeout);
             throw new IResourceStore.ResourceStoreException(
                     "Failed to submit resumed group discussion: " + e.getMessage(), e);
         }
+
+        // #35: only NOW — after the resume was actually enqueued — count the resume
+        // and write the audit entry, so a rolled-back submit does not pollute the
+        // metric or the compliance trail (mirrors the regular surface).
+        counterGroupHitlResume.increment();
+        auditHitlDecision(gc, decision);
 
         // The live gc instance is being mutated by the background thread — hand
         // the HTTP layer a freshly-read copy instead (CME-safe serialization).
@@ -2831,7 +2866,8 @@ public class GroupConversationService implements IGroupConversationService {
      */
     private void restoreGroupPause(GroupConversation gc, int phaseIndex, String phaseName,
                                    GroupConversation.HitlPauseType pauseType, Instant pausedAt,
-                                   AgentGroupConfiguration configOrNull) {
+                                   AgentGroupConfiguration configOrNull,
+                                   String fallbackTimeoutPolicy, String fallbackApprovalTimeout) {
         try {
             gc.setState(GroupConversationState.AWAITING_APPROVAL);
             gc.setPausedAt(pausedAt);
@@ -2839,13 +2875,19 @@ public class GroupConversationService implements IGroupConversationService {
             gc.setPausedPhaseName(phaseName);
             gc.setHitlPauseType(pauseType != null ? pauseType : GroupConversation.HitlPauseType.PHASE);
             gc.setHitlPauseReason("Pause restored after failed resume");
+            // #29: resumeDiscussion already NULLED the in-memory timeout bookmark
+            // before the CAS, so we must re-set it here or the restore persists a
+            // disarmed policy. Prefer a fresh config read; if that fails, fall back
+            // to the bookmark values captured BEFORE the clear — never leave null,
+            // which parsePolicy treats as WAIT_INDEFINITELY (silently disarming a
+            // finite AUTO_REJECT/ABORT policy).
             var config = configOrNull;
             if (config == null) {
                 try {
                     var resId = groupStore.getCurrentResourceId(gc.getGroupId());
                     config = resId != null ? groupStore.read(gc.getGroupId(), resId.getVersion()) : null;
                 } catch (Exception ignored) {
-                    // bookmark policy fields stay as previously persisted
+                    // fall through to the captured fallback below
                 }
             }
             if (config != null && config.getHitlConfig() != null) {
@@ -2853,6 +2895,11 @@ public class GroupConversationService implements IGroupConversationService {
                         ? config.getHitlConfig().getTimeoutPolicy().name()
                         : HitlTimeoutPolicy.WAIT_INDEFINITELY.name());
                 gc.setHitlApprovalTimeout(config.getHitlConfig().getApprovalTimeout());
+            } else {
+                // Config unreadable — preserve the original bookmark so a finite
+                // policy is not silently disarmed.
+                gc.setHitlTimeoutPolicy(fallbackTimeoutPolicy);
+                gc.setHitlApprovalTimeout(fallbackApprovalTimeout);
             }
             conversationStore.updateIfState(gc, GroupConversationState.IN_PROGRESS);
             scheduleGroupHitlTimeout(gc);

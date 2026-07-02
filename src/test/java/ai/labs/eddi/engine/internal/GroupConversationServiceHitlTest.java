@@ -277,19 +277,35 @@ class GroupConversationServiceHitlTest {
             doReturn(config).when(groupStore).read(GROUP_ID, 1);
             stubAgentSay();
 
+            // Capture pause-clear state at the SYNCHRONOUS resume CAS. Asserting on
+            // the returned object would race the async resumed leg, which mutates the
+            // shared gc (and flips it to COMPLETED) — the CAS point is where the
+            // clear-pause block deterministically runs.
+            var casState = new java.util.concurrent.atomic.AtomicReference<GroupConversationState>();
+            var casPhaseIndex = new java.util.concurrent.atomic.AtomicInteger(Integer.MIN_VALUE);
+            var casPausedAtWasNull = new java.util.concurrent.atomic.AtomicBoolean(false);
+            doAnswer(inv -> {
+                GroupConversation g = inv.getArgument(0);
+                if (casState.compareAndSet(null, g.getState())) {
+                    casPhaseIndex.set(g.getPausedAtPhaseIndex());
+                    casPausedAtWasNull.set(g.getPausedAt() == null);
+                }
+                return null;
+            }).when(conversationStore).updateIfState(any(), eq(GroupConversationState.AWAITING_APPROVAL));
+
             var request = new GroupApprovalRequest();
             var decision = new HitlDecision();
             decision.setVerdict(HitlVerdict.APPROVED);
             request.setDecision(decision);
 
-            GroupConversation result = service.resumeDiscussion("gc-resume", request, null);
+            service.resumeDiscussion("gc-resume", request, null);
 
-            // The resume clears pause state and sets IN_PROGRESS
-            assertEquals(GroupConversationState.IN_PROGRESS, result.getState(),
-                    "State should be IN_PROGRESS after resume");
-            assertEquals(-1, result.getPausedAtPhaseIndex(),
-                    "Paused phase index should be cleared to -1");
-            assertNull(result.getPausedAt(), "pausedAt should be cleared");
+            // The resume clears pause state and sets IN_PROGRESS (captured at the CAS)
+            assertEquals(GroupConversationState.IN_PROGRESS, casState.get(),
+                    "State should be IN_PROGRESS at the resume CAS");
+            assertEquals(-1, casPhaseIndex.get(),
+                    "Paused phase index should be cleared to -1 at the resume CAS");
+            assertTrue(casPausedAtWasNull.get(), "pausedAt should be cleared at the resume CAS");
 
             // Verify updateIfState was called with AWAITING_APPROVAL (CAS)
             verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
