@@ -114,4 +114,14 @@ public final class MemoryKeys {
      * @since 6.1.0
      */
     public static final MemoryKey<List<String>> ATTACHMENT_ERRORS = MemoryKey.of("attachments:errors");
+
+    /**
+     * Text extracted from attachments this turn (PDF text-fallback, inlined text
+     * documents), one entry per attachment as {@code "fileName: <text>"}.
+     * Non-public — stitched into that turn's user message when history is rebuilt
+     * so later turns retain the content, while the visible transcript stays clean.
+     *
+     * @since 6.1.0
+     */
+    public static final MemoryKey<List<String>> ATTACHMENT_EXTRACTS = MemoryKey.of("attachments:extracts");
 }

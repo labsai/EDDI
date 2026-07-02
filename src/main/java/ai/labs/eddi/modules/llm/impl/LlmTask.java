@@ -106,6 +106,11 @@ public class LlmTask implements ILifecycleTask {
     private final IdentityMaskingService identityMaskingService;
     private final IAttachmentStore attachmentStore;
 
+    // Field-injected so the many direct-construction unit tests are unaffected;
+    // null-guarded at the call site.
+    @jakarta.inject.Inject
+    AttachmentForwarder attachmentForwarder;
+
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
     private final IRestAgentStore restAgentStore;
@@ -334,9 +339,11 @@ public class LlmTask implements ILifecycleTask {
                     includeFirstAgentMessage, summaryPrefix, skipSteps);
         }
 
-        // Enhance the last user message with multimodal attachment content (images,
-        // etc.)
-        MultimodalMessageEnhancer.enhanceLastUserMessage(messages, memory, attachmentStore);
+        // Forward the current step's attachments to the LLM as multimodal content,
+        // gated on the resolved (provider, model) capabilities.
+        if (attachmentForwarder != null) {
+            attachmentForwarder.forward(messages, memory, resolvedType, resolveModelName(processedParams));
+        }
 
         if (messages.isEmpty()) {
             return;

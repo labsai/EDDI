@@ -5,6 +5,37 @@
 
 ---
 
+## 📎 Multimodal Attachments Completion — Phase 2: Unified forwarder (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 2 of 6). Forwarder core.
+
+### What changed
+
+- **`AttachmentForwarder`** (`modules/llm/impl`, new) — the single place attachments become langchain4j `Content` on the outgoing user message. Replaces the image-only `MultimodalMessageEnhancer` (deleted, with its tests). Per attachment it resolves bytes from any source (stored blob → `store.load`, URL → `SafeHttpClient` download, base64 → decode) under **uniform per-file (10 MB) and aggregate (20 MB) byte caps across all sources** (the base64 path was previously unguarded), gates on `ModelCapabilityService(provider, model)`, and emits:
+  - `image/*` → `ImageContent` when vision-capable (URL passed through when the provider fetches URLs, else **downloaded and inlined** — provider URL normalization, D7), else a note;
+  - `application/pdf` → **hybrid**: native `PdfFileContent` when the model supports documents, else PDFBox text extraction inlined as `TextContent`;
+  - text-like (`text/*`, JSON, XML, CSV, YAML) → decoded + inlined, **no capability required** (always works);
+  - `audio/*` → `AudioContent` when supported, else a note;
+  - everything else → a metadata note pointing at the (Phase 4) `readAttachment` tool.
+- Extracted text is persisted to `attachments:extracts` (for Phase-2 history stitching) and every drop/skip/gate is appended to `attachments:errors` — **never silent**; each also leaves a note the LLM can relay.
+- **`LlmTask`** now calls the forwarder with the resolved `(provider, model)` instead of the static enhancer (field-injected + null-guarded so the six direct-construction `LlmTask` tests are untouched).
+
+### Design decisions
+
+- **Capability service uses the real defaults, not mocks, in tests** — the forwarder test drives the true `ModelCapabilityService` matrix (OpenAI URL-image fast path, Gemini download-and-inline, Anthropic native PDF, OpenAI PDF text-fallback, jlama no-vision note).
+- **Skip ≠ silence** — a per-file/aggregate cap hit, store-load failure, or download failure records to `attachments:errors` *and* emits a `TextContent` note so the model can tell the user, rather than dropping the attachment invisibly.
+
+### Tests
+
+`AttachmentForwarderTest` (18) covers the full branch matrix incl. URL-passthrough vs download-inline, base64/stored images, PDF native vs text-fallback (with extract persistence), text inline, audio on/off, unsupported note, per-file cap, store-load failure, and no-source skip. Enhancer tests removed.
+
+### What's next (remaining Phase 2, then 3–6)
+
+Still open in Phase 2: history stitching (inject `attachments:extracts` into the rebuilt turn's user message in `ConversationHistoryBuilder`) and per-task config (`LlmConfiguration.Task.multimodal` override + `reattachTurns`). Then Phase 3 (group parity), 4 (`readAttachment` tool), 5 (UX), 6 (ops).
+
+---
+
 ## 📎 Multimodal Attachments Completion — Phase 1: Storage unification + secure upload (2026-07-03)
 
 **Repo:** EDDI (`feat/multimodal-attachments-completion`)
