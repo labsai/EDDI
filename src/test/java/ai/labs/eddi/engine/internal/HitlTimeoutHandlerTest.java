@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -44,6 +45,7 @@ class HitlTimeoutHandlerTest {
         // Inject mocks into @Inject fields via reflection
         setField(handler, "conversationService", conversationService);
         setField(handler, "groupConversationService", groupConversationService);
+        setField(handler, "meterRegistry", new SimpleMeterRegistry());
     }
 
     private static void setField(Object target, String fieldName, Object value) throws Exception {

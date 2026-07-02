@@ -109,10 +109,24 @@ class RestGroupConversationHitlTest {
             asUser(ATTACKER_ID);
             when(groupService.readGroupConversation(GC_ID)).thenReturn(makeGc(OWNER_ID));
 
+            // Valid body — body validation runs before the ownership check,
+            // so an empty request would short-circuit to 400 instead.
             var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            request.setDecision(decision);
             assertThrows(ForbiddenException.class,
                     () -> restGroupConversation.approveGroupPhase(GROUP_ID, GC_ID, request),
                     "Non-owner approve should throw ForbiddenException");
+        }
+
+        @Test
+        @DisplayName("Empty body returns 400 before any ownership check")
+        void emptyBodyRejectedBeforeAuthz() {
+            asUser(ATTACKER_ID);
+
+            var response = restGroupConversation.approveGroupPhase(GROUP_ID, GC_ID, new GroupApprovalRequest());
+            assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), response.getStatus());
         }
 
         @Test

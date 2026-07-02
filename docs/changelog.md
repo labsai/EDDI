@@ -5,6 +5,19 @@
 
 ---
 
+## 🔧 HITL Merge-Readiness Hardening (2026-07-02, session 2)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Second full-branch review after the phase 1–7 fixes; verified 22 tracked findings (10 FIXED, 7 PARTIAL, 5 UNFIXED) plus new regressions in the fix commits themselves. This session closes the remainder before PR.
+
+| Step | Fix |
+|------|-----|
+| Red tests | `HitlTimeoutHandlerTest` — inject `SimpleMeterRegistry` (new metrics field NPE'd all 7 tests); `RestGroupConversationHitlTest.approveDenied` — body validation runs before authz, so the test now sends a valid decision (plus a new test pinning the 400-before-authz ordering). The suite was red at HEAD; these commits restore green as the baseline. |
+
+*(Extended by subsequent commits in this session — see below.)*
+
+---
+
 ## 🔧 HITL Review Fixes — Phases 1–5 (partial) (2026-07-02)
 
 **Repo:** EDDI (`feat/hitl-framework`)
