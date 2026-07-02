@@ -36,14 +36,14 @@
 - `GroupConversationService.java` — Cancel state guard in no-token branch
 - `LifecycleManagerHitlTest.java` — 3 new/fixed delta-based pause tests
 
-### In Progress / Next
-- Phase 4b: Strict ownership + approver role
-- Phase 7: Integration tests, dead code cleanup, documentation
-
 ### Completed (this session)
 - Phase 2b: HitlConfig string→enum typing (HitlGranularity, HitlTimeoutPolicy, HitlRejectionPolicy)
+- Phase 3d: Discriminating status codes — cancelDiscussion exception mapping (409/404 instead of 500)
+- Phase 4b: Strict ownership + eddi-approver role for HITL endpoints (requireOwnerAdminOrApprover)
 - Phase 4d: Micrometer HITL counters (eddi_hitl_pause/resume/timeout_count with surface tag)
 - Phase 6a: Deduplicated executeLifecycle/executeLifecycleFromIndex → shared executeTaskRange()
+- Phase 7b: HitlCrashRecoveryObserver unit tests (6 tests)
+- Phase 7b: OwnershipValidator approver role tests (6 tests)
 
 ---
 

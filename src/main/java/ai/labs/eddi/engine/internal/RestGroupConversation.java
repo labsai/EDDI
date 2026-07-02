@@ -147,8 +147,6 @@ public class RestGroupConversation implements IRestGroupConversation {
             groupConversationService.cancelDiscussion(gcId, ControlSignal.CANCEL_GRACEFUL);
             var gc = groupConversationService.readGroupConversation(gcId);
             return Response.ok(gc).build();
-        } catch (IGroupConversationService.GroupDiscussionException e) {
-            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
         } catch (Exception e) {
