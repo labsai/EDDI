@@ -5,10 +5,12 @@
 package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
 
 import javax.sql.DataSource;
@@ -16,6 +18,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -39,7 +42,7 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
     static void init() {
         var dsInstance = createDataSourceInstance();
         ds = dsInstance.get();
-        store = new PostgresScheduleStore(dsInstance);
+        store = new PostgresScheduleStore(dsInstance, new JsonSerialization(new ObjectMapper()), 100);
     }
 
     @BeforeEach
@@ -79,6 +82,21 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
         void readNonExistent() {
             assertThrows(IResourceStore.ResourceNotFoundException.class,
                     () -> store.readSchedule("nonexistent-id"));
+        }
+
+        @Test
+        @DisplayName("Finding #5 parity: HITL metadata survives create/read round-trip")
+        void metadataRoundTrip() throws Exception {
+            var config = createCronSchedule("HITL timeout", "agent1", "t");
+            config.setMetadata(Map.of("hitlType", "hitl_timeout", "policy", "AUTO_APPROVE",
+                    "surface", "regular", "conversationId", "conv-xyz"));
+            String id = store.createSchedule(config);
+
+            var found = store.readSchedule(id);
+            assertNotNull(found.getMetadata());
+            assertEquals("hitl_timeout", found.getMetadata().get("hitlType"));
+            assertEquals("AUTO_APPROVE", found.getMetadata().get("policy"));
+            assertEquals("conv-xyz", found.getMetadata().get("conversationId"));
         }
 
         @Test

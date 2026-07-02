@@ -50,7 +50,7 @@ class MongoScheduleStoreTest {
         when(database.getCollection("eddi_schedules")).thenReturn(scheduleCollection);
         when(database.getCollection("eddi_schedule_fire_logs")).thenReturn(fireLogCollection);
 
-        store = new MongoScheduleStore(database, jsonSerialization, documentBuilder);
+        store = new MongoScheduleStore(database, jsonSerialization, documentBuilder, 100);
     }
 
     // ==================== createSchedule ====================

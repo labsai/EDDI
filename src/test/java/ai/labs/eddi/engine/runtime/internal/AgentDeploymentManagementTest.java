@@ -212,4 +212,44 @@ class AgentDeploymentManagementTest {
             verify(migrationManager).startMigrationIfFirstTimeRun(any());
         }
     }
+
+    @Nested
+    @DisplayName("endOldConversationsWithOldAgents — Finding #7")
+    class IdleSweepHitlTests {
+
+        @Test
+        @DisplayName("skips AWAITING_HUMAN conversations (no raw ENDED write)")
+        void skipsPausedConversations() throws Exception {
+            var paused = snapshot("conv-paused", ai.labs.eddi.engine.memory.model.ConversationState.AWAITING_HUMAN);
+
+            when(conversationMemoryStore.loadActiveConversationMemorySnapshot("agent1", 1))
+                    .thenReturn(List.of(paused));
+
+            invokeEndOldConversations("agent1", 1);
+
+            // A paused conversation must never be force-ENDed by the idle sweep.
+            verify(conversationMemoryStore, never())
+                    .setConversationState(eq("conv-paused"), any());
+            // And its descriptor is never even read (we short-circuit before that).
+            verify(documentDescriptorStore, never()).readDescriptor(eq("agent1"), eq(1));
+        }
+    }
+
+    private static ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot snapshot(
+                                                                                        String id,
+                                                                                        ai.labs.eddi.engine.memory.model.ConversationState state) {
+        var s = new ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot();
+        s.setId(id);
+        s.setAgentId("agent1");
+        s.setAgentVersion(1);
+        s.setConversationState(state);
+        return s;
+    }
+
+    private void invokeEndOldConversations(String agentId, Integer agentVersion) throws Exception {
+        var m = AgentDeploymentManagement.class.getDeclaredMethod(
+                "endOldConversationsWithOldAgents", String.class, Integer.class);
+        m.setAccessible(true);
+        m.invoke(management, agentId, agentVersion);
+    }
 }

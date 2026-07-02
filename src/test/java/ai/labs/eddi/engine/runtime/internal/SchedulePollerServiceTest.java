@@ -189,6 +189,61 @@ class SchedulePollerServiceTest {
         verify(scheduleStore).markCompleted(eq("one-1"), isNull());
     }
 
+    // --- Finding #17: concurrent dispatch + error isolation ---
+
+    @Test
+    void poll_claimsAllBeforeDispatch_andFiresEachClaimed() throws Exception {
+        var s1 = makeCronSchedule("s1", "0 9 * * *", "a");
+        var s2 = makeCronSchedule("s2", "0 9 * * *", "b");
+        var s3 = makeCronSchedule("s3", "0 9 * * *", "c");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(s1, s2, s3));
+        when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt()))
+                .thenAnswer(inv -> makeFireLog(((ScheduleConfiguration) inv.getArgument(0)).getId(), FireStatus.COMPLETED.name()));
+
+        poller.pollDueSchedules();
+
+        // Every due schedule is claimed (CAS runs on the poll thread) and fired.
+        verify(scheduleStore).tryClaim(eq("s1"), any(), any());
+        verify(scheduleStore).tryClaim(eq("s2"), any(), any());
+        verify(scheduleStore).tryClaim(eq("s3"), any(), any());
+        verify(fireExecutor).fire(eq(s1), any(), anyInt());
+        verify(fireExecutor).fire(eq(s2), any(), anyInt());
+        verify(fireExecutor).fire(eq(s3), any(), anyInt());
+    }
+
+    @Test
+    void poll_oneFailingFireDoesNotBlockOthers() throws Exception {
+        var good = makeCronSchedule("good", "0 9 * * *", "a");
+        var bad = makeCronSchedule("bad", "0 9 * * *", "b");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(bad, good));
+        when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+        // The "bad" fire throws; the "good" fire must still complete.
+        when(fireExecutor.fire(eq(bad), any(), anyInt())).thenThrow(new RuntimeException("boom"));
+        when(fireExecutor.fire(eq(good), any(), anyInt())).thenReturn(makeFireLog("good", FireStatus.COMPLETED.name()));
+
+        poller.pollDueSchedules();
+
+        // good completes; bad is marked failed via the per-fire error isolation path.
+        verify(scheduleStore).markCompleted(eq("good"), any());
+        verify(scheduleStore).markFailed(eq("bad"), any());
+    }
+
+    @Test
+    void poll_onlyClaimedSchedulesAreFired() throws Exception {
+        var mine = makeCronSchedule("mine", "0 9 * * *", "a");
+        var theirs = makeCronSchedule("theirs", "0 9 * * *", "b");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(mine, theirs));
+        when(scheduleStore.tryClaim(eq("mine"), any(), any())).thenReturn(true);
+        when(scheduleStore.tryClaim(eq("theirs"), any(), any())).thenReturn(false); // lost the CAS
+        when(fireExecutor.fire(eq(mine), any(), anyInt())).thenReturn(makeFireLog("mine", FireStatus.COMPLETED.name()));
+
+        poller.pollDueSchedules();
+
+        verify(fireExecutor).fire(eq(mine), any(), anyInt());
+        verify(fireExecutor, never()).fire(eq(theirs), any(), anyInt());
+    }
+
     // --- Helpers ---
 
     private static ScheduleConfiguration makeCronSchedule(String id, String cron, String message) {

@@ -28,7 +28,7 @@ class MongoScheduleStoreTest extends MongoTestBase {
 
     @BeforeAll
     static void init() {
-        store = new MongoScheduleStore(getDatabase(), jsonSerialization, documentBuilder);
+        store = new MongoScheduleStore(getDatabase(), jsonSerialization, documentBuilder, 100);
     }
 
     @BeforeEach

@@ -23,8 +23,12 @@ import java.net.InetAddress;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * Polls the schedule store for due schedules and fires them.
@@ -140,25 +144,76 @@ public class SchedulePollerService {
                 LOGGER.debugf("[SCHEDULE] Found %d due schedules", dueSchedules.size());
             }
 
+            // Claim BEFORE dispatch: the cluster-wide CAS claim must run on the poll
+            // thread so exactly one instance owns each schedule. Only the schedules
+            // this instance won are dispatched.
+            List<ScheduleConfiguration> claimed = new ArrayList<>();
             for (ScheduleConfiguration schedule : dueSchedules) {
-                processSchedule(schedule, now);
+                if (claimSchedule(schedule, now)) {
+                    claimed.add(schedule);
+                }
             }
+
+            // Fire claimed schedules concurrently on virtual threads with per-fire
+            // error isolation: a large burst of one-shot HITL timeouts (each doing a
+            // synchronous snapshot load) no longer serializes behind one thread and
+            // starves other schedule types (Dream, maintenance) for the poll cycle.
+            dispatchClaimed(claimed);
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Poll cycle failed");
         }
     }
 
-    private void processSchedule(ScheduleConfiguration schedule, Instant now) {
+    /**
+     * Atomically claim a schedule for this instance. Returns true only if the CAS
+     * claim succeeded.
+     */
+    private boolean claimSchedule(ScheduleConfiguration schedule, Instant now) {
         try {
-            // Atomic CAS claim
             boolean claimed = scheduleStore.tryClaim(schedule.getId(), instanceId, now);
-
             if (!claimed) {
                 claimConflictCounter.increment();
                 LOGGER.debugf("[SCHEDULE] Claim conflict for schedule %s — another instance got it", schedule.getId());
-                return;
             }
+            return claimed;
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Error claiming schedule %s", schedule.getId());
+            return false;
+        }
+    }
 
+    /**
+     * Fire all claimed schedules on a virtual-thread-per-task executor and wait for
+     * the batch to finish within the poll cycle. Each fire is isolated so one
+     * failure never blocks the rest of the batch.
+     */
+    private void dispatchClaimed(List<ScheduleConfiguration> claimed) {
+        if (claimed.isEmpty()) {
+            return;
+        }
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<?>> futures = new ArrayList<>(claimed.size());
+            for (ScheduleConfiguration schedule : claimed) {
+                futures.add(executor.submit(() -> fireClaimedSchedule(schedule)));
+            }
+            // Join each task; fireClaimedSchedule swallows its own errors, so this
+            // only guards against unexpected escapes.
+            for (Future<?> future : futures) {
+                try {
+                    future.get();
+                } catch (Exception e) {
+                    LOGGER.errorf(e, "[SCHEDULE] Dispatched fire task failed unexpectedly");
+                }
+            }
+        }
+    }
+
+    /**
+     * Fire an already-claimed schedule and record its outcome. Must not throw —
+     * error isolation for the concurrent dispatch depends on this.
+     */
+    private void fireClaimedSchedule(ScheduleConfiguration schedule) {
+        try {
             // Fix #4: compute correct attempt number from schedule state
             int attemptNumber = schedule.getFailCount() + 1;
 

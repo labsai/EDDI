@@ -7,6 +7,8 @@ package ai.labs.eddi.engine.hitl;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
+import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -20,9 +22,11 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -42,19 +46,27 @@ class HitlCrashRecoveryObserverTest {
     private IConversationMemoryStore memStore;
     private IGroupConversationStore gcStore;
     private IScheduleStore scheduleStore;
+    private IConversationService conversationService;
 
     @BeforeEach
     void setUp() throws Exception {
         memStore = mock(IConversationMemoryStore.class);
         gcStore = mock(IGroupConversationStore.class);
         scheduleStore = mock(IScheduleStore.class);
+        conversationService = mock(IConversationService.class);
         when(memStore.findConversationIdsByState(any())).thenReturn(List.of());
         when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of());
         when(gcStore.findByState(any())).thenReturn(List.of());
     }
 
     private HitlCrashRecoveryObserver observer(boolean enabled, boolean recoverInProgress) {
-        return new HitlCrashRecoveryObserver(memStore, gcStore, scheduleStore, enabled, recoverInProgress);
+        return new HitlCrashRecoveryObserver(memStore, gcStore, scheduleStore, conversationService,
+                enabled, recoverInProgress, Optional.empty());
+    }
+
+    private HitlCrashRecoveryObserver observerWithRetention(Duration maxAge) {
+        return new HitlCrashRecoveryObserver(memStore, gcStore, scheduleStore, conversationService,
+                true, true, Optional.ofNullable(maxAge));
     }
 
     /** Projected summary of a paused conversation, as the sweep now reads them. */
@@ -333,6 +345,53 @@ class HitlCrashRecoveryObserverTest {
 
             verify(scheduleStore).createSchedule(any());
             verify(scheduleStore, times(2)).deleteSchedulesByName("hitl-timeout-group-" + GC_ID);
+        }
+    }
+
+    @Nested
+    @DisplayName("Pending-approval retention sweep — Finding #32")
+    class RetentionSweep {
+
+        private PendingApprovalSummary summary(String conversationId, Instant pausedAt) {
+            return new PendingApprovalSummary(conversationId, "agent-1", "user-1", pausedAt,
+                    "needs review", "WAIT_INDEFINITELY");
+        }
+
+        @Test
+        @DisplayName("disabled by default — never cancels")
+        void disabledByDefault() throws Exception {
+            when(memStore.findPendingApprovalSummaries(anyInt()))
+                    .thenReturn(List.of(summary("old", Instant.now().minus(365, ChronoUnit.DAYS))));
+
+            observer(true, true).sweepExpiredPendingApprovals();
+
+            verify(conversationService, never()).cancelConversation(any(), any());
+        }
+
+        @Test
+        @DisplayName("cancels pauses older than max-age via the audited path")
+        void cancelsExpiredPauses() throws Exception {
+            var oldOne = summary("old", Instant.now().minus(40, ChronoUnit.DAYS));
+            var recentOne = summary("recent", Instant.now().minus(1, ChronoUnit.DAYS));
+            when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of(oldOne, recentOne));
+            when(conversationService.cancelConversation(eq("old"), any()))
+                    .thenReturn(IConversationService.CancelOutcome.CANCELLED);
+
+            observerWithRetention(Duration.ofDays(30)).sweepExpiredPendingApprovals();
+
+            verify(conversationService).cancelConversation(eq("old"), eq(ControlSignal.CANCEL_GRACEFUL));
+            verify(conversationService, never()).cancelConversation(eq("recent"), any());
+        }
+
+        @Test
+        @DisplayName("zero/negative max-age is treated as OFF")
+        void nonPositiveMaxAgeIsOff() throws Exception {
+            when(memStore.findPendingApprovalSummaries(anyInt()))
+                    .thenReturn(List.of(summary("old", Instant.now().minus(40, ChronoUnit.DAYS))));
+
+            observerWithRetention(Duration.ZERO).sweepExpiredPendingApprovals();
+
+            verify(conversationService, never()).cancelConversation(any(), any());
         }
     }
 }
