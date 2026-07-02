@@ -462,6 +462,8 @@ public class AgentGroupConfiguration {
         private String approvalTimeout;
         private String timeoutPolicy = "WAIT_INDEFINITELY";
         private String granularity = "PHASE";
+        /** Task rejection policy: FAIL (default) or RETRY. */
+        private String onTaskRejection = "FAIL";
 
         public String getApprovalTimeout() {
             return approvalTimeout;
@@ -485,6 +487,14 @@ public class AgentGroupConfiguration {
 
         public void setGranularity(String granularity) {
             this.granularity = granularity;
+        }
+
+        public String getOnTaskRejection() {
+            return onTaskRejection;
+        }
+
+        public void setOnTaskRejection(String onTaskRejection) {
+            this.onTaskRejection = onTaskRejection;
         }
     }
 }

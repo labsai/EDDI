@@ -453,6 +453,10 @@ public class GroupConversationService implements IGroupConversationService {
         gc.setPausedPhaseName(phase.name());
         gc.setPausedTurnCount(currentTurnCount);
         gc.setHitlPauseType(GroupConversation.HitlPauseType.valueOf(granularity));
+        // Phase 6c: Designer-supplied pause reason
+        gc.setHitlPauseReason("Requires human approval (" + granularity + ") — phase: " + phase.name());
+        // Phase 6d: Copy timeout config into bookmark for REST visibility
+        populateTimeoutBookmark(gc);
         conversationStore.update(gc);
 
         // MAJOR-2: Schedule group timeout if configured
@@ -460,7 +464,24 @@ public class GroupConversationService implements IGroupConversationService {
 
         if (listener != null) {
             listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(
-                    phaseIdx, phase.name(), "Requires human approval (" + granularity + ")", granularity));
+                    phaseIdx, phase.name(), gc.getHitlPauseReason(), granularity));
+        }
+    }
+
+    /** Copies HITL timeout config values into the GC bookmark fields. */
+    private void populateTimeoutBookmark(GroupConversation gc) {
+        try {
+            var resId = groupStore.getCurrentResourceId(gc.getGroupId());
+            if (resId == null)
+                return;
+            var config = groupStore.read(gc.getGroupId(), resId.getVersion());
+            if (config.getHitlConfig() != null) {
+                gc.setHitlTimeoutPolicy(config.getHitlConfig().getTimeoutPolicy());
+                gc.setHitlApprovalTimeout(config.getHitlConfig().getApprovalTimeout());
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Could not populate timeout bookmark for %s: %s",
+                    gc.getId(), e.getMessage());
         }
     }
 
@@ -952,6 +973,20 @@ public class GroupConversationService implements IGroupConversationService {
                 LOGGER.warnf("Task execution timed out for group %s (wave %d)",
                         LogSanitizer.sanitize(gc.getGroupId()), wave + 1);
                 futures.forEach(f -> f.cancel(true));
+                // Phase 5c: Reset stranded IN_PROGRESS tasks back to ASSIGNED
+                // so they don't stay permanently stuck after a wave timeout.
+                if (gc.getTaskList() != null) {
+                    gc.getTaskList().all().stream()
+                            .filter(t -> t.status() == SharedTaskList.TaskStatus.IN_PROGRESS)
+                            .forEach(t -> {
+                                try {
+                                    gc.getTaskList().resetToAssigned(t.id());
+                                    LOGGER.infof("Reset timed-out task '%s' to ASSIGNED", t.id());
+                                } catch (Exception ex) {
+                                    LOGGER.warnf("Failed to reset task '%s': %s", t.id(), ex.getMessage());
+                                }
+                            });
+                }
                 break;
             } catch (java.util.concurrent.CancellationException e) {
                 // R2: CANCEL_IMMEDIATE fires allOf.cancel(true) → CancellationException.
@@ -1869,6 +1904,16 @@ public class GroupConversationService implements IGroupConversationService {
 
             GroupConversation subConversation = discuss(subGroupId, input, gc.getUserId(), nextDepth);
 
+            // Phase 5d: Nested group HITL guard — if the sub-group paused for
+            // approval, don't extract a partial answer. Nested HITL is not
+            // supported in v1; return a SKIPPED entry with explanation.
+            if (subConversation.getState() == GroupConversationState.AWAITING_APPROVAL) {
+                LOGGER.warnf("Sub-group '%s' is awaiting approval — nested HITL not supported in v1", subGroupId);
+                return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(),
+                        TranscriptEntryType.SKIPPED, Instant.now(),
+                        "Sub-group awaiting approval — nested HITL not supported in v1", targetAgentId);
+            }
+
             // Extract the synthesized answer, or concatenate all responses
             String response = subConversation.getSynthesizedAnswer();
             if (response == null || response.isBlank()) {
@@ -2166,12 +2211,35 @@ public class GroupConversationService implements IGroupConversationService {
         }
 
         // Apply task-level approvals if present
+        // Phase 5a: Load rejection policy from config
+        boolean retryOnReject = false;
+        try {
+            var resId = groupStore.getCurrentResourceId(gc.getGroupId());
+            if (resId != null) {
+                var config = groupStore.read(gc.getGroupId(), resId.getVersion());
+                if (config.getHitlConfig() != null) {
+                    retryOnReject = "RETRY".equalsIgnoreCase(config.getHitlConfig().getOnTaskRejection());
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Could not load rejection policy for %s, defaulting to FAIL: %s",
+                    groupConversationId, e.getMessage());
+        }
+
         if (request.getTaskApprovals() != null && gc.getTaskList() != null) {
             for (var entry : request.getTaskApprovals().entrySet()) {
-                if ("APPROVED".equals(entry.getValue())) {
+                if ("APPROVED".equalsIgnoreCase(entry.getValue())) {
                     gc.getTaskList().approveTask(entry.getKey());
+                } else if (retryOnReject) {
+                    // RETRY policy: reset to ASSIGNED so the task re-executes
+                    gc.getTaskList().resetFromAnyToAssigned(entry.getKey());
+                    LOGGER.infof("Task '%s' rejected with RETRY policy — reset to ASSIGNED", entry.getKey());
                 } else {
-                    gc.getTaskList().rejectTask(entry.getKey(), "Rejected by human reviewer");
+                    // FAIL policy (default): permanently reject the task
+                    gc.getTaskList().rejectTask(entry.getKey(),
+                            request.getDecision() != null && request.getDecision().getNote() != null
+                                    ? request.getDecision().getNote()
+                                    : "Rejected by human reviewer");
                 }
             }
         }
@@ -2217,6 +2285,9 @@ public class GroupConversationService implements IGroupConversationService {
         gc.setPausedAtPhaseIndex(-1);
         gc.setPausedPhaseName(null);
         gc.setHitlPauseType(null);
+        gc.setHitlPauseReason(null);
+        gc.setHitlTimeoutPolicy(null);
+        gc.setHitlApprovalTimeout(null);
         gc.setState(GroupConversationState.IN_PROGRESS);
 
         conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);

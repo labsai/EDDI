@@ -44,6 +44,15 @@ public class GroupConversation {
     private String pausedPhaseName;
     private Instant pausedAt;
     private HitlPauseType hitlPauseType;
+    /** Human-readable reason for the pause (from HITL gate). */
+    private String hitlPauseReason;
+    /** Timeout policy copied from config at pause time (Phase 6d). */
+    private String hitlTimeoutPolicy;
+    /**
+     * Approval timeout duration (ISO-8601) copied from config at pause time (Phase
+     * 6d).
+     */
+    private String hitlApprovalTimeout;
     private Instant created;
     private Instant lastModified;
 
@@ -351,5 +360,29 @@ public class GroupConversation {
 
     public void setHitlPauseType(HitlPauseType hitlPauseType) {
         this.hitlPauseType = hitlPauseType;
+    }
+
+    public String getHitlPauseReason() {
+        return hitlPauseReason;
+    }
+
+    public void setHitlPauseReason(String hitlPauseReason) {
+        this.hitlPauseReason = hitlPauseReason;
+    }
+
+    public String getHitlTimeoutPolicy() {
+        return hitlTimeoutPolicy;
+    }
+
+    public void setHitlTimeoutPolicy(String hitlTimeoutPolicy) {
+        this.hitlTimeoutPolicy = hitlTimeoutPolicy;
+    }
+
+    public String getHitlApprovalTimeout() {
+        return hitlApprovalTimeout;
+    }
+
+    public void setHitlApprovalTimeout(String hitlApprovalTimeout) {
+        this.hitlApprovalTimeout = hitlApprovalTimeout;
     }
 }

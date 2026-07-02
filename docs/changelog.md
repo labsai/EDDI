@@ -38,10 +38,39 @@
 
 ### In Progress / Next
 - Phase 2b: HitlConfig unification (shared class, enums)
-- Phase 3: Full cancel matrix, crash recovery, discriminating status codes
-- Phase 4b–d: Security hardening, audit trail, metrics
-- Phase 5: Group API correctness (task rejection, nested guard, config drift)
-- Phase 6–7: Architecture dedup, integration tests, dead code cleanup
+- Phase 3c: Crash recovery (startup sweep for stale AWAITING states)
+- Phase 3d: Discriminating status codes
+- Phase 4b: Strict ownership + approver role
+- Phase 6a: Deduplicate task loop
+- Phase 7: Integration tests, dead code cleanup, documentation
+
+---
+
+## 🔧 HITL Review Fixes — Phases 5/6: Group Correctness + Config Surface (2026-07-02)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Continuing 7-phase implementation plan — group API correctness, config surface, and architecture.
+
+### Fixes Implemented
+
+| ID | Severity | Phase | Fix |
+|----|----------|-------|-----|
+| #10 | MAJOR | 5b | **Non-EXECUTE + TASK fallback**: TASK granularity only applies to EXECUTE phases (they have a SharedTaskList). Non-EXECUTE phases (OPINION, SYNTHESIS, etc.) now fall back to PHASE-style pause. |
+| #5e | MAJOR | 5e | **Resume ordering**: Timeout schedule deleted only AFTER the CAS succeeds (both approve + reject paths). If CAS fails, schedule preserved → timeout can still fire. |
+| #5f | MAJOR | 5f | **Config drift guard**: On resume, bookmarked phase name validated against loaded config. If config was edited while paused → FAILED + ERROR transcript entry. |
+| #10 | MAJOR | 5d | **Nested group HITL guard**: Sub-group returning AWAITING_APPROVAL → SKIPPED entry instead of extracting partial answer. Nested HITL not supported in v1. |
+| #11 | MAJOR | 5c | **Timed-out task fixup**: After wave timeout, IN_PROGRESS tasks reset to ASSIGNED (prevents permanent stranding). |
+| #5a | MAJOR | 5a | **Task rejection policy**: New `onTaskRejection` field in HitlConfig (FAIL/RETRY). RETRY resets rejected tasks to ASSIGNED for re-execution. |
+| #15 | MAJOR | 4c | **Audit trail**: Audit collector added to resume path (same as say path). |
+| #6c | MINOR | 6c | **Pause reason**: `hitlPauseReason` field on GroupConversation — human-readable reason set at commitPause. |
+| #6d | MINOR | 6d | **Bookmark timeout fields**: `hitlTimeoutPolicy` + `hitlApprovalTimeout` copied from config at pause time for REST visibility. |
+
+### Files Changed
+- `GroupConversationService.java` — HITL gate type check, drift guard, resume ordering, nested guard, timeout task fixup, rejection policy, bookmark population
+- `GroupConversation.java` — 3 new bookmark fields (hitlPauseReason, hitlTimeoutPolicy, hitlApprovalTimeout)
+- `AgentGroupConfiguration.java` — `onTaskRejection` field in HitlConfig
+- `SharedTaskList.java` — `resetFromAnyToAssigned()` method for RETRY policy
+- `ConversationService.java` — Audit collector on resume path
 
 ---
 

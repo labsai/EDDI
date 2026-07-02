@@ -326,6 +326,23 @@ public class SharedTaskList {
         return u;
     }
 
+    /**
+     * AWAITING_APPROVAL / IN_PROGRESS / FAILED → ASSIGNED. Used by the RETRY
+     * rejection policy to re-queue tasks for another attempt. Clears prior result
+     * but preserves assignment and metadata.
+     */
+    public synchronized TaskItem resetFromAnyToAssigned(String taskId) {
+        TaskItem t = requireTask(taskId);
+        if (t.status() == TaskStatus.ASSIGNED || t.status() == TaskStatus.COMPLETED) {
+            return t; // already assignable or done — no-op
+        }
+        TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.ASSIGNED,
+                t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), null,
+                null, false, t.priority(), t.createdAt(), null);
+        replaceTask(taskId, u);
+        return u;
+    }
+
     /** Post-join detection query for the per-task gate (Invariant 4). */
     public synchronized boolean hasAwaitingApproval() {
         return all().stream().anyMatch(t -> t.status() == TaskStatus.AWAITING_APPROVAL);
