@@ -884,6 +884,13 @@ public class ConversationService implements IConversationService {
                 throw new ResourceStoreException("Agent not deployed for resume (agentId=" + agentId + ", version=" + agentVersion + ")");
             }
 
+            // #15/4c: Set the audit collector (same as say path) so resume
+            // operations are recorded in the audit ledger.
+            if (auditLedgerService.isEnabled()) {
+                String envName = environment.toString();
+                memory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
+            }
+
             IConversation conversation = agent.continueConversation(memory,
                     createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig()),
                     handler != null ? returnMemory -> {

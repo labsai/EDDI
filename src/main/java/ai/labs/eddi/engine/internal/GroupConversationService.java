@@ -354,15 +354,17 @@ public class GroupConversationService implements IGroupConversationService {
                 // MAJOR-1: Only check phase.requiresApproval() for the relevant granularity.
                 // TASK-level: gate on requiresApproval() AND taskLevelHitl AND tasks awaiting.
                 // PHASE-level: gate on requiresApproval() AND NOT taskLevelHitl.
+                // Phase 5b: TASK granularity only applies to EXECUTE phases (they have
+                // a SharedTaskList). Non-EXECUTE phases fall back to PHASE-style pause.
                 if (phase.requiresApproval()) {
-                    if (taskLevelHitl) {
+                    if (taskLevelHitl && phase.type() == PhaseType.EXECUTE) {
                         // TASK granularity: pause only if tasks actually await approval
                         if (gc.getTaskList() != null && gc.getTaskList().hasAwaitingApproval()) {
                             commitPause(gc, phaseIdx, phase, "TASK", turnCounter.get(), listener);
                             return gc;
                         }
                     } else {
-                        // PHASE granularity: pause after entire phase completes
+                        // PHASE granularity (or non-EXECUTE with TASK config → fallback)
                         commitPause(gc, phaseIdx, phase, "PHASE", turnCounter.get(), listener);
                         return gc;
                     }
@@ -2163,9 +2165,6 @@ public class GroupConversationService implements IGroupConversationService {
             throw new GroupDiscussionException("Group conversation is not awaiting approval");
         }
 
-        // MAJOR-3: Delete stale HITL timeout schedule before resume
-        deleteGroupHitlTimeoutSchedule(groupConversationId);
-
         // Apply task-level approvals if present
         if (request.getTaskApprovals() != null && gc.getTaskList() != null) {
             for (var entry : request.getTaskApprovals().entrySet()) {
@@ -2199,11 +2198,14 @@ public class GroupConversationService implements IGroupConversationService {
             gc.setPausedAt(null);
             // MAJOR-4: Use CAS to prevent concurrent approve clobbering reject
             conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+            // Delete timeout schedule only after CAS succeeds (Phase 5e)
+            deleteGroupHitlTimeoutSchedule(groupConversationId);
             return gc;
         }
 
         // Save resume point and pause type before clearing
         int resumePhaseIndex = gc.getPausedAtPhaseIndex();
+        String pausedPhaseName = gc.getPausedPhaseName(); // saved for config drift guard
         // BLOCKER: read hitlPauseType — TASK pauses mid-phase, so we must re-enter
         // at the SAME phase (findExecutableTasks is idempotent for approved tasks).
         // PHASE pauses after the phase completes, so resume at +1.
@@ -2218,6 +2220,9 @@ public class GroupConversationService implements IGroupConversationService {
         gc.setState(GroupConversationState.IN_PROGRESS);
 
         conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+        // Delete timeout schedule only after CAS succeeds (Phase 5e) — if CAS
+        // fails, the schedule is preserved so the timeout can still fire.
+        deleteGroupHitlTimeoutSchedule(groupConversationId);
 
         // Resume execution in background thread
         var groupId = gc.getGroupId();
@@ -2235,6 +2240,31 @@ public class GroupConversationService implements IGroupConversationService {
                 }
                 var groupConfig = groupStore.read(groupId, currentGroupId.getVersion());
                 var phases = resolvePhases(groupConfig);
+
+                // Phase 5f: Config drift guard — verify the phase at the bookmark
+                // still matches what was paused. If the config was edited while the
+                // discussion was awaiting approval, the phase list may have shifted.
+                // Compare against resumePhaseIndex (the bookmarked phase), not
+                // startFromPhase (which is +1 for PHASE pauses).
+                if (resumePhaseIndex < phases.size() && pausedPhaseName != null) {
+                    String actualPhase = phases.get(resumePhaseIndex).name();
+                    if (!pausedPhaseName.equals(actualPhase)) {
+                        LOGGER.warnf("Config drift detected for GC %s: expected phase '%s' at index %d but found '%s'",
+                                groupConversationId, pausedPhaseName, resumePhaseIndex, actualPhase);
+                        gc.setState(GroupConversationState.FAILED);
+                        String driftMessage = "Resume aborted: group config changed while paused (expected phase '"
+                                + pausedPhaseName + "' at index " + resumePhaseIndex
+                                + " but found '" + actualPhase + "')";
+                        gc.getTranscript().add(new TranscriptEntry(
+                                "system", "System",
+                                driftMessage,
+                                resumePhaseIndex, actualPhase,
+                                TranscriptEntryType.ERROR, Instant.now(), driftMessage, null));
+                        conversationStore.update(gc);
+                        return;
+                    }
+                }
+
                 executeDiscussion(gc, groupConfig, phases, question, listener, startFromPhase);
             } catch (Exception e) {
                 LOGGER.error("Failed to resume group discussion: " + groupConversationId, e);
