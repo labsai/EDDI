@@ -436,6 +436,16 @@ public class ConversationService implements IConversationService {
                 }
 
                 @Override
+                public void onCascadeStepStart(int stepIndex, String modelType, String modelName, int totalSteps) {
+                    streamingHandler.onCascadeStepStart(stepIndex, modelType, modelName, totalSteps);
+                }
+
+                @Override
+                public void onCascadeEscalation(int fromStep, int toStep, double confidence, double threshold, String reason, long durationMs) {
+                    streamingHandler.onCascadeEscalation(fromStep, toStep, confidence, threshold, reason, durationMs);
+                }
+
+                @Override
                 public void onComplete() {
                     // Handled separately after memory conversion
                 }

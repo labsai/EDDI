@@ -5,6 +5,55 @@
 
 ---
 
+## 🚀 Multi-Model Cascade — Enterprise Hardening (2026-07-03)
+
+**Repo:** EDDI (`feat/model-cascade-enterprise-hardening`)
+**What changed:** Full enterprise pass over the multi-model cascading feature. A review found two documented-but-dead capabilities (SSE events, judge model), a compliance bug (audit recorded the wrong model), and discarded token/cost/metrics that made the cost-savings pitch unmeasurable. This lands all of it. Plan: [`planning/model-cascade-enterprise-hardening-plan.md`](../planning/model-cascade-enterprise-hardening-plan.md).
+
+### Correctness / compliance
+
+- **Audit records the real model (#5).** `LlmTask` now writes `audit:model_name` and `audit:cascade_model` from the cascade-selected step (`provider/model (step N)`), not the task-level default. Added `audit:cascade_cost` and `audit:cascade_token_usage`. An auditor can now reconstruct which model produced an answer.
+- **Agent-mode confidence (#6).** `structured_output` cannot be injected around the tool-loop, so agent mode auto-routes to `judge_model` (if configured) else `heuristic`. A single deploy-time warning replaces the previous per-turn WARN.
+- **convertToObject + cascade (#7).** The cascade now honors native `jsonMode`, and forces a non-wrapper confidence strategy when `convertToObject=true` (the wrapper contradicts the raw-JSON instruction).
+- **Global-var / Qute consistency (#8).** Step `type` is resolved through `GlobalVariableResolver` and step param values are run through the template engine — parity with the standard path.
+
+### Broken promises made real
+
+- **SSE cascade events (#1).** `StreamingResponseHandler` gained default `onCascadeStepStart`/`onCascadeEscalation`; the anonymous sink in `ConversationService.sayStreaming` forwards them; `RestAgentEngineStreaming` emits `cascade_step_start` / `cascade_escalation` SSE events. The plumbing is now live end-to-end.
+- **judge_model implemented (#2).** New `judgeModel: {type, parameters}` config block, built once via `ChatModelRegistry` (vault + global-var resolution), passed into `ConfidenceEvaluator`. `evaluationStrategy: judge_model` without a judge now fails at configure time.
+- **`strategy: parallel` (#3) / budget javadoc (#4).** Unknown strategy rejected at configure time; `parallel` warns once and runs sequentially; the false "budget exhausted" javadoc replaced with real ceiling docs.
+
+### Observability & guardrails
+
+- **Token + cost evidence.** Per-step `tokenUsage` and `costUsd` in the trace; aggregate run cost + token usage surfaced via `responseMetadataObjectName` (was `{}`). Agent-mode token usage is accumulated across tool-loop iterations.
+- **Micrometer metrics** under `eddi.llm.cascade.*`: executions, escalations (tag `reason`), accepted step, step latency, confidence distribution, step errors (tags `provider`,`type`), tokens, cost, ceiling exceeded (tag `kind`).
+- **Cascade ceilings.** `maxTotalDurationMs` (wall-clock) and `maxCostPerRun` (dollars, from configurable per-step `inputPricePer1M`/`outputPricePer1M`) stop escalation and return the best response so far. Per-step timeout is capped by the remaining duration budget.
+- **Configure-time validation** (`CascadeConfigValidator`): empty steps, unknown `evaluationStrategy`, `judge_model` without a judge, thresholds ∉ [0,1], null threshold on a non-last step (dead-step trap), negative pricing/ceilings — all fail fast at deploy.
+
+### Robustness
+
+- **Confidence parsing** tries a real Jackson parse first (only reads `confidence` from an identified wrapper object, so a stray `"confidence":` in answer content is ignored), regex as fallback.
+- **Heuristic i18n.** `heuristicConfig` makes phrases/thresholds config-driven (English defaults); the no-phrase-match fallback is language-agnostic (keeps the default score rather than mis-scoring).
+- **Cancellation safety (#9).** `AgentOrchestrator` checks interruption between tool-loop iterations and before each tool, so a timed-out cascade step stops launching further side-effectful tools. Residual risk: a tool already in-flight when the timeout fires may complete.
+- **Streaming the final step live.** The always-accepted final step (legacy mode, non-wrapper strategy, streaming-capable provider) streams token-by-token via the event sink instead of buffering. `StreamingLegacyChatExecutor.executeCapturing` preserves token usage while streaming.
+- **`returnBestAcrossSteps`** (opt-in): return an earlier step's response if it scored strictly higher than the finally-accepted step.
+- **Base-model laziness.** The base `ChatModel` is no longer built when the active-cascade branch owns the request.
+
+### Architecture
+
+- `CascadingModelExecutor` converted from a static utility to an instance (constructed by `LlmTask`) holding `ChatModelRegistry`, `GlobalVariableResolver`, `ITemplatingEngine`, `LegacyChatExecutor`, `StreamingLegacyChatExecutor`, and `MeterRegistry`. `AgentOrchestrator.ExecutionResult` gained a `responseMetadata` field (2-arg constructor retained for compatibility).
+- Backward compatible: all new config fields optional with today's defaults; configs without `modelCascade` and `enabled:false` are unaffected; `StreamingResponseHandler` cascade methods are `default`.
+
+### Tests
+
+- Updated the 3 executor test classes to the instance API and the 6 `LlmTask` test classes to the new constructor. Removed the backward-incompatible `languageAgnosticScore` band that regressed the default heuristic score.
+
+### Next
+
+- Docs rewrite (`docs/model-cascade.md`) to match reality, and comprehensive new test coverage for judge model, ceilings, metrics, audit, validation, and streaming.
+
+---
+
 ## 🐛 Fix: PostgreSQL group conversations broken — JDBC `?|` operator escape (2026-07-02)
 
 **Repo:** EDDI (`fix/postgres-group-conversation-jdbc-escape`)

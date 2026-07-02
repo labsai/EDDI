@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.HeuristicConfig;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -19,10 +22,13 @@ import java.util.regex.Pattern;
  * Four strategies are supported:
  * <ul>
  * <li><b>structured_output</b> — asks the LLM to return
- * {@code {"response":"...","confidence":0.0-1.0}} and parses the JSON. Falls
- * back to heuristic if parsing fails.</li>
+ * {@code {"response":"...","confidence":0.0-1.0}} and parses the JSON (via a
+ * real JSON parser first, regex as fallback). Falls back to heuristic if no
+ * wrapper is found.</li>
  * <li><b>heuristic</b> — analyzes response text for hedging phrases, emptiness,
- * length.</li>
+ * length. Phrases and thresholds are configurable via {@link HeuristicConfig};
+ * when no configured phrase matches, language-agnostic signals (length +
+ * JSON-structure) are used instead of a flat score.</li>
  * <li><b>judge_model</b> — uses a separate cheap model call to rate
  * confidence.</li>
  * <li><b>none</b> — always returns 1.0 (effectively disables escalation).</li>
@@ -30,23 +36,39 @@ import java.util.regex.Pattern;
  */
 class ConfidenceEvaluator {
     private static final Logger LOGGER = Logger.getLogger(ConfidenceEvaluator.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    // JSON extraction patterns
+    // JSON extraction patterns (regex fallback only — a real JSON parse is tried
+    // first)
     private static final Pattern CONFIDENCE_JSON_PATTERN = Pattern.compile("\"confidence\"\\s*:\\s*(-?\\d+\\.?\\d*)", Pattern.CASE_INSENSITIVE);
     private static final Pattern RESPONSE_JSON_PATTERN = Pattern.compile("\"response\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"", Pattern.DOTALL);
 
-    // Hedging/uncertainty phrases (case-insensitive match)
-    private static final String[] LOW_CONFIDENCE_PHRASES = {"i don't know", "i do not know", "i'm not sure", "i am not sure", "i cannot", "i can't",
-            "i'm unable", "i am unable", "i don't have enough information", "i do not have enough information", "it's unclear", "it is unclear",
-            "unfortunately, i", "i apologize", "i'm sorry but i cannot", "as an ai", "as a language model", "i would need more", "could you clarify",
-            "could you provide more"};
+    // Default hedging/uncertainty phrases (case-insensitive match) — English.
+    // Overridable per deployment via HeuristicConfig for non-English agents.
+    static final List<String> DEFAULT_LOW_CONFIDENCE_PHRASES = List.of("i don't know", "i do not know", "i'm not sure", "i am not sure",
+            "i cannot", "i can't", "i'm unable", "i am unable", "i don't have enough information", "i do not have enough information",
+            "it's unclear", "it is unclear", "unfortunately, i", "i apologize", "i'm sorry but i cannot", "as an ai", "as a language model",
+            "i would need more", "could you clarify", "could you provide more");
 
-    // Refusal phrases
-    private static final String[] REFUSAL_PHRASES = {"i'm not able to", "i cannot fulfill", "i can't help with", "i'm not allowed",
-            "this is outside my", "i must decline"};
+    // Default refusal phrases — English.
+    static final List<String> DEFAULT_REFUSAL_PHRASES = List.of("i'm not able to", "i cannot fulfill", "i can't help with", "i'm not allowed",
+            "this is outside my", "i must decline");
+
+    static final int DEFAULT_SHORT_LENGTH_THRESHOLD = 20;
+    static final double DEFAULT_SHORT_SCORE = 0.3;
+    static final double DEFAULT_REFUSAL_SCORE = 0.2;
+    static final double DEFAULT_HEDGING_SCORE = 0.4;
+    static final double DEFAULT_SCORE = 0.8;
 
     private ConfidenceEvaluator() {
         // static utility class
+    }
+
+    /**
+     * Evaluate confidence based on the configured strategy (English defaults).
+     */
+    static EvaluationResult evaluate(String strategy, String response, ChatModel judgeModel) {
+        return evaluate(strategy, response, judgeModel, null);
     }
 
     /**
@@ -58,94 +80,185 @@ class ConfidenceEvaluator {
      *            the LLM response text
      * @param judgeModel
      *            optional chat model for "judge_model" strategy (null for others)
+     * @param heuristicConfig
+     *            optional overrides for the heuristic strategy (null = defaults)
      * @return a result containing the actual response text and confidence score
      */
-    static EvaluationResult evaluate(String strategy, String response, ChatModel judgeModel) {
+    static EvaluationResult evaluate(String strategy, String response, ChatModel judgeModel, HeuristicConfig heuristicConfig) {
         if (response == null || response.isBlank()) {
             return new EvaluationResult("", 0.0);
         }
 
         return switch (strategy != null ? strategy.toLowerCase() : "structured_output") {
-            case "heuristic" -> evaluateHeuristic(response);
-            case "judge_model" -> evaluateWithJudge(response, judgeModel);
+            case "heuristic" -> evaluateHeuristic(response, heuristicConfig);
+            case "judge_model" -> evaluateWithJudge(response, judgeModel, heuristicConfig);
             case "none" -> new EvaluationResult(response, 1.0);
-            default -> evaluateStructuredOutput(response);
+            default -> evaluateStructuredOutput(response, heuristicConfig);
         };
+    }
+
+    /** Backward-compatible overload — English defaults. */
+    static EvaluationResult evaluateStructuredOutput(String response) {
+        return evaluateStructuredOutput(response, null);
     }
 
     /**
      * Parse structured output format: {@code {"response":"...", "confidence":
-     * 0.85}} Falls back to heuristic if JSON parsing fails.
+     * 0.85}}. Tries a real JSON parse first (so a stray {@code "confidence":}
+     * inside answer content is not mistaken for the score), then a regex fallback,
+     * then heuristic.
      */
-    static EvaluationResult evaluateStructuredOutput(String response) {
+    static EvaluationResult evaluateStructuredOutput(String response, HeuristicConfig heuristicConfig) {
+        // 1. Real JSON parse — only reads confidence from an identified wrapper object.
+        EvaluationResult parsed = tryParseConfidenceWrapper(response);
+        if (parsed != null) {
+            return parsed;
+        }
+
+        // 2. Regex fallback — anchored to a balanced JSON object if one exists, else
+        // the whole string. Reduces (does not fully eliminate) false positives.
+        String scope = extractFirstBalancedObject(response);
+        String regexTarget = scope != null ? scope : response;
         try {
-            Matcher confidenceMatcher = CONFIDENCE_JSON_PATTERN.matcher(response);
+            Matcher confidenceMatcher = CONFIDENCE_JSON_PATTERN.matcher(regexTarget);
             if (confidenceMatcher.find()) {
-                double confidence = Double.parseDouble(confidenceMatcher.group(1));
-                confidence = Math.max(0.0, Math.min(1.0, confidence)); // clamp
-
-                // Extract the actual response text from JSON wrapper
-                Matcher responseMatcher = RESPONSE_JSON_PATTERN.matcher(response);
-                String actualResponse;
-                if (responseMatcher.find()) {
-                    actualResponse = responseMatcher.group(1).replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\");
-                } else {
-                    // Couldn't extract response field — return the whole thing
-                    // but strip the JSON wrapper if it looks like one
-                    actualResponse = stripJsonWrapper(response);
-                }
-
+                double confidence = clamp(Double.parseDouble(confidenceMatcher.group(1)));
+                Matcher responseMatcher = RESPONSE_JSON_PATTERN.matcher(regexTarget);
+                String actualResponse = responseMatcher.find()
+                        ? unescapeJsonString(responseMatcher.group(1))
+                        : stripJsonWrapper(response);
                 return new EvaluationResult(actualResponse, confidence);
             }
         } catch (NumberFormatException e) {
             LOGGER.debug("Failed to parse confidence from structured output, falling back to heuristic");
         }
 
-        // Fallback to heuristic
+        // 3. Heuristic fallback.
         LOGGER.debug("No structured confidence found in response, using heuristic fallback");
-        return evaluateHeuristic(response);
+        return evaluateHeuristic(response, heuristicConfig);
     }
 
     /**
-     * Analyze response text heuristically for confidence signals.
+     * Try to parse a confidence wrapper object using a real JSON parser. Handles
+     * markdown code fences and leading/trailing prose by extracting the first
+     * balanced JSON object. Returns null if no wrapper object with a numeric
+     * {@code confidence} field is found.
      */
+    private static EvaluationResult tryParseConfidenceWrapper(String response) {
+        String candidate = stripCodeFences(response.trim());
+
+        EvaluationResult direct = parseWrapperObject(candidate);
+        if (direct != null) {
+            return direct;
+        }
+
+        String balanced = extractFirstBalancedObject(candidate);
+        if (balanced != null && !balanced.equals(candidate)) {
+            return parseWrapperObject(balanced);
+        }
+        return null;
+    }
+
+    /**
+     * Parse a single JSON object string and, if it carries a numeric
+     * {@code confidence} field, return the extracted response + clamped confidence.
+     */
+    private static EvaluationResult parseWrapperObject(String json) {
+        try {
+            JsonNode node = MAPPER.readTree(json);
+            if (node != null && node.isObject() && node.has("confidence") && node.get("confidence").isNumber()) {
+                double confidence = clamp(node.get("confidence").asDouble());
+                JsonNode responseNode = node.get("response");
+                String actualResponse;
+                if (responseNode == null || responseNode.isNull()) {
+                    // Wrapper without an explicit response field — return original text.
+                    actualResponse = json;
+                } else if (responseNode.isTextual()) {
+                    actualResponse = responseNode.asText();
+                } else {
+                    // response is itself an object/array — preserve it as JSON text.
+                    actualResponse = responseNode.toString();
+                }
+                return new EvaluationResult(actualResponse, confidence);
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Not a parseable confidence wrapper: %s", e.getMessage());
+        }
+        return null;
+    }
+
+    /** Backward-compatible overload — English defaults. */
     static EvaluationResult evaluateHeuristic(String response) {
+        return evaluateHeuristic(response, null);
+    }
+
+    /**
+     * Analyze response text heuristically for confidence signals. Phrases and
+     * thresholds come from {@code heuristicConfig} when provided (English defaults
+     * otherwise). When no phrase matches, language-agnostic signals are used.
+     */
+    static EvaluationResult evaluateHeuristic(String response, HeuristicConfig heuristicConfig) {
         if (response == null || response.isBlank()) {
             return new EvaluationResult("", 0.0);
         }
 
         String lowerResponse = response.toLowerCase().trim();
 
-        // Very short responses are likely low quality
-        if (lowerResponse.length() < 20) {
-            return new EvaluationResult(response, 0.3);
+        int shortThreshold = heuristicConfig != null && heuristicConfig.getShortLengthThreshold() != null
+                ? heuristicConfig.getShortLengthThreshold()
+                : DEFAULT_SHORT_LENGTH_THRESHOLD;
+        double shortScore = value(heuristicConfig != null ? heuristicConfig.getShortScore() : null, DEFAULT_SHORT_SCORE);
+        double refusalScore = value(heuristicConfig != null ? heuristicConfig.getRefusalScore() : null, DEFAULT_REFUSAL_SCORE);
+        double hedgingScore = value(heuristicConfig != null ? heuristicConfig.getHedgingScore() : null, DEFAULT_HEDGING_SCORE);
+        double defaultScore = value(heuristicConfig != null ? heuristicConfig.getDefaultScore() : null, DEFAULT_SCORE);
+
+        // Very short responses are likely low quality.
+        if (lowerResponse.length() < shortThreshold) {
+            return new EvaluationResult(response, shortScore);
         }
 
-        // Check for refusal phrases
-        for (String phrase : REFUSAL_PHRASES) {
-            if (lowerResponse.contains(phrase)) {
-                return new EvaluationResult(response, 0.2);
+        List<String> refusalPhrases = heuristicConfig != null && heuristicConfig.getRefusalPhrases() != null
+                ? heuristicConfig.getRefusalPhrases()
+                : DEFAULT_REFUSAL_PHRASES;
+        for (String phrase : refusalPhrases) {
+            if (phrase != null && lowerResponse.contains(phrase.toLowerCase())) {
+                return new EvaluationResult(response, refusalScore);
             }
         }
 
-        // Check for hedging/uncertainty phrases
-        for (String phrase : LOW_CONFIDENCE_PHRASES) {
-            if (lowerResponse.contains(phrase)) {
-                return new EvaluationResult(response, 0.4);
+        List<String> lowConfidencePhrases = heuristicConfig != null && heuristicConfig.getLowConfidencePhrases() != null
+                ? heuristicConfig.getLowConfidencePhrases()
+                : DEFAULT_LOW_CONFIDENCE_PHRASES;
+        for (String phrase : lowConfidencePhrases) {
+            if (phrase != null && lowerResponse.contains(phrase.toLowerCase())) {
+                return new EvaluationResult(response, hedgingScore);
             }
         }
 
-        // Decent length and no red flags → assume reasonable confidence
-        return new EvaluationResult(response, 0.8);
+        // No configured phrase matched → language-agnostic fallback. Without
+        // language-specific signals we cannot tell hedging from confidence, so a
+        // non-short response keeps the default score (very short responses were
+        // already scored above). Deployments localize the phrase lists via
+        // HeuristicConfig to sharpen this gate in non-English languages.
+        return new EvaluationResult(response, defaultScore);
+    }
+
+    /**
+     * Backward-compatible overload — English defaults for the heuristic fallback.
+     */
+    static EvaluationResult evaluateWithJudge(String response, ChatModel judgeModel) {
+        return evaluateWithJudge(response, judgeModel, null);
     }
 
     /**
      * Use a separate model call to judge the quality/confidence of a response.
+     * Falls back to the (configurable) heuristic when no judge model is available
+     * or the judge call fails.
      */
-    static EvaluationResult evaluateWithJudge(String response, ChatModel judgeModel) {
+    static EvaluationResult evaluateWithJudge(String response, ChatModel judgeModel, HeuristicConfig heuristicConfig) {
         if (judgeModel == null) {
             LOGGER.warn("judge_model strategy requested but no judge model available, falling back to heuristic");
-            return evaluateHeuristic(response);
+            return evaluateHeuristic(response, heuristicConfig);
         }
 
         try {
@@ -156,25 +269,35 @@ class ConfidenceEvaluator {
             var judgeResponse = judgeModel.chat(
                     List.of(SystemMessage.from("You are a response quality evaluator. Output only valid JSON."), UserMessage.from(judgePrompt)));
 
-            String judgeText = judgeResponse.aiMessage().text();
+            String judgeText = judgeResponse.aiMessage() != null ? judgeResponse.aiMessage().text() : null;
             if (judgeText != null) {
+                // Prefer a real JSON parse of the judge's object, regex fallback.
+                String balanced = extractFirstBalancedObject(judgeText);
+                if (balanced != null) {
+                    try {
+                        JsonNode node = MAPPER.readTree(balanced);
+                        if (node != null && node.has("confidence") && node.get("confidence").isNumber()) {
+                            return new EvaluationResult(response, clamp(node.get("confidence").asDouble()));
+                        }
+                    } catch (Exception ignored) {
+                        // fall through to regex
+                    }
+                }
                 Matcher matcher = CONFIDENCE_JSON_PATTERN.matcher(judgeText);
                 if (matcher.find()) {
-                    double confidence = Double.parseDouble(matcher.group(1));
-                    confidence = Math.max(0.0, Math.min(1.0, confidence));
-                    return new EvaluationResult(response, confidence);
+                    return new EvaluationResult(response, clamp(Double.parseDouble(matcher.group(1))));
                 }
             }
         } catch (Exception e) {
             LOGGER.warn("Judge model evaluation failed: " + e.getMessage() + ", falling back to heuristic");
         }
 
-        return evaluateHeuristic(response);
+        return evaluateHeuristic(response, heuristicConfig);
     }
 
     /**
      * Build the system message suffix that instructs the model to include
-     * confidence. Only used for the "structured_output" strategy.
+     * confidence. Only used for the "structured_output" strategy in legacy mode.
      */
     static String buildConfidenceInstruction() {
         return "\n\nIMPORTANT: Wrap your entire response in a JSON object with exactly two fields: "
@@ -189,13 +312,84 @@ class ConfidenceEvaluator {
     private static String stripJsonWrapper(String response) {
         String trimmed = response.trim();
         if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-            // Try to extract just the useful part, skipping the confidence field
             Matcher matcher = RESPONSE_JSON_PATTERN.matcher(trimmed);
             if (matcher.find()) {
-                return matcher.group(1).replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\");
+                return unescapeJsonString(matcher.group(1));
             }
         }
         return response;
+    }
+
+    /**
+     * Unescape a raw JSON string body (regex-extracted, so not parsed by Jackson).
+     */
+    private static String unescapeJsonString(String raw) {
+        return raw.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r").replace("\\\"", "\"").replace("\\/", "/").replace("\\\\", "\\");
+    }
+
+    /** Remove surrounding markdown code fences (```json ... ``` or ``` ... ```). */
+    private static String stripCodeFences(String text) {
+        String t = text.trim();
+        if (t.startsWith("```")) {
+            int firstNewline = t.indexOf('\n');
+            if (firstNewline > 0) {
+                t = t.substring(firstNewline + 1);
+            }
+            if (t.endsWith("```")) {
+                t = t.substring(0, t.length() - 3);
+            }
+            t = t.trim();
+        }
+        return t;
+    }
+
+    /**
+     * Extract the first balanced {@code {...}} JSON object from a string, honoring
+     * string literals and escapes. Returns null if none is found.
+     */
+    static String extractFirstBalancedObject(String text) {
+        if (text == null) {
+            return null;
+        }
+        int start = text.indexOf('{');
+        if (start < 0) {
+            return null;
+        }
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = start; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                inString = true;
+            } else if (c == '{') {
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0) {
+                    return text.substring(start, i + 1);
+                }
+            }
+        }
+        return null;
+    }
+
+    private static double clamp(double v) {
+        return Math.max(0.0, Math.min(1.0, v));
+    }
+
+    private static double value(Double configured, double fallback) {
+        return configured != null ? configured : fallback;
     }
 
     /**

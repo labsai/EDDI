@@ -30,6 +30,12 @@ import java.util.Map;
  * <li>{@code task_start} — lifecycle task began execution</li>
  * <li>{@code task_complete} — lifecycle task finished</li>
  * <li>{@code token} — LLM response token</li>
+ * <li>{@code cascade_step_start} — a multi-model cascade step began
+ * ({@code stepIndex}, {@code modelType}, {@code modelName},
+ * {@code totalSteps})</li>
+ * <li>{@code cascade_escalation} — a cascade step was rejected and escalated
+ * ({@code fromStep}, {@code toStep}, {@code confidence}, {@code threshold},
+ * {@code reason}, {@code durationMs})</li>
  * <li>{@code done} — full conversation snapshot (final event)</li>
  * <li>{@code error} — error during processing</li>
  * </ul>
@@ -87,6 +93,21 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                         @Override
                         public void onToken(String token) {
                             sendEvent(eventSink, sse, "token", token);
+                        }
+
+                        @Override
+                        public void onCascadeStepStart(int stepIndex, String modelType, String modelName, int totalSteps) {
+                            sendEvent(eventSink, sse, "cascade_step_start",
+                                    String.format("{\"stepIndex\":%d,\"modelType\":\"%s\",\"modelName\":\"%s\",\"totalSteps\":%d}", stepIndex,
+                                            escapeJson(modelType), escapeJson(modelName), totalSteps));
+                        }
+
+                        @Override
+                        public void onCascadeEscalation(int fromStep, int toStep, double confidence, double threshold, String reason,
+                                                        long durationMs) {
+                            sendEvent(eventSink, sse, "cascade_escalation", String.format(java.util.Locale.ROOT,
+                                    "{\"fromStep\":%d,\"toStep\":%d,\"confidence\":%.4f,\"threshold\":%.4f,\"reason\":\"%s\",\"durationMs\":%d}",
+                                    fromStep, toStep, confidence, threshold, escapeJson(reason), durationMs));
                         }
 
                         @Override

@@ -44,6 +44,7 @@ import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.output.TokenUsage;
 import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
 import org.jboss.logging.Logger;
@@ -160,8 +161,15 @@ class AgentOrchestrator {
      *            the final LLM text response
      * @param trace
      *            list of tool call/result trace entries for debugging
+     * @param responseMetadata
+     *            metadata about the execution (aggregate token usage across
+     *            tool-loop iterations). Never null; empty when unavailable.
      */
-    record ExecutionResult(String response, List<Map<String, Object>> trace) {
+    record ExecutionResult(String response, List<Map<String, Object>> trace, Map<String, Object> responseMetadata) {
+        /** Convenience constructor — no response metadata (empty map). */
+        ExecutionResult(String response, List<Map<String, Object>> trace) {
+            this(response, trace, Map.of());
+        }
     }
 
     /**
@@ -317,8 +325,13 @@ class AgentOrchestrator {
         Double maxBudget = task.getMaxBudgetPerConversation();
         String conversationId = memory.getConversationId();
 
+        // Accumulates token usage across tool-loop iterations. Reset at the start of
+        // each retry attempt so only the successful attempt's usage is reported.
+        final TokenUsage[] tokenHolder = new TokenUsage[1];
+
         // Execute with retry logic — the tool execution loop
         String response = AgentExecutionHelper.executeWithRetry(() -> {
+            tokenHolder[0] = null;
             List<ChatMessage> currentMessages = new ArrayList<>(messages);
             int maxIterations = task.getMaxToolIterations() != null ? task.getMaxToolIterations() : 10;
 
@@ -335,6 +348,14 @@ class AgentOrchestrator {
             }
 
             for (int i = 0; i < maxIterations; i++) {
+                // Cooperative cancellation: if this step was interrupted (e.g. a cascade
+                // per-step timeout called future.cancel(true)), stop before issuing another
+                // model call — avoids launching further side-effectful tools on a step whose
+                // result will be discarded.
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new LifecycleException("Agent execution cancelled (interrupted)");
+                }
+
                 ChatRequest.Builder requestBuilder = ChatRequest.builder().messages(currentMessages);
 
                 if (!activeSpecs.isEmpty()) {
@@ -347,8 +368,18 @@ class AgentOrchestrator {
                 AiMessage aiMessage = chatResponse.aiMessage();
                 currentMessages.add(aiMessage);
 
+                // Accumulate token usage for cost/observability reporting.
+                if (chatResponse.metadata() != null && chatResponse.metadata().tokenUsage() != null) {
+                    tokenHolder[0] = sumTokens(tokenHolder[0], chatResponse.metadata().tokenUsage());
+                }
+
                 if (aiMessage.hasToolExecutionRequests()) {
                     for (ToolExecutionRequest toolRequest : aiMessage.toolExecutionRequests()) {
+                        // Cooperative cancellation before each (potentially side-effectful) tool.
+                        if (Thread.currentThread().isInterrupted()) {
+                            throw new LifecycleException("Agent execution cancelled (interrupted) before tool: " + toolRequest.name());
+                        }
+
                         // Auto-checkpoint before tool execution (Wave 4)
                         if (memorySnapshotService != null) {
                             try {
@@ -442,7 +473,41 @@ class AgentOrchestrator {
             return lastMessage.text() != null ? lastMessage.text() : "Max tool iterations reached";
         }, task, "Agent execution");
 
-        return new ExecutionResult(response, trace);
+        Map<String, Object> responseMetadata = new HashMap<>();
+        if (tokenHolder[0] != null) {
+            responseMetadata.put("tokenUsage", tokenUsageMap(tokenHolder[0]));
+        }
+
+        return new ExecutionResult(response, trace, responseMetadata);
+    }
+
+    /**
+     * Sum two (possibly null) TokenUsage values field-by-field, tolerating nulls.
+     */
+    private static TokenUsage sumTokens(TokenUsage a, TokenUsage b) {
+        if (a == null) {
+            return b;
+        }
+        if (b == null) {
+            return a;
+        }
+        return new TokenUsage(sumInt(a.inputTokenCount(), b.inputTokenCount()), sumInt(a.outputTokenCount(), b.outputTokenCount()),
+                sumInt(a.totalTokenCount(), b.totalTokenCount()));
+    }
+
+    private static Integer sumInt(Integer a, Integer b) {
+        return (a != null ? a : 0) + (b != null ? b : 0);
+    }
+
+    /**
+     * Convert a TokenUsage into a template/audit-friendly map with non-null counts.
+     */
+    static Map<String, Object> tokenUsageMap(TokenUsage usage) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("inputTokens", usage.inputTokenCount() != null ? usage.inputTokenCount() : 0);
+        map.put("outputTokens", usage.outputTokenCount() != null ? usage.outputTokenCount() : 0);
+        map.put("totalTokens", usage.totalTokenCount() != null ? usage.totalTokenCount() : 0);
+        return map;
     }
 
     /**

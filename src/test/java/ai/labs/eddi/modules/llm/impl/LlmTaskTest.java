@@ -143,7 +143,7 @@ class LlmTaskTest {
                 identityMaskingService,
                 toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService, attachmentStore,
-                null, null, null, null, null);
+                null, null, null, null, null, new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
     }
 
     // ====================================================================

@@ -124,7 +124,7 @@ class LlmTaskExtendedTest {
                 counterweightService, identityMaskingService,
                 toolResponseTruncator, mock(ai.labs.eddi.engine.tenancy.TenantQuotaService.class),
                 null, null,
-                null, null, null, null, null);
+                null, null, null, null, null, new io.micrometer.core.instrument.simple.SimpleMeterRegistry());
     }
 
     private IConversationMemory createMemoryWithAction(String... actions) throws Exception {

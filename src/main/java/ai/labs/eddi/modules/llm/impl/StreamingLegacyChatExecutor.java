@@ -12,7 +12,9 @@ import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import org.jboss.logging.Logger;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -41,12 +43,29 @@ class StreamingLegacyChatExecutor {
      * @return the full accumulated response text (for memory storage)
      */
     String execute(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink) {
+        return executeCapturing(streamingModel, messages, eventSink).response();
+    }
+
+    /**
+     * Result of a streaming execution — the full text plus response metadata
+     * (finish reason, token usage) captured from the final response.
+     */
+    record StreamResult(String response, Map<String, Object> responseMetadata) {
+    }
+
+    /**
+     * Execute a streaming chat completion, emitting tokens via the event sink and
+     * capturing the final response metadata (token usage). Used by the cascade to
+     * stream the final step live without losing cost/token evidence.
+     */
+    StreamResult executeCapturing(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink) {
 
         LOGGER.debug("Executing with streaming (legacy mode)");
 
         var latch = new CountDownLatch(1);
         var fullResponse = new StringBuilder();
         var errorRef = new AtomicReference<Throwable>();
+        var responseRef = new AtomicReference<ChatResponse>();
 
         var chatRequest = ChatRequest.builder().messages(messages).build();
 
@@ -63,6 +82,7 @@ class StreamingLegacyChatExecutor {
 
             @Override
             public void onCompleteResponse(ChatResponse completeResponse) {
+                responseRef.set(completeResponse);
                 latch.countDown();
             }
 
@@ -76,7 +96,7 @@ class StreamingLegacyChatExecutor {
         try {
             if (!latch.await(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 LOGGER.warn("Streaming chat timed out");
-                return fullResponse.toString();
+                return new StreamResult(fullResponse.toString(), Map.of());
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -88,6 +108,23 @@ class StreamingLegacyChatExecutor {
             throw new RuntimeException("Streaming chat failed", errorRef.get());
         }
 
-        return fullResponse.toString();
+        return new StreamResult(fullResponse.toString(), buildMetadata(responseRef.get()));
+    }
+
+    private static Map<String, Object> buildMetadata(ChatResponse response) {
+        Map<String, Object> metadata = new HashMap<>();
+        if (response != null && response.metadata() != null) {
+            var meta = response.metadata();
+            if (meta.finishReason() != null) {
+                metadata.put("finishReason", meta.finishReason().toString());
+            }
+            if (meta.tokenUsage() != null) {
+                var usage = meta.tokenUsage();
+                metadata.put("tokenUsage", Map.of("inputTokens", usage.inputTokenCount() != null ? usage.inputTokenCount() : 0, "outputTokens",
+                        usage.outputTokenCount() != null ? usage.outputTokenCount() : 0, "totalTokens",
+                        usage.totalTokenCount() != null ? usage.totalTokenCount() : 0));
+            }
+        }
+        return metadata;
     }
 }

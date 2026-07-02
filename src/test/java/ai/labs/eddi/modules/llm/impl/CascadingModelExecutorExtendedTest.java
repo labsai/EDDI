@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -50,6 +51,17 @@ class CascadingModelExecutorExtendedTest {
         task.setType("openai");
     }
 
+    /** Build an executor instance and run the cascade with the new signature. */
+    private CascadingModelExecutor.CascadeResult runCascade(ChatModelRegistry registry, ModelCascadeConfig cascade, List<ChatMessage> messages,
+                                                            String systemMessage, Map<String, String> params, LlmConfiguration.Task task,
+                                                            IConversationMemory memory, AgentOrchestrator orchestrator)
+            throws LifecycleException {
+        GlobalVariableResolver resolver = mock(GlobalVariableResolver.class);
+        when(resolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        var executor = new CascadingModelExecutor(registry, resolver, null, new LegacyChatExecutor(), new StreamingLegacyChatExecutor(), null);
+        return executor.execute(cascade, messages, systemMessage, params, task, memory, orchestrator, Map.of(), false, false, false);
+    }
+
     @Nested
     @DisplayName("execute — validation")
     class ExecuteValidation {
@@ -60,7 +72,7 @@ class CascadingModelExecutorExtendedTest {
             var cascade = new ModelCascadeConfig();
             cascade.setSteps(null);
 
-            assertThrows(LifecycleException.class, () -> CascadingModelExecutor.execute(registry, cascade,
+            assertThrows(LifecycleException.class, () -> runCascade(registry, cascade,
                     List.of(UserMessage.from("hi")), "system", Map.of(), task, memory, agentOrchestrator));
         }
 
@@ -70,7 +82,7 @@ class CascadingModelExecutorExtendedTest {
             var cascade = new ModelCascadeConfig();
             cascade.setSteps(List.of());
 
-            assertThrows(LifecycleException.class, () -> CascadingModelExecutor.execute(registry, cascade,
+            assertThrows(LifecycleException.class, () -> runCascade(registry, cascade,
                     List.of(UserMessage.from("hi")), "system", Map.of(), task, memory, agentOrchestrator));
         }
     }
@@ -97,7 +109,7 @@ class CascadingModelExecutorExtendedTest {
             cascade.setSteps(List.of(step));
             cascade.setEvaluationStrategy("none");
 
-            var result = CascadingModelExecutor.execute(registry, cascade,
+            var result = runCascade(registry, cascade,
                     List.of(UserMessage.from("hi")), "system", new HashMap<>(), task, memory, agentOrchestrator);
 
             assertNotNull(result);
@@ -142,7 +154,7 @@ class CascadingModelExecutorExtendedTest {
             cascade.setSteps(List.of(step1, step2));
             cascade.setEvaluationStrategy("heuristic");
 
-            var result = CascadingModelExecutor.execute(registry, cascade,
+            var result = runCascade(registry, cascade,
                     List.of(UserMessage.from("What is the meaning?")), "system",
                     new HashMap<>(), task, memory, agentOrchestrator);
 
@@ -186,7 +198,7 @@ class CascadingModelExecutorExtendedTest {
             cascade.setSteps(List.of(step1, step2));
             cascade.setEvaluationStrategy("none");
 
-            var result = CascadingModelExecutor.execute(registry, cascade,
+            var result = runCascade(registry, cascade,
                     List.of(UserMessage.from("hi")), "system", new HashMap<>(), task, memory, agentOrchestrator);
 
             assertEquals(1, result.stepUsed());
@@ -223,7 +235,7 @@ class CascadingModelExecutorExtendedTest {
             cascade.setSteps(List.of(step1, step2));
             cascade.setEvaluationStrategy("none");
 
-            var result = CascadingModelExecutor.execute(registry, cascade,
+            var result = runCascade(registry, cascade,
                     List.of(UserMessage.from("hi")), "system", new HashMap<>(), task, memory, agentOrchestrator);
 
             // Should return the best-so-far from step 0
@@ -245,7 +257,7 @@ class CascadingModelExecutorExtendedTest {
             cascade.setSteps(List.of(step));
             cascade.setEvaluationStrategy("none");
 
-            assertThrows(LifecycleException.class, () -> CascadingModelExecutor.execute(registry, cascade,
+            assertThrows(LifecycleException.class, () -> runCascade(registry, cascade,
                     List.of(UserMessage.from("hi")), "system", new HashMap<>(), task, memory, agentOrchestrator));
         }
     }
@@ -272,7 +284,7 @@ class CascadingModelExecutorExtendedTest {
             cascade.setSteps(List.of(step));
             cascade.setEvaluationStrategy("none");
 
-            var result = CascadingModelExecutor.execute(registry, cascade,
+            var result = runCascade(registry, cascade,
                     List.of(UserMessage.from("hi")), "system", new HashMap<>(), task, memory, agentOrchestrator);
 
             assertNotNull(result);
@@ -299,7 +311,7 @@ class CascadingModelExecutorExtendedTest {
             cascade.setSteps(List.of(step));
             cascade.setEvaluationStrategy("none");
 
-            var result = CascadingModelExecutor.execute(registry, cascade,
+            var result = runCascade(registry, cascade,
                     List.of(UserMessage.from("hi")), "system", new HashMap<>(), task, memory, agentOrchestrator);
 
             assertEquals("openai", result.modelType());
@@ -331,7 +343,7 @@ class CascadingModelExecutorExtendedTest {
             cascade.setSteps(List.of(step1, step2));
             cascade.setEvaluationStrategy("none");
 
-            var result = CascadingModelExecutor.execute(registry, cascade,
+            var result = runCascade(registry, cascade,
                     List.of(UserMessage.from("hi")), "system", new HashMap<>(), task, memory, agentOrchestrator);
 
             // Should accept first step because threshold is null
@@ -359,7 +371,7 @@ class CascadingModelExecutorExtendedTest {
             cascade.setSteps(List.of(step));
             cascade.setEvaluationStrategy("none");
 
-            var result = CascadingModelExecutor.execute(registry, cascade,
+            var result = runCascade(registry, cascade,
                     List.of(UserMessage.from("hi")), "system", new HashMap<>(), task, memory, agentOrchestrator);
 
             assertNotNull(result);
