@@ -175,11 +175,26 @@ class RestGroupConversationHitlTest {
             asUser(OWNER_ID);
             var gc = makeGc(OWNER_ID);
             when(groupService.readGroupConversation(GC_ID)).thenReturn(gc);
+            when(groupService.cancelDiscussion(eq(GC_ID), any())).thenReturn(true);
 
             Response response = restGroupConversation.cancelDiscussion(GROUP_ID, GC_ID);
 
             assertEquals(200, response.getStatus(),
                     "Owner cancel should return 200 OK");
+        }
+
+        @Test
+        @DisplayName("Cancel of already-terminal GC returns 409")
+        void ownerCancelAlreadyTerminal() throws Exception {
+            asUser(OWNER_ID);
+            var gc = makeGc(OWNER_ID);
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(gc);
+            when(groupService.cancelDiscussion(eq(GC_ID), any())).thenReturn(false);
+
+            Response response = restGroupConversation.cancelDiscussion(GROUP_ID, GC_ID);
+
+            assertEquals(409, response.getStatus(),
+                    "Cancel of a terminal conversation should return 409 Conflict");
         }
 
         @Test
@@ -229,6 +244,7 @@ class RestGroupConversationHitlTest {
             asAdmin(ADMIN_ID);
             var gc = makeGc(OWNER_ID);
             when(groupService.readGroupConversation(GC_ID)).thenReturn(gc);
+            when(groupService.cancelDiscussion(eq(GC_ID), any())).thenReturn(true);
 
             Response response = restGroupConversation.cancelDiscussion(GROUP_ID, GC_ID);
 

@@ -115,9 +115,13 @@ public class HitlTimeoutHandler {
     private void cancelGroup(Map<String, Object> metadata) {
         String gcId = (String) metadata.get("conversationId");
         try {
-            groupConversationService.cancelDiscussion(gcId,
+            boolean cancelled = groupConversationService.cancelDiscussion(gcId,
                     ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
-            LOGGER.infof("HITL timeout ABORT for group conversation %s", gcId);
+            if (cancelled) {
+                LOGGER.infof("HITL timeout ABORT for group conversation %s", gcId);
+            } else {
+                LOGGER.infof("HITL timeout ABORT for group conversation %s skipped — already terminal", gcId);
+            }
         } catch (Exception e) {
             LOGGER.errorf(e, "Failed to abort group conversation %s on HITL timeout", gcId);
         }

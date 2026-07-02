@@ -132,15 +132,19 @@ public interface IRestGroupConversation {
 
     /**
      * List the group conversations of THIS group that are currently awaiting human
-     * approval. Visibility: admins and approvers see all of the group's pending
-     * items; other callers only their own conversations.
+     * approval, as bounded summaries (no transcripts). Visibility: admins and
+     * approvers see all of the group's pending items; other callers only their own
+     * conversations.
      */
     @GET
     @Path("/pending-approvals")
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
     @Operation(summary = "List pending HITL approvals",
-               description = "Lists this group's conversations currently awaiting human approval.")
-    @APIResponse(responseCode = "200", description = "List of pending approval group conversations.")
-    List<GroupConversation> listGroupPendingApprovals(@PathParam("groupId") String groupId);
+               description = "Lists this group's conversations currently awaiting human approval (summaries).")
+    @APIResponse(responseCode = "200", description = "List of pending approval summaries.")
+    List<ai.labs.eddi.engine.model.PendingApprovalSummary> listGroupPendingApprovals(
+                                                                                     @PathParam("groupId") String groupId,
+                                                                                     @QueryParam("limit")
+                                                                                     @DefaultValue("100") Integer limit);
 }

@@ -40,4 +40,17 @@ public interface IGroupConversationStore {
      */
     List<GroupConversation> findByState(GroupConversation.GroupConversationState state)
             throws IResourceStore.ResourceStoreException;
+
+    /**
+     * Bounded variant of {@link #findByState} with an optional group filter — backs
+     * the pending-approvals listing endpoint.
+     *
+     * @param groupId
+     *            restrict results to this group configuration ID; {@code null} for
+     *            all groups
+     * @param limit
+     *            maximum number of conversations to return
+     */
+    List<GroupConversation> findByState(GroupConversation.GroupConversationState state, String groupId, int limit)
+            throws IResourceStore.ResourceStoreException;
 }

@@ -68,7 +68,24 @@ public interface IGroupConversationService {
      */
     List<GroupConversation> listGroupConversations(String groupId, int index, int limit) throws IResourceStore.ResourceStoreException;
 
-    void cancelDiscussion(String conversationId, ControlSignal mode);
+    /**
+     * Cancel a running or paused group discussion.
+     *
+     * @param conversationId
+     *            the group conversation to cancel
+     * @param mode
+     *            CANCEL_GRACEFUL (stop at next boundary) or CANCEL_IMMEDIATE
+     *            (interrupt the blocking wave)
+     * @return true if the discussion was cancelled or an in-flight leg was
+     *         signalled to stop; false if it was already in a terminal state or a
+     *         concurrent state change won the race — maps to HTTP 409
+     * @throws IResourceStore.ResourceNotFoundException
+     *             if no group conversation with that id exists
+     * @throws IResourceStore.ResourceStoreException
+     *             on persistence failures
+     */
+    boolean cancelDiscussion(String conversationId, ControlSignal mode)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     GroupConversation resumeDiscussion(String groupConversationId,
                                        GroupApprovalRequest request,
@@ -77,10 +94,17 @@ public interface IGroupConversationService {
             IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException;
 
     /**
-     * List all group conversations currently awaiting human approval. Used by
-     * dashboards and admin UIs to show pending HITL items.
+     * List group conversations currently awaiting human approval, as bounded
+     * summaries (no transcripts). Used by dashboards and admin UIs.
+     *
+     * @param groupId
+     *            restrict to this group configuration ID; {@code null} for all
+     *            groups
+     * @param limit
+     *            maximum number of summaries to return (clamped to [1, 1000])
      */
-    List<GroupConversation> listGroupPendingApprovals() throws IResourceStore.ResourceStoreException;
+    List<ai.labs.eddi.engine.model.PendingApprovalSummary> listGroupPendingApprovals(String groupId, int limit)
+            throws IResourceStore.ResourceStoreException;
 
     // --- Event listener for SSE streaming ---
 

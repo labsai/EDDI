@@ -144,7 +144,14 @@ public class RestGroupConversation implements IRestGroupConversation {
     public Response cancelDiscussion(String groupId, String gcId) {
         validateGroupConversationOwnership(gcId, true);
         try {
-            groupConversationService.cancelDiscussion(gcId, ControlSignal.CANCEL_GRACEFUL);
+            boolean cancelled = groupConversationService.cancelDiscussion(gcId, ControlSignal.CANCEL_GRACEFUL);
+            if (!cancelled) {
+                // Terminal state or lost a concurrent state race — report honestly
+                // instead of a 200 that implies the cancel took effect.
+                return Response.status(Response.Status.CONFLICT)
+                        .entity("Group conversation is already in a terminal state — nothing to cancel")
+                        .build();
+            }
             var gc = groupConversationService.readGroupConversation(gcId);
             return Response.ok(gc).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -385,13 +392,13 @@ public class RestGroupConversation implements IRestGroupConversation {
     }
 
     @Override
-    public List<GroupConversation> listGroupPendingApprovals(String groupId) {
+    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> listGroupPendingApprovals(String groupId, Integer limit) {
         try {
-            var all = groupConversationService.listGroupPendingApprovals();
-
-            // Scope to the group in the path — the listing endpoint lives under
-            // /groups/{groupId}/conversations and must not leak other groups.
-            var scoped = all.stream().filter(gc -> groupId != null && groupId.equals(gc.getGroupId()));
+            // Scoped to the group in the path (query-level filter — the listing
+            // endpoint lives under /groups/{groupId}/conversations and must not
+            // leak other groups) and bounded by the limit param.
+            var scoped = groupConversationService
+                    .listGroupPendingApprovals(groupId, limit != null ? limit : 100).stream();
 
             // C-B: ownership filter, mirroring RestAgentEngine.listPendingApprovals —
             // admins and designated approvers see the group's pending items, other
@@ -403,7 +410,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             if (callerId == null || callerId.isBlank()) {
                 return List.of(); // fail-closed
             }
-            return scoped.filter(gc -> callerId.equals(gc.getUserId())).toList();
+            return scoped.filter(summary -> callerId.equals(summary.getUserId())).toList();
         } catch (IResourceStore.ResourceStoreException e) {
             throw new InternalServerErrorException("Failed to list pending approvals: " + e.getMessage(), e);
         }

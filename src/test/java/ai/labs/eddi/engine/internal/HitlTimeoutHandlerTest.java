@@ -166,7 +166,7 @@ class HitlTimeoutHandlerTest {
 
         @Test
         @DisplayName("group surface → calls cancelDiscussion with CANCEL_GRACEFUL")
-        void groupSurface_callsCancelDiscussion() {
+        void groupSurface_callsCancelDiscussion() throws Exception {
             var metadata = Map.<String, Object>of(
                     "policy", "ABORT",
                     "surface", "group",

@@ -126,10 +126,20 @@ public class GroupConversationStore implements IGroupConversationStore {
     @Override
     public List<GroupConversation> findByState(GroupConversation.GroupConversationState state)
             throws IResourceStore.ResourceStoreException {
+        return findByState(state, null, 1000);
+    }
+
+    @Override
+    public List<GroupConversation> findByState(GroupConversation.GroupConversationState state, String groupId, int limit)
+            throws IResourceStore.ResourceStoreException {
+        var filterList = new ArrayList<ai.labs.eddi.datastore.IResourceFilter.QueryFilter>();
+        filterList.add(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("state", "^" + state.name() + "$"));
+        if (groupId != null) {
+            filterList.add(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("groupId", groupId));
+        }
         var filters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{
-                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(List.of(
-                        new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("state", "^" + state.name() + "$")))};
-        List<IResourceStore.IResourceId> ids = storage.findResources(filters, "lastModified", 0, 1000);
+                new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(filterList)};
+        List<IResourceStore.IResourceId> ids = storage.findResources(filters, "lastModified", 0, limit);
         List<GroupConversation> out = new ArrayList<>();
         for (var id : ids) {
             try {

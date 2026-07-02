@@ -12,6 +12,8 @@ import java.time.Instant;
 public class PendingApprovalSummary {
     private String conversationId;
     private String agentId;
+    /** Set only for group-surface pauses — the group configuration ID. */
+    private String groupId;
     /** Owner of the conversation — used for listing visibility filters. */
     private String userId;
     private Instant pausedAt;
@@ -36,6 +38,13 @@ public class PendingApprovalSummary {
     }
     public void setUserId(String userId) {
         this.userId = userId;
+    }
+
+    public String getGroupId() {
+        return groupId;
+    }
+    public void setGroupId(String groupId) {
+        this.groupId = groupId;
     }
 
     public String getConversationId() {

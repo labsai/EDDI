@@ -225,11 +225,11 @@ public interface IConversationService {
      * @param responseHandler
      *            optional callback — may be null for fire-and-forget
      * @throws IllegalStateException
-     *             wrong-state conflict (not AWAITING_HUMAN, or agent not
-     *             deployed) — maps to HTTP 409; the pause is preserved/restored
+     *             wrong-state conflict (not AWAITING_HUMAN, or agent not deployed)
+     *             — maps to HTTP 409; the pause is preserved/restored
      * @throws ResourceStoreException
-     *             on infrastructure failures (store errors, coordinator
-     *             saturation) — maps to HTTP 500; the pause is restored
+     *             on infrastructure failures (store errors, coordinator saturation)
+     *             — maps to HTTP 500; the pause is restored
      * @throws ResourceNotFoundException
      *             if the conversation is not found
      */
