@@ -356,6 +356,16 @@ public class GroupConversationService implements IGroupConversationService {
                         executeSequentialPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
                     }
 
+                    // #27/#45: a cross-pod cancel/ABORT flips the persisted state to
+                    // CANCELLED/FAILED while this leg runs. The periodic write below
+                    // is a whole-document store from this leg's in-memory copy — an
+                    // unconditional write would resurrect IN_PROGRESS and also clobber
+                    // transcript entries appended by the terminal writer. Honor a
+                    // cross-pod terminal flip at this phase boundary instead.
+                    if (persistedTerminalOverride(gc, listener)) {
+                        return conversationStore.read(gc.getId());
+                    }
+
                     gc.setLastModified(Instant.now());
                     conversationStore.update(gc);
 
@@ -439,11 +449,27 @@ public class GroupConversationService implements IGroupConversationService {
             if (gc.getState() == GroupConversationState.AWAITING_APPROVAL) {
                 return gc;
             }
+            // #27/#45: complete with a CAS on the running state this leg believes it
+            // holds (IN_PROGRESS or SYNTHESIZING). If a cross-pod cancel/ABORT
+            // already flipped the persisted state, the CAS fails and we honor the
+            // terminal state instead of resurrecting a completed answer for work a
+            // human tried to stop.
+            var expectedRunningState = gc.getState();
             gc.setState(GroupConversationState.COMPLETED);
             gc.setPausedTurnCount(0); // Clear turn budget state on successful completion
             gc.setHitlLastPauseFingerprint(null); // #4: reset no-progress guard
             gc.setLastModified(Instant.now());
-            conversationStore.update(gc);
+            try {
+                conversationStore.updateIfState(gc, expectedRunningState);
+            } catch (IResourceStore.ResourceModifiedException e) {
+                LOGGER.infof("Group discussion %s was terminated elsewhere (expected %s) — not overwriting with COMPLETED",
+                        gc.getId(), expectedRunningState);
+                var persisted = conversationStore.read(gc.getId());
+                if (listener != null && persisted.getState() == GroupConversationState.CANCELLED) {
+                    notifyCancelled(persisted, listener);
+                }
+                return persisted;
+            }
 
             if (listener != null) {
                 listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(gc.getState(), gc.getSynthesizedAnswer()));
@@ -505,6 +531,38 @@ public class GroupConversationService implements IGroupConversationService {
             listener.onCancelled(new GroupConversationEventSink.CancelledEvent(
                     "Discussion cancelled", gc.getUserId()));
         }
+    }
+
+    /**
+     * Cross-pod terminal-override check for a phase boundary (#27/#45). Group
+     * control is per-pod (activeTokens is process-local), so a cancel/ABORT landing
+     * on another pod flips only the persisted state — the running leg never sees it
+     * and its next whole-document write would resurrect the running state and
+     * clobber concurrent transcript writes. Re-reads the persisted state at the
+     * boundary: if another writer moved it to a terminal state, the leg stops and
+     * honors it (notifying the listener on a cancel). Best-effort: a store read
+     * failure keeps the leg running (the local token path still applies).
+     *
+     * @return true if the persisted state is terminal and this leg should stop
+     */
+    private boolean persistedTerminalOverride(GroupConversation gc, GroupDiscussionEventListener listener) {
+        try {
+            var persistedState = conversationStore.read(gc.getId()).getState();
+            if (persistedState == GroupConversationState.CANCELLED
+                    || persistedState == GroupConversationState.FAILED
+                    || persistedState == GroupConversationState.COMPLETED) {
+                LOGGER.infof("Group discussion %s was moved to %s elsewhere — stopping this leg at the phase boundary",
+                        gc.getId(), persistedState);
+                if (persistedState == GroupConversationState.CANCELLED) {
+                    notifyCancelled(gc, listener);
+                }
+                return true;
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Phase-boundary persisted-state re-check failed for %s: %s (continuing)",
+                    gc.getId(), e.getMessage());
+        }
+        return false;
     }
 
     /**
@@ -685,6 +743,15 @@ public class GroupConversationService implements IGroupConversationService {
     public void deleteGroupConversation(String groupConversationId) throws IResourceStore.ResourceStoreException {
         try {
             GroupConversation gc = conversationStore.read(groupConversationId);
+            // #12: deleting a paused discussion must run the same cleanup as
+            // cancel-of-paused. executeDiscussion's finally deliberately skipped
+            // cleanup while AWAITING_APPROVAL, so without this the armed timeout
+            // schedule fires against a deleted conversation, ephemeral dynamic
+            // agents stay deployed forever, and the lastVerifiedIndex entry leaks.
+            if (gc.getState() == GroupConversationState.AWAITING_APPROVAL) {
+                deleteGroupHitlTimeoutSchedule(groupConversationId);
+                cleanupAfterTerminalState(gc);
+            }
             for (String privateConvId : gc.getMemberConversationIds().values()) {
                 try {
                     conversationService.endConversation(privateConvId);
@@ -2423,9 +2490,11 @@ public class GroupConversationService implements IGroupConversationService {
     @Override
     public boolean cancelDiscussion(String conversationId, ControlSignal mode)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
-        // MAJOR-3: Delete stale HITL timeout schedule
-        deleteGroupHitlTimeoutSchedule(conversationId);
-
+        // #13: decide the cancel path BEFORE deleting the timeout schedule. The old
+        // order deleted the schedule unconditionally up front, so a cancel racing a
+        // fresh pause (token present, pause just committed) reported success yet
+        // left the pause intact — stripped of its finite timeout, silently
+        // degrading a bounded policy to WAIT_INDEFINITELY.
         var token = activeTokens.get(conversationId);
         if (token != null) {
             if (mode == ControlSignal.CANCEL_IMMEDIATE) {
@@ -2434,6 +2503,10 @@ public class GroupConversationService implements IGroupConversationService {
             } else {
                 token.setSignal(ControlSignal.CANCEL_GRACEFUL);
             }
+            // Do NOT delete the schedule here: a running leg has no armed schedule,
+            // and if the leg is mid-pause-commit it converts the pause to CANCELLED
+            // itself (convertPauseToCancelIfSignalled), deleting the schedule only
+            // once the cancel actually wins.
             return true; // in-flight leg signalled — it will persist CANCELLED
         }
         // Not actively running — update DB with a state-CAS (#9): a plain
@@ -2456,9 +2529,13 @@ public class GroupConversationService implements IGroupConversationService {
         try {
             conversationStore.updateIfState(gc, state);
         } catch (IResourceStore.ResourceModifiedException e) {
+            // CAS lost — leave the schedule alone: whoever won the race (a fresh
+            // pause / approve / timeout) owns the schedule now. Report 409.
             LOGGER.infof("Cancel of group conversation %s lost a concurrent state race — not overwriting", conversationId);
             return false;
         }
+        // Cancel won: delete the timeout schedule only now (MAJOR-3).
+        deleteGroupHitlTimeoutSchedule(conversationId);
         if (wasPaused) {
             // Cancelling a pending approval is an HITL decision — audit it, and
             // release resources that were kept alive across the pause.
