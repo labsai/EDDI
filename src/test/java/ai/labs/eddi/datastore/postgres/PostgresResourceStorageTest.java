@@ -5,6 +5,7 @@
 package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.datastore.IResourceStorage;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -577,6 +578,55 @@ class PostgresResourceStorageTest {
         TestConfig data = history.getData();
 
         assertEquals(expected, data);
+    }
+
+    // ─── storeIfFieldEquals (conditional CAS: deleted vs mismatch) ───
+
+    private static final String VALID_UUID = "11111111-1111-1111-1111-111111111111";
+
+    @Test
+    void storeIfFieldEquals_success_whenUpdateAffectsARow() throws Exception {
+        TestConfig config = new TestConfig("value1");
+        when(jsonSerialization.serialize(config)).thenReturn("{\"state\":\"AWAITING_APPROVAL\"}");
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource(VALID_UUID, 2, config);
+
+        // The conditional UPDATE matches (field equals the expected value).
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertDoesNotThrow(() -> storage.storeIfFieldEquals(resource, "state", "AWAITING_APPROVAL"));
+        verify(preparedStatement).executeUpdate();
+        // No existence probe when the UPDATE succeeded.
+        verify(preparedStatement, never()).executeQuery();
+    }
+
+    @Test
+    void storeIfFieldEquals_deleted_throwsResourceNotFoundException() throws Exception {
+        TestConfig config = new TestConfig("value1");
+        when(jsonSerialization.serialize(config)).thenReturn("{\"state\":\"AWAITING_APPROVAL\"}");
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource(VALID_UUID, 2, config);
+
+        // UPDATE affects 0 rows → existence probe finds NO row → the resource was
+        // deleted.
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+        when(resultSet.next()).thenReturn(false);
+
+        assertThrows(IResourceStore.ResourceNotFoundException.class,
+                () -> storage.storeIfFieldEquals(resource, "state", "AWAITING_APPROVAL"));
+    }
+
+    @Test
+    void storeIfFieldEquals_fieldMismatch_throwsResourceModifiedException() throws Exception {
+        TestConfig config = new TestConfig("value1");
+        when(jsonSerialization.serialize(config)).thenReturn("{\"state\":\"AWAITING_APPROVAL\"}");
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource(VALID_UUID, 2, config);
+
+        // UPDATE affects 0 rows → existence probe finds a row → the row exists but the
+        // field value no longer matches (concurrent state change / lost CAS).
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+        when(resultSet.next()).thenReturn(true);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> storage.storeIfFieldEquals(resource, "state", "AWAITING_APPROVAL"));
     }
 
     // Simple test POJO

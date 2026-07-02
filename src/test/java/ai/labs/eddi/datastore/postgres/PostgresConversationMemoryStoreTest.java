@@ -348,6 +348,77 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
             assertNull(loaded.getHitlTimeoutPolicy());
             assertNull(loaded.getHitlApprovalTimeout());
         }
+
+        @Test
+        @DisplayName("zombie regression: after a CAS flips the state column, load reports the COLUMN state, not the stale document AWAITING_HUMAN")
+        void loadReconcilesColumnOverStaleDocumentState() throws Exception {
+            // Store a paused conversation — the full document AND the column say
+            // AWAITING_HUMAN.
+            var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            String id = store.storeConversationMemorySnapshot(snapshot);
+
+            // Cancel via CAS: the arbiter column flips to EXECUTION_INTERRUPTED. The
+            // JSONB document copy is patched in the same statement — but this test's
+            // key guarantee is that LOAD reconciles the two.
+            assertTrue(store.compareAndSetState(id,
+                    ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED));
+
+            var loaded = store.loadConversationMemorySnapshot(id);
+            assertNotNull(loaded);
+            // The regression this guards: loading MUST NOT resurrect the terminally
+            // resolved pause. A stale AWAITING_HUMAN here would wedge say() and
+            // re-arm a dead approval (the zombie the say-path guard exists to catch).
+            assertEquals(ConversationState.EXECUTION_INTERRUPTED, loaded.getConversationState(),
+                    "load must report the CAS'd column state, never the stale document state");
+            assertEquals(ConversationState.EXECUTION_INTERRUPTED, store.getConversationState(id));
+        }
+
+        @Test
+        @DisplayName("setConversationState converges document and column — a reloaded snapshot matches the column")
+        void setConversationStateConvergesDocumentAndColumn() throws Exception {
+            var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            String id = store.storeConversationMemorySnapshot(snapshot);
+
+            // jsonb_set patches the document copy alongside the column, so no reader
+            // (column projection OR full-document load) can observe divergence.
+            store.setConversationState(id, ConversationState.ENDED);
+
+            assertEquals(ConversationState.ENDED, store.getConversationState(id));
+            var loaded = store.loadConversationMemorySnapshot(id);
+            assertEquals(ConversationState.ENDED, loaded.getConversationState(),
+                    "the reloaded full snapshot must match the column after setConversationState");
+        }
+
+        @Test
+        @DisplayName("owner-filtered summaries: the filter is pushed into the query so the limit applies AFTER the restriction")
+        void findPendingApprovalSummariesByOwner() throws Exception {
+            // user1 has two pending approvals; user2 has one.
+            store.storeConversationMemorySnapshot(
+                    createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN));
+            store.storeConversationMemorySnapshot(
+                    createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN));
+            store.storeConversationMemorySnapshot(
+                    createSnapshot(null, "agent1", 1, "user2", ConversationState.AWAITING_HUMAN));
+            // A READY conversation for user1 must never appear.
+            store.storeConversationMemorySnapshot(
+                    createSnapshot(null, "agent1", 1, "user1", ConversationState.READY));
+
+            var user1 = store.findPendingApprovalSummaries("user1", 10);
+            assertEquals(2, user1.size(), "only user1's PENDING approvals");
+            assertTrue(user1.stream().allMatch(s -> "user1".equals(s.getUserId())));
+
+            var user2 = store.findPendingApprovalSummaries("user2", 10);
+            assertEquals(1, user2.size());
+            assertEquals("user2", user2.get(0).getUserId());
+
+            var none = store.findPendingApprovalSummaries("nobody", 10);
+            assertTrue(none.isEmpty(), "an owner with no pending approvals sees an empty inbox");
+
+            // Limit applies AFTER the owner restriction — user1's inbox is bounded,
+            // not starved by another user's backlog.
+            assertEquals(1, store.findPendingApprovalSummaries("user1", 1).size(),
+                    "owner limit must bound the owner-filtered result");
+        }
     }
 
     private static ConversationMemorySnapshot createSnapshot(String id, String agentId,
