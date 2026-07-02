@@ -195,25 +195,50 @@ public class LifecycleManager implements ILifecycleManager {
 
         checkNotNull(conversationMemory, "conversationMemory");
 
-        var eventSink = conversationMemory.getEventSink();
-
         // Determine which tasks to execute
-        List<ILifecycleTask> lifecycleTasks;
+        List<ILifecycleTask> tasks;
         if (isNullOrEmpty(lifecycleTaskTypes)) {
             // Execute all tasks
-            lifecycleTasks = this.lifecycleTasks;
+            tasks = this.lifecycleTasks;
         } else {
             // Execute only tasks starting from specified type
-            lifecycleTasks = getLifecycleTasks(lifecycleTaskTypes);
+            tasks = getLifecycleTasks(lifecycleTaskTypes);
         }
+
+        executeTaskRange(conversationMemory, tasks, 0);
+    }
+
+    /**
+     * Resume lifecycle execution from an absolute task index. Used by the HITL
+     * framework to continue the pipeline from where it was paused.
+     */
+    @Override
+    public void executeLifecycleFromIndex(IConversationMemory conversationMemory, int startFromAbsoluteIndex)
+            throws LifecycleException, ConversationStopException, ConversationPauseException {
+
+        checkNotNull(conversationMemory, "conversationMemory");
+        executeTaskRange(conversationMemory, this.lifecycleTasks, startFromAbsoluteIndex);
+    }
+
+    /**
+     * Shared task execution loop used by both executeLifecycle and
+     * executeLifecycleFromIndex. Iterates tasks from startIndex, applying
+     * cancel/interrupt checks, action snapshots, tracing, metrics, strict-write
+     * discipline, and HITL pause detection for each task.
+     */
+    private void executeTaskRange(IConversationMemory conversationMemory,
+                                  List<ILifecycleTask> tasks, int startIndex)
+            throws LifecycleException, ConversationStopException, ConversationPauseException {
+
+        var eventSink = conversationMemory.getEventSink();
 
         // Resolve memory policy once (null-safe)
         var memoryPolicy = conversationMemory.getMemoryPolicy();
         boolean strictWriteEnabled = memoryPolicy != null && memoryPolicy.isEffectivelyEnabled();
 
         // Execute each task in sequence
-        for (int index = 0; index < lifecycleTasks.size(); index++) {
-            ILifecycleTask task = lifecycleTasks.get(index);
+        for (int index = startIndex; index < tasks.size(); index++) {
+            ILifecycleTask task = tasks.get(index);
 
             // Cancel check (Wave 0)
             if (conversationMemory.isCancelled()) {
@@ -327,126 +352,6 @@ public class LifecycleManager implements ILifecycleManager {
                 // both successful and failed task executions contribute to the
                 // duration histogram (failing tasks with long timeouts are especially
                 // important for latency monitoring during incidents).
-                long durationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
-                String taskId = task.getId().name();
-                String taskType = task.getType() != null ? task.getType() : "unknown";
-                String meterKey = taskId + "|" + taskType;
-                TASK_TIMERS.computeIfAbsent(meterKey, k -> Timer.builder("eddi.pipeline.task.duration")
-                        .tag("task.id", taskId)
-                        .tag("task.type", taskType)
-                        .description("Pipeline task execution duration")
-                        .publishPercentileHistogram()
-                        .register(Metrics.globalRegistry)).record(java.time.Duration.ofMillis(durationMs));
-
-                taskSpan.end();
-            }
-        }
-    }
-
-    @Override
-    public void executeLifecycleFromIndex(IConversationMemory conversationMemory, int startFromAbsoluteIndex)
-            throws LifecycleException, ConversationStopException, ConversationPauseException {
-
-        checkNotNull(conversationMemory, "conversationMemory");
-
-        var eventSink = conversationMemory.getEventSink();
-        var memoryPolicy = conversationMemory.getMemoryPolicy();
-        boolean strictWriteEnabled = memoryPolicy != null && memoryPolicy.isEffectivelyEnabled();
-
-        for (int index = startFromAbsoluteIndex; index < this.lifecycleTasks.size(); index++) {
-            ILifecycleTask task = this.lifecycleTasks.get(index);
-
-            if (conversationMemory.isCancelled()) {
-                throw new ConversationStopException();
-            }
-
-            if (task.getId() == null) {
-                throw new LifecycleException("Lifecycle task returned null TaskId: " + task.getClass().getName());
-            }
-
-            if (Thread.currentThread().isInterrupted()) {
-                throw new LifecycleException.LifecycleInterruptedException("Execution was interrupted!");
-            }
-
-            // Snapshot actions before task execution — always captured for
-            // delta-based PAUSE_CONVERSATION detection (Blocker #1 fix).
-            var currentStep = conversationMemory.getCurrentStep();
-            IData<List<String>> preActionData = currentStep.getLatestData(ACTIONS);
-            List<String> actionsBefore = (preActionData != null && preActionData.getResult() != null)
-                    ? List.copyOf(preActionData.getResult())
-                    : List.of();
-
-            Map<String, IData<?>> dataIdentitiesBefore = Map.of();
-            Set<String> outputKeysBefore = Set.of();
-            if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
-                dataIdentitiesBefore = cs.snapshotDataIdentities();
-                outputKeysBefore = cs.snapshotOutputKeys();
-            }
-
-            @SuppressWarnings("null")
-            Span taskSpan = getTracer().spanBuilder("eddi.pipeline.task")
-                    .setAttribute("eddi.task.id", task.getId().name())
-                    .setAttribute("eddi.task.type", Objects.requireNonNullElse(task.getType(), "unknown"))
-                    .setAttribute("eddi.task.index", (long) index)
-                    .setAttribute("eddi.conversation.id",
-                            Objects.requireNonNullElse(conversationMemory.getConversationId(), "unknown"))
-                    .setAttribute("eddi.agent.id",
-                            Objects.requireNonNullElse(conversationMemory.getAgentId(), "unknown"))
-                    .startSpan();
-
-            long taskStartTime = System.nanoTime();
-
-            try (Scope ignored = taskSpan.makeCurrent()) {
-                var components = componentCache.getComponentMap(task.getId().name());
-                var componentKey = createComponentKey(workflowId.getId(), workflowId.getVersion(), index);
-                var component = components.getOrDefault(componentKey, null);
-
-                if (eventSink != null) {
-                    eventSink.onTaskStart(task.getId(), task.getType(), index);
-                }
-
-                task.execute(conversationMemory, component);
-
-                long durationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
-                Map<String, Object> summary = buildTaskSummary(conversationMemory, task);
-
-                if (eventSink != null) {
-                    eventSink.onTaskComplete(task.getId(), task.getType(), durationMs, summary);
-                }
-
-                var auditCollector = conversationMemory.getAuditCollector();
-                if (auditCollector != null) {
-                    AuditEntry auditEntry = buildAuditEntry(conversationMemory, task, index, durationMs, summary);
-                    auditCollector.collect(auditEntry);
-                }
-
-                checkIfStopConversationAction(conversationMemory);
-                checkIfPauseConversationAction(conversationMemory, index, actionsBefore);
-
-            } catch (LifecycleException | RuntimeException e) {
-                taskSpan.setStatus(StatusCode.ERROR, Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
-                taskSpan.recordException(e);
-
-                String errTaskId = task.getId().name();
-                String errTaskType = task.getType() != null ? task.getType() : "unknown";
-                String errMeterKey = errTaskId + "|" + errTaskType;
-                TASK_ERROR_COUNTERS.computeIfAbsent(errMeterKey, k -> Counter.builder("eddi.pipeline.task.errors")
-                        .tag("task.id", errTaskId)
-                        .tag("task.type", errTaskType)
-                        .description("Pipeline task execution errors")
-                        .register(Metrics.globalRegistry)).increment();
-
-                if (strictWriteEnabled && currentStep instanceof ConversationStep cs) {
-                    String onFailureMode = resolveOnFailureMode(memoryPolicy);
-                    handleTaskFailure(cs, task, e, dataIdentitiesBefore,
-                            outputKeysBefore, actionsBefore, onFailureMode);
-                }
-
-                if (e instanceof LifecycleException le) {
-                    throw new LifecycleException("Error while executing lifecycle!", le);
-                }
-                throw new LifecycleException("Error while executing lifecycle!", e);
-            } finally {
                 long durationMs = (System.nanoTime() - taskStartTime) / 1_000_000;
                 String taskId = task.getId().name();
                 String taskType = task.getType() != null ? task.getType() : "unknown";

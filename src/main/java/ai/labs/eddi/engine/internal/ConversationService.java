@@ -107,6 +107,9 @@ public class ConversationService implements IConversationService {
     private final Counter counterConversationProcessing;
     private final Counter counterConversationUndo;
     private final Counter counterConversationRedo;
+    private final Counter counterHitlPause;
+    private final Counter counterHitlResume;
+    private final Counter counterHitlTimeout;
 
     private final List<String> processingConversationReferences;
 
@@ -150,6 +153,9 @@ public class ConversationService implements IConversationService {
         this.counterConversationProcessing = meterRegistry.counter("eddi_conversation_processing_count");
         this.counterConversationUndo = meterRegistry.counter("eddi_conversation_undo_count");
         this.counterConversationRedo = meterRegistry.counter("eddi_conversation_redo_count");
+        this.counterHitlPause = meterRegistry.counter("eddi_hitl_pause_count", "surface", "regular");
+        this.counterHitlResume = meterRegistry.counter("eddi_hitl_resume_count", "surface", "regular");
+        this.counterHitlTimeout = meterRegistry.counter("eddi_hitl_timeout_count", "surface", "regular");
 
         meterRegistry.gaugeCollectionSize("eddi_processing_conversation_count", Tags.empty(), processingConversationReferences);
     }
@@ -719,6 +725,7 @@ public class ConversationService implements IConversationService {
                                 storeConversationMemory(conversationMemory, environment);
                                 // M1: Schedule HITL timeout if conversation paused
                                 if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                                    counterHitlPause.increment();
                                     scheduleHitlTimeout(conversationId, conversationMemory.getAgentId());
                                 }
                             } catch (ResourceStoreException e) {
@@ -865,6 +872,7 @@ public class ConversationService implements IConversationService {
         }
         // MAJOR-3: Delete stale HITL timeout schedule before resume
         deleteHitlTimeoutSchedule(conversationId);
+        counterHitlResume.increment();
         cacheConversationState(conversationId, ConversationState.IN_PROGRESS);
 
         var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);

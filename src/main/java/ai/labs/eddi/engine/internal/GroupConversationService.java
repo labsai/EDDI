@@ -103,6 +103,8 @@ public class GroupConversationService implements IGroupConversationService {
     private final Timer timerGroupDiscussion;
     private final Counter counterGroupDiscussion;
     private final Counter counterGroupFailure;
+    private final Counter counterGroupHitlPause;
+    private final Counter counterGroupHitlResume;
 
     @Inject
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
@@ -129,6 +131,8 @@ public class GroupConversationService implements IGroupConversationService {
         this.timerGroupDiscussion = meterRegistry.timer("eddi_group_discussion_duration");
         this.counterGroupDiscussion = meterRegistry.counter("eddi_group_discussion_count");
         this.counterGroupFailure = meterRegistry.counter("eddi_group_discussion_failure_count");
+        this.counterGroupHitlPause = meterRegistry.counter("eddi_hitl_pause_count", "surface", "group");
+        this.counterGroupHitlResume = meterRegistry.counter("eddi_hitl_resume_count", "surface", "group");
     }
 
     @PreDestroy
@@ -461,6 +465,7 @@ public class GroupConversationService implements IGroupConversationService {
 
         // MAJOR-2: Schedule group timeout if configured
         scheduleGroupHitlTimeout(gc);
+        counterGroupHitlPause.increment();
 
         if (listener != null) {
             listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(
@@ -2299,6 +2304,7 @@ public class GroupConversationService implements IGroupConversationService {
         // Delete timeout schedule only after CAS succeeds (Phase 5e) — if CAS
         // fails, the schedule is preserved so the timeout can still fire.
         deleteGroupHitlTimeoutSchedule(groupConversationId);
+        counterGroupHitlResume.increment();
 
         // Resume execution in background thread
         var groupId = gc.getGroupId();

@@ -6,6 +6,8 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlTimeoutPolicy;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -27,7 +29,15 @@ public class HitlTimeoutHandler {
     @Inject
     ai.labs.eddi.engine.api.IGroupConversationService groupConversationService;
 
+    @Inject
+    MeterRegistry meterRegistry;
+
     public void handleTimeout(Map<String, Object> metadata) {
+        String surface = (String) metadata.get("surface");
+        Counter.builder("eddi_hitl_timeout_count")
+                .tag("surface", surface != null ? surface : "unknown")
+                .register(meterRegistry)
+                .increment();
         String policyStr = (String) metadata.get("policy");
         if (policyStr == null) {
             LOGGER.error("HITL timeout metadata missing 'policy' key");
@@ -40,8 +50,6 @@ public class HitlTimeoutHandler {
             LOGGER.errorf("Unknown HITL timeout policy: %s", policyStr);
             return;
         }
-
-        String surface = (String) metadata.get("surface");
 
         switch (policy) {
             case AUTO_REJECT, AUTO_APPROVE -> {
