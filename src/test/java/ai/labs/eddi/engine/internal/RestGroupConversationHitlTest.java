@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.security.Principal;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -263,6 +264,102 @@ class RestGroupConversationHitlTest {
 
             assertEquals(200, response.getStatus(),
                     "Admin should bypass ownership check and get 200 OK");
+        }
+    }
+
+    // =================================================================
+    // Approval status — detail param + approver read scope
+    // =================================================================
+
+    @Nested
+    @DisplayName("Approval status — detail param + approver read scope")
+    class ApprovalStatusReadScope {
+
+        /** Configures identity as an approver who is NOT the owner and NOT admin. */
+        private void asApprover(String userId) {
+            var principal = mock(Principal.class);
+            when(principal.getName()).thenReturn(userId);
+            when(identity.getPrincipal()).thenReturn(principal);
+            when(identity.hasRole("eddi-admin")).thenReturn(false);
+            when(identity.hasRole("eddi-approver")).thenReturn(true);
+        }
+
+        @Test
+        @DisplayName("Default (summary) returns pause coordinates, not the full conversation")
+        void summaryHasNoTranscript() throws Exception {
+            asUser(OWNER_ID);
+            var gc = makeGc(OWNER_ID);
+            gc.setHitlPauseReason("Requires human approval");
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(gc);
+
+            Response response = restGroupConversation.getGroupApprovalStatus(GROUP_ID, GC_ID, null);
+
+            assertEquals(200, response.getStatus());
+            assertInstanceOf(Map.class, response.getEntity(),
+                    "Summary must be a projection, not the full GroupConversation");
+            @SuppressWarnings("unchecked")
+            var summary = (Map<String, Object>) response.getEntity();
+            assertEquals(GroupConversationState.AWAITING_APPROVAL.name(), summary.get("state"));
+            assertEquals("Requires human approval", summary.get("pauseReason"));
+            assertFalse(summary.containsKey("transcript"), "Summary must not leak the transcript");
+        }
+
+        @Test
+        @DisplayName("Approver may read detail=full while the conversation is paused")
+        void approverFullWhilePaused() throws Exception {
+            asApprover(ATTACKER_ID); // approver, but not the owner
+            var gc = makeGc(OWNER_ID); // AWAITING_APPROVAL
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(gc);
+
+            Response response = restGroupConversation.getGroupApprovalStatus(GROUP_ID, GC_ID, "full");
+
+            assertEquals(200, response.getStatus());
+            assertSame(gc, response.getEntity(), "Full view should return the conversation");
+        }
+
+        @Test
+        @DisplayName("Approver gets 403 for detail=full on a non-paused conversation")
+        void approverFullDeniedWhenNotPaused() throws Exception {
+            asApprover(ATTACKER_ID);
+            var gc = makeGc(OWNER_ID);
+            gc.setState(GroupConversationState.COMPLETED);
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(gc);
+
+            Response response = restGroupConversation.getGroupApprovalStatus(GROUP_ID, GC_ID, "full");
+
+            assertEquals(403, response.getStatus(),
+                    "Approver role must not be a universal read-everything grant");
+        }
+
+        @Test
+        @DisplayName("Owner may read detail=full even when not paused")
+        void ownerFullWhenNotPaused() throws Exception {
+            asUser(OWNER_ID);
+            var gc = makeGc(OWNER_ID);
+            gc.setState(GroupConversationState.COMPLETED);
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(gc);
+
+            Response response = restGroupConversation.getGroupApprovalStatus(GROUP_ID, GC_ID, "full");
+
+            assertEquals(200, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("Summary suppresses stale pause fields once the conversation left AWAITING_APPROVAL")
+        void summarySuppressesStaleFields() throws Exception {
+            asUser(OWNER_ID);
+            var gc = makeGc(OWNER_ID);
+            gc.setState(GroupConversationState.CANCELLED);
+            gc.setHitlPauseReason("stale reason");
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(gc);
+
+            Response response = restGroupConversation.getGroupApprovalStatus(GROUP_ID, GC_ID, null);
+
+            assertEquals(200, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var summary = (Map<String, Object>) response.getEntity();
+            assertEquals(GroupConversationState.CANCELLED.name(), summary.get("state"));
+            assertEquals("", summary.get("pauseReason"), "Stale pause fields must be suppressed");
         }
     }
 

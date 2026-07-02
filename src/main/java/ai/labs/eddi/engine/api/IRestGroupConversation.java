@@ -116,8 +116,12 @@ public interface IRestGroupConversation {
     @Path("/{groupConversationId}/approval-status")
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
-    @Operation(summary = "Get group approval status", description = "Returns the current approval status of a group conversation.")
+    @Operation(summary = "Get group approval status",
+               description = "Returns the current approval status of a group conversation. Default is a summary "
+                       + "(pause coordinates, no transcript); use detail=full for the complete conversation "
+                       + "(approver-only callers may use detail=full only while the conversation is awaiting approval).")
     @APIResponse(responseCode = "200", description = "Approval status.")
+    @APIResponse(responseCode = "403", description = "Approver-only caller requested detail=full on a non-paused conversation.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
     Response getGroupApprovalStatus(@PathParam("groupId") String groupId,
                                     @PathParam("groupConversationId") String gcId,

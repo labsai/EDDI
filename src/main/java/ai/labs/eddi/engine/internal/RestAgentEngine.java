@@ -304,16 +304,27 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public Response getApprovalStatus(String conversationId, String detail) {
-        validateConversationOwnership(conversationId, true);
+        String ownerId = validateConversationOwnership(conversationId, true);
         try {
             var snapshot = conversationService.getConversationMemorySnapshot(conversationId);
+            boolean paused = snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
             if ("full".equals(detail)) {
+                // Approver-only callers (not owner, not admin) may read the full
+                // memory only while the conversation is actually awaiting approval —
+                // the approver role exists to decide pending approvals, not as a
+                // universal read-everything grant over all conversations.
+                if (!paused && !ownershipValidator.isAdmin(identity)
+                        && !ownershipValidator.isOwner(identity, ownerId)) {
+                    return Response.status(Response.Status.FORBIDDEN)
+                            .entity("Full approval status is available to approvers only while the conversation "
+                                    + "is awaiting approval — use the summary view")
+                            .build();
+                }
                 return Response.ok(snapshot).build();
             }
             // Bookmark fields describe the pause — suppress them once the
             // conversation left AWAITING_HUMAN so stale fields (e.g. after a
             // cancel that predates bookmark clearing) never mislead dashboards.
-            boolean paused = snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
             var summary = Map.of(
                     "conversationId", conversationId,
                     "state", snapshot.getConversationState().name(),
@@ -369,8 +380,10 @@ public class RestAgentEngine implements IRestAgentEngine {
     /**
      * @param hitlOperation
      *            if true, uses strict ownership + approver role check
+     * @return the conversation owner's userId, or {@code null} if the descriptor
+     *         was not found (the actual operation handles the 404)
      */
-    private void validateConversationOwnership(String conversationId, boolean hitlOperation) {
+    private String validateConversationOwnership(String conversationId, boolean hitlOperation) {
         try {
             var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
             if (hitlOperation) {
@@ -378,11 +391,13 @@ public class RestAgentEngine implements IRestAgentEngine {
             } else {
                 ownershipValidator.requireOwnerOrAdmin(identity, descriptor.getUserId(), "conversation");
             }
+            return descriptor.getUserId();
         } catch (ForbiddenException e) {
             throw e;
         } catch (ResourceNotFoundException e) {
             // Descriptor not found — let the actual operation handle it
             LOGGER.debugf("Conversation descriptor not found for %s", sanitize(conversationId));
+            return null;
         } catch (ResourceStoreException e) {
             // Fail-closed: cannot verify ownership → deny access
             LOGGER.warnf("Could not load conversation descriptor for ownership check: %s", sanitize(conversationId));

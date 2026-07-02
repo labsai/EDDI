@@ -10,6 +10,8 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -193,6 +195,84 @@ class RestAgentEngineHitlTest {
 
             assertNotNull(result);
             assertTrue(result.isEmpty());
+        }
+    }
+
+    // =========================================================================
+    // getApprovalStatus — approver read scope
+    // =========================================================================
+
+    @Nested
+    @DisplayName("getApprovalStatus — approver read scope")
+    class GetApprovalStatus {
+
+        private ConversationMemorySnapshot snapshotInState(ConversationState state) throws Exception {
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(state);
+            doReturn(snapshot).when(conversationService).getConversationMemorySnapshot(CONVERSATION_ID);
+            return snapshot;
+        }
+
+        @Test
+        @DisplayName("approver-only caller may read detail=full while paused")
+        void approverFullWhilePaused() throws Exception {
+            var snapshot = snapshotInState(ConversationState.AWAITING_HUMAN);
+
+            Response response = restAgentEngine.getApprovalStatus(CONVERSATION_ID, "full");
+
+            assertEquals(200, response.getStatus());
+            assertSame(snapshot, response.getEntity(), "Full view should return the memory snapshot");
+        }
+
+        @Test
+        @DisplayName("approver-only caller gets 403 for detail=full on a non-paused conversation")
+        void approverFullDeniedWhenNotPaused() throws Exception {
+            snapshotInState(ConversationState.READY);
+            doReturn(false).when(ownershipValidator).isAdmin(identity);
+            doReturn(false).when(ownershipValidator).isOwner(eq(identity), any());
+
+            Response response = restAgentEngine.getApprovalStatus(CONVERSATION_ID, "full");
+
+            assertEquals(403, response.getStatus(),
+                    "Approver role must not be a universal read-everything grant");
+        }
+
+        @Test
+        @DisplayName("owner may read detail=full even when not paused")
+        void ownerFullWhenNotPaused() throws Exception {
+            var snapshot = snapshotInState(ConversationState.ENDED);
+            doReturn(false).when(ownershipValidator).isAdmin(identity);
+            doReturn(true).when(ownershipValidator).isOwner(identity, USER_ID);
+
+            Response response = restAgentEngine.getApprovalStatus(CONVERSATION_ID, "full");
+
+            assertEquals(200, response.getStatus());
+            assertSame(snapshot, response.getEntity());
+        }
+
+        @Test
+        @DisplayName("admin may read detail=full even when not paused")
+        void adminFullWhenNotPaused() throws Exception {
+            snapshotInState(ConversationState.ENDED);
+            doReturn(true).when(ownershipValidator).isAdmin(identity);
+
+            Response response = restAgentEngine.getApprovalStatus(CONVERSATION_ID, "full");
+
+            assertEquals(200, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("summary suppresses stale bookmark fields when not paused")
+        void summarySuppressesStaleFields() throws Exception {
+            var snapshot = snapshotInState(ConversationState.ENDED);
+            snapshot.setHitlPauseReason("stale reason");
+
+            Response response = restAgentEngine.getApprovalStatus(CONVERSATION_ID, "summary");
+
+            assertEquals(200, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var summary = (java.util.Map<String, Object>) response.getEntity();
+            assertEquals("", summary.get("pauseReason"), "Stale pause fields must be suppressed");
         }
     }
 }

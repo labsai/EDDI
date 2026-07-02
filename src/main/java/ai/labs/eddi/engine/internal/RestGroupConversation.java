@@ -242,7 +242,39 @@ public class RestGroupConversation implements IRestGroupConversation {
         validateGroupConversationOwnership(gcId, true);
         try {
             var gc = groupConversationService.readGroupConversation(gcId);
-            return Response.ok(gc).build();
+            boolean paused = gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL;
+            if ("full".equals(detail)) {
+                // Approver-only callers (not owner, not admin) may read the full
+                // conversation (incl. transcript) only while it is actually awaiting
+                // approval — mirrors the regular surface's read-scope gate.
+                if (!paused && !ownershipValidator.isAdmin(identity)
+                        && !ownershipValidator.isOwner(identity, gc.getUserId())) {
+                    return Response.status(Response.Status.FORBIDDEN)
+                            .entity("Full approval status is available to approvers only while the group "
+                                    + "conversation is awaiting approval — use the summary view")
+                            .build();
+                }
+                return Response.ok(gc).build();
+            }
+            // Summary (default): pause coordinates only — no transcript. Pause
+            // fields are suppressed outside AWAITING_APPROVAL so stale values
+            // never mislead dashboards.
+            List<String> awaitingTaskIds = paused && gc.getTaskList() != null
+                    ? gc.getTaskList().all().stream()
+                            .filter(t -> t.status() == ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus.AWAITING_APPROVAL)
+                            .map(ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem::id)
+                            .toList()
+                    : List.of();
+            var summary = new java.util.LinkedHashMap<String, Object>();
+            summary.put("groupConversationId", gcId);
+            summary.put("state", gc.getState() != null ? gc.getState().name() : "");
+            summary.put("pausedAt", paused && gc.getPausedAt() != null ? gc.getPausedAt().toString() : "");
+            summary.put("pausedPhaseName", paused && gc.getPausedPhaseName() != null ? gc.getPausedPhaseName() : "");
+            summary.put("pauseType", paused && gc.getHitlPauseType() != null ? gc.getHitlPauseType().name() : "");
+            summary.put("pauseReason", paused && gc.getHitlPauseReason() != null ? gc.getHitlPauseReason() : "");
+            summary.put("timeoutPolicy", paused && gc.getHitlTimeoutPolicy() != null ? gc.getHitlTimeoutPolicy() : "");
+            summary.put("awaitingApprovalTaskIds", awaitingTaskIds);
+            return Response.ok(summary).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
         } catch (Exception e) {

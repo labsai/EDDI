@@ -212,8 +212,10 @@ public interface IRestAgentEngine {
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
     @Operation(summary = "Get HITL approval status",
-               description = "Returns the approval status of a paused conversation. Use detail=full for the complete memory snapshot.")
+               description = "Returns the approval status of a paused conversation. Use detail=full for the complete memory snapshot "
+                       + "(approver-only callers may use detail=full only while the conversation is awaiting approval).")
     @APIResponse(responseCode = "200", description = "Approval status.")
+    @APIResponse(responseCode = "403", description = "Approver-only caller requested detail=full on a non-paused conversation.")
     @APIResponse(responseCode = "404", description = "Conversation not found.")
     Response getApprovalStatus(@PathParam("conversationId") String conversationId,
                                @QueryParam("detail")

@@ -64,6 +64,23 @@ public class OwnershipValidator {
     }
 
     /**
+     * Returns whether the caller IS the resource owner — a pure identity
+     * comparison, no roles. Always {@code true} when authorization is disabled.
+     * Unowned resources (null/blank owner) return {@code false}; callers decide how
+     * to treat legacy data.
+     */
+    public boolean isOwner(SecurityIdentity identity, String resourceOwnerId) {
+        if (!authEnabled) {
+            return true;
+        }
+        if (identity == null || identity.isAnonymous() || identity.getPrincipal() == null) {
+            return false;
+        }
+        return resourceOwnerId != null && !resourceOwnerId.isBlank()
+                && identity.getPrincipal().getName().equals(resourceOwnerId);
+    }
+
+    /**
      * Asserts that the caller matches the requested {@code userId} or holds the
      * {@code eddi-admin} role.
      *
