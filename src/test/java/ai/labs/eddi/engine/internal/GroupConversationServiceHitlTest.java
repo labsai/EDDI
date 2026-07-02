@@ -277,19 +277,35 @@ class GroupConversationServiceHitlTest {
             doReturn(config).when(groupStore).read(GROUP_ID, 1);
             stubAgentSay();
 
+            // Capture pause-clear state at the SYNCHRONOUS resume CAS. Asserting on
+            // the returned object would race the async resumed leg, which mutates the
+            // shared gc (and flips it to COMPLETED) — the CAS point is where the
+            // clear-pause block deterministically runs.
+            var casState = new java.util.concurrent.atomic.AtomicReference<GroupConversationState>();
+            var casPhaseIndex = new java.util.concurrent.atomic.AtomicInteger(Integer.MIN_VALUE);
+            var casPausedAtWasNull = new java.util.concurrent.atomic.AtomicBoolean(false);
+            doAnswer(inv -> {
+                GroupConversation g = inv.getArgument(0);
+                if (casState.compareAndSet(null, g.getState())) {
+                    casPhaseIndex.set(g.getPausedAtPhaseIndex());
+                    casPausedAtWasNull.set(g.getPausedAt() == null);
+                }
+                return null;
+            }).when(conversationStore).updateIfState(any(), eq(GroupConversationState.AWAITING_APPROVAL));
+
             var request = new GroupApprovalRequest();
             var decision = new HitlDecision();
             decision.setVerdict(HitlVerdict.APPROVED);
             request.setDecision(decision);
 
-            GroupConversation result = service.resumeDiscussion("gc-resume", request, null);
+            service.resumeDiscussion("gc-resume", request, null);
 
-            // The resume clears pause state and sets IN_PROGRESS
-            assertEquals(GroupConversationState.IN_PROGRESS, result.getState(),
-                    "State should be IN_PROGRESS after resume");
-            assertEquals(-1, result.getPausedAtPhaseIndex(),
-                    "Paused phase index should be cleared to -1");
-            assertNull(result.getPausedAt(), "pausedAt should be cleared");
+            // The resume clears pause state and sets IN_PROGRESS (captured at the CAS)
+            assertEquals(GroupConversationState.IN_PROGRESS, casState.get(),
+                    "State should be IN_PROGRESS at the resume CAS");
+            assertEquals(-1, casPhaseIndex.get(),
+                    "Paused phase index should be cleared to -1 at the resume CAS");
+            assertTrue(casPausedAtWasNull.get(), "pausedAt should be cleared at the resume CAS");
 
             // Verify updateIfState was called with AWAITING_APPROVAL (CAS)
             verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
@@ -1374,6 +1390,201 @@ class GroupConversationServiceHitlTest {
             assertThrows(GroupDiscussionException.class,
                     () -> service.resumeDiscussion("gc-wrong", request, null),
                     "Resuming a non-AWAITING_APPROVAL GC should throw");
+        }
+    }
+
+    // =================================================================
+    // #3: member agent's own PAUSE_CONVERSATION inside a group discussion
+    // =================================================================
+
+    @Nested
+    @DisplayName("Member pause inside a group (#3)")
+    class MemberPauseInsideGroup {
+
+        @Test
+        @DisplayName("member turn that pauses AWAITING_HUMAN is recorded SKIPPED, its pause cancelled, no empty content")
+        void memberPauseRecordedSkippedAndCancelled() throws Exception {
+            var phases = List.of(
+                    new DiscussionPhase("Opinion", PhaseType.OPINION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL,
+                            false, null, 1, false));
+            var config = buildConfig(phases);
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+            doReturn("gc-member-pause").when(conversationStore).create(any());
+
+            doReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class))
+                    .when(agentFactory).getLatestReadyAgent(any(), eq(AGENT_A));
+            var convResult = new IConversationService.ConversationResult("member-conv", null);
+            doReturn(convResult).when(conversationService).startConversation(any(), any(), any(), any());
+
+            // The member's private conversation pauses for human approval mid-turn:
+            // the snapshot carries state AWAITING_HUMAN and no output.
+            doAnswer(inv -> {
+                var snapshot = new SimpleConversationMemorySnapshot();
+                snapshot.setConversationState(
+                        ai.labs.eddi.engine.memory.model.ConversationState.AWAITING_HUMAN);
+                IConversationService.ConversationResponseHandler handler = inv.getArgument(8);
+                if (handler != null) {
+                    handler.onComplete(snapshot);
+                }
+                return null;
+            }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+
+            GroupConversation gc = service.discuss(GROUP_ID, "Question?", USER_ID, 0);
+
+            // The stranded member pause must have been cancelled.
+            verify(conversationService).cancelConversation(eq("member-conv"),
+                    eq(ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL));
+
+            // The member turn is recorded SKIPPED with the explanatory note — never
+            // as an empty OPINION contribution.
+            var memberEntries = gc.getTranscript().stream()
+                    .filter(e -> AGENT_A.equals(e.speakerAgentId()))
+                    .toList();
+            assertEquals(1, memberEntries.size(), "exactly one member entry expected");
+            var entry = memberEntries.get(0);
+            assertEquals(GroupConversation.TranscriptEntryType.SKIPPED, entry.type(),
+                    "member pause must be recorded SKIPPED, not as a real contribution");
+            assertNull(entry.content(), "a skipped member turn must not carry empty content as a contribution");
+            assertNotNull(entry.errorReason(), "the SKIPPED entry must explain why");
+            assertTrue(entry.errorReason().contains("requiresApproval"),
+                    "the note should point the designer at group-level HITL");
+
+            // The discussion itself completes normally (does not stall).
+            assertEquals(GroupConversationState.COMPLETED, gc.getState(),
+                    "the group discussion completes past the skipped member");
+        }
+    }
+
+    // =================================================================
+    // #4: no-progress TASK re-pause must fail (guarantee termination)
+    // =================================================================
+
+    @Nested
+    @DisplayName("No-progress TASK re-pause fails (#4)")
+    class NoProgressTaskRepause {
+
+        /** A TASK-paused GC with one ASSIGNED task whose agentId cannot be resolved. */
+        private GroupConversation stalledGc(String id, String fingerprint) {
+            var gc = new GroupConversation();
+            gc.setId(id);
+            gc.setGroupId(GROUP_ID);
+            gc.setUserId(USER_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAtPhaseIndex(0);
+            gc.setPausedPhaseName("Execute");
+            gc.setPausedAt(Instant.now());
+            gc.setHitlPauseType(GroupConversation.HitlPauseType.TASK);
+            gc.setPausedTurnCount(50);
+            gc.setOriginalQuestion("no-progress test");
+            gc.setHitlLastPauseFingerprint(fingerprint);
+
+            var taskList = new SharedTaskList();
+            taskList.addTask(new SharedTaskList.TaskItem("Stuck", "never resolves", 0));
+            var t = taskList.all().get(0);
+            // Assign to an agentId the config does not contain — findExecutableTasks
+            // returns it forever but no member ever runs it.
+            taskList.assignTask(t.id(), "ghost-agent", "Ghost");
+            gc.setTaskList(taskList);
+            return gc;
+        }
+
+        @Test
+        @DisplayName("resume that re-pauses with the identical task fingerprint fails the discussion")
+        void noProgressResumeFailsDiscussion() throws Exception {
+            // EXECUTE phase requiresApproval=true + TASK granularity.
+            var phases = List.of(
+                    new DiscussionPhase("Execute", PhaseType.EXECUTE,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.TASK_ONLY,
+                            false, null, 1, true));
+            var config = buildConfig(phases);
+            var hitlConfig = new AgentGroupConfiguration.HitlConfig();
+            hitlConfig.setGranularity(HitlGranularity.TASK);
+            config.setHitlConfig(hitlConfig);
+
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+            stubAgentSay();
+
+            // Pre-seed the fingerprint to what this exact task-state will produce, so
+            // the first re-pause on resume is detected as no-progress. Fingerprint is
+            // phase=0; then "<taskId>:ASSIGNED,".
+            var gc = stalledGc("gc-noprogress", null);
+            String taskId = gc.getTaskList().all().get(0).id();
+            gc.setHitlLastPauseFingerprint("phase=0;" + taskId + ":ASSIGNED,");
+            doReturn(gc).when(conversationStore).read("gc-noprogress");
+
+            var resumeDone = new java.util.concurrent.CountDownLatch(1);
+            var errored = new java.util.concurrent.atomic.AtomicBoolean(false);
+            var listener = new ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener() {
+                @Override
+                public void onGroupComplete(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupCompleteEvent event) {
+                    resumeDone.countDown();
+                }
+                @Override
+                public void onGroupError(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupErrorEvent event) {
+                    errored.set(true);
+                    resumeDone.countDown();
+                }
+            };
+
+            // Human approval (no fresh budget granted matters — the ghost task can
+            // never advance, so the re-pause fingerprint is identical).
+            var request = new GroupApprovalRequest();
+            var dec = new HitlDecision();
+            dec.setVerdict(HitlVerdict.APPROVED);
+            dec.setDecidedBy("system:timeout"); // AUTO_APPROVE — no fresh budget
+            request.setDecision(dec);
+
+            service.resumeDiscussion("gc-noprogress", request, listener);
+
+            assertTrue(resumeDone.await(5, java.util.concurrent.TimeUnit.SECONDS),
+                    "resumed leg should terminate quickly, not loop");
+            assertTrue(errored.get(), "no-progress resume must emit a terminal group_error");
+            assertEquals(GroupConversationState.FAILED, gc.getState(),
+                    "no-progress TASK re-pause must FAIL the discussion, not re-pause forever");
+        }
+    }
+
+    // =================================================================
+    // #30: taskApprovals against a PHASE pause → 400
+    // =================================================================
+
+    @Nested
+    @DisplayName("taskApprovals on a phase pause is rejected (#30)")
+    class TaskApprovalsOnPhasePause {
+
+        @Test
+        @DisplayName("taskApprovals with a PHASE pause type throws IllegalArgumentException (→400)")
+        void taskApprovalsOnPhasePauseRejected() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-phase-only");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAtPhaseIndex(1);
+            gc.setPausedPhaseName("Critique");
+            gc.setPausedAt(Instant.now());
+            gc.setHitlPauseType(GroupConversation.HitlPauseType.PHASE);
+            gc.setOriginalQuestion("phase pause");
+            // no task list — PHASE granularity group
+            doReturn(gc).when(conversationStore).read("gc-phase-only");
+
+            var request = new GroupApprovalRequest();
+            var dec = new HitlDecision();
+            dec.setVerdict(HitlVerdict.APPROVED);
+            request.setDecision(dec);
+            request.setTaskApprovals(java.util.Map.of("some-task", "APPROVED"));
+
+            var ex = assertThrows(IllegalArgumentException.class,
+                    () -> service.resumeDiscussion("gc-phase-only", request, null),
+                    "task-level body against a PHASE pause must fail, not silently full-resume");
+            assertTrue(ex.getMessage().contains("no task-level approval")
+                    || ex.getMessage().contains("PHASE granularity"), ex.getMessage());
+            assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState(), "pause must survive");
+            verify(conversationStore, never()).updateIfState(any(), any());
         }
     }
 }

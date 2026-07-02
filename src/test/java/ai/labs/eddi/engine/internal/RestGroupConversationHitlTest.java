@@ -550,4 +550,66 @@ class RestGroupConversationHitlTest {
                     "ResourceModifiedException should map to 409 CONFLICT");
         }
     }
+
+    // =================================================================
+    // groupId path-parameter validation (CodeQL: unused path param)
+    // =================================================================
+
+    @Nested
+    @DisplayName("groupId path validation — 404 on group mismatch")
+    class GroupIdPathValidation {
+
+        private static final String OTHER_GROUP = "some-other-group";
+
+        @Test
+        @DisplayName("approve with a mismatched groupId path throws 404 NotFoundException")
+        void approveWrongGroup404() throws Exception {
+            asAdmin(ADMIN_ID); // authz passes — the membership check must still 404
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(makeGc(OWNER_ID)); // groupId=GROUP_ID
+
+            var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            request.setDecision(decision);
+
+            assertThrows(jakarta.ws.rs.NotFoundException.class,
+                    () -> restGroupConversation.approveGroupPhase(OTHER_GROUP, GC_ID, request),
+                    "approving under the wrong group path must 404, not act on the conversation");
+        }
+
+        @Test
+        @DisplayName("cancel with a mismatched groupId path throws 404 NotFoundException")
+        void cancelWrongGroup404() throws Exception {
+            asAdmin(ADMIN_ID);
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(makeGc(OWNER_ID));
+
+            assertThrows(jakarta.ws.rs.NotFoundException.class,
+                    () -> restGroupConversation.cancelDiscussion(OTHER_GROUP, GC_ID),
+                    "cancelling under the wrong group path must 404");
+        }
+
+        @Test
+        @DisplayName("approval-status with a mismatched groupId path throws 404 NotFoundException")
+        void statusWrongGroup404() throws Exception {
+            asAdmin(ADMIN_ID);
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(makeGc(OWNER_ID));
+
+            assertThrows(jakarta.ws.rs.NotFoundException.class,
+                    () -> restGroupConversation.getGroupApprovalStatus(OTHER_GROUP, GC_ID, "summary"),
+                    "reading approval-status under the wrong group path must 404");
+        }
+
+        @Test
+        @DisplayName("matching groupId path proceeds normally (no 404)")
+        void matchingGroupProceeds() throws Exception {
+            asAdmin(ADMIN_ID);
+            var gc = makeGc(OWNER_ID); // groupId == GROUP_ID
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(gc);
+
+            // Correct group → membership check passes; status returns 200.
+            Response response = restGroupConversation.getGroupApprovalStatus(GROUP_ID, GC_ID, "summary");
+            assertEquals(Response.Status.OK.getStatusCode(), response.getStatus(),
+                    "a matching groupId path must not 404");
+        }
+    }
 }
