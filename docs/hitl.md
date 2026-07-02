@@ -52,7 +52,7 @@ User sends message
                       ├→ timeout policy copied into the bookmark
                       └→ one-shot timeout schedule armed (if finite policy)
 
-⏸️ Conversation is paused — say() is rejected, undo/redo return 409
+⏸️ Conversation is paused — say() is rejected promptly with 409, undo/redo return 409
 
 Human reviews → POST /agents/{conversationId}/resume with a decision
   └→ REJECTED → remaining pipeline tasks are skipped, state = READY
@@ -60,13 +60,16 @@ Human reviews → POST /agents/{conversationId}/resume with a decision
        └→ Remaining tasks (output, templating, …) execute normally
 ```
 
+**While paused, user input is rejected without being consumed**: `POST /agents/{id}/say` returns `409 Conflict` immediately with a body directing to the resume endpoint — the message is *not* queued and *not* processed. The same applies if a pause commits in the narrow window after a message was accepted (the turn is skipped and answered with `409` instead of executing against the paused conversation). Chat clients should render "awaiting approval" and disable input until the decision lands.
+
 ### Configuration
 
 ```json
 {
   "hitlConfig": {
     "approvalTimeout": "PT15M",
-    "timeoutPolicy": "AUTO_REJECT"
+    "timeoutPolicy": "AUTO_REJECT",
+    "pauseReason": "Account deletion requires manager sign-off"
   }
 }
 ```
@@ -75,8 +78,9 @@ Human reviews → POST /agents/{conversationId}/resume with a decision
 |-------|------|---------|-------------|
 | `approvalTimeout` | ISO-8601 duration (`"PT30S"`, `"PT15M"`) | `null` | Time before the timeout policy fires. Required for finite policies. |
 | `timeoutPolicy` | `AUTO_APPROVE` \| `AUTO_REJECT` \| `ABORT` \| `WAIT_INDEFINITELY` | `WAIT_INDEFINITELY` | What happens when the timeout expires. |
+| `pauseReason` | string, ≤ 500 chars | `null` | Approver-facing text shown in pending-approval listings and approval-status — answers "what am I approving?". Falls back to a generic reason when absent. |
 
-Validation happens at **save time**: a finite policy without a valid positive `approvalTimeout` (or a malformed duration like `"30m"`) is rejected with an actionable 400 — it never degrades silently to wait-forever at runtime.
+Validation happens at **save time** (and on ZIP import): a finite policy without a valid positive `approvalTimeout` (or a malformed duration like `"30m"`, or an overlong `pauseReason`) is rejected with an actionable 400 — it never degrades silently to wait-forever at runtime.
 
 ### Behavior Rule (the actual trigger)
 
@@ -96,12 +100,12 @@ Validation happens at **save time**: a finite policy without a valid positive `a
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/agents/{conversationId}/resume` | Submit a decision (`{"verdict": "APPROVED"\|"REJECTED", "note": "..."}`) |
-| `GET` | `/agents/{conversationId}/approval-status` | Pause status (`?detail=full` for the whole snapshot — approver-only callers get `full` only while the conversation is paused, `403` otherwise) |
-| `GET` | `/agents/pending-approvals?limit=200` | List paused conversations as summaries (bounded, max 1000) |
+| `POST` | `/agents/{conversationId}/resume` | Submit a decision (`{"verdict": "APPROVED"\|"REJECTED", "note": "..."}` — verdict is case-insensitive) |
+| `GET` | `/agents/{conversationId}/approval-status` | Pause summary: `state`, `pausedAt`, `pauseReason`, `timeoutPolicy`, `approvalTimeout` (render the auto-decision deadline as `pausedAt + approvalTimeout`). `?detail=full` for the whole snapshot — approver-only callers get `full` only while the conversation is paused, `403` otherwise |
+| `GET` | `/agents/pending-approvals?limit=200` | List paused conversations as summaries (bounded, max 1000). Non-admin/non-approver callers get their own conversations, filtered *inside* the query — the limit applies after the owner restriction, so a personal inbox is never starved by other users' backlog |
 | `POST` | `/agents/{conversationId}/cancel` | Cancel a paused (or same-pod running) conversation |
 
-Status codes are discriminating: `400` invalid body (missing verdict, note > 4 KB — the pause is **not** consumed), `404` unknown conversation, `409` not in a resumable state (body names the current state), `200` success.
+Status codes are discriminating: `400` invalid body (missing verdict, note > 4 KB — the pause is **not** consumed), `404` unknown conversation, `409` not in a resumable state (body names the current state), `200` success. HITL operations on a conversation whose descriptor is missing (legacy/corruption) fail **closed** — only admins/approvers may act on them.
 
 ### What the Agent Sees After a Decision
 
@@ -148,7 +152,10 @@ On **REJECTED**, the remaining pipeline tasks are skipped (the actions that woul
 | `POST` | `/groups/{groupId}/conversations/{gcId}/approve/stream` | Same, with SSE progress events |
 | `GET` | `/groups/{groupId}/conversations/{gcId}/approval-status` | Pause summary (state, pausedAt, phase, pauseType, reason, timeoutPolicy, awaiting task ids); `?detail=full` returns the whole conversation incl. transcript — approver-only callers get `full` only while paused, `403` otherwise |
 | `GET` | `/groups/{groupId}/conversations/pending-approvals?limit=100` | This group's paused conversations as summaries (bounded, max 1000) |
+| `GET` | `/groups/pending-approvals?limit=100` | **Global approval inbox** across all groups (bounded, max 1000): admins/approvers see everything, other callers their own conversations |
 | `POST` | `/groups/{groupId}/conversations/{gcId}/cancel` | Cancel the discussion — `409` if it is already in a terminal state |
+
+The `{groupId}` path segment is validated: a conversation that does not belong to the given group returns `404` on read/delete/cancel/approve/approval-status. A discussion deleted concurrently with an approve/cancel also returns `404` (never a misleading `409` state conflict).
 
 **Approval bodies:**
 
@@ -170,6 +177,10 @@ Unknown task IDs, tasks not awaiting approval, and unknown decision values (anyt
 ### Config drift protection
 
 Pauses can last days. On resume, the bookmarked phase (index + name) is verified against the **current** group config; if phases were added, removed, or reordered in between, the resume is aborted and the **pause is restored** (state back to `AWAITING_APPROVAL`, timeout schedule re-armed, `group_error` emitted with the mismatch details) — fix the config and approve again, or cancel. Transient failures before the resumed execution starts restore the pause the same way instead of failing the discussion terminally.
+
+### No-progress protection (TASK granularity)
+
+A TASK-gate pause caused by turn-budget exhaustion could previously loop forever under `AUTO_APPROVE` (approve → zero work → identical re-pause). Resumes now fingerprint the pause (phase + non-terminal task states): an **explicit human APPROVED grants a fresh turn budget**; if a resumed leg re-pauses with an identical fingerprint (no progress), the discussion **fails with an actionable error** instead of pausing again — guaranteed termination. Automated (`system:*`) approvals never grant fresh budget, so a timeout policy cannot sustain the loop.
 
 ---
 
@@ -194,7 +205,7 @@ Approve/reject/cancel/status require, in order: the **conversation owner**, the 
 
 ## Auditing
 
-Every HITL decision — human or automated — writes an immutable `hitl.approval` entry to the audit ledger (verdict, decider, automated flag, note), and the resumed pipeline leg records its task entries like any other turn. Cancelling a pending approval is a decision too: it writes an `hitl.approval` entry with verdict `CANCELLED` and the cancel mode. This is the EU AI Act human-oversight trail.
+Every HITL decision — human or automated — writes an immutable `hitl.approval` entry to the audit ledger (verdict, decider, automated flag, note), and the resumed pipeline leg records its task entries like any other turn. Cancelling a pending approval is a decision too: it writes an `hitl.approval` entry with verdict `CANCELLED`, the cancel mode, and the **cancelling actor** (`decidedBy`: the authenticated principal, or a `system:*` identifier such as `system:timeout` for ABORT policies and `system:group` for auto-cancelled member pauses). This is the EU AI Act human-oversight trail.
 
 ## Crash Recovery
 
@@ -208,13 +219,20 @@ Config: `eddi.hitl.crash-recovery.enabled` (default `true`), `eddi.hitl.crash-re
 
 ## Operations
 
-- **Metrics** (`/q/metrics`): `eddi_hitl_pause_count`, `eddi_hitl_resume_count`, `eddi_hitl_timeout_count`, each tagged `surface=regular|group`.
-- **Undeploy**: paused conversations do **not** count as active — an agent version with pending approvals can be undeployed. Resuming afterwards returns `409 agent not deployed` and the pause is restored (redeploy, then retry).
+- **Metrics** (`/q/metrics`): `eddi_hitl_pause_count`, `eddi_hitl_resume_count`, `eddi_hitl_timeout_count`, each tagged `surface=regular|group`; `eddi_group_member_pause_skipped_count` for auto-cancelled member pauses inside groups.
+- **Undeploy**: paused conversations do **not** count as active — an agent version with pending approvals can be undeployed. Resuming afterwards returns `409 agent not deployed` and the pause is restored (redeploy, then retry). The idle-conversation cleanup sweep likewise **spares** `AWAITING_HUMAN` conversations — a pending approval is never silently force-ended by maintenance.
 - **Cancel semantics (regular)**: cancels a paused conversation, or signals a turn executing on the same pod to stop at the next task boundary. `CANCEL_IMMEDIATE` currently degrades to graceful on the regular surface. Cancelling an idle conversation returns `409` (use `endConversation`).
+- **Timeout schedules are not manually operable**: HITL timeout schedules live in the schedule store but the schedule REST surface refuses to fire them manually (`409`, use `/resume` or `/cancel` — manual firing would bypass the approval authz), restricts update/delete/enable/disable to `eddi-admin` (`403` otherwise, so an editor cannot disarm an ABORT/AUTO_REJECT safety timeout), and redacts them from non-admin listings.
+- **Pause retention (optional)**: `eddi.hitl.pending.max-age` (ISO-8601 duration, default **off**) auto-cancels pauses older than the threshold — audited, schedule-disarmed, via the normal cancel path; `eddi.hitl.pending.sweep-interval` (default 6h) controls the sweep cadence. Under the default `WAIT_INDEFINITELY` policy, pauses otherwise accumulate until decided.
+- **Mass-timeout drain**: due schedules are claimed in configurable batches (`eddi.schedule.poll-batch-size`, default 100) and fired concurrently on virtual threads with per-fire error isolation.
 
 ## Known Limitations (v1)
 
+- **Member-level HITL inside a group**: a member agent's own `PAUSE_CONVERSATION` rule firing during a group turn is not supported — the turn is recorded as SKIPPED with an explanatory note, the member's stranded pause is auto-cancelled (audited as `system:group`), and a `member_pause_skipped` SSE event is emitted. Use group-level HITL (`requiresApproval`) instead.
 - **Nested groups**: `requiresApproval` inside a sub-group of a group-of-groups is not supported — the sub-pause is cancelled and the member turn is recorded as SKIPPED with an explanatory note.
-- **Cross-pod cancel of an actively-running turn**: the cooperative cancel flag is per-pod; the DB CAS covers paused states cluster-wide.
+- **Cross-pod cancel of an actively-running turn**: the cooperative cancel flag is per-pod; the DB CAS covers paused states cluster-wide, and a running group leg re-checks the persisted state at every phase boundary, so a cross-pod cancel takes effect at the next boundary.
 - **Tool-level HITL** (pausing inside an LLM tool call) is deferred.
-- **Upgrade note**: `DiscussionPhase.requiresApproval` existed before this feature as an inert placeholder. Stored group configs that set it to `true` will begin pausing for approval after this upgrade.
+- **Upgrade notes**:
+  - `DiscussionPhase.requiresApproval` existed before this feature as an inert placeholder. Stored group configs that set it to `true` will begin pausing for approval after this upgrade.
+  - `PAUSE_CONVERSATION` is a **newly reserved action name**. A stored behavior-rule config that already emitted an action with this exact name will begin pausing conversations after this upgrade — rename such actions before upgrading.
+  - During a rolling upgrade, pods running the previous version cannot read conversations paused by new pods (unknown `AWAITING_HUMAN` state) — schedule pause-heavy traffic after the rollout completes.
