@@ -235,7 +235,7 @@ public class ConversationMemory implements IConversationMemory {
 
     private transient String hitlPausedWorkflowId;
     private transient int hitlPausedAbsoluteTaskIndex = -1;
-    private transient java.time.Instant hitlPausedAt;
+    private transient Instant hitlPausedAt;
     private transient String hitlPauseReason;
     private transient String hitlTimeoutPolicy;
     private transient String hitlApprovalTimeout;
@@ -261,12 +261,12 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
-    public java.time.Instant getHitlPausedAt() {
+    public Instant getHitlPausedAt() {
         return hitlPausedAt;
     }
 
     @Override
-    public void setHitlPausedAt(java.time.Instant pausedAt) {
+    public void setHitlPausedAt(Instant pausedAt) {
         this.hitlPausedAt = pausedAt;
     }
 

@@ -5,6 +5,25 @@
 
 ---
 
+## 🔧 HITL PR Review Response — Copilot + CodeRabbit (2026-07-02, session 4)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+**Trigger:** Automated review on the open PR (GitHub Copilot + CodeRabbit) surfaced ~24 findings. Each was independently, adversarially re-verified against the actual code (not the bot's paraphrase); the confirmed ones are fixed here, deliberate skips are recorded with rationale.
+
+| Area | Fix |
+|------|-----|
+| Cross-group leak (MAJOR) | `GroupConversationStore.findByState(state, groupId, limit)` passed `groupId` as a raw filter value; `MongoResourceStorage.findResources` turns String filters into **unanchored** regexes, so a group id that is a substring of another matched across groups. Now anchored + `Pattern.quote`d (`^\Q…\E$`) in both `findByState` and the pre-existing `listByGroupId`. |
+| Stuck resume (MAJOR) | `resumeConversation`'s critical section (CAS → `submitInOrder`) only caught `ServiceException`/`InstantiationException`/`IllegalAccessException`; an unchecked exception from `continueConversation` escaped, leaving the conversation stuck `IN_PROGRESS` with a leaked `inFlightConversations` entry. The catch now also covers `RuntimeException` (restores the pause + drops the registry entry), while the deliberate agent-not-deployed `IllegalStateException` is re-thrown as-is so it still maps to 409. |
+| Props on failed resume (MAJOR) | `Conversation.resume()`'s finally ran `postConversationLifecycleTasks()` whenever the state was not `AWAITING_HUMAN` — including `ERROR`, so a failed resume persisted long-term properties, unlike the say path. Now also skipped on `ERROR`. |
+| Resume bookmark index (MAJOR) | `LifecycleManager` selective execution (`rerun`) ran a suffix sublist but stored the sublist-relative loop index as the "absolute" pause bookmark. Added an `indexOffset` threaded only into the pause-index computation (component-cache/telemetry indices unchanged), so a pause during selective execution records a true absolute index. Also added bounds validation to `executeLifecycleFromIndex` (negative → `LifecycleException`; strictly-past-end from a redeployed workflow → warn + skip; exactly `size()` remains valid). |
+| End-vs-resume race (MAJOR) | `endConversation` wrote `ENDED` without signalling `inFlightConversations`, so a resume past the CAS could persist its snapshot back over the terminal state. It now sets the cooperative-cancel flag on any in-flight memory (mirrors `cancelConversation`), so the resume's `onComplete` skips persistence and `ENDED` wins. |
+| Timeout fire-log parity | `ScheduleFireExecutor`'s HITL fast-path returned before `logFire()` and had no exception isolation. It now records a `ScheduleFireLog` (with the conversationId + FAILED status on error) and wraps `handleTimeout` in try/catch, matching the normal path. |
+| Consistency / hardening | `OwnershipValidator.isAdmin` null-guards `identity` (matches `isApprover`/`isOwner`); `AgentGroupConfiguration.HitlConfig` setters null-coalesce to their defaults (a JSON `null` can no longer wipe `timeoutPolicy`/`granularity`/`onTaskRejection`, mirroring `setLifecyclePolicy`); `DiscussionControlToken` wave loop re-checks `isCancelled()` after `setActiveFuture` so a `CANCEL_IMMEDIATE` landing mid-registration still cancels the new future; `MongoScheduleStore` uses a `NAME` constant; `ConversationMemory` drops redundant `java.time.Instant` FQNs; `SharedTaskList.TaskStatus` Javadoc corrected (AWAITING_APPROVAL is fully wired, not a placeholder). |
+| Tests | New `resetFromAnyToAssigned` coverage (7 cases: valid transitions, ASSIGNED no-op, rejected states); new resume test for an unexpected `RuntimeException` from `continueConversation` (asserts pause restored + `ResourceStoreException` + never submitted); `turnCounterSeedsFromPausedTurnCount` de-flaked by capturing `pausedTurnCount` at the synchronous resume CAS instead of racing the async completion; bogus timeout-policy strings in memory round-trip tests replaced with real enum names. |
+| Deliberately skipped | `listPendingApprovals` "max 1000 not enforced" — FALSE POSITIVE, the service already clamps `Math.min(limit, 1000)`. Crash-recovery pagination (10k scan cap) — 10k concurrent pauses is unrealistic and the code already warns. Pending-summary N+1 (Mongo/Postgres) and `findByState` bulk-read — perf-only on bounded/one-time paths, a pre-existing `IResourceStorage` API limitation; deferred. `HitlPauseType` vs `HitlGranularity` unification — intentional pause-record vs config separation. Duplicated cancel-check refactor — declined to churn just-hardened control flow. |
+
+---
+
 ## 🔧 HITL Merge-Readiness Hardening (2026-07-02, session 2)
 
 **Repo:** EDDI (`feat/hitl-framework`)

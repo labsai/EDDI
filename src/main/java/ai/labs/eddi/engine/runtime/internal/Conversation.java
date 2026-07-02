@@ -540,7 +540,12 @@ public class Conversation implements IConversation {
             ConversationState finalState = getConversationState();
             if (finalState == ConversationState.IN_PROGRESS)
                 setConversationState(ConversationState.READY);
-            if (finalState != ConversationState.AWAITING_HUMAN) {
+            // Persist long-term properties only on a clean outcome. Skip on a
+            // re-pause (AWAITING_HUMAN — the pause is not the end of the turn) and
+            // on ERROR — mirroring the say path (executeConversationStep only runs
+            // post-tasks when execution did not throw), so a failed resume does not
+            // upsert partial/inconsistent property state into the user memory store.
+            if (finalState != ConversationState.AWAITING_HUMAN && finalState != ConversationState.ERROR) {
                 try {
                     postConversationLifecycleTasks();
                 } catch (IResourceStore.ResourceStoreException ex) {

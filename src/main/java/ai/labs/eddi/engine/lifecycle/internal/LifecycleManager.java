@@ -195,17 +195,22 @@ public class LifecycleManager implements ILifecycleManager {
 
         checkNotNull(conversationMemory, "conversationMemory");
 
-        // Determine which tasks to execute
-        List<ILifecycleTask> tasks;
         if (isNullOrEmpty(lifecycleTaskTypes)) {
-            // Execute all tasks
-            tasks = this.lifecycleTasks;
+            // Execute all tasks — loop index is already absolute (offset 0).
+            executeTaskRange(conversationMemory, this.lifecycleTasks, 0, 0);
         } else {
-            // Execute only tasks starting from specified type
-            tasks = getLifecycleTasks(lifecycleTaskTypes);
+            // Selective execution: run the suffix of the pipeline starting at the
+            // first task whose type matches. The sublist is passed (preserving the
+            // component-cache/telemetry index base), but the absolute offset is
+            // threaded through so a HITL pause records an ABSOLUTE task index that
+            // resume can re-enter against the full task list.
+            int startAbsolute = getLifecycleStartIndex(lifecycleTaskTypes);
+            if (startAbsolute < 0) {
+                return; // no task matches the requested types — nothing to execute
+            }
+            List<ILifecycleTask> tasks = this.lifecycleTasks.subList(startAbsolute, this.lifecycleTasks.size());
+            executeTaskRange(conversationMemory, tasks, 0, startAbsolute);
         }
-
-        executeTaskRange(conversationMemory, tasks, 0);
     }
 
     /**
@@ -217,7 +222,19 @@ public class LifecycleManager implements ILifecycleManager {
             throws LifecycleException, ConversationStopException, ConversationPauseException {
 
         checkNotNull(conversationMemory, "conversationMemory");
-        executeTaskRange(conversationMemory, this.lifecycleTasks, startFromAbsoluteIndex);
+        // The index comes from a persisted HITL bookmark — validate it before use.
+        // A negative index is a corrupt bookmark; an index STRICTLY past the end
+        // means the workflow was redeployed with fewer tasks (a bookmark of exactly
+        // size() is valid: it means "pause was on the last task", zero remaining).
+        if (startFromAbsoluteIndex < 0) {
+            throw new LifecycleException("HITL resume index cannot be negative: " + startFromAbsoluteIndex);
+        }
+        if (startFromAbsoluteIndex > this.lifecycleTasks.size()) {
+            LOGGER.warnf("HITL resume index %d exceeds task count %d (workflow may have been redeployed) — "
+                    + "skipping remaining tasks of this workflow", startFromAbsoluteIndex, this.lifecycleTasks.size());
+            return;
+        }
+        executeTaskRange(conversationMemory, this.lifecycleTasks, startFromAbsoluteIndex, 0);
     }
 
     /**
@@ -227,7 +244,7 @@ public class LifecycleManager implements ILifecycleManager {
      * discipline, and HITL pause detection for each task.
      */
     private void executeTaskRange(IConversationMemory conversationMemory,
-                                  List<ILifecycleTask> tasks, int startIndex)
+                                  List<ILifecycleTask> tasks, int startIndex, int indexOffset)
             throws LifecycleException, ConversationStopException, ConversationPauseException {
 
         var eventSink = conversationMemory.getEventSink();
@@ -317,7 +334,10 @@ public class LifecycleManager implements ILifecycleManager {
 
                 // Check if task triggered a STOP_CONVERSATION action
                 checkIfStopConversationAction(conversationMemory);
-                checkIfPauseConversationAction(conversationMemory, index, actionsBefore);
+                // The pause bookmark must be ABSOLUTE (offset + loop index) so resume
+                // re-enters the full task list at the right place, even when this is a
+                // selective (sublist) execution where the loop index is offset-relative.
+                checkIfPauseConversationAction(conversationMemory, indexOffset + index, actionsBefore);
 
             } catch (LifecycleException | RuntimeException e) {
                 taskSpan.setStatus(StatusCode.ERROR, Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
@@ -459,22 +479,19 @@ public class LifecycleManager implements ILifecycleManager {
      *            list of task type prefixes to match
      * @return filtered list of tasks to execute
      */
-    private List<ILifecycleTask> getLifecycleTasks(List<String> lifecycleTaskTypes) {
-        List<ILifecycleTask> ret = new LinkedList<>();
-
-        // Find the first task that matches any of the specified types
+    /**
+     * Returns the ABSOLUTE index of the first task whose type matches any of the
+     * requested types (prefix match); selective execution runs that task and all
+     * subsequent ones. Returns -1 when no task matches.
+     */
+    private int getLifecycleStartIndex(List<String> lifecycleTaskTypes) {
         for (int i = 0; i < this.lifecycleTasks.size(); i++) {
             ILifecycleTask task = this.lifecycleTasks.get(i);
-
-            // Check if this task's type matches any of the requested types (prefix match)
             if (lifecycleTaskTypes.stream().anyMatch(type -> task.getType().startsWith(type))) {
-                // Include this task and all subsequent tasks
-                ret.addAll(this.lifecycleTasks.subList(i, this.lifecycleTasks.size()));
-                break;
+                return i;
             }
         }
-
-        return ret;
+        return -1;
     }
 
     /**

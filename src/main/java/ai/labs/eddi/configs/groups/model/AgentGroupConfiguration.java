@@ -483,7 +483,9 @@ public class AgentGroupConfiguration {
         }
 
         public void setTimeoutPolicy(HitlTimeoutPolicy timeoutPolicy) {
-            this.timeoutPolicy = timeoutPolicy;
+            // Coalesce null to the default (mirrors setLifecyclePolicy) so an explicit
+            // JSON "timeoutPolicy": null cannot silently disable the default policy.
+            this.timeoutPolicy = timeoutPolicy != null ? timeoutPolicy : HitlTimeoutPolicy.WAIT_INDEFINITELY;
         }
 
         public HitlGranularity getGranularity() {
@@ -491,7 +493,7 @@ public class AgentGroupConfiguration {
         }
 
         public void setGranularity(HitlGranularity granularity) {
-            this.granularity = granularity;
+            this.granularity = granularity != null ? granularity : HitlGranularity.PHASE;
         }
 
         public HitlRejectionPolicy getOnTaskRejection() {
@@ -499,7 +501,7 @@ public class AgentGroupConfiguration {
         }
 
         public void setOnTaskRejection(HitlRejectionPolicy onTaskRejection) {
-            this.onTaskRejection = onTaskRejection;
+            this.onTaskRejection = onTaskRejection != null ? onTaskRejection : HitlRejectionPolicy.FAIL;
         }
     }
 

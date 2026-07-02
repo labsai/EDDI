@@ -237,6 +237,16 @@ public class ConversationService implements IConversationService {
     @Override
     public void endConversation(String conversationId) {
         long startTime = System.nanoTime();
+        // Signal any in-flight resume on this pod (mirrors cancelConversation): a
+        // resume that already passed the AWAITING_HUMAN->IN_PROGRESS CAS would
+        // otherwise finish and persist its snapshot back over the terminal ENDED
+        // state. Setting the cooperative-cancel flag makes the resume's onComplete
+        // skip persistence, so ENDED wins.
+        var inFlightMemory = inFlightConversations.get(conversationId);
+        if (inFlightMemory != null) {
+            inFlightMemory.setCancelled(true);
+            LOGGER.infof("Signalled in-flight resume to abort — conversation %s is being ended", conversationId);
+        }
         // Ending a PAUSED conversation terminally resolves its pending approval:
         // disarm the timeout schedule (a stale fire would log spurious errors and
         // leave a dead schedule row forever) and clear the persisted bookmark.
@@ -1148,8 +1158,16 @@ public class ConversationService implements IConversationService {
             // trail or the counter.
             counterHitlResume.increment();
             auditHitlDecision(conversationId, agentId, agentVersion, memory.getUserId(), environment, decision);
-        } catch (ServiceException | InstantiationException | IllegalAccessException e) {
-            // #7: transient failures restore the pause instead of destroying it
+        } catch (IllegalStateException e) {
+            // Deliberately thrown for the agent-not-deployed case, which already
+            // removed the in-flight entry and restored the pause above. Propagate
+            // as-is so the REST layer maps it to 409 (not 500).
+            throw e;
+        } catch (ServiceException | InstantiationException | IllegalAccessException | RuntimeException e) {
+            // #7 + review: transient OR unexpected failures anywhere between the CAS
+            // and submitInOrder (e.g. an unchecked exception from continueConversation)
+            // must restore the pause and drop the in-flight registration — otherwise
+            // the conversation is left stuck IN_PROGRESS with a leaked registry entry.
             inFlightConversations.remove(conversationId);
             restorePauseAfterFailedResume(conversationId, memory, true);
             throw new ResourceStoreException("Failed to resume conversation: " + e.getLocalizedMessage(), e);

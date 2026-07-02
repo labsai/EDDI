@@ -17,6 +17,7 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * DB-agnostic store for group conversation transcripts. Uses
@@ -91,8 +92,12 @@ public class GroupConversationStore implements IGroupConversationStore {
         // This is a placeholder that works with both DB backends.
         var results = new ArrayList<GroupConversation>();
         try {
+            // Anchor + quote: findResources turns a String filter value into an
+            // unanchored Mongo regex, so a raw groupId would substring-match other
+            // groups. Exact match is the only correct semantics here.
             var filter = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(
-                    java.util.List.of(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("groupId", groupId)));
+                    java.util.List.of(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter(
+                            "groupId", "^" + Pattern.quote(groupId) + "$")));
             var resourceIds = storage.findResources(new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{filter}, "lastModified", index, limit);
             for (var resourceId : resourceIds) {
                 try {
@@ -135,7 +140,11 @@ public class GroupConversationStore implements IGroupConversationStore {
         var filterList = new ArrayList<ai.labs.eddi.datastore.IResourceFilter.QueryFilter>();
         filterList.add(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("state", "^" + state.name() + "$"));
         if (groupId != null) {
-            filterList.add(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter("groupId", groupId));
+            // Anchor + quote: findResources treats a String filter as an unanchored
+            // regex, so a raw groupId would leak conversations from other groups whose
+            // id contains it as a substring. Exact match only.
+            filterList.add(new ai.labs.eddi.datastore.IResourceFilter.QueryFilter(
+                    "groupId", "^" + Pattern.quote(groupId) + "$"));
         }
         var filters = new ai.labs.eddi.datastore.IResourceFilter.QueryFilters[]{
                 new ai.labs.eddi.datastore.IResourceFilter.QueryFilters(filterList)};

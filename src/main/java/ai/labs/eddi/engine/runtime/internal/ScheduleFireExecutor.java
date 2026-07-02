@@ -64,11 +64,27 @@ public class ScheduleFireExecutor {
     public ScheduleFireLog fire(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
         Map<String, Object> md = schedule.getMetadata();
         if (md != null && "hitl_timeout".equals(md.get("hitlType"))) {
-            hitlTimeoutHandler.handleTimeout(md);
-            return new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(),
-                    schedule.getFireId(), schedule.getNextFire(), Instant.now(), Instant.now(),
-                    ScheduleConfiguration.FireStatus.COMPLETED.name(), instanceId,
-                    null, null, attemptNumber, 0.0);
+            // HITL timeout fast-path — isolate exceptions and record a fire log for
+            // parity with the normal path (observability + retry diagnostics).
+            Instant hitlStartedAt = Instant.now();
+            String hitlStatus = ScheduleConfiguration.FireStatus.COMPLETED.name();
+            String hitlError = null;
+            try {
+                hitlTimeoutHandler.handleTimeout(md);
+            } catch (Exception e) {
+                hitlStatus = ScheduleConfiguration.FireStatus.FAILED.name();
+                hitlError = e.getClass().getSimpleName() + ": " + e.getMessage();
+                LOGGER.warnf(e, "[SCHEDULE] HITL timeout handling failed for schedule %s", schedule.getId());
+            }
+            var hitlFireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(),
+                    schedule.getFireId(), schedule.getNextFire(), hitlStartedAt, Instant.now(),
+                    hitlStatus, instanceId, (String) md.get("conversationId"), hitlError, attemptNumber, 0.0);
+            try {
+                scheduleStore.logFire(hitlFireLog);
+            } catch (Exception e) {
+                LOGGER.errorf(e, "[SCHEDULE] Failed to log HITL timeout fire for schedule %s", schedule.getId());
+            }
+            return hitlFireLog;
         }
 
         Instant startedAt = Instant.now();

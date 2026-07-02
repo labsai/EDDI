@@ -1060,9 +1060,16 @@ public class GroupConversationService implements IGroupConversationService {
             int maxTasksPerAgent = tasksByAgent.values().stream().mapToInt(List::size).max().orElse(1);
             try {
                 var allOf = CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new));
-                // NEW-3: Register the blocking future so IMMEDIATE cancel can interrupt
+                // NEW-3: Register the blocking future so IMMEDIATE cancel can interrupt.
+                // Re-check the signal AFTER registering: a CANCEL_IMMEDIATE that landed
+                // while this future was being built cancelled only the previous handle,
+                // so cancel it here too — otherwise the wave blocks in get() until the
+                // timeout despite the cancel already having been requested.
                 if (token != null) {
                     token.setActiveFuture(allOf);
+                    if (token.isCancelled()) {
+                        allOf.cancel(true);
+                    }
                 }
                 allOf.get(timeout * (long) maxTasksPerAgent, TimeUnit.SECONDS);
             } catch (TimeoutException e) {

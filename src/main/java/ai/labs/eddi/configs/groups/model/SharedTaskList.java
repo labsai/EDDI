@@ -82,15 +82,18 @@ public class SharedTaskList {
     /**
      * Task lifecycle states.
      * <p>
-     * {@code BLOCKED} and {@code AWAITING_APPROVAL} are placeholders for Phase 9b
-     * (HITL — Human-in-the-Loop). They are recognized by {@link #failTask} as
-     * non-terminal but no code transitions into them yet.
+     * {@code AWAITING_APPROVAL} is the HITL (Human-in-the-Loop) approval gate with
+     * full lifecycle support: {@link #submitForApproval} transitions into it, and
+     * {@link #approveTask}, {@link #rejectTask}, and
+     * {@link #resetFromAnyToAssigned} transition out of it. {@code BLOCKED} remains
+     * reserved (recognized by {@link #failTask} as non-terminal) for
+     * dependency/resource blocking.
      */
     public enum TaskStatus {
         PENDING, ASSIGNED, IN_PROGRESS, COMPLETED, VERIFIED, FAILED,
-        /** Phase 9b placeholder — task blocked by unmet dependency or resource. */
+        /** Reserved — task blocked by an unmet dependency or resource. */
         BLOCKED,
-        /** Phase 9b placeholder — task requires human approval before proceeding. */
+        /** HITL gate — task requires human approval before proceeding. */
         AWAITING_APPROVAL
     }
 

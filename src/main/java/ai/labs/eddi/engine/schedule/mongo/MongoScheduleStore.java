@@ -54,6 +54,7 @@ public class MongoScheduleStore implements IScheduleStore {
     private static final String COLLECTION_FIRE_LOGS = "eddi_schedule_fire_logs";
 
     private static final String ID = "_id";
+    private static final String NAME = "name";
     private static final String ENABLED = "enabled";
     private static final String NEXT_FIRE = "nextFire";
     private static final String FIRE_STATUS = "fireStatus";
@@ -91,7 +92,7 @@ public class MongoScheduleStore implements IScheduleStore {
         // HITL timeout schedules are deleted/re-armed by name on every pause,
         // resume, cancel, and crash-recovery pass — without this index each of
         // those is a collection scan.
-        scheduleCollection.createIndex(Indexes.ascending("name"), new IndexOptions().name("idx_schedules_name"));
+        scheduleCollection.createIndex(Indexes.ascending(NAME), new IndexOptions().name("idx_schedules_name"));
 
         // Fire log indexes
         fireLogCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(SCHEDULE_ID), Indexes.descending(STARTED_AT)),
@@ -218,7 +219,7 @@ public class MongoScheduleStore implements IScheduleStore {
     @Override
     public int deleteSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
         try {
-            var result = scheduleCollection.deleteMany(eq("name", name));
+            var result = scheduleCollection.deleteMany(eq(NAME, name));
             int count = (int) result.getDeletedCount();
             if (count > 0) {
                 LOGGER.infof("Deleted %d HITL timeout schedule(s) with name '%s'", count, name);

@@ -51,7 +51,7 @@ public class OwnershipValidator {
      * when authorization is disabled (all callers are effectively admin).
      */
     public boolean isAdmin(SecurityIdentity identity) {
-        return !authEnabled || identity.hasRole("eddi-admin");
+        return !authEnabled || (identity != null && identity.hasRole("eddi-admin"));
     }
 
     /**
