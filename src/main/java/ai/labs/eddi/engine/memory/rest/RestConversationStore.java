@@ -7,7 +7,7 @@ package ai.labs.eddi.engine.memory.rest;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore;
-import ai.labs.eddi.engine.memory.IAttachmentStorage;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
@@ -55,7 +55,7 @@ public class RestConversationStore implements IRestConversationStore {
     private final IRuntime runtime;
     private final Integer deleteEndedConversationsOnceOlderThanDays;
     private final Integer deleteMemoriesOlderThanDays;
-    private final Instance<IAttachmentStorage> attachmentStorageInstance;
+    private final Instance<IAttachmentStore> attachmentStorageInstance;
 
     private static final Logger log = Logger.getLogger(RestConversationStore.class);
 
@@ -71,7 +71,7 @@ public class RestConversationStore implements IRestConversationStore {
             Integer deleteEndedConversationsOnceOlderThanDays,
             @ConfigProperty(name = "eddi.usermemories.deleteOlderThanDays")
             Integer deleteMemoriesOlderThanDays,
-            Instance<IAttachmentStorage> attachmentStorageInstance) {
+            Instance<IAttachmentStore> attachmentStorageInstance) {
     // @formatter:on
 
         this.documentDescriptorStore = documentDescriptorStore;

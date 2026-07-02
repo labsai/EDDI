@@ -10,7 +10,7 @@ import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
-import ai.labs.eddi.engine.memory.IAttachmentStorage;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
@@ -53,7 +53,7 @@ public class GdprComplianceService {
     private final IDatabaseLogs databaseLogs;
     private final IAuditStore auditStore;
     private final AuditLedgerService auditLedgerService;
-    private final Instance<IAttachmentStorage> attachmentStorageInstance;
+    private final Instance<IAttachmentStore> attachmentStorageInstance;
 
     @Inject
     public GdprComplianceService(IUserMemoryStore userMemoryStore,
@@ -62,7 +62,7 @@ public class GdprComplianceService {
             IDatabaseLogs databaseLogs,
             IAuditStore auditStore,
             AuditLedgerService auditLedgerService,
-            Instance<IAttachmentStorage> attachmentStorageInstance) {
+            Instance<IAttachmentStore> attachmentStorageInstance) {
         this.userMemoryStore = userMemoryStore;
         this.conversationMemoryStore = conversationMemoryStore;
         this.userConversationStore = userConversationStore;

@@ -11,9 +11,19 @@ import java.util.List;
  * Supports MongoDB GridFS and PostgreSQL backends via the DB-agnostic pattern
  * in {@code DataStoreProducers}.
  * <p>
- * <strong>Security:</strong> All access is scoped to the owning conversation.
- * Cross-conversation access is rejected. GDPR erasure cascades via
- * {@link #deleteByConversation(String)}.
+ * <strong>Ownership &amp; access:</strong> every blob is owned by the
+ * conversation it was uploaded to. Read access ({@link #load} /
+ * {@link #getMetadata}) is granted to the owning conversation <em>or</em> any
+ * conversation that has been given an explicit {@linkplain #grantAccess grant}.
+ * Grants are written only by trusted server code (e.g. group fan-out) — never
+ * derived from client-supplied context. Deletion of a single blob
+ * ({@link #delete}) is restricted to the owner. GDPR/conversation erasure
+ * cascades via {@link #deleteByConversation(String)}, which also removes the
+ * blob's grants.
+ * <p>
+ * This is the single blob-store abstraction for EDDI; the former
+ * {@code IAttachmentStorage} was folded into it so uploads, LLM forwarding,
+ * conversation deletion and GDPR erasure all operate on the same store.
  *
  * @since 6.0.0
  */
@@ -31,31 +41,81 @@ public interface IAttachmentStore {
      * @param conversationId
      *            owning conversation
      * @param tenantId
-     *            the tenant (for quota enforcement)
+     *            the tenant (advisory metadata only; not an access boundary)
      * @return the stored attachment metadata
      * @throws AttachmentStoreException
-     *             if storage fails, MIME validation fails, or size limit exceeded
+     *             if storage fails, MIME validation fails, the size limit is
+     *             exceeded, or a per-conversation quota is exceeded
      */
     Attachment store(byte[] bytes, String declaredMime, String filename,
                      String conversationId, String tenantId)
             throws AttachmentStoreException;
 
     /**
-     * Load an attachment by storage reference.
+     * Load an attachment's bytes.
      *
      * @param storageRef
      *            the storage reference from {@link Attachment#storageRef()}
      * @param requestingConversationId
-     *            the conversation requesting access (must match owning
-     *            conversation)
+     *            the conversation requesting access (must own the blob or hold a
+     *            grant)
      * @return the raw bytes
      * @throws AttachmentStoreException
-     *             if not found or cross-conversation access attempted
+     *             if not found or access is denied (not owner and not granted)
      */
     byte[] load(String storageRef, String requestingConversationId) throws AttachmentStoreException;
 
     /**
-     * Delete all attachments for a conversation (GDPR erasure).
+     * Resolve an attachment's server-validated metadata (MIME, filename, size,
+     * owner) without transferring the bytes. Same owner-or-grant authorization as
+     * {@link #load}. Used at extraction time so behavior rules and the forwarder
+     * see the truth for {@code storageRef}-only references.
+     *
+     * @param storageRef
+     *            the storage reference
+     * @param requestingConversationId
+     *            the conversation requesting access (must own the blob or hold a
+     *            grant)
+     * @return the attachment metadata
+     * @throws AttachmentStoreException
+     *             if not found or access is denied
+     */
+    Attachment getMetadata(String storageRef, String requestingConversationId) throws AttachmentStoreException;
+
+    /**
+     * Grant a conversation read access to a blob it does not own. Idempotent.
+     * <p>
+     * <strong>Trusted callers only.</strong> This must be invoked exclusively by
+     * server-side orchestration (e.g. {@code GroupConversationService} at member
+     * fan-out) — never from client-supplied context — since it widens the access
+     * boundary of the blob. The grant lives with the blob and dies when the blob is
+     * deleted.
+     *
+     * @param storageRef
+     *            the storage reference of the blob to share
+     * @param conversationId
+     *            the conversation to grant read access to
+     * @throws AttachmentStoreException
+     *             if the blob does not exist
+     */
+    void grantAccess(String storageRef, String conversationId) throws AttachmentStoreException;
+
+    /**
+     * Delete a single attachment. Restricted to the owning conversation — a grantee
+     * cannot delete another conversation's blob.
+     *
+     * @param storageRef
+     *            the storage reference
+     * @param requestingConversationId
+     *            the conversation requesting deletion (must be the owner)
+     * @return {@code true} if a blob was deleted, {@code false} if none matched
+     * @throws AttachmentStoreException
+     *             if the blob exists but is owned by another conversation
+     */
+    boolean delete(String storageRef, String requestingConversationId) throws AttachmentStoreException;
+
+    /**
+     * Delete all attachments for a conversation (GDPR/conversation erasure).
      *
      * @param conversationId
      *            the conversation ID

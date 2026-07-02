@@ -8,7 +8,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
-import ai.labs.eddi.engine.memory.IAttachmentStorage;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -54,7 +54,7 @@ class GdprComplianceServiceTest {
         auditLedgerService = mock(AuditLedgerService.class);
 
         @SuppressWarnings("unchecked")
-        Instance<IAttachmentStorage> attachmentStorageInstance = mock(Instance.class);
+        Instance<IAttachmentStore> attachmentStorageInstance = mock(Instance.class);
         when(attachmentStorageInstance.isResolvable()).thenReturn(false);
 
         service = new GdprComplianceService(
@@ -154,9 +154,9 @@ class GdprComplianceServiceTest {
     @SuppressWarnings("unchecked")
     void deleteUserData_deletesAttachmentsWhenStorageAvailable() throws Exception {
         // Given — attachment storage is resolvable
-        Instance<IAttachmentStorage> attachInstance = mock(Instance.class);
+        Instance<IAttachmentStore> attachInstance = mock(Instance.class);
         when(attachInstance.isResolvable()).thenReturn(true);
-        var attachmentStorage = mock(IAttachmentStorage.class);
+        var attachmentStorage = mock(IAttachmentStore.class);
         when(attachInstance.get()).thenReturn(attachmentStorage);
         when(attachmentStorage.deleteByConversation("conv-1")).thenReturn(2L);
         when(attachmentStorage.deleteByConversation("conv-2")).thenReturn(3L);
@@ -187,9 +187,9 @@ class GdprComplianceServiceTest {
     @SuppressWarnings("unchecked")
     void deleteUserData_handlesAttachmentFailureGracefully() throws Exception {
         // Given — attachment storage throws
-        Instance<IAttachmentStorage> attachInstance = mock(Instance.class);
+        Instance<IAttachmentStore> attachInstance = mock(Instance.class);
         when(attachInstance.isResolvable()).thenReturn(true);
-        var attachmentStorage = mock(IAttachmentStorage.class);
+        var attachmentStorage = mock(IAttachmentStore.class);
         when(attachInstance.get()).thenReturn(attachmentStorage);
 
         var serviceWithAttachments = new GdprComplianceService(
