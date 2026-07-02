@@ -24,12 +24,18 @@ import java.util.List;
  * list). No {@code {env}} parameter — group conversations default to the
  * production environment.
  */
-@Path("/groups/{groupId}/conversations")
+// Class-level path is the /groups root (not /groups/{groupId}/conversations) so
+// the
+// cross-group inbox GET /groups/pending-approvals (#21) can live alongside the
+// per-group routes. Every per-group method carries the /{groupId}/conversations
+// prefix, so all existing external URLs are unchanged.
+@Path("/groups")
 @Tag(name = "Conversations / Groups", description = "Multi-agent group discussion orchestration")
 @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user"})
 public interface IRestGroupConversation {
 
     @POST
+    @Path("/{groupId}/conversations")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Start a group discussion", description = "Starts a new multi-agent group discussion with the given question.")
@@ -38,7 +44,7 @@ public interface IRestGroupConversation {
     Response discuss(@PathParam("groupId") String groupId, DiscussRequest request);
 
     @POST
-    @Path("/stream")
+    @Path("/{groupId}/conversations/stream")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.SERVER_SENT_EVENTS)
     @Operation(summary = "Start a group discussion with SSE streaming",
@@ -51,7 +57,7 @@ public interface IRestGroupConversation {
     void discussStreaming(@PathParam("groupId") String groupId, DiscussRequest request, @Context SseEventSink eventSink, @Context Sse sse);
 
     @GET
-    @Path("/{groupConversationId}")
+    @Path("/{groupId}/conversations/{groupConversationId}")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Read a group conversation", description = "Returns the full transcript of a group conversation.")
     @APIResponse(responseCode = "200", description = "Group conversation transcript.")
@@ -59,13 +65,14 @@ public interface IRestGroupConversation {
     GroupConversation readGroupConversation(@PathParam("groupId") String groupId, @PathParam("groupConversationId") String groupConversationId);
 
     @DELETE
-    @Path("/{groupConversationId}")
+    @Path("/{groupId}/conversations/{groupConversationId}")
     @Operation(summary = "Delete a group conversation", description = "Deletes a group conversation and its member conversations.")
     @APIResponse(responseCode = "200", description = "Group conversation deleted.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
     Response deleteGroupConversation(@PathParam("groupId") String groupId, @PathParam("groupConversationId") String groupConversationId);
 
     @GET
+    @Path("/{groupId}/conversations")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "List group conversations", description = "Lists group conversation transcripts for a group with pagination.")
     @APIResponse(responseCode = "200", description = "Paginated list of group conversations.")
@@ -75,7 +82,7 @@ public interface IRestGroupConversation {
                                                    @DefaultValue("20") Integer limit);
 
     @POST
-    @Path("/{groupConversationId}/cancel")
+    @Path("/{groupId}/conversations/{groupConversationId}/cancel")
     @Consumes(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
     @Operation(summary = "Cancel a group discussion", description = "Cancels an in-progress group discussion.")
@@ -85,7 +92,7 @@ public interface IRestGroupConversation {
                               @PathParam("groupConversationId") String gcId);
 
     @POST
-    @Path("/{groupConversationId}/approve")
+    @Path("/{groupId}/conversations/{groupConversationId}/approve")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
@@ -99,7 +106,7 @@ public interface IRestGroupConversation {
                                GroupApprovalRequest request);
 
     @POST
-    @Path("/{groupConversationId}/approve/stream")
+    @Path("/{groupId}/conversations/{groupConversationId}/approve/stream")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.SERVER_SENT_EVENTS)
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
@@ -113,7 +120,7 @@ public interface IRestGroupConversation {
                                     @Context Sse sse);
 
     @GET
-    @Path("/{groupConversationId}/approval-status")
+    @Path("/{groupId}/conversations/{groupConversationId}/approval-status")
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
     @Operation(summary = "Get group approval status",
@@ -141,7 +148,7 @@ public interface IRestGroupConversation {
      * conversations.
      */
     @GET
-    @Path("/pending-approvals")
+    @Path("/{groupId}/conversations/pending-approvals")
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
     @Operation(summary = "List pending HITL approvals",
@@ -151,4 +158,23 @@ public interface IRestGroupConversation {
                                                                                      @PathParam("groupId") String groupId,
                                                                                      @QueryParam("limit")
                                                                                      @DefaultValue("100") Integer limit);
+
+    /**
+     * Cross-group HITL inbox (#21): all group conversations currently awaiting
+     * human approval across every group, as bounded summaries (no transcripts).
+     * Lets an approvals dashboard answer "what is waiting for me?" in one request
+     * instead of enumerating every group (N+1). Visibility mirrors the per-group
+     * and regular surfaces: admins and approvers see all pending items; other
+     * callers see only their own conversations; anonymous sees nothing.
+     */
+    @GET
+    @Path("/pending-approvals")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
+    @Operation(summary = "List all pending group HITL approvals",
+               description = "Lists group conversations awaiting human approval across all groups (summaries).")
+    @APIResponse(responseCode = "200", description = "List of pending approval summaries.")
+    List<ai.labs.eddi.engine.model.PendingApprovalSummary> listAllGroupPendingApprovals(
+                                                                                        @QueryParam("limit")
+                                                                                        @DefaultValue("100") Integer limit);
 }

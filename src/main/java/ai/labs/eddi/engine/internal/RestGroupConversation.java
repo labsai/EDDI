@@ -443,16 +443,30 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     @Override
     public List<ai.labs.eddi.engine.model.PendingApprovalSummary> listGroupPendingApprovals(String groupId, Integer limit) {
+        // Scoped to the group in the path — the query-level filter keeps the listing
+        // from leaking other groups.
+        return listPendingApprovals(groupId, limit);
+    }
+
+    @Override
+    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> listAllGroupPendingApprovals(Integer limit) {
+        // #21: cross-group inbox — groupId=null lists pending approvals across all
+        // groups (the store's existing findByState(state, null, limit) variant, the
+        // same one crash recovery uses). Same authz as the per-group endpoint.
+        return listPendingApprovals(null, limit);
+    }
+
+    /**
+     * Shared listing + ownership filter for the per-group and cross-group inboxes.
+     * Mirrors RestAgentEngine.listPendingApprovals: admins and designated approvers
+     * see all pending items, other callers only their own conversations; anonymous
+     * or principal-less callers see nothing (fail-closed).
+     */
+    private List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals(String groupId, Integer limit) {
         try {
-            // Scoped to the group in the path (query-level filter — the listing
-            // endpoint lives under /groups/{groupId}/conversations and must not
-            // leak other groups) and bounded by the limit param.
             var scoped = groupConversationService
                     .listGroupPendingApprovals(groupId, limit != null ? limit : 100).stream();
 
-            // C-B: ownership filter, mirroring RestAgentEngine.listPendingApprovals —
-            // admins and designated approvers see the group's pending items, other
-            // callers only their own conversations; anonymous sees nothing.
             if (ownershipValidator.isAdmin(identity) || ownershipValidator.isApprover(identity)) {
                 return scoped.toList();
             }
