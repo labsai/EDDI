@@ -5,6 +5,35 @@
 
 ---
 
+## 📎 Multimodal Attachments Completion — Phase 0: Foundations & bug fixes (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 0 of 6). Low-risk foundations that ship alone.
+
+### What changed
+
+1. **`@JsonIgnore` on `Attachment.getBase64Data()`** (`engine/memory/model/Attachment.java`) — the `transient` keyword did **not** stop Jackson (getter-based serialization, no `PROPAGATE_TRANSIENT_MARKER`), so inline base64 payloads were being serialized into Mongo conversation documents. Now excluded; metadata still persists. Serialization tests prove the payload never reaches persisted JSON.
+2. **Scrub inline base64 from persisted context copies** (`engine/memory/AttachmentContextExtractor.java` + `engine/runtime/internal/Conversation.java`) — new `AttachmentContextExtractor.scrubInlinePayload()` returns a metadata-only copy of an `attachment_*` context when it carries a `data` payload. `Conversation.createContextData()` builds the persisted copy (step data + `context.*` conversation output) through it, so the raw base64 (~1.33× file size/turn against the 16 MB doc limit) never lands in Mongo and is never exposed via `{context.attachment_*.data}`. The live payload still rides ATTACHMENTS memory for the turn. Mirrors secret-input scrubbing.
+3. **`AttachmentTextExtractor`** (`modules/llm/tools/impl/`, new) — shared PDFBox + plain-text extraction behind a uniform, configurable cap (`eddi.attachments.extraction.max-chars`, default 10k). `extractText(bytes, mime[, maxChars])` dispatches PDF + text-like (text/*, JSON, XML, CSV, YAML); PDF full/page-range/info methods; `canExtractText()`. `PdfReaderTool` now delegates all extraction to it (download/SSRF/formatting unchanged). Reused by the Phase 2 forwarder and Phase 4 readAttachment tool.
+4. **`ModelCapabilityService`** (`modules/llm/capability/`, new) — resolves vision/documents/audio/image-by-URL support for a `(provider, model)` pair. Precedence: per-task override > deployment override (`eddi.multimodal.<provider>.<cap>` then `eddi.multimodal.<cap>`) > conservative model-aware defaults (plan §5). Unknown ⇒ unsupported ⇒ fallback. Injectable via MicroProfile Config; Function-based constructor keeps it unit-testable.
+5. **Body-size alignment** (`application.properties`) — added `quarkus.http.limits.max-body-size=25M` (was Quarkus' 10 MB default, below the 20 MB attachment cap → 10–20 MB uploads died with a bare 413), plus documented `eddi.attachments.max-size-bytes` and `eddi.attachments.extraction.max-chars`.
+
+### Design decisions
+
+- **Scrub is a copy, not a mutation** — the original context map keeps its payload so the current turn's extraction/forwarding is unaffected; only the persisted derivative is stripped.
+- **Extractor owns extraction, tool owns presentation** — `PdfReaderTool.getPdfInfo` still formats the human-readable string; the extractor returns a structured `PdfInfo`, so the shared service stays presentation-free and reusable by the forwarder.
+- **Capability defaults are conservative and model-aware** — vision-first providers (OpenAI/Anthropic/Gemini/Mistral) default on but downgrade for known text-only models; model-dependent providers (Ollama/Bedrock/Oracle) default off but upgrade for known vision models; image-by-URL only for OpenAI/Azure (everything else inlines).
+
+### Tests
+
+146 new/covered unit tests: `AttachmentTest` (serialization no-payload), `AttachmentContextExtractorTest` (scrub matrix), `AttachmentTextExtractorTest` (PDF/text/caps/corrupt), `ModelCapabilityServiceTest` (74 — default matrix across 11 providers + override precedence). `PdfReaderToolTest` remains CI-only (SafeHttpClient opens a loopback selector local JVMs may block).
+
+### What's next
+
+Phase 1 — storage unification (collapse `IAttachmentStorage` into `IAttachmentStore`, port conversation-delete + GDPR cascades), grants (`grantAccess`/grant-aware `load`), authenticated upload/list/download/delete, quotas, `storageRef` extraction branch, UUID ref hardening.
+
+---
+
 ## 🐛 Fix: PostgreSQL group conversations broken — JDBC `?|` operator escape (2026-07-02)
 
 **Repo:** EDDI (`fix/postgres-group-conversation-jdbc-escape`)
