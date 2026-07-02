@@ -306,4 +306,54 @@ class MongoResourceStorageTest {
         IResourceStorage.IResource<String> resource = storage.newResource("test");
         assertEquals("parsed-value", resource.getData());
     }
+
+    // ==================== storeIfFieldEquals (deleted vs mismatch)
+    // ====================
+
+    @Test
+    @DisplayName("storeIfFieldEquals — matched update succeeds, no existence probe")
+    void storeIfFieldEqualsSuccess() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"state\":\"AWAITING_APPROVAL\"}");
+        IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 2, "test");
+
+        var updateResult = mock(com.mongodb.client.result.UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(1L);
+        when(currentCollection.updateOne(any(Bson.class), any(Document.class))).thenReturn(updateResult);
+
+        assertDoesNotThrow(() -> storage.storeIfFieldEquals(resource, "state", "AWAITING_APPROVAL"));
+        // No deleted-vs-mismatch probe when the conditional update matched.
+        verify(currentCollection, never()).countDocuments(any(Bson.class));
+    }
+
+    @Test
+    @DisplayName("storeIfFieldEquals — deleted document → ResourceNotFoundException")
+    void storeIfFieldEqualsDeleted() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"state\":\"AWAITING_APPROVAL\"}");
+        IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 2, "test");
+
+        var updateResult = mock(com.mongodb.client.result.UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(0L);
+        when(currentCollection.updateOne(any(Bson.class), any(Document.class))).thenReturn(updateResult);
+        // No document with that id exists any more → deleted.
+        when(currentCollection.countDocuments(any(Bson.class))).thenReturn(0L);
+
+        assertThrows(IResourceStore.ResourceNotFoundException.class,
+                () -> storage.storeIfFieldEquals(resource, "state", "AWAITING_APPROVAL"));
+    }
+
+    @Test
+    @DisplayName("storeIfFieldEquals — field mismatch → ResourceModifiedException")
+    void storeIfFieldEqualsMismatch() throws Exception {
+        when(documentBuilder.toString(any())).thenReturn("{\"state\":\"AWAITING_APPROVAL\"}");
+        IResourceStorage.IResource<String> resource = storage.newResource(VALID_ID, 2, "test");
+
+        var updateResult = mock(com.mongodb.client.result.UpdateResult.class);
+        when(updateResult.getMatchedCount()).thenReturn(0L);
+        when(currentCollection.updateOne(any(Bson.class), any(Document.class))).thenReturn(updateResult);
+        // The document exists, but its field value changed under us → mismatch.
+        when(currentCollection.countDocuments(any(Bson.class))).thenReturn(1L);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> storage.storeIfFieldEquals(resource, "state", "AWAITING_APPROVAL"));
+    }
 }

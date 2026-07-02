@@ -289,6 +289,111 @@ class MongoConversationMemoryStoreTest {
         }
     }
 
+    // ─── HITL primitives ────────────────────────────────────────
+
+    @Nested
+    @DisplayName("HITL primitives")
+    class HitlPrimitives {
+
+        @Test
+        @DisplayName("compareAndSetState succeeds only from the expected state")
+        void compareAndSetState() {
+            var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            String id = store.storeConversationMemorySnapshot(snapshot);
+
+            assertFalse(store.compareAndSetState(id, ConversationState.READY, ConversationState.IN_PROGRESS),
+                    "CAS from a wrong expected state must fail");
+            assertEquals(ConversationState.AWAITING_HUMAN, store.getConversationState(id));
+
+            assertTrue(store.compareAndSetState(id, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS));
+            assertEquals(ConversationState.IN_PROGRESS, store.getConversationState(id));
+
+            assertFalse(store.compareAndSetState(id, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS),
+                    "a second identical CAS must lose");
+        }
+
+        @Test
+        @DisplayName("after a CAS the reloaded snapshot reports the new state (parity with the Postgres column-wins guarantee)")
+        void loadReportsCasState() {
+            var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            String id = store.storeConversationMemorySnapshot(snapshot);
+
+            assertTrue(store.compareAndSetState(id,
+                    ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED));
+
+            var loaded = store.loadConversationMemorySnapshot(id);
+            assertNotNull(loaded);
+            assertEquals(ConversationState.EXECUTION_INTERRUPTED, loaded.getConversationState(),
+                    "load must not resurrect the terminally resolved pause");
+        }
+
+        @Test
+        @DisplayName("findPendingApprovalSummaries projects the bookmark incl. approvalTimeout and honors the limit")
+        void findPendingApprovalSummaries() {
+            var paused = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            paused.setHitlPausedAt(java.time.Instant.now());
+            paused.setHitlPauseReason("needs review");
+            paused.setHitlTimeoutPolicy("AUTO_REJECT");
+            paused.setHitlApprovalTimeout("PT30M");
+            String id = store.storeConversationMemorySnapshot(paused);
+            store.storeConversationMemorySnapshot(
+                    createSnapshot(null, "agent1", 1, "user2", ConversationState.AWAITING_HUMAN));
+            // a READY conversation must never appear
+            store.storeConversationMemorySnapshot(
+                    createSnapshot(null, "agent1", 1, "user1", ConversationState.READY));
+
+            var summaries = store.findPendingApprovalSummaries(10);
+            assertEquals(2, summaries.size());
+            var summary = summaries.stream().filter(s -> id.equals(s.getConversationId()))
+                    .findFirst().orElseThrow();
+            assertEquals("needs review", summary.getPauseReason());
+            assertEquals("AUTO_REJECT", summary.getTimeoutPolicy());
+            assertEquals("PT30M", summary.getApprovalTimeout());
+
+            assertEquals(1, store.findPendingApprovalSummaries(1).size(), "limit must bound the result");
+        }
+
+        @Test
+        @DisplayName("owner-filtered summaries push the filter into the query (limit applies after the restriction)")
+        void findPendingApprovalSummariesByOwner() {
+            store.storeConversationMemorySnapshot(
+                    createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN));
+            store.storeConversationMemorySnapshot(
+                    createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN));
+            store.storeConversationMemorySnapshot(
+                    createSnapshot(null, "agent1", 1, "user2", ConversationState.AWAITING_HUMAN));
+
+            var user1 = store.findPendingApprovalSummaries("user1", 10);
+            assertEquals(2, user1.size());
+            assertTrue(user1.stream().allMatch(s -> "user1".equals(s.getUserId())));
+
+            assertEquals(1, store.findPendingApprovalSummaries("user2", 10).size());
+            assertTrue(store.findPendingApprovalSummaries("nobody", 10).isEmpty());
+            assertEquals(1, store.findPendingApprovalSummaries("user1", 1).size(),
+                    "owner limit must bound the owner-filtered result");
+        }
+
+        @Test
+        @DisplayName("clearHitlBookmark removes the bookmark fields but keeps the conversation")
+        void clearHitlBookmark() {
+            var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPausedAt(java.time.Instant.now());
+            snapshot.setHitlPauseReason("needs review");
+            snapshot.setHitlTimeoutPolicy("AUTO_REJECT");
+            snapshot.setHitlApprovalTimeout("PT30M");
+            String id = store.storeConversationMemorySnapshot(snapshot);
+
+            store.clearHitlBookmark(id);
+
+            var loaded = store.loadConversationMemorySnapshot(id);
+            assertNotNull(loaded, "the conversation itself must survive");
+            assertNull(loaded.getHitlPausedAt());
+            assertNull(loaded.getHitlPauseReason());
+            assertNull(loaded.getHitlTimeoutPolicy());
+            assertNull(loaded.getHitlApprovalTimeout());
+        }
+    }
+
     // ─── Helpers ────────────────────────────────────────────────
 
     private static ConversationMemorySnapshot createSnapshot(String id, String agentId,

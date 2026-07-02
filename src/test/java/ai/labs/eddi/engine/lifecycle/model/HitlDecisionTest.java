@@ -133,4 +133,68 @@ class HitlDecisionTest {
             assertThrows(IllegalArgumentException.class, () -> HitlVerdict.valueOf("PENDING"));
         }
     }
+
+    // =========================================================================
+    // Case-insensitive @JsonCreator (finding H) — every surface accepts
+    // "approved"/"Approved"/"APPROVED " as the same human intent; rejecting on
+    // casing/whitespace would be needless 400 noise.
+    // =========================================================================
+
+    @Nested
+    @DisplayName("HitlVerdict.fromString — case-insensitive parsing")
+    class FromString {
+
+        @Test
+        @DisplayName("lowercase 'approved' parses to APPROVED")
+        void lowercaseApproved() {
+            assertEquals(HitlVerdict.APPROVED, HitlVerdict.fromString("approved"));
+        }
+
+        @Test
+        @DisplayName("mixed-case 'Approved' parses to APPROVED")
+        void mixedCaseApproved() {
+            assertEquals(HitlVerdict.APPROVED, HitlVerdict.fromString("Approved"));
+        }
+
+        @Test
+        @DisplayName("surrounding whitespace is trimmed")
+        void trimsWhitespace() {
+            assertEquals(HitlVerdict.REJECTED, HitlVerdict.fromString("  rejected  "));
+        }
+
+        @Test
+        @DisplayName("null in → null out (no NPE)")
+        void nullReturnsNull() {
+            assertNull(HitlVerdict.fromString(null));
+        }
+
+        @Test
+        @DisplayName("an unknown verdict still throws")
+        void unknownThrows() {
+            assertThrows(IllegalArgumentException.class, () -> HitlVerdict.fromString("maybe"));
+        }
+    }
+
+    @Nested
+    @DisplayName("Jackson deserialization round-trip")
+    class JacksonRoundTrip {
+
+        private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
+        @Test
+        @DisplayName("request body with lowercase verdict deserializes via @JsonCreator")
+        void lowercaseVerdictBodyDeserializes() throws Exception {
+            var decision = mapper.readValue(
+                    "{\"verdict\":\"approved\",\"note\":\"ok\"}", HitlDecision.class);
+            assertEquals(HitlVerdict.APPROVED, decision.getVerdict());
+            assertEquals("ok", decision.getNote());
+        }
+
+        @Test
+        @DisplayName("request body with mixed-case verdict deserializes")
+        void mixedCaseVerdictBodyDeserializes() throws Exception {
+            var decision = mapper.readValue("{\"verdict\":\"Rejected\"}", HitlDecision.class);
+            assertEquals(HitlVerdict.REJECTED, decision.getVerdict());
+        }
+    }
 }
