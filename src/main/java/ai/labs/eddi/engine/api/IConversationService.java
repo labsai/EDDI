@@ -247,13 +247,15 @@ public interface IConversationService {
             throws ResourceStoreException, ResourceNotFoundException;
 
     /**
-     * List all conversations currently in AWAITING_HUMAN state.
+     * List conversations currently in AWAITING_HUMAN state (bounded).
      *
+     * @param limit
+     *            maximum number of summaries to return (clamped to [1, 1000])
      * @return list of pending approval summaries (never null)
      * @throws ResourceStoreException
      *             on persistence failures
      */
-    java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals()
+    java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals(int limit)
             throws ResourceStoreException;
 
     // --- Domain exceptions (no JAX-RS dependency) ---

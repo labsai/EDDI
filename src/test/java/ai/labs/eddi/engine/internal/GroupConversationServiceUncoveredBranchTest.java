@@ -119,7 +119,7 @@ class GroupConversationServiceUncoveredBranchTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 meterRegistry, agentSigningService, agentStore,
-                org.mockito.Mockito.mock(IScheduleStore.class), nonceCacheService, "default", 3);
+                org.mockito.Mockito.mock(IScheduleStore.class), nonceCacheService, null, "default", 3);
     }
 
     // === Helpers ===

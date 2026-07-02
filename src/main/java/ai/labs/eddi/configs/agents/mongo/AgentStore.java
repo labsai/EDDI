@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.mongo;
 
+import ai.labs.eddi.configs.HitlConfigValidation;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.mongo.DocumentDescriptorStore;
@@ -44,6 +45,7 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
     @Override
     public IResourceStore.IResourceId create(AgentConfiguration agentConfiguration) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkCollectionNoNullElements(agentConfiguration.getWorkflows(), WORKFLOWS_FIELD);
+        HitlConfigValidation.validate(agentConfiguration.getHitlConfig());
         return super.create(agentConfiguration);
     }
 
@@ -52,6 +54,7 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
     public Integer update(String id, Integer version, AgentConfiguration agentConfiguration)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkCollectionNoNullElements(agentConfiguration.getWorkflows(), WORKFLOWS_FIELD);
+        HitlConfigValidation.validate(agentConfiguration.getHitlConfig());
         return super.update(id, version, agentConfiguration);
     }
 

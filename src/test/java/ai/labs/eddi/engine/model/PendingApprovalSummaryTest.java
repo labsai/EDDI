@@ -41,10 +41,11 @@ class PendingApprovalSummaryTest {
         void setsAllFields() {
             var now = Instant.now();
             var summary = new PendingApprovalSummary(
-                    "conv-1", "agent-1", now, "needs review", "AUTO_REJECT");
+                    "conv-1", "agent-1", "user-1", now, "needs review", "AUTO_REJECT");
 
             assertEquals("conv-1", summary.getConversationId());
             assertEquals("agent-1", summary.getAgentId());
+            assertEquals("user-1", summary.getUserId());
             assertEquals(now, summary.getPausedAt());
             assertEquals("needs review", summary.getPauseReason());
             assertEquals("AUTO_REJECT", summary.getTimeoutPolicy());
@@ -53,10 +54,11 @@ class PendingApprovalSummaryTest {
         @Test
         @DisplayName("accepts null values for all parameters")
         void acceptsNullValues() {
-            var summary = new PendingApprovalSummary(null, null, null, null, null);
+            var summary = new PendingApprovalSummary(null, null, null, null, null, null);
 
             assertNull(summary.getConversationId());
             assertNull(summary.getAgentId());
+            assertNull(summary.getUserId());
             assertNull(summary.getPausedAt());
             assertNull(summary.getPauseReason());
             assertNull(summary.getTimeoutPolicy());

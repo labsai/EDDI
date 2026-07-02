@@ -25,6 +25,12 @@
 | Group pending list (C-B) | `GET /groups/{groupId}/conversations/pending-approvals` now scopes to the path's group and applies the same ownership filter as the regular listing (admin/approver see the group's items, others only their own, anonymous nothing) — was a global unfiltered dump of all users' paused conversations incl. transcripts. |
 | Approver role | New `eddi-approver` role: `OwnershipValidator.isApprover`, added to `@RolesAllowed` on all HITL endpoints (approver-only accounts were blocked at RBAC), and approvers now see pending listings on both surfaces (they could approve but not list). SSE error events now serialize through the JSON serializer (no string-concatenation injection). |
 
+| Audit (F15) | `hitl.approval` AuditEntry submitted on BOTH surfaces for every decision (verdict, decidedBy, automated flag, note) — covers human and `system:timeout` decisions; `GroupConversationService` now injects `AuditLedgerService`. Combined with the earlier resume audit-collector wiring, the EU AI Act human-oversight trail is complete. |
+| Quota (F16, plan §10a) | `getActiveConversationCount` excludes AWAITING_HUMAN on Mongo AND Postgres — paused conversations no longer block undeploy/old-version GC forever. Undeployed-while-paused conversations keep their pause; resume reports 409 and restores it. |
+| Pending listing scale (F17) | New `findPendingApprovalSummaries(limit)` store method: Mongo uses POJO-codec projection (never deserializes step data), Postgres a LIMIT-bounded loop; REST takes `?limit` (default 200, max 1000); `PendingApprovalSummary` gains `userId` so the ownership filter no longer does N+1 descriptor reads. |
+| Config safety (F20/C-E/C-F) | Duplicate `engine.lifecycle.model.HitlTimeoutPolicy` enum deleted — `AgentGroupConfiguration.HitlTimeoutPolicy` is the single source (no more constants-drift between schedule metadata writer and parser). New `HitlConfigValidation` enforced in `AgentStore`/`AgentGroupStore` create+update: finite policy requires a valid positive ISO-8601 `approvalTimeout`, actionable 400 messages via the existing `IllegalArgumentExceptionMapper`. |
+| Input bounds | HITL decision `note` capped at 4 KB on both surfaces (400 on overflow). Dead `counterHitlTimeout` field removed (handler owns the timeout metric). |
+
 *(Extended by subsequent commits in this session — see below.)*
 
 ---

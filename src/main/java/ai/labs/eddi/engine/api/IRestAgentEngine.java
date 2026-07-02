@@ -224,7 +224,9 @@ public interface IRestAgentEngine {
     @Path("/pending-approvals")
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
-    @Operation(summary = "List pending approvals", description = "Lists all conversations currently awaiting human approval.")
+    @Operation(summary = "List pending approvals",
+               description = "Lists conversations currently awaiting human approval (bounded by limit, max 1000).")
     @APIResponse(responseCode = "200", description = "List of pending approvals.")
-    List<PendingApprovalSummary> listPendingApprovals();
+    List<PendingApprovalSummary> listPendingApprovals(@QueryParam("limit")
+    @DefaultValue("200") Integer limit);
 }

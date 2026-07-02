@@ -91,13 +91,13 @@ class GroupConversationServiceBranchCoverageTest {
         service = new GroupConversationService(groupStore, conversationStore,
                 conversationService, agentFactory, templatingEngine,
                 jsonSerialization, new SimpleMeterRegistry(),
-                null, null, null, null, "default", 3);
+                null, null, null, null, null, "default", 3);
 
         // Service with signing infrastructure
         serviceWithSigning = new GroupConversationService(groupStore, conversationStore,
                 conversationService, agentFactory, templatingEngine,
                 jsonSerialization, new SimpleMeterRegistry(),
-                agentSigningService, agentStore, null, nonceCacheService, "default", 3);
+                agentSigningService, agentStore, null, nonceCacheService, null, "default", 3);
 
         when(conversationStore.create(any())).thenReturn("gc-1");
 

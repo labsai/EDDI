@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import io.quarkus.arc.DefaultBean;
+import org.jboss.logging.Logger;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -36,6 +37,8 @@ import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
 @ApplicationScoped
 @DefaultBean
 public class PostgresConversationMemoryStore implements IConversationMemoryStore, IResourceStore<ConversationMemorySnapshot> {
+
+    private static final Logger LOGGER = Logger.getLogger(PostgresConversationMemoryStore.class);
 
     private static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS conversation_memories (
@@ -204,11 +207,15 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     @Override
     public Long getActiveConversationCount(String agentId, Integer agentVersion) {
         ensureSchema();
-        String sql = "SELECT COUNT(*) FROM conversation_memories " + "WHERE AGENT_ID = ? AND AGENT_VERSION = ? AND conversation_state != ?";
+        // Plan §10(a): AWAITING_HUMAN does not count as active (mirrors the Mongo
+        // store) — otherwise a forgotten approval blocks undeploy/GC forever.
+        String sql = "SELECT COUNT(*) FROM conversation_memories "
+                + "WHERE AGENT_ID = ? AND AGENT_VERSION = ? AND conversation_state NOT IN (?, ?)";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, agentId);
             ps.setInt(2, agentVersion);
             ps.setString(3, ENDED.toString());
+            ps.setString(4, ConversationState.AWAITING_HUMAN.toString());
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getLong(1);
@@ -266,6 +273,39 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             }
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to find conversations by state", e);
+        }
+    }
+
+    @Override
+    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(int limit)
+            throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        // Bounded loop: loads at most `limit` snapshots. Unlike Mongo there is no
+        // POJO projection here, but the LIMIT keeps a polled listing bounded.
+        List<ai.labs.eddi.engine.model.PendingApprovalSummary> out = new ArrayList<>();
+        String sql = "SELECT id FROM conversation_memories WHERE conversation_state = ? LIMIT ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, ConversationState.AWAITING_HUMAN.name());
+            ps.setInt(2, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String id = rs.getString("id");
+                    try {
+                        var snapshot = loadConversationMemorySnapshot(id);
+                        if (snapshot != null) {
+                            out.add(new ai.labs.eddi.engine.model.PendingApprovalSummary(
+                                    id, snapshot.getAgentId(), snapshot.getUserId(),
+                                    snapshot.getHitlPausedAt(), snapshot.getHitlPauseReason(),
+                                    snapshot.getHitlTimeoutPolicy()));
+                        }
+                    } catch (Exception e) {
+                        LOGGER.warnf("Skipping conversation %s in pending-approvals listing: %s", id, e.getMessage());
+                    }
+                }
+            }
+            return out;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to list pending approvals", e);
         }
     }
 

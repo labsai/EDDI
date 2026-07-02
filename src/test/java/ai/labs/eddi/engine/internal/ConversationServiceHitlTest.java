@@ -195,36 +195,32 @@ class ConversationServiceHitlTest {
         @Test
         @DisplayName("no AWAITING_HUMAN conversations → returns empty list")
         void noAwaitingHuman_returnsEmptyList() throws Exception {
-            doReturn(List.of()).when(conversationMemoryStore)
-                    .findConversationIdsByState(ConversationState.AWAITING_HUMAN);
+            doReturn(List.of()).when(conversationMemoryStore).findPendingApprovalSummaries(anyInt());
 
-            List<PendingApprovalSummary> result = conversationService.listPendingApprovals();
+            List<PendingApprovalSummary> result = conversationService.listPendingApprovals(200);
 
             assertNotNull(result);
             assertTrue(result.isEmpty());
         }
 
         @Test
-        @DisplayName("returns correct summaries for AWAITING_HUMAN conversations")
+        @DisplayName("delegates to the bounded store projection and returns its summaries")
         void awaitingHumanConversations_returnsCorrectSummaries() throws Exception {
-            doReturn(List.of("conv-a", "conv-b")).when(conversationMemoryStore)
-                    .findConversationIdsByState(ConversationState.AWAITING_HUMAN);
-
-            var snapshotA = createHitlSnapshot("conv-a", "agent-1",
+            var summaryA = new PendingApprovalSummary("conv-a", "agent-1", USER_ID,
                     Instant.parse("2026-06-30T10:00:00Z"), "high-risk action", "AUTO_APPROVE");
-            var snapshotB = createHitlSnapshot("conv-b", "agent-2",
+            var summaryB = new PendingApprovalSummary("conv-b", "agent-2", USER_ID,
                     Instant.parse("2026-06-30T11:00:00Z"), "financial transaction", "WAIT_INDEFINITELY");
+            doReturn(List.of(summaryA, summaryB)).when(conversationMemoryStore)
+                    .findPendingApprovalSummaries(200);
 
-            doReturn(snapshotA).when(conversationMemoryStore).loadConversationMemorySnapshot("conv-a");
-            doReturn(snapshotB).when(conversationMemoryStore).loadConversationMemorySnapshot("conv-b");
-
-            List<PendingApprovalSummary> result = conversationService.listPendingApprovals();
+            List<PendingApprovalSummary> result = conversationService.listPendingApprovals(200);
 
             assertEquals(2, result.size());
 
             PendingApprovalSummary first = result.get(0);
             assertEquals("conv-a", first.getConversationId());
             assertEquals("agent-1", first.getAgentId());
+            assertEquals(USER_ID, first.getUserId());
             assertEquals(Instant.parse("2026-06-30T10:00:00Z"), first.getPausedAt());
             assertEquals("high-risk action", first.getPauseReason());
             assertEquals("AUTO_APPROVE", first.getTimeoutPolicy());
@@ -237,21 +233,15 @@ class ConversationServiceHitlTest {
         }
 
         @Test
-        @DisplayName("skips conversations that throw when loading snapshot")
-        void loadException_skipsConversation() throws Exception {
-            doReturn(List.of("conv-ok", "conv-broken")).when(conversationMemoryStore)
-                    .findConversationIdsByState(ConversationState.AWAITING_HUMAN);
+        @DisplayName("limit is clamped to [1, 1000] before reaching the store")
+        void limitClamped() throws Exception {
+            doReturn(List.of()).when(conversationMemoryStore).findPendingApprovalSummaries(anyInt());
 
-            var snapshotOk = createHitlSnapshot("conv-ok", "agent-1",
-                    Instant.now(), "reason", "AUTO_REJECT");
-            doReturn(snapshotOk).when(conversationMemoryStore).loadConversationMemorySnapshot("conv-ok");
-            doThrow(new RuntimeException("deleted")).when(conversationMemoryStore)
-                    .loadConversationMemorySnapshot("conv-broken");
+            conversationService.listPendingApprovals(50_000);
+            verify(conversationMemoryStore).findPendingApprovalSummaries(1000);
 
-            List<PendingApprovalSummary> result = conversationService.listPendingApprovals();
-
-            assertEquals(1, result.size());
-            assertEquals("conv-ok", result.get(0).getConversationId());
+            conversationService.listPendingApprovals(-5);
+            verify(conversationMemoryStore).findPendingApprovalSummaries(1);
         }
     }
 

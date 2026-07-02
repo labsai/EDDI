@@ -269,11 +269,19 @@ public class RestAgentEngine implements IRestAgentEngine {
         }
     }
 
+    /** Upper bound for the free-text reviewer note persisted with a decision. */
+    private static final int MAX_HITL_NOTE_LENGTH = 4096;
+
     @Override
     public Response resumeConversation(String conversationId, HitlDecision decision) {
         if (decision == null || decision.getVerdict() == null) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity("Request body must include a 'verdict' field (APPROVED or REJECTED)")
+                    .build();
+        }
+        if (decision.getNote() != null && decision.getNote().length() > MAX_HITL_NOTE_LENGTH) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Decision note exceeds the maximum length of " + MAX_HITL_NOTE_LENGTH + " characters")
                     .build();
         }
         validateConversationOwnership(conversationId, true);
@@ -312,9 +320,9 @@ public class RestAgentEngine implements IRestAgentEngine {
     }
 
     @Override
-    public List<PendingApprovalSummary> listPendingApprovals() {
+    public List<PendingApprovalSummary> listPendingApprovals(Integer limit) {
         try {
-            var all = conversationService.listPendingApprovals();
+            var all = conversationService.listPendingApprovals(limit != null ? limit : 200);
 
             // MAJOR-6: Admins and designated approvers see all; other callers see
             // only their own conversations (an approver who can decide approvals
@@ -328,16 +336,11 @@ public class RestAgentEngine implements IRestAgentEngine {
                 return List.of(); // Fail-closed: anonymous user sees nothing
             }
 
-            return all.stream().filter(summary -> {
-                try {
-                    var descriptor = conversationDescriptorStore.readDescriptor(
-                            summary.getConversationId(), 0);
-                    return callerId.equals(descriptor.getUserId());
-                } catch (Exception e) {
-                    // Fail-closed: can't verify ownership → exclude
-                    return false;
-                }
-            }).toList();
+            // Ownership from the projected summary (no per-row descriptor reads);
+            // fail-closed: summaries without an owner are excluded for non-admins.
+            return all.stream()
+                    .filter(summary -> callerId.equals(summary.getUserId()))
+                    .toList();
         } catch (ResourceStoreException e) {
             throw new InternalServerErrorException(e.getMessage(), e);
         }

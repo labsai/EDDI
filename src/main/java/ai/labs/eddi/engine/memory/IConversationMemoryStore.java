@@ -65,6 +65,21 @@ public interface IConversationMemoryStore {
     List<String> findConversationIdsByState(ConversationState state)
             throws IResourceStore.ResourceStoreException;
 
+    /**
+     * Bounded, projection-friendly listing of conversations awaiting human
+     * approval. Implementations must NOT load the full conversation documents where
+     * the backend supports field projection — this method backs a potentially
+     * polled REST listing.
+     *
+     * @param limit
+     *            maximum number of summaries to return
+     * @return summaries of paused conversations (never null)
+     * @throws IResourceStore.ResourceStoreException
+     *             on persistence failures
+     */
+    List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(int limit)
+            throws IResourceStore.ResourceStoreException;
+
     // === GDPR ===
 
     /**

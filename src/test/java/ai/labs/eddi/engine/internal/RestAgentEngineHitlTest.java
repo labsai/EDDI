@@ -121,31 +121,75 @@ class RestAgentEngineHitlTest {
     @DisplayName("listPendingApprovals")
     class ListPendingApprovals {
 
+        private PendingApprovalSummary summaryOwnedBy(String conversationId, String ownerId) {
+            return new PendingApprovalSummary(
+                    conversationId, "agent-1", ownerId, Instant.now(), "needs review", "AUTO_APPROVE");
+        }
+
         @Test
-        @DisplayName("returns list from conversationService")
-        void returnsList() throws Exception {
-            var summary1 = new PendingApprovalSummary(
-                    "conv-1", "agent-1", Instant.now(), "needs review", "AUTO_APPROVE");
-            var summary2 = new PendingApprovalSummary(
-                    "conv-2", "agent-2", Instant.now(), "high risk", "WAIT_INDEFINITELY");
+        @DisplayName("admin sees all summaries")
+        void adminSeesAll() throws Exception {
+            doReturn(true).when(ownershipValidator).isAdmin(identity);
+            doReturn(List.of(summaryOwnedBy("conv-1", USER_ID), summaryOwnedBy("conv-2", "someone-else")))
+                    .when(conversationService).listPendingApprovals(anyInt());
 
-            doReturn(List.of(summary1, summary2)).when(conversationService).listPendingApprovals();
+            List<PendingApprovalSummary> result = restAgentEngine.listPendingApprovals(200);
 
-            List<PendingApprovalSummary> result = restAgentEngine.listPendingApprovals();
-
-            assertNotNull(result);
             assertEquals(2, result.size());
-            assertEquals("conv-1", result.get(0).getConversationId());
-            assertEquals("conv-2", result.get(1).getConversationId());
-            verify(conversationService).listPendingApprovals();
+        }
+
+        @Test
+        @DisplayName("approver sees all summaries (they must be able to list what they can decide)")
+        void approverSeesAll() throws Exception {
+            doReturn(false).when(ownershipValidator).isAdmin(identity);
+            doReturn(true).when(ownershipValidator).isApprover(identity);
+            doReturn(List.of(summaryOwnedBy("conv-1", USER_ID), summaryOwnedBy("conv-2", "someone-else")))
+                    .when(conversationService).listPendingApprovals(anyInt());
+
+            List<PendingApprovalSummary> result = restAgentEngine.listPendingApprovals(200);
+
+            assertEquals(2, result.size());
+        }
+
+        @Test
+        @DisplayName("non-admin sees ONLY their own conversations (mixed ownership filtered)")
+        void nonAdminSeesOnlyOwn() throws Exception {
+            doReturn(false).when(ownershipValidator).isAdmin(identity);
+            doReturn(false).when(ownershipValidator).isApprover(identity);
+            doReturn(List.of(
+                    summaryOwnedBy("conv-mine", USER_ID),
+                    summaryOwnedBy("conv-theirs", "someone-else"),
+                    summaryOwnedBy("conv-unowned", null)))
+                    .when(conversationService).listPendingApprovals(anyInt());
+
+            List<PendingApprovalSummary> result = restAgentEngine.listPendingApprovals(200);
+
+            // fail-closed: other users' AND ownerless conversations are excluded
+            assertEquals(1, result.size());
+            assertEquals("conv-mine", result.get(0).getConversationId());
+        }
+
+        @Test
+        @DisplayName("anonymous caller sees nothing (fail-closed)")
+        void anonymousSeesNothing() throws Exception {
+            doReturn(false).when(ownershipValidator).isAdmin(identity);
+            doReturn(false).when(ownershipValidator).isApprover(identity);
+            doReturn(null).when(identity).getPrincipal();
+            doReturn(List.of(summaryOwnedBy("conv-1", USER_ID)))
+                    .when(conversationService).listPendingApprovals(anyInt());
+
+            List<PendingApprovalSummary> result = restAgentEngine.listPendingApprovals(200);
+
+            assertTrue(result.isEmpty());
         }
 
         @Test
         @DisplayName("returns empty list when no pending approvals")
         void returnsEmptyList() throws Exception {
-            doReturn(List.of()).when(conversationService).listPendingApprovals();
+            doReturn(true).when(ownershipValidator).isAdmin(identity);
+            doReturn(List.of()).when(conversationService).listPendingApprovals(anyInt());
 
-            List<PendingApprovalSummary> result = restAgentEngine.listPendingApprovals();
+            List<PendingApprovalSummary> result = restAgentEngine.listPendingApprovals(200);
 
             assertNotNull(result);
             assertTrue(result.isEmpty());

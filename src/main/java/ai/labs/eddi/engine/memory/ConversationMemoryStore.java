@@ -147,8 +147,14 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public Long getActiveConversationCount(String agentId, Integer agentVersion) {
+        // Plan §10(a): AWAITING_HUMAN conversations do not count as active — with
+        // the default WAIT_INDEFINITELY policy a single forgotten approval would
+        // otherwise block undeploy and old-version GC forever. A paused
+        // conversation whose agent was undeployed keeps its pause; resume then
+        // reports 409 "agent not deployed" and restores the pause.
         Bson query = Filters.and(Filters.eq(KEY_AGENT_ID, agentId), Filters.eq(KEY_AGENT_VERSION, agentVersion),
-                Filters.not(new Document(KEY_CONVERSATION_STATE, ENDED.toString())));
+                Filters.nin(KEY_CONVERSATION_STATE,
+                        ENDED.toString(), ConversationState.AWAITING_HUMAN.toString()));
         return conversationCollectionDocument.countDocuments(query);
     }
 
@@ -177,6 +183,23 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                 .projection(new Document(OBJECT_ID, 1))
                 .forEach(document -> ids.add(document.get(OBJECT_ID).toString()));
         return ids;
+    }
+
+    @Override
+    public List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(int limit) {
+        // Projection via the POJO codec: only the summary fields are read — never
+        // the (potentially multi-MB) step/output data of paused conversations.
+        List<ai.labs.eddi.engine.model.PendingApprovalSummary> out = new ArrayList<>();
+        conversationCollectionObject
+                .find(Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.toString()))
+                .projection(Projections.include(KEY_AGENT_ID, "userId",
+                        "hitlPausedAt", "hitlPauseReason", "hitlTimeoutPolicy"))
+                .limit(limit)
+                .forEach(snapshot -> out.add(new ai.labs.eddi.engine.model.PendingApprovalSummary(
+                        snapshot.getConversationId(), snapshot.getAgentId(), snapshot.getUserId(),
+                        snapshot.getHitlPausedAt(), snapshot.getHitlPauseReason(),
+                        snapshot.getHitlTimeoutPolicy())));
+        return out;
     }
 
     @Override

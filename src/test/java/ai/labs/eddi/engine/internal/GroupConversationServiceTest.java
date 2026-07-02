@@ -85,7 +85,7 @@ class GroupConversationServiceTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), agentSigningService, agentStore,
-                mock(IScheduleStore.class), nonceCacheService, DEFAULT_TENANT, MAX_DEPTH);
+                mock(IScheduleStore.class), nonceCacheService, null, DEFAULT_TENANT, MAX_DEPTH);
     }
 
     // =================================================================

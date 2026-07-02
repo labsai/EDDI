@@ -154,11 +154,20 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
     }
 
+    /** Upper bound for the free-text reviewer note persisted with a decision. */
+    private static final int MAX_HITL_NOTE_LENGTH = 4096;
+
     @Override
     public Response approveGroupPhase(String groupId, String gcId, GroupApprovalRequest request) {
         if (request == null || request.getDecision() == null || request.getDecision().getVerdict() == null) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity("Request body must include a 'decision' with a 'verdict' field (APPROVED or REJECTED)")
+                    .build();
+        }
+        if (request.getDecision().getNote() != null
+                && request.getDecision().getNote().length() > MAX_HITL_NOTE_LENGTH) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Decision note exceeds the maximum length of " + MAX_HITL_NOTE_LENGTH + " characters")
                     .build();
         }
         validateGroupConversationOwnership(gcId, true);
@@ -186,6 +195,12 @@ public class RestGroupConversation implements IRestGroupConversation {
                                            SseEventSink eventSink, Sse sse) {
         if (request == null || request.getDecision() == null || request.getDecision().getVerdict() == null) {
             sendErrorEvent(eventSink, sse, "Request body must include a 'decision' with a 'verdict' field");
+            closeQuietly(eventSink);
+            return;
+        }
+        if (request.getDecision().getNote() != null
+                && request.getDecision().getNote().length() > MAX_HITL_NOTE_LENGTH) {
+            sendErrorEvent(eventSink, sse, "Decision note exceeds the maximum length of " + MAX_HITL_NOTE_LENGTH + " characters");
             closeQuietly(eventSink);
             return;
         }

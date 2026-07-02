@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.configs.agents.crypto.SignedEnvelope;
@@ -92,6 +93,7 @@ public class GroupConversationService implements IGroupConversationService {
     private final IAgentStore agentStore;
     private final IScheduleStore scheduleStore;
     private final NonceCacheService nonceCacheService;
+    private final AuditLedgerService auditLedgerService;
     private final String defaultTenantId;
 
     // Incremental peer verification: tracks the last verified transcript index
@@ -110,7 +112,7 @@ public class GroupConversationService implements IGroupConversationService {
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
             IAgentFactory agentFactory, ITemplatingEngine templatingEngine, IJsonSerialization jsonSerialization, MeterRegistry meterRegistry,
             AgentSigningService agentSigningService, IAgentStore agentStore, IScheduleStore scheduleStore,
-            NonceCacheService nonceCacheService,
+            NonceCacheService nonceCacheService, AuditLedgerService auditLedgerService,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
             @ConfigProperty(name = "eddi.groups.max-depth", defaultValue = "3") int maxDepth) {
         this.groupStore = groupStore;
@@ -124,6 +126,7 @@ public class GroupConversationService implements IGroupConversationService {
         this.agentStore = agentStore;
         this.scheduleStore = scheduleStore;
         this.nonceCacheService = nonceCacheService;
+        this.auditLedgerService = auditLedgerService;
         this.defaultTenantId = defaultTenantId;
         // Virtual threads — lightweight, no pool sizing, ideal for parallel agent calls
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
@@ -2330,6 +2333,7 @@ public class GroupConversationService implements IGroupConversationService {
             conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
             // Delete timeout schedule only after CAS succeeds (Phase 5e)
             deleteGroupHitlTimeoutSchedule(groupConversationId);
+            auditHitlDecision(gc, decision);
             return gc;
         }
 
@@ -2357,6 +2361,7 @@ public class GroupConversationService implements IGroupConversationService {
         // fails, the schedule is preserved so the timeout can still fire.
         deleteGroupHitlTimeoutSchedule(groupConversationId);
         counterGroupHitlResume.increment();
+        auditHitlDecision(gc, decision);
 
         // Resume execution in background thread
         var groupId = gc.getGroupId();
@@ -2417,6 +2422,34 @@ public class GroupConversationService implements IGroupConversationService {
         });
 
         return gc;
+    }
+
+    /**
+     * Submits an {@code hitl.approval} audit entry for a group HITL decision (#15,
+     * EU AI Act). Covers human and automated timeout decisions.
+     */
+    private void auditHitlDecision(GroupConversation gc, ai.labs.eddi.engine.lifecycle.model.HitlDecision decision) {
+        if (auditLedgerService == null || !auditLedgerService.isEnabled() || decision == null) {
+            return;
+        }
+        try {
+            var detail = new java.util.LinkedHashMap<String, Object>();
+            detail.put("verdict", decision.getVerdict() != null ? decision.getVerdict().name() : "UNKNOWN");
+            detail.put("decidedBy", decision.getDecidedBy() != null ? decision.getDecidedBy() : "unknown");
+            detail.put("automated", decision.getDecidedBy() != null && decision.getDecidedBy().startsWith("system:"));
+            detail.put("surface", "group");
+            if (decision.getNote() != null) {
+                detail.put("note", decision.getNote());
+            }
+            auditLedgerService.submit(new ai.labs.eddi.engine.audit.model.AuditEntry(
+                    java.util.UUID.randomUUID().toString(), gc.getId(), gc.getGroupId(), null, gc.getUserId(),
+                    null, -1, "hitl.approval", "hitl", -1, 0L,
+                    java.util.Map.of(), detail, null, null, java.util.List.of(), 0.0,
+                    Instant.now(), null, null));
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to submit HITL audit entry for group conversation %s: %s",
+                    gc.getId(), e.getMessage());
+        }
     }
 
     /**

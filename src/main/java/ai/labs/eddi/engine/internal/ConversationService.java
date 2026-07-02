@@ -109,7 +109,6 @@ public class ConversationService implements IConversationService {
     private final Counter counterConversationRedo;
     private final Counter counterHitlPause;
     private final Counter counterHitlResume;
-    private final Counter counterHitlTimeout;
 
     private final List<String> processingConversationReferences;
 
@@ -164,7 +163,7 @@ public class ConversationService implements IConversationService {
         this.counterConversationRedo = meterRegistry.counter("eddi_conversation_redo_count");
         this.counterHitlPause = meterRegistry.counter("eddi_hitl_pause_count", "surface", "regular");
         this.counterHitlResume = meterRegistry.counter("eddi_hitl_resume_count", "surface", "regular");
-        this.counterHitlTimeout = meterRegistry.counter("eddi_hitl_timeout_count", "surface", "regular");
+        // (timeout fires are counted in HitlTimeoutHandler, tagged by surface)
 
         meterRegistry.gaugeCollectionSize("eddi_processing_conversation_count", Tags.empty(), processingConversationReferences);
     }
@@ -949,6 +948,11 @@ public class ConversationService implements IConversationService {
         Integer agentVersion = snapshot.getAgentVersion();
         Environment environment = snapshot.getEnvironment();
 
+        // #15: EU AI Act — every human (or automated) HITL decision leaves an
+        // immutable audit record, including who decided, the verdict, and whether
+        // it was an automated timeout decision.
+        auditHitlDecision(conversationId, agentId, agentVersion, snapshot.getUserId(), environment, decision);
+
         try {
             IAgent agent = getAgent(environment, agentId, agentVersion);
             if (agent == null) {
@@ -1031,6 +1035,36 @@ public class ConversationService implements IConversationService {
     }
 
     /**
+     * Submits an {@code hitl.approval} audit entry for a HITL decision. Covers both
+     * human decisions and automated timeout decisions
+     * ({@code decidedBy=system:timeout}).
+     */
+    private void auditHitlDecision(String conversationId, String agentId, Integer agentVersion,
+                                   String userId, Environment environment,
+                                   ai.labs.eddi.engine.lifecycle.model.HitlDecision decision) {
+        if (!auditLedgerService.isEnabled()) {
+            return;
+        }
+        try {
+            var detail = new LinkedHashMap<String, Object>();
+            detail.put("verdict", decision.getVerdict() != null ? decision.getVerdict().name() : "UNKNOWN");
+            detail.put("decidedBy", decision.getDecidedBy() != null ? decision.getDecidedBy() : "unknown");
+            detail.put("automated", decision.getDecidedBy() != null && decision.getDecidedBy().startsWith("system:"));
+            if (decision.getNote() != null) {
+                detail.put("note", decision.getNote());
+            }
+            auditLedgerService.submit(new ai.labs.eddi.engine.audit.model.AuditEntry(
+                    UUID.randomUUID().toString(), conversationId, agentId, agentVersion, userId,
+                    environment != null ? environment.toString() : null, -1,
+                    "hitl.approval", "hitl", -1, 0L,
+                    Map.of(), detail, null, null, List.of(), 0.0,
+                    Instant.now(), null, null));
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to submit HITL audit entry for %s: %s", conversationId, e.getMessage());
+        }
+    }
+
+    /**
      * Rolls a failed resume back to AWAITING_HUMAN so the pending approval survives
      * transient failures (undeployed agent, service errors). Re-arms the timeout
      * schedule that the resume attempt deleted.
@@ -1085,24 +1119,11 @@ public class ConversationService implements IConversationService {
     }
 
     @Override
-    public java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals()
+    public java.util.List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals(int limit)
             throws ResourceStoreException {
-        List<String> ids = conversationMemoryStore.findConversationIdsByState(ConversationState.AWAITING_HUMAN);
-        List<ai.labs.eddi.engine.model.PendingApprovalSummary> summaries = new ArrayList<>();
-        for (String id : ids) {
-            try {
-                var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(id);
-                if (snapshot != null) {
-                    summaries.add(new ai.labs.eddi.engine.model.PendingApprovalSummary(
-                            id, snapshot.getAgentId(), snapshot.getHitlPausedAt(),
-                            snapshot.getHitlPauseReason(), snapshot.getHitlTimeoutPolicy()));
-                }
-            } catch (Exception e) {
-                // skip deleted or inaccessible conversations
-                LOGGER.debugf("Skipping conversation %s while listing pending approvals: %s", id, e.getMessage());
-            }
-        }
-        return summaries;
+        // #17: bounded, projection-based listing — never deserializes full
+        // conversation documents on the Mongo backend.
+        return conversationMemoryStore.findPendingApprovalSummaries(Math.max(1, Math.min(limit, 1000)));
     }
 
     /**

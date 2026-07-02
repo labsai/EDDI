@@ -12,6 +12,8 @@ import java.time.Instant;
 public class PendingApprovalSummary {
     private String conversationId;
     private String agentId;
+    /** Owner of the conversation — used for listing visibility filters. */
+    private String userId;
     private Instant pausedAt;
     private String pauseReason;
     private String timeoutPolicy;
@@ -19,13 +21,21 @@ public class PendingApprovalSummary {
     public PendingApprovalSummary() {
     }
 
-    public PendingApprovalSummary(String conversationId, String agentId, Instant pausedAt,
+    public PendingApprovalSummary(String conversationId, String agentId, String userId, Instant pausedAt,
             String pauseReason, String timeoutPolicy) {
         this.conversationId = conversationId;
         this.agentId = agentId;
+        this.userId = userId;
         this.pausedAt = pausedAt;
         this.pauseReason = pauseReason;
         this.timeoutPolicy = timeoutPolicy;
+    }
+
+    public String getUserId() {
+        return userId;
+    }
+    public void setUserId(String userId) {
+        this.userId = userId;
     }
 
     public String getConversationId() {
