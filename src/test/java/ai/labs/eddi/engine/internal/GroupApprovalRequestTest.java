@@ -117,4 +117,43 @@ class GroupApprovalRequestTest {
             assertEquals("REJECTED", request.getTaskApprovals().get("task-2"));
         }
     }
+
+    @Nested
+    @DisplayName("verdict casing (#39)")
+    class VerdictCasing {
+
+        private final com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
+        @Test
+        @DisplayName("lowercase verdict deserializes to APPROVED (matches case-insensitive taskApprovals)")
+        void lowercaseVerdictAccepted() throws Exception {
+            var parsed = mapper.readValue(
+                    "{\"decision\":{\"verdict\":\"approved\"},\"taskApprovals\":{\"t1\":\"approved\"}}",
+                    GroupApprovalRequest.class);
+            assertNotNull(parsed.getDecision());
+            assertEquals(HitlVerdict.APPROVED, parsed.getDecision().getVerdict(),
+                    "lowercase 'approved' must parse to APPROVED, mirroring taskApprovals casing");
+        }
+
+        @Test
+        @DisplayName("mixed-case verdict + note + decidedBy all round-trip")
+        void mixedCaseWithFields() throws Exception {
+            var parsed = mapper.readValue(
+                    "{\"decision\":{\"verdict\":\"Rejected\",\"note\":\"no\",\"decidedBy\":\"x\"}}",
+                    GroupApprovalRequest.class);
+            assertEquals(HitlVerdict.REJECTED, parsed.getDecision().getVerdict());
+            assertEquals("no", parsed.getDecision().getNote());
+            assertEquals("x", parsed.getDecision().getDecidedBy());
+        }
+
+        @Test
+        @DisplayName("unknown verdict yields a null verdict (reported as the friendly 400 upstream)")
+        void unknownVerdictNulled() throws Exception {
+            var parsed = mapper.readValue(
+                    "{\"decision\":{\"verdict\":\"maybe\"}}", GroupApprovalRequest.class);
+            assertNotNull(parsed.getDecision());
+            assertNull(parsed.getDecision().getVerdict(),
+                    "an unrecognized verdict must not throw a raw Jackson error — it is nulled");
+        }
+    }
 }
