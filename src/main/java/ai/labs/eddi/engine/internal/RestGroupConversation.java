@@ -311,14 +311,11 @@ public class RestGroupConversation implements IRestGroupConversation {
     }
 
     /**
-     * Validates that the caller owns the group conversation or is an admin. Mirrors
-     * the pattern in RestAgentEngine.validateConversationOwnership.
-     */
-    private void validateGroupConversationOwnership(String gcId) {
-        validateGroupConversationOwnership(null, gcId, false);
-    }
-
-    /**
+     * Validates that the caller owns the group conversation (or is admin/approver)
+     * and — when {@code groupId} is non-null — that the target conversation belongs
+     * to that group. Mirrors the pattern in
+     * RestAgentEngine.validateConversationOwnership.
+     *
      * @param groupId
      *            when non-null, also verifies the target conversation belongs to
      *            this group — a mismatch (or unknown conversation) yields 404 so

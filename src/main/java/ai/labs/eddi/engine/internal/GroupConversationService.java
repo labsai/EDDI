@@ -2711,6 +2711,10 @@ public class GroupConversationService implements IGroupConversationService {
         gc.setHitlApprovalTimeout(null);
         gc.setState(GroupConversationState.IN_PROGRESS);
 
+        // TODO(merge WS-A): updateIfState currently signals both "deleted" and
+        // "state mismatch" as ResourceModifiedException (→409). Once WS-A adds the
+        // 404-vs-409 distinction, a concurrent DELETE of a paused discussion should
+        // surface here as 404 rather than a misleading 409 conflict.
         conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
         // Delete timeout schedule only after CAS succeeds (Phase 5e) — if CAS
         // fails, the schedule is preserved so the timeout can still fire.
