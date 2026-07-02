@@ -250,7 +250,7 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public Response cancelConversation(String conversationId) {
-        validateConversationOwnership(conversationId);
+        validateConversationOwnership(conversationId, true);
         conversationService.cancelConversation(conversationId,
                 ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
         return Response.ok().build();
@@ -263,7 +263,7 @@ public class RestAgentEngine implements IRestAgentEngine {
                     .entity("Request body must include a 'verdict' field (APPROVED or REJECTED)")
                     .build();
         }
-        validateConversationOwnership(conversationId);
+        validateConversationOwnership(conversationId, true);
         String userId = identity.getPrincipal().getName();
         decision.setDecidedBy(userId);
         try {
@@ -278,7 +278,7 @@ public class RestAgentEngine implements IRestAgentEngine {
 
     @Override
     public Response getApprovalStatus(String conversationId, String detail) {
-        validateConversationOwnership(conversationId);
+        validateConversationOwnership(conversationId, true);
         try {
             var snapshot = conversationService.getConversationMemorySnapshot(conversationId);
             if ("full".equals(detail)) {
@@ -336,9 +336,21 @@ public class RestAgentEngine implements IRestAgentEngine {
      * handle the 404.
      */
     private void validateConversationOwnership(String conversationId) {
+        validateConversationOwnership(conversationId, false);
+    }
+
+    /**
+     * @param hitlOperation
+     *            if true, uses strict ownership + approver role check
+     */
+    private void validateConversationOwnership(String conversationId, boolean hitlOperation) {
         try {
             var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
-            ownershipValidator.requireOwnerOrAdmin(identity, descriptor.getUserId(), "conversation");
+            if (hitlOperation) {
+                ownershipValidator.requireOwnerAdminOrApprover(identity, descriptor.getUserId(), "conversation");
+            } else {
+                ownershipValidator.requireOwnerOrAdmin(identity, descriptor.getUserId(), "conversation");
+            }
         } catch (ForbiddenException e) {
             throw e;
         } catch (ResourceNotFoundException e) {

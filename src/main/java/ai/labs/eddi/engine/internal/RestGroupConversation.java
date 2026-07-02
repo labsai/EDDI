@@ -142,13 +142,17 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     @Override
     public Response cancelDiscussion(String groupId, String gcId) {
-        validateGroupConversationOwnership(gcId);
-        groupConversationService.cancelDiscussion(gcId, ControlSignal.CANCEL_GRACEFUL);
+        validateGroupConversationOwnership(gcId, true);
         try {
+            groupConversationService.cancelDiscussion(gcId, ControlSignal.CANCEL_GRACEFUL);
             var gc = groupConversationService.readGroupConversation(gcId);
             return Response.ok(gc).build();
+        } catch (IGroupConversationService.GroupDiscussionException e) {
+            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
         } catch (Exception e) {
-            return Response.ok().build();
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
         }
     }
 
@@ -159,7 +163,7 @@ public class RestGroupConversation implements IRestGroupConversation {
                     .entity("Request body must include a 'decision' with a 'verdict' field (APPROVED or REJECTED)")
                     .build();
         }
-        validateGroupConversationOwnership(gcId);
+        validateGroupConversationOwnership(gcId, true);
         setDecidedByFromIdentity(request);
         try {
             var gc = groupConversationService.resumeDiscussion(gcId, request, null);
@@ -185,7 +189,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             closeQuietly(eventSink);
             return;
         }
-        validateGroupConversationOwnership(gcId);
+        validateGroupConversationOwnership(gcId, true);
         setDecidedByFromIdentity(request);
         var listener = createStreamingListener(eventSink, sse);
         try {
@@ -205,7 +209,7 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     @Override
     public Response getGroupApprovalStatus(String groupId, String gcId, String detail) {
-        validateGroupConversationOwnership(gcId);
+        validateGroupConversationOwnership(gcId, true);
         try {
             var gc = groupConversationService.readGroupConversation(gcId);
             return Response.ok(gc).build();
@@ -221,9 +225,21 @@ public class RestGroupConversation implements IRestGroupConversation {
      * the pattern in RestAgentEngine.validateConversationOwnership.
      */
     private void validateGroupConversationOwnership(String gcId) {
+        validateGroupConversationOwnership(gcId, false);
+    }
+
+    /**
+     * @param hitlOperation
+     *            if true, uses strict ownership + approver role check
+     */
+    private void validateGroupConversationOwnership(String gcId, boolean hitlOperation) {
         try {
             var gc = groupConversationService.readGroupConversation(gcId);
-            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            if (hitlOperation) {
+                ownershipValidator.requireOwnerAdminOrApprover(identity, gc.getUserId(), "group conversation");
+            } else {
+                ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
+            }
         } catch (ForbiddenException e) {
             throw e;
         } catch (IResourceStore.ResourceNotFoundException e) {

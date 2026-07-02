@@ -189,4 +189,25 @@ public class OwnershipValidator {
         }
         requireOwnerOrAdmin(identity, resourceOwnerId, resourceType);
     }
+
+    /**
+     * HITL-specific ownership check: allows the resource owner, eddi-admin,
+     * <strong>or eddi-approver</strong> role to proceed. Use this for
+     * approve/reject/cancel endpoints where a designated human reviewer may not be
+     * the conversation owner.
+     * <p>
+     * Fail-closed: if the resource has no owner and the caller is not admin or
+     * approver, access is denied.
+     */
+    public void requireOwnerAdminOrApprover(SecurityIdentity identity, String resourceOwnerId, String resourceType) {
+        if (!authEnabled) {
+            return;
+        }
+        // Approver role is always allowed for HITL operations
+        if (identity != null && identity.hasRole("eddi-approver")) {
+            return;
+        }
+        // Fall through to the strict owner/admin check
+        requireOwnerOrAdminStrict(identity, resourceOwnerId, resourceType);
+    }
 }
