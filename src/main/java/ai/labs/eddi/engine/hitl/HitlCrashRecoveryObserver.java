@@ -5,7 +5,7 @@
 package ai.labs.eddi.engine.hitl;
 
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
-import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;

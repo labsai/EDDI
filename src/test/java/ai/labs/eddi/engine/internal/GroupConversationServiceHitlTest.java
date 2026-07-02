@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.crypto.NonceCacheService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
+import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -205,7 +206,7 @@ class GroupConversationServiceHitlTest {
             var config = buildConfig(phases);
             // Enable task-level HITL
             var hitlConfig = new AgentGroupConfiguration.HitlConfig();
-            hitlConfig.setGranularity(AgentGroupConfiguration.HitlGranularity.TASK);
+            hitlConfig.setGranularity(HitlGranularity.TASK);
             config.setHitlConfig(hitlConfig);
 
             var resId = mockResourceId();
@@ -530,7 +531,7 @@ class GroupConversationServiceHitlTest {
             var config = buildConfig(phases);
             // Set TASK granularity
             var hitlConfig = new AgentGroupConfiguration.HitlConfig();
-            hitlConfig.setGranularity(AgentGroupConfiguration.HitlGranularity.TASK);
+            hitlConfig.setGranularity(HitlGranularity.TASK);
             config.setHitlConfig(hitlConfig);
 
             var resId = mockResourceId();

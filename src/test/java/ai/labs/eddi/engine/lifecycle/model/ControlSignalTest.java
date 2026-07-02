@@ -35,15 +35,9 @@ class ControlSignalTest {
         }
 
         @Test
-        @DisplayName("PAUSE exists")
-        void pauseExists() {
-            assertNotNull(ControlSignal.PAUSE);
-        }
-
-        @Test
-        @DisplayName("values() returns exactly 4 entries")
-        void valuesReturnsAllFour() {
-            assertEquals(4, ControlSignal.values().length);
+        @DisplayName("values() returns exactly 3 entries — PAUSE was removed (HITL pauses are committed by the execution loop, never signalled)")
+        void valuesReturnsAllThree() {
+            assertEquals(3, ControlSignal.values().length);
         }
     }
 
@@ -70,9 +64,9 @@ class ControlSignalTest {
         }
 
         @Test
-        @DisplayName("valueOf('PAUSE') returns PAUSE")
-        void valueOfPause() {
-            assertEquals(ControlSignal.PAUSE, ControlSignal.valueOf("PAUSE"));
+        @DisplayName("valueOf('PAUSE') throws — the dead signal must not resurface")
+        void valueOfPauseThrows() {
+            assertThrows(IllegalArgumentException.class, () -> ControlSignal.valueOf("PAUSE"));
         }
 
         @Test

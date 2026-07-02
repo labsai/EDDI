@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.model;
 
-import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import com.fasterxml.jackson.annotation.JsonAlias;
 
 import java.net.URI;
@@ -854,7 +854,7 @@ public class AgentConfiguration {
     public static class HitlConfig {
         /** ISO-8601 duration (e.g., "PT30S"), null = indefinite. */
         private String approvalTimeout;
-        private AgentGroupConfiguration.HitlTimeoutPolicy timeoutPolicy = AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY;
+        private HitlTimeoutPolicy timeoutPolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
 
         public String getApprovalTimeout() {
             return approvalTimeout;
@@ -864,11 +864,11 @@ public class AgentConfiguration {
             this.approvalTimeout = approvalTimeout;
         }
 
-        public AgentGroupConfiguration.HitlTimeoutPolicy getTimeoutPolicy() {
+        public HitlTimeoutPolicy getTimeoutPolicy() {
             return timeoutPolicy;
         }
 
-        public void setTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy timeoutPolicy) {
+        public void setTimeoutPolicy(HitlTimeoutPolicy timeoutPolicy) {
             this.timeoutPolicy = timeoutPolicy;
         }
     }

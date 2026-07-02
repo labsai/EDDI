@@ -4,6 +4,10 @@
  */
 package ai.labs.eddi.configs.groups.model;
 
+import ai.labs.eddi.configs.hitl.HitlGranularity;
+import ai.labs.eddi.configs.hitl.HitlRejectionPolicy;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -454,7 +458,9 @@ public class AgentGroupConfiguration {
     /**
      * HITL approval timeout configuration for group discussions. Extends the
      * agent-level config with a {@code granularity} field to control at what level
-     * human approval is required (per phase, per turn, or per discussion).
+     * human approval is required: {@code PHASE} (after each gated phase) or
+     * {@code TASK} (per task inside a gated EXECUTE phase; non-EXECUTE phases fall
+     * back to PHASE behavior).
      *
      * @since 6.0.0
      */
@@ -497,15 +503,4 @@ public class AgentGroupConfiguration {
         }
     }
 
-    public enum HitlGranularity {
-        PHASE, TASK
-    }
-
-    public enum HitlTimeoutPolicy {
-        WAIT_INDEFINITELY, AUTO_APPROVE, AUTO_REJECT, ABORT
-    }
-
-    public enum HitlRejectionPolicy {
-        FAIL, RETRY
-    }
 }

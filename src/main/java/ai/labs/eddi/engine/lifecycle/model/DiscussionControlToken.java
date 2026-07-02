@@ -9,11 +9,12 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Thread-safe control token shared between an execution loop and external
- * callers (cancel/pause). Created at execution start, removed in the finally
- * block.
+ * cancel callers. Created at execution start, removed in the finally block.
  * <p>
  * <strong>In-flight scope only</strong>: does NOT survive a pause gap.
- * Cancel-of-paused uses persisted state, not this token.
+ * Cancel-of-paused uses persisted state, not this token. HITL pauses are NOT
+ * signalled through this token either — they are committed by the execution
+ * loop itself at the phase/task gates.
  */
 public class DiscussionControlToken {
 
@@ -36,16 +37,6 @@ public class DiscussionControlToken {
     public boolean isCancelled() {
         var s = signal.get();
         return s == ControlSignal.CANCEL_GRACEFUL || s == ControlSignal.CANCEL_IMMEDIATE;
-    }
-
-    /** Convenience: is the PAUSE signal active? */
-    public boolean isPaused() {
-        return signal.get() == ControlSignal.PAUSE;
-    }
-
-    /** Convenience: should the loop stop (cancel or pause)? */
-    public boolean shouldStop() {
-        return isCancelled() || isPaused();
     }
 
     public void setActiveFuture(CompletableFuture<?> f) {

@@ -16,8 +16,5 @@ public enum ControlSignal {
     CANCEL_GRACEFUL,
 
     /** Immediate stop — best-effort interrupt of the current in-flight call. */
-    CANCEL_IMMEDIATE,
-
-    /** Pause for human approval (HITL). */
-    PAUSE
+    CANCEL_IMMEDIATE
 }

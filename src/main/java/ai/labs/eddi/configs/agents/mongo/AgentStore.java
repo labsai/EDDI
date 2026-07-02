@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.configs.agents.mongo;
 
-import ai.labs.eddi.configs.HitlConfigValidation;
+import ai.labs.eddi.configs.hitl.HitlConfigValidation;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.mongo.DocumentDescriptorStore;

@@ -25,6 +25,9 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.LifecyclePolicy;
+import ai.labs.eddi.configs.hitl.HitlGranularity;
+import ai.labs.eddi.configs.hitl.HitlRejectionPolicy;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
@@ -276,7 +279,7 @@ public class GroupConversationService implements IGroupConversationService {
 
         // Resolve HITL granularity from group config
         boolean taskLevelHitl = config.getHitlConfig() != null
-                && config.getHitlConfig().getGranularity() == AgentGroupConfiguration.HitlGranularity.TASK;
+                && config.getHitlConfig().getGranularity() == HitlGranularity.TASK;
 
         // MAJOR-5: Register control token so cancelDiscussion can signal in-flight.
         // computeIfAbsent — startAndDiscussAsync/resumeDiscussion pre-register the
@@ -298,7 +301,7 @@ public class GroupConversationService implements IGroupConversationService {
 
                 // NEW-3: Check control token at top of phase loop
                 var token = activeTokens.get(gc.getId());
-                if (token != null && token.shouldStop()) {
+                if (token != null && token.isCancelled()) {
                     gc.setState(GroupConversationState.CANCELLED);
                     gc.setLastModified(Instant.now());
                     conversationStore.update(gc);
@@ -361,8 +364,8 @@ public class GroupConversationService implements IGroupConversationService {
 
                 // R1: Check for cancel BEFORE the HITL gate. After the wave loop
                 // breaks on a cancel signal, control reaches here before the next
-                // phase-loop iteration's shouldStop() check. Using isCancelled()
-                // (not shouldStop()) so a real PAUSE still routes to commitPause.
+                // phase-loop iteration's cancel check — without this, the pause
+                // gate below would commit a pause for a cancelled discussion.
                 {
                     var cancelToken = activeTokens.get(gc.getId());
                     if (cancelToken != null && cancelToken.isCancelled()) {
@@ -512,10 +515,10 @@ public class GroupConversationService implements IGroupConversationService {
             var hitlConfig = config.getHitlConfig();
             gc.setHitlTimeoutPolicy(hitlConfig.getTimeoutPolicy() != null
                     ? hitlConfig.getTimeoutPolicy().name()
-                    : AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY.name());
+                    : HitlTimeoutPolicy.WAIT_INDEFINITELY.name());
             gc.setHitlApprovalTimeout(hitlConfig.getApprovalTimeout());
         } else {
-            gc.setHitlTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY.name());
+            gc.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY.name());
         }
         conversationStore.update(gc);
 
@@ -577,7 +580,7 @@ public class GroupConversationService implements IGroupConversationService {
             String policy = gc.getHitlTimeoutPolicy();
             if (timeoutStr == null || timeoutStr.isBlank()
                     || policy == null
-                    || AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY.name().equals(policy)) {
+                    || HitlTimeoutPolicy.WAIT_INDEFINITELY.name().equals(policy)) {
                 return;
             }
 
@@ -946,7 +949,7 @@ public class GroupConversationService implements IGroupConversationService {
         // Resolve HITL TASK-level flag locally (not available from executeDiscussion
         // scope)
         boolean taskLevelHitl = config.getHitlConfig() != null
-                && config.getHitlConfig().getGranularity() == AgentGroupConfiguration.HitlGranularity.TASK;
+                && config.getHitlConfig().getGranularity() == HitlGranularity.TASK;
 
         // Note: unlike executeParallelPhase, no transcript snapshot is needed here
         // because agents receive task-specific input via buildTaskExecutionInput(),
@@ -962,7 +965,7 @@ public class GroupConversationService implements IGroupConversationService {
         for (int wave = 0; wave < maxWaves; wave++) {
             // NEW-3: Check control token at top of wave loop
             var token = activeTokens.get(gc.getId());
-            if (token != null && token.shouldStop()) {
+            if (token != null && token.isCancelled()) {
                 LOGGER.infof("EXECUTE wave loop cancelled via control token at wave %d", wave);
                 break;
             }
@@ -2353,7 +2356,7 @@ public class GroupConversationService implements IGroupConversationService {
             if (resId != null) {
                 var config = groupStore.read(gc.getGroupId(), resId.getVersion());
                 if (config.getHitlConfig() != null) {
-                    retryOnReject = config.getHitlConfig().getOnTaskRejection() == AgentGroupConfiguration.HitlRejectionPolicy.RETRY;
+                    retryOnReject = config.getHitlConfig().getOnTaskRejection() == HitlRejectionPolicy.RETRY;
                 }
             }
         } catch (Exception e) {
@@ -2467,6 +2470,15 @@ public class GroupConversationService implements IGroupConversationService {
         deleteGroupHitlTimeoutSchedule(groupConversationId);
         counterGroupHitlResume.increment();
         auditHitlDecision(gc, decision);
+
+        // The resume is committed — tell SSE subscribers the discussion is live
+        // again (the stream stays open for the resumed discussion's events).
+        if (listener != null) {
+            listener.onHitlResume(new GroupConversationEventSink.HitlResumeEvent(
+                    decision != null && decision.getVerdict() != null ? decision.getVerdict().name() : "APPROVED",
+                    decision != null ? decision.getNote() : null,
+                    decision != null ? decision.getDecidedBy() : null));
+        }
 
         // Resume execution in background thread
         var groupId = gc.getGroupId();
@@ -2613,7 +2625,7 @@ public class GroupConversationService implements IGroupConversationService {
             if (config != null && config.getHitlConfig() != null) {
                 gc.setHitlTimeoutPolicy(config.getHitlConfig().getTimeoutPolicy() != null
                         ? config.getHitlConfig().getTimeoutPolicy().name()
-                        : AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY.name());
+                        : HitlTimeoutPolicy.WAIT_INDEFINITELY.name());
                 gc.setHitlApprovalTimeout(config.getHitlConfig().getApprovalTimeout());
             }
             conversationStore.updateIfState(gc, GroupConversationState.IN_PROGRESS);

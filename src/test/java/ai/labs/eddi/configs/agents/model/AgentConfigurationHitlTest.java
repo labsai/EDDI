@@ -4,7 +4,7 @@
 package ai.labs.eddi.configs.agents.model;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.HitlConfig;
-import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -37,7 +37,7 @@ class AgentConfigurationHitlTest {
         @Test
         @DisplayName("timeoutPolicy defaults to 'WAIT_INDEFINITELY'")
         void timeoutPolicyDefault() {
-            assertEquals(AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY, config.getTimeoutPolicy());
+            assertEquals(HitlTimeoutPolicy.WAIT_INDEFINITELY, config.getTimeoutPolicy());
         }
     }
 
@@ -64,8 +64,8 @@ class AgentConfigurationHitlTest {
         @Test
         @DisplayName("timeoutPolicy round-trip")
         void timeoutPolicy() {
-            config.setTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_APPROVE);
-            assertEquals(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_APPROVE, config.getTimeoutPolicy());
+            config.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_APPROVE);
+            assertEquals(HitlTimeoutPolicy.AUTO_APPROVE, config.getTimeoutPolicy());
         }
 
         @Test
@@ -101,13 +101,13 @@ class AgentConfigurationHitlTest {
         void roundTrip() {
             HitlConfig config = new HitlConfig();
             config.setApprovalTimeout("PT30S");
-            config.setTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_REJECT);
+            config.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
 
             agentConfig.setHitlConfig(config);
 
             assertNotNull(agentConfig.getHitlConfig());
             assertEquals("PT30S", agentConfig.getHitlConfig().getApprovalTimeout());
-            assertEquals(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_REJECT, agentConfig.getHitlConfig().getTimeoutPolicy());
+            assertEquals(HitlTimeoutPolicy.AUTO_REJECT, agentConfig.getHitlConfig().getTimeoutPolicy());
         }
 
         @Test

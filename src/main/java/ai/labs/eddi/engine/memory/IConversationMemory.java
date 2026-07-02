@@ -175,7 +175,10 @@ public interface IConversationMemory extends Serializable {
     default void setHitlPauseReason(String reason) {
     }
 
-    /** Timeout policy (e.g. "auto_approve", "auto_reject", "expire"). */
+    /**
+     * Timeout policy — a {@code HitlTimeoutPolicy} enum name: WAIT_INDEFINITELY,
+     * AUTO_APPROVE, AUTO_REJECT, or ABORT.
+     */
     default String getHitlTimeoutPolicy() {
         return null;
     }

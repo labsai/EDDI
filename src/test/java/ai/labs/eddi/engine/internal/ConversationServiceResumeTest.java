@@ -6,7 +6,7 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
-import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
@@ -377,7 +377,7 @@ class ConversationServiceResumeTest {
         void rePauseCreatesScheduleWithMetadata() throws Exception {
             var hitlConfig = new AgentConfiguration.HitlConfig();
             hitlConfig.setApprovalTimeout("PT30S");
-            hitlConfig.setTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_REJECT);
+            hitlConfig.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
 
             resumeWithRePause(hitlConfig);
 
@@ -408,7 +408,7 @@ class ConversationServiceResumeTest {
         void waitIndefinitely_noScheduleCreated() throws Exception {
             var hitlConfig = new AgentConfiguration.HitlConfig();
             hitlConfig.setApprovalTimeout("PT30S");
-            hitlConfig.setTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY);
+            hitlConfig.setTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
 
             resumeWithRePause(hitlConfig);
 
@@ -420,7 +420,7 @@ class ConversationServiceResumeTest {
         void nullTimeout_noScheduleCreated() throws Exception {
             var hitlConfig = new AgentConfiguration.HitlConfig();
             // approvalTimeout is null by default
-            hitlConfig.setTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_REJECT);
+            hitlConfig.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
 
             resumeWithRePause(hitlConfig);
 

@@ -131,6 +131,8 @@ public interface IGroupConversationService {
         }
         default void onHitlPause(GroupConversationEventSink.HitlPauseEvent event) {
         }
+        default void onHitlResume(GroupConversationEventSink.HitlResumeEvent event) {
+        }
         default void onCancelled(GroupConversationEventSink.CancelledEvent event) {
         }
     }

@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
-import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;

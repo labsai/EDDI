@@ -2,7 +2,7 @@
  * Copyright EDDI contributors
  * SPDX-License-Identifier: Apache-2.0
  */
-package ai.labs.eddi.configs;
+package ai.labs.eddi.configs.hitl;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -28,7 +28,7 @@ public final class HitlConfigValidation {
         }
         validateApprovalTimeout(hitlConfig.getApprovalTimeout(),
                 hitlConfig.getTimeoutPolicy() != null
-                        && hitlConfig.getTimeoutPolicy() != AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY);
+                        && hitlConfig.getTimeoutPolicy() != HitlTimeoutPolicy.WAIT_INDEFINITELY);
     }
 
     /** Validates the group-level HITL config; no-op when absent. */
@@ -38,7 +38,7 @@ public final class HitlConfigValidation {
         }
         validateApprovalTimeout(hitlConfig.getApprovalTimeout(),
                 hitlConfig.getTimeoutPolicy() != null
-                        && hitlConfig.getTimeoutPolicy() != AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY);
+                        && hitlConfig.getTimeoutPolicy() != HitlTimeoutPolicy.WAIT_INDEFINITELY);
     }
 
     private static void validateApprovalTimeout(String approvalTimeout, boolean finitePolicy) {

@@ -385,6 +385,13 @@ public class RestGroupConversation implements IRestGroupConversation {
             }
 
             @Override
+            public void onHitlResume(GroupConversationEventSink.HitlResumeEvent event) {
+                // Deliberately does NOT close — the stream continues with the
+                // resumed discussion's phase/speaker events.
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_HITL_RESUME, toJson(event));
+            }
+
+            @Override
             public void onCancelled(GroupConversationEventSink.CancelledEvent event) {
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_CANCELLED, toJson(event));
                 closeQuietly(eventSink);

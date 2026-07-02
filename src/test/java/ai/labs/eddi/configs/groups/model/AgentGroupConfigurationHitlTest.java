@@ -4,6 +4,8 @@
 package ai.labs.eddi.configs.groups.model;
 
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.HitlConfig;
+import ai.labs.eddi.configs.hitl.HitlGranularity;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -36,13 +38,13 @@ class AgentGroupConfigurationHitlTest {
         @Test
         @DisplayName("timeoutPolicy defaults to 'WAIT_INDEFINITELY'")
         void timeoutPolicyDefault() {
-            assertEquals(AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY, config.getTimeoutPolicy());
+            assertEquals(HitlTimeoutPolicy.WAIT_INDEFINITELY, config.getTimeoutPolicy());
         }
 
         @Test
         @DisplayName("granularity defaults to 'PHASE'")
         void granularityDefault() {
-            assertEquals(AgentGroupConfiguration.HitlGranularity.PHASE, config.getGranularity());
+            assertEquals(HitlGranularity.PHASE, config.getGranularity());
         }
     }
 
@@ -69,15 +71,15 @@ class AgentGroupConfigurationHitlTest {
         @Test
         @DisplayName("timeoutPolicy round-trip")
         void timeoutPolicy() {
-            config.setTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_APPROVE);
-            assertEquals(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_APPROVE, config.getTimeoutPolicy());
+            config.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_APPROVE);
+            assertEquals(HitlTimeoutPolicy.AUTO_APPROVE, config.getTimeoutPolicy());
         }
 
         @Test
         @DisplayName("granularity round-trip")
         void granularity() {
-            config.setGranularity(AgentGroupConfiguration.HitlGranularity.TASK);
-            assertEquals(AgentGroupConfiguration.HitlGranularity.TASK, config.getGranularity());
+            config.setGranularity(HitlGranularity.TASK);
+            assertEquals(HitlGranularity.TASK, config.getGranularity());
         }
 
         @Test
@@ -91,9 +93,9 @@ class AgentGroupConfigurationHitlTest {
         @Test
         @DisplayName("granularity can be changed from PHASE to TASK")
         void granularityChange() {
-            assertEquals(AgentGroupConfiguration.HitlGranularity.PHASE, config.getGranularity());
-            config.setGranularity(AgentGroupConfiguration.HitlGranularity.TASK);
-            assertEquals(AgentGroupConfiguration.HitlGranularity.TASK, config.getGranularity());
+            assertEquals(HitlGranularity.PHASE, config.getGranularity());
+            config.setGranularity(HitlGranularity.TASK);
+            assertEquals(HitlGranularity.TASK, config.getGranularity());
         }
     }
 
@@ -121,15 +123,15 @@ class AgentGroupConfigurationHitlTest {
         void roundTrip() {
             HitlConfig config = new HitlConfig();
             config.setApprovalTimeout("PT5M");
-            config.setTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_REJECT);
-            config.setGranularity(AgentGroupConfiguration.HitlGranularity.TASK);
+            config.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
+            config.setGranularity(HitlGranularity.TASK);
 
             groupConfig.setHitlConfig(config);
 
             assertNotNull(groupConfig.getHitlConfig());
             assertEquals("PT5M", groupConfig.getHitlConfig().getApprovalTimeout());
-            assertEquals(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_REJECT, groupConfig.getHitlConfig().getTimeoutPolicy());
-            assertEquals(AgentGroupConfiguration.HitlGranularity.TASK, groupConfig.getHitlConfig().getGranularity());
+            assertEquals(HitlTimeoutPolicy.AUTO_REJECT, groupConfig.getHitlConfig().getTimeoutPolicy());
+            assertEquals(HitlGranularity.TASK, groupConfig.getHitlConfig().getGranularity());
         }
 
         @Test

@@ -6,7 +6,7 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
-import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
@@ -1248,7 +1248,7 @@ public class ConversationService implements IConversationService {
      */
     private void populateHitlTimeoutBookmark(IConversationMemory memory) {
         try {
-            memory.setHitlTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY.name());
+            memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY.name());
             AgentConfiguration agentConfig = readAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
             if (agentConfig == null)
                 return;
@@ -1312,7 +1312,7 @@ public class ConversationService implements IConversationService {
             String timeoutStr = memory.getHitlApprovalTimeout();
             String policyName = memory.getHitlTimeoutPolicy();
             if (timeoutStr == null || timeoutStr.isBlank() || policyName == null
-                    || AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY.name().equals(policyName)) {
+                    || HitlTimeoutPolicy.WAIT_INDEFINITELY.name().equals(policyName)) {
                 return;
             }
 
