@@ -392,19 +392,27 @@ class GroupConversationServiceHitlTest {
             doReturn(config).when(groupStore).read(GROUP_ID, 1);
             stubAgentSay();
 
+            // Capture pausedTurnCount at the SYNCHRONOUS resume CAS — this is where
+            // resume's clear-pause block runs, and it must preserve pausedTurnCount so
+            // executeDiscussion can seed turnCounter from it (M3). Capturing here (not
+            // on the live gc after return) removes the race with the async discussion
+            // completing and resetting pausedTurnCount to 0.
+            var capturedTurnCount = new java.util.concurrent.atomic.AtomicInteger(-1);
+            doAnswer(inv -> {
+                GroupConversation g = inv.getArgument(0);
+                capturedTurnCount.compareAndSet(-1, g.getPausedTurnCount());
+                return null;
+            }).when(conversationStore).updateIfState(any(), eq(GroupConversationState.AWAITING_APPROVAL));
+
             var request = new GroupApprovalRequest();
             var decision = new HitlDecision();
             decision.setVerdict(HitlVerdict.APPROVED);
             request.setDecision(decision);
 
-            GroupConversation result = service.resumeDiscussion("gc-turn", request, null);
+            service.resumeDiscussion("gc-turn", request, null);
 
-            // The pausedTurnCount should NOT be cleared during resume — it seeds
-            // the turnCounter in executeDiscussion (M3 fix). We verify the GC
-            // still has the original pausedTurnCount value (it's only cleared
-            // on successful COMPLETED state).
-            assertEquals(10, gc.getPausedTurnCount(),
-                    "pausedTurnCount should be preserved for turnCounter seeding (M3)");
+            assertEquals(10, capturedTurnCount.get(),
+                    "pausedTurnCount must survive resume's clear-pause block to seed turnCounter (M3)");
         }
     }
 

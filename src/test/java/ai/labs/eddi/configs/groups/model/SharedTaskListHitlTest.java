@@ -14,7 +14,8 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Unit tests for the HITL (Human-in-the-Loop) lifecycle methods on
  * {@link SharedTaskList}: {@code submitForApproval}, {@code approveTask},
- * {@code rejectTask}, {@code resetToAssigned}, and {@code hasAwaitingApproval}.
+ * {@code rejectTask}, {@code resetToAssigned}, {@code resetFromAnyToAssigned},
+ * and {@code hasAwaitingApproval}.
  */
 class SharedTaskListHitlTest {
 
@@ -219,6 +220,107 @@ class SharedTaskListHitlTest {
 
             assertThrows(IllegalStateException.class,
                     () -> list.resetToAssigned(task.id()));
+        }
+    }
+
+    // =========================================================================
+    // resetFromAnyToAssigned (RETRY re-queue)
+    // =========================================================================
+
+    @Nested
+    @DisplayName("resetFromAnyToAssigned")
+    class ResetFromAnyToAssigned {
+
+        @Test
+        @DisplayName("AWAITING_APPROVAL → ASSIGNED: result cleared, feedback stored, verified reset")
+        void fromAwaitingApproval() {
+            var task = list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
+            list.assignTask(task.id(), "agent-1", "Agent One");
+            list.startTask(task.id());
+            list.submitForApproval(task.id(), "Draft v1");
+
+            var reset = list.resetFromAnyToAssigned(task.id(), "Please add sources");
+
+            assertEquals(SharedTaskList.TaskStatus.ASSIGNED, reset.status());
+            assertEquals("agent-1", reset.assignedAgentId(), "Assignment must be preserved for the retry");
+            assertNull(reset.result(), "Prior result must be cleared before re-execution");
+            assertEquals("Please add sources", reset.verificationNote(),
+                    "Reviewer feedback must be stored so the agent knows what to fix");
+            assertFalse(reset.verified(), "verified flag must be reset");
+            assertNull(reset.completedAt(), "completedAt must be cleared");
+        }
+
+        @Test
+        @DisplayName("IN_PROGRESS → ASSIGNED")
+        void fromInProgress() {
+            var task = list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
+            list.assignTask(task.id(), "agent-1", "Agent One");
+            list.startTask(task.id());
+
+            var reset = list.resetFromAnyToAssigned(task.id(), "retry");
+
+            assertEquals(SharedTaskList.TaskStatus.ASSIGNED, reset.status());
+            assertEquals("retry", reset.verificationNote());
+        }
+
+        @Test
+        @DisplayName("FAILED → ASSIGNED")
+        void fromFailed() {
+            var task = list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
+            list.assignTask(task.id(), "agent-1", "Agent One");
+            list.startTask(task.id());
+            list.failTask(task.id(), "boom");
+
+            var reset = list.resetFromAnyToAssigned(task.id(), "try again");
+
+            assertEquals(SharedTaskList.TaskStatus.ASSIGNED, reset.status());
+            assertEquals("try again", reset.verificationNote());
+        }
+
+        @Test
+        @DisplayName("ASSIGNED is a no-op — returns the task unchanged")
+        void fromAssignedIsNoOp() {
+            var task = list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
+            list.assignTask(task.id(), "agent-1", "Agent One");
+
+            var reset = list.resetFromAnyToAssigned(task.id(), "ignored feedback");
+
+            assertEquals(SharedTaskList.TaskStatus.ASSIGNED, reset.status());
+            assertNull(reset.verificationNote(), "No-op must not overwrite state with reviewer feedback");
+        }
+
+        @Test
+        @DisplayName("throws IllegalStateException from PENDING")
+        void fromPending() {
+            var task = list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
+
+            assertThrows(IllegalStateException.class,
+                    () -> list.resetFromAnyToAssigned(task.id(), "feedback"));
+        }
+
+        @Test
+        @DisplayName("throws IllegalStateException from COMPLETED")
+        void fromCompleted() {
+            var task = list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
+            list.assignTask(task.id(), "agent-1", "Agent One");
+            list.startTask(task.id());
+            list.completeTask(task.id(), "done");
+
+            assertThrows(IllegalStateException.class,
+                    () -> list.resetFromAnyToAssigned(task.id(), "feedback"));
+        }
+
+        @Test
+        @DisplayName("throws IllegalStateException from VERIFIED")
+        void fromVerified() {
+            var task = list.addTask(new SharedTaskList.TaskItem("Task", "desc", 0));
+            list.assignTask(task.id(), "agent-1", "Agent One");
+            list.startTask(task.id());
+            list.completeTask(task.id(), "done");
+            list.verifyTask(task.id(), true, "ok");
+
+            assertThrows(IllegalStateException.class,
+                    () -> list.resetFromAnyToAssigned(task.id(), "feedback"));
         }
     }
 

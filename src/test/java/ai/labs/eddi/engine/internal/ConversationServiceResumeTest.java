@@ -540,6 +540,39 @@ class ConversationServiceResumeTest {
             // timeout→restore→re-arm forever against a missing agent)
             verify(scheduleStore, never()).createSchedule(any());
         }
+
+        @Test
+        @DisplayName("unexpected RuntimeException from continueConversation → pause RESTORED, wrapped as ResourceStoreException (not stuck IN_PROGRESS)")
+        void continueConversationThrowsRuntimeException_restoresPause() throws Exception {
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
+
+            var snapshot = createResumeSnapshot();
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            IAgent agent = mock(IAgent.class);
+            doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+            // An unexpected unchecked failure in the window between the CAS and
+            // submitInOrder — must not escape raw or leave the conversation stuck.
+            doThrow(new RuntimeException("boom from continueConversation"))
+                    .when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+
+            // Wrapped as a store failure (500), not leaked as a raw RuntimeException.
+            assertThrows(ResourceStoreException.class,
+                    () -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
+
+            // The pending approval survives: pause restored via CAS, never ERROR, and
+            // the resume was never submitted (the failure happened before submit).
+            verify(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
+            verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+            verify(conversationCoordinator, never()).submitInOrder(eq(CONVERSATION_ID), any());
+        }
     }
 
     // =========================================================================

@@ -43,7 +43,7 @@ class ConversationMemoryUtilitiesHitlTest {
             memory.setHitlPausedAbsoluteTaskIndex(3);
             memory.setHitlPausedAt(pausedAt);
             memory.setHitlPauseReason("Needs review");
-            memory.setHitlTimeoutPolicy("FAIL_TASK");
+            memory.setHitlTimeoutPolicy("AUTO_REJECT");
             memory.setHitlApprovalTimeout("PT15M");
 
             // Must have at least one step with data for conversion to work
@@ -55,7 +55,7 @@ class ConversationMemoryUtilitiesHitlTest {
             assertEquals(3, snapshot.getHitlPausedAbsoluteTaskIndex());
             assertEquals(pausedAt, snapshot.getHitlPausedAt());
             assertEquals("Needs review", snapshot.getHitlPauseReason());
-            assertEquals("FAIL_TASK", snapshot.getHitlTimeoutPolicy());
+            assertEquals("AUTO_REJECT", snapshot.getHitlTimeoutPolicy());
             assertEquals("PT15M", snapshot.getHitlApprovalTimeout());
         }
 
@@ -94,7 +94,7 @@ class ConversationMemoryUtilitiesHitlTest {
             snapshot.setHitlPausedAbsoluteTaskIndex(5);
             snapshot.setHitlPausedAt(pausedAt);
             snapshot.setHitlPauseReason("Approval required");
-            snapshot.setHitlTimeoutPolicy("SKIP_TASK");
+            snapshot.setHitlTimeoutPolicy("AUTO_APPROVE");
             snapshot.setHitlApprovalTimeout("PT1H");
 
             var restored = ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot);
@@ -103,7 +103,7 @@ class ConversationMemoryUtilitiesHitlTest {
             assertEquals(5, restored.getHitlPausedAbsoluteTaskIndex());
             assertEquals(pausedAt, restored.getHitlPausedAt());
             assertEquals("Approval required", restored.getHitlPauseReason());
-            assertEquals("SKIP_TASK", restored.getHitlTimeoutPolicy());
+            assertEquals("AUTO_APPROVE", restored.getHitlTimeoutPolicy());
             assertEquals("PT1H", restored.getHitlApprovalTimeout());
         }
 
@@ -142,7 +142,7 @@ class ConversationMemoryUtilitiesHitlTest {
             snapshot.setHitlPausedAbsoluteTaskIndex(9);
             snapshot.setHitlPausedAt(pausedAt);
             snapshot.setHitlPauseReason("Sensitive action");
-            snapshot.setHitlTimeoutPolicy("ESCALATE");
+            snapshot.setHitlTimeoutPolicy("WAIT_INDEFINITELY");
             snapshot.setHitlApprovalTimeout("PT2H");
 
             var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(

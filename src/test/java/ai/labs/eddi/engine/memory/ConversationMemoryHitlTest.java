@@ -110,8 +110,8 @@ class ConversationMemoryHitlTest {
         @Test
         @DisplayName("hitlTimeoutPolicy round-trip")
         void timeoutPolicy() {
-            memory.setHitlTimeoutPolicy("FAIL_TASK");
-            assertEquals("FAIL_TASK", memory.getHitlTimeoutPolicy());
+            memory.setHitlTimeoutPolicy("AUTO_REJECT");
+            assertEquals("AUTO_REJECT", memory.getHitlTimeoutPolicy());
         }
 
         @Test
