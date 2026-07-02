@@ -703,12 +703,14 @@ Behavior rules within a group ALL fire if their conditions match. Rules with onl
 
 #### Quick reply expressions must be unique identifiers
 
-Do NOT reuse system action names (like `CONVERSATION_START`) as quick reply expressions. Use dedicated identifiers:
+Do NOT reuse system action names as quick reply expressions. The reserved actions are `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`, and `PAUSE_CONVERSATION` (the HITL human-approval gate — see [`docs/hitl.md`](docs/hitl.md)). Use dedicated identifiers:
 
 ```
 ❌ WRONG:  "expressions" : "CONVERSATION_START"   (system action name)
 ✅ RIGHT:  "expressions" : "get_started"           (dedicated identifier)
 ```
+
+> **HITL**: a behavior rule that emits `PAUSE_CONVERSATION` pauses the conversation (`AWAITING_HUMAN`) until a human approves or rejects via `POST /agents/{conversationId}/resume`. Timeout behavior is configured via `hitlConfig` on the agent. Full reference: [`docs/hitl.md`](docs/hitl.md).
 
 #### `actionmatcher` comma-separated values = AND (contiguous sublist), NOT OR
 

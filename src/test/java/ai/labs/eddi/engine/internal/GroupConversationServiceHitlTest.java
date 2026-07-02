@@ -74,6 +74,8 @@ class GroupConversationServiceHitlTest {
     private IAgentStore agentStore;
     @Mock
     private NonceCacheService nonceCacheService;
+    @Mock
+    private IScheduleStore scheduleStore;
 
     private GroupConversationService service;
 
@@ -91,7 +93,7 @@ class GroupConversationServiceHitlTest {
                 groupStore, conversationStore, conversationService,
                 agentFactory, templatingEngine, jsonSerialization,
                 new SimpleMeterRegistry(), agentSigningService, agentStore,
-                mock(IScheduleStore.class), nonceCacheService, null, DEFAULT_TENANT, MAX_DEPTH);
+                scheduleStore, nonceCacheService, null, DEFAULT_TENANT, MAX_DEPTH);
     }
 
     // =================================================================
@@ -709,15 +711,15 @@ class GroupConversationServiceHitlTest {
             discussThread.join(10_000);
             assertFalse(discussThread.isAlive(), "discuss() should have finished");
 
+            // R2 fail-on-revert: discuss() must RETURN a CANCELLED gc — an
+            // exception means the cancel was routed to FAILED/error, which is
+            // exactly the regression this test protects against.
             var gc = resultHolder.get();
-            // Should be CANCELLED, not FAILED or COMPLETED
-            if (gc != null) {
-                assertEquals(GroupConversationState.CANCELLED, gc.getState(),
-                        "In-flight GRACEFUL cancel should result in CANCELLED state");
-            } else {
-                // If discuss threw, it should be because of cancel
-                assertNotNull(exHolder.get(), "Either result or exception should be set");
+            if (gc == null) {
+                fail("discuss() threw instead of returning a CANCELLED conversation: " + exHolder.get());
             }
+            assertEquals(GroupConversationState.CANCELLED, gc.getState(),
+                    "In-flight GRACEFUL cancel should result in CANCELLED state");
         }
         @Test
         @DisplayName("IMMEDIATE cancel during EXECUTE phase → CANCELLED (exercises allOf/CancellationException)")
@@ -806,14 +808,105 @@ class GroupConversationServiceHitlTest {
             discussThread.join(10_000);
             assertFalse(discussThread.isAlive(), "discuss() should have finished");
 
+            // R2 fail-on-revert: reverting the CancellationException routing makes
+            // discuss() throw (FAILED path) — this test must fail loudly then,
+            // not slip through an "either result or exception" escape hatch.
             var gc = resultHolder.get();
-            if (gc != null) {
-                // R2: CANCEL_IMMEDIATE via EXECUTE phase must be CANCELLED, not FAILED
-                assertEquals(GroupConversationState.CANCELLED, gc.getState(),
-                        "IMMEDIATE cancel during EXECUTE phase should result in CANCELLED (not FAILED)");
-            } else {
-                assertNotNull(exHolder.get(), "Either result or exception should be set");
+            if (gc == null) {
+                fail("discuss() threw instead of returning a CANCELLED conversation: " + exHolder.get());
             }
+            // R2: CANCEL_IMMEDIATE via EXECUTE phase must be CANCELLED, not FAILED
+            assertEquals(GroupConversationState.CANCELLED, gc.getState(),
+                    "IMMEDIATE cancel during EXECUTE phase should result in CANCELLED (not FAILED)");
+        }
+
+        @Test
+        @DisplayName("R1: cancel racing a requiresApproval phase → CANCELLED, pause NEVER committed")
+        void cancelDuringApprovalGatedPhase() throws Exception {
+            // The exact interleaving R1 fixed: a cancel lands while a
+            // requiresApproval=true phase is executing. Without the isCancelled()
+            // guard before the HITL gate, the cancel is swallowed and commitPause
+            // parks the discussion in AWAITING_APPROVAL (and arms a timeout) —
+            // the opposite of what the user asked for.
+            var phases = List.of(
+                    new DiscussionPhase("Gated", PhaseType.OPINION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL,
+                            false, null, 1, true)); // requiresApproval = true
+
+            var config = buildConfig(phases);
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+
+            doAnswer(inv -> {
+                GroupConversation gcArg = inv.getArgument(0);
+                gcArg.setId("gc-r1");
+                return "gc-r1";
+            }).when(conversationStore).create(any());
+
+            doReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class))
+                    .when(agentFactory).getLatestReadyAgent(any(), eq(AGENT_A));
+
+            var convResult = new IConversationService.ConversationResult("conv-r1", null);
+            doReturn(convResult).when(conversationService).startConversation(any(), any(), any(), any());
+
+            var agentBlocked = new java.util.concurrent.CountDownLatch(1);
+            var cancelFired = new java.util.concurrent.CountDownLatch(1);
+
+            doAnswer(inv -> {
+                agentBlocked.countDown();
+                cancelFired.await(5, java.util.concurrent.TimeUnit.SECONDS);
+
+                var snapshot = new SimpleConversationMemorySnapshot();
+                var output = new ConversationOutput();
+                output.put("output", List.of("Opinion delivered"));
+                snapshot.setConversationOutputs(new ArrayList<>(List.of(output)));
+
+                IConversationService.ConversationResponseHandler handler = inv.getArgument(8);
+                if (handler != null) {
+                    handler.onComplete(snapshot);
+                }
+                return null;
+            }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+
+            var resultHolder = new java.util.concurrent.atomic.AtomicReference<GroupConversation>();
+            var exHolder = new java.util.concurrent.atomic.AtomicReference<Exception>();
+
+            Thread discussThread = new Thread(() -> {
+                try {
+                    resultHolder.set(service.discuss(GROUP_ID, "Cancel during gated phase", USER_ID, 0));
+                } catch (Exception e) {
+                    exHolder.set(e);
+                    agentBlocked.countDown();
+                }
+            });
+            discussThread.start();
+
+            boolean started = agentBlocked.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            if (!started || exHolder.get() != null) {
+                discussThread.join(5_000);
+                fail("discuss() failed before reaching say(): "
+                        + (exHolder.get() != null ? exHolder.get().getMessage() : "latch timeout"));
+            }
+
+            // Cancel lands while the requiresApproval phase is mid-flight
+            service.cancelDiscussion("gc-r1",
+                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+            cancelFired.countDown();
+
+            discussThread.join(10_000);
+            assertFalse(discussThread.isAlive(), "discuss() should have finished");
+
+            var gc = resultHolder.get();
+            if (gc == null) {
+                fail("discuss() threw instead of returning a CANCELLED conversation: " + exHolder.get());
+            }
+            assertEquals(GroupConversationState.CANCELLED, gc.getState(),
+                    "cancel during a requiresApproval phase must CANCEL, not pause");
+            // commitPause must never have run: no pause metadata, no timeout schedule
+            assertNull(gc.getPausedAt(), "pause metadata must not be set after cancel");
+            assertEquals(-1, gc.getPausedAtPhaseIndex(), "no pause phase index after cancel");
+            verify(scheduleStore, never()).createSchedule(any());
         }
     }
 

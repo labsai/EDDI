@@ -121,9 +121,13 @@ class ConversationHitlTest {
         }
 
         @Test
-        @DisplayName("pause during say() skips postConversationLifecycleTasks — state stays AWAITING_HUMAN")
+        @DisplayName("pause during say() skips postConversationLifecycleTasks — step-scoped properties survive (Invariant 9)")
         void pauseSkipsPostTasks() throws Exception {
             memory.setConversationState(ConversationState.READY);
+            // A step-scoped property that postConversationLifecycleTasks would purge
+            memory.getConversationProperties().put("stepProp",
+                    new ai.labs.eddi.configs.properties.model.Property("stepProp", "value",
+                            ai.labs.eddi.configs.properties.model.Property.Scope.step));
 
             doThrow(new ConversationPauseException("wf1", 1, "human review"))
                     .when(lifecycleManager).executeLifecycle(any(), any());
@@ -131,10 +135,26 @@ class ConversationHitlTest {
             var conv = createConversation();
             conv.say("check this", Map.of());
 
-            // State should be AWAITING_HUMAN, NOT READY
-            // If postConversationLifecycleTasks ran, removeOldInvalidProperties would
-            // have cleared step-scoped properties. We verify via state:
             assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+            // Invariant 9, asserted behaviorally: removing the "if (!paused)" guard
+            // around postConversationLifecycleTasks purges this property mid-turn.
+            assertTrue(memory.getConversationProperties().containsKey("stepProp"),
+                    "step-scoped properties must survive a pause — post tasks must not run");
+        }
+
+        @Test
+        @DisplayName("normal (non-pause) turn DOES purge step-scoped properties — companion to Invariant 9")
+        void normalTurnPurgesStepProperties() throws Exception {
+            memory.setConversationState(ConversationState.READY);
+            memory.getConversationProperties().put("stepProp",
+                    new ai.labs.eddi.configs.properties.model.Property("stepProp", "value",
+                            ai.labs.eddi.configs.properties.model.Property.Scope.step));
+
+            var conv = createConversation();
+            conv.say("normal turn", Map.of());
+
+            assertFalse(memory.getConversationProperties().containsKey("stepProp"),
+                    "step-scoped properties are purged when the turn completes normally");
         }
     }
 
@@ -174,6 +194,47 @@ class ConversationHitlTest {
             assertEquals("looks good", step.getLatestData("hitl:decision_note").getResult());
             assertNotNull(step.getLatestData("hitl:decision_by"));
             assertEquals("admin", step.getLatestData("hitl:decision_by").getResult());
+        }
+
+        @Test
+        @DisplayName("resume strips the stale PAUSE_CONVERSATION action from step ACTIONS (Blocker #1 belt-and-braces)")
+        void resumeStripsStalePauseAction() throws Exception {
+            memory.setConversationState(ConversationState.AWAITING_HUMAN);
+            memory.setHitlPausedWorkflowId("wf1");
+            memory.setHitlPausedAbsoluteTaskIndex(1);
+            // The paused turn's actions (incl. PAUSE_CONVERSATION) are restored
+            // into the current step on resume — they must not survive re-entry.
+            memory.getCurrentStep().storeData(new ai.labs.eddi.engine.memory.model.Data<>(
+                    "actions", List.of("delete_account", IConversation.PAUSE_CONVERSATION)));
+
+            var conv = createConversation();
+            conv.resume(decision(HitlVerdict.APPROVED), Map.of());
+
+            var actionsData = memory.getCurrentStep().<List<String>>getLatestData("actions");
+            assertNotNull(actionsData);
+            assertFalse(actionsData.getResult().contains(IConversation.PAUSE_CONVERSATION),
+                    "stale PAUSE_CONVERSATION must be stripped before re-entering the pipeline");
+            assertTrue(actionsData.getResult().contains("delete_account"),
+                    "other actions must be preserved");
+        }
+
+        @Test
+        @DisplayName("resume exposes the decision to templates and next-turn behavior rules")
+        void resumeExposesDecisionToTemplates() throws Exception {
+            memory.setConversationState(ConversationState.AWAITING_HUMAN);
+            memory.setHitlPausedWorkflowId("wf1");
+            memory.setHitlPausedAbsoluteTaskIndex(0);
+
+            var conv = createConversation();
+            conv.resume(decision(HitlVerdict.APPROVED, "verified by phone", "supervisor"), Map.of());
+
+            // {{memory.current.hitlDecision}} — conversationOutput, not raw step data
+            var output = memory.getCurrentStep().getConversationOutput();
+            assertEquals("APPROVED", output.get("hitlDecision"));
+            assertEquals("verified by phone", output.get("hitlDecisionNote"));
+
+            // {properties.hitlVerdict} — conversation-scoped property for next-turn rules
+            assertTrue(memory.getConversationProperties().containsKey("hitlVerdict"));
         }
 
         @Test

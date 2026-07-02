@@ -150,14 +150,25 @@ class ConversationServiceResumeTest {
             doReturn(true).when(conversationMemoryStore).compareAndSetState(
                     CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
 
+            // B1 reality: the CAS has ALREADY flipped the stored document to
+            // IN_PROGRESS by the time the snapshot is loaded — the service must
+            // set the in-memory state back to AWAITING_HUMAN itself, or the real
+            // Conversation.resume() guard rejects the resume.
             var snapshot = createResumeSnapshot();
+            snapshot.setConversationState(ConversationState.IN_PROGRESS);
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
 
-            // Agent is deployed and returns a conversation mock
+            // Agent is deployed; capture the memory handed to continueConversation
+            // and record its state AT CALL TIME (post-B1-fix it must be AWAITING_HUMAN)
             IAgent agent = mock(IAgent.class);
             IConversation conversation = mock(IConversation.class);
             doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
-            doReturn(conversation).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+            var stateAtContinueTime = new java.util.concurrent.atomic.AtomicReference<ConversationState>();
+            doAnswer(inv -> {
+                IConversationMemory memoryArg = inv.getArgument(0);
+                stateAtContinueTime.set(memoryArg.getConversationState());
+                return conversation;
+            }).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
 
             // Capture the callable submitted to the coordinator so we can execute it
             // synchronously
@@ -175,7 +186,14 @@ class ConversationServiceResumeTest {
             verify(conversationMemoryStore).compareAndSetState(
                     CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
 
-            // Assert: cache was updated to IN_PROGRESS (line 852)
+            // B1 fail-on-revert: the memory built from the post-CAS (IN_PROGRESS)
+            // snapshot must have been reset to AWAITING_HUMAN before the
+            // Conversation was built — deleting the fix makes this assertion fail.
+            assertEquals(ConversationState.AWAITING_HUMAN, stateAtContinueTime.get(),
+                    "memory must be AWAITING_HUMAN when handed to continueConversation, "
+                            + "otherwise the real Conversation.resume() guard bricks the conversation");
+
+            // Assert: cache was updated to IN_PROGRESS
             verify(conversationStateCache).put(CONVERSATION_ID, ConversationState.IN_PROGRESS);
 
             // Assert: submitInOrder was called (the resume callable was submitted)
