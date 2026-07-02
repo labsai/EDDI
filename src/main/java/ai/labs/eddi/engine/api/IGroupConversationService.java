@@ -135,6 +135,8 @@ public interface IGroupConversationService {
         }
         default void onCancelled(GroupConversationEventSink.CancelledEvent event) {
         }
+        default void onMemberPauseSkipped(GroupConversationEventSink.MemberPauseSkippedEvent event) {
+        }
     }
 
     // --- Exceptions ---

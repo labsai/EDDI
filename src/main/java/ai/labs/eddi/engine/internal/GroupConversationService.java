@@ -110,6 +110,7 @@ public class GroupConversationService implements IGroupConversationService {
     private final Counter counterGroupFailure;
     private final Counter counterGroupHitlPause;
     private final Counter counterGroupHitlResume;
+    private final Counter counterGroupMemberPauseSkipped;
 
     @Inject
     public GroupConversationService(IAgentGroupStore groupStore, IGroupConversationStore conversationStore, IConversationService conversationService,
@@ -139,6 +140,7 @@ public class GroupConversationService implements IGroupConversationService {
         this.counterGroupFailure = meterRegistry.counter("eddi_group_discussion_failure_count");
         this.counterGroupHitlPause = meterRegistry.counter("eddi_hitl_pause_count", "surface", "group");
         this.counterGroupHitlResume = meterRegistry.counter("eddi_hitl_resume_count", "surface", "group");
+        this.counterGroupMemberPauseSkipped = meterRegistry.counter("eddi_group_member_pause_skipped_count");
     }
 
     @PreDestroy
@@ -393,6 +395,18 @@ public class GroupConversationService implements IGroupConversationService {
                         boolean awaiting = gc.getTaskList() != null && gc.getTaskList().hasAwaitingApproval();
                         boolean unfinished = gc.getTaskList() != null && !gc.getTaskList().findExecutableTasks().isEmpty();
                         if (awaiting || unfinished) {
+                            // #4: no-progress guard. A resume that re-pauses at the same
+                            // phase with an identical task-state fingerprint made zero
+                            // progress (exhausted turn budget leaving ASSIGNED tasks, or
+                            // ASSIGNED tasks whose agentId no longer resolves). Re-pausing
+                            // would loop forever — unbounded under AUTO_APPROVE. Fail
+                            // instead, which guarantees termination.
+                            String fingerprint = taskPauseFingerprint(gc, phaseIdx);
+                            if (fingerprint.equals(gc.getHitlLastPauseFingerprint())) {
+                                failDiscussionNoProgress(gc, phaseIdx, phase, listener);
+                                return gc;
+                            }
+                            gc.setHitlLastPauseFingerprint(fingerprint);
                             if (!awaiting) {
                                 LOGGER.warnf("EXECUTE phase %d of GC %s ended with executable task(s) left "
                                         + "(aborted wave) — pausing for human review instead of skipping them",
@@ -427,6 +441,7 @@ public class GroupConversationService implements IGroupConversationService {
             }
             gc.setState(GroupConversationState.COMPLETED);
             gc.setPausedTurnCount(0); // Clear turn budget state on successful completion
+            gc.setHitlLastPauseFingerprint(null); // #4: reset no-progress guard
             gc.setLastModified(Instant.now());
             conversationStore.update(gc);
 
@@ -529,6 +544,59 @@ public class GroupConversationService implements IGroupConversationService {
         if (listener != null) {
             listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(
                     phaseIdx, phase.name(), gc.getHitlPauseReason(), granularity));
+        }
+    }
+
+    /**
+     * Fingerprint of the task state at a TASK-granularity pause (#4). Captures the
+     * phase index plus every non-terminal task's id and status — deliberately NOT
+     * the turn count, so a resume that burns turns without advancing any task
+     * produces the SAME fingerprint and is detected as no-progress. Two pauses with
+     * equal fingerprints mean nothing changed between them.
+     */
+    private String taskPauseFingerprint(GroupConversation gc, int phaseIdx) {
+        var sb = new StringBuilder("phase=").append(phaseIdx).append(';');
+        if (gc.getTaskList() != null) {
+            gc.getTaskList().all().stream()
+                    .filter(t -> t.status() != SharedTaskList.TaskStatus.COMPLETED
+                            && t.status() != SharedTaskList.TaskStatus.VERIFIED
+                            && t.status() != SharedTaskList.TaskStatus.FAILED)
+                    .map(t -> t.id() + ":" + t.status())
+                    .sorted()
+                    .forEach(s -> sb.append(s).append(','));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Fails a TASK-granularity discussion that cannot make progress (#4): a resume
+     * re-paused at the same phase with an identical task-state fingerprint. Records
+     * an actionable transcript entry, fires a terminal SSE event, releases
+     * paused-state resources, and persists FAILED. Guarantees the
+     * pause→approve→pause loop terminates.
+     */
+    private void failDiscussionNoProgress(GroupConversation gc, int phaseIdx, DiscussionPhase phase,
+                                          GroupDiscussionEventListener listener)
+            throws IResourceStore.ResourceStoreException {
+        String msg = "Discussion failed: EXECUTE phase '" + phase.name() + "' cannot make progress — "
+                + "the same task(s) remained executable across an approval cycle without advancing "
+                + "(exhausted turn budget or tasks assigned to an agent that can no longer be resolved). "
+                + "Increase protocol.maxTurns, fix the task assignments, or cancel the discussion.";
+        LOGGER.warnf("No-progress TASK pause detected for GC %s at phase %d — failing to guarantee termination",
+                gc.getId(), phaseIdx);
+        gc.getTranscript().add(new TranscriptEntry(
+                "system", "System", null, phaseIdx, phase.name(),
+                TranscriptEntryType.ERROR, Instant.now(), msg, null));
+        gc.setState(GroupConversationState.FAILED);
+        gc.setPausedAt(null);
+        gc.setHitlLastPauseFingerprint(null);
+        gc.setLastModified(Instant.now());
+        conversationStore.update(gc);
+        counterGroupFailure.increment();
+        deleteGroupHitlTimeoutSchedule(gc.getId());
+        cleanupAfterTerminalState(gc);
+        if (listener != null) {
+            listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(msg));
         }
     }
 
@@ -882,7 +950,7 @@ public class GroupConversationService implements IGroupConversationService {
                 planInput = "Decompose this goal into tasks for your team: " + question;
             }
 
-            TranscriptEntry planEntry = executeAgentTurn(planner, gc, planInput, protocol, phaseIdx, phase, null);
+            TranscriptEntry planEntry = executeAgentTurn(planner, gc, planInput, protocol, phaseIdx, phase, null, listener);
             gc.getTranscript().add(planEntry);
 
             if (listener != null) {
@@ -1014,7 +1082,7 @@ public class GroupConversationService implements IGroupConversationService {
 
                             // Build task-specific input
                             String taskInput = buildTaskExecutionInput(task, question, phase, gc);
-                            TranscriptEntry entry = executeAgentTurn(member, gc, taskInput, protocol, phaseIdx, phase, null);
+                            TranscriptEntry entry = executeAgentTurn(member, gc, taskInput, protocol, phaseIdx, phase, null, listener);
 
                             synchronized (gc.getTranscript()) {
                                 gc.getTranscript().add(entry);
@@ -1206,7 +1274,7 @@ public class GroupConversationService implements IGroupConversationService {
             verifyInput = "Review the task results and provide pass/fail for each task.";
         }
 
-        TranscriptEntry verifyEntry = executeAgentTurn(verifier, gc, verifyInput, protocol, phaseIdx, phase, null);
+        TranscriptEntry verifyEntry = executeAgentTurn(verifier, gc, verifyInput, protocol, phaseIdx, phase, null, listener);
         gc.getTranscript().add(verifyEntry);
 
         if (listener != null) {
@@ -1455,7 +1523,7 @@ public class GroupConversationService implements IGroupConversationService {
                         new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
             }
             String input = buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, null);
-            TranscriptEntry entry = executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null);
+            TranscriptEntry entry = executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
             gc.getTranscript().add(entry);
             if (listener != null) {
                 listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(speaker.agentId(), speaker.displayName(),
@@ -1492,7 +1560,7 @@ public class GroupConversationService implements IGroupConversationService {
         List<CompletableFuture<TranscriptEntry>> futures = batchSpeakers.stream().map(speaker -> CompletableFuture.supplyAsync(() -> {
             try {
                 String input = buildPhaseInput(phase, speaker, question, snapshotTranscript, phaseIdx, null);
-                return executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null);
+                return executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
             } catch (GroupDiscussionException e) {
                 if (e.getCause() instanceof QuotaExceededException) {
                     throw new java.util.concurrent.CompletionException(e);
@@ -1569,7 +1637,7 @@ public class GroupConversationService implements IGroupConversationService {
                             new GroupConversationEventSink.SpeakerStartEvent(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name()));
                 }
                 String input = buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, target);
-                TranscriptEntry entry = executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, target.agentId());
+                TranscriptEntry entry = executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, target.agentId(), listener);
                 gc.getTranscript().add(entry);
                 if (listener != null) {
                     listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(speaker.agentId(), speaker.displayName(),
@@ -1584,7 +1652,7 @@ public class GroupConversationService implements IGroupConversationService {
     // =================================================================
 
     private TranscriptEntry executeAgentTurn(GroupMember member, GroupConversation gc, String input, ProtocolConfig protocol, int phaseIdx,
-                                             DiscussionPhase phase, String targetAgentId)
+                                             DiscussionPhase phase, String targetAgentId, GroupDiscussionEventListener listener)
             throws GroupDiscussionException {
 
         TranscriptEntryType entryType = mapPhaseToEntryType(phase.type());
@@ -1662,8 +1730,17 @@ public class GroupConversationService implements IGroupConversationService {
             try {
                 CompletableFuture<String> responseFuture = new CompletableFuture<>();
                 final String convId = privateConvId;
+                // #3: a member agent's own behavior rule may emit PAUSE_CONVERSATION,
+                // pausing its private conversation (AWAITING_HUMAN). Member-level HITL
+                // is not supported inside a group — flag it here and resolve it after
+                // the say callback returns, rather than recording an empty contribution.
+                final boolean[] memberPaused = {false};
 
                 conversationService.say(DEFAULT_ENV, member.agentId(), convId, true, true, null, inputData, false, snapshot -> {
+                    if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                        memberPaused[0] = true;
+                    }
+
                     String response = extractResponse(snapshot);
                     // When the agent pipeline fails (e.g. LLM unreachable), extractResponse
                     // returns empty because there are no output keys — only pipeline metadata.
@@ -1681,6 +1758,14 @@ public class GroupConversationService implements IGroupConversationService {
                 });
 
                 String response = responseFuture.get(timeout, TimeUnit.SECONDS);
+
+                // #3: member requested human approval mid-turn — cancel the stranded
+                // pause (disarms its timeout schedule and clears it from the regular
+                // pending-approvals surface so no human is left an unresolvable
+                // approval), record the turn SKIPPED, and tell observers why.
+                if (memberPaused[0]) {
+                    return handleMemberPause(member, gc, convId, phaseIdx, phase, targetAgentId, listener);
+                }
 
                 // Wave 6: Sign inter-agent messages with full envelope if configured
                 String signature = null;
@@ -1797,6 +1882,45 @@ public class GroupConversationService implements IGroupConversationService {
                 return handleAgentFailure(member, phaseIdx, phase, protocol, cause, "Agent execution failed", targetAgentId);
             }
         }
+    }
+
+    /**
+     * Explanatory note for a member turn skipped because the member agent's own
+     * conversation requested human approval — kept in one place so the transcript
+     * entry, the SSE event, and docs stay consistent.
+     */
+    private static final String MEMBER_PAUSE_NOTE = "member agent requested human approval (PAUSE_CONVERSATION) — not supported inside group "
+            + "discussions; configure group-level HITL via requiresApproval instead";
+
+    /**
+     * Resolves a member turn whose private conversation paused for human approval
+     * (#3). Member-level HITL is unsupported inside a group in v1: leaving the
+     * pause armed strands an approval no human can meaningfully resolve, and
+     * recording the empty snapshot as a real contribution poisons later phases. So
+     * we cancel the member's pause (disarming its timeout schedule and removing it
+     * from the regular pending-approvals surface), count a metric, notify
+     * observers, and return a SKIPPED entry with an actionable note.
+     */
+    private TranscriptEntry handleMemberPause(GroupMember member, GroupConversation gc, String convId,
+                                              int phaseIdx, DiscussionPhase phase, String targetAgentId,
+                                              GroupDiscussionEventListener listener) {
+        LOGGER.warnf("Member agent '%s' paused for human approval during group discussion %s (phase %d) — "
+                + "member-level HITL is unsupported inside a group; skipping the turn and cancelling the pause",
+                member.agentId(), gc.getId(), phaseIdx);
+        try {
+            conversationService.cancelConversation(convId,
+                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+        } catch (Exception e) {
+            // Best-effort — still record SKIPPED so the discussion terminates cleanly.
+            LOGGER.warnf("Failed to cancel stranded member pause %s: %s", convId, e.getMessage());
+        }
+        counterGroupMemberPauseSkipped.increment();
+        if (listener != null) {
+            listener.onMemberPauseSkipped(new GroupConversationEventSink.MemberPauseSkippedEvent(
+                    member.agentId(), member.displayName(), phaseIdx, phase.name(), MEMBER_PAUSE_NOTE));
+        }
+        return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(),
+                TranscriptEntryType.SKIPPED, Instant.now(), MEMBER_PAUSE_NOTE, targetAgentId);
     }
 
     // =================================================================
@@ -2431,6 +2555,24 @@ public class GroupConversationService implements IGroupConversationService {
             gc.getTaskList().all().stream()
                     .filter(t -> t.status() == SharedTaskList.TaskStatus.AWAITING_APPROVAL)
                     .forEach(t -> gc.getTaskList().approveTask(t.id()));
+        }
+
+        // #4: On an EXPLICIT HUMAN approval of a TASK pause, grant a fresh turn
+        // budget so the resume can actually drive the remaining executable tasks —
+        // the preserved budget (seeded from pausedTurnCount) may already be
+        // exhausted, which would otherwise re-pause immediately. AUTO_APPROVE
+        // (decidedBy "system:...") deliberately does NOT get a fresh budget: it
+        // must terminate via the no-progress fingerprint guard, never run
+        // unattended forever. If the fresh budget still yields no task progress,
+        // the fingerprint guard fails the discussion on the next pause.
+        boolean humanDecision = decision != null
+                && (decision.getDecidedBy() == null || !decision.getDecidedBy().startsWith("system:"));
+        if (humanDecision
+                && decision.getVerdict() == ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.APPROVED
+                && gc.getHitlPauseType() == GroupConversation.HitlPauseType.TASK
+                && gc.getPausedTurnCount() > 0) {
+            LOGGER.infof("Human approval of TASK pause for GC %s — granting a fresh turn budget", groupConversationId);
+            gc.setPausedTurnCount(0);
         }
 
         // Apply phase-level decision

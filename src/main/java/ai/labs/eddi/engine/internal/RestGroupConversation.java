@@ -234,7 +234,12 @@ public class RestGroupConversation implements IRestGroupConversation {
      * concatenation.
      */
     private void sendErrorEvent(SseEventSink eventSink, Sse sse, String message) {
-        sendEvent(eventSink, sse, "error", toJson(new GroupConversationEventSink.GroupErrorEvent(message)));
+        // The documented event set uses "group_error" for every application-level
+        // failure; a raw "error" name additionally collides with the browser
+        // EventSource's built-in transport-error event, so clients cannot tell an
+        // invalid approval body from a dropped connection (#36).
+        sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
+                toJson(new GroupConversationEventSink.GroupErrorEvent(message)));
     }
 
     @Override
@@ -395,6 +400,12 @@ public class RestGroupConversation implements IRestGroupConversation {
             public void onCancelled(GroupConversationEventSink.CancelledEvent event) {
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_CANCELLED, toJson(event));
                 closeQuietly(eventSink);
+            }
+
+            @Override
+            public void onMemberPauseSkipped(GroupConversationEventSink.MemberPauseSkippedEvent event) {
+                // Not terminal — the discussion continues past the skipped member.
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_MEMBER_PAUSE_SKIPPED, toJson(event));
             }
         };
     }

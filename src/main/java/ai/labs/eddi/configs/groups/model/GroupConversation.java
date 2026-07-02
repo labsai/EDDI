@@ -53,6 +53,14 @@ public class GroupConversation {
      * 6d).
      */
     private String hitlApprovalTimeout;
+    /**
+     * Fingerprint of the task state at the previous TASK-granularity pause (#4). A
+     * resume that re-pauses at the SAME phase with an identical fingerprint made no
+     * progress — the discussion is failed instead of re-pausing, guaranteeing
+     * termination of the pause→approve→pause loop. Null until the first TASK pause;
+     * cleared on successful completion.
+     */
+    private String hitlLastPauseFingerprint;
     private Instant created;
     private Instant lastModified;
 
@@ -384,5 +392,13 @@ public class GroupConversation {
 
     public void setHitlApprovalTimeout(String hitlApprovalTimeout) {
         this.hitlApprovalTimeout = hitlApprovalTimeout;
+    }
+
+    public String getHitlLastPauseFingerprint() {
+        return hitlLastPauseFingerprint;
+    }
+
+    public void setHitlLastPauseFingerprint(String hitlLastPauseFingerprint) {
+        this.hitlLastPauseFingerprint = hitlLastPauseFingerprint;
     }
 }
