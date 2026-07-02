@@ -77,8 +77,10 @@ public interface IRestGroupConversation {
     @POST
     @Path("/{groupConversationId}/cancel")
     @Consumes(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
     @Operation(summary = "Cancel a group discussion", description = "Cancels an in-progress group discussion.")
     @APIResponse(responseCode = "200", description = "Discussion cancelled.")
+    @APIResponse(responseCode = "404", description = "Group conversation not found.")
     Response cancelDiscussion(@PathParam("groupId") String groupId,
                               @PathParam("groupConversationId") String gcId);
 
@@ -86,10 +88,12 @@ public interface IRestGroupConversation {
     @Path("/{groupConversationId}/approve")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
     @Operation(summary = "Approve a paused group phase", description = "Resumes a paused group discussion after human approval.")
     @APIResponse(responseCode = "200", description = "Discussion resumed.")
+    @APIResponse(responseCode = "400", description = "Invalid decision body or taskApprovals.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
-    @APIResponse(responseCode = "409", description = "Concurrent modification conflict.")
+    @APIResponse(responseCode = "409", description = "Not awaiting approval / concurrent modification conflict.")
     Response approveGroupPhase(@PathParam("groupId") String groupId,
                                @PathParam("groupConversationId") String gcId,
                                GroupApprovalRequest request);
@@ -98,6 +102,7 @@ public interface IRestGroupConversation {
     @Path("/{groupConversationId}/approve/stream")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.SERVER_SENT_EVENTS)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
     @Operation(summary = "Approve a paused group phase with SSE streaming",
                description = "Resumes a paused group discussion and streams progress events via Server-Sent Events.")
     @APIResponse(responseCode = "200", description = "SSE event stream of resumed discussion progress.")
@@ -110,6 +115,7 @@ public interface IRestGroupConversation {
     @GET
     @Path("/{groupConversationId}/approval-status")
     @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
     @Operation(summary = "Get group approval status", description = "Returns the current approval status of a group conversation.")
     @APIResponse(responseCode = "200", description = "Approval status.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
@@ -125,14 +131,16 @@ public interface IRestGroupConversation {
     }
 
     /**
-     * List all group conversations across all groups that are currently awaiting
-     * human approval. Not scoped to a single group.
+     * List the group conversations of THIS group that are currently awaiting human
+     * approval. Visibility: admins and approvers see all of the group's pending
+     * items; other callers only their own conversations.
      */
     @GET
     @Path("/pending-approvals")
     @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
     @Operation(summary = "List pending HITL approvals",
-               description = "Lists all group conversations currently awaiting human approval across all groups.")
+               description = "Lists this group's conversations currently awaiting human approval.")
     @APIResponse(responseCode = "200", description = "List of pending approval group conversations.")
     List<GroupConversation> listGroupPendingApprovals(@PathParam("groupId") String groupId);
 }

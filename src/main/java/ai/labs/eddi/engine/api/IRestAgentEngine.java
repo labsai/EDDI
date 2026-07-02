@@ -184,9 +184,11 @@ public interface IRestAgentEngine {
 
     @POST
     @Path("/{conversationId}/cancel")
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
     @Operation(summary = "Cancel a conversation", description = "Gracefully cancels the conversation, stopping any in-progress processing.")
     @APIResponse(responseCode = "200", description = "Conversation cancelled.")
     @APIResponse(responseCode = "404", description = "Conversation not found.")
+    @APIResponse(responseCode = "409", description = "Nothing to cancel (conversation neither paused nor executing).")
     Response cancelConversation(@PathParam("conversationId") String conversationId);
 
     // --- HITL (Human-in-the-Loop) ---
@@ -194,9 +196,11 @@ public interface IRestAgentEngine {
     @POST
     @Path("/{conversationId}/resume")
     @Consumes(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
     @Operation(summary = "Resume a paused conversation",
                description = "Submits a human decision (APPROVED/REJECTED) to resume a conversation that is in AWAITING_HUMAN state.")
     @APIResponse(responseCode = "200", description = "Conversation resumed.")
+    @APIResponse(responseCode = "400", description = "Missing or invalid decision body.")
     @APIResponse(responseCode = "404", description = "Conversation not found.")
     @APIResponse(responseCode = "409", description = "Conversation is not in AWAITING_HUMAN state.")
     Response resumeConversation(@PathParam("conversationId") String conversationId,
@@ -206,6 +210,7 @@ public interface IRestAgentEngine {
     @NoCache
     @Path("/{conversationId}/approval-status")
     @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
     @Operation(summary = "Get HITL approval status",
                description = "Returns the approval status of a paused conversation. Use detail=full for the complete memory snapshot.")
     @APIResponse(responseCode = "200", description = "Approval status.")
@@ -218,6 +223,7 @@ public interface IRestAgentEngine {
     @NoCache
     @Path("/pending-approvals")
     @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
     @Operation(summary = "List pending approvals", description = "Lists all conversations currently awaiting human approval.")
     @APIResponse(responseCode = "200", description = "List of pending approvals.")
     List<PendingApprovalSummary> listPendingApprovals();

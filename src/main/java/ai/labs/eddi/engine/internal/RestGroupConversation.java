@@ -173,6 +173,9 @@ public class RestGroupConversation implements IRestGroupConversation {
         } catch (IGroupConversationService.GroupDiscussionException e) {
             // #12: wrong-state (e.g., double-approve) → 409, not 500
             return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
+        } catch (IllegalArgumentException e) {
+            // #13: invalid taskApprovals (unknown taskId / task not awaiting) → 400
+            return Response.status(Response.Status.BAD_REQUEST).entity(e.getMessage()).build();
         } catch (Exception e) {
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
         }
@@ -182,8 +185,7 @@ public class RestGroupConversation implements IRestGroupConversation {
     public void approveGroupPhaseStreaming(String groupId, String gcId, GroupApprovalRequest request,
                                            SseEventSink eventSink, Sse sse) {
         if (request == null || request.getDecision() == null || request.getDecision().getVerdict() == null) {
-            sendEvent(eventSink, sse, "error",
-                    "{\"error\":\"Request body must include a 'decision' with a 'verdict' field\"}");
+            sendErrorEvent(eventSink, sse, "Request body must include a 'decision' with a 'verdict' field");
             closeQuietly(eventSink);
             return;
         }
@@ -192,17 +194,25 @@ public class RestGroupConversation implements IRestGroupConversation {
         var listener = createStreamingListener(eventSink, sse);
         try {
             groupConversationService.resumeDiscussion(gcId, request, listener);
-        } catch (IResourceStore.ResourceModifiedException e) {
-            sendEvent(eventSink, sse, "error", "{\"error\":\"" + e.getMessage() + "\"}");
+        } catch (IResourceStore.ResourceModifiedException | IllegalArgumentException e) {
+            sendErrorEvent(eventSink, sse, e.getMessage());
             closeQuietly(eventSink);
         } catch (IGroupConversationService.GroupDiscussionException e) {
-            sendEvent(eventSink, sse, "error", "{\"error\":\"" + e.getMessage() + "\"}");
+            sendErrorEvent(eventSink, sse, e.getMessage());
             closeQuietly(eventSink);
         } catch (Exception e) {
             sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
                     toJson(new GroupConversationEventSink.GroupErrorEvent(e.getMessage())));
             closeQuietly(eventSink);
         }
+    }
+
+    /**
+     * JSON-safe error event — the message goes through the serializer, never string
+     * concatenation.
+     */
+    private void sendErrorEvent(SseEventSink eventSink, Sse sse, String message) {
+        sendEvent(eventSink, sse, "error", toJson(new GroupConversationEventSink.GroupErrorEvent(message)));
     }
 
     @Override
@@ -319,6 +329,12 @@ public class RestGroupConversation implements IRestGroupConversation {
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_AWAITING_APPROVAL, toJson(event));
                 closeQuietly(eventSink);
             }
+
+            @Override
+            public void onCancelled(GroupConversationEventSink.CancelledEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_CANCELLED, toJson(event));
+                closeQuietly(eventSink);
+            }
         };
     }
 
@@ -356,7 +372,23 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public List<GroupConversation> listGroupPendingApprovals(String groupId) {
         try {
-            return groupConversationService.listGroupPendingApprovals();
+            var all = groupConversationService.listGroupPendingApprovals();
+
+            // Scope to the group in the path — the listing endpoint lives under
+            // /groups/{groupId}/conversations and must not leak other groups.
+            var scoped = all.stream().filter(gc -> groupId != null && groupId.equals(gc.getGroupId()));
+
+            // C-B: ownership filter, mirroring RestAgentEngine.listPendingApprovals —
+            // admins and designated approvers see the group's pending items, other
+            // callers only their own conversations; anonymous sees nothing.
+            if (ownershipValidator.isAdmin(identity) || ownershipValidator.isApprover(identity)) {
+                return scoped.toList();
+            }
+            String callerId = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
+            if (callerId == null || callerId.isBlank()) {
+                return List.of(); // fail-closed
+            }
+            return scoped.filter(gc -> callerId.equals(gc.getUserId())).toList();
         } catch (IResourceStore.ResourceStoreException e) {
             throw new InternalServerErrorException("Failed to list pending approvals: " + e.getMessage(), e);
         }

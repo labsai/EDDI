@@ -328,17 +328,26 @@ public class SharedTaskList {
 
     /**
      * AWAITING_APPROVAL / IN_PROGRESS / FAILED → ASSIGNED. Used by the RETRY
-     * rejection policy to re-queue tasks for another attempt. Clears prior result
-     * but preserves assignment and metadata.
+     * rejection policy to re-queue tasks for another attempt. Clears the prior
+     * result but stores the reviewer's feedback in {@code verificationNote} so the
+     * re-executing agent knows why the first attempt was rejected. ASSIGNED is a
+     * no-op; any other status (PENDING, COMPLETED, VERIFIED) throws.
      */
-    public synchronized TaskItem resetFromAnyToAssigned(String taskId) {
+    public synchronized TaskItem resetFromAnyToAssigned(String taskId, String reviewerFeedback) {
         TaskItem t = requireTask(taskId);
-        if (t.status() == TaskStatus.ASSIGNED || t.status() == TaskStatus.COMPLETED) {
-            return t; // already assignable or done — no-op
+        if (t.status() == TaskStatus.ASSIGNED) {
+            return t; // already assignable — no-op
+        }
+        if (t.status() != TaskStatus.AWAITING_APPROVAL
+                && t.status() != TaskStatus.IN_PROGRESS
+                && t.status() != TaskStatus.FAILED) {
+            throw new IllegalStateException(
+                    "resetFromAnyToAssigned '%s': expected AWAITING_APPROVAL/IN_PROGRESS/FAILED but was %s"
+                            .formatted(taskId, t.status()));
         }
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.ASSIGNED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), null,
-                null, false, t.priority(), t.createdAt(), null);
+                reviewerFeedback, false, t.priority(), t.createdAt(), null);
         replaceTask(taskId, u);
         return u;
     }

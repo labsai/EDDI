@@ -19,6 +19,12 @@
 | Resume robustness (F4/F7) | Resume now: pre-checks existence → 404 (was 409 with misleading message); reports the current state in the 409 body; **restores the pause** (CAS back to AWAITING_HUMAN + re-arms timeout) when the agent is undeployed or a service error occurs, instead of destroying the approval with ERROR; wraps execution with the same watchdog as the say path (hung LLM → EXECUTION_INTERRUPTED, never stuck IN_PROGRESS). |
 | Undo/redo gate (F5/C-C) | Gate now reads the DB-loaded state (was per-pod cache — silently bypassed after restart/cross-pod) and returns `false` → 409 CONFLICT (was 500). |
 
+| Group cancel (F9) | No-token branch now uses the `updateIfState` state-CAS (was plain read-modify-write racing approve/resume); `CancelledEvent` is finally emitted via new `onCancelled` listener method and the SSE stream closes on cancel (was: `/discuss/stream` clients hung forever after a cancel). |
+| Group approvals (F13/C-D) | `taskApprovals` validated up front (unknown taskId / task not awaiting → 400, no partial in-memory mutation, schedule untouched); RETRY rejection now passes the reviewer's note into the re-queued task and `buildTaskExecutionInput` surfaces it as feedback (was: blind retry loop); `resetFromAnyToAssigned` enforces its documented status contract. |
+| Group robustness (F11/5f) | Stranded IN_PROGRESS tasks are reset to ASSIGNED in ALL wave-abort branches (was: timeout only — cancellation/error still stranded tasks forever); config-drift guard now also fails when phases were REMOVED (bookmarked index out of range no longer silently skips the check); nested-group sub-pauses are cancelled instead of stranded with an armed schedule; `commitPause` reuses the in-scope config (no duplicate store read per pause). |
+| Group pending list (C-B) | `GET /groups/{groupId}/conversations/pending-approvals` now scopes to the path's group and applies the same ownership filter as the regular listing (admin/approver see the group's items, others only their own, anonymous nothing) — was a global unfiltered dump of all users' paused conversations incl. transcripts. |
+| Approver role | New `eddi-approver` role: `OwnershipValidator.isApprover`, added to `@RolesAllowed` on all HITL endpoints (approver-only accounts were blocked at RBAC), and approvers now see pending listings on both surfaces (they could approve but not list). SSE error events now serialize through the JSON serializer (no string-concatenation injection). |
+
 *(Extended by subsequent commits in this session — see below.)*
 
 ---

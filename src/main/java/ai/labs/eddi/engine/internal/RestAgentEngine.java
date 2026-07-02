@@ -316,8 +316,10 @@ public class RestAgentEngine implements IRestAgentEngine {
         try {
             var all = conversationService.listPendingApprovals();
 
-            // MAJOR-6: Admin sees all; non-admin sees only their own conversations
-            if (ownershipValidator.isAdmin(identity)) {
+            // MAJOR-6: Admins and designated approvers see all; other callers see
+            // only their own conversations (an approver who can decide approvals
+            // must also be able to list them).
+            if (ownershipValidator.isAdmin(identity) || ownershipValidator.isApprover(identity)) {
                 return all;
             }
 

@@ -55,6 +55,15 @@ public class OwnershipValidator {
     }
 
     /**
+     * Returns whether the caller holds the designated HITL approver role. Always
+     * returns {@code true} when authorization is disabled. Approvers may decide
+     * pending approvals they do not own and see them in pending listings.
+     */
+    public boolean isApprover(SecurityIdentity identity) {
+        return !authEnabled || (identity != null && identity.hasRole("eddi-approver"));
+    }
+
+    /**
      * Asserts that the caller matches the requested {@code userId} or holds the
      * {@code eddi-admin} role.
      *

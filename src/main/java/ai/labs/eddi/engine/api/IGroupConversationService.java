@@ -107,6 +107,8 @@ public interface IGroupConversationService {
         }
         default void onHitlPause(GroupConversationEventSink.HitlPauseEvent event) {
         }
+        default void onCancelled(GroupConversationEventSink.CancelledEvent event) {
+        }
     }
 
     // --- Exceptions ---
