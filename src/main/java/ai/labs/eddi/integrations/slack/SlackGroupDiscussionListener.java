@@ -47,6 +47,11 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
     private final String channelId;
     private final String userThreadTs;
 
+    /** Slack channel id for HITL approval notifications, or {@code null}. */
+    private final String hitlApprovalChannel;
+    /** Comma-separated approver Slack user ids, or {@code null}. */
+    private final String hitlApproverUserIds;
+
     /** agentId → Slack message ts of their first contribution (for threading). */
     private final Map<String, String> agentMessageTs = new ConcurrentHashMap<>();
 
@@ -80,10 +85,24 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
 
     public SlackGroupDiscussionListener(SlackWebApiClient slackApi, String authToken,
             String channelId, String userThreadTs) {
+        this(slackApi, authToken, channelId, userThreadTs, null, null);
+    }
+
+    /**
+     * Constructor with HITL approval configuration. {@code hitlApprovalChannel} and
+     * {@code hitlApproverUserIds} are read from the integration's
+     * {@code platformConfig} — both may be {@code null} (no approval channel /
+     * fail-closed no buttons).
+     */
+    public SlackGroupDiscussionListener(SlackWebApiClient slackApi, String authToken,
+            String channelId, String userThreadTs,
+            String hitlApprovalChannel, String hitlApproverUserIds) {
         this.slackApi = slackApi;
         this.authToken = authToken;
         this.channelId = channelId;
         this.userThreadTs = userThreadTs;
+        this.hitlApprovalChannel = hitlApprovalChannel;
+        this.hitlApproverUserIds = hitlApproverUserIds;
     }
 
     @Override
@@ -230,6 +249,77 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
 
         String threadTs = expandedMode ? null : userThreadTs;
         postSafe(channelId, threadTs, sb.toString().stripTrailing());
+    }
+
+    // ─── HITL (human-in-the-loop) ───
+
+    @Override
+    public void onHitlPause(GroupConversationEventSink.HitlPauseEvent event) {
+        // In-thread notice so the discussion participants know it's blocked.
+        String reason = event.reason() != null && !event.reason().isBlank()
+                ? "\n> " + event.reason()
+                : "";
+        postSafe(channelId, userThreadTs, "⏸️ *Discussion awaiting approval*" + reason);
+
+        // Optional interactive approval notification with buttons. The action value
+        // carries "group:<groupConversationId>" so the interactivity handler routes
+        // it to resumeDiscussion. Fail-closed: no approver list → no buttons.
+        if (hitlApprovalChannel == null || hitlApprovalChannel.isBlank() || groupConversationId == null) {
+            return;
+        }
+        boolean includeButtons = !SlackHitlSupport.parseApproverUserIds(hitlApproverUserIds).isEmpty();
+        String phase = event.phaseName() != null ? event.phaseName() : ("phase " + event.phaseIndex());
+        var blocks = SlackHitlSupport.buildApprovalBlocks(
+                "⏸️ Discussion awaiting approval", "Discussion", groupConversationId,
+                phase, event.reason(), null,
+                SlackHitlSupport.GROUP_VALUE_PREFIX + groupConversationId, includeButtons);
+        String fallback = "Group discussion " + groupConversationId + " is awaiting human approval.";
+        try {
+            slackApi.postBlocksMessage(authToken, hitlApprovalChannel, null, blocks, fallback);
+        } catch (SlackDeliveryException e) {
+            LOGGER.warnf("Failed to post group HITL approval notification for %s: %s",
+                    groupConversationId, e.getMessage());
+        }
+    }
+
+    @Override
+    public void onHitlResume(GroupConversationEventSink.HitlResumeEvent event) {
+        String verdict = event.verdict() != null ? event.verdict() : "resolved";
+        String who = event.decidedBy() != null ? " by " + event.decidedBy() : "";
+        String emoji = "APPROVED".equalsIgnoreCase(verdict)
+                ? "✅"
+                : ("REJECTED".equalsIgnoreCase(verdict) ? "⛔" : "ℹ️");
+        var sb = new StringBuilder();
+        sb.append(String.format("%s *Discussion %s*%s", emoji, verdict.toLowerCase(), who));
+        if (event.note() != null && !event.note().isBlank()) {
+            sb.append("\n> ").append(event.note());
+        }
+        postSafe(channelId, userThreadTs, sb.toString());
+    }
+
+    @Override
+    public void onMemberPauseSkipped(GroupConversationEventSink.MemberPauseSkippedEvent event) {
+        String displayName = event.displayName() != null ? event.displayName() : event.agentId();
+        String reason = event.reason() != null && !event.reason().isBlank()
+                ? " (" + event.reason() + ")"
+                : "";
+        postSafe(channelId, userThreadTs, String.format(
+                "⚠️ *%s* requested human approval mid-turn — not supported inside a group discussion; "
+                        + "its turn was skipped%s.",
+                displayName, reason));
+    }
+
+    @Override
+    public void onCancelled(GroupConversationEventSink.CancelledEvent event) {
+        try {
+            String who = event.cancelledBy() != null ? " by " + event.cancelledBy() : "";
+            String reason = event.reason() != null && !event.reason().isBlank()
+                    ? " — " + event.reason()
+                    : "";
+            postSafe(channelId, userThreadTs, "🛑 *Discussion cancelled*" + who + reason);
+        } finally {
+            completionLatch.countDown();
+        }
     }
 
     // ─── Posting strategies ───

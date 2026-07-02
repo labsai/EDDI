@@ -183,14 +183,24 @@ public class CreateSubAgentTool {
                     InputData inputData = new InputData();
                     inputData.setInput(initialMessage);
 
-                    CompletableFuture<String> responseFuture = new CompletableFuture<>();
+                    CompletableFuture<ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();
                     conversationService.say(DEFAULT_ENV, agentId, conversationId,
-                            false, true, null, inputData, false, snapshot -> {
-                                String text = extractResponse(snapshot);
-                                responseFuture.complete(text);
-                            });
+                            false, true, null, inputData, false, responseFuture::complete);
 
-                    response = responseFuture.get(60, TimeUnit.SECONDS);
+                    var snapshot = responseFuture.get(60, TimeUnit.SECONDS);
+                    // Finding 25: a sub-agent that pauses for approval on its first
+                    // message must report the pending approval, not "[no response]".
+                    if (snapshot != null && snapshot.getConversationState() == ai.labs.eddi.engine.memory.model.ConversationState.AWAITING_HUMAN) {
+                        response = "PAUSED_FOR_APPROVAL: the sub-agent's conversation " + conversationId
+                                + " requires human approval before it can continue. A reviewer must decide via "
+                                + "POST /agents/" + conversationId + "/resume.";
+                    } else {
+                        response = extractResponse(snapshot);
+                    }
+                } catch (IConversationService.ConversationAwaitingApprovalException e) {
+                    response = "PAUSED_FOR_APPROVAL: the sub-agent's conversation " + conversationId
+                            + " is awaiting human approval; a reviewer must decide via POST /agents/"
+                            + conversationId + "/resume before it can continue.";
                 } catch (Exception e) {
                     LOGGER.warnf("[SUB-AGENT] Initial message failed for agent '%s': %s",
                             agentId, e.getMessage());

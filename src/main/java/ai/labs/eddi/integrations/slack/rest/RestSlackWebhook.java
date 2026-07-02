@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.slack.rest;
 
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.slack.SlackEventHandler;
+import ai.labs.eddi.integrations.slack.SlackInteractivityHandler;
 import ai.labs.eddi.integrations.slack.SlackSignatureVerifier;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -19,6 +20,8 @@ import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Set;
 
@@ -54,16 +57,19 @@ public class RestSlackWebhook {
     private final ChannelTargetRouter channelTargetRouter;
     private final SlackSignatureVerifier signatureVerifier;
     private final SlackEventHandler eventHandler;
+    private final SlackInteractivityHandler interactivityHandler;
     private final ObjectMapper objectMapper;
 
     @Inject
     public RestSlackWebhook(ChannelTargetRouter channelTargetRouter,
             SlackSignatureVerifier signatureVerifier,
             SlackEventHandler eventHandler,
+            SlackInteractivityHandler interactivityHandler,
             ObjectMapper objectMapper) {
         this.channelTargetRouter = channelTargetRouter;
         this.signatureVerifier = signatureVerifier;
         this.eventHandler = eventHandler;
+        this.interactivityHandler = interactivityHandler;
         this.objectMapper = objectMapper;
     }
 
@@ -132,5 +138,74 @@ public class RestSlackWebhook {
                     .entity("{\"error\":\"Invalid payload\"}")
                     .build();
         }
+    }
+
+    /**
+     * Receive Slack interactivity payloads (block_actions from HITL Approve/Reject
+     * buttons). Slack sends {@code application/x-www-form-urlencoded} with a single
+     * {@code payload} parameter containing a JSON string.
+     * <p>
+     * Signature verification runs over the RAW body (before form parsing) using the
+     * same signing secrets as {@code /events}. Responds 200 within Slack's 3-second
+     * window and processes the decision asynchronously.
+     *
+     * @param rawBody
+     *            the raw request body (needed for signature verification)
+     * @param signature
+     *            the X-Slack-Signature header
+     * @param timestamp
+     *            the X-Slack-Request-Timestamp header
+     * @return 200 OK for valid requests; 403 for invalid signatures; 400 for a
+     *         missing/malformed payload
+     */
+    @POST
+    @Path("/interactive")
+    @Consumes(MediaType.APPLICATION_FORM_URLENCODED)
+    public Response handleInteractive(String rawBody,
+                                      @HeaderParam("X-Slack-Signature") String signature,
+                                      @HeaderParam("X-Slack-Request-Timestamp") String timestamp) {
+
+        // Step 1: Verify signature against all known signing secrets — over the
+        // RAW body, exactly like /events (never the parsed form).
+        Set<String> signingSecrets = channelTargetRouter.getSigningSecrets("slack");
+        if (!signatureVerifier.verify(timestamp, rawBody, signature, signingSecrets)) {
+            LOGGER.warnf("Slack interactive signature verification failed (timestamp=%s)", sanitize(timestamp));
+            return Response.status(Response.Status.FORBIDDEN)
+                    .entity("{\"error\":\"Invalid signature\"}")
+                    .build();
+        }
+
+        // Step 2: Extract the "payload" form parameter (URL-encoded JSON string).
+        String payloadJson = extractPayloadParam(rawBody);
+        if (payloadJson == null || payloadJson.isBlank()) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("{\"error\":\"Missing payload\"}")
+                    .build();
+        }
+
+        // Step 3: Process async (Slack's 3-second requirement) and ack immediately.
+        interactivityHandler.handlePayloadAsync(payloadJson);
+        return Response.ok().build();
+    }
+
+    /**
+     * Extract and URL-decode the {@code payload} parameter from an
+     * {@code x-www-form-urlencoded} body. Returns {@code null} if absent.
+     */
+    static String extractPayloadParam(String rawBody) {
+        if (rawBody == null || rawBody.isBlank()) {
+            return null;
+        }
+        for (String pair : rawBody.split("&")) {
+            int eq = pair.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            String key = pair.substring(0, eq);
+            if ("payload".equals(key)) {
+                return URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+            }
+        }
+        return null;
     }
 }

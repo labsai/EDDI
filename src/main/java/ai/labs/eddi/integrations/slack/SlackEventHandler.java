@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.InputData;
@@ -17,7 +18,6 @@ import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
-import ai.labs.eddi.modules.output.model.OutputItem;
 import ai.labs.eddi.datastore.IResourceStore;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -287,8 +287,137 @@ public class SlackEventHandler {
         String message = resolved.strippedMessage() != null ? resolved.strippedMessage() : originalText;
 
         String conversationId = getOrCreateConversation(agentId, userId, intent);
-        String response = sendAndWait(conversationId, message);
-        postMessageChunked(channelId, threadTs, response, botToken);
+        sendAndDeliver(resolved, conversationId, agentId, channelId, threadTs, message, botToken);
+    }
+
+    /**
+     * Send a message to a conversation, then deliver the outcome to Slack —
+     * handling the HITL pause cases:
+     * <ul>
+     * <li>If {@code say} throws {@link ConversationAwaitingApprovalException} (a
+     * follow-up while already paused), post the "still awaiting" notice.</li>
+     * <li>If the returned snapshot is {@code AWAITING_HUMAN} (this turn paused),
+     * post any output-so-far plus a pause notice, and — when configured — an
+     * approval notification with Approve/Reject buttons.</li>
+     * <li>Otherwise post the response normally.</li>
+     * </ul>
+     */
+    private void sendAndDeliver(ResolvedTarget resolved, String conversationId, String agentId,
+                                String channelId, String threadTs, String message, String botToken)
+            throws Exception {
+        SimpleConversationMemorySnapshot snapshot;
+        try {
+            snapshot = sendAndWait(conversationId, message);
+        } catch (IConversationService.ConversationAwaitingApprovalException e) {
+            // Subsequent message while the conversation is already paused — input
+            // was NOT consumed. Never surface the generic error message.
+            postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
+            return;
+        }
+
+        boolean paused = snapshot != null
+                && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
+
+        // Post output-so-far (if any). extractSlackResponseText never returns null;
+        // when paused with no output it returns a placeholder we suppress.
+        String response = SlackHitlSupport.extractSlackResponseText(snapshot);
+        if (paused) {
+            if (response != null && !response.startsWith("_")) {
+                postMessageChunked(channelId, threadTs, response, botToken);
+            }
+            postMessage(channelId, threadTs, buildPauseNotice(conversationId), botToken);
+            notifyApprovers(resolved, conversationId, agentId, threadTs);
+        } else {
+            postMessageChunked(channelId, threadTs, response, botToken);
+        }
+    }
+
+    /**
+     * Build the in-thread pause notice, appending the pause reason from the HITL
+     * bookmark when available.
+     */
+    private String buildPauseNotice(String conversationId) {
+        String reason = null;
+        try {
+            var full = conversationService.getConversationMemorySnapshot(conversationId);
+            if (full != null) {
+                reason = full.getHitlPauseReason();
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Could not load pause reason for %s: %s",
+                    sanitize(conversationId), e.getMessage());
+        }
+        if (reason != null && !reason.isBlank()) {
+            return SlackHitlSupport.PAUSE_NOTICE + "\n> " + reason;
+        }
+        return SlackHitlSupport.PAUSE_NOTICE;
+    }
+
+    /**
+     * Post an interactive approval notification to the configured approval channel
+     * for a paused conversation. No-op when no {@code hitlApprovalChannel} is
+     * configured. Fail-closed: buttons are only rendered when
+     * {@code hitlApproverUserIds} is configured (otherwise notification-only).
+     * <p>
+     * Data minimization: only the pause reason (which the agent designer controls)
+     * is included — never the user's raw message.
+     */
+    private void notifyApprovers(ResolvedTarget resolved, String conversationId,
+                                 String agentId, String userThreadTs) {
+        var integration = resolved.integration();
+        if (integration == null || integration.getPlatformConfig() == null) {
+            return; // legacy connectors have no HITL config
+        }
+        Map<String, String> platformConfig = integration.getPlatformConfig();
+        String approvalChannel = platformConfig.get(SlackHitlSupport.CFG_HITL_APPROVAL_CHANNEL);
+        if (approvalChannel == null || approvalChannel.isBlank()) {
+            return; // notification-only disabled
+        }
+
+        String approverIds = platformConfig.get(SlackHitlSupport.CFG_HITL_APPROVER_USER_IDS);
+        boolean includeButtons = !SlackHitlSupport.parseApproverUserIds(approverIds).isEmpty();
+
+        String pauseReason = null;
+        String timeoutInfo = null;
+        try {
+            var full = conversationService.getConversationMemorySnapshot(conversationId);
+            if (full != null) {
+                pauseReason = full.getHitlPauseReason();
+                timeoutInfo = formatTimeoutInfo(full.getHitlTimeoutPolicy(), full.getHitlApprovalTimeout());
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Could not load HITL bookmark for %s: %s", sanitize(conversationId), e.getMessage());
+        }
+
+        var blocks = SlackHitlSupport.buildApprovalBlocks(
+                "⏸️ Conversation awaiting approval", "Conversation", conversationId,
+                agentId, pauseReason, timeoutInfo, conversationId, includeButtons);
+        String fallback = "Conversation " + conversationId + " is awaiting human approval.";
+
+        String botToken = resolved.botToken();
+        String auth = botToken != null && !botToken.isBlank()
+                ? "Bearer " + botToken
+                : "Bearer " + channelTargetRouter.getBotToken("slack", approvalChannel);
+        try {
+            slackApi.postBlocksMessage(auth, approvalChannel, null, blocks, fallback);
+        } catch (SlackDeliveryException e) {
+            LOGGER.warnf("Failed to post HITL approval notification for %s: %s",
+                    sanitize(conversationId), e.getMessage());
+        }
+    }
+
+    /**
+     * Format the HITL timeout policy + duration into a readable one-liner for the
+     * approval notification.
+     */
+    static String formatTimeoutInfo(String policy, String approvalTimeout) {
+        if (policy == null || policy.isBlank()) {
+            return null;
+        }
+        if (approvalTimeout != null && !approvalTimeout.isBlank()) {
+            return policy + " (" + approvalTimeout + ")";
+        }
+        return policy;
     }
 
     // ─── Group Discussion ───
@@ -308,8 +437,19 @@ public class SlackEventHandler {
 
         String token = "Bearer " + botToken;
 
+        // HITL approval config (optional) — flows into the listener so a group
+        // pause can notify approvers with buttons.
+        String hitlApprovalChannel = null;
+        String hitlApproverUserIds = null;
+        var integration = resolved.integration();
+        if (integration != null && integration.getPlatformConfig() != null) {
+            hitlApprovalChannel = integration.getPlatformConfig().get(SlackHitlSupport.CFG_HITL_APPROVAL_CHANNEL);
+            hitlApproverUserIds = integration.getPlatformConfig().get(SlackHitlSupport.CFG_HITL_APPROVER_USER_IDS);
+        }
+
         // Create the listener that streams discussion into Slack
-        var listener = new SlackGroupDiscussionListener(slackApi, token, channelId, threadTs);
+        var listener = new SlackGroupDiscussionListener(slackApi, token, channelId, threadTs,
+                hitlApprovalChannel, hitlApproverUserIds);
 
         String question = resolved.strippedMessage() != null ? resolved.strippedMessage() : originalText;
         try {
@@ -385,8 +525,26 @@ public class SlackEventHandler {
         // Route to the specific agent from the group discussion
         String intent = "channel:followup:" + channelId + ":" + parentTs;
         String conversationId = getOrCreateConversation(agentId, userId, intent);
-        String response = sendAndWait(conversationId, enrichedInput);
-        postMessageChunked(channelId, threadTs, response, null);
+
+        // Follow-ups have no ResolvedTarget/integration config, so no approver
+        // notification is sent — but the pause notice and "still awaiting" handling
+        // still apply so the user is never left with a generic error.
+        try {
+            SimpleConversationMemorySnapshot snapshot = sendAndWait(conversationId, enrichedInput);
+            boolean paused = snapshot != null
+                    && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
+            String response = SlackHitlSupport.extractSlackResponseText(snapshot);
+            if (paused) {
+                if (response != null && !response.startsWith("_")) {
+                    postMessageChunked(channelId, threadTs, response, null);
+                }
+                postMessage(channelId, threadTs, buildPauseNotice(conversationId), null);
+            } else {
+                postMessageChunked(channelId, threadTs, response, null);
+            }
+        } catch (IConversationService.ConversationAwaitingApprovalException e) {
+            postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, null);
+        }
 
         return true;
     }
@@ -447,9 +605,15 @@ public class SlackEventHandler {
     }
 
     /**
-     * Send a message to EDDI and wait synchronously for the response.
+     * Send a message to EDDI and wait synchronously for the response snapshot.
+     * <p>
+     * Throws {@link IConversationService.ConversationAwaitingApprovalException}
+     * (synchronously, from {@code say}) when the conversation is already paused —
+     * the caller must translate that into a "still awaiting" notice rather than a
+     * generic error. When THIS turn pauses, {@code say} completes normally and the
+     * returned snapshot carries state {@code AWAITING_HUMAN}.
      */
-    private String sendAndWait(String conversationId, String message) throws Exception {
+    private SimpleConversationMemorySnapshot sendAndWait(String conversationId, String message) throws Exception {
         var inputData = new InputData();
         inputData.setInput(message);
         inputData.setContext(Map.of("slack", new Context(Context.ContextType.string, "true")));
@@ -464,69 +628,7 @@ public class SlackEventHandler {
             }
         });
 
-        var snapshot = responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        return extractResponseText(snapshot);
-    }
-
-    /**
-     * Extract the text response from a conversation snapshot. Handles output items
-     * stored as {@link OutputItem} POJOs (live memory callback path) or as Maps
-     * (deserialized from MongoDB).
-     */
-    private String extractResponseText(SimpleConversationMemorySnapshot snapshot) {
-        var outputs = snapshot.getConversationOutputs();
-        if (outputs == null || outputs.isEmpty()) {
-            return "_No response from agent._";
-        }
-
-        var lastOutput = outputs.get(outputs.size() - 1);
-        if (lastOutput == null) {
-            return "_No response from agent._";
-        }
-
-        var texts = new ArrayList<String>();
-
-        // Format 1: Nested "output" array — may contain TextOutputItem POJOs or Maps
-        Object outputArray = lastOutput.get("output");
-        if (outputArray instanceof List<?> list) {
-            for (var item : list) {
-                if (item instanceof String s) {
-                    texts.add(s);
-                } else if (item instanceof OutputItem oi && oi.toString() != null) {
-                    // TextOutputItem.toString() returns the text field
-                    texts.add(oi.toString());
-                } else if (item instanceof Map<?, ?> map && map.get("text") instanceof String s) {
-                    texts.add(s);
-                }
-            }
-            if (!texts.isEmpty()) {
-                return String.join("\n", texts);
-            }
-        }
-
-        // Format 2: Flat keys like "output:text:agent" or "output:text:*"
-        for (var entry : lastOutput.entrySet()) {
-            if (entry.getKey() instanceof String key && key.startsWith("output:text:")) {
-                Object val = entry.getValue();
-                if (val instanceof String s) {
-                    texts.add(s);
-                } else if (val instanceof List<?> list) {
-                    for (var item : list) {
-                        if (item instanceof String s) {
-                            texts.add(s);
-                        } else if (item instanceof Map<?, ?> map && map.get("text") instanceof String s) {
-                            texts.add(s);
-                        }
-                    }
-                }
-            }
-        }
-
-        if (!texts.isEmpty()) {
-            return String.join("\n", texts);
-        }
-
-        return "_Agent completed but produced no text output._";
+        return responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }
 
     /**
