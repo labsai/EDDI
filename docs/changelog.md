@@ -5,6 +5,35 @@
 
 ---
 
+## 📎 Multimodal Attachments Completion — Phase 1: Storage unification + secure upload (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 1 of 6).
+
+### What changed
+
+1. **One blob store.** Collapsed the two parallel abstractions onto `IAttachmentStore`. Uploads already wrote to it (GridFS / Postgres `*Store`), but conversation-deletion and GDPR erasure cascaded through a *different* store (`IAttachmentStorage` → `Mongo`/`PostgresAttachmentStorage`), so uploaded blobs were never actually deleted. Ported both consumers (`RestConversationStore` delete cascade, `GdprComplianceService` erasure) to `IAttachmentStore`, then deleted `IAttachmentStorage` + both impls + their 4 tests (verified write-dead — only the delete cascades referenced them).
+2. **Grants + owner-or-grant authz.** New `IAttachmentStore.getMetadata()` (server-validated metadata, no bytes), `grantAccess()` (trusted-caller-only cross-conversation read grant), single-item `delete()` (owner-only). `load()`/`getMetadata()` authorize owner **OR** an explicit grant; grants die with the blob. This is what lets group members read a blob uploaded to the group conversation (Phase 3) without opening cross-conversation access generally.
+3. **UUID ref hardening (open decision #4).** GridFS now returns an unguessable random-UUID `storageRef` held in file metadata (legacy ObjectId-hex refs still resolve); Postgres already used UUIDs. Both backends unified on one opaque ref format.
+4. **Quotas.** Per-conversation count + total-byte caps enforced in `store()` (`eddi.attachments.max-per-conversation` = 50, `eddi.attachments.max-total-bytes-per-conversation` = 100 MB; non-positive disables).
+5. **`storageRef` extraction branch (defect #2 — upload was orphaned).** `AttachmentContextExtractor` now parses `{storageRef}` (precedence storageRef > url > data) and `resolveAndGuard()` resolves each stored ref's authoritative MIME/size via `getMetadata` (owner/grant authorized) **before** behavior rules run, enforces the per-turn cap (`eddi.attachments.max-per-turn` = 5), and records every drop/failure to `attachments:errors` — never silent. Wired into `Conversation` init via `IPropertiesHandler.getAttachmentStore()`/`getMaxAttachmentsPerTurn()` (populated by `ConversationService`).
+6. **Secure REST surface.** `RestAttachmentUpload` gains a `forwardableInline` hint on upload (upload cap 20 MB > forward cap 10 MB — warn at upload, not silently at forward), a single-item download endpoint (`GET /conversations/{id}/attachments/{storageRef}`, owner/grant-checked, Content-Disposition sanitized) and single-item `DELETE`.
+
+### Design decisions
+
+- **Auth model fits EDDI's anonymous-capable conversations.** No other conversation endpoint uses `@RolesAllowed` (only admin endpoints do), and anonymous deployments must keep working (D2). Enforcement is therefore store-level owner-or-grant authorization on every `load`/`getMetadata`/`delete`, plus unguessable UUID refs — not an OIDC role gate. `@RolesAllowed` can be layered on when a deployment makes OIDC mandatory. `tenantId` stays advisory (sanitized, not an access boundary).
+- **Field injection for the two new `ConversationService` deps** (attachment store + per-turn cap) so the numerous direct-construction unit tests need no change.
+
+### Tests
+
+161 unit tests across the affected classes: `GridFsAttachmentStoreTest` rewritten for UUID refs + grants + quota (26), `AttachmentContextExtractorTest` +storageRef/resolveAndGuard (27), `RestAttachmentUploadTest` +download/delete-one/forwardableInline/CD-sanitization (21), re-typed consumer tests. Postgres store IT and full ITs stay CI-only.
+
+### What's next
+
+Phase 2 — the unified `AttachmentForwarder` (replaces `MultimodalMessageEnhancer` + `convertMessage`): hybrid PDF (native `PdfFileContent` vs PDFBox text), universal text inline, uniform per-file/aggregate caps across all sources, provider image-URL normalization, capability gating via `ModelCapabilityService`, and extracts-in-history stitching.
+
+---
+
 ## 📎 Multimodal Attachments Completion — Phase 0: Foundations & bug fixes (2026-07-03)
 
 **Repo:** EDDI (`feat/multimodal-attachments-completion`)

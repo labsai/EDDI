@@ -104,4 +104,14 @@ public final class MemoryKeys {
      * @since 6.0.0
      */
     public static final MemoryKey<List<?>> ATTACHMENTS = MemoryKey.ofPublic("attachments");
+
+    /**
+     * Human-readable notes for attachments that were dropped, skipped, or failed to
+     * resolve/forward this turn (unresolvable stored ref, per-turn cap reached,
+     * capability gate, oversize). Non-public — surfaced to the LLM as a note and
+     * available for audit, never silently discarded.
+     *
+     * @since 6.1.0
+     */
+    public static final MemoryKey<List<String>> ATTACHMENT_ERRORS = MemoryKey.of("attachments:errors");
 }

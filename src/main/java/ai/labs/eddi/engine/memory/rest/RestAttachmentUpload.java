@@ -56,15 +56,19 @@ public class RestAttachmentUpload {
     private final IAttachmentStore attachmentStore;
     private final ManagedExecutor managedExecutor;
     private final long maxUploadBytes;
+    private final long maxForwardBytes;
 
     @Inject
     public RestAttachmentUpload(IAttachmentStore attachmentStore,
             ManagedExecutor managedExecutor,
             @ConfigProperty(name = "eddi.attachments.max-size-bytes",
-                            defaultValue = "20971520") long maxUploadBytes) {
+                            defaultValue = "20971520") long maxUploadBytes,
+            @ConfigProperty(name = "eddi.attachments.max-forward-bytes",
+                            defaultValue = "10485760") long maxForwardBytes) {
         this.attachmentStore = attachmentStore;
         this.managedExecutor = managedExecutor;
         this.maxUploadBytes = maxUploadBytes;
+        this.maxForwardBytes = maxForwardBytes;
     }
 
     @POST
@@ -136,7 +140,11 @@ public class RestAttachmentUpload {
                                 "fileName", attachment.filename() != null ? attachment.filename() : "",
                                 "mimeType", attachment.mimeType(),
                                 "sizeBytes", attachment.sizeBytes(),
-                                "conversationId", attachment.conversationId()))
+                                "conversationId", attachment.conversationId(),
+                                // Uploads may be larger than what is inlined to the LLM: warn now,
+                                // not silently at forward time. Oversize files remain retrievable
+                                // via the readAttachment tool / download endpoint.
+                                "forwardableInline", attachment.sizeBytes() <= maxForwardBytes))
                         .build());
 
             } catch (IAttachmentStore.AttachmentStoreException e) {
@@ -191,6 +199,91 @@ public class RestAttachmentUpload {
         }, managedExecutor);
     }
 
+    @GET
+    @Path("/{conversationId}/attachments/{storageRef}")
+    @Operation(
+               operationId = "downloadAttachment",
+               summary = "Download a single attachment",
+               description = "Streams the raw bytes of one attachment. Access is checked against "
+                       + "the owning conversation (owner or explicit grant); references are "
+                       + "unguessable.")
+    @APIResponse(responseCode = "200", description = "Attachment bytes with Content-Type and Content-Disposition.")
+    @APIResponse(responseCode = "403", description = "The conversation is not permitted to access this attachment.")
+    @APIResponse(responseCode = "404", description = "Attachment not found.")
+    public void downloadAttachment(
+                                   @Parameter(description = "Owning conversation ID.")
+                                   @PathParam("conversationId") String conversationId,
+                                   @Parameter(description = "Storage reference of the attachment.")
+                                   @PathParam("storageRef") String storageRef,
+                                   @Suspended AsyncResponse asyncResponse) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                Attachment meta = attachmentStore.getMetadata(storageRef, conversationId);
+                byte[] bytes = attachmentStore.load(storageRef, conversationId);
+                String downloadName = sanitizeContentDisposition(
+                        meta.filename() != null ? meta.filename() : "attachment");
+                asyncResponse.resume(Response.ok(bytes)
+                        .header("Content-Type", meta.mimeType() != null ? meta.mimeType() : "application/octet-stream")
+                        .header("Content-Disposition", "attachment; filename=\"" + downloadName + "\"")
+                        .build());
+            } catch (IAttachmentStore.AttachmentStoreException e) {
+                boolean denied = e.getMessage() != null && e.getMessage().contains("denied");
+                var status = denied ? Response.Status.FORBIDDEN : Response.Status.NOT_FOUND;
+                LOGGER.debugf("Attachment download %s for conversation '%s': %s",
+                        denied ? "denied" : "not found", sanitize(conversationId), e.getMessage());
+                asyncResponse.resume(Response.status(status)
+                        .entity(Map.of("error", e.getMessage(), "code",
+                                denied ? "ATTACHMENT_ACCESS_DENIED" : "ATTACHMENT_NOT_FOUND"))
+                        .build());
+            } catch (Exception e) {
+                LOGGER.errorf(e, "Failed to download attachment for conversation '%s'", sanitize(conversationId));
+                asyncResponse.resume(Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                        .entity(Map.of("error", "Failed to download attachment")).build());
+            }
+        }, managedExecutor);
+    }
+
+    @DELETE
+    @Path("/{conversationId}/attachments/{storageRef}")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(
+               operationId = "deleteAttachment",
+               summary = "Delete a single attachment",
+               description = "Removes one attachment. Restricted to the owning conversation.")
+    @APIResponse(responseCode = "200", description = "Attachment deleted.")
+    @APIResponse(responseCode = "403", description = "The conversation does not own this attachment.")
+    @APIResponse(responseCode = "404", description = "Attachment not found.")
+    public void deleteAttachment(
+                                 @Parameter(description = "Owning conversation ID.")
+                                 @PathParam("conversationId") String conversationId,
+                                 @Parameter(description = "Storage reference of the attachment.")
+                                 @PathParam("storageRef") String storageRef,
+                                 @Suspended AsyncResponse asyncResponse) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                boolean deleted = attachmentStore.delete(storageRef, conversationId);
+                if (deleted) {
+                    asyncResponse.resume(Response.ok(Map.of(
+                            "storageRef", storageRef, "deleted", true)).build());
+                } else {
+                    asyncResponse.resume(Response.status(Response.Status.NOT_FOUND)
+                            .entity(Map.of("error", "Attachment not found", "code", "ATTACHMENT_NOT_FOUND"))
+                            .build());
+                }
+            } catch (IAttachmentStore.AttachmentStoreException e) {
+                LOGGER.debugf("Attachment delete denied for conversation '%s': %s",
+                        sanitize(conversationId), e.getMessage());
+                asyncResponse.resume(Response.status(Response.Status.FORBIDDEN)
+                        .entity(Map.of("error", e.getMessage(), "code", "ATTACHMENT_ACCESS_DENIED"))
+                        .build());
+            } catch (Exception e) {
+                LOGGER.errorf(e, "Failed to delete attachment for conversation '%s'", sanitize(conversationId));
+                asyncResponse.resume(Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                        .entity(Map.of("error", "Failed to delete attachment")).build());
+            }
+        }, managedExecutor);
+    }
+
     @DELETE
     @Path("/{conversationId}/attachments")
     @Produces(MediaType.APPLICATION_JSON)
@@ -230,5 +323,15 @@ public class RestAttachmentUpload {
             return null;
         }
         return tenantId;
+    }
+
+    /**
+     * Strip characters that could break out of the quoted
+     * {@code Content-Disposition} filename or inject headers (quotes, backslashes,
+     * control characters).
+     */
+    private static String sanitizeContentDisposition(String filename) {
+        String cleaned = filename.replaceAll("[\"\\\\\\r\\n]", "_").trim();
+        return cleaned.isEmpty() ? "attachment" : cleaned;
     }
 }

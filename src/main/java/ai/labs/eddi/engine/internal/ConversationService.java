@@ -85,6 +85,14 @@ public class ConversationService implements IConversationService {
     private final IConversationSetup conversationSetup;
     private final ICache<String, ConversationState> conversationStateCache;
 
+    // Field-injected so the numerous direct-construction unit tests need no change;
+    // used only to resolve stored-attachment metadata at conversation init.
+    @Inject
+    ai.labs.eddi.engine.attachments.IAttachmentStore attachmentStore;
+
+    @ConfigProperty(name = "eddi.attachments.max-per-turn", defaultValue = "5")
+    int maxAttachmentsPerTurn;
+
     // Metrics
     private final Timer timerConversationStart;
     private final Timer timerConversationEnd;
@@ -671,6 +679,16 @@ public class ConversationService implements IConversationService {
             @Override
             public String getUserId() {
                 return userId;
+            }
+
+            @Override
+            public ai.labs.eddi.engine.attachments.IAttachmentStore getAttachmentStore() {
+                return attachmentStore;
+            }
+
+            @Override
+            public int getMaxAttachmentsPerTurn() {
+                return maxAttachmentsPerTurn;
             }
         };
     }

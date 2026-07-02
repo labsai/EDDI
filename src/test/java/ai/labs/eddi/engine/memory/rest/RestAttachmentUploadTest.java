@@ -33,6 +33,7 @@ import static org.mockito.Mockito.*;
 class RestAttachmentUploadTest {
 
     private static final long MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // 20MB
+    private static final long MAX_FORWARD_BYTES = 10 * 1024 * 1024; // 10MB
 
     private IAttachmentStore attachmentStore;
     private ManagedExecutor managedExecutor;
@@ -42,7 +43,7 @@ class RestAttachmentUploadTest {
     void setUp() {
         attachmentStore = mock(IAttachmentStore.class);
         managedExecutor = ManagedExecutor.builder().build();
-        endpoint = new RestAttachmentUpload(attachmentStore, managedExecutor, MAX_UPLOAD_BYTES);
+        endpoint = new RestAttachmentUpload(attachmentStore, managedExecutor, MAX_UPLOAD_BYTES, MAX_FORWARD_BYTES);
     }
 
     /**
@@ -114,6 +115,35 @@ class RestAttachmentUploadTest {
             assertEquals("image/png", body.get("mimeType"));
             assertEquals(42L, body.get("sizeBytes"));
             assertEquals("conv-1", body.get("conversationId"));
+            assertEquals(true, body.get("forwardableInline"));
+
+            Files.deleteIfExists(tempFile);
+        }
+
+        @Test
+        void shouldMarkOversizeUploadNotForwardableInline() throws Exception {
+            // store reports an 11 MB blob (> 10 MB forward cap) though the temp file is
+            // tiny
+            var attachment = new Attachment(
+                    "ref-big", "huge.png", "image/png", 11L * 1024 * 1024, "conv-1");
+            when(attachmentStore.store(any(byte[].class), eq("image/png"),
+                    eq("huge.png"), eq("conv-1"), isNull()))
+                    .thenReturn(attachment);
+
+            Path tempFile = Files.createTempFile("test-upload", ".png");
+            Files.write(tempFile, new byte[10]);
+
+            FileUpload file = mock(FileUpload.class);
+            when(file.fileName()).thenReturn("huge.png");
+            when(file.contentType()).thenReturn("image/png");
+            when(file.uploadedFile()).thenReturn(tempFile);
+
+            Response response = captureAsync(ar -> endpoint.uploadAttachment("conv-1", file, null, ar));
+
+            assertEquals(201, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals(false, body.get("forwardableInline"));
 
             Files.deleteIfExists(tempFile);
         }
@@ -251,7 +281,7 @@ class RestAttachmentUploadTest {
         @Test
         void shouldReturn400WhenFileTooLarge() throws Exception {
             // Create endpoint with very small max size
-            var smallEndpoint = new RestAttachmentUpload(attachmentStore, managedExecutor, 100);
+            var smallEndpoint = new RestAttachmentUpload(attachmentStore, managedExecutor, 100, MAX_FORWARD_BYTES);
 
             Path tempFile = Files.createTempFile("test-large", ".bin");
             Files.write(tempFile, new byte[200]); // Exceeds 100 byte limit
@@ -341,6 +371,107 @@ class RestAttachmentUploadTest {
             @SuppressWarnings("unchecked")
             var body = (Map<String, Object>) response.getEntity();
             assertEquals(0L, body.get("deletedCount"));
+        }
+    }
+
+    // ==================== Download Tests ====================
+
+    @Nested
+    class DownloadTests {
+
+        @Test
+        void shouldStreamBytesWithHeaders() throws Exception {
+            var meta = new Attachment("ref-1", "doc.pdf", "application/pdf", 4, "conv-1");
+            when(attachmentStore.getMetadata("ref-1", "conv-1")).thenReturn(meta);
+            when(attachmentStore.load("ref-1", "conv-1")).thenReturn(new byte[]{1, 2, 3, 4});
+
+            Response response = captureAsync(ar -> endpoint.downloadAttachment("conv-1", "ref-1", ar));
+
+            assertEquals(200, response.getStatus());
+            assertInstanceOf(byte[].class, response.getEntity());
+            assertEquals("application/pdf", response.getHeaderString("Content-Type"));
+            assertTrue(response.getHeaderString("Content-Disposition").contains("doc.pdf"));
+        }
+
+        @Test
+        void shouldReturn404WhenNotFound() throws Exception {
+            when(attachmentStore.getMetadata("missing", "conv-1"))
+                    .thenThrow(new AttachmentStoreException("Attachment not found: missing"));
+
+            Response response = captureAsync(ar -> endpoint.downloadAttachment("conv-1", "missing", ar));
+
+            assertEquals(404, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals("ATTACHMENT_NOT_FOUND", body.get("code"));
+        }
+
+        @Test
+        void shouldReturn403WhenDenied() throws Exception {
+            when(attachmentStore.getMetadata("ref-1", "conv-other"))
+                    .thenThrow(new AttachmentStoreException(
+                            "Cross-conversation access denied: attachment belongs to 'conv-1', requested from 'conv-other'"));
+
+            Response response = captureAsync(ar -> endpoint.downloadAttachment("conv-other", "ref-1", ar));
+
+            assertEquals(403, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals("ATTACHMENT_ACCESS_DENIED", body.get("code"));
+        }
+
+        @Test
+        void shouldSanitizeContentDispositionFilename() throws Exception {
+            var meta = new Attachment("ref-1", "bad\"name\r\n.png", "image/png", 2, "conv-1");
+            when(attachmentStore.getMetadata("ref-1", "conv-1")).thenReturn(meta);
+            when(attachmentStore.load("ref-1", "conv-1")).thenReturn(new byte[]{1, 2});
+
+            Response response = captureAsync(ar -> endpoint.downloadAttachment("conv-1", "ref-1", ar));
+
+            String cd = response.getHeaderString("Content-Disposition");
+            assertFalse(cd.contains("\"" + "name"), "quotes must be stripped from filename");
+            assertFalse(cd.contains("\r") || cd.contains("\n"), "CR/LF must be stripped");
+        }
+    }
+
+    // ==================== Delete-One Tests ====================
+
+    @Nested
+    class DeleteOneTests {
+
+        @Test
+        void shouldDeleteAndReturnTrue() throws Exception {
+            when(attachmentStore.delete("ref-1", "conv-1")).thenReturn(true);
+
+            Response response = captureAsync(ar -> endpoint.deleteAttachment("conv-1", "ref-1", ar));
+
+            assertEquals(200, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals(true, body.get("deleted"));
+        }
+
+        @Test
+        void shouldReturn404WhenNotFound() throws Exception {
+            when(attachmentStore.delete("missing", "conv-1")).thenReturn(false);
+
+            Response response = captureAsync(ar -> endpoint.deleteAttachment("conv-1", "missing", ar));
+
+            assertEquals(404, response.getStatus());
+        }
+
+        @Test
+        void shouldReturn403WhenNotOwner() throws Exception {
+            when(attachmentStore.delete("ref-1", "conv-other"))
+                    .thenThrow(new AttachmentStoreException(
+                            "Delete denied: attachment belongs to 'conv-1', requested from 'conv-other'"));
+
+            Response response = captureAsync(ar -> endpoint.deleteAttachment("conv-other", "ref-1", ar));
+
+            assertEquals(403, response.getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (Map<String, Object>) response.getEntity();
+            assertEquals("ATTACHMENT_ACCESS_DENIED", body.get("code"));
         }
     }
 }

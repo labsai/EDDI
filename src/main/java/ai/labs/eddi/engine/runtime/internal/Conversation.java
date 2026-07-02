@@ -233,12 +233,26 @@ public class Conversation implements IConversation {
         addContextToConversationOutput(currentStep, contextData);
         removedTaskTypeResultsFromPreviousRuns(currentStep, taskTypeResultsToBeRemoved);
 
-        // Extract attachments from context (attachment_0, attachment_1, etc.)
-        var attachments = AttachmentContextExtractor.extractAttachments(contexts);
-        if (!attachments.isEmpty()) {
-            var data = new Data<>(MemoryKeys.ATTACHMENTS.key(), attachments);
-            data.setPublic(true);
-            currentStep.storeData(data);
+        // Extract attachments from context (attachment_0, attachment_1, etc.),
+        // resolve stored-blob metadata (owner/grant authorized) and enforce the
+        // per-turn cap. Failures surface as attachments:errors — never silent.
+        var parsedAttachments = AttachmentContextExtractor.extractAttachments(contexts);
+        if (!parsedAttachments.isEmpty()) {
+            var extraction = AttachmentContextExtractor.resolveAndGuard(
+                    parsedAttachments, propertiesHandler.getAttachmentStore(),
+                    conversationMemory.getConversationId(), propertiesHandler.getMaxAttachmentsPerTurn());
+
+            if (!extraction.errors().isEmpty()) {
+                extraction.errors().forEach(err -> LOGGER.warnv("Attachment issue: {0}", err));
+                var errorData = new Data<>(MemoryKeys.ATTACHMENT_ERRORS.key(), extraction.errors());
+                errorData.setPublic(false);
+                currentStep.storeData(errorData);
+            }
+            if (!extraction.attachments().isEmpty()) {
+                var data = new Data<>(MemoryKeys.ATTACHMENTS.key(), extraction.attachments());
+                data.setPublic(true);
+                currentStep.storeData(data);
+            }
         }
 
         boolean isSecretInput = isSecretInputFlagged(contexts);
