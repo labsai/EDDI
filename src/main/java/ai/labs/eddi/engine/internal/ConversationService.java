@@ -113,6 +113,15 @@ public class ConversationService implements IConversationService {
 
     private final List<String> processingConversationReferences;
 
+    /**
+     * Live memories of conversations currently executing on THIS pod, keyed by
+     * conversationId. Lets {@link #cancelConversation} set the cooperative
+     * {@code cancelled} flag that {@code LifecycleManager} checks at task
+     * boundaries. Cross-pod cancellation of an actively-executing turn is not
+     * supported — the DB CAS handles the paused/persisted states.
+     */
+    private final ConcurrentHashMap<String, IConversationMemory> inFlightConversations = new ConcurrentHashMap<>();
+
     private static final Logger LOGGER = Logger.getLogger(ConversationService.class);
 
     @Inject
@@ -530,14 +539,18 @@ public class ConversationService implements IConversationService {
             throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException {
 
         validateParams(environment, agentId, conversationId);
-        // #5: undo during AWAITING_HUMAN would corrupt the HITL bookmark
-        var cachedState = conversationStateCache.get(conversationId);
-        if (cachedState == ConversationState.AWAITING_HUMAN) {
-            throw new ResourceStoreException("Cannot undo while conversation is awaiting human approval");
-        }
         long startTime = System.nanoTime();
         try {
             IConversationMemory conversationMemory = loadAndValidateConversationMemory(agentId, conversationId);
+
+            // #5: undo during AWAITING_HUMAN would corrupt the HITL bookmark.
+            // Checked against the loaded (DB-backed) state — a per-pod cache would
+            // silently miss after a restart or on another cluster node. Returning
+            // false maps to 409 CONFLICT at the REST layer.
+            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                LOGGER.warnf("Undo rejected: conversation %s is awaiting human approval", conversationId);
+                return false;
+            }
 
             if (conversationMemory.isUndoAvailable()) {
                 conversationMemory.undoLastStep();
@@ -565,14 +578,16 @@ public class ConversationService implements IConversationService {
             throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException {
 
         validateParams(environment, agentId, conversationId);
-        // #5: redo during AWAITING_HUMAN would corrupt the HITL bookmark
-        var cachedState = conversationStateCache.get(conversationId);
-        if (cachedState == ConversationState.AWAITING_HUMAN) {
-            throw new ResourceStoreException("Cannot redo while conversation is awaiting human approval");
-        }
         long startTime = System.nanoTime();
         try {
             IConversationMemory conversationMemory = loadAndValidateConversationMemory(agentId, conversationId);
+
+            // #5: redo during AWAITING_HUMAN would corrupt the HITL bookmark.
+            // DB-backed state check; false maps to 409 CONFLICT at the REST layer.
+            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                LOGGER.warnf("Redo rejected: conversation %s is awaiting human approval", conversationId);
+                return false;
+            }
 
             if (conversationMemory.isRedoAvailable()) {
                 conversationMemory.redoLastStep();
@@ -717,41 +732,61 @@ public class ConversationService implements IConversationService {
     private Callable<Void> processConversationStep(Environment environment, IConversationMemory conversationMemory, String conversationId,
                                                    Map<String, String> loggingContext, Callable<Void> executeConversation) {
         return () -> {
-            waitForExecutionFinishOrTimeout(loggingContext, conversationId,
-                    runtime.submitCallable(executeConversation, new IRuntime.IFinishedExecution<>() {
-                        @Override
-                        public void onComplete(Void result) {
-                            try {
-                                storeConversationMemory(conversationMemory, environment);
-                                // M1: Schedule HITL timeout if conversation paused
-                                if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
-                                    counterHitlPause.increment();
-                                    scheduleHitlTimeout(conversationId, conversationMemory.getAgentId());
-                                }
-                            } catch (ResourceStoreException e) {
-                                logConversationError(loggingContext, conversationId, e);
-                            }
-                        }
-
-                        @Override
-                        public void onFailure(Throwable t) {
-                            if (t instanceof LifecycleException.LifecycleInterruptedException) {
-                                String errorMessage = "Conversation processing got interrupted! (conversationId=%s)";
-                                errorMessage = String.format(errorMessage, conversationId);
-                                contextLogger.setLoggingContext(loggingContext);
-                                LOGGER.warn(errorMessage, t);
-                            } else if (t instanceof IConversation.ConversationNotReadyException) {
-                                String msg = "Conversation not ready! (conversationId=%s)";
-                                msg = String.format(msg, conversationId);
-                                contextLogger.setLoggingContext(loggingContext);
-                                LOGGER.error(msg + "\n" + t.getLocalizedMessage(), t);
-                            } else {
-                                logConversationError(loggingContext, conversationId, t);
-                            }
-                        }
-                    }, null));
+            // #2: register the live memory so cancelConversation can signal the
+            // running pipeline via setCancelled (checked at task boundaries).
+            inFlightConversations.put(conversationId, conversationMemory);
+            try {
+                runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory, executeConversation);
+            } finally {
+                inFlightConversations.remove(conversationId);
+            }
             return null;
         };
+    }
+
+    private void runGuardedConversationStep(Map<String, String> loggingContext, String conversationId,
+                                            Environment environment, IConversationMemory conversationMemory,
+                                            Callable<Void> executeConversation) {
+        waitForExecutionFinishOrTimeout(loggingContext, conversationId,
+                runtime.submitCallable(executeConversation, new IRuntime.IFinishedExecution<>() {
+                    @Override
+                    public void onComplete(Void result) {
+                        try {
+                            // #6: copy the agent's timeout policy into the bookmark
+                            // BEFORE persisting so approval-status/pending-approvals
+                            // report it and crash recovery can distinguish
+                            // WAIT_INDEFINITELY pauses from lost-schedule ones.
+                            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                                populateHitlTimeoutBookmark(conversationMemory);
+                            }
+                            storeConversationMemory(conversationMemory, environment);
+                            // M1: Schedule HITL timeout if conversation paused
+                            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                                counterHitlPause.increment();
+                                scheduleHitlTimeout(conversationId, conversationMemory.getAgentId());
+                            }
+                        } catch (ResourceStoreException e) {
+                            logConversationError(loggingContext, conversationId, e);
+                        }
+                    }
+
+                    @Override
+                    public void onFailure(Throwable t) {
+                        if (t instanceof LifecycleException.LifecycleInterruptedException) {
+                            String errorMessage = "Conversation processing got interrupted! (conversationId=%s)";
+                            errorMessage = String.format(errorMessage, conversationId);
+                            contextLogger.setLoggingContext(loggingContext);
+                            LOGGER.warn(errorMessage, t);
+                        } else if (t instanceof IConversation.ConversationNotReadyException) {
+                            String msg = "Conversation not ready! (conversationId=%s)";
+                            msg = String.format(msg, conversationId);
+                            contextLogger.setLoggingContext(loggingContext);
+                            LOGGER.error(msg + "\n" + t.getLocalizedMessage(), t);
+                        } else {
+                            logConversationError(loggingContext, conversationId, t);
+                        }
+                    }
+                }, null));
     }
 
     private void waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId, Future<Void> future) {
@@ -840,24 +875,45 @@ public class ConversationService implements IConversationService {
     // --- HITL lifecycle ---
 
     @Override
-    public void cancelConversation(String conversationId,
-                                   ai.labs.eddi.engine.lifecycle.model.ControlSignal mode) {
-        try {
-            // MAJOR-3: Delete stale HITL timeout schedule before cancel
-            deleteHitlTimeoutSchedule(conversationId);
-
-            boolean changed = conversationMemoryStore.compareAndSetState(conversationId,
-                    ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
-            if (!changed) {
-                changed = conversationMemoryStore.compareAndSetState(conversationId,
-                        ConversationState.IN_PROGRESS, ConversationState.EXECUTION_INTERRUPTED);
-            }
-            if (changed) {
-                cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
-            }
-        } catch (ResourceStoreException e) {
-            LOGGER.error("Failed to cancel conversation: " + conversationId, e);
+    public CancelOutcome cancelConversation(String conversationId,
+                                            ai.labs.eddi.engine.lifecycle.model.ControlSignal mode)
+            throws ResourceStoreException {
+        ConversationState currentState = conversationMemoryStore.getConversationState(conversationId);
+        if (currentState == null) {
+            return CancelOutcome.NOT_FOUND;
         }
+
+        // MAJOR-3: Delete stale HITL timeout schedule before cancel
+        deleteHitlTimeoutSchedule(conversationId);
+
+        // #2: signal an in-flight execution on this pod. The pipeline checks the
+        // flag at task boundaries and stops before the next lifecycle task.
+        // CANCEL_IMMEDIATE currently degrades to graceful semantics on the
+        // regular surface (no per-conversation future handle to interrupt).
+        var inFlightMemory = inFlightConversations.get(conversationId);
+        if (inFlightMemory != null) {
+            inFlightMemory.setCancelled(true);
+            LOGGER.infof("Signalled in-flight cancellation (%s) for conversation %s", mode, conversationId);
+        }
+
+        boolean changed = conversationMemoryStore.compareAndSetState(conversationId,
+                ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
+        if (!changed) {
+            changed = conversationMemoryStore.compareAndSetState(conversationId,
+                    ConversationState.IN_PROGRESS, ConversationState.EXECUTION_INTERRUPTED);
+        }
+        if (changed) {
+            cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
+            return CancelOutcome.CANCELLED;
+        }
+        if (inFlightMemory != null) {
+            // Nothing persisted to flip, but a running pipeline was signalled —
+            // it will stop at the next task boundary and persist its own state.
+            return CancelOutcome.CANCELLED;
+        }
+        // READY / ENDED / ERROR / EXECUTION_INTERRUPTED: nothing paused, nothing
+        // running. Use endConversation to close a READY conversation.
+        return CancelOutcome.NOTHING_TO_CANCEL;
     }
 
     @Override
@@ -865,10 +921,17 @@ public class ConversationService implements IConversationService {
                                    ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
                                    ConversationResponseHandler handler)
             throws ResourceStoreException, ResourceNotFoundException {
+        // #7: distinguish "unknown conversation" (404) from "wrong state" (409)
+        // — compareAndSetState returns false for both.
+        if (conversationMemoryStore.getConversationState(conversationId) == null) {
+            throw new ResourceNotFoundException("Conversation not found: " + conversationId);
+        }
         if (!conversationMemoryStore.compareAndSetState(conversationId,
                 ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS)) {
+            ConversationState current = conversationMemoryStore.getConversationState(conversationId);
             throw new ResourceStoreException(
-                    "Conversation is not in AWAITING_HUMAN state (possible concurrent resume)");
+                    "Conversation is not in AWAITING_HUMAN state (current: " + current
+                            + ") — it may have been resumed, cancelled, or timed out already");
         }
         // MAJOR-3: Delete stale HITL timeout schedule before resume
         deleteHitlTimeoutSchedule(conversationId);
@@ -889,8 +952,11 @@ public class ConversationService implements IConversationService {
         try {
             IAgent agent = getAgent(environment, agentId, agentVersion);
             if (agent == null) {
-                setConversationState(conversationId, ConversationState.ERROR);
-                throw new ResourceStoreException("Agent not deployed for resume (agentId=" + agentId + ", version=" + agentVersion + ")");
+                // #7: a transient deployment issue must not destroy the pending
+                // approval — restore the pause instead of flipping to ERROR.
+                restorePauseAfterFailedResume(conversationId, agentId);
+                throw new ResourceStoreException("Agent not deployed for resume (agentId=" + agentId + ", version=" + agentVersion
+                        + ") — the conversation remains AWAITING_HUMAN; redeploy the agent and retry");
             }
 
             // #15/4c: Set the audit collector (same as say path) so resume
@@ -916,6 +982,10 @@ public class ConversationService implements IConversationService {
                     LOGGER.error("Error during conversation resume: " + conversationId, e);
                     memory.setConversationState(ConversationState.ERROR);
                 } finally {
+                    // #6: keep the timeout-policy bookmark populated on re-pause
+                    if (memory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                        populateHitlTimeoutBookmark(memory);
+                    }
                     storeConversationMemory(memory, environment);
                     cacheConversationState(conversationId, memory.getConversationState());
                     // #3: If the resumed turn re-paused (another PAUSE_CONVERSATION
@@ -927,10 +997,80 @@ public class ConversationService implements IConversationService {
                 return null;
             };
 
-            conversationCoordinator.submitInOrder(conversationId, resumeCallable);
+            // #4: guard the resume with the same watchdog the say path uses — a
+            // hung LLM call or crashed executor must not leave the conversation
+            // stuck IN_PROGRESS forever.
+            Map<String, String> loggingContext = contextLogger.createLoggingContext(environment, agentId, conversationId, memory.getUserId());
+            Callable<Void> guardedResume = () -> {
+                inFlightConversations.put(conversationId, memory);
+                try {
+                    waitForExecutionFinishOrTimeout(loggingContext, conversationId,
+                            runtime.submitCallable(resumeCallable, new IRuntime.IFinishedExecution<>() {
+                                @Override
+                                public void onComplete(Void result) {
+                                    // persistence + rescheduling handled in resumeCallable's finally
+                                }
+
+                                @Override
+                                public void onFailure(Throwable t) {
+                                    logConversationError(loggingContext, conversationId, t);
+                                }
+                            }, null));
+                } finally {
+                    inFlightConversations.remove(conversationId);
+                }
+                return null;
+            };
+
+            conversationCoordinator.submitInOrder(conversationId, guardedResume);
         } catch (ServiceException | InstantiationException | IllegalAccessException e) {
-            setConversationState(conversationId, ConversationState.ERROR);
+            // #7: transient failures restore the pause instead of destroying it
+            restorePauseAfterFailedResume(conversationId, agentId);
             throw new ResourceStoreException("Failed to resume conversation: " + e.getLocalizedMessage(), e);
+        }
+    }
+
+    /**
+     * Rolls a failed resume back to AWAITING_HUMAN so the pending approval survives
+     * transient failures (undeployed agent, service errors). Re-arms the timeout
+     * schedule that the resume attempt deleted.
+     */
+    private void restorePauseAfterFailedResume(String conversationId, String agentId) {
+        try {
+            boolean restored = conversationMemoryStore.compareAndSetState(conversationId,
+                    ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
+            if (restored) {
+                cacheConversationState(conversationId, ConversationState.AWAITING_HUMAN);
+                scheduleHitlTimeout(conversationId, agentId);
+                LOGGER.warnf("Resume of conversation %s failed — pause restored (AWAITING_HUMAN)", conversationId);
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "Failed to restore pause after failed resume: %s", conversationId);
+        }
+    }
+
+    /**
+     * Copies the agent's HITL timeout config into the memory bookmark so
+     * approval-status / pending-approvals report the effective policy and crash
+     * recovery can distinguish WAIT_INDEFINITELY pauses from ones whose timeout
+     * schedule may have been lost. Absent config is normalized to WAIT_INDEFINITELY
+     * (the default).
+     */
+    private void populateHitlTimeoutBookmark(IConversationMemory memory) {
+        try {
+            memory.setHitlTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY.name());
+            IResourceStore.IResourceId currentId = agentStore.getCurrentResourceId(memory.getAgentId());
+            if (currentId == null)
+                return;
+            AgentConfiguration agentConfig = agentStore.read(memory.getAgentId(), currentId.getVersion());
+            AgentConfiguration.HitlConfig hitlConfig = agentConfig.getHitlConfig();
+            if (hitlConfig == null || hitlConfig.getTimeoutPolicy() == null)
+                return;
+            memory.setHitlTimeoutPolicy(hitlConfig.getTimeoutPolicy().name());
+            memory.setHitlApprovalTimeout(hitlConfig.getApprovalTimeout());
+        } catch (Exception e) {
+            LOGGER.warnf("Could not populate HITL timeout bookmark for %s: %s",
+                    memory.getConversationId(), e.getMessage());
         }
     }
 

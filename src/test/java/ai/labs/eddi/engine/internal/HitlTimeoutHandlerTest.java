@@ -152,7 +152,7 @@ class HitlTimeoutHandlerTest {
 
         @Test
         @DisplayName("regular surface → calls cancelConversation with CANCEL_GRACEFUL")
-        void regularSurface_callsCancelConversation() {
+        void regularSurface_callsCancelConversation() throws Exception {
             var metadata = Map.<String, Object>of(
                     "policy", "ABORT",
                     "surface", "regular",

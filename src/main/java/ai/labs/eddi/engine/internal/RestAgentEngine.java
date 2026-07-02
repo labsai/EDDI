@@ -251,9 +251,22 @@ public class RestAgentEngine implements IRestAgentEngine {
     @Override
     public Response cancelConversation(String conversationId) {
         validateConversationOwnership(conversationId, true);
-        conversationService.cancelConversation(conversationId,
-                ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
-        return Response.ok().build();
+        try {
+            var outcome = conversationService.cancelConversation(conversationId,
+                    ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);
+            return switch (outcome) {
+                case CANCELLED -> Response.ok().build();
+                case NOT_FOUND -> Response.status(Response.Status.NOT_FOUND)
+                        .entity("Conversation not found: " + conversationId).build();
+                case NOTHING_TO_CANCEL -> Response.status(Response.Status.CONFLICT)
+                        .entity("Nothing to cancel: conversation is neither awaiting approval nor executing."
+                                + " Use endConversation to close it.")
+                        .build();
+            };
+        } catch (ResourceStoreException e) {
+            LOGGER.error("Failed to cancel conversation: " + conversationId, e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
+        }
     }
 
     @Override

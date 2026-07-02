@@ -103,7 +103,8 @@ class ConversationServiceResumeTest {
     private ConversationService conversationService;
 
     @BeforeEach
-    void setUp() {
+    @SuppressWarnings("unchecked")
+    void setUp() throws Exception {
         MockitoAnnotations.openMocks(this);
         doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
         conversationService = new ConversationService(
@@ -112,6 +113,26 @@ class ConversationServiceResumeTest {
                 cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
                 new SimpleMeterRegistry(), AGENT_TIMEOUT);
+
+        // The resume path pre-checks existence via getConversationState (404 vs 409)
+        doReturn(ConversationState.AWAITING_HUMAN)
+                .when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+
+        // The resume path wraps execution with the say-path watchdog: execute the
+        // submitted callable inline and hand back a completed future.
+        lenient().when(runtime.submitCallable(any(Callable.class), any(IRuntime.IFinishedExecution.class), any()))
+                .thenAnswer(invocation -> {
+                    Callable<Object> callable = invocation.getArgument(0);
+                    IRuntime.IFinishedExecution<Object> listener = invocation.getArgument(1);
+                    try {
+                        Object result = callable.call();
+                        listener.onComplete(result);
+                        return java.util.concurrent.CompletableFuture.completedFuture(result);
+                    } catch (Exception e) {
+                        listener.onFailure(e);
+                        return java.util.concurrent.CompletableFuture.failedFuture(e);
+                    }
+                });
     }
 
     // =========================================================================
@@ -464,16 +485,17 @@ class ConversationServiceResumeTest {
         }
 
         @Test
-        @DisplayName("agent not deployed → ResourceStoreException with state set to ERROR")
+        @DisplayName("agent not deployed → ResourceStoreException and the pause is RESTORED (not ERROR)")
         void agentNotDeployed_throwsResourceStoreException() throws Exception {
             doReturn(true).when(conversationMemoryStore).compareAndSetState(
                     CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
 
             var snapshot = createResumeSnapshot();
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
 
             // Agent not found
-            doReturn(null).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
             doReturn(null).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
 
             HitlDecision decision = new HitlDecision();
@@ -484,8 +506,11 @@ class ConversationServiceResumeTest {
             assertTrue(exception.getMessage().contains("Agent not deployed"),
                     "Exception should mention agent not deployed, got: " + exception.getMessage());
 
-            // State should be set to ERROR
-            verify(conversationMemoryStore).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+            // #7: the pending approval must survive — pause restored via CAS,
+            // never destroyed with ERROR
+            verify(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
+            verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
         }
     }
 

@@ -183,15 +183,37 @@ public interface IConversationService {
     // --- HITL lifecycle ---
 
     /**
-     * Cancel a conversation with the given control signal.
+     * Outcome of a cancel request — lets the REST layer report honestly instead of
+     * returning 200 unconditionally.
+     */
+    enum CancelOutcome {
+        /** A paused/running conversation was cancelled (or signalled to stop). */
+        CANCELLED,
+        /**
+         * Conversation exists but is neither paused nor executing (READY/ENDED/...).
+         */
+        NOTHING_TO_CANCEL,
+        /** No conversation with that id exists. */
+        NOT_FOUND
+    }
+
+    /**
+     * Cancel a conversation with the given control signal. Cancels a paused
+     * (AWAITING_HUMAN) conversation, or signals a turn executing on this pod to
+     * stop at the next task boundary.
      *
      * @param conversationId
      *            the conversation to cancel
      * @param mode
-     *            the cancellation mode (CANCEL_GRACEFUL or CANCEL_IMMEDIATE)
+     *            the cancellation mode (CANCEL_GRACEFUL or CANCEL_IMMEDIATE —
+     *            IMMEDIATE currently degrades to graceful on this surface)
+     * @return what actually happened — see {@link CancelOutcome}
+     * @throws ResourceStoreException
+     *             on persistence failures
      */
-    void cancelConversation(String conversationId,
-                            ai.labs.eddi.engine.lifecycle.model.ControlSignal mode);
+    CancelOutcome cancelConversation(String conversationId,
+                                     ai.labs.eddi.engine.lifecycle.model.ControlSignal mode)
+            throws ResourceStoreException;
 
     /**
      * Resume a paused (HITL) conversation with the given human decision.

@@ -79,12 +79,37 @@ class RestAgentEngineHitlTest {
     class CancelConversation {
 
         @Test
-        @DisplayName("returns 200 OK and delegates to conversationService.cancelConversation")
-        void returns200Ok() {
+        @DisplayName("returns 200 OK when the service reports CANCELLED")
+        void returns200Ok() throws Exception {
+            doReturn(IConversationService.CancelOutcome.CANCELLED)
+                    .when(conversationService).cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL);
+
             Response response = restAgentEngine.cancelConversation(CONVERSATION_ID);
 
             assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
             verify(conversationService).cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL);
+        }
+
+        @Test
+        @DisplayName("returns 404 when the conversation does not exist")
+        void returns404WhenUnknown() throws Exception {
+            doReturn(IConversationService.CancelOutcome.NOT_FOUND)
+                    .when(conversationService).cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL);
+
+            Response response = restAgentEngine.cancelConversation(CONVERSATION_ID);
+
+            assertEquals(Response.Status.NOT_FOUND.getStatusCode(), response.getStatus());
+        }
+
+        @Test
+        @DisplayName("returns 409 when there is nothing to cancel")
+        void returns409WhenNothingToCancel() throws Exception {
+            doReturn(IConversationService.CancelOutcome.NOTHING_TO_CANCEL)
+                    .when(conversationService).cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL);
+
+            Response response = restAgentEngine.cancelConversation(CONVERSATION_ID);
+
+            assertEquals(Response.Status.CONFLICT.getStatusCode(), response.getStatus());
         }
     }
 

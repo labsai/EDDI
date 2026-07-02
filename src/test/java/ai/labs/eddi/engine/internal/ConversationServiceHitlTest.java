@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
@@ -109,13 +110,16 @@ class ConversationServiceHitlTest {
     class CancelConversation {
 
         @Test
-        @DisplayName("when in AWAITING_HUMAN → CAS succeeds, state set to EXECUTION_INTERRUPTED")
+        @DisplayName("when in AWAITING_HUMAN → CAS succeeds, state set to EXECUTION_INTERRUPTED, outcome CANCELLED")
         void awaitingHuman_casSucceeds() throws Exception {
+            doReturn(ConversationState.AWAITING_HUMAN)
+                    .when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
             doReturn(true).when(conversationMemoryStore).compareAndSetState(
                     CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
 
-            conversationService.cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL);
+            var outcome = conversationService.cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL);
 
+            assertEquals(IConversationService.CancelOutcome.CANCELLED, outcome);
             verify(conversationMemoryStore).compareAndSetState(
                     CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
             // Should NOT try the IN_PROGRESS CAS since the first one succeeded
@@ -127,13 +131,16 @@ class ConversationServiceHitlTest {
         @Test
         @DisplayName("when in IN_PROGRESS → first CAS fails, second CAS succeeds")
         void inProgress_fallbackCas() throws Exception {
+            doReturn(ConversationState.IN_PROGRESS)
+                    .when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
             doReturn(false).when(conversationMemoryStore).compareAndSetState(
                     CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
             doReturn(true).when(conversationMemoryStore).compareAndSetState(
                     CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.EXECUTION_INTERRUPTED);
 
-            conversationService.cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL);
+            var outcome = conversationService.cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL);
 
+            assertEquals(IConversationService.CancelOutcome.CANCELLED, outcome);
             verify(conversationMemoryStore).compareAndSetState(
                     CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
             verify(conversationMemoryStore).compareAndSetState(
@@ -142,12 +149,38 @@ class ConversationServiceHitlTest {
         }
 
         @Test
-        @DisplayName("when store throws ResourceStoreException → no exception propagated")
-        void storeException_noPropagation() throws Exception {
+        @DisplayName("unknown conversation → NOT_FOUND, no CAS attempted")
+        void unknownConversation_notFound() throws Exception {
+            doReturn(null).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+
+            var outcome = conversationService.cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL);
+
+            assertEquals(IConversationService.CancelOutcome.NOT_FOUND, outcome);
+            verify(conversationMemoryStore, never()).compareAndSetState(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("READY conversation with nothing running → NOTHING_TO_CANCEL")
+        void readyConversation_nothingToCancel() throws Exception {
+            doReturn(ConversationState.READY)
+                    .when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            // both CAS attempts miss (default false)
+
+            var outcome = conversationService.cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL);
+
+            assertEquals(IConversationService.CancelOutcome.NOTHING_TO_CANCEL, outcome);
+        }
+
+        @Test
+        @DisplayName("when store throws ResourceStoreException → propagated to caller")
+        void storeException_propagated() throws Exception {
+            doReturn(ConversationState.AWAITING_HUMAN)
+                    .when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
             doThrow(new ResourceStoreException("db error")).when(conversationMemoryStore).compareAndSetState(
                     CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
 
-            assertDoesNotThrow(() -> conversationService.cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL));
+            assertThrows(ResourceStoreException.class,
+                    () -> conversationService.cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL));
         }
     }
 
