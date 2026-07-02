@@ -382,7 +382,7 @@ class CascadingModelExecutor {
             }
             String type = globalVariableResolver.resolveValue(judgeConfig.getType());
             Map<String, String> params = templateParams(judgeConfig.getParameters(), templateDataObjects);
-            return registry.getOrCreate(type, params);
+            return registry.getOrCreate(type, params != null ? params : new HashMap<>());
         } catch (Exception e) {
             LOGGER.warnf("Failed to build judge model: %s; falling back to heuristic", e.getMessage());
             return null;

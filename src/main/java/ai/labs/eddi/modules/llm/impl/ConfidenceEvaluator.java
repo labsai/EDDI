@@ -109,54 +109,34 @@ class ConfidenceEvaluator {
      * then heuristic.
      */
     static EvaluationResult evaluateStructuredOutput(String response, HeuristicConfig heuristicConfig) {
-        // 1. Real JSON parse — only reads confidence from an identified wrapper object.
-        EvaluationResult parsed = tryParseConfidenceWrapper(response);
-        if (parsed != null) {
-            return parsed;
-        }
-
-        // 2. Regex fallback — anchored to a balanced JSON object if one exists, else
-        // the whole string. Reduces (does not fully eliminate) false positives.
-        String scope = extractFirstBalancedObject(response);
-        String regexTarget = scope != null ? scope : response;
-        try {
-            Matcher confidenceMatcher = CONFIDENCE_JSON_PATTERN.matcher(regexTarget);
-            if (confidenceMatcher.find()) {
-                double confidence = clamp(Double.parseDouble(confidenceMatcher.group(1)));
-                Matcher responseMatcher = RESPONSE_JSON_PATTERN.matcher(regexTarget);
-                String actualResponse = responseMatcher.find()
-                        ? unescapeJsonString(responseMatcher.group(1))
-                        : stripJsonWrapper(response);
-                return new EvaluationResult(actualResponse, confidence);
-            }
-        } catch (NumberFormatException e) {
-            LOGGER.debug("Failed to parse confidence from structured output, falling back to heuristic");
-        }
-
-        // 3. Heuristic fallback.
-        LOGGER.debug("No structured confidence found in response, using heuristic fallback");
-        return evaluateHeuristic(response, heuristicConfig);
-    }
-
-    /**
-     * Try to parse a confidence wrapper object using a real JSON parser. Handles
-     * markdown code fences and leading/trailing prose by extracting the first
-     * balanced JSON object. Returns null if no wrapper object with a numeric
-     * {@code confidence} field is found.
-     */
-    private static EvaluationResult tryParseConfidenceWrapper(String response) {
+        // Only treat the response as a confidence wrapper when it IS a single JSON
+        // object (after stripping code fences). This avoids mistaking a stray
+        // "confidence": value inside legitimate answer content — e.g. a code sample —
+        // for the score. A correctly-following model wraps its ENTIRE response.
         String candidate = stripCodeFences(response.trim());
-
-        EvaluationResult direct = parseWrapperObject(candidate);
-        if (direct != null) {
-            return direct;
+        if (candidate.startsWith("{") && candidate.endsWith("}")) {
+            // 1. Real JSON parse (preferred).
+            EvaluationResult parsed = parseWrapperObject(candidate);
+            if (parsed != null) {
+                return parsed;
+            }
+            // 2. Regex fallback for a malformed-but-object-shaped wrapper.
+            try {
+                Matcher confidenceMatcher = CONFIDENCE_JSON_PATTERN.matcher(candidate);
+                if (confidenceMatcher.find()) {
+                    double confidence = clamp(Double.parseDouble(confidenceMatcher.group(1)));
+                    Matcher responseMatcher = RESPONSE_JSON_PATTERN.matcher(candidate);
+                    String actualResponse = responseMatcher.find() ? unescapeJsonString(responseMatcher.group(1)) : stripJsonWrapper(response);
+                    return new EvaluationResult(actualResponse, confidence);
+                }
+            } catch (NumberFormatException e) {
+                LOGGER.debug("Failed to parse confidence from structured output, falling back to heuristic");
+            }
         }
 
-        String balanced = extractFirstBalancedObject(candidate);
-        if (balanced != null && !balanced.equals(candidate)) {
-            return parseWrapperObject(balanced);
-        }
-        return null;
+        // 3. Heuristic fallback — response was not a JSON-object wrapper.
+        LOGGER.debug("No structured confidence wrapper found, using heuristic fallback");
+        return evaluateHeuristic(response, heuristicConfig);
     }
 
     /**
