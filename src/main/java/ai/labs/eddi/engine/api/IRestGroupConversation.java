@@ -123,4 +123,16 @@ public interface IRestGroupConversation {
      */
     record DiscussRequest(String question, String userId) {
     }
+
+    /**
+     * List all group conversations across all groups that are currently awaiting
+     * human approval. Not scoped to a single group.
+     */
+    @GET
+    @Path("/pending-approvals")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "List pending HITL approvals",
+               description = "Lists all group conversations currently awaiting human approval across all groups.")
+    @APIResponse(responseCode = "200", description = "List of pending approval group conversations.")
+    List<GroupConversation> listGroupPendingApprovals(@PathParam("groupId") String groupId);
 }

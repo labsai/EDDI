@@ -76,6 +76,12 @@ public interface IGroupConversationService {
             throws GroupDiscussionException, IResourceStore.ResourceStoreException,
             IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException;
 
+    /**
+     * List all group conversations currently awaiting human approval. Used by
+     * dashboards and admin UIs to show pending HITL items.
+     */
+    List<GroupConversation> listGroupPendingApprovals() throws IResourceStore.ResourceStoreException;
+
     // --- Event listener for SSE streaming ---
 
     interface GroupDiscussionEventListener {

@@ -558,6 +558,11 @@ public class GroupConversationService implements IGroupConversationService {
         return conversationStore.listByGroupId(groupId, index, limit);
     }
 
+    @Override
+    public List<GroupConversation> listGroupPendingApprovals() throws IResourceStore.ResourceStoreException {
+        return conversationStore.findByState(GroupConversationState.AWAITING_APPROVAL);
+    }
+
     // =================================================================
     // Ephemeral agent cleanup
     // =================================================================

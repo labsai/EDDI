@@ -17,6 +17,7 @@ import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
@@ -335,6 +336,15 @@ public class RestGroupConversation implements IRestGroupConversation {
         } catch (Exception e) {
             LOGGER.warnf("Failed to serialize SSE event: %s", e.getMessage());
             return "{}";
+        }
+    }
+
+    @Override
+    public List<GroupConversation> listGroupPendingApprovals(String groupId) {
+        try {
+            return groupConversationService.listGroupPendingApprovals();
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new InternalServerErrorException("Failed to list pending approvals: " + e.getMessage(), e);
         }
     }
 }
