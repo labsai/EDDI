@@ -217,6 +217,49 @@ class PostgresUserMemoryStoreTest extends PostgresTestBase {
                     null, "most_recent", 3);
             assertEquals(3, limited.size());
         }
+
+        @Test
+        @DisplayName("getVisibleEntries — non-empty groupIds does not cause JDBC parameter error")
+        void groupIdsDoNotBreakQuery() throws IResourceStore.ResourceStoreException {
+            // Regression test: PostgreSQL's ?| operator was misinterpreted by JDBC as a
+            // bind parameter, causing "No value specified for parameter 5" when groupIds
+            // was non-empty. This broke ALL group conversations on PostgreSQL.
+            store.upsert(createEntry("user1", "self_key", "v1", "fact", Visibility.self, "agentA"));
+            store.upsert(createEntry("user1", "global_key", "v2", "fact", Visibility.global, "agentA"));
+
+            // Must not throw — before the fix, this threw PSQLException
+            List<UserMemoryEntry> visible = store.getVisibleEntries("user1", "agentA",
+                    List.of("group-123"), "most_recent", 50);
+
+            assertTrue(visible.stream().anyMatch(e -> "self_key".equals(e.key())));
+            assertTrue(visible.stream().anyMatch(e -> "global_key".equals(e.key())));
+        }
+
+        @Test
+        @DisplayName("getVisibleEntries — group-scoped entries visible when groupIds match")
+        void groupScopedEntriesVisible() throws IResourceStore.ResourceStoreException {
+            var groupEntry = new UserMemoryEntry(null, "user1", "group_fact", "shared-value",
+                    "fact", Visibility.group, "agentA", List.of("group-abc", "group-xyz"),
+                    "conv1", false, 0, Instant.now(), Instant.now());
+            store.upsert(groupEntry);
+            store.upsert(createEntry("user1", "self_key", "v1", "fact", Visibility.self, "agentA"));
+
+            // Query with a matching groupId
+            List<UserMemoryEntry> visible = store.getVisibleEntries("user1", "agentA",
+                    List.of("group-abc"), "most_recent", 50);
+
+            assertTrue(visible.stream().anyMatch(e -> "group_fact".equals(e.key())),
+                    "Group-scoped entry should be visible when groupIds overlap");
+            assertTrue(visible.stream().anyMatch(e -> "self_key".equals(e.key())));
+
+            // Query with a non-matching groupId — group entry should NOT appear
+            List<UserMemoryEntry> noMatch = store.getVisibleEntries("user1", "agentA",
+                    List.of("group-other"), "most_recent", 50);
+
+            assertFalse(noMatch.stream().anyMatch(e -> "group_fact".equals(e.key())),
+                    "Group-scoped entry should NOT be visible when groupIds don't overlap");
+            assertTrue(noMatch.stream().anyMatch(e -> "self_key".equals(e.key())));
+        }
     }
 
     // ─── Filter and Category ────────────────────────────────────
