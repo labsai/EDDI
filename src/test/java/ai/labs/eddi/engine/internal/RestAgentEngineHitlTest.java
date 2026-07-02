@@ -13,7 +13,10 @@ import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -320,6 +323,152 @@ class RestAgentEngineHitlTest {
             @SuppressWarnings("unchecked")
             var summary = (java.util.Map<String, Object>) response.getEntity();
             assertEquals("", summary.get("pauseReason"), "Stale pause fields must be suppressed");
+        }
+    }
+
+    // =========================================================================
+    // Endpoint-level ownership enforcement (finding 23) — mirrors the group
+    // surface's 403 tests for the REGULAR HITL surface (resume / cancel /
+    // approval-status). Verifies the approver-inclusive validator is used and
+    // that a ForbiddenException from it propagates before the service runs.
+    // =========================================================================
+
+    @Nested
+    @DisplayName("HITL ownership enforcement (resume / cancel / approval-status)")
+    class HitlOwnershipEnforcement {
+
+        private HitlDecision approvedDecision() {
+            var d = new HitlDecision();
+            d.setVerdict(HitlVerdict.APPROVED);
+            return d;
+        }
+
+        // -- resume --------------------------------------------------------
+
+        @Test
+        @DisplayName("non-owner non-approver → resume propagates ForbiddenException, service never called")
+        void resumeDeniedForNonOwner() throws Exception {
+            doThrow(new ForbiddenException("Access denied"))
+                    .when(ownershipValidator).requireOwnerAdminOrApprover(any(), any(), any());
+
+            assertThrows(ForbiddenException.class,
+                    () -> restAgentEngine.resumeConversation(CONVERSATION_ID, approvedDecision()));
+
+            verify(conversationService, never()).resumeConversation(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("resume uses the approver-INCLUSIVE variant (requireOwnerAdminOrApprover), not requireOwnerOrAdmin")
+        void resumeUsesApproverInclusiveVariant() throws Exception {
+            restAgentEngine.resumeConversation(CONVERSATION_ID, approvedDecision());
+
+            // An approver must be able to decide approvals — dropping to the
+            // non-approver variant would silently exclude them.
+            verify(ownershipValidator).requireOwnerAdminOrApprover(eq(identity), eq(USER_ID), eq("conversation"));
+            verify(ownershipValidator, never()).requireOwnerOrAdmin(any(), any(), any());
+            verify(conversationService).resumeConversation(eq(CONVERSATION_ID), any(), any());
+        }
+
+        @Test
+        @DisplayName("approver (not owner) → resume allowed, service invoked")
+        void resumeAllowedForApprover() throws Exception {
+            // requireOwnerAdminOrApprover passes (approver role) → default no-op stub
+            restAgentEngine.resumeConversation(CONVERSATION_ID, approvedDecision());
+
+            verify(conversationService).resumeConversation(eq(CONVERSATION_ID), any(), any());
+        }
+
+        @Test
+        @DisplayName("missing descriptor + plain user → resume Forbidden (fail-closed), service never called")
+        void resumeFailClosedForPlainUserWhenDescriptorMissing() throws Exception {
+            // No descriptor to verify ownership against; caller is neither admin
+            // nor approver → the HITL branch fails closed.
+            doThrow(new ResourceNotFoundException("no descriptor"))
+                    .when(conversationDescriptorStore).readDescriptor(anyString(), anyInt());
+            doReturn(false).when(ownershipValidator).isAdmin(identity);
+            doReturn(false).when(ownershipValidator).isApprover(identity);
+
+            assertThrows(ForbiddenException.class,
+                    () -> restAgentEngine.resumeConversation(CONVERSATION_ID, approvedDecision()));
+            verify(conversationService, never()).resumeConversation(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("missing descriptor + admin → resume proceeds (fail-closed only for plain users)")
+        void resumeAllowedForAdminWhenDescriptorMissing() throws Exception {
+            doThrow(new ResourceNotFoundException("no descriptor"))
+                    .when(conversationDescriptorStore).readDescriptor(anyString(), anyInt());
+            doReturn(true).when(ownershipValidator).isAdmin(identity);
+
+            restAgentEngine.resumeConversation(CONVERSATION_ID, approvedDecision());
+
+            verify(conversationService).resumeConversation(eq(CONVERSATION_ID), any(), any());
+        }
+
+        // -- cancel --------------------------------------------------------
+
+        @Test
+        @DisplayName("non-owner non-approver → cancel propagates ForbiddenException, service never called")
+        void cancelDeniedForNonOwner() throws Exception {
+            doThrow(new ForbiddenException("Access denied"))
+                    .when(ownershipValidator).requireOwnerAdminOrApprover(any(), any(), any());
+
+            assertThrows(ForbiddenException.class,
+                    () -> restAgentEngine.cancelConversation(CONVERSATION_ID));
+
+            verify(conversationService, never()).cancelConversation(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("cancel uses the approver-INCLUSIVE variant (requireOwnerAdminOrApprover)")
+        void cancelUsesApproverInclusiveVariant() throws Exception {
+            doReturn(IConversationService.CancelOutcome.CANCELLED)
+                    .when(conversationService).cancelConversation(eq(CONVERSATION_ID), eq(ControlSignal.CANCEL_GRACEFUL), any());
+
+            restAgentEngine.cancelConversation(CONVERSATION_ID);
+
+            verify(ownershipValidator).requireOwnerAdminOrApprover(eq(identity), eq(USER_ID), eq("conversation"));
+            verify(ownershipValidator, never()).requireOwnerOrAdmin(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("missing descriptor + plain user → cancel Forbidden (fail-closed), service never called")
+        void cancelFailClosedForPlainUserWhenDescriptorMissing() throws Exception {
+            doThrow(new ResourceNotFoundException("no descriptor"))
+                    .when(conversationDescriptorStore).readDescriptor(anyString(), anyInt());
+            doReturn(false).when(ownershipValidator).isAdmin(identity);
+            doReturn(false).when(ownershipValidator).isApprover(identity);
+
+            assertThrows(ForbiddenException.class,
+                    () -> restAgentEngine.cancelConversation(CONVERSATION_ID));
+            verify(conversationService, never()).cancelConversation(anyString(), any(), any());
+        }
+
+        // -- approval-status ----------------------------------------------
+
+        @Test
+        @DisplayName("non-owner non-approver → approval-status propagates ForbiddenException, service never called")
+        void approvalStatusDeniedForNonOwner() throws Exception {
+            doThrow(new ForbiddenException("Access denied"))
+                    .when(ownershipValidator).requireOwnerAdminOrApprover(any(), any(), any());
+
+            assertThrows(ForbiddenException.class,
+                    () -> restAgentEngine.getApprovalStatus(CONVERSATION_ID, "summary"));
+
+            verify(conversationService, never()).getConversationMemorySnapshot(anyString());
+        }
+
+        @Test
+        @DisplayName("approval-status uses the approver-INCLUSIVE variant (requireOwnerAdminOrApprover)")
+        void approvalStatusUsesApproverInclusiveVariant() throws Exception {
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+            doReturn(snapshot).when(conversationService).getConversationMemorySnapshot(CONVERSATION_ID);
+
+            restAgentEngine.getApprovalStatus(CONVERSATION_ID, "summary");
+
+            verify(ownershipValidator).requireOwnerAdminOrApprover(eq(identity), eq(USER_ID), eq("conversation"));
+            verify(ownershipValidator, never()).requireOwnerOrAdmin(any(), any(), any());
         }
     }
 }

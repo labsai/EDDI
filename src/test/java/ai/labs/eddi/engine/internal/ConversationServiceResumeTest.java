@@ -434,6 +434,30 @@ class ConversationServiceResumeTest {
 
             verify(scheduleStore, never()).createSchedule(any());
         }
+
+        @Test
+        @DisplayName("resume deletes the pending timeout schedule by name before executing (MAJOR-3)")
+        void resumeDeletesTimeoutScheduleByName() throws Exception {
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            var snapshot = createResumeSnapshot();
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            IAgent agent = mock(IAgent.class);
+            IConversation conversation = mock(IConversation.class);
+            doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+            doReturn(conversation).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+
+            conversationService.resumeConversation(CONVERSATION_ID, decision, null);
+
+            // The stale one-shot fire must be disarmed so it cannot auto-decide a
+            // conversation a human already resumed; deleted by the conversation-scoped
+            // schedule name.
+            verify(scheduleStore).deleteSchedulesByName("hitl-timeout-" + CONVERSATION_ID);
+        }
     }
 
     // =========================================================================

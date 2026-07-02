@@ -356,5 +356,144 @@ class ConversationHitlTest {
 
             assertEquals(ConversationState.ENDED, memory.getConversationState());
         }
+
+        @Test
+        @DisplayName("REJECTED path writes the rejection to ConversationOutput[output] AND strips PAUSE_CONVERSATION (finding 24/H)")
+        void resumeRejectedWritesOutputAndStripsPauseAction() throws Exception {
+            memory.setConversationState(ConversationState.AWAITING_HUMAN);
+            memory.setHitlPausedWorkflowId("wf1");
+            memory.setHitlPausedAbsoluteTaskIndex(1);
+            // The paused turn's ACTIONS (incl. PAUSE_CONVERSATION) are restored on
+            // resume — the REJECTED branch must strip the gate action just like APPROVED.
+            memory.getCurrentStep().storeData(new ai.labs.eddi.engine.memory.model.Data<>(
+                    "actions", List.of("delete_account", IConversation.PAUSE_CONVERSATION)));
+
+            var conv = createConversation();
+            conv.resume(decision(HitlVerdict.REJECTED, "not authorized", "supervisor"));
+
+            // The rejection feedback must reach conversationOutputs["output"] so log
+            // generation and UIs (which read that key) render it.
+            var output = memory.getCurrentStep().getConversationOutput();
+            @SuppressWarnings("unchecked")
+            var outputList = (List<Object>) output.get(
+                    ai.labs.eddi.engine.memory.MemoryKeys.OUTPUT_PREFIX);
+            assertNotNull(outputList, "REJECTED must publish an output entry");
+            assertTrue(outputList.stream().anyMatch(o -> o.toString().contains("rejected by a human reviewer")),
+                    "output must carry the rejection message, got: " + outputList);
+            assertTrue(outputList.stream().anyMatch(o -> o.toString().contains("not authorized")),
+                    "output must include the reviewer's note");
+
+            // ACTIONS strip: PAUSE_CONVERSATION must be gone so a later rerun/undo of
+            // this step cannot re-trigger the gate from stale action data.
+            var actionsData = memory.getCurrentStep().<List<String>>getLatestData("actions");
+            assertNotNull(actionsData);
+            assertFalse(actionsData.getResult().contains(IConversation.PAUSE_CONVERSATION),
+                    "REJECTED must strip stale PAUSE_CONVERSATION");
+            assertTrue(actionsData.getResult().contains("delete_account"),
+                    "other actions must be preserved");
+
+            // No pipeline re-entry on REJECTED.
+            verify(lifecycleManager, never()).executeLifecycleFromIndex(any(), anyInt());
+        }
+    }
+
+    // =========================================================================
+    // Multi-workflow resume (finding 24) — the paused workflow resumes FROM the
+    // bookmark index; every workflow AFTER it runs a full executeLifecycle. The
+    // single-workflow ResumeTests never exercise the found-then-continue loop.
+    // =========================================================================
+
+    @Nested
+    @DisplayName("resume() across multiple workflows")
+    class MultiWorkflowResume {
+
+        private IExecutableWorkflow wf(String id, ILifecycleManager lm) {
+            var w = mock(IExecutableWorkflow.class);
+            when(w.getWorkflowId()).thenReturn(id);
+            when(w.getLifecycleManager()).thenReturn(lm);
+            return w;
+        }
+
+        @Test
+        @DisplayName("pause in workflow 1 of 2 → wf1 resumes from index, wf2 runs a full lifecycle, in order")
+        void pausedInFirstOfTwo_secondRunsFull() throws Exception {
+            var lm1 = mock(ILifecycleManager.class);
+            var lm2 = mock(ILifecycleManager.class);
+            var wf1 = wf("wf1", lm1);
+            var wf2 = wf("wf2", lm2);
+
+            memory.setConversationState(ConversationState.AWAITING_HUMAN);
+            memory.setHitlPausedWorkflowId("wf1");
+            memory.setHitlPausedAbsoluteTaskIndex(2);
+
+            var conv = new Conversation(List.of(wf1, wf2), memory, propertiesHandler, outputRenderer);
+            conv.resume(decision(HitlVerdict.APPROVED));
+
+            var inOrder = inOrder(lm1, lm2);
+            // wf1: resume from bookmark index + 1
+            inOrder.verify(lm1).executeLifecycleFromIndex(memory, 3);
+            // wf2: full lifecycle (the found-then-continue branch) — regression guard:
+            // skipping subsequent workflows would drop their output/templating.
+            inOrder.verify(lm2).executeLifecycle(memory, null);
+            verify(lm2, never()).executeLifecycleFromIndex(any(), anyInt());
+            assertEquals(ConversationState.READY, memory.getConversationState());
+        }
+
+        @Test
+        @DisplayName("pause in workflow 2 of 2 → wf1 is skipped entirely, wf2 resumes from index")
+        void pausedInSecondOfTwo_firstSkipped() throws Exception {
+            var lm1 = mock(ILifecycleManager.class);
+            var lm2 = mock(ILifecycleManager.class);
+            var wf1 = wf("wf1", lm1);
+            var wf2 = wf("wf2", lm2);
+
+            memory.setConversationState(ConversationState.AWAITING_HUMAN);
+            memory.setHitlPausedWorkflowId("wf2");
+            memory.setHitlPausedAbsoluteTaskIndex(0);
+
+            var conv = new Conversation(List.of(wf1, wf2), memory, propertiesHandler, outputRenderer);
+            conv.resume(decision(HitlVerdict.APPROVED));
+
+            // wf1 is before the paused workflow — it already ran in the original turn,
+            // so it must NOT re-run on resume.
+            verify(lm1, never()).executeLifecycle(any(), any());
+            verify(lm1, never()).executeLifecycleFromIndex(any(), anyInt());
+            verify(lm2).executeLifecycleFromIndex(memory, 1);
+        }
+    }
+
+    // =========================================================================
+    // Config-drift resume (finding 24) — the pausedWorkflowId is not among the
+    // deployed workflows (agent redeployed / workflow renamed). The REAL loop
+    // must set ERROR and throw a config-drift LifecycleException. Previously this
+    // branch was only "tested" by a mock that pre-scripted the exception.
+    // =========================================================================
+
+    @Nested
+    @DisplayName("resume() config drift (paused workflow no longer exists)")
+    class ConfigDriftResume {
+
+        @Test
+        @DisplayName("bookmarked workflowId absent from deployed workflows → LifecycleException + state ERROR")
+        void missingPausedWorkflow_errorsWithActionableMessage() throws Exception {
+            // The only deployed workflow is "wf1"; the bookmark names one that is gone.
+            memory.setConversationState(ConversationState.AWAITING_HUMAN);
+            memory.setHitlPausedWorkflowId("renamed-workflow");
+            memory.setHitlPausedAbsoluteTaskIndex(1);
+
+            var conv = createConversation();
+
+            var ex = assertThrows(LifecycleException.class,
+                    () -> conv.resume(decision(HitlVerdict.APPROVED)));
+            assertTrue(ex.getMessage().contains("renamed-workflow")
+                    && ex.getMessage().contains("config drift"),
+                    "message must be actionable, got: " + ex.getMessage());
+
+            // The conversation is parked in ERROR (not left dangling IN_PROGRESS).
+            assertEquals(ConversationState.ERROR, memory.getConversationState());
+            // The paused workflow was never found, so nothing was executed.
+            verify(lifecycleManager, never()).executeLifecycleFromIndex(any(), anyInt());
+            verify(lifecycleManager, never()).executeLifecycle(any(), any());
+        }
     }
 }

@@ -126,6 +126,11 @@ class ConversationServiceHitlTest {
             verify(conversationMemoryStore, never()).compareAndSetState(
                     CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.EXECUTION_INTERRUPTED);
             verify(conversationStateCache).put(CONVERSATION_ID, ConversationState.EXECUTION_INTERRUPTED);
+            // MAJOR-3: cancel disarms the pending timeout schedule (a stale fire
+            // would auto-decide an already-cancelled conversation) and clears the
+            // now-terminal bookmark.
+            verify(scheduleStore).deleteSchedulesByName("hitl-timeout-" + CONVERSATION_ID);
+            verify(conversationMemoryStore).clearHitlBookmark(CONVERSATION_ID);
         }
 
         @Test
