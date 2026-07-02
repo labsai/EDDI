@@ -169,6 +169,83 @@ class AttachmentContextExtractorTest {
         }
     }
 
+    // ==================== Payload Scrubbing (persistence) ====================
+
+    @Nested
+    class ScrubInlinePayload {
+
+        @Test
+        void shouldRemoveBase64DataFromAttachmentContext() {
+            Map<String, Object> attachMap = new HashMap<>();
+            attachMap.put("mimeType", "image/png");
+            attachMap.put("fileName", "icon.png");
+            attachMap.put("data", "iVBORw0KGgoAAAANSUhEUgAA");
+            Context original = createContext(attachMap);
+
+            Context scrubbed = AttachmentContextExtractor.scrubInlinePayload("attachment_0", original);
+
+            assertNotSame(original, scrubbed, "a scrubbed copy must be returned, not the original");
+            @SuppressWarnings("unchecked")
+            Map<Object, Object> value = (Map<Object, Object>) scrubbed.getValue();
+            assertFalse(value.containsKey("data"), "base64 data must be scrubbed from the persisted copy");
+            assertEquals("image/png", value.get("mimeType"), "metadata must be preserved");
+            assertEquals("icon.png", value.get("fileName"), "metadata must be preserved");
+            assertEquals(original.getType(), scrubbed.getType(), "context type must be preserved");
+        }
+
+        @Test
+        void shouldNotMutateOriginalContext() {
+            Map<String, Object> attachMap = new HashMap<>();
+            attachMap.put("mimeType", "image/png");
+            attachMap.put("data", "iVBORw0KGgo=");
+            Context original = createContext(attachMap);
+
+            AttachmentContextExtractor.scrubInlinePayload("attachment_0", original);
+
+            @SuppressWarnings("unchecked")
+            Map<Object, Object> originalValue = (Map<Object, Object>) original.getValue();
+            assertTrue(originalValue.containsKey("data"),
+                    "original context must keep its payload so the live turn can forward it");
+            assertEquals("iVBORw0KGgo=", originalValue.get("data"));
+        }
+
+        @Test
+        void shouldReturnSameInstanceForUrlAttachment() {
+            Context original = createContext(Map.of(
+                    "mimeType", "image/png", "url", "https://example.com/x.png"));
+
+            Context result = AttachmentContextExtractor.scrubInlinePayload("attachment_0", original);
+
+            assertSame(original, result, "url-only attachments carry no payload — return unchanged");
+        }
+
+        @Test
+        void shouldReturnSameInstanceForNonAttachmentKey() {
+            Context original = createContext(Map.of("data", "somevalue"));
+
+            Context result = AttachmentContextExtractor.scrubInlinePayload("language", original);
+
+            assertSame(original, result, "non-attachment contexts must never be scrubbed");
+        }
+
+        @Test
+        void shouldHandleNullContext() {
+            assertNull(AttachmentContextExtractor.scrubInlinePayload("attachment_0", null));
+        }
+
+        @Test
+        void shouldHandleNullKey() {
+            Context original = createContext(Map.of("data", "x"));
+            assertSame(original, AttachmentContextExtractor.scrubInlinePayload(null, original));
+        }
+
+        @Test
+        void shouldReturnUnchangedWhenValueNotAMap() {
+            Context original = createContext("not a map");
+            assertSame(original, AttachmentContextExtractor.scrubInlinePayload("attachment_0", original));
+        }
+    }
+
     // ==================== Helpers ====================
 
     private static Context createContext(Object value) {

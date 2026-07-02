@@ -412,8 +412,10 @@ public class Conversation implements IConversation {
         List<IData<Context>> contextData = new LinkedList<>();
         if (context != null) {
             for (String key : context.keySet()) {
-                contextData.add(new Data<>(KEY_CONTEXT + ":" + key, context.get(key)));
-
+                // Persisted copy is scrubbed of inline base64 payloads; the live payload
+                // has already been captured into ATTACHMENTS memory for this turn.
+                Context persistedCopy = AttachmentContextExtractor.scrubInlinePayload(key, context.get(key));
+                contextData.add(new Data<>(KEY_CONTEXT + ":" + key, persistedCopy));
             }
         }
         return contextData;

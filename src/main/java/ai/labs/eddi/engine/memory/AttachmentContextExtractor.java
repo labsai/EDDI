@@ -10,6 +10,7 @@ import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -38,7 +39,15 @@ import java.util.Map;
 public final class AttachmentContextExtractor {
 
     private static final Logger LOGGER = Logger.getLogger(AttachmentContextExtractor.class);
-    private static final String ATTACHMENT_PREFIX = "attachment_";
+
+    /**
+     * Context keys with this prefix carry attachment references (attachment_0,
+     * attachment_1, …).
+     */
+    public static final String ATTACHMENT_PREFIX = "attachment_";
+
+    /** Inline base64 payload field inside an attachment context value map. */
+    public static final String FIELD_DATA = "data";
 
     private AttachmentContextExtractor() {
         // non-instantiable utility
@@ -112,7 +121,7 @@ public final class AttachmentContextExtractor {
         }
 
         // Base64 inline path
-        String data = getStringField(attachMap, "data");
+        String data = getStringField(attachMap, FIELD_DATA);
         if (data != null && !data.isBlank()) {
             attachment.setBase64Data(data);
             // Estimate size from base64 length (3/4 of encoded length)
@@ -127,5 +136,39 @@ public final class AttachmentContextExtractor {
     private static String getStringField(Map<String, Object> map, String key) {
         Object value = map.get(key);
         return value instanceof String s ? s : null;
+    }
+
+    /**
+     * Return a metadata-only copy of an {@code attachment_*} context whose value
+     * map carries an inline base64 {@link #FIELD_DATA} payload; every other context
+     * — and payload-free attachment contexts such as URL references — is returned
+     * unchanged.
+     * <p>
+     * Callers use this to build the <em>persisted</em> copy of the context (step
+     * data and {@code context.*} conversation output) so the raw base64 never lands
+     * in the Mongo conversation document (~1.33&times; file size per turn against
+     * the 16&nbsp;MB limit) and is never exposed via
+     * {@code {context.attachment_*.data}} templates. The live payload has already
+     * been captured into ATTACHMENTS memory for the turn by
+     * {@link #extractAttachments(Map)} reading the original context map, so LLM
+     * forwarding is unaffected. Mirrors the secret-input scrubbing pattern.
+     *
+     * @param contextKey
+     *            the context key (only {@code attachment_*} keys are scrubbed)
+     * @param ctx
+     *            the original context (may be null)
+     * @return a scrubbed copy when a payload is present, otherwise {@code ctx}
+     *         unchanged
+     */
+    public static Context scrubInlinePayload(String contextKey, Context ctx) {
+        if (contextKey == null || !contextKey.startsWith(ATTACHMENT_PREFIX) || ctx == null) {
+            return ctx;
+        }
+        if (!(ctx.getValue() instanceof Map<?, ?> value) || !value.containsKey(FIELD_DATA)) {
+            return ctx;
+        }
+        Map<Object, Object> scrubbed = new LinkedHashMap<>(value);
+        scrubbed.remove(FIELD_DATA);
+        return new Context(ctx.getType(), scrubbed);
     }
 }
