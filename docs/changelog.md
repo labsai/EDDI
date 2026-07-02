@@ -35,7 +35,9 @@
 | Integration test (F22) | **New `HitlPauseResumeIT`** — full end-to-end with zero mocked seams: real behavior rule emits PAUSE_CONVERSATION → real Mongo persistence → REST resume completes the remaining pipeline tasks (the original BLOCKER's fail-on-revert), plus REJECTED path, cancel path, 400-does-not-consume-pause, 404 unknown id, 409 not-paused, and undo-blocked-while-paused. New `tests/hitl/*.json` agent fixtures. Runs in CI via `mvnw verify -DskipITs=false` (ci.yml:179); local Docker daemon was unavailable during this session, so first execution happens in CI — same as any IT change. |
 | Docs (F21) | New [docs/hitl.md](hitl.md): both surfaces, config reference incl. `onTaskRejection`, real REST paths, template access (`hitlDecision` / `{properties.hitlVerdict}`), timeout policies, approver role, crash recovery config, operations notes (metrics, undeploy semantics, cancel matrix), known v1 limitations, `requiresApproval` upgrade note. AGENTS.md reserved-action list updated with PAUSE_CONVERSATION. `planning/hitl-framework-plan.md` committed. |
 
-*(Extended by subsequent commits in this session — see below.)*
+| Final sweep | Full 9,761-test suite executed: the only genuine branch defect was `GroupConversationTest.groupConversationStates` still asserting 6 enum values after the branch added CANCELLED (fixed: 7 + CANCELLED assertion). All other local failures are environmental (Docker unavailable for Testcontainers classes, sandbox-blocked loopback sockets for HTTP-server-based tool tests) — these classes are untouched by this branch and run in CI. Mongo `findPendingApprovalSummaries` reworked to bounded projected point-reads with explicit id mapping (the bulk POJO-codec projection could not be guaranteed to populate `_id`→conversationId). |
+
+*(End of session 2.)*
 
 ---
 

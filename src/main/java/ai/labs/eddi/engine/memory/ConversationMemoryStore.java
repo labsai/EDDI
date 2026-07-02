@@ -187,18 +187,28 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     @Override
     public List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(int limit) {
-        // Projection via the POJO codec: only the summary fields are read — never
-        // the (potentially multi-MB) step/output data of paused conversations.
+        // Bounded projected reads: ids come from the indexed state query, each
+        // summary is a projected point-read — the (potentially multi-MB)
+        // step/output data of paused conversations is never deserialized. The id
+        // is set explicitly, mirroring loadConversationMemorySnapshot.
         List<ai.labs.eddi.engine.model.PendingApprovalSummary> out = new ArrayList<>();
-        conversationCollectionObject
-                .find(Filters.eq(KEY_CONVERSATION_STATE, ConversationState.AWAITING_HUMAN.toString()))
-                .projection(Projections.include(KEY_AGENT_ID, "userId",
-                        "hitlPausedAt", "hitlPauseReason", "hitlTimeoutPolicy"))
-                .limit(limit)
-                .forEach(snapshot -> out.add(new ai.labs.eddi.engine.model.PendingApprovalSummary(
-                        snapshot.getConversationId(), snapshot.getAgentId(), snapshot.getUserId(),
+        List<String> ids = findConversationIdsByState(ConversationState.AWAITING_HUMAN);
+        for (String conversationId : ids) {
+            if (out.size() >= limit) {
+                break;
+            }
+            var snapshot = conversationCollectionObject
+                    .find(new Document(OBJECT_ID, new ObjectId(conversationId)))
+                    .projection(Projections.include(KEY_AGENT_ID, "userId",
+                            "hitlPausedAt", "hitlPauseReason", "hitlTimeoutPolicy"))
+                    .first();
+            if (snapshot != null) {
+                out.add(new ai.labs.eddi.engine.model.PendingApprovalSummary(
+                        conversationId, snapshot.getAgentId(), snapshot.getUserId(),
                         snapshot.getHitlPausedAt(), snapshot.getHitlPauseReason(),
-                        snapshot.getHitlTimeoutPolicy())));
+                        snapshot.getHitlTimeoutPolicy()));
+            }
+        }
         return out;
     }
 
