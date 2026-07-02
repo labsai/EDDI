@@ -38,10 +38,8 @@
 
 ### In Progress / Next
 - Phase 2b: HitlConfig unification (shared class, enums)
-- Phase 3c: Crash recovery (startup sweep for stale AWAITING states)
-- Phase 3d: Discriminating status codes
 - Phase 4b: Strict ownership + approver role
-- Phase 6a: Deduplicate task loop
+- Phase 6a: Deduplicate task loop (refactor, not correctness)
 - Phase 7: Integration tests, dead code cleanup, documentation
 
 ---
