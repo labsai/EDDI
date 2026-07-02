@@ -37,10 +37,13 @@
 - `LifecycleManagerHitlTest.java` — 3 new/fixed delta-based pause tests
 
 ### In Progress / Next
-- Phase 2b: HitlConfig unification (shared class, enums)
 - Phase 4b: Strict ownership + approver role
-- Phase 6a: Deduplicate task loop (refactor, not correctness)
 - Phase 7: Integration tests, dead code cleanup, documentation
+
+### Completed (this session)
+- Phase 2b: HitlConfig string→enum typing (HitlGranularity, HitlTimeoutPolicy, HitlRejectionPolicy)
+- Phase 4d: Micrometer HITL counters (eddi_hitl_pause/resume/timeout_count with surface tag)
+- Phase 6a: Deduplicated executeLifecycle/executeLifecycleFromIndex → shared executeTaskRange()
 
 ---
 
