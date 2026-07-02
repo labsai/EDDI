@@ -44,6 +44,7 @@
     "capabilities": "Capacidades",
     "sync": "Sincronização",
     "channels": "Canais",
+    "approvals": "Aprovações",
     "userConversations": "Conversas do usuário",
     "userData": "Dados do utilizador",
     "variables": "Variáveis"
@@ -106,7 +107,9 @@
     "groups": {
       "title": "Grupos",
       "subtitle": "Grupos de discussão multi-agente para debate estruturado e colaboração"
-    }
+    },
+    "approvals": "Aprovações pendentes",
+    "approvalsSubtitle": "Revise e decida sobre conversas que aguardam entrada humana"
   },
   "common": {
     "loading": "Carregando...",
@@ -1392,6 +1395,7 @@
     "maxRounds": "Rodadas máx.",
     "styleTaskForce": "Task Force",
     "stateAwaitingApproval": "Aguardando aprovação",
+    "stateCancelled": "Cancelado",
     "phasePlan": "Planejamento",
     "phaseExecute": "Execução",
     "phaseVerify": "Verificação",
@@ -1886,5 +1890,32 @@
     "type": "Tipo de canal",
     "webhookHint": "Cole esta URL no campo Request URL em Event Subscriptions do seu aplicativo Slack.",
     "webhookUrl": "URL do webhook"
+  },
+  "hitl": {
+    "awaitingHuman": "Aguardando humano",
+    "awaitingApproval": "Aguardando aprovação",
+    "approve": "Aprovar",
+    "reject": "Rejeitar",
+    "cancel": "Cancelar",
+    "approved": "Aprovado",
+    "rejected": "Rejeitado",
+    "cancelled": "Cancelado",
+    "pending": "pendente",
+    "emptyQueue": "Sem aprovações pendentes",
+    "emptyQueueDescription": "Todas as conversas estão fluindo — nenhuma entrada humana necessária agora.",
+    "surface": "Tipo",
+    "regular": "Conversa",
+    "group": "Grupo",
+    "pauseReason": "Motivo",
+    "pausedAt": "Pausado",
+    "timeoutPolicy": "Tempo limite",
+    "timeRemaining": "Restante",
+    "overdue": "Atrasado",
+    "phase": "Fase",
+    "granularity": "Granularidade",
+    "taskApprovals": "Aprovações de tarefas",
+    "approveAll": "Aprovar tudo",
+    "note": "Adicionar nota (opcional)",
+    "notePlaceholder": "Adicionar uma nota para a decisão..."
   }
 }

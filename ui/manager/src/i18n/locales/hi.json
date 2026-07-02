@@ -44,6 +44,7 @@
     "capabilities": "क्षमताएं",
     "sync": "सिंक",
     "channels": "चैनल",
+    "approvals": "अनुमोदन",
     "userConversations": "उपयोगकर्ता वार्तालाप",
     "userData": "उपयोगकर्ता डेटा",
     "variables": "चर"
@@ -106,7 +107,9 @@
     "groups": {
       "title": "समूह",
       "subtitle": "संरचित चर्चा और सहयोग के लिए बहु-Agent चर्चा समूह"
-    }
+    },
+    "approvals": "लंबित अनुमोदन",
+    "approvalsSubtitle": "मानव इनपुट की प्रतीक्षा कर रही बातचीत की समीक्षा और निर्णय लें"
   },
   "common": {
     "loading": "लोड हो रहा है...",
@@ -1392,6 +1395,7 @@
     "maxRounds": "अधिकतम राउंड",
     "styleTaskForce": "Task Force",
     "stateAwaitingApproval": "अनुमोदन की प्रतीक्षा",
+    "stateCancelled": "रद्द",
     "phasePlan": "योजना",
     "phaseExecute": "कार्यान्वयन",
     "phaseVerify": "सत्यापन",
@@ -1886,5 +1890,32 @@
     "type": "चैनल प्रकार",
     "webhookHint": "इस URL को अपने Slack ऐप के Event Subscriptions → Request URL फ़ील्ड में पेस्ट करें।",
     "webhookUrl": "वेबहुक URL"
+  },
+  "hitl": {
+    "awaitingHuman": "मानव की प्रतीक्षा",
+    "awaitingApproval": "अनुमोदन की प्रतीक्षा",
+    "approve": "अनुमोदन",
+    "reject": "अस्वीकार",
+    "cancel": "रद्द करें",
+    "approved": "अनुमोदित",
+    "rejected": "अस्वीकृत",
+    "cancelled": "रद्द",
+    "pending": "लंबित",
+    "emptyQueue": "कोई लंबित अनुमोदन नहीं",
+    "emptyQueueDescription": "सभी बातचीत सुचारू रूप से चल रही हैं — अभी किसी मानव इनपुट की आवश्यकता नहीं है।",
+    "surface": "प्रकार",
+    "regular": "बातचीत",
+    "group": "समूह",
+    "pauseReason": "कारण",
+    "pausedAt": "रुका हुआ",
+    "timeoutPolicy": "समय सीमा",
+    "timeRemaining": "शेष",
+    "overdue": "अतिदेय",
+    "phase": "चरण",
+    "granularity": "विस्तृतता",
+    "taskApprovals": "कार्य अनुमोदन",
+    "approveAll": "सभी को अनुमोदित करें",
+    "note": "नोट जोड़ें (वैकल्पिक)",
+    "notePlaceholder": "निर्णय के लिए एक नोट जोड़ें..."
   }
 }

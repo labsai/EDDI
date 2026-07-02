@@ -36,6 +36,7 @@
     "capabilities": "Capabilities",
     "sync": "Sync",
     "channels": "Channels",
+    "approvals": "Approvals",
     "userConversations": "User Conversations",
     "userData": "User Data",
     "sectionCore": "Core",
@@ -106,7 +107,9 @@
     "channels": {
       "title": "Channels",
       "subtitle": "Connect agents and groups to messaging platforms like Slack"
-    }
+    },
+    "approvals": "Pending Approvals",
+    "approvalsSubtitle": "Review and decide on conversations awaiting human input"
   },
   "common": {
     "loading": "Loading...",
@@ -1434,6 +1437,7 @@
     "maxRounds": "Max Rounds",
     "styleTaskForce": "Task Force",
     "stateAwaitingApproval": "Awaiting Approval",
+    "stateCancelled": "Cancelled",
     "phasePlan": "Plan",
     "phaseExecute": "Execute",
     "phaseVerify": "Verify",
@@ -1915,5 +1919,32 @@
     "type": "Channel Type",
     "webhookHint": "Paste this URL into your Slack App’s Event Subscriptions → Request URL field.",
     "webhookUrl": "Webhook URL"
+  },
+  "hitl": {
+    "awaitingHuman": "Awaiting Human",
+    "awaitingApproval": "Awaiting Approval",
+    "approve": "Approve",
+    "reject": "Reject",
+    "cancel": "Cancel",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "cancelled": "Cancelled",
+    "pending": "pending",
+    "emptyQueue": "No pending approvals",
+    "emptyQueueDescription": "All conversations are flowing — no human input needed right now.",
+    "surface": "Surface",
+    "regular": "Conversation",
+    "group": "Group",
+    "pauseReason": "Reason",
+    "pausedAt": "Paused",
+    "timeoutPolicy": "Timeout",
+    "timeRemaining": "Remaining",
+    "overdue": "Overdue",
+    "phase": "Phase",
+    "granularity": "Granularity",
+    "taskApprovals": "Task Approvals",
+    "approveAll": "Approve All",
+    "note": "Add note (optional)",
+    "notePlaceholder": "Add a note for the decision..."
   }
 }

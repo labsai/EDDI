@@ -44,6 +44,7 @@
     "capabilities": "기능",
     "sync": "동기화",
     "channels": "채널",
+    "approvals": "승인",
     "userConversations": "사용자 대화",
     "userData": "사용자 데이터",
     "variables": "변수"
@@ -106,7 +107,9 @@
     "groups": {
       "title": "그룹",
       "subtitle": "구조화된 토론과 협업을 위한 다중 Agent 토론 그룹"
-    }
+    },
+    "approvals": "대기 중인 승인",
+    "approvalsSubtitle": "사람의 입력을 기다리는 대화를 검토하고 결정합니다"
   },
   "common": {
     "loading": "로딩 중...",
@@ -1392,6 +1395,7 @@
     "maxRounds": "최대 라운드",
     "styleTaskForce": "Task Force",
     "stateAwaitingApproval": "승인 대기 중",
+    "stateCancelled": "취소됨",
     "phasePlan": "계획",
     "phaseExecute": "실행",
     "phaseVerify": "검증",
@@ -1886,5 +1890,32 @@
     "type": "채널 유형",
     "webhookHint": "이 URL을 Slack 앱의 Event Subscriptions → Request URL 필드에 붙여넣으세요.",
     "webhookUrl": "Webhook URL"
+  },
+  "hitl": {
+    "awaitingHuman": "사람 대기 중",
+    "awaitingApproval": "승인 대기 중",
+    "approve": "승인",
+    "reject": "거부",
+    "cancel": "취소",
+    "approved": "승인됨",
+    "rejected": "거부됨",
+    "cancelled": "취소됨",
+    "pending": "대기 중",
+    "emptyQueue": "대기 중인 승인 없음",
+    "emptyQueueDescription": "모든 대화가 원활하게 진행 중입니다 — 현재 사람의 입력이 필요하지 않습니다.",
+    "surface": "유형",
+    "regular": "대화",
+    "group": "그룹",
+    "pauseReason": "사유",
+    "pausedAt": "일시 중지",
+    "timeoutPolicy": "시간 초과",
+    "timeRemaining": "남은 시간",
+    "overdue": "기한 초과",
+    "phase": "페이즈",
+    "granularity": "세분화",
+    "taskApprovals": "작업 승인",
+    "approveAll": "모두 승인",
+    "note": "메모 추가 (선택)",
+    "notePlaceholder": "결정에 대한 메모를 추가..."
   }
 }

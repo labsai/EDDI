@@ -44,6 +44,7 @@
     "capabilities": "ขีดความสามารถ",
     "sync": "ซิงค์",
     "channels": "ช่องทาง",
+    "approvals": "การอนุมัติ",
     "userConversations": "การสนทนาของผู้ใช้",
     "userData": "ข้อมูลผู้ใช้",
     "variables": "ตัวแปร"
@@ -106,7 +107,9 @@
     "groups": {
       "title": "กลุ่ม",
       "subtitle": "กลุ่มสนทนาหลาย Agent สำหรับการอภิปรายเชิงโครงสร้างและการทำงานร่วมกัน"
-    }
+    },
+    "approvals": "การอนุมัติที่รอดำเนินการ",
+    "approvalsSubtitle": "ตรวจสอบและตัดสินใจเกี่ยวกับการสนทนาที่รอการป้อนข้อมูลของมนุษย์"
   },
   "common": {
     "loading": "กำลังโหลด...",
@@ -1392,6 +1395,7 @@
     "maxRounds": "รอบสูงสุด",
     "styleTaskForce": "Task Force",
     "stateAwaitingApproval": "รอการอนุมัติ",
+    "stateCancelled": "ยกเลิก",
     "phasePlan": "วางแผน",
     "phaseExecute": "ดำเนินการ",
     "phaseVerify": "ตรวจสอบ",
@@ -1886,5 +1890,32 @@
     "type": "ประเภทช่อง",
     "webhookHint": "วาง URL นี้ในฟิลด์ Request URL ของ Event Subscriptions ในแอป Slack",
     "webhookUrl": "URL เว็บฮุก"
+  },
+  "hitl": {
+    "awaitingHuman": "รอมนุษย์",
+    "awaitingApproval": "รอการอนุมัติ",
+    "approve": "อนุมัติ",
+    "reject": "ปฏิเสธ",
+    "cancel": "ยกเลิก",
+    "approved": "อนุมัติแล้ว",
+    "rejected": "ปฏิเสธแล้ว",
+    "cancelled": "ยกเลิกแล้ว",
+    "pending": "รอดำเนินการ",
+    "emptyQueue": "ไม่มีการอนุมัติที่รอดำเนินการ",
+    "emptyQueueDescription": "การสนทนาทั้งหมดดำเนินไปอย่างราบรื่น — ไม่ต้องการการป้อนข้อมูลจากมนุษย์ในขณะนี้",
+    "surface": "ประเภท",
+    "regular": "การสนทนา",
+    "group": "กลุ่ม",
+    "pauseReason": "เหตุผล",
+    "pausedAt": "หยุดชั่วคราว",
+    "timeoutPolicy": "นโยบายหมดเวลา",
+    "timeRemaining": "เหลือ",
+    "overdue": "เลยกำหนด",
+    "phase": "เฟส",
+    "granularity": "ความละเอียด",
+    "taskApprovals": "การอนุมัติงาน",
+    "approveAll": "อนุมัติทั้งหมด",
+    "note": "เพิ่มหมายเหตุ (ไม่บังคับ)",
+    "notePlaceholder": "เพิ่มหมายเหตุสำหรับการตัดสินใจ..."
   }
 }

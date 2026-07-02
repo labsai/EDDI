@@ -44,6 +44,7 @@
     "capabilities": "Fähigkeiten",
     "sync": "Synchronisierung",
     "channels": "Kanäle",
+    "approvals": "Genehmigungen",
     "userConversations": "Nutzer-Konversationen",
     "userData": "Nutzerdaten",
     "variables": "Variablen"
@@ -106,7 +107,9 @@
     "groups": {
       "title": "Gruppen",
       "subtitle": "Multi-Agenten-Diskussionsgruppen für strukturierte Debatten und Zusammenarbeit"
-    }
+    },
+    "approvals": "Ausstehende Genehmigungen",
+    "approvalsSubtitle": "Prüfen und entscheiden Sie über Konversationen, die menschliche Eingabe erwarten"
   },
   "common": {
     "loading": "Laden...",
@@ -1392,6 +1395,7 @@
     "maxRounds": "Max. Runden",
     "styleTaskForce": "Task Force",
     "stateAwaitingApproval": "Genehmigung ausstehend",
+    "stateCancelled": "Abgebrochen",
     "phasePlan": "Planung",
     "phaseExecute": "Ausführung",
     "phaseVerify": "Überprüfung",
@@ -1886,5 +1890,32 @@
     "type": "Kanaltyp",
     "webhookHint": "Fügen Sie diese URL in das Feld „Request URL“ unter Event Subscriptions Ihrer Slack-App ein.",
     "webhookUrl": "Webhook-URL"
+  },
+  "hitl": {
+    "awaitingHuman": "Warten auf Mensch",
+    "awaitingApproval": "Warten auf Genehmigung",
+    "approve": "Genehmigen",
+    "reject": "Ablehnen",
+    "cancel": "Abbrechen",
+    "approved": "Genehmigt",
+    "rejected": "Abgelehnt",
+    "cancelled": "Abgebrochen",
+    "pending": "ausstehend",
+    "emptyQueue": "Keine ausstehenden Genehmigungen",
+    "emptyQueueDescription": "Alle Konversationen laufen — keine menschliche Eingabe erforderlich.",
+    "surface": "Oberfläche",
+    "regular": "Konversation",
+    "group": "Gruppe",
+    "pauseReason": "Grund",
+    "pausedAt": "Pausiert",
+    "timeoutPolicy": "Zeitlimit",
+    "timeRemaining": "Verbleibend",
+    "overdue": "Überfällig",
+    "phase": "Phase",
+    "granularity": "Granularität",
+    "taskApprovals": "Aufgabengenehmigungen",
+    "approveAll": "Alle genehmigen",
+    "note": "Notiz hinzufügen (optional)",
+    "notePlaceholder": "Eine Notiz zur Entscheidung hinzufügen..."
   }
 }

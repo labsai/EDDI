@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { PhaseHeader } from "./phase-header";
+import { ApprovalBanner } from "@/components/hitl/approval-banner";
 import { AgentResponseCard } from "./agent-response-card";
 import { TaskBoard } from "./task-board";
 import { parseTranscriptContent, safeFormatDate } from "./group-utils";
@@ -175,6 +176,7 @@ const STATE_VARIANTS: Record<string, { variant: "default" | "success" | "warning
   COMPLETED: { variant: "success" },
   FAILED: { variant: "destructive" },
   AWAITING_APPROVAL: { variant: "warning" },
+  CANCELLED: { variant: "destructive" },
 };
 
 /** Height above which synthesis content is collapsed */
@@ -287,6 +289,7 @@ export function DiscussionTranscript({
     COMPLETED: t("groups.stateCompleted", "Completed"),
     FAILED: t("groups.stateFailed", "Failed"),
     AWAITING_APPROVAL: t("groups.stateAwaitingApproval", "Awaiting Approval"),
+    CANCELLED: t("groups.stateCancelled", "Cancelled"),
   };
   const stateLabel = discussionStateLabels[effectiveState] ?? effectiveState;
 
@@ -527,6 +530,23 @@ export function DiscussionTranscript({
                 {t("groups.speakingCount", "{{count}} speaking", { count: activeSpeakers.size })}
               </span>
             )}
+          </div>
+        )}
+
+        {/* HITL Approval Banner */}
+        {effectiveState === "AWAITING_APPROVAL" && (
+          <div className="px-6 py-4">
+            <ApprovalBanner
+              surface="group"
+              pauseReason={streamState?.hitlPause?.reason || conversation?.hitlPauseReason}
+              pausedAt={conversation?.pausedAt}
+              timeoutPolicy={conversation?.hitlTimeoutPolicy}
+              approvalTimeout={conversation?.hitlApprovalTimeout}
+              pausedPhaseName={streamState?.hitlPause?.phaseName || conversation?.pausedPhaseName}
+              granularity={streamState?.hitlPause?.granularity || conversation?.hitlPauseType}
+              isSubmitting={false}
+              onDecide={() => {}}
+            />
           </div>
         )}
 

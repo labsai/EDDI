@@ -4674,4 +4674,65 @@ export const backupSyncHandlers = [
   http.post("*/agents/:conversationId/rerun", () => {
     return new HttpResponse(null, { status: 200 });
   }),
+
+  // ── HITL — Human-in-the-Loop ──
+
+  http.get("*/agents/pending-approvals", () => {
+    return HttpResponse.json([
+      {
+        conversationId: "conv-awaiting-1",
+        agentId: "agent1",
+        userId: "user-123",
+        pausedAt: new Date(Date.now() - 300_000).toISOString(),
+        pauseReason: "High-value transaction requires human review",
+        timeoutPolicy: "WAIT_INDEFINITELY",
+        approvalTimeout: null,
+      },
+      {
+        conversationId: "conv-awaiting-2",
+        agentId: "agent2",
+        userId: "user-456",
+        pausedAt: new Date(Date.now() - 120_000).toISOString(),
+        pauseReason: "Agent requested escalation to human operator",
+        timeoutPolicy: "AUTO_REJECT",
+        approvalTimeout: "PT15M",
+      },
+    ]);
+  }),
+
+  http.post("*/agents/:conversationId/resume", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/agents/:conversationId/cancel", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.get("*/agents/:conversationId/approval-status", () => {
+    return HttpResponse.json({
+      conversationId: "conv-awaiting-1",
+      state: "AWAITING_HUMAN",
+      pausedAt: new Date(Date.now() - 300_000).toISOString(),
+      pauseReason: "High-value transaction requires human review",
+    });
+  }),
+
+  http.post("*/groups/:groupId/conversations/:gcId/approve", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/groups/:groupId/conversations/:gcId/cancel", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.get("*/groups/:groupId/conversations/:gcId/approval-status", () => {
+    return HttpResponse.json({
+      state: "AWAITING_APPROVAL",
+      pausedAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+  }),
+
+  http.get("*/groups/:groupId/conversations/pending-approvals", () => {
+    return HttpResponse.json([]);
+  }),
 ];

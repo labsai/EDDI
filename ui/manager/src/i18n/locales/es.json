@@ -44,6 +44,7 @@
     "capabilities": "Capacidades",
     "sync": "Sincronización",
     "channels": "Canales",
+    "approvals": "Aprobaciones",
     "userConversations": "Conversaciones de usuario",
     "userData": "Datos del usuario",
     "variables": "Variables"
@@ -106,7 +107,9 @@
     "groups": {
       "title": "Grupos",
       "subtitle": "Grupos de discusión multi-agente para debate estructurado y colaboración"
-    }
+    },
+    "approvals": "Aprobaciones pendientes",
+    "approvalsSubtitle": "Revise y decida sobre conversaciones que esperan intervención humana"
   },
   "common": {
     "loading": "Cargando...",
@@ -1392,6 +1395,7 @@
     "maxRounds": "Rondas máx.",
     "styleTaskForce": "Task Force",
     "stateAwaitingApproval": "Pendiente de aprobación",
+    "stateCancelled": "Cancelado",
     "phasePlan": "Planificación",
     "phaseExecute": "Ejecución",
     "phaseVerify": "Verificación",
@@ -1886,5 +1890,32 @@
     "type": "Tipo de canal",
     "webhookHint": "Pegue esta URL en el campo Request URL de Event Subscriptions de su aplicación Slack.",
     "webhookUrl": "URL del webhook"
+  },
+  "hitl": {
+    "awaitingHuman": "Esperando humano",
+    "awaitingApproval": "Esperando aprobación",
+    "approve": "Aprobar",
+    "reject": "Rechazar",
+    "cancel": "Cancelar",
+    "approved": "Aprobado",
+    "rejected": "Rechazado",
+    "cancelled": "Cancelado",
+    "pending": "pendiente",
+    "emptyQueue": "Sin aprobaciones pendientes",
+    "emptyQueueDescription": "Todas las conversaciones fluyen — no se necesita intervención humana.",
+    "surface": "Superficie",
+    "regular": "Conversación",
+    "group": "Grupo",
+    "pauseReason": "Razón",
+    "pausedAt": "Pausado",
+    "timeoutPolicy": "Tiempo límite",
+    "timeRemaining": "Restante",
+    "overdue": "Vencido",
+    "phase": "Fase",
+    "granularity": "Granularidad",
+    "taskApprovals": "Aprobaciones de tareas",
+    "approveAll": "Aprobar todo",
+    "note": "Agregar nota (opcional)",
+    "notePlaceholder": "Agregar una nota para la decisión..."
   }
 }

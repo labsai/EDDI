@@ -44,6 +44,7 @@
     "capabilities": "Capacités",
     "sync": "Synchronisation",
     "channels": "Canaux",
+    "approvals": "Approbations",
     "userConversations": "Conversations utilisateur",
     "userData": "Données utilisateur",
     "variables": "Variables"
@@ -106,7 +107,9 @@
     "groups": {
       "title": "Groupes",
       "subtitle": "Groupes de discussion multi-agents pour le débat structuré et la collaboration"
-    }
+    },
+    "approvals": "Approbations en attente",
+    "approvalsSubtitle": "Examinez et décidez des conversations en attente de saisie humaine"
   },
   "common": {
     "loading": "Chargement...",
@@ -1392,6 +1395,7 @@
     "maxRounds": "Tours max.",
     "styleTaskForce": "Task Force",
     "stateAwaitingApproval": "En attente d'approbation",
+    "stateCancelled": "Annulé",
     "phasePlan": "Planification",
     "phaseExecute": "Exécution",
     "phaseVerify": "Vérification",
@@ -1886,5 +1890,32 @@
     "type": "Type de canal",
     "webhookHint": "Collez cette URL dans le champ Request URL des Event Subscriptions de votre application Slack.",
     "webhookUrl": "URL du webhook"
+  },
+  "hitl": {
+    "awaitingHuman": "En attente humaine",
+    "awaitingApproval": "En attente d'approbation",
+    "approve": "Approuver",
+    "reject": "Rejeter",
+    "cancel": "Annuler",
+    "approved": "Approuvé",
+    "rejected": "Rejeté",
+    "cancelled": "Annulé",
+    "pending": "en attente",
+    "emptyQueue": "Aucune approbation en attente",
+    "emptyQueueDescription": "Toutes les conversations se déroulent — aucune intervention humaine nécessaire.",
+    "surface": "Surface",
+    "regular": "Conversation",
+    "group": "Groupe",
+    "pauseReason": "Raison",
+    "pausedAt": "En pause",
+    "timeoutPolicy": "Délai",
+    "timeRemaining": "Restant",
+    "overdue": "En retard",
+    "phase": "Phase",
+    "granularity": "Granularité",
+    "taskApprovals": "Approbations de tâches",
+    "approveAll": "Tout approuver",
+    "note": "Ajouter une note (optionnel)",
+    "notePlaceholder": "Ajouter une note pour la décision..."
   }
 }

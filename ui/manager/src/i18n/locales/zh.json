@@ -44,6 +44,7 @@
     "capabilities": "能力",
     "sync": "同步",
     "channels": "频道",
+    "approvals": "审批",
     "userConversations": "用户对话",
     "userData": "用户数据",
     "variables": "变量"
@@ -106,7 +107,9 @@
     "groups": {
       "title": "群组",
       "subtitle": "多 Agent 讨论组，用于结构化辩论和协作"
-    }
+    },
+    "approvals": "待审批",
+    "approvalsSubtitle": "审查并决定等待人工输入的对话"
   },
   "common": {
     "loading": "加载中...",
@@ -1392,6 +1395,7 @@
     "maxRounds": "最大轮次",
     "styleTaskForce": "Task Force",
     "stateAwaitingApproval": "等待审批",
+    "stateCancelled": "已取消",
     "phasePlan": "规划",
     "phaseExecute": "执行",
     "phaseVerify": "验证",
@@ -1886,5 +1890,32 @@
     "type": "频道类型",
     "webhookHint": "将此 URL 粘贴到您的 Slack 应用的 Event Subscriptions → Request URL 字段中。",
     "webhookUrl": "Webhook URL"
+  },
+  "hitl": {
+    "awaitingHuman": "等待人工",
+    "awaitingApproval": "等待审批",
+    "approve": "批准",
+    "reject": "拒绝",
+    "cancel": "取消",
+    "approved": "已批准",
+    "rejected": "已拒绝",
+    "cancelled": "已取消",
+    "pending": "待处理",
+    "emptyQueue": "没有待审批项",
+    "emptyQueueDescription": "所有对话正常进行 — 目前不需要人工输入。",
+    "surface": "类型",
+    "regular": "对话",
+    "group": "群组",
+    "pauseReason": "原因",
+    "pausedAt": "暂停时间",
+    "timeoutPolicy": "超时策略",
+    "timeRemaining": "剩余时间",
+    "overdue": "已超时",
+    "phase": "阶段",
+    "granularity": "粒度",
+    "taskApprovals": "任务审批",
+    "approveAll": "全部批准",
+    "note": "添加备注（可选）",
+    "notePlaceholder": "为决定添加备注..."
   }
 }

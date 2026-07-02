@@ -6,7 +6,7 @@ import {
   Users, Trash2, MessageSquareQuote, Clock, Settings2,
   PanelRightOpen, PanelRightClose,
   PanelLeftOpen, PanelLeftClose,
-  Maximize2, Minimize2, History,
+  Maximize2, Minimize2, History, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -16,6 +16,7 @@ import {
   useDeleteGroupConversation,
 } from "@/hooks/use-groups";
 import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
+import { useCancelGroupDiscussion } from "@/hooks/use-hitl";
 import { DiscussionTranscript } from "@/components/groups/discussion-transcript";
 import { DiscussionInput } from "@/components/groups/discussion-input";
 import { GroupConfigPanel } from "@/components/groups/group-config-panel";
@@ -25,6 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { BackLink } from "@/components/shared/back-link";
 import { ErrorState } from "@/components/shared/error-state";
 import { cn } from "@/lib/utils";
+import { getErrorMessage } from "@/lib/api-client";
 import { STYLE_INFO, type DiscussionStyle, type AgentGroupConfiguration } from "@/lib/api/groups";
 import { STYLE_THEME } from "@/components/groups/discussion-transcript";
 import { safeFormatDate } from "@/components/groups/group-utils";
@@ -38,6 +40,7 @@ const STATE_CONFIG: Record<string, { label: string; color: string; dot: string }
   FAILED: { label: "Failed", color: "text-destructive", dot: "bg-destructive" },
   CREATED: DEFAULT_STATE,
   AWAITING_APPROVAL: { label: "Awaiting Approval", color: "text-orange-500", dot: "bg-orange-500" },
+  CANCELLED: { label: "Cancelled", color: "text-muted-foreground", dot: "bg-muted-foreground" },
   ERROR: { label: "Error", color: "text-destructive", dot: "bg-destructive" },
 };
 
@@ -80,6 +83,7 @@ export function GroupDetailPage() {
   const { streamState, startStream, abortStream } = useGroupDiscussionStream();
 
   const deleteConvMutation = useDeleteGroupConversation();
+  const cancelDiscussionMutation = useCancelGroupDiscussion();
 
   // Auto-select the first conversation if none selected and not streaming
   useEffect(() => {
@@ -232,6 +236,32 @@ export function GroupDetailPage() {
                 >
                   <Trash2 className="h-3 w-3" />
                 </button>
+                {(conv.state === "AWAITING_APPROVAL" || conv.state === "IN_PROGRESS") && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!groupId) return;
+                      cancelDiscussionMutation.mutate(
+                        { groupId, conversationId: conv.id },
+                        {
+                          onSuccess: () => {
+                            toast.success(t("hitl.discussionCancelled", "Discussion cancelled"));
+                            queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
+                          },
+                          onError: (err) => {
+                            toast.error(getErrorMessage(err));
+                          },
+                        },
+                      );
+                    }}
+                    className="opacity-0 group-hover/item:opacity-100 rounded p-0.5 text-muted-foreground hover:text-destructive transition-all"
+                    title={t("hitl.cancelDiscussion", "Cancel discussion")}
+                    aria-label={t("hitl.cancelDiscussion", "Cancel discussion")}
+                    disabled={cancelDiscussionMutation.isPending}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
               </div>
             </button>
           ))}

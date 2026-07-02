@@ -51,6 +51,7 @@ export type GroupConversationState =
   | "SYNTHESIZING"
   | "COMPLETED"
   | "FAILED"
+  | "CANCELLED"
   | "AWAITING_APPROVAL";
 
 export type TranscriptEntryType =
@@ -172,6 +173,8 @@ export interface AgentGroupConfiguration {
   tasks?: TaskDefinition[];
   /** Dynamic agent creation and recruitment configuration */
   dynamicAgents?: DynamicAgentConfig;
+  /** Human-in-the-loop approval configuration */
+  hitlConfig?: import("./hitl").GroupHitlConfig;
 }
 
 export interface TranscriptEntry {
@@ -208,6 +211,15 @@ export interface GroupConversation {
   retainedAgentIds: string[];
   created: string;
   lastModified: string;
+  // HITL pause fields (set when state === "AWAITING_APPROVAL")
+  pausedAtPhaseIndex?: number;
+  pausedTurnCount?: number;
+  pausedPhaseName?: string;
+  pausedAt?: string;
+  hitlPauseType?: "PHASE" | "TASK";
+  hitlPauseReason?: string;
+  hitlTimeoutPolicy?: string;
+  hitlApprovalTimeout?: string;
 }
 
 // Re-export descriptor type for group descriptors (same shape as agent descriptors)
@@ -343,7 +355,10 @@ export type GroupSSEEventType =
   | "group_complete"
   | "group_error"
   | "task_plan_created"
-  | "task_verified";
+  | "task_verified"
+  | "awaiting_approval"
+  | "hitl_resume"
+  | "cancelled";
 
 export interface GroupSSEEvent {
   type: GroupSSEEventType;

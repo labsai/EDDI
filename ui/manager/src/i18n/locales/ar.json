@@ -44,6 +44,7 @@
     "capabilities": "القدرات",
     "sync": "المزامنة",
     "channels": "القنوات",
+    "approvals": "الموافقات",
     "userConversations": "محادثات المستخدم",
     "userData": "بيانات المستخدم",
     "variables": "المتغيرات"
@@ -106,7 +107,9 @@
     "groups": {
       "title": "مجموعات",
       "subtitle": "مجموعات نقاش متعددة الوكلاء للنقاش المنظم والتعاون"
-    }
+    },
+    "approvals": "الموافقات المعلقة",
+    "approvalsSubtitle": "مراجعة المحادثات التي تنتظر مدخلات بشرية واتخاذ قرار بشأنها"
   },
   "common": {
     "loading": "جارٍ التحميل...",
@@ -1392,6 +1395,7 @@
     "maxRounds": "الجولات القصوى",
     "styleTaskForce": "فريق العمل",
     "stateAwaitingApproval": "بانتظار الموافقة",
+    "stateCancelled": "ملغى",
     "phasePlan": "التخطيط",
     "phaseExecute": "التنفيذ",
     "phaseVerify": "التحقق",
@@ -1886,5 +1890,32 @@
     "type": "نوع القناة",
     "webhookHint": "الصق هذا الرابط في حقل Request URL ضمن Event Subscriptions في تطبيق Slack.",
     "webhookUrl": "رابط الويب هوك"
+  },
+  "hitl": {
+    "awaitingHuman": "في انتظار الإنسان",
+    "awaitingApproval": "في انتظار الموافقة",
+    "approve": "موافقة",
+    "reject": "رفض",
+    "cancel": "إلغاء",
+    "approved": "تمت الموافقة",
+    "rejected": "مرفوض",
+    "cancelled": "ملغى",
+    "pending": "معلق",
+    "emptyQueue": "لا توجد موافقات معلقة",
+    "emptyQueueDescription": "جميع المحادثات تسير — لا حاجة لمدخلات بشرية الآن.",
+    "surface": "السطح",
+    "regular": "محادثة",
+    "group": "مجموعة",
+    "pauseReason": "السبب",
+    "pausedAt": "متوقف",
+    "timeoutPolicy": "المهلة",
+    "timeRemaining": "المتبقي",
+    "overdue": "متأخر",
+    "phase": "المرحلة",
+    "granularity": "الدقة",
+    "taskApprovals": "موافقات المهام",
+    "approveAll": "الموافقة على الكل",
+    "note": "إضافة ملاحظة (اختياري)",
+    "notePlaceholder": "أضف ملاحظة للقرار..."
   }
 }

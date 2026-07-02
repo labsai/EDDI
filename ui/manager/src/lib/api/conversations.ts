@@ -1,7 +1,7 @@
 import { api } from "../api-client";
 
 // Types matching EDDI backend
-export type ConversationState = "READY" | "IN_PROGRESS" | "ENDED" | "EXECUTION_INTERRUPTED" | "ERROR";
+export type ConversationState = "READY" | "IN_PROGRESS" | "ENDED" | "EXECUTION_INTERRUPTED" | "ERROR" | "AWAITING_HUMAN";
 
 export type ViewState = "UNSEEN" | "SEEN";
 
@@ -106,6 +106,13 @@ export interface SimpleConversationMemorySnapshot {
   conversationProperties?: Record<string, unknown>;
   undoAvailable?: boolean;
   redoAvailable?: boolean;
+  // HITL bookmark fields (set when conversationState === "AWAITING_HUMAN")
+  hitlPausedWorkflowId?: string;
+  hitlPausedAbsoluteTaskIndex?: number;
+  hitlPausedAt?: string;
+  hitlPauseReason?: string;
+  hitlTimeoutPolicy?: string;
+  hitlApprovalTimeout?: string;
 }
 
 /** Extract user input from a conversation step's key/value pairs */

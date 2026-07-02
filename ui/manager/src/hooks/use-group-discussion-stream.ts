@@ -43,6 +43,24 @@ export interface GroupStreamState {
   tasksInProgress: Set<string>;
   /** Set of task IDs completed (inferred from speaker events during EXECUTE phase) */
   tasksCompleted: Set<string>;
+  /** HITL pause info when the group is awaiting approval */
+  hitlPause: {
+    phaseIndex: number;
+    phaseName: string;
+    reason: string;
+    granularity: string;
+  } | null;
+  /** HITL resume info after approval decision */
+  hitlResume: {
+    verdict: string;
+    note?: string;
+    decidedBy?: string;
+  } | null;
+  /** Cancellation info when the group discussion is cancelled */
+  cancelInfo: {
+    reason?: string;
+    cancelledBy?: string;
+  } | null;
 }
 
 const initialState: GroupStreamState = {
@@ -59,6 +77,9 @@ const initialState: GroupStreamState = {
   taskVerifications: new Map(),
   tasksInProgress: new Set(),
   tasksCompleted: new Set(),
+  hitlPause: null,
+  hitlResume: null,
+  cancelInfo: null,
 };
 
 // ─── Hook ───────────────────────────────────────────────────────
@@ -413,6 +434,75 @@ function handleSSEEvent(
         error: errorMsg,
         activeSpeakers: new Set(),
       }));
+      return true;
+    }
+
+    case "awaiting_approval": {
+      try {
+        const payload = JSON.parse(event.data) as {
+          phaseIndex: number;
+          phaseName: string;
+          reason: string;
+          granularity: string;
+        };
+        setState((s) => ({
+          ...s,
+          state: "AWAITING_APPROVAL" as GroupConversationState,
+          hitlPause: {
+            phaseIndex: payload.phaseIndex,
+            phaseName: payload.phaseName,
+            reason: payload.reason,
+            granularity: payload.granularity,
+          },
+          isStreaming: false,
+        }));
+      } catch (e) {
+        console.warn('[SSE] Failed to parse awaiting_approval event:', e);
+      }
+      return true;
+    }
+
+    case "hitl_resume": {
+      try {
+        const payload = JSON.parse(event.data) as {
+          verdict: string;
+          note?: string;
+          decidedBy?: string;
+        };
+        setState((s) => ({
+          ...s,
+          state: "IN_PROGRESS" as GroupConversationState,
+          hitlResume: {
+            verdict: payload.verdict,
+            note: payload.note,
+            decidedBy: payload.decidedBy,
+          },
+          hitlPause: null,
+        }));
+      } catch (e) {
+        console.warn('[SSE] Failed to parse hitl_resume event:', e);
+      }
+      return false;
+    }
+
+    case "cancelled": {
+      try {
+        const payload = JSON.parse(event.data) as {
+          reason?: string;
+          cancelledBy?: string;
+        };
+        setState((s) => ({
+          ...s,
+          state: "CANCELLED" as GroupConversationState,
+          cancelInfo: {
+            reason: payload.reason,
+            cancelledBy: payload.cancelledBy,
+          },
+          isStreaming: false,
+        }));
+      } catch (e) {
+        console.warn('[SSE] Failed to parse cancelled event:', e);
+      }
       return true;
     }
 

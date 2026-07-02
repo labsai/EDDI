@@ -44,6 +44,7 @@
     "capabilities": "ケイパビリティ",
     "sync": "同期",
     "channels": "チャンネル",
+    "approvals": "承認",
     "userConversations": "ユーザー会話",
     "userData": "ユーザーデータ",
     "variables": "変数"
@@ -106,7 +107,9 @@
     "groups": {
       "title": "グループ",
       "subtitle": "構造化された議論とコラボレーションのためのマルチ Agent ディスカッショングループ"
-    }
+    },
+    "approvals": "保留中の承認",
+    "approvalsSubtitle": "人間の入力を待っている会話を確認し決定します"
   },
   "common": {
     "loading": "読み込み中...",
@@ -1392,6 +1395,7 @@
     "maxRounds": "最大ラウンド数",
     "styleTaskForce": "Task Force",
     "stateAwaitingApproval": "承認待ち",
+    "stateCancelled": "キャンセル済み",
     "phasePlan": "計画",
     "phaseExecute": "実行",
     "phaseVerify": "検証",
@@ -1886,5 +1890,32 @@
     "type": "チャネルタイプ",
     "webhookHint": "この URL を Slack アプリの Event Subscriptions → Request URL フィールドに貼り付けてください。",
     "webhookUrl": "Webhook URL"
+  },
+  "hitl": {
+    "awaitingHuman": "人間待ち",
+    "awaitingApproval": "承認待ち",
+    "approve": "承認",
+    "reject": "拒否",
+    "cancel": "キャンセル",
+    "approved": "承認済み",
+    "rejected": "拒否済み",
+    "cancelled": "キャンセル済み",
+    "pending": "保留中",
+    "emptyQueue": "保留中の承認はありません",
+    "emptyQueueDescription": "すべての会話が順調です — 現在、人間の入力は不要です。",
+    "surface": "種類",
+    "regular": "会話",
+    "group": "グループ",
+    "pauseReason": "理由",
+    "pausedAt": "一時停止",
+    "timeoutPolicy": "タイムアウト",
+    "timeRemaining": "残り",
+    "overdue": "期限超過",
+    "phase": "フェーズ",
+    "granularity": "粒度",
+    "taskApprovals": "タスク承認",
+    "approveAll": "すべて承認",
+    "note": "メモを追加（任意）",
+    "notePlaceholder": "決定のメモを追加..."
   }
 }
