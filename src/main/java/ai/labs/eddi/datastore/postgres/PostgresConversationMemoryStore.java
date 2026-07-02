@@ -277,6 +277,21 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
+    public void clearHitlBookmark(String conversationId) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String sql = "UPDATE conversation_memories SET data = data "
+                + "- 'hitlPausedWorkflowId' - 'hitlPausedAbsoluteTaskIndex' - 'hitlPausedAt' "
+                + "- 'hitlPauseReason' - 'hitlTimeoutPolicy' - 'hitlApprovalTimeout' "
+                + "WHERE id = ?::uuid";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, conversationId);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to clear HITL bookmark", e);
+        }
+    }
+
+    @Override
     public List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(int limit)
             throws IResourceStore.ResourceStoreException {
         ensureSchema();

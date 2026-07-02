@@ -213,6 +213,18 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
+    public void clearHitlBookmark(String conversationId) {
+        var unset = new Document();
+        for (String field : List.of("hitlPausedWorkflowId", "hitlPausedAbsoluteTaskIndex", "hitlPausedAt",
+                "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout")) {
+            unset.append(field, "");
+        }
+        conversationCollectionDocument.updateOne(
+                new Document(OBJECT_ID, new ObjectId(conversationId)),
+                new Document("$unset", unset));
+    }
+
+    @Override
     public List<String> getConversationIdsByUserId(String userId) {
         List<String> ids = new ArrayList<>();
         conversationCollectionDocument.find(new Document("userId", userId))

@@ -80,6 +80,20 @@ public interface IConversationMemoryStore {
     List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(int limit)
             throws IResourceStore.ResourceStoreException;
 
+    /**
+     * Removes the persisted HITL pause bookmark fields from a conversation
+     * document. Called when a pause is terminally resolved OUTSIDE resume (cancel,
+     * end-while-paused) — a stale bookmark would otherwise round-trip through every
+     * later snapshot store, mislead approval-status, and make crash recovery's
+     * IN_PROGRESS classifier resurrect a pause nobody made.
+     *
+     * @param conversationId
+     *            the conversation identifier
+     * @throws IResourceStore.ResourceStoreException
+     *             on persistence failures
+     */
+    void clearHitlBookmark(String conversationId) throws IResourceStore.ResourceStoreException;
+
     // === GDPR ===
 
     /**

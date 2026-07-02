@@ -307,8 +307,15 @@ public class Conversation implements IConversation {
         } catch (ConversationStopException unused) {
             endConversation();
         } catch (ConversationPauseException e) {
-            pauseConversation(e);
-            paused = true;
+            if (conversationMemory.isCancelled()) {
+                // A cancel that landed while the pausing task ran wins over the
+                // pause — the caller was told CANCELLED; committing a pause here
+                // would park the conversation AWAITING_HUMAN despite the cancel.
+                endConversation();
+            } else {
+                pauseConversation(e);
+                paused = true;
+            }
         }
         if (!paused) {
             try {
@@ -520,7 +527,11 @@ public class Conversation implements IConversation {
         } catch (ConversationStopException unused) {
             endConversation();
         } catch (ConversationPauseException e) {
-            pauseConversation(e);
+            if (conversationMemory.isCancelled()) {
+                endConversation(); // cancel wins over a re-pause (see executeConversationStep)
+            } else {
+                pauseConversation(e);
+            }
         } catch (Exception e) {
             setConversationState(ConversationState.ERROR);
             throw new LifecycleException(e.getLocalizedMessage(), e);

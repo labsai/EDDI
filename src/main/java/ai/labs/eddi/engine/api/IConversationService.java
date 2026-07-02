@@ -224,9 +224,12 @@ public interface IConversationService {
      *            the human approval/rejection decision
      * @param responseHandler
      *            optional callback — may be null for fire-and-forget
+     * @throws IllegalStateException
+     *             wrong-state conflict (not AWAITING_HUMAN, or agent not
+     *             deployed) — maps to HTTP 409; the pause is preserved/restored
      * @throws ResourceStoreException
-     *             on persistence failures or if conversation is not in
-     *             AWAITING_HUMAN state
+     *             on infrastructure failures (store errors, coordinator
+     *             saturation) — maps to HTTP 500; the pause is restored
      * @throws ResourceNotFoundException
      *             if the conversation is not found
      */

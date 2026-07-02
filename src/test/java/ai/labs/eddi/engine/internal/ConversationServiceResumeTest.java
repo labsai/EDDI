@@ -306,8 +306,9 @@ class ConversationServiceResumeTest {
             // First resume succeeds
             assertDoesNotThrow(() -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
 
-            // Second resume throws because CAS returns false
-            ResourceStoreException exception = assertThrows(ResourceStoreException.class,
+            // Second resume throws because CAS returns false — a wrong-state
+            // conflict is IllegalStateException (409), not a store failure (500)
+            IllegalStateException exception = assertThrows(IllegalStateException.class,
                     () -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
             assertTrue(exception.getMessage().contains("not in AWAITING_HUMAN state"),
                     "Exception should mention state mismatch, got: " + exception.getMessage());
@@ -319,34 +320,67 @@ class ConversationServiceResumeTest {
     // =========================================================================
 
     @Nested
-    @DisplayName("scheduleHitlTimeout (M1)")
+    @DisplayName("re-pause timeout scheduling (M1) — through the real resume path")
     class TimeoutSchedule {
 
+        /**
+         * Drives a full resume where the resumed turn RE-PAUSES, then asserts the
+         * schedule behavior. Exercises populateHitlTimeoutBookmark (pinned-version
+         * config read) + scheduleHitlTimeout (bookmark-driven) via the onComplete
+         * persistence path — no reflection into privates.
+         */
+        private void resumeWithRePause(AgentConfiguration.HitlConfig hitlConfig) throws Exception {
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+
+            var snapshot = createResumeSnapshot();
+            snapshot.setConversationState(ConversationState.IN_PROGRESS);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setHitlConfig(hitlConfig);
+            // pinned-version read: the conversation is pinned to AGENT_VERSION
+            doReturn(agentConfig).when(agentStore).read(AGENT_ID, AGENT_VERSION);
+
+            IAgent agent = mock(IAgent.class);
+            IConversation conversation = mock(IConversation.class);
+            doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+            var memoryRef = new java.util.concurrent.atomic.AtomicReference<IConversationMemory>();
+            doAnswer(inv -> {
+                memoryRef.set(inv.getArgument(0));
+                return conversation;
+            }).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+            // the resumed turn re-pauses: Conversation.resume leaves the memory
+            // in AWAITING_HUMAN with a fresh bookmark
+            doAnswer(inv -> {
+                var memory = memoryRef.get();
+                memory.setConversationState(ConversationState.AWAITING_HUMAN);
+                memory.setHitlPausedWorkflowId("workflow-1");
+                memory.setHitlPausedAbsoluteTaskIndex(4);
+                memory.setHitlPausedAt(Instant.now());
+                memory.setHitlPauseReason("PAUSE_CONVERSATION action");
+                return null;
+            }).when(conversation).resume(any(HitlDecision.class), anyMap());
+
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            conversationService.resumeConversation(CONVERSATION_ID, decision, null);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Callable<Void>> callableCaptor = ArgumentCaptor.forClass(Callable.class);
+            verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), callableCaptor.capture());
+            callableCaptor.getValue().call();
+        }
+
         @Test
-        @DisplayName("when conversation pauses → scheduleHitlTimeout creates schedule with correct metadata")
-        void scheduleHitlTimeout_createsScheduleWithMetadata() throws Exception {
-            // scheduleHitlTimeout is private, so we test it indirectly via the
-            // processConversationStep callback path. Since that's complex,
-            // we use reflection to invoke it directly.
+        @DisplayName("re-pause with finite policy → schedule created with bookmark-driven metadata")
+        void rePauseCreatesScheduleWithMetadata() throws Exception {
             var hitlConfig = new AgentConfiguration.HitlConfig();
             hitlConfig.setApprovalTimeout("PT30S");
             hitlConfig.setTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_REJECT);
 
-            var agentConfig = new AgentConfiguration();
-            agentConfig.setHitlConfig(hitlConfig);
+            resumeWithRePause(hitlConfig);
 
-            IResourceStore.IResourceId resourceId = mock(IResourceStore.IResourceId.class);
-            doReturn(1).when(resourceId).getVersion();
-            doReturn(resourceId).when(agentStore).getCurrentResourceId(AGENT_ID);
-            doReturn(agentConfig).when(agentStore).read(AGENT_ID, 1);
-            doReturn("schedule-1").when(scheduleStore).createSchedule(any(ScheduleConfiguration.class));
-
-            // Invoke via reflection since scheduleHitlTimeout is private
-            var method = ConversationService.class.getDeclaredMethod("scheduleHitlTimeout", String.class, String.class);
-            method.setAccessible(true);
-            method.invoke(conversationService, CONVERSATION_ID, AGENT_ID);
-
-            // Capture the schedule passed to createSchedule
             ArgumentCaptor<ScheduleConfiguration> scheduleCaptor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
             verify(scheduleStore).createSchedule(scheduleCaptor.capture());
 
@@ -364,66 +398,39 @@ class ConversationServiceResumeTest {
             assertEquals("AUTO_REJECT", metadata.get("policy"));
             assertEquals("regular", metadata.get("surface"));
             assertEquals(CONVERSATION_ID, metadata.get("conversationId"));
+
+            // and the re-paused memory was persisted with the policy bookmark
+            verify(conversationMemoryStore, atLeastOnce()).storeConversationMemorySnapshot(any());
         }
 
         @Test
-        @DisplayName("WAIT_INDEFINITELY policy → no schedule created")
+        @DisplayName("re-pause with WAIT_INDEFINITELY policy → no schedule created")
         void waitIndefinitely_noScheduleCreated() throws Exception {
             var hitlConfig = new AgentConfiguration.HitlConfig();
             hitlConfig.setApprovalTimeout("PT30S");
             hitlConfig.setTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.WAIT_INDEFINITELY);
 
-            var agentConfig = new AgentConfiguration();
-            agentConfig.setHitlConfig(hitlConfig);
-
-            IResourceStore.IResourceId resourceId = mock(IResourceStore.IResourceId.class);
-            doReturn(1).when(resourceId).getVersion();
-            doReturn(resourceId).when(agentStore).getCurrentResourceId(AGENT_ID);
-            doReturn(agentConfig).when(agentStore).read(AGENT_ID, 1);
-
-            var method = ConversationService.class.getDeclaredMethod("scheduleHitlTimeout", String.class, String.class);
-            method.setAccessible(true);
-            method.invoke(conversationService, CONVERSATION_ID, AGENT_ID);
+            resumeWithRePause(hitlConfig);
 
             verify(scheduleStore, never()).createSchedule(any());
         }
 
         @Test
-        @DisplayName("null approvalTimeout → no schedule created")
+        @DisplayName("re-pause with finite policy but null approvalTimeout → no schedule created")
         void nullTimeout_noScheduleCreated() throws Exception {
             var hitlConfig = new AgentConfiguration.HitlConfig();
             // approvalTimeout is null by default
             hitlConfig.setTimeoutPolicy(AgentGroupConfiguration.HitlTimeoutPolicy.AUTO_REJECT);
 
-            var agentConfig = new AgentConfiguration();
-            agentConfig.setHitlConfig(hitlConfig);
-
-            IResourceStore.IResourceId resourceId = mock(IResourceStore.IResourceId.class);
-            doReturn(1).when(resourceId).getVersion();
-            doReturn(resourceId).when(agentStore).getCurrentResourceId(AGENT_ID);
-            doReturn(agentConfig).when(agentStore).read(AGENT_ID, 1);
-
-            var method = ConversationService.class.getDeclaredMethod("scheduleHitlTimeout", String.class, String.class);
-            method.setAccessible(true);
-            method.invoke(conversationService, CONVERSATION_ID, AGENT_ID);
+            resumeWithRePause(hitlConfig);
 
             verify(scheduleStore, never()).createSchedule(any());
         }
 
         @Test
-        @DisplayName("null hitlConfig → no schedule created")
+        @DisplayName("re-pause with no hitlConfig at all → no schedule created")
         void nullHitlConfig_noScheduleCreated() throws Exception {
-            var agentConfig = new AgentConfiguration();
-            // hitlConfig is null
-
-            IResourceStore.IResourceId resourceId = mock(IResourceStore.IResourceId.class);
-            doReturn(1).when(resourceId).getVersion();
-            doReturn(resourceId).when(agentStore).getCurrentResourceId(AGENT_ID);
-            doReturn(agentConfig).when(agentStore).read(AGENT_ID, 1);
-
-            var method = ConversationService.class.getDeclaredMethod("scheduleHitlTimeout", String.class, String.class);
-            method.setAccessible(true);
-            method.invoke(conversationService, CONVERSATION_ID, AGENT_ID);
+            resumeWithRePause(null);
 
             verify(scheduleStore, never()).createSchedule(any());
         }
@@ -503,7 +510,7 @@ class ConversationServiceResumeTest {
         }
 
         @Test
-        @DisplayName("agent not deployed → ResourceStoreException and the pause is RESTORED (not ERROR)")
+        @DisplayName("agent not deployed → IllegalStateException (409) and the pause is RESTORED (not ERROR)")
         void agentNotDeployed_throwsResourceStoreException() throws Exception {
             doReturn(true).when(conversationMemoryStore).compareAndSetState(
                     CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
@@ -519,7 +526,7 @@ class ConversationServiceResumeTest {
             HitlDecision decision = new HitlDecision();
             decision.setVerdict(HitlVerdict.APPROVED);
 
-            ResourceStoreException exception = assertThrows(ResourceStoreException.class,
+            IllegalStateException exception = assertThrows(IllegalStateException.class,
                     () -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
             assertTrue(exception.getMessage().contains("Agent not deployed"),
                     "Exception should mention agent not deployed, got: " + exception.getMessage());
@@ -529,6 +536,9 @@ class ConversationServiceResumeTest {
             verify(conversationMemoryStore).compareAndSetState(
                     CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
             verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+            // undeployed agent must NOT re-arm the timeout schedule (would loop
+            // timeout→restore→re-arm forever against a missing agent)
+            verify(scheduleStore, never()).createSchedule(any());
         }
     }
 

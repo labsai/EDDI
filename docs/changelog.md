@@ -41,6 +41,25 @@
 
 ---
 
+## 🔧 HITL Final-Review Fixes — Round 3 (2026-07-02, session 3)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+**Trigger:** Third full-branch multi-agent review (70 agents, adversarial verification completed): 43 confirmed findings (12 MAJOR). This session fixes all of them.
+
+| Area | Fix |
+|------|-----|
+| Queued-say race (MAJOR) | `processConversationStep` re-reads the persisted state at execution time and DROPS a queued turn when the conversation is AWAITING_HUMAN/IN_PROGRESS — a stale pre-pause memory copy can no longer execute and full-document-overwrite a just-committed pause. |
+| Zombie resume (MAJOR) | Resume persistence moved from the callable's `finally` into `IFinishedExecution.onComplete` — BaseRuntime's completed-after-cancellation discard now protects the resume path like the say path; a timed-out resume can never clobber state written after its watchdog fired. |
+| Cancel-vs-resume window (MAJOR) | The live memory is registered in `inFlightConversations` synchronously after the resume CAS; the resume callable re-checks `isCancelled()`/persisted EXECUTION_INTERRUPTED before executing and skips persistence when cancelled. Cancel now also wins over a pause committed by the very task it interrupted (`Conversation` treats pause-while-cancelled as stop), on both say and resume paths. |
+| Init pause (MAJOR) | `startConversation` performs the same HITL bookkeeping as the say path — a CONVERSATION_START pause now gets its policy bookmark, pause counter, and timeout schedule. |
+| Resume rollback (MAJOR) | Every post-CAS failure restores the pause: snapshot-load failures, `RejectedExecutionException` from a saturated coordinator, and service exceptions. Wrong-state/agent-undeployed now throw `IllegalStateException` → 409; infrastructure failures throw `ResourceStoreException` → 500 (was: everything 409). Audit + resume counter moved AFTER the successful submit — rolled-back resumes no longer pollute the compliance trail or metrics; undeployed-agent restores skip schedule re-arm (kills the infinite timeout→restore→re-arm loop). |
+| Bookmark hygiene | New `clearHitlBookmark` store op (Mongo `$unset` / Postgres jsonb key-removal) called when a pause is terminally resolved outside resume (cancel, end-while-paused) — stale bookmarks no longer round-trip forever, mislead approval-status (now also state-gated), or trick crash recovery into resurrecting dead pauses. Cancel of a pending approval writes an `hitl.approval` audit entry (verdict CANCELLED). `endConversation` on a paused conversation disarms the schedule and clears the bookmark (round-1 leftover). |
+| Config resolution | HITL timeout config is read ONCE per pause at the conversation's PINNED agentVersion (fallback to latest); `scheduleHitlTimeout` derives from the memory bookmark — bookmark and schedule can no longer diverge, and draft config edits no longer change paused conversations' behavior. Re-pauses now increment the pause counter (metric parity with the group surface). Undo/redo additionally rejected during IN_PROGRESS (protects the resume-CAS invariant crash recovery relies on). |
+
+*(Extended by subsequent commits in this session.)*
+
+---
+
 ## 🔧 HITL Review Fixes — Phases 1–5 (partial) (2026-07-02)
 
 **Repo:** EDDI (`feat/hitl-framework`)

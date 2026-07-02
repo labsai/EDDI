@@ -292,8 +292,13 @@ public class RestAgentEngine implements IRestAgentEngine {
             return Response.ok().build();
         } catch (ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
-        } catch (ResourceStoreException e) {
+        } catch (IllegalStateException e) {
+            // wrong state (already resumed/cancelled/timed out, agent not deployed)
             return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
+        } catch (ResourceStoreException e) {
+            // genuine infrastructure failure — the pause was restored by the service
+            LOGGER.error("Resume failed for conversation " + conversationId, e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
         }
     }
 
@@ -305,12 +310,16 @@ public class RestAgentEngine implements IRestAgentEngine {
             if ("full".equals(detail)) {
                 return Response.ok(snapshot).build();
             }
+            // Bookmark fields describe the pause — suppress them once the
+            // conversation left AWAITING_HUMAN so stale fields (e.g. after a
+            // cancel that predates bookmark clearing) never mislead dashboards.
+            boolean paused = snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
             var summary = Map.of(
                     "conversationId", conversationId,
                     "state", snapshot.getConversationState().name(),
-                    "pausedAt", snapshot.getHitlPausedAt() != null ? snapshot.getHitlPausedAt().toString() : "",
-                    "pauseReason", snapshot.getHitlPauseReason() != null ? snapshot.getHitlPauseReason() : "",
-                    "timeoutPolicy", snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy() : "");
+                    "pausedAt", paused && snapshot.getHitlPausedAt() != null ? snapshot.getHitlPausedAt().toString() : "",
+                    "pauseReason", paused && snapshot.getHitlPauseReason() != null ? snapshot.getHitlPauseReason() : "",
+                    "timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy() : "");
             return Response.ok(summary).build();
         } catch (ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
