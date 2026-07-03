@@ -38,6 +38,7 @@ class RestScheduleStoreExpandedTest {
     private IScheduleStore scheduleStore;
     private ScheduleFireExecutor fireExecutor;
     private SchedulePollerService pollerService;
+    private ai.labs.eddi.engine.security.OwnershipValidator ownershipValidator;
     private RestScheduleStore sut;
 
     @BeforeEach
@@ -45,11 +46,17 @@ class RestScheduleStoreExpandedTest {
         scheduleStore = mock(IScheduleStore.class);
         fireExecutor = mock(ScheduleFireExecutor.class);
         pollerService = mock(SchedulePollerService.class);
+        ownershipValidator = mock(ai.labs.eddi.engine.security.OwnershipValidator.class);
+        // admin by default: the HITL redaction/guards are tested in
+        // RestScheduleStoreTest — these tests exercise the general surface
+        doReturn(true).when(ownershipValidator).isAdmin(any());
 
         sut = new RestScheduleStore();
         setField(sut, "scheduleStore", scheduleStore);
         setField(sut, "fireExecutor", fireExecutor);
         setField(sut, "pollerService", pollerService);
+        setField(sut, "identity", mock(io.quarkus.security.identity.SecurityIdentity.class));
+        setField(sut, "ownershipValidator", ownershipValidator);
         setField(sut, "defaultTimeZone", "UTC");
         setField(sut, "minIntervalSeconds", 60L);
     }

@@ -123,6 +123,7 @@ class RestGroupConversationTest {
         void success() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-1");
+            gc.setGroupId("group-1"); // must belong to the {groupId} in the path (404 otherwise)
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
 
             GroupConversation result = restGroupConversation.readGroupConversation("group-1", "gc-1");
@@ -160,6 +161,7 @@ class RestGroupConversationTest {
         void success() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-1");
+            gc.setGroupId("group-1");
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
 
             Response response = restGroupConversation.deleteGroupConversation("group-1", "gc-1");
@@ -173,6 +175,7 @@ class RestGroupConversationTest {
         void storeError() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-1");
+            gc.setGroupId("group-1");
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
             doThrow(new IResourceStore.ResourceStoreException("Delete failed"))
                     .when(groupService).deleteGroupConversation("gc-1");
@@ -232,6 +235,7 @@ class RestGroupConversationTest {
         void readGroupConversation_rejectsNonOwner() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-1");
+            gc.setGroupId("group-1");
             gc.setUserId("other-user");
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
             doThrow(new ForbiddenException("Access denied"))
@@ -246,6 +250,7 @@ class RestGroupConversationTest {
         void deleteGroupConversation_rejectsNonOwner() throws Exception {
             var gc = new GroupConversation();
             gc.setId("gc-1");
+            gc.setGroupId("group-1");
             gc.setUserId("other-user");
             when(groupService.readGroupConversation("gc-1")).thenReturn(gc);
             doThrow(new ForbiddenException("Access denied"))
