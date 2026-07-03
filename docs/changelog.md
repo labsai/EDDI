@@ -5,6 +5,28 @@
 
 ---
 
+## 🔐 MCP HITL surface — resolve approval gates over MCP (2026-07-03)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Exposes the HITL approval operations over the MCP server so an external MCP client (agent / orchestrator / ops console) can list, read, resume/approve, and cancel paused conversations and group discussions — at full parity with the REST endpoints, for both the regular (1:1) and group surfaces. Closes the loop `chat_managed`/`talk_to_agent` already open: they return `PAUSED_FOR_APPROVAL` but, until now, the client had to drop to REST to resolve it. Full plan: [`planning/mcp-hitl-surface-plan.md`](../planning/mcp-hitl-surface-plan.md).
+
+**Design — human authority preserved:** MCP is a transport, not a new authority; no tool lets an agent approve its own gate. Authorization mirrors REST exactly via a new shared `HitlAccessGuard` (extracted from `RestAgentEngine`/`RestGroupConversation`, so *who may decide* lives in exactly one place): per-conversation owner / `eddi-admin` / `eddi-approver`, owner-scoped listings, fail-closed on a missing descriptor. Decisions are attributed server-side as `mcp:<principal>` (mirroring the existing `system:timeout` convention). A global kill-switch `eddi.mcp.hitl.mutations.enabled` (default `true`) can make MCP a read-only HITL surface without touching REST.
+
+**Method:** brainstorm → adversarial design critique (four subagent workflows: verify-assumptions + security + architecture + completeness; 28/28 code assumptions verified, ~26 findings triaged — folded in owner-scoped **group** listings, structured error codes, the discoverability hint, and metrics; **rejected** agent-level config, dev-mode fail-closed mutations, and a by-intent resume variant, each with reasons) → TDD execution, one commit per task. All new tests are plain Mockito (locally runnable, no Quarkus boot).
+
+**Landed (each task = its own commit, all tests green locally):**
+- `McpToolUtils.errorJson(msg, code, details)` — structured error JSON (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | FORBIDDEN | DISABLED | BAD_REQUEST`), manual construction so it never throws on the error path.
+- `HitlAccessGuard` — shared HITL ownership check + owner-scoped pending-approval listing (regular + group). `RestAgentEngine`/`RestGroupConversation` refactored to delegate the `hitlOperation=true` path (non-HITL paths untouched); existing REST HITL tests pass unchanged via a real guard wired with the same mocks.
+- `McpHitlTools` — 9 `@Tool`s: `list_pending_approvals`, `get_approval_status`, `resume_conversation`, `cancel_conversation`, `list_group_pending_approvals`, `list_all_group_pending_approvals`, `get_group_approval_status`, `approve_group_phase` (optional `taskApprovals` JSON for TASK granularity), `cancel_group_discussion`. `@Blocking`, JSON returns, `eddi.mcp.hitl.*` metrics (verdict-tagged).
+- `chat_managed`/`talk_to_agent` `PAUSED_FOR_APPROVAL` payload now names `"suggestNextTool": "resume_conversation"` so an LLM client can chain the approval over MCP.
+
+**Pause-type-agnostic:** because the tool-level HITL layer (see below) reuses the same `AWAITING_HUMAN` state + `/resume` + single-verdict `HitlDecision`, the regular tools resolve **both** `RULE` and `TOOL_CALL` pauses unchanged; `get_approval_status` reports `pauseType` and exposes the pending tool-call batch via `detail=full`. No SSE/streaming variant over MCP, no autonomous approver, no new realm role.
+
+**Docs:** `docs/hitl.md` (new *MCP Surface* section), `docs/mcp-server.md` (new *HITL Tools* category).
+
+---
+
 ## 🛠️ Tool-level HITL — foundational layer (Tasks 1–4 of 17) (2026-07-03)
 
 **Repo:** EDDI (`feat/hitl-framework`)

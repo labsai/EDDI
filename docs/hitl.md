@@ -245,6 +245,26 @@ Behavior:
 
 **Delegated/managed conversations** (agent-to-agent tools, MCP `chat_managed`): when a nested conversation pauses, the calling tool receives a structured `PAUSED_FOR_APPROVAL` result naming the conversation and reason instead of hanging — the delegated approval stays pending (it is *not* auto-cancelled; a reviewer decides, then the tool can be re-invoked).
 
+## MCP Surface
+
+The HITL operations are also exposed over the MCP server (`McpHitlTools`), so an MCP client that drives a conversation (`talk_to_agent` / `chat_managed`) and receives a `PAUSED_FOR_APPROVAL` result can resolve the gate over the **same transport** instead of switching to REST. That paused payload names the tool to call next (`"suggestNextTool": "resume_conversation"`).
+
+| MCP tool                          | Mirrors REST                                                  | Notes                                                                                               |
+| --------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `list_pending_approvals`          | `GET /agents/pending-approvals`                              | Owner-scoped; includes RULE and TOOL_CALL pauses                                                    |
+| `get_approval_status`             | `GET /agents/{id}/approval-status`                           | Summary reports `pauseType`; `detail=full` returns the snapshot (incl. any pending tool-call batch) |
+| `resume_conversation`             | `POST /agents/{id}/resume`                                   | A single verdict resolves both RULE and TOOL_CALL pauses                                             |
+| `cancel_conversation`             | `POST /agents/{id}/cancel`                                   |                                                                                                     |
+| `list_group_pending_approvals`    | `GET /groups/{groupId}/conversations/pending-approvals`      | Owner-scoped                                                                                         |
+| `list_all_group_pending_approvals`| `GET /groups/pending-approvals`                             | Cross-group inbox                                                                                    |
+| `get_group_approval_status`       | `GET /groups/{groupId}/conversations/{gcId}/approval-status` | Summary only; `detail=full` returns the whole conversation                                          |
+| `approve_group_phase`             | `POST /groups/{groupId}/conversations/{gcId}/approve`        | Optional `taskApprovals` JSON for TASK granularity; blocks and returns the resumed discussion (no SSE variant over MCP) |
+| `cancel_group_discussion`         | `POST /groups/{groupId}/conversations/{gcId}/cancel`        |                                                                                                     |
+
+**Authority is identical to REST** — the shared `HitlAccessGuard` enforces owner / `eddi-admin` / `eddi-approver` per conversation (fail-closed on a missing descriptor), and the decision is attributed **server-side** to the authenticated caller, prefixed `mcp:` (e.g. `mcp:alice`, mirroring the `system:timeout` convention) — never taken from a tool argument. Errors are structured JSON (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | FORBIDDEN | DISABLED | BAD_REQUEST`) so a programmatic client can branch on the failure kind.
+
+**Kill-switch:** set `eddi.mcp.hitl.mutations.enabled=false` to make MCP a **read-only** HITL surface — `resume_conversation`, `cancel_conversation`, `approve_group_phase`, and `cancel_group_discussion` then return a `DISABLED` error while the read-only list/status tools keep working. MCP is a transport, not a new authority: no tool lets an agent approve its own gate.
+
 ## Known Limitations (v1)
 
 - **Member-level HITL inside a group**: a member agent's own `PAUSE_CONVERSATION` rule firing during a group turn is not supported — the turn is recorded as SKIPPED with an explanatory note, the member's stranded pause is auto-cancelled (audited as `system:group`), and a `member_pause_skipped` SSE event is emitted. Use group-level HITL (`requiresApproval`) instead.

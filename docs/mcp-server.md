@@ -10,7 +10,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | --------------------------- | ------------------------------------- |
 | `http://localhost:7070/mcp` | MCP server endpoint (default + admin) |
 
-## Available Tools (65)
+## Available Tools (74)
 
 ### Conversation Tools (11)
 
@@ -98,6 +98,24 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
 | `delete_group_conversation` | Delete a group conversation and cascade-delete all member conversations                                                                                    |
 
 See [Group Conversations](group-conversations.md) for full style details, custom phases, and nested groups.
+
+### HITL Tools (9)
+
+Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the REST HITL endpoints, at parity for both the regular (1:1) and group surfaces. Authorization mirrors REST exactly (per-conversation owner / `eddi-admin` / `eddi-approver` via the shared `HitlAccessGuard`); decisions are attributed server-side as `mcp:<principal>`. Mutating tools honour the `eddi.mcp.hitl.mutations.enabled` kill-switch and return structured errors (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | FORBIDDEN | DISABLED | BAD_REQUEST`).
+
+| Tool                              | Description                                                                                                                    |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `list_pending_approvals`          | List regular (1:1) conversations awaiting approval (owner-scoped; includes RULE and TOOL_CALL pauses)                          |
+| `get_approval_status`             | Read a paused conversation's status; summary reports `pauseType`, `detail=full` returns the snapshot incl. any tool-call batch |
+| `resume_conversation`             | Resume with APPROVED/REJECTED (case-insensitive); resolves both RULE and TOOL_CALL pauses                                      |
+| `cancel_conversation`             | Cancel a paused or running conversation                                                                                        |
+| `list_group_pending_approvals`    | List a group's conversations awaiting approval (owner-scoped)                                                                  |
+| `list_all_group_pending_approvals`| Cross-group HITL inbox across all groups (owner-scoped)                                                                        |
+| `get_group_approval_status`       | Read a paused group discussion's status (summary; `detail=full` returns the whole conversation)                               |
+| `approve_group_phase`             | Approve/reject a paused phase, with optional `taskApprovals` JSON for TASK granularity; returns the resumed discussion         |
+| `cancel_group_discussion`         | Cancel an in-progress or paused group discussion                                                                              |
+
+See [HITL](hitl.md#mcp-surface) for the full authority model, the kill-switch, and REST-endpoint parity.
 
 ### Memory Tools (8)
 
