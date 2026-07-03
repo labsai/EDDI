@@ -75,7 +75,8 @@ class RestAgentEngineHitlTest {
         // owner-scoped listing now live here, so every assertion below still exercises
         // that logic end-to-end through the delegating REST endpoint.
         var hitlAccessGuard = new HitlAccessGuard(
-                identity, ownershipValidator, conversationDescriptorStore, conversationService);
+                identity, ownershipValidator, conversationDescriptorStore, conversationService,
+                mock(ai.labs.eddi.engine.api.IGroupConversationService.class));
         restAgentEngine = new RestAgentEngine(
                 conversationService, conversationDescriptorStore,
                 identity, ownershipValidator, hitlAccessGuard, AGENT_TIMEOUT);

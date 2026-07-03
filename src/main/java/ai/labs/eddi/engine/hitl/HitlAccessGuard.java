@@ -4,9 +4,11 @@
  */
 package ai.labs.eddi.engine.hitl;
 
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.security.OwnershipValidator;
@@ -40,16 +42,19 @@ public class HitlAccessGuard {
     private final OwnershipValidator ownershipValidator;
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final IConversationService conversationService;
+    private final IGroupConversationService groupConversationService;
 
     @Inject
     public HitlAccessGuard(SecurityIdentity identity,
             OwnershipValidator ownershipValidator,
             IConversationDescriptorStore conversationDescriptorStore,
-            IConversationService conversationService) {
+            IConversationService conversationService,
+            IGroupConversationService groupConversationService) {
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.conversationService = conversationService;
+        this.groupConversationService = groupConversationService;
     }
 
     /**
@@ -101,5 +106,54 @@ public class HitlAccessGuard {
             return List.of();
         }
         return conversationService.listPendingApprovals(callerId, limit);
+    }
+
+    /**
+     * Strict HITL ownership check for a group conversation (owner OR admin OR
+     * approver). When {@code groupId} is non-null the target must belong to that
+     * group, otherwise a mismatch is surfaced as
+     * {@link jakarta.ws.rs.NotFoundException} so a wrong-group path never leaks the
+     * conversation's existence or owner. A missing conversation is left for the
+     * actual operation to 404.
+     *
+     * @throws ForbiddenException
+     *             if the caller may not decide this group conversation.
+     */
+    public void requireGroupConversationHitlAccess(String groupId, String groupConversationId) {
+        GroupConversation gc;
+        try {
+            gc = groupConversationService.readGroupConversation(groupConversationId);
+        } catch (ResourceNotFoundException e) {
+            LOGGER.debugf("Group conversation not found for HITL ownership check: %s", sanitize(groupConversationId));
+            return;
+        } catch (Exception e) {
+            throw new ForbiddenException("Access denied: unable to verify group conversation ownership");
+        }
+        if (groupId != null && !groupId.equals(gc.getGroupId())) {
+            LOGGER.infof("Group conversation %s does not belong to group %s",
+                    sanitize(groupConversationId), sanitize(groupId));
+            throw new jakarta.ws.rs.NotFoundException("Group conversation not found.");
+        }
+        ownershipValidator.requireOwnerAdminOrApprover(identity, gc.getUserId(), "group conversation");
+    }
+
+    /**
+     * Owner-scoped pending-approval inbox for group conversations: admins and
+     * approvers see all; other callers see only their own (post-filtered by owner,
+     * since the group store has no owner-scoped query); anonymous callers see
+     * nothing (fail-closed). {@code groupId == null} lists across all groups
+     * (cross-group inbox).
+     */
+    public List<PendingApprovalSummary> listScopedGroupPendingApprovals(String groupId, int limit)
+            throws ResourceStoreException {
+        var scoped = groupConversationService.listGroupPendingApprovals(groupId, limit).stream();
+        if (ownershipValidator.isAdmin(identity) || ownershipValidator.isApprover(identity)) {
+            return scoped.toList();
+        }
+        String callerId = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
+        if (callerId == null || callerId.isBlank()) {
+            return List.of();
+        }
+        return scoped.filter(summary -> callerId.equals(summary.getUserId())).toList();
     }
 }

@@ -4,8 +4,10 @@
  */
 package ai.labs.eddi.engine.hitl;
 
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
@@ -16,12 +18,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.security.Principal;
+import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -36,6 +40,7 @@ class HitlAccessGuardTest {
     OwnershipValidator ownershipValidator;
     IConversationService conversationService;
     IConversationDescriptorStore descriptorStore;
+    IGroupConversationService groupConversationService;
     SecurityIdentity identity;
     HitlAccessGuard guard;
 
@@ -44,8 +49,10 @@ class HitlAccessGuardTest {
         ownershipValidator = mock(OwnershipValidator.class);
         conversationService = mock(IConversationService.class);
         descriptorStore = mock(IConversationDescriptorStore.class);
+        groupConversationService = mock(IGroupConversationService.class);
         identity = mock(SecurityIdentity.class);
-        guard = new HitlAccessGuard(identity, ownershipValidator, descriptorStore, conversationService);
+        guard = new HitlAccessGuard(identity, ownershipValidator, descriptorStore,
+                conversationService, groupConversationService);
     }
 
     private void callerNamed(String name) {
@@ -142,5 +149,82 @@ class HitlAccessGuardTest {
         when(ownershipValidator.isAdmin(identity)).thenReturn(true);
 
         assertNull(guard.requireConversationHitlAccess("c1"));
+    }
+
+    // ---- group surface -----------------------------------------------------
+
+    private PendingApprovalSummary groupSummaryOwnedBy(String gcId, String ownerId) {
+        return new PendingApprovalSummary(gcId, "agent-1", ownerId, Instant.now(), "needs review", "AUTO_APPROVE");
+    }
+
+    @Test
+    void listScopedGroupPendingApprovals_adminSeesAll() throws Exception {
+        when(ownershipValidator.isAdmin(identity)).thenReturn(true);
+        when(groupConversationService.listGroupPendingApprovals(null, 25))
+                .thenReturn(List.of(groupSummaryOwnedBy("gc-1", "alice"), groupSummaryOwnedBy("gc-2", "bob")));
+
+        List<PendingApprovalSummary> result = guard.listScopedGroupPendingApprovals(null, 25);
+
+        assertEquals(2, result.size());
+    }
+
+    @Test
+    void listScopedGroupPendingApprovals_ownerFilteredToOwn() throws Exception {
+        when(ownershipValidator.isAdmin(identity)).thenReturn(false);
+        when(ownershipValidator.isApprover(identity)).thenReturn(false);
+        callerNamed("bob");
+        when(groupConversationService.listGroupPendingApprovals("g1", 10))
+                .thenReturn(List.of(groupSummaryOwnedBy("gc-bob", "bob"), groupSummaryOwnedBy("gc-other", "alice")));
+
+        List<PendingApprovalSummary> result = guard.listScopedGroupPendingApprovals("g1", 10);
+
+        assertEquals(1, result.size());
+        assertEquals("gc-bob", result.get(0).getConversationId());
+    }
+
+    @Test
+    void listScopedGroupPendingApprovals_anonymousSeesNothing() throws Exception {
+        when(ownershipValidator.isAdmin(identity)).thenReturn(false);
+        when(ownershipValidator.isApprover(identity)).thenReturn(false);
+        when(identity.getPrincipal()).thenReturn(null);
+        when(groupConversationService.listGroupPendingApprovals("g1", 10))
+                .thenReturn(List.of(groupSummaryOwnedBy("gc-1", "alice")));
+
+        assertTrue(guard.listScopedGroupPendingApprovals("g1", 10).isEmpty());
+    }
+
+    @Test
+    void requireGroupConversationHitlAccess_allowed() throws Exception {
+        GroupConversation gc = mock(GroupConversation.class);
+        when(gc.getGroupId()).thenReturn("g1");
+        when(gc.getUserId()).thenReturn("owner1");
+        when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
+
+        guard.requireGroupConversationHitlAccess("g1", "gc1");
+
+        verify(ownershipValidator).requireOwnerAdminOrApprover(identity, "owner1", "group conversation");
+    }
+
+    @Test
+    void requireGroupConversationHitlAccess_wrongGroup_throwsNotFound() throws Exception {
+        GroupConversation gc = mock(GroupConversation.class);
+        when(gc.getGroupId()).thenReturn("g2");
+        when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
+
+        assertThrows(jakarta.ws.rs.NotFoundException.class,
+                () -> guard.requireGroupConversationHitlAccess("g1", "gc1"));
+        verify(ownershipValidator, never()).requireOwnerAdminOrApprover(any(), any(), any());
+    }
+
+    @Test
+    void requireGroupConversationHitlAccess_denied_throwsForbidden() throws Exception {
+        GroupConversation gc = mock(GroupConversation.class);
+        when(gc.getGroupId()).thenReturn("g1");
+        when(gc.getUserId()).thenReturn("owner1");
+        when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
+        doThrow(new ForbiddenException("no"))
+                .when(ownershipValidator).requireOwnerAdminOrApprover(eq(identity), eq("owner1"), eq("group conversation"));
+
+        assertThrows(ForbiddenException.class, () -> guard.requireGroupConversationHitlAccess("g1", "gc1"));
     }
 }

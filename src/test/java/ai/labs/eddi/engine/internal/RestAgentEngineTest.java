@@ -56,7 +56,8 @@ class RestAgentEngineTest {
         // Default: descriptor not found → ownership check skipped gracefully
         when(descriptorStore.readDescriptor(anyString(), anyInt()))
                 .thenThrow(new ResourceNotFoundException("test default"));
-        var hitlAccessGuard = new HitlAccessGuard(identity, ownershipValidator, descriptorStore, conversationService);
+        var hitlAccessGuard = new HitlAccessGuard(identity, ownershipValidator, descriptorStore, conversationService,
+                mock(ai.labs.eddi.engine.api.IGroupConversationService.class));
         restAgentEngine = new RestAgentEngine(conversationService, descriptorStore, identity, ownershipValidator, hitlAccessGuard, 30);
     }
 

@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -45,16 +46,19 @@ public class RestGroupConversation implements IRestGroupConversation {
     private final IJsonSerialization jsonSerialization;
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
+    private final HitlAccessGuard hitlAccessGuard;
 
     @Inject
     public RestGroupConversation(IGroupConversationService groupConversationService,
             IJsonSerialization jsonSerialization,
             SecurityIdentity identity,
-            OwnershipValidator ownershipValidator) {
+            OwnershipValidator ownershipValidator,
+            HitlAccessGuard hitlAccessGuard) {
         this.groupConversationService = groupConversationService;
         this.jsonSerialization = jsonSerialization;
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
+        this.hitlAccessGuard = hitlAccessGuard;
     }
 
     @Override
@@ -385,6 +389,12 @@ public class RestGroupConversation implements IRestGroupConversation {
      *            if true, uses strict ownership + approver role check
      */
     private void validateGroupConversationOwnership(String groupId, String gcId, boolean hitlOperation) {
+        if (hitlOperation) {
+            // Strict HITL ownership (group-membership check + owner/admin/approver,
+            // fail-closed) is shared with the MCP surface via HitlAccessGuard.
+            hitlAccessGuard.requireGroupConversationHitlAccess(groupId, gcId);
+            return;
+        }
         GroupConversation gc;
         try {
             gc = groupConversationService.readGroupConversation(gcId);
@@ -398,17 +408,10 @@ public class RestGroupConversation implements IRestGroupConversation {
         // Membership check first: a wrong-group path must look like "not found" here,
         // never leak the conversation's existence or owner via an authz error.
         if (groupId != null && !groupId.equals(gc.getGroupId())) {
-            // Curated body: never reflect the caller-supplied gcId/groupId (CodeQL
-            // reflected-value/XSS — no ExceptionMapper for jakarta NotFoundException);
-            // the detail is logged server-side with both ids sanitized.
             LOGGER.infof("Group conversation %s does not belong to group %s", sanitize(gcId), sanitize(groupId));
             throw new jakarta.ws.rs.NotFoundException("Group conversation not found.");
         }
-        if (hitlOperation) {
-            ownershipValidator.requireOwnerAdminOrApprover(identity, gc.getUserId(), "group conversation");
-        } else {
-            ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
-        }
+        ownershipValidator.requireOwnerOrAdmin(identity, gc.getUserId(), "group conversation");
     }
 
     /**
@@ -558,17 +561,10 @@ public class RestGroupConversation implements IRestGroupConversation {
      */
     private List<ai.labs.eddi.engine.model.PendingApprovalSummary> listPendingApprovals(String groupId, Integer limit) {
         try {
-            var scoped = groupConversationService
-                    .listGroupPendingApprovals(groupId, limit != null ? limit : 100).stream();
-
-            if (ownershipValidator.isAdmin(identity) || ownershipValidator.isApprover(identity)) {
-                return scoped.toList();
-            }
-            String callerId = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
-            if (callerId == null || callerId.isBlank()) {
-                return List.of(); // fail-closed
-            }
-            return scoped.filter(summary -> callerId.equals(summary.getUserId())).toList();
+            // Owner-scoping (admins/approvers see all; others see only their own;
+            // anonymous sees nothing) lives in HitlAccessGuard so the MCP surface
+            // shares the exact same rule verbatim.
+            return hitlAccessGuard.listScopedGroupPendingApprovals(groupId, limit != null ? limit : 100);
         } catch (IResourceStore.ResourceStoreException e) {
             throw new InternalServerErrorException("Failed to list pending approvals: " + e.getMessage(), e);
         }

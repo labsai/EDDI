@@ -55,8 +55,15 @@ class RestGroupConversationHitlTest {
 
         when(identity.isAnonymous()).thenReturn(false);
 
+        // Real guard wired with the same mocks + real OwnershipValidator, so the group
+        // HITL ownership + listing assertions still exercise that logic end-to-end.
+        var hitlAccessGuard = new ai.labs.eddi.engine.hitl.HitlAccessGuard(
+                identity, ownershipValidator,
+                mock(ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore.class),
+                mock(ai.labs.eddi.engine.api.IConversationService.class),
+                groupService);
         restGroupConversation = new RestGroupConversation(
-                groupService, jsonSerialization, identity, ownershipValidator);
+                groupService, jsonSerialization, identity, ownershipValidator, hitlAccessGuard);
     }
 
     /** Creates a GC owned by the given userId. */
