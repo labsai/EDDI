@@ -29,6 +29,10 @@ public class ConversationMemorySnapshot {
     private String hitlPauseReason;
     private String hitlTimeoutPolicy;
     private String hitlApprovalTimeout;
+    // Tool-level HITL: null/"RULE" = behavior-rule pause, "TOOL_CALL" = gated tool
+    // pause.
+    private String hitlPauseType;
+    private PendingToolCallBatch hitlPendingToolCalls;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
     private Map<String, Property> conversationProperties = new LinkedHashMap<>();
     private List<ConversationStepSnapshot> conversationSteps = new LinkedList<>();
@@ -331,6 +335,22 @@ public class ConversationMemorySnapshot {
 
     public void setHitlApprovalTimeout(String hitlApprovalTimeout) {
         this.hitlApprovalTimeout = hitlApprovalTimeout;
+    }
+
+    public String getHitlPauseType() {
+        return hitlPauseType;
+    }
+
+    public void setHitlPauseType(String hitlPauseType) {
+        this.hitlPauseType = hitlPauseType;
+    }
+
+    public PendingToolCallBatch getHitlPendingToolCalls() {
+        return hitlPendingToolCalls;
+    }
+
+    public void setHitlPendingToolCalls(PendingToolCallBatch hitlPendingToolCalls) {
+        this.hitlPendingToolCalls = hitlPendingToolCalls;
     }
 
     public List<ConversationOutput> getConversationOutputs() {

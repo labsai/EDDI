@@ -1,0 +1,114 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.engine.memory.model;
+
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Round-trips the new tool-HITL fields through Jackson (the mechanism the
+ * Mongo/Postgres snapshot persistence uses) and verifies backward compatibility
+ * with pre-feature documents.
+ */
+class PendingToolCallBatchSnapshotTest {
+
+    private static ObjectMapper mapper() {
+        return new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    }
+
+    private static PendingToolCallBatch fullBatch() {
+        var call1 = new PendingToolCallBatch.PendingToolCall();
+        call1.setCallId("call_abc");
+        call1.setToolName("transfer_funds");
+        call1.setSource("http");
+        call1.setArgumentsRaw("{\"amount\":250}");
+        call1.setArgsTruncated(false);
+        call1.setArgumentsRedacted("{\"amount\":250}");
+        call1.setGateReason("http:transfer_*");
+
+        var call2 = new PendingToolCallBatch.PendingToolCall();
+        call2.setCallId("call_def");
+        call2.setToolName("delete_record");
+        call2.setSource("mcp");
+        call2.setArgumentsRaw("<huge>");
+        call2.setArgsTruncated(true);
+        call2.setArgumentsRedacted("<huge>");
+        call2.setGateReason("mcp:*");
+
+        var batch = new PendingToolCallBatch();
+        batch.setPauseEpoch("epoch-1");
+        batch.setLlmTaskId("task-a");
+        batch.setLlmTaskIndex(2);
+        batch.setWorkflowId("wf-1");
+        batch.setChatTranscriptJson("[{\"type\":\"AI\"}]");
+        batch.setTranscriptOmitted(false);
+        batch.setCalls(List.of(call1, call2));
+        batch.setExecutedUngatedCallNames(List.of("getCurrentDateTime"));
+        batch.setIterationIndex(3);
+        batch.setActivatedToolNames(List.of("delete_record"));
+        batch.setTraceSoFar(List.of(Map.of("type", "tool_call", "tool", "transfer_funds")));
+        batch.setFingerprint("sha256-xyz");
+        batch.setAutoApproveCount(1);
+        batch.setPauseCountThisTurn(2);
+        return batch;
+    }
+
+    @Test
+    void snapshot_roundTrips_toolPauseFields() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setHitlPauseType("TOOL_CALL");
+        snapshot.setHitlPendingToolCalls(fullBatch());
+
+        var json = mapper().writeValueAsString(snapshot);
+        var restored = mapper().readValue(json, ConversationMemorySnapshot.class);
+
+        assertEquals("TOOL_CALL", restored.getHitlPauseType());
+        var batch = restored.getHitlPendingToolCalls();
+        assertNotNull(batch);
+        assertEquals("epoch-1", batch.getPauseEpoch());
+        assertEquals("task-a", batch.getLlmTaskId());
+        assertEquals(2, batch.getLlmTaskIndex());
+        assertEquals(2, batch.getCalls().size());
+        assertEquals("call_abc", batch.getCalls().get(0).getCallId());
+        assertEquals("transfer_funds", batch.getCalls().get(0).getToolName());
+        assertFalse(batch.getCalls().get(0).isArgsTruncated());
+        assertTrue(batch.getCalls().get(1).isArgsTruncated());
+        assertEquals(List.of("getCurrentDateTime"), batch.getExecutedUngatedCallNames());
+        assertEquals(3, batch.getIterationIndex());
+        assertEquals("sha256-xyz", batch.getFingerprint());
+        assertEquals(1, batch.getAutoApproveCount());
+        assertEquals(2, batch.getPauseCountThisTurn());
+    }
+
+    @Test
+    void legacySnapshot_withoutNewFields_deserializesToNull() throws Exception {
+        // A pre-feature document simply lacks the two new keys.
+        String legacyJson = "{\"conversationId\":\"c1\",\"agentId\":\"a1\"}";
+        var restored = mapper().readValue(legacyJson, ConversationMemorySnapshot.class);
+        assertNull(restored.getHitlPauseType());
+        assertNull(restored.getHitlPendingToolCalls());
+    }
+
+    @Test
+    void pauseException_threeArgCtor_defaultsToRuleOrigin() {
+        var e = new ConversationPauseException("wf", 3, "reason");
+        assertEquals(ConversationPauseException.PauseOrigin.RULE, e.getPauseOrigin());
+        assertEquals("wf", e.getPausedWorkflowId());
+        assertEquals(3, e.getPausedAbsoluteTaskIndex());
+    }
+
+    @Test
+    void pauseException_fourArgCtor_carriesToolCallOrigin() {
+        var e = new ConversationPauseException("wf", 5, "reason", ConversationPauseException.PauseOrigin.TOOL_CALL);
+        assertEquals(ConversationPauseException.PauseOrigin.TOOL_CALL, e.getPauseOrigin());
+    }
+}

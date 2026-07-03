@@ -72,6 +72,8 @@ public class ConversationMemoryUtilities {
         snapshot.setHitlPauseReason(conversationMemory.getHitlPauseReason());
         snapshot.setHitlTimeoutPolicy(conversationMemory.getHitlTimeoutPolicy());
         snapshot.setHitlApprovalTimeout(conversationMemory.getHitlApprovalTimeout());
+        snapshot.setHitlPauseType(conversationMemory.getHitlPauseType());
+        snapshot.setHitlPendingToolCalls(conversationMemory.getHitlPendingToolCalls());
         return snapshot;
     }
 
@@ -121,6 +123,8 @@ public class ConversationMemoryUtilities {
         conversationMemory.setHitlPauseReason(snapshot.getHitlPauseReason());
         conversationMemory.setHitlTimeoutPolicy(snapshot.getHitlTimeoutPolicy());
         conversationMemory.setHitlApprovalTimeout(snapshot.getHitlApprovalTimeout());
+        conversationMemory.setHitlPauseType(snapshot.getHitlPauseType());
+        conversationMemory.setHitlPendingToolCalls(snapshot.getHitlPendingToolCalls());
         conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
 
         var redoSteps = iterateRedoCache(snapshot.getRedoCache());

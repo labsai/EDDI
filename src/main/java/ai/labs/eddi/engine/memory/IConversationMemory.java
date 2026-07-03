@@ -192,6 +192,48 @@ public interface IConversationMemory extends Serializable {
     default void setHitlApprovalTimeout(String timeout) {
     }
 
+    // === Tool-level HITL (tool-call pause) ===
+
+    /**
+     * Pause-type discriminator: null/"RULE" = behavior-rule pause, "TOOL_CALL" =
+     * gated tool pause.
+     */
+    default String getHitlPauseType() {
+        return null;
+    }
+    default void setHitlPauseType(String pauseType) {
+    }
+
+    /**
+     * The interrupted tool-call batch (durable); null unless a tool pause is
+     * active.
+     */
+    default ai.labs.eddi.engine.memory.model.PendingToolCallBatch getHitlPendingToolCalls() {
+        return null;
+    }
+    default void setHitlPendingToolCalls(ai.labs.eddi.engine.memory.model.PendingToolCallBatch batch) {
+    }
+
+    /**
+     * Agent-level tool-approval config carried onto memory at conversation start
+     * (NOT persisted).
+     */
+    default ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig getAgentToolApprovalsConfig() {
+        return null;
+    }
+    default void setAgentToolApprovalsConfig(ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig config) {
+    }
+
+    /**
+     * The human decision being applied during an in-JVM tool-pause resume (NOT
+     * persisted).
+     */
+    default ai.labs.eddi.engine.lifecycle.model.HitlDecision getHitlResumeDecision() {
+        return null;
+    }
+    default void setHitlResumeDecision(ai.labs.eddi.engine.lifecycle.model.HitlDecision decision) {
+    }
+
     interface IConversationStepStack {
         <T> IData<T> getLatestData(String key);
 

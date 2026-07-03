@@ -11,14 +11,10 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
+import static ai.labs.eddi.engine.memory.model.PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ChatTranscriptCodecTest {
-
-    // Task 4 places this constant on PendingToolCallBatch. For THIS task it is
-    // inlined; Task 4 Step 4 replaces this field with a static import of
-    // PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT.
-    private static final int TRANSCRIPT_MAX_BYTES_DEFAULT = 2_000_000;
 
     private List<ChatMessage> fullConversation() {
         ToolExecutionRequest req1 = ToolExecutionRequest.builder()
