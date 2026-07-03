@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
+import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
@@ -1475,17 +1476,17 @@ public class ConversationService implements IConversationService {
             Instant fireAt = Instant.now().plus(timeout);
 
             var schedule = new ScheduleConfiguration();
-            schedule.setName("hitl-timeout-" + conversationId);
+            schedule.setName(HitlSchedules.regularTimeoutScheduleName(conversationId));
             schedule.setAgentId(memory.getAgentId());
             schedule.setOneTimeAt(fireAt.toString());
             schedule.setEnabled(true);
             schedule.setNextFire(fireAt);
             schedule.setCreatedAt(Instant.now());
             schedule.setMetadata(Map.of(
-                    "hitlType", "hitl_timeout",
-                    "policy", policyName,
-                    "surface", "regular",
-                    "conversationId", conversationId));
+                    HitlSchedules.METADATA_TYPE_KEY, HitlSchedules.METADATA_TYPE_TIMEOUT,
+                    HitlSchedules.METADATA_POLICY_KEY, policyName,
+                    HitlSchedules.METADATA_SURFACE_KEY, HitlSchedules.SURFACE_REGULAR,
+                    HitlSchedules.METADATA_CONVERSATION_ID_KEY, conversationId));
             scheduleStore.createSchedule(schedule);
             LOGGER.infof("Scheduled HITL timeout for conversation %s at %s (policy: %s)",
                     conversationId, fireAt, policyName);
@@ -1501,7 +1502,7 @@ public class ConversationService implements IConversationService {
      */
     private void deleteHitlTimeoutSchedule(String conversationId) {
         try {
-            int deleted = scheduleStore.deleteSchedulesByName("hitl-timeout-" + conversationId);
+            int deleted = scheduleStore.deleteSchedulesByName(HitlSchedules.regularTimeoutScheduleName(conversationId));
             if (deleted > 0) {
                 LOGGER.infof("Cleaned up %d HITL timeout schedule(s) for conversation %s", deleted, conversationId);
             }

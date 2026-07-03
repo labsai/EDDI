@@ -721,16 +721,18 @@ public class GroupConversationService implements IGroupConversationService {
             Instant fireAt = Instant.now().plus(timeout);
 
             var schedule = new ScheduleConfiguration();
-            schedule.setName("hitl-timeout-group-" + gc.getId());
+            schedule.setName(ai.labs.eddi.engine.hitl.HitlSchedules.groupTimeoutScheduleName(gc.getId()));
             schedule.setEnabled(true);
             schedule.setOneTimeAt(fireAt.toString());
             schedule.setNextFire(fireAt);
             schedule.setCreatedAt(Instant.now());
             schedule.setMetadata(java.util.Map.of(
-                    "hitlType", "hitl_timeout",
-                    "policy", policy,
-                    "surface", "group",
-                    "conversationId", gc.getId()));
+                    ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_TYPE_KEY,
+                    ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_TYPE_TIMEOUT,
+                    ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_POLICY_KEY, policy,
+                    ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_SURFACE_KEY,
+                    ai.labs.eddi.engine.hitl.HitlSchedules.SURFACE_GROUP,
+                    ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_CONVERSATION_ID_KEY, gc.getId()));
             scheduleStore.createSchedule(schedule);
             LOGGER.infof("Scheduled group HITL timeout for %s at %s (policy: %s)",
                     gc.getId(), fireAt, policy);
@@ -3002,7 +3004,8 @@ public class GroupConversationService implements IGroupConversationService {
      */
     private void deleteGroupHitlTimeoutSchedule(String groupConversationId) {
         try {
-            int deleted = scheduleStore.deleteSchedulesByName("hitl-timeout-group-" + groupConversationId);
+            int deleted = scheduleStore.deleteSchedulesByName(
+                    ai.labs.eddi.engine.hitl.HitlSchedules.groupTimeoutScheduleName(groupConversationId));
             if (deleted > 0) {
                 LOGGER.infof("Cleaned up %d group HITL timeout schedule(s) for %s", deleted, groupConversationId);
             }

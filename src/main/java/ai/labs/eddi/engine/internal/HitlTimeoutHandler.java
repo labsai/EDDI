@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -33,12 +34,12 @@ public class HitlTimeoutHandler {
     MeterRegistry meterRegistry;
 
     public void handleTimeout(Map<String, Object> metadata) {
-        String surface = (String) metadata.get("surface");
+        String surface = (String) metadata.get(HitlSchedules.METADATA_SURFACE_KEY);
         Counter.builder("eddi_hitl_timeout_count")
                 .tag("surface", surface != null ? surface : "unknown")
                 .register(meterRegistry)
                 .increment();
-        String policyStr = (String) metadata.get("policy");
+        String policyStr = (String) metadata.get(HitlSchedules.METADATA_POLICY_KEY);
         if (policyStr == null) {
             LOGGER.error("HITL timeout metadata missing 'policy' key");
             return;
@@ -61,14 +62,14 @@ public class HitlTimeoutHandler {
                 decision.setDecidedBy("system:timeout");
                 decision.setNote("Automatic " + verdict.name().toLowerCase() + " due to timeout (policy: " + policyStr + ")");
 
-                if ("group".equals(surface)) {
+                if (HitlSchedules.SURFACE_GROUP.equals(surface)) {
                     resumeGroup(metadata, decision);
                 } else {
                     resumeRegular(metadata, decision);
                 }
             }
             case ABORT -> {
-                if ("group".equals(surface)) {
+                if (HitlSchedules.SURFACE_GROUP.equals(surface)) {
                     cancelGroup(metadata);
                 } else {
                     cancelRegular(metadata);
@@ -80,7 +81,7 @@ public class HitlTimeoutHandler {
     }
 
     private void resumeRegular(Map<String, Object> metadata, HitlDecision decision) {
-        String conversationId = (String) metadata.get("conversationId");
+        String conversationId = (String) metadata.get(HitlSchedules.METADATA_CONVERSATION_ID_KEY);
         try {
             conversationService.resumeConversation(conversationId, decision, null);
             LOGGER.infof("HITL timeout auto-%s for conversation %s", decision.getVerdict(), conversationId);
@@ -90,7 +91,7 @@ public class HitlTimeoutHandler {
     }
 
     private void resumeGroup(Map<String, Object> metadata, HitlDecision decision) {
-        String gcId = (String) metadata.get("conversationId");
+        String gcId = (String) metadata.get(HitlSchedules.METADATA_CONVERSATION_ID_KEY);
         try {
             var request = new GroupApprovalRequest();
             request.setDecision(decision);
@@ -102,7 +103,7 @@ public class HitlTimeoutHandler {
     }
 
     private void cancelRegular(Map<String, Object> metadata) {
-        String conversationId = (String) metadata.get("conversationId");
+        String conversationId = (String) metadata.get(HitlSchedules.METADATA_CONVERSATION_ID_KEY);
         try {
             conversationService.cancelConversation(conversationId,
                     ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL, "system:timeout");
@@ -113,7 +114,7 @@ public class HitlTimeoutHandler {
     }
 
     private void cancelGroup(Map<String, Object> metadata) {
-        String gcId = (String) metadata.get("conversationId");
+        String gcId = (String) metadata.get(HitlSchedules.METADATA_CONVERSATION_ID_KEY);
         try {
             boolean cancelled = groupConversationService.cancelDiscussion(gcId,
                     ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL);

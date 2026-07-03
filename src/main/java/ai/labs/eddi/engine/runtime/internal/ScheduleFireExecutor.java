@@ -63,7 +63,7 @@ public class ScheduleFireExecutor {
      */
     public ScheduleFireLog fire(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
         Map<String, Object> md = schedule.getMetadata();
-        if (md != null && "hitl_timeout".equals(md.get("hitlType"))) {
+        if (ai.labs.eddi.engine.hitl.HitlSchedules.isHitlTimeout(md)) {
             // HITL timeout fast-path — isolate exceptions and record a fire log for
             // parity with the normal path (observability + retry diagnostics).
             Instant hitlStartedAt = Instant.now();
@@ -78,7 +78,9 @@ public class ScheduleFireExecutor {
             }
             var hitlFireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(),
                     schedule.getFireId(), schedule.getNextFire(), hitlStartedAt, Instant.now(),
-                    hitlStatus, instanceId, (String) md.get("conversationId"), hitlError, attemptNumber, 0.0);
+                    hitlStatus, instanceId,
+                    (String) md.get(ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_CONVERSATION_ID_KEY),
+                    hitlError, attemptNumber, 0.0);
             try {
                 scheduleStore.logFire(hitlFireLog);
             } catch (Exception e) {

@@ -5,6 +5,16 @@
 
 ---
 
+## 🧪 HITL Coverage Closure + Schedule-Contract Consolidation (2026-07-03, WS-F + merge)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+
+**Coverage (WS-F, findings 10/22/23/24/41/43):** 13 test files, +1469 lines, tests only. Queued-say guard + say fast-fail (finding 10 — previously zero coverage), zombie-pause discard guard, the entire finite-timeout leg (schedule creation/metadata routing/fire-log parity/error isolation/delete-on-resume+cancel, initial say-path arming), regular-surface endpoint authz incl. fail-closed missing-descriptor, resume robustness against REAL workflow lists (config drift → ERROR, multi-workflow continuation order), HitlConfigValidation wiring at AgentStore/AgentGroupStore CRUD + the import seam, storage regressions (Postgres zombie: post-CAS load must report the column state; `jsonb_set` convergence; owner-filtered summaries; `storeIfFieldEquals` deleted-404 vs mismatch-409 on both backends; anchored group filters + SAFE_ID rejection), case-insensitive verdict round-trip, REJECTED-path `ConversationOutput` visibility + ACTIONS strip. Testcontainers classes (`PostgresConversationMemoryStoreTest`, `MongoConversationMemoryStoreTest`) execute in CI; everything else ran green locally (202 tests). Known residual gaps documented in the test agent's report: no wall-clock end-to-end timeout IT (every seam unit-covered), full ZIP pipeline (validation seam covered).
+
+**Consolidation:** new `ai.labs.eddi.engine.hitl.HitlSchedules` — single source of truth for the HITL timeout-schedule contract (names `hitl-timeout-*`/`hitl-timeout-group-*`; metadata keys `hitlType`/`policy`/`surface`/`conversationId`; `isHitlTimeout` predicate) — adopted by ConversationService, GroupConversationService, ScheduleFireExecutor, HitlTimeoutHandler, HitlCrashRecoveryObserver, RestScheduleStore. Closes the "HITL lifecycle glued by magic strings across five classes" review finding.
+
+---
+
 ## 🔌 HITL — Slack integration + nested-consumer bridges (2026-07-03, WS-E)
 
 **Repo:** EDDI (`feat/hitl-ws-e-slack`, branched from `feat/hitl-framework`)

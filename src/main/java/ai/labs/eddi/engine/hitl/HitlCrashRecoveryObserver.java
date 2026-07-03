@@ -214,7 +214,8 @@ public class HitlCrashRecoveryObserver {
                     if (policy == HitlTimeoutPolicy.WAIT_INDEFINITELY) {
                         continue; // legitimate indefinite pause — never touch
                     }
-                    if (rearmSchedule("hitl-timeout-" + conversationId, "regular", conversationId,
+                    if (rearmSchedule(HitlSchedules.regularTimeoutScheduleName(conversationId),
+                            HitlSchedules.SURFACE_REGULAR, conversationId,
                             summary.getAgentId(), policy, summary.getApprovalTimeout(),
                             summary.getPausedAt(),
                             () -> conversationMemoryStore.getConversationState(conversationId) == ConversationState.AWAITING_HUMAN)) {
@@ -255,7 +256,8 @@ public class HitlCrashRecoveryObserver {
                             count++;
                             HitlTimeoutPolicy policy = parsePolicy(snapshot.getHitlTimeoutPolicy());
                             if (policy != HitlTimeoutPolicy.WAIT_INDEFINITELY) {
-                                rearmSchedule("hitl-timeout-" + conversationId, "regular", conversationId,
+                                rearmSchedule(HitlSchedules.regularTimeoutScheduleName(conversationId),
+                                        HitlSchedules.SURFACE_REGULAR, conversationId,
                                         snapshot.getAgentId(), policy, snapshot.getHitlApprovalTimeout(),
                                         snapshot.getHitlPausedAt(),
                                         () -> conversationMemoryStore.getConversationState(conversationId) == ConversationState.AWAITING_HUMAN);
@@ -291,7 +293,8 @@ public class HitlCrashRecoveryObserver {
                     if (policy == HitlTimeoutPolicy.WAIT_INDEFINITELY) {
                         continue;
                     }
-                    if (rearmSchedule("hitl-timeout-group-" + gc.getId(), "group", gc.getId(),
+                    if (rearmSchedule(HitlSchedules.groupTimeoutScheduleName(gc.getId()),
+                            HitlSchedules.SURFACE_GROUP, gc.getId(),
                             null, policy, gc.getHitlApprovalTimeout(), gc.getPausedAt(),
                             () -> {
                                 try {
@@ -359,10 +362,10 @@ public class HitlCrashRecoveryObserver {
             schedule.setNextFire(fireAt);
             schedule.setCreatedAt(Instant.now());
             schedule.setMetadata(Map.of(
-                    "hitlType", "hitl_timeout",
-                    "policy", policy.name(),
-                    "surface", surface,
-                    "conversationId", conversationId));
+                    HitlSchedules.METADATA_TYPE_KEY, HitlSchedules.METADATA_TYPE_TIMEOUT,
+                    HitlSchedules.METADATA_POLICY_KEY, policy.name(),
+                    HitlSchedules.METADATA_SURFACE_KEY, surface,
+                    HitlSchedules.METADATA_CONVERSATION_ID_KEY, conversationId));
             scheduleStore.createSchedule(schedule);
 
             // Re-check AFTER creating: a resume/cancel landing between the sweep

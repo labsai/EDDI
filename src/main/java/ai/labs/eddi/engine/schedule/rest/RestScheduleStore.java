@@ -49,8 +49,8 @@ public class RestScheduleStore implements IRestScheduleStore {
      * side-step the owner/admin/approver check on {@code /resume}) or disarm them
      * (defeating an ABORT/AUTO_REJECT deadline).
      */
-    private static final String HITL_TYPE_KEY = "hitlType";
-    private static final String HITL_TYPE_TIMEOUT = "hitl_timeout";
+    private static final String HITL_TYPE_KEY = ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_TYPE_KEY;
+    private static final String HITL_TYPE_TIMEOUT = ai.labs.eddi.engine.hitl.HitlSchedules.METADATA_TYPE_TIMEOUT;
 
     @Inject
     IScheduleStore scheduleStore;

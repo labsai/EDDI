@@ -129,7 +129,7 @@ class ConversationServiceSayHitlTest {
                 userMemoryStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
-                new SimpleMeterRegistry(), AGENT_TIMEOUT);
+                new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), AGENT_TIMEOUT);
     }
 
     // =========================================================================
