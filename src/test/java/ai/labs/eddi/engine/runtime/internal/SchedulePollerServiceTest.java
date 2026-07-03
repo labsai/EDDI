@@ -176,6 +176,50 @@ class SchedulePollerServiceTest {
     }
 
     @Test
+    void poll_nonInterruptibleStuckFire_doesNotHangPollCycle() throws Exception {
+        // Stronger than the sleep-based test above: this fire() SWALLOWS interruption
+        // and keeps blocking, mimicking a synchronous DB socket read that the Mongo
+        // sync driver does not abort on Thread.interrupt(). If dispatchClaimed relied
+        // on try-with-resources ExecutorService.close() (which awaits termination),
+        // future.cancel(true) would not free the task and the poll thread would pin
+        // forever. shutdownNow() + no awaitTermination must keep the poll cycle live.
+        var shortLeasePoller = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true,
+                Duration.ofMillis(200), // leaseTimeout — the per-fire bound
+                5, 15, 4, Optional.of("test-instance"), "UTC");
+        shortLeasePoller.init();
+
+        var schedule = makeCronSchedule("sched-wedged", "0 9 * * *", "Hello");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenAnswer(inv -> {
+            entered.countDown();
+            // Block until released, ignoring interruption entirely — the poll cycle
+            // must NOT depend on this ever unblocking.
+            boolean released = false;
+            while (!released) {
+                try {
+                    released = release.await(30, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (InterruptedException ignored) {
+                    // swallow — this is the non-interruptible case under test
+                }
+            }
+            return makeFireLog("sched-wedged", FireStatus.COMPLETED.name());
+        });
+
+        try {
+            assertTimeoutPreemptively(Duration.ofSeconds(5), shortLeasePoller::pollDueSchedules,
+                    "a non-interruptible stuck fire must not pin the poll thread");
+            assertEquals(0, entered.getCount(), "the fire task should have started");
+        } finally {
+            // Let the leaked virtual thread finish so it does not linger past the test.
+            release.countDown();
+        }
+    }
+
+    @Test
     void poll_fireFailed_marksFailedWithBackoff() throws Exception {
         var schedule = makeCronSchedule("sched-1", "0 9 * * *", "Hello");
         schedule.setFailCount(0);

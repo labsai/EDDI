@@ -75,6 +75,23 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
+    public boolean storeConversationMemorySnapshotIfState(ConversationMemorySnapshot snapshot, ConversationState expectedState) {
+        String conversationId = snapshot.getConversationId();
+        if (conversationId == null) {
+            // A conditional store only makes sense against an existing document.
+            return false;
+        }
+        var filter = new Document(OBJECT_ID, new ObjectId(conversationId))
+                .append(KEY_CONVERSATION_STATE, expectedState.name());
+        // Atomic compare-and-store: replaces the whole document (including its new
+        // state) only while the persisted state still equals expectedState. If a
+        // concurrent terminal writer already flipped it (ENDED/EXECUTION_INTERRUPTED),
+        // the filter misses and nothing is overwritten.
+        var result = conversationCollectionObject.replaceOne(filter, snapshot);
+        return result.getMatchedCount() > 0;
+    }
+
+    @Override
     public ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId) {
         var memorySnapshot = conversationCollectionObject.find(new Document(OBJECT_ID, new ObjectId(conversationId))).first();
 

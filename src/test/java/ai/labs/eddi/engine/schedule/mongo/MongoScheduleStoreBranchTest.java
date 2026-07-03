@@ -24,7 +24,6 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.time.Instant;
-import java.util.Date;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -264,88 +263,79 @@ class MongoScheduleStoreBranchTest {
                 () -> store.readAllSchedules(100));
     }
 
-    // ==================== convertInstantField edge cases ====================
+    // ==================== Instant field write/read helpers ====================
 
     @Nested
-    @DisplayName("convertInstantField via storeInstantsAsLong")
-    class ConvertInstantFieldTests {
+    @DisplayName("Instant field write/read helpers")
+    class InstantFieldHelpers {
 
         @Test
-        @DisplayName("handles Date fields by converting to epoch millis")
-        void dateField() throws Exception {
-            var method = MongoScheduleStore.class.getDeclaredMethod("storeInstantsAsLong", Document.class);
+        @DisplayName("writeScheduleInstants stores Instant getters as epoch-MILLIS Long (not seconds)")
+        void writeScheduleInstantsAsMillis() throws Exception {
+            var method = MongoScheduleStore.class.getDeclaredMethod("writeScheduleInstants", Document.class, ScheduleConfiguration.class);
             method.setAccessible(true);
 
+            ScheduleConfiguration schedule = new ScheduleConfiguration();
+            schedule.setNextFire(Instant.ofEpochMilli(1719964800123L));
             Document doc = new Document();
-            Date now = new Date();
-            doc.put("nextFire", now);
 
-            method.invoke(null, doc);
+            method.invoke(null, doc, schedule);
 
             Object result = doc.get("nextFire");
             assertInstanceOf(Long.class, result);
-            assertEquals(now.getTime(), result);
+            assertEquals(1719964800123L, result, "must be epoch-MILLIS, not the epoch-SECONDS the mapper would produce");
         }
 
         @Test
-        @DisplayName("handles Instant fields by converting to epoch millis")
-        void instantField() throws Exception {
-            var method = MongoScheduleStore.class.getDeclaredMethod("storeInstantsAsLong", Document.class);
+        @DisplayName("writeScheduleInstants stores null for a null Instant getter")
+        void writeScheduleInstantsNull() throws Exception {
+            var method = MongoScheduleStore.class.getDeclaredMethod("writeScheduleInstants", Document.class, ScheduleConfiguration.class);
             method.setAccessible(true);
 
             Document doc = new Document();
-            Instant now = Instant.now();
-            doc.put("lastFired", now);
+            method.invoke(null, doc, new ScheduleConfiguration());
 
-            method.invoke(null, doc);
-
-            Object result = doc.get("lastFired");
-            assertInstanceOf(Long.class, result);
-            assertEquals(now.toEpochMilli(), result);
-        }
-
-        @Test
-        @DisplayName("handles Number fields by normalizing to Long")
-        void numberField() throws Exception {
-            var method = MongoScheduleStore.class.getDeclaredMethod("storeInstantsAsLong", Document.class);
-            method.setAccessible(true);
-
-            Document doc = new Document();
-            doc.put("claimedAt", 12345); // Integer
-
-            method.invoke(null, doc);
-
-            Object result = doc.get("claimedAt");
-            assertInstanceOf(Long.class, result);
-            assertEquals(12345L, result);
-        }
-
-        @Test
-        @DisplayName("null fields are left as-is")
-        void nullField() throws Exception {
-            var method = MongoScheduleStore.class.getDeclaredMethod("storeInstantsAsLong", Document.class);
-            method.setAccessible(true);
-
-            Document doc = new Document();
-            doc.put("nextRetryAt", null);
-
-            method.invoke(null, doc);
-
+            assertTrue(doc.containsKey("nextRetryAt"));
             assertNull(doc.get("nextRetryAt"));
         }
 
         @Test
-        @DisplayName("string fields are left as-is")
-        void stringField() throws Exception {
-            var method = MongoScheduleStore.class.getDeclaredMethod("storeInstantsAsLong", Document.class);
+        @DisplayName("writeFireLogInstants stores Instant components as epoch-MILLIS Long")
+        void writeFireLogInstantsAsMillis() throws Exception {
+            var method = MongoScheduleStore.class.getDeclaredMethod("writeFireLogInstants", Document.class, ScheduleFireLog.class);
             method.setAccessible(true);
 
+            ScheduleFireLog log = new ScheduleFireLog("l1", "s1", "f1",
+                    Instant.ofEpochMilli(1719964800123L), Instant.ofEpochMilli(1719964800456L), null,
+                    "COMPLETED", "inst1", "conv1", null, 1, 0.0);
             Document doc = new Document();
-            doc.put("createdAt", "not-a-date");
 
-            method.invoke(null, doc);
+            method.invoke(null, doc, log);
 
-            assertEquals("not-a-date", doc.get("createdAt"));
+            assertEquals(1719964800123L, doc.get("fireTime"));
+            assertEquals(1719964800456L, doc.get("startedAt"));
+            assertTrue(doc.containsKey("completedAt"));
+            assertNull(doc.get("completedAt"));
+        }
+
+        @Test
+        @DisplayName("readEpochMillis converts a stored Long back to the same Instant")
+        void readEpochMillisRoundTrip() throws Exception {
+            var method = MongoScheduleStore.class.getDeclaredMethod("readEpochMillis", Document.class, String.class);
+            method.setAccessible(true);
+
+            Document doc = new Document("nextFire", 1719964800123L);
+            assertEquals(Instant.ofEpochMilli(1719964800123L), method.invoke(null, doc, "nextFire"));
+        }
+
+        @Test
+        @DisplayName("readEpochMillis returns null for a missing or non-numeric field")
+        void readEpochMillisNull() throws Exception {
+            var method = MongoScheduleStore.class.getDeclaredMethod("readEpochMillis", Document.class, String.class);
+            method.setAccessible(true);
+
+            assertNull(method.invoke(null, new Document(), "nextFire"));
+            assertNull(method.invoke(null, new Document("nextFire", "not-a-number"), "nextFire"));
         }
     }
 

@@ -413,6 +413,20 @@ class SlackGroupDiscussionListenerTest {
     }
 
     @Test
+    void onHitlPause_countsDownCompletionLatch() {
+        // A HITL pause is terminal for this listener: resume runs through a different
+        // listener instance, so onGroupComplete/onCancelled never arrive here. The
+        // latch MUST be released or registerAgentThreadMappings() parks for the full
+        // awaitCompletion timeout and leaks a virtual thread on every paused
+        // expanded-mode discussion.
+        listener.onGroupStart(groupStart("ROUND_TABLE", 2));
+        listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+
+        assertTrue(listener.awaitCompletion(1, TimeUnit.SECONDS),
+                "onHitlPause must release the completion latch so follow-up registration does not block");
+    }
+
+    @Test
     void onHitlResume_postsVerdict() {
         listener.onGroupStart(groupStart("ROUND_TABLE", 2));
         listener.onHitlResume(new GroupConversationEventSink.HitlResumeEvent("APPROVED", "looks good", "slack:U1"));

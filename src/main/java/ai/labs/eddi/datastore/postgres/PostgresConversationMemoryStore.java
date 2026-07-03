@@ -123,6 +123,39 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
+    public boolean storeConversationMemorySnapshotIfState(ConversationMemorySnapshot snapshot, ConversationState expectedState)
+            throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String conversationId = snapshot.getConversationId();
+        if (conversationId == null) {
+            // A conditional store only makes sense against an existing row.
+            return false;
+        }
+        try {
+            String json = jsonSerialization.serialize(snapshot);
+            // Atomic compare-and-store: the WHERE guards the state column (the CAS
+            // arbiter, see compareAndSetState), so a concurrent terminal writer that
+            // moved the row off expectedState is not overwritten.
+            String sql = """
+                    UPDATE conversation_memories
+                    SET AGENT_ID = ?, AGENT_VERSION = ?, conversation_state = ?, data = ?::jsonb
+                    WHERE id = ?::uuid AND conversation_state = ?
+                    """;
+            try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+                ps.setString(1, snapshot.getAgentId());
+                ps.setInt(2, snapshot.getAgentVersion());
+                ps.setString(3, snapshot.getConversationState() != null ? snapshot.getConversationState().name() : "IN_PROGRESS");
+                ps.setString(4, json);
+                ps.setString(5, conversationId);
+                ps.setString(6, expectedState.name());
+                return ps.executeUpdate() > 0;
+            }
+        } catch (IOException | SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to conditionally store conversation memory", e);
+        }
+    }
+
+    @Override
     public ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId) {
         String sql = "SELECT conversation_state, data FROM conversation_memories WHERE id = ?::uuid";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {

@@ -272,34 +272,45 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
 
     @Override
     public void onHitlPause(GroupConversationEventSink.HitlPauseEvent event) {
-        // In-thread notice so the discussion participants know it's blocked.
-        String reason = event.reason() != null && !event.reason().isBlank()
-                ? "\n> " + event.reason()
-                : "";
-        postSafe(channelId, userThreadTs, "⏸️ *Discussion awaiting approval*" + reason);
-
-        // Optional interactive approval notification with buttons. The action value
-        // carries "group:<groupConversationId>" so the interactivity handler routes
-        // it to resumeDiscussion. Fail-closed: no approver list → no buttons.
-        if (hitlApprovalChannel == null || hitlApprovalChannel.isBlank() || groupConversationId == null) {
-            return;
-        }
-        boolean includeButtons = !SlackHitlSupport.parseApproverUserIds(hitlApproverUserIds).isEmpty();
-        String phase = event.phaseName() != null ? event.phaseName() : ("phase " + event.phaseIndex());
-        // The button value carries the owning integration name so the group
-        // decision is bound to THIS integration at the interactivity endpoint.
-        String actionValue = SlackHitlSupport.buildActionValue(integrationName,
-                SlackHitlSupport.GROUP_VALUE_PREFIX + groupConversationId);
-        var blocks = SlackHitlSupport.buildApprovalBlocks(
-                "⏸️ Discussion awaiting approval", "Discussion", groupConversationId,
-                phase, event.reason(), null,
-                actionValue, includeButtons);
-        String fallback = "Group discussion " + groupConversationId + " is awaiting human approval.";
         try {
-            slackApi.postBlocksMessage(authToken, hitlApprovalChannel, null, blocks, fallback);
-        } catch (SlackDeliveryException e) {
-            LOGGER.warnf("Failed to post group HITL approval notification for %s: %s",
-                    groupConversationId, e.getMessage());
+            // In-thread notice so the discussion participants know it's blocked.
+            String reason = event.reason() != null && !event.reason().isBlank()
+                    ? "\n> " + event.reason()
+                    : "";
+            postSafe(channelId, userThreadTs, "⏸️ *Discussion awaiting approval*" + reason);
+
+            // Optional interactive approval notification with buttons. The action value
+            // carries "group:<groupConversationId>" so the interactivity handler routes
+            // it to resumeDiscussion. Fail-closed: no approver list → no buttons.
+            if (hitlApprovalChannel == null || hitlApprovalChannel.isBlank() || groupConversationId == null) {
+                return;
+            }
+            boolean includeButtons = !SlackHitlSupport.parseApproverUserIds(hitlApproverUserIds).isEmpty();
+            String phase = event.phaseName() != null ? event.phaseName() : ("phase " + event.phaseIndex());
+            // The button value carries the owning integration name so the group
+            // decision is bound to THIS integration at the interactivity endpoint.
+            String actionValue = SlackHitlSupport.buildActionValue(integrationName,
+                    SlackHitlSupport.GROUP_VALUE_PREFIX + groupConversationId);
+            var blocks = SlackHitlSupport.buildApprovalBlocks(
+                    "⏸️ Discussion awaiting approval", "Discussion", groupConversationId,
+                    phase, event.reason(), null,
+                    actionValue, includeButtons);
+            String fallback = "Group discussion " + groupConversationId + " is awaiting human approval.";
+            try {
+                slackApi.postBlocksMessage(authToken, hitlApprovalChannel, null, blocks, fallback);
+            } catch (SlackDeliveryException e) {
+                LOGGER.warnf("Failed to post group HITL approval notification for %s: %s",
+                        groupConversationId, e.getMessage());
+            }
+        } finally {
+            // A HITL pause is TERMINAL for this listener's lifecycle: the discussion
+            // suspends here and any resume runs through a DIFFERENT listener instance,
+            // so this one will never receive onGroupComplete/onCancelled. Release the
+            // completion latch now — otherwise registerAgentThreadMappings() parks for
+            // the full awaitCompletion timeout on every paused expanded-mode discussion
+            // (leaking a virtual thread), and follow-up routing for the agents that
+            // already spoke stays unregistered for that whole window.
+            completionLatch.countDown();
         }
     }
 

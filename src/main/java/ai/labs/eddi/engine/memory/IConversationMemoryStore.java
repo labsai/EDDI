@@ -16,6 +16,32 @@ import java.util.List;
 public interface IConversationMemoryStore {
     String storeConversationMemorySnapshot(ConversationMemorySnapshot snapshot) throws IResourceStore.ResourceStoreException;
 
+    /**
+     * Store the full snapshot ONLY IF the conversation is still in
+     * {@code expectedState} — an atomic compare-and-store. Returns true if the
+     * snapshot was persisted, false if the current persisted state no longer
+     * matched (a concurrent terminal writer won).
+     * <p>
+     * The resume path uses this to persist a resumed outcome (which flips the state
+     * away from IN_PROGRESS) without clobbering an ENDED/EXECUTION_INTERRUPTED
+     * state written concurrently by {@code end}/{@code cancel}. A plain
+     * full-document store overwrites the whole row, so it would replace the
+     * terminal state with a non-terminal one and resurrect a terminated
+     * conversation.
+     *
+     * @param snapshot
+     *            the full conversation snapshot to persist
+     * @param expectedState
+     *            the state the conversation must currently be in for the store to
+     *            proceed
+     * @return true if the snapshot was persisted; false if the CAS precondition
+     *         failed
+     * @throws IResourceStore.ResourceStoreException
+     *             on persistence failures
+     */
+    boolean storeConversationMemorySnapshotIfState(ConversationMemorySnapshot snapshot, ConversationState expectedState)
+            throws IResourceStore.ResourceStoreException;
+
     ConversationMemorySnapshot loadConversationMemorySnapshot(String conversationId)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 

@@ -133,6 +133,13 @@ class ConversationServiceResumeTest {
                         return java.util.concurrent.CompletableFuture.failedFuture(e);
                     }
                 });
+
+        // Resume onComplete persists via an atomic compare-and-store guarded on
+        // IN_PROGRESS (so a concurrent end/cancel cannot be clobbered). Default it to
+        // "won the CAS" so the normal resume paths persist and schedule as before; the
+        // terminal-writer-wins branch is exercised by stubbing this to false.
+        lenient().when(conversationMemoryStore.storeConversationMemorySnapshotIfState(any(), any()))
+                .thenReturn(true);
     }
 
     // =========================================================================
@@ -206,8 +213,9 @@ class ConversationServiceResumeTest {
             // Assert: conversation.resume() was invoked with APPROVED decision
             verify(conversation).resume(eq(decision));
 
-            // Assert: memory was stored after resume
-            verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            // Assert: memory was stored after resume — via the state-guarded store so
+            // a concurrent terminal end/cancel can never be clobbered.
+            verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), eq(ConversationState.IN_PROGRESS));
         }
 
         @Test
@@ -399,8 +407,9 @@ class ConversationServiceResumeTest {
             assertEquals("regular", metadata.get("surface"));
             assertEquals(CONVERSATION_ID, metadata.get("conversationId"));
 
-            // and the re-paused memory was persisted with the policy bookmark
-            verify(conversationMemoryStore, atLeastOnce()).storeConversationMemorySnapshot(any());
+            // and the re-paused memory was persisted with the policy bookmark, via the
+            // state-guarded store
+            verify(conversationMemoryStore, atLeastOnce()).storeConversationMemorySnapshotIfState(any(), eq(ConversationState.IN_PROGRESS));
         }
 
         @Test
@@ -506,8 +515,9 @@ class ConversationServiceResumeTest {
             // Assert: conversation.resume() was attempted
             verify(conversation).resume(eq(decision));
 
-            // Assert: memory was stored (the finally block in resumeCallable always stores)
-            verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            // Assert: memory was stored (onComplete persists the ERROR outcome via the
+            // state-guarded store)
+            verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), eq(ConversationState.IN_PROGRESS));
         }
     }
 
@@ -596,6 +606,62 @@ class ConversationServiceResumeTest {
                     CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
             verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
             verify(conversationCoordinator, never()).submitInOrder(eq(CONVERSATION_ID), any());
+        }
+
+        @Test
+        @DisplayName("concurrent end/cancel wins the CAS-store → resume outcome discarded (no re-arm, no clobber)")
+        void concurrentTerminalWrite_resumeOutcomeDiscarded() throws Exception {
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            var snapshot = createResumeSnapshot();
+            snapshot.setConversationState(ConversationState.IN_PROGRESS);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            var agentConfig = new AgentConfiguration();
+            var hitlConfig = new AgentConfiguration.HitlConfig();
+            hitlConfig.setApprovalTimeout("PT30S");
+            hitlConfig.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
+            agentConfig.setHitlConfig(hitlConfig);
+            doReturn(agentConfig).when(agentStore).read(AGENT_ID, AGENT_VERSION);
+
+            IAgent agent = mock(IAgent.class);
+            IConversation conversation = mock(IConversation.class);
+            doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+            var memoryRef = new java.util.concurrent.atomic.AtomicReference<IConversationMemory>();
+            doAnswer(inv -> {
+                memoryRef.set(inv.getArgument(0));
+                return conversation;
+            }).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+            // the resumed turn re-pauses — would normally re-arm a timeout schedule
+            doAnswer(inv -> {
+                var memory = memoryRef.get();
+                memory.setConversationState(ConversationState.AWAITING_HUMAN);
+                memory.setHitlPausedWorkflowId("workflow-1");
+                memory.setHitlPausedAbsoluteTaskIndex(4);
+                memory.setHitlPausedAt(Instant.now());
+                memory.setHitlPauseReason("PAUSE_CONVERSATION action");
+                return null;
+            }).when(conversation).resume(any(HitlDecision.class));
+
+            // A concurrent end/cancel moved the conversation off IN_PROGRESS between
+            // the up-front cancelled check and the persist: the atomic CAS-store is
+            // rejected, so the resumed outcome must be discarded wholesale.
+            doReturn(false).when(conversationMemoryStore)
+                    .storeConversationMemorySnapshotIfState(any(), eq(ConversationState.IN_PROGRESS));
+
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            conversationService.resumeConversation(CONVERSATION_ID, decision, null);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Callable<Void>> callableCaptor = ArgumentCaptor.forClass(Callable.class);
+            verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), callableCaptor.capture());
+            callableCaptor.getValue().call();
+
+            // No re-arm (that would resurrect a conversation the terminal writer just
+            // ended) and the unconditional full store is never used on the resume path.
+            verify(scheduleStore, never()).createSchedule(any());
+            verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
         }
     }
 

@@ -86,6 +86,15 @@ class RestScheduleStoreExpandedTest {
         return s;
     }
 
+    /** A HITL approval-timeout schedule as stored by ConversationService. */
+    private static ScheduleConfiguration hitlSchedule(String id) {
+        var s = makeCronSchedule(id);
+        s.setName("hitl-timeout-conv-" + id);
+        s.setMetadata(java.util.Map.of("hitlType", "hitl_timeout", "policy", "AUTO_REJECT",
+                "surface", "regular", "conversationId", "conv-" + id));
+        return s;
+    }
+
     // ─── readSchedule ──────────────────────────────────────────────────────────
 
     @Nested
@@ -370,6 +379,18 @@ class RestScheduleStoreExpandedTest {
             assertThrows(InternalServerErrorException.class,
                     () -> sut.retryDeadLetter("s1"));
         }
+
+        @Test
+        @DisplayName("should 403 for a non-admin on a HITL timeout schedule and not requeue it")
+        void nonAdminHitlForbidden() throws Exception {
+            doReturn(false).when(ownershipValidator).isAdmin(any());
+            when(scheduleStore.readSchedule("s1")).thenReturn(hitlSchedule("s1"));
+
+            Response response = sut.retryDeadLetter("s1");
+
+            assertEquals(403, response.getStatus());
+            verify(scheduleStore, never()).requeueDeadLetter(anyString());
+        }
     }
 
     // ─── dismissDeadLetter ─────────────────────────────────────────────────────
@@ -421,6 +442,18 @@ class RestScheduleStoreExpandedTest {
 
             assertThrows(InternalServerErrorException.class,
                     () -> sut.dismissDeadLetter("s1"));
+        }
+
+        @Test
+        @DisplayName("should 403 for a non-admin on a HITL timeout schedule and not disarm it")
+        void nonAdminHitlForbidden() throws Exception {
+            doReturn(false).when(ownershipValidator).isAdmin(any());
+            when(scheduleStore.readSchedule("s1")).thenReturn(hitlSchedule("s1"));
+
+            Response response = sut.dismissDeadLetter("s1");
+
+            assertEquals(403, response.getStatus());
+            verify(scheduleStore, never()).markCompleted(anyString(), any());
         }
     }
 

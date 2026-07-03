@@ -28,6 +28,8 @@ import java.net.URI;
 import java.util.List;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
 
 /**
  * REST implementation for group conversation operations.
@@ -171,9 +173,17 @@ public class RestGroupConversation implements IRestGroupConversation {
             return Response.ok(gc).build();
         } catch (IResourceStore.ResourceNotFoundException
                 | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
-            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+            // Curated body: GroupConversationGoneException embeds the caller-supplied
+            // gcId — never reflect it (CodeQL reflected-value/XSS) and never echo the
+            // raw exception text; the detail is logged server-side with the id sanitized
+            // (parity with RestAgentEngine).
+            LOGGER.infof("Cancel of group conversation %s → not found: %s", sanitize(gcId), e.getMessage());
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("Group conversation not found.").build();
         } catch (Exception e) {
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
+            LOGGER.error("Failed to cancel group conversation " + sanitize(gcId), e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).type(TEXT_PLAIN)
+                    .entity("Failed to cancel group discussion.").build();
         }
     }
 
@@ -199,19 +209,37 @@ public class RestGroupConversation implements IRestGroupConversation {
             var gc = groupConversationService.resumeDiscussion(gcId, request, null);
             return Response.ok(gc).build();
         } catch (IResourceStore.ResourceModifiedException e) {
-            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
+            // Curated bodies throughout (parity with RestAgentEngine): the HTTP status
+            // carries the outcome; the raw exception text (and any caller-supplied id
+            // it embeds) is logged server-side, never reflected to the client.
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("The group conversation was modified concurrently — reload and retry.").build();
         } catch (IResourceStore.ResourceNotFoundException
                 | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
             // deleted concurrently — a genuine 404, not a state conflict
-            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+            LOGGER.infof("Approve of group conversation %s → not found: %s", sanitize(gcId), e.getMessage());
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("Group conversation not found.").build();
         } catch (IGroupConversationService.GroupDiscussionException e) {
-            // #12: wrong-state (e.g., double-approve) → 409, not 500
-            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
+            // #12: wrong-state (e.g., double-approve) → 409, not 500. The current state
+            // is discoverable via the approval-status endpoint.
+            LOGGER.infof("Approve of group conversation %s rejected (wrong state): %s", sanitize(gcId), e.getMessage());
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("Group conversation is not awaiting approval — it may have been resolved, cancelled, "
+                            + "or already approved.")
+                    .build();
         } catch (IllegalArgumentException e) {
-            // #13: invalid taskApprovals (unknown taskId / task not awaiting) → 400
-            return Response.status(Response.Status.BAD_REQUEST).entity(e.getMessage()).build();
+            // #13: invalid taskApprovals (unknown taskId / task not awaiting) → 400. Do
+            // not reflect the caller-supplied taskId; keep the hint generic.
+            LOGGER.infof("Approve of group conversation %s rejected (invalid request): %s", sanitize(gcId), e.getMessage());
+            return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
+                    .entity("Invalid approval request: an unknown task id was referenced, or a task is not awaiting "
+                            + "approval.")
+                    .build();
         } catch (Exception e) {
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
+            LOGGER.error("Failed to approve group conversation " + sanitize(gcId), e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).type(TEXT_PLAIN)
+                    .entity("Failed to process group approval.").build();
         }
     }
 
@@ -309,9 +337,12 @@ public class RestGroupConversation implements IRestGroupConversation {
             summary.put("awaitingApprovalTaskIds", awaitingTaskIds);
             return Response.ok(summary).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
-            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("Group conversation not found.").build();
         } catch (Exception e) {
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
+            LOGGER.error("Failed to read group approval status for " + sanitize(gcId), e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).type(TEXT_PLAIN)
+                    .entity("Failed to read group approval status.").build();
         }
     }
 

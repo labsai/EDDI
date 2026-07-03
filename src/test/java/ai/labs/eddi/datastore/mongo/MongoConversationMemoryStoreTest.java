@@ -328,6 +328,31 @@ class MongoConversationMemoryStoreTest {
         }
 
         @Test
+        @DisplayName("storeConversationMemorySnapshotIfState persists only while the state matches (terminal writer wins)")
+        void storeConversationMemorySnapshotIfState() {
+            var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.IN_PROGRESS);
+            String id = store.storeConversationMemorySnapshot(snapshot);
+
+            // CAS-store from the matching state succeeds and flips the state to READY.
+            var resumed = store.loadConversationMemorySnapshot(id);
+            resumed.setConversationState(ConversationState.READY);
+            assertTrue(store.storeConversationMemorySnapshotIfState(resumed, ConversationState.IN_PROGRESS),
+                    "store must succeed while the persisted state still matches");
+            assertEquals(ConversationState.READY, store.getConversationState(id));
+
+            // A concurrent terminal writer flips it to ENDED; a CAS-store expecting
+            // IN_PROGRESS must NOT overwrite the terminal state (the resume clobber the
+            // fix guards against).
+            store.setConversationState(id, ConversationState.ENDED);
+            var stale = store.loadConversationMemorySnapshot(id);
+            stale.setConversationState(ConversationState.READY);
+            assertFalse(store.storeConversationMemorySnapshotIfState(stale, ConversationState.IN_PROGRESS),
+                    "store must be rejected once a terminal writer moved the state off the expected value");
+            assertEquals(ConversationState.ENDED, store.getConversationState(id),
+                    "the terminal ENDED state must survive — no resurrection");
+        }
+
+        @Test
         @DisplayName("findPendingApprovalSummaries projects the bookmark incl. approvalTimeout and honors the limit")
         void findPendingApprovalSummaries() {
             var paused = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);

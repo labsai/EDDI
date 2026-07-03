@@ -275,6 +275,14 @@ public class RestScheduleStore implements IRestScheduleStore {
     @Override
     public Response retryDeadLetter(String scheduleId) {
         try {
+            // A HITL timeout schedule is a safety timer: requeuing it re-arms the
+            // AUTO_REJECT/AUTO_APPROVE/ABORT decision on a system actor. Like every
+            // other HITL mutation (update/delete/enable/disable), restrict it to
+            // admins so an editor cannot manipulate another user's pending approval.
+            Response guard = requireAdminForHitl(scheduleId, "retry");
+            if (guard != null) {
+                return guard;
+            }
             scheduleStore.requeueDeadLetter(scheduleId);
             return Response.ok().build();
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -289,6 +297,14 @@ public class RestScheduleStore implements IRestScheduleStore {
     @Override
     public Response dismissDeadLetter(String scheduleId) {
         try {
+            // Dismissing a one-shot HITL timeout schedule disarms it permanently
+            // (markCompleted with a null nextFire disables it) — exactly the
+            // "editor cannot disarm an ABORT/AUTO_REJECT safety timeout" guarantee the
+            // other mutation paths enforce. Require admin here too.
+            Response guard = requireAdminForHitl(scheduleId, "dismiss");
+            if (guard != null) {
+                return guard;
+            }
             ScheduleConfiguration schedule = scheduleStore.readSchedule(scheduleId);
             Instant nextFire = computeNextFireForSchedule(schedule);
             scheduleStore.markCompleted(scheduleId, nextFire);

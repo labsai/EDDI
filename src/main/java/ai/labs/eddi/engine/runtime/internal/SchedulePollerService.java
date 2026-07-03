@@ -203,19 +203,24 @@ public class SchedulePollerService {
         if (claimed.isEmpty()) {
             return;
         }
-        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+        // Deliberately NOT try-with-resources: ExecutorService.close() awaits
+        // termination indefinitely, and future.cancel(true) only unblocks a task that
+        // honors Thread.interrupt(). The real fire path (say() → synchronous DB driver
+        // calls) can stall on a NON-interruptible socket read, which close() would then
+        // wait on forever — pinning this @Scheduled poll thread and stopping this
+        // instance from claiming or firing ANY further schedule (HITL timeouts, Dream,
+        // maintenance). That is the exact hang the per-fire timeout exists to prevent.
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+        try {
             List<Future<?>> futures = new ArrayList<>(claimed.size());
             for (ScheduleConfiguration schedule : claimed) {
                 futures.add(executor.submit(() -> fireClaimedSchedule(schedule)));
             }
-            // Join each task with a bound: an unbounded future.get() here would let one
-            // stalled fire (e.g. a downstream call that never returns) hang this whole
-            // @Scheduled poll cycle forever, stopping this instance from claiming or
-            // firing ANY further schedules. Bound the wait by leaseTimeout — the same
-            // window after which another instance is already allowed to reclaim this
-            // schedule (findDueSchedules' leaseExpiredFilter), so waiting any longer
-            // serves no purpose. On timeout, cancel (best-effort interrupt) and move on;
-            // the claim's lease will simply expire and the schedule becomes reclaimable.
+            // Join each task with a bound: an unbounded future.get() would let one
+            // stalled fire hang the whole poll cycle. Bound the wait by leaseTimeout —
+            // the same window after which another instance may reclaim this schedule
+            // (findDueSchedules' leaseExpiredFilter), so waiting longer serves no
+            // purpose. On timeout, cancel (best-effort interrupt) and move on.
             long timeoutMillis = Math.max(leaseTimeout.toMillis(), 1);
             for (Future<?> future : futures) {
                 try {
@@ -228,6 +233,13 @@ public class SchedulePollerService {
                     LOGGER.errorf(e, "[SCHEDULE] Dispatched fire task failed unexpectedly");
                 }
             }
+        } finally {
+            // shutdownNow() interrupts any still-running task (best effort) and returns
+            // immediately WITHOUT awaiting termination — so a fire wedged in a
+            // non-interruptible call leaks a single (cheap) virtual thread rather than
+            // freezing the poll loop. The claim's lease expiry lets another instance
+            // reclaim the schedule. Never awaitTermination() here.
+            executor.shutdownNow();
         }
     }
 

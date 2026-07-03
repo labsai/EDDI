@@ -1031,6 +1031,20 @@ public class ConversationService implements IConversationService {
         return conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
     }
 
+    /**
+     * Persist the full memory snapshot only while the conversation is still in
+     * {@code expectedState} — an atomic compare-and-store. Used by the resume path
+     * so a resumed outcome cannot clobber an ENDED/EXECUTION_INTERRUPTED state
+     * written concurrently by end/cancel.
+     */
+    private boolean storeConversationMemoryIfState(IConversationMemory conversationMemory, Environment environment,
+                                                   ConversationState expectedState)
+            throws ResourceStoreException {
+        var memorySnapshot = convertConversationMemory(conversationMemory);
+        memorySnapshot.setEnvironment(environment);
+        return conversationMemoryStore.storeConversationMemorySnapshotIfState(memorySnapshot, expectedState);
+    }
+
     private static void checkConversationMemoryNotNull(IConversationMemory conversationMemory, String conversationId) {
         if (conversationMemory == null) {
             String message = "No conversation found with conversationId: %s";
@@ -1151,12 +1165,15 @@ public class ConversationService implements IConversationService {
                     "Conversation is not in AWAITING_HUMAN state (current: " + current
                             + ") — it may have been resumed, cancelled, or timed out already");
         }
-        // MAJOR-3: Delete stale HITL timeout schedule before resume
-        deleteHitlTimeoutSchedule(conversationId);
         cacheConversationState(conversationId, ConversationState.IN_PROGRESS);
 
-        // From here on the pause has been consumed: EVERY failure path must
-        // restore it (or the approval is wedged IN_PROGRESS with no schedule).
+        // From here on the pause's STATE has been consumed
+        // (AWAITING_HUMAN->IN_PROGRESS):
+        // EVERY failure path must restore it, or the approval is wedged IN_PROGRESS.
+        // The timeout schedule is deliberately NOT deleted yet (see below): a failure
+        // before that point — a transient snapshot-load hiccup or an undeployed agent —
+        // then leaves the original finite-policy timeout armed, so it still fires on
+        // time instead of silently degrading to wait-forever until the next restart.
         final IConversationMemory memory;
         final String agentId;
         final Integer agentVersion;
@@ -1174,8 +1191,9 @@ public class ConversationService implements IConversationService {
         } catch (ResourceNotFoundException e) {
             throw e; // genuinely deleted — nothing to restore into
         } catch (Exception e) {
-            // transient store failure loading the snapshot — restore the pause
-            // (no memory available: schedule re-arm happens via crash recovery)
+            // transient store failure loading the snapshot — restore the pause. No
+            // re-arm needed: the timeout schedule is deleted only after this load
+            // succeeds, so it is still armed here and the finite policy still fires.
             restorePauseAfterFailedResume(conversationId, null, false);
             throw new ResourceStoreException("Failed to load conversation for resume: " + e.getLocalizedMessage(), e);
         }
@@ -1189,15 +1207,25 @@ public class ConversationService implements IConversationService {
             IAgent agent = getAgent(environment, agentId, agentVersion);
             if (agent == null) {
                 // #7: a transient deployment issue must not destroy the pending
-                // approval — restore the pause instead of flipping to ERROR.
-                // No schedule re-arm: an undeployed agent would otherwise loop
-                // timeout→restore→re-arm forever; the policy resumes after the
-                // next restart (crash recovery) or a manual resume.
+                // approval — restore the pause instead of flipping to ERROR. No
+                // re-arm needed: the delete happens only below (after this check), so
+                // the original timeout schedule is still armed and the finite policy
+                // continues to fire on time; redeploy + retry works either way.
                 inFlightConversations.remove(conversationId, memory);
                 restorePauseAfterFailedResume(conversationId, memory, false);
                 throw new AgentNotDeployedForResumeException("Agent not deployed for resume (agentId=" + agentId + ", version=" + agentVersion
                         + ") — the conversation remains AWAITING_HUMAN; redeploy the agent and retry");
             }
+
+            // MAJOR-3: now that the snapshot has loaded and the agent is confirmed
+            // deployed — i.e. we are committed to executing the resume — disarm the
+            // stale timeout schedule. Deferring the delete to here (rather than right
+            // after the CAS) means a pre-execution failure above leaves the original
+            // finite-policy timeout armed, so an AUTO_REJECT/AUTO_APPROVE/ABORT policy
+            // is never silently dropped by a transient load hiccup. The AWAITING_HUMAN
+            // ->IN_PROGRESS CAS already prevents the timeout from firing concurrently
+            // (its own CAS would fail), so nothing races on this window.
+            deleteHitlTimeoutSchedule(conversationId);
 
             // #15/4c: Set the audit collector (same as say path) so resume
             // operations are recorded in the audit ledger.
@@ -1256,7 +1284,22 @@ public class ConversationService implements IConversationService {
                         if (memory.getConversationState() == ConversationState.AWAITING_HUMAN) {
                             populateHitlTimeoutBookmark(memory);
                         }
-                        storeConversationMemory(memory, environment);
+                        // Persist ONLY while we still own IN_PROGRESS — the state the
+                        // AWAITING_HUMAN->IN_PROGRESS CAS set at resume start. The
+                        // up-front isCancelled() check above narrows but does not close
+                        // the race with a concurrent end/cancel: a terminal write can
+                        // land between that check and this store, and an unconditional
+                        // full-document replace would then overwrite ENDED/
+                        // EXECUTION_INTERRUPTED with READY — resurrecting a terminated
+                        // conversation that then accepts new say() input. The atomic
+                        // compare-and-store lets the terminal writer win; when it does,
+                        // discard the resumed outcome (no persist, no schedule/notify).
+                        boolean persisted = storeConversationMemoryIfState(memory, environment, ConversationState.IN_PROGRESS);
+                        if (!persisted) {
+                            LOGGER.infof("Resume of conversation %s not persisted: a concurrent end/cancel moved it off "
+                                    + "IN_PROGRESS — discarding the resumed outcome so the terminal state wins", conversationId);
+                            return;
+                        }
                         cacheConversationState(conversationId, memory.getConversationState());
                         // #3 (schedule) + metric: a re-pause is a pause
                         if (memory.getConversationState() == ConversationState.AWAITING_HUMAN) {

@@ -127,8 +127,10 @@ public class MongoScheduleStore implements IScheduleStore {
             Document doc = toDocument(schedule);
             doc.put(ID, id);
             doc.remove("id"); // use _id instead
-            // Fix #6: Store Instants as epoch-millis for consistent BSON comparison
-            storeInstantsAsLong(doc);
+            // Store every Instant field as an epoch-millis Long read straight from
+            // the getters — never trusting whatever numeric format the shared mapper
+            // produced (see writeScheduleInstants).
+            writeScheduleInstants(doc, schedule);
             scheduleCollection.insertOne(doc);
             LOGGER.infof("Created schedule '%s' (id=%s, type=%s) for Agent %s", schedule.getName(), id, schedule.getTriggerType(),
                     schedule.getAgentId());
@@ -162,7 +164,7 @@ public class MongoScheduleStore implements IScheduleStore {
             Document doc = toDocument(schedule);
             doc.remove("id");
             doc.remove(ID);
-            storeInstantsAsLong(doc);
+            writeScheduleInstants(doc, schedule);
 
             var result = scheduleCollection.replaceOne(eq(ID, scheduleId), doc);
             if (result.getMatchedCount() == 0) {
@@ -384,7 +386,7 @@ public class MongoScheduleStore implements IScheduleStore {
         try {
             Document doc = toDocument(fireLog);
             doc.put(ID, fireLog.id());
-            storeInstantsAsLong(doc);
+            writeFireLogInstants(doc, fireLog);
             fireLogCollection.insertOne(doc);
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to log fire", e);
@@ -433,44 +435,57 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     /**
-     * Fix #6: Convert known Instant fields to epoch-millis Long for BSON comparison
-     * consistency. Jackson with write-dates-as-timestamps=true serializes Instants
-     * as longs, but we must ensure the filter queries also use longs consistently.
+     * Overwrite every schedule {@link Instant} field on the document with an
+     * epoch-millisecond {@code Long} taken straight from the source object's
+     * getters.
+     * <p>
+     * This is deliberately independent of the shared JSON mapper. With
+     * {@code write-dates-as-timestamps=true} plus {@code JavaTimeModule} (default
+     * {@code WRITE_DATE_TIMESTAMPS_AS_NANOSECONDS}), an Instant serializes as
+     * fractional <em>seconds</em> — e.g.
+     * {@code Instant.ofEpochMilli(1719964800123L)} becomes
+     * {@code 1719964800.123000000} — which, deserialized into a {@link Document},
+     * is a {@link Double}. Rounding that to a {@code Long} yields epoch
+     * <em>seconds</em> (~1.7e9), 1000x smaller than the epoch millis (~1.7e12) that
+     * {@link #findDueSchedules} compares against, so every future-armed schedule
+     * would look immediately due — and would diverge from
+     * {@link ai.labs.eddi.datastore.postgres.PostgresScheduleStore}, which stores
+     * epoch millis. Reading is handled symmetrically by {@link #readEpochMillis}.
      */
-    private static void storeInstantsAsLong(Document doc) {
-        convertInstantField(doc, "nextFire");
-        convertInstantField(doc, "lastFired");
-        convertInstantField(doc, "claimedAt");
-        convertInstantField(doc, "nextRetryAt");
-        convertInstantField(doc, "createdAt");
-        convertInstantField(doc, "updatedAt");
-        // fireLog fields
-        convertInstantField(doc, "fireTime");
-        convertInstantField(doc, "startedAt");
-        convertInstantField(doc, "completedAt");
+    private static void writeScheduleInstants(Document doc, ScheduleConfiguration schedule) {
+        putEpochMillis(doc, "nextFire", schedule.getNextFire());
+        putEpochMillis(doc, "lastFired", schedule.getLastFired());
+        putEpochMillis(doc, "claimedAt", schedule.getClaimedAt());
+        putEpochMillis(doc, "nextRetryAt", schedule.getNextRetryAt());
+        putEpochMillis(doc, "createdAt", schedule.getCreatedAt());
+        putEpochMillis(doc, "updatedAt", schedule.getUpdatedAt());
     }
 
-    private static void convertInstantField(Document doc, String field) {
+    private static void writeFireLogInstants(Document doc, ScheduleFireLog fireLog) {
+        putEpochMillis(doc, "fireTime", fireLog.fireTime());
+        putEpochMillis(doc, "startedAt", fireLog.startedAt());
+        putEpochMillis(doc, "completedAt", fireLog.completedAt());
+    }
+
+    private static void putEpochMillis(Document doc, String field, Instant instant) {
+        doc.put(field, instant == null ? null : instant.toEpochMilli());
+    }
+
+    /**
+     * Read an epoch-millisecond date field written by {@link #putEpochMillis}. The
+     * shared mapper reads a bare integer as epoch-<em>seconds</em> (JavaTimeModule
+     * default), so schedule date fields are always coerced here rather than
+     * deserialized by Jackson — mirroring PostgresScheduleStore's column reads.
+     */
+    private static Instant readEpochMillis(Document doc, String field) {
         Object val = doc.get(field);
-        if (val instanceof Number num) {
-            doc.put(field, num.longValue()); // already epoch-millis, normalize to Long
-        } else if (val instanceof Instant inst) {
-            doc.put(field, inst.toEpochMilli());
-        } else if (val instanceof Date date) {
-            doc.put(field, date.getTime());
-        } else if (val instanceof String str && !str.isBlank()) {
-            // The serializer may render Instants as ISO-8601 strings rather than
-            // epoch numbers (depends on the ObjectMapper's WRITE_DATES_AS_TIMESTAMPS
-            // setting). Range queries (findDueSchedules: lte(nextFire, nowMs)) compare
-            // numerically, so an ISO string would never match — normalize it to
-            // epoch-millis here so storage is correct regardless of the date format.
-            try {
-                doc.put(field, Instant.parse(str).toEpochMilli());
-            } catch (java.time.format.DateTimeParseException e) {
-                LOGGER.warnf("Schedule field '%s' value '%s' is neither epoch-millis nor ISO-8601 — left as-is", field, str);
-            }
+        return val instanceof Number num ? Instant.ofEpochMilli(num.longValue()) : null;
+    }
+
+    private static void stripFields(Document doc, String... fields) {
+        for (String field : fields) {
+            doc.remove(field);
         }
-        // null or other types left as-is
     }
 
     private static long epochMillis(Instant instant) {
@@ -490,7 +505,25 @@ public class MongoScheduleStore implements IScheduleStore {
             if (doc.containsKey(ID)) {
                 doc.put("id", doc.get(ID));
             }
-            return documentBuilder.build(doc, ScheduleConfiguration.class);
+            // Date fields are epoch-millis Longs (see writeScheduleInstants). Capture
+            // them here and strip them before the Jackson build, because the shared
+            // mapper reads a bare integer as epoch-SECONDS and would mangle them.
+            Instant nextFire = readEpochMillis(doc, "nextFire");
+            Instant lastFired = readEpochMillis(doc, "lastFired");
+            Instant claimedAt = readEpochMillis(doc, "claimedAt");
+            Instant nextRetryAt = readEpochMillis(doc, "nextRetryAt");
+            Instant createdAt = readEpochMillis(doc, "createdAt");
+            Instant updatedAt = readEpochMillis(doc, "updatedAt");
+            stripFields(doc, "nextFire", "lastFired", "claimedAt", "nextRetryAt", "createdAt", "updatedAt");
+
+            ScheduleConfiguration config = documentBuilder.build(doc, ScheduleConfiguration.class);
+            config.setNextFire(nextFire);
+            config.setLastFired(lastFired);
+            config.setClaimedAt(claimedAt);
+            config.setNextRetryAt(nextRetryAt);
+            config.setCreatedAt(createdAt);
+            config.setUpdatedAt(updatedAt);
+            return config;
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException("Deserialization failed", e);
         }
@@ -501,7 +534,16 @@ public class MongoScheduleStore implements IScheduleStore {
             if (doc.containsKey(ID)) {
                 doc.put("id", doc.get(ID));
             }
-            return documentBuilder.build(doc, ScheduleFireLog.class);
+            // See fromDocument — coerce the epoch-millis date fields ourselves rather
+            // than let the shared mapper read them as epoch-seconds.
+            Instant fireTime = readEpochMillis(doc, "fireTime");
+            Instant startedAt = readEpochMillis(doc, "startedAt");
+            Instant completedAt = readEpochMillis(doc, "completedAt");
+            stripFields(doc, "fireTime", "startedAt", "completedAt");
+
+            ScheduleFireLog log = documentBuilder.build(doc, ScheduleFireLog.class);
+            return new ScheduleFireLog(log.id(), log.scheduleId(), log.fireId(), fireTime, startedAt, completedAt, log.status(),
+                    log.instanceId(), log.conversationId(), log.errorMessage(), log.attemptNumber(), log.cost());
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException("Deserialization failed", e);
         }
