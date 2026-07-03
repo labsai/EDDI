@@ -5,7 +5,6 @@ import {
   buildCascadeSteps,
   type PipelineEvent,
   type ToolTraceEntry,
-  type CascadeStepInfo,
 } from "@/hooks/use-debug-events";
 import {
   Zap,
@@ -17,11 +16,9 @@ import {
   AlertTriangle,
   Wrench,
   Copy,
-  Layers,
-  ArrowUpRight,
 } from "lucide-react";
 import { getExtensionIcon, getExtensionColor } from "@/lib/api/extensions";
-import { cascadeReasonText } from "@/lib/cascade-reason";
+import { CascadeStepTrace } from "@/components/cascade-step-trace";
 
 // ==================== Types ====================
 
@@ -147,6 +144,7 @@ export function ChatActivity({ events, isLive, totalSteps }: ChatActivityProps) 
       >
         {/* Summary bar — always visible */}
         <button
+          type="button"
           onClick={() => setExpanded(!expanded)}
           className={cn(
             "flex w-full items-center gap-2 px-3 py-2 text-start text-xs transition-colors",
@@ -206,67 +204,18 @@ export function ChatActivity({ events, isLive, totalSteps }: ChatActivityProps) 
           )}
         >
           <div className="border-t border-border/30 px-3 pb-2.5 pt-1.5 space-y-0.5">
-            {cascadeSteps.length > 0 && <CascadeTrace steps={cascadeSteps} />}
+            {cascadeSteps.length > 0 && (
+              <CascadeStepTrace
+                steps={cascadeSteps}
+                testId="cascade-trace"
+                className="mb-1 rounded-lg border border-purple-500/20 bg-purple-500/5 p-2"
+              />
+            )}
             {tasks.map((task, i) => (
               <TaskRow key={`${task.taskType}-${task.index}-${i}`} task={task} />
             ))}
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-// ==================== Cascade Trace ====================
-
-function CascadeTrace({ steps }: { steps: CascadeStepInfo[] }) {
-  const { t } = useTranslation();
-
-  const reasonText = (r?: string): string => cascadeReasonText(t, r);
-
-  return (
-    <div
-      className="mb-1 rounded-lg border border-purple-500/20 bg-purple-500/5 p-2"
-      data-testid="cascade-trace"
-    >
-      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-purple-600 dark:text-purple-400">
-        <Layers className="h-3 w-3" />
-        {t("cascadeTrace.title", "Model Cascade")}
-      </div>
-      <div className="space-y-0.5">
-        {steps.map((step, i) => (
-          <div
-            key={step.stepIndex}
-            className="flex items-center gap-1.5 text-[10px]"
-            data-testid={`cascade-trace-step-${step.stepIndex}`}
-          >
-            <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-purple-500/10 text-[9px] font-bold text-purple-600 dark:text-purple-400">
-              {step.stepIndex + 1}
-            </span>
-            <span className="truncate font-mono text-foreground">
-              {step.modelName ?? step.modelType ?? "—"}
-            </span>
-            {step.escalatedFrom ? (
-              <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
-                <ArrowUpRight className="h-2.5 w-2.5" />
-                {step.escalatedFrom.confidence != null && step.escalatedFrom.threshold != null
-                  ? t("cascadeTrace.escalated", "conf {{c}} < {{th}}", {
-                      c: step.escalatedFrom.confidence.toFixed(2),
-                      th: step.escalatedFrom.threshold.toFixed(2),
-                    })
-                  : t("cascadeTrace.escalatedShort", "escalated")}
-                {step.escalatedFrom.reason && (
-                  <span className="text-muted-foreground">· {reasonText(step.escalatedFrom.reason)}</span>
-                )}
-              </span>
-            ) : i === steps.length - 1 ? (
-              <span className="inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
-                <Check className="h-2.5 w-2.5" />
-                {t("cascadeTrace.accepted", "accepted")}
-              </span>
-            ) : null}
-          </div>
-        ))}
       </div>
     </div>
   );
@@ -310,6 +259,7 @@ function TaskRow({ task }: { task: TaskSummary }) {
         {/* Tool call badge */}
         {hasTools && (
           <button
+            type="button"
             onClick={() => setToolsExpanded(!toolsExpanded)}
             className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
           >
@@ -358,6 +308,7 @@ function ToolCallRow({
   return (
     <div>
       <button
+        type="button"
         onClick={() => setShowDetail(!showDetail)}
         className="flex w-full items-center gap-1.5 rounded px-1.5 py-0.5 text-[10px] text-start hover:bg-muted/50 transition-colors"
         data-testid="tool-call-row"
@@ -418,6 +369,7 @@ function CopyButton({ text }: { text: string }) {
 
   return (
     <button
+      type="button"
       onClick={(e) => {
         e.stopPropagation();
         navigator.clipboard.writeText(text);

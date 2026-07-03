@@ -20,14 +20,15 @@ describe("buildCascadeSteps", () => {
     const steps = buildCascadeSteps(events);
     expect(steps).toHaveLength(2);
     expect(steps[0]).toMatchObject({ stepIndex: 0, modelName: "gpt-4o-mini" });
-    expect(steps[0]!.escalatedFrom).toBeUndefined();
-    expect(steps[1]).toMatchObject({ stepIndex: 1, modelName: "gpt-4o" });
-    expect(steps[1]!.escalatedFrom).toMatchObject({
-      fromStep: 0,
+    // Escalation info attaches to the SOURCE step (the one that was rejected).
+    expect(steps[0]!.escalation).toMatchObject({
+      toStep: 1,
       confidence: 0.6,
       threshold: 0.7,
       reason: "low_confidence",
     });
+    expect(steps[1]).toMatchObject({ stepIndex: 1, modelName: "gpt-4o" });
+    expect(steps[1]!.escalation).toBeUndefined();
   });
 
   it("sorts steps by index regardless of event order", () => {

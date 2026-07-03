@@ -35,15 +35,13 @@ export interface CascadeIssue {
   params?: Record<string, string | number>;
 }
 
-/** True if a parameters map carries a non-blank apiKey (case-insensitive key match). */
+/**
+ * Mirrors the backend's cross-provider gate `parameters.containsKey("apiKey")`
+ * (CascadeConfigValidator) — exact-case key, presence only (an empty value still
+ * counts as "has a key", and a non-canonical casing like `apikey` does not).
+ */
 function hasApiKey(parameters?: Record<string, string>): boolean {
-  if (!parameters) return false;
-  return Object.entries(parameters).some(
-    ([k, v]) =>
-      k.trim().toLowerCase() === "apikey" &&
-      typeof v === "string" &&
-      v.trim() !== "",
-  );
+  return !!parameters && Object.prototype.hasOwnProperty.call(parameters, "apiKey");
 }
 
 function norm(s?: string): string {
@@ -62,12 +60,16 @@ export function validateCascade(task: LlmTask): CascadeIssue[] {
   const steps = cascade.steps ?? [];
 
   // ── Cascade-level ──────────────────────────────────────────────────────────
+  // The backend validator returns immediately after this warning (empty steps),
+  // so none of the later hard-error checks run. Mirror that so the editor never
+  // shows a deploy-blocking error the backend would not actually raise.
   if (steps.length === 0) {
     issues.push({
       level: "warning",
       code: "NO_STEPS",
       message: "Cascade is enabled but has no steps — it will fail when it runs.",
     });
+    return issues;
   }
 
   const strategy = norm(cascade.strategy);
@@ -161,14 +163,15 @@ export function validateCascade(task: LlmTask): CascadeIssue[] {
     });
   }
 
-  // convertToObject collides with the structured_output confidence wrapper.
+  // convertToObject collides with the structured_output confidence wrapper. The
+  // backend downgrades to judge_model when a judge is configured, else heuristic.
   const convertToObject = norm(task.parameters?.convertToObject) === "true";
   if (convertToObject && effectiveEval === "structured_output") {
     issues.push({
       level: "warning",
       code: "CONVERT_TO_OBJECT_STRUCTURED",
       message:
-        "convertToObject is incompatible with Structured Output confidence — the cascade will use heuristic instead.",
+        "convertToObject is incompatible with Structured Output confidence — the cascade will use heuristic (or the judge model, if one is configured) instead.",
     });
   }
 

@@ -1,13 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Gauge } from "lucide-react";
 import type { ModelCascadeConfig } from "../types";
-
-/** Parse a number input into a value or `undefined` when blank/invalid. */
-function num(v: string): number | undefined {
-  if (v === "") return undefined;
-  const n = parseFloat(v);
-  return isNaN(n) ? undefined : n;
-}
+import { parseNum as num } from "./cascade-utils";
 
 /**
  * Cost & time ceilings plus cascade-level default token pricing. All optional;

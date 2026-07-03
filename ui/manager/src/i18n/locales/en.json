@@ -738,7 +738,7 @@
       "MAX_COST_NEGATIVE": "Max cost per run cannot be negative.",
       "CASCADE_INPUT_PRICE_NEGATIVE": "Cascade input price cannot be negative.",
       "CASCADE_OUTPUT_PRICE_NEGATIVE": "Cascade output price cannot be negative.",
-      "CONVERT_TO_OBJECT_STRUCTURED": "convertToObject is incompatible with Structured Output confidence — the cascade will use heuristic instead.",
+      "CONVERT_TO_OBJECT_STRUCTURED": "convertToObject is incompatible with Structured Output confidence — the cascade will use heuristic (or the judge model, if one is configured) instead.",
       "STEP_INPUT_PRICE_NEGATIVE": "Step {{step}} input price cannot be negative.",
       "STEP_OUTPUT_PRICE_NEGATIVE": "Step {{step}} output price cannot be negative.",
       "STEP_CONFIDENCE_OUT_OF_RANGE": "Step {{step}} confidence must be between 0 and 1.",

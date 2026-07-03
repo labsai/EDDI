@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Layers, Plus, ArrowDown } from "lucide-react";
 import { EditorSection } from "../editor-section";
@@ -33,6 +34,16 @@ export function TaskCascadeSection({ task, onChange, readOnly }: TaskSectionProp
 
   const steps = cascade?.steps ?? [];
 
+  // Stable per-step keys so a card's local UI state (advanced open, secret
+  // picker popup) follows the logical step across reorder/remove rather than its
+  // array position. Purely client-side — never written to the saved config. The
+  // handlers keep it in lockstep; the length guard resyncs on external changes.
+  const stepKeys = useRef<number[]>([]);
+  const keySeq = useRef(0);
+  if (stepKeys.current.length !== steps.length) {
+    stepKeys.current = steps.map(() => keySeq.current++);
+  }
+
   const updateStep = (i: number, patch: Partial<CascadeStep>) => {
     const next = [...steps];
     next[i] = { ...next[i], ...patch };
@@ -45,17 +56,24 @@ export function TaskCascadeSection({ task, onChange, readOnly }: TaskSectionProp
     const tmp = next[i]!;
     next[i] = next[j]!;
     next[j] = tmp;
+    const kt = stepKeys.current[i]!;
+    stepKeys.current[i] = stepKeys.current[j]!;
+    stepKeys.current[j] = kt;
     updateCascade({ steps: next });
   };
-  const removeStep = (i: number) =>
+  const removeStep = (i: number) => {
+    stepKeys.current.splice(i, 1);
     updateCascade({ steps: steps.filter((_, j) => j !== i) });
-  const addStep = () =>
+  };
+  const addStep = () => {
+    stepKeys.current.push(keySeq.current++);
     updateCascade({
       steps: [
         ...steps,
         { type: task.type ?? "openai", parameters: { model: "" }, confidenceThreshold: 0.7, timeoutMs: 30000 },
       ],
     });
+  };
 
   const evalStrategy = cascade?.evaluationStrategy ?? "structured_output";
 
@@ -216,7 +234,7 @@ export function TaskCascadeSection({ task, onChange, readOnly }: TaskSectionProp
               <div className="space-y-2">
                 {steps.map((step, si) => (
                   <CascadeStepCard
-                    key={si}
+                    key={stepKeys.current[si] ?? si}
                     step={step}
                     index={si}
                     totalSteps={steps.length}

@@ -47,9 +47,13 @@ export interface CascadeStepInfo {
   stepIndex: number;
   modelName?: string;
   modelType?: string;
-  /** Set on steps that were reached via an escalation. */
-  escalatedFrom?: {
-    fromStep?: number;
+  /**
+   * Set on the step whose low confidence caused the cascade to escalate onward.
+   * The confidence/threshold belong to THIS step (the one that was rejected), so
+   * they render on its own row rather than the destination's.
+   */
+  escalation?: {
+    toStep?: number;
     confidence?: number;
     threshold?: number;
     reason?: string;
@@ -58,23 +62,21 @@ export interface CascadeStepInfo {
 
 /**
  * Fold `cascade_step_start` / `cascade_escalation` events into an ordered
- * per-step view (model name + escalation info). Returns an empty list when
- * the turn had no cascade activity.
+ * per-step view. Escalation info is attached to the SOURCE step (fromStep) —
+ * the one that was evaluated and found lacking — so the final accepted step
+ * stays clean. Returns an empty list when the turn had no cascade activity.
  */
 export function buildCascadeSteps(events: PipelineEvent[]): CascadeStepInfo[] {
   const byStep = new Map<number, CascadeStepInfo>();
+  const ensure = (i: number) => byStep.get(i) ?? { stepIndex: i };
   for (const e of events) {
     if (e.type === "cascade_step_start" && e.stepIndex != null) {
-      byStep.set(e.stepIndex, {
-        ...(byStep.get(e.stepIndex) ?? { stepIndex: e.stepIndex }),
-        modelName: e.modelName,
-        modelType: e.taskType,
-      });
-    } else if (e.type === "cascade_escalation" && e.toStep != null) {
-      byStep.set(e.toStep, {
-        ...(byStep.get(e.toStep) ?? { stepIndex: e.toStep }),
-        escalatedFrom: {
-          fromStep: e.fromStep,
+      byStep.set(e.stepIndex, { ...ensure(e.stepIndex), modelName: e.modelName, modelType: e.taskType });
+    } else if (e.type === "cascade_escalation" && e.fromStep != null) {
+      byStep.set(e.fromStep, {
+        ...ensure(e.fromStep),
+        escalation: {
+          toStep: e.toStep,
           confidence: e.confidence,
           threshold: e.threshold,
           reason: e.reason,

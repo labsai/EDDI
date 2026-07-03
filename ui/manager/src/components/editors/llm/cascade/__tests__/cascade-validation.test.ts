@@ -138,6 +138,36 @@ describe("validateCascade", () => {
     expect(codes(issues)).not.toContain("STEP_CROSS_PROVIDER_NO_APIKEY");
   });
 
+  it("stops at NO_STEPS and skips later hard-error checks (mirrors the backend early return)", () => {
+    const c = codes(validateCascade(mk({ maxCostPerRun: -1, inputPricePer1M: -5, steps: [] })));
+    expect(c).toEqual(["NO_STEPS"]);
+    expect(c).not.toContain("MAX_COST_NEGATIVE");
+  });
+
+  it("treats a present-but-empty apiKey as 'has key' (containsKey semantics)", () => {
+    const issues = validateCascade(
+      mk({
+        steps: [
+          { type: "anthropic", parameters: { model: "claude", apiKey: "" }, confidenceThreshold: 0.7 },
+          { type: "openai", confidenceThreshold: null },
+        ],
+      }),
+    );
+    expect(codes(issues)).not.toContain("STEP_CROSS_PROVIDER_NO_APIKEY");
+  });
+
+  it("warns when a cross-provider apiKey uses non-canonical casing (exact-case match)", () => {
+    const issues = validateCascade(
+      mk({
+        steps: [
+          { type: "anthropic", parameters: { model: "claude", apikey: "x" }, confidenceThreshold: 0.7 },
+          { type: "openai", confidenceThreshold: null },
+        ],
+      }),
+    );
+    expect(codes(issues)).toContain("STEP_CROSS_PROVIDER_NO_APIKEY");
+  });
+
   it("warns on a non-last step with a null threshold (dead-step trap) but allows it on the last step", () => {
     const issues = validateCascade(
       mk({

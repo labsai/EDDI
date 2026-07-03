@@ -13,16 +13,11 @@ import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { MODEL_TYPES, type CascadeStep } from "../types";
 import type { CascadeIssue } from "./cascade-validation";
 import { CascadeIssues } from "./cascade-issues";
+import { parseNum as num, nextParamKey } from "./cascade-utils";
 
 /** Params surfaced through dedicated controls — excluded from the advanced grid. */
 const STEP_HIDDEN_PARAM_KEYS = new Set(["model", "apikey"]);
 const SENSITIVE_KEYS = new Set(["apikey", "password", "secret", "token"]);
-
-function num(v: string): number | undefined {
-  if (v === "") return undefined;
-  const n = parseFloat(v);
-  return isNaN(n) ? undefined : n;
-}
 
 /**
  * One cascade step: provider + model, confidence/timeout, cross-provider API key,
@@ -146,7 +141,7 @@ export function CascadeStepCard({
               const v = e.target.value;
               onChange({
                 confidenceThreshold:
-                  v === "" ? null : isNaN(parseFloat(v)) ? 0 : parseFloat(v),
+                  v === "" ? null : isNaN(parseFloat(v)) ? null : parseFloat(v),
               });
             }}
             readOnly={readOnly}
@@ -160,9 +155,10 @@ export function CascadeStepCard({
           </label>
           <input
             type="number"
-            value={step.timeoutMs ?? 30000}
-            onChange={(e) => onChange({ timeoutMs: parseInt(e.target.value, 10) || 30000 })}
+            value={step.timeoutMs ?? ""}
+            onChange={(e) => onChange({ timeoutMs: num(e.target.value) })}
             readOnly={readOnly}
+            placeholder="30000"
             className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
@@ -272,6 +268,7 @@ export function CascadeStepCard({
                         <button
                           type="button"
                           onClick={() => removeParam(k)}
+                          aria-label={t("common.remove", "Remove")}
                           className="rounded p-1 text-muted-foreground transition-colors hover:text-destructive"
                         >
                           <X className="h-3 w-3" />
@@ -283,7 +280,7 @@ export function CascadeStepCard({
                 {!readOnly && (
                   <button
                     type="button"
-                    onClick={() => setParam(`param${extraParamEntries.length}`, "")}
+                    onClick={() => setParam(nextParamKey(params), "")}
                     className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground"
                   >
                     <Plus className="h-3 w-3" />

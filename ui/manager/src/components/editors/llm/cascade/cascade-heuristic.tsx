@@ -75,6 +75,7 @@ function PhraseList({
           <button
             type="button"
             onClick={add}
+            aria-label={t("common.add", "Add")}
             className="inline-flex h-6 items-center rounded border border-input px-1.5 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
           >
             <Plus className="h-2.5 w-2.5" />
