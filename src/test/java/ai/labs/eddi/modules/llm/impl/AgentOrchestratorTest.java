@@ -111,7 +111,8 @@ class AgentOrchestratorTest {
                 apiCallExecutor, jsonSerialization, memoryItemConverter,
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService,
-                null, null, null, null, null);
+                null, null, null, null, null,
+                mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class), new ConversationHistoryBuilder());
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -521,7 +522,8 @@ class AgentOrchestratorTest {
                 apiCallExecutor, jsonSerialization, memoryItemConverter,
                 null, // null userMemoryStore
                 toolResponseTruncator, tenantQuotaService, memorySnapshotService,
-                null, null, null, null, null);
+                null, null, null, null, null,
+                mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class), new ConversationHistoryBuilder());
 
         var task = new LlmConfiguration.Task();
         task.setEnableBuiltInTools(true);

@@ -102,6 +102,8 @@ class AgentOrchestratorToolPauseTest {
     private IConversationMemory memory;
     @Mock
     private IConversationMemory.IWritableConversationStep currentStep;
+    @Mock
+    private ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore journalStore;
 
     private AgentOrchestrator orchestrator;
 
@@ -117,7 +119,8 @@ class AgentOrchestratorToolPauseTest {
                 apiCallExecutor, jsonSerialization, memoryItemConverter,
                 userMemoryStore, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService,
-                null, null, null, null, null);
+                null, null, null, null, null,
+                journalStore, new ConversationHistoryBuilder());
 
         when(memory.getConversationId()).thenReturn("conv-1");
         when(memory.getAgentId()).thenReturn(null);

@@ -37,6 +37,7 @@ import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import dev.langchain4j.data.message.ChatMessage;
@@ -143,7 +144,8 @@ public class LlmTask implements ILifecycleTask {
             ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService,
             MemorySnapshotService memorySnapshotService, IAttachmentStore attachmentStore,
             AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
-            IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore) {
+            IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
+            IHitlToolJournalStore hitlToolJournalStore) {
         this.resourceClientLibrary = resourceClientLibrary;
         this.dataFactory = dataFactory;
         this.memoryItemConverter = memoryItemConverter;
@@ -160,7 +162,8 @@ public class LlmTask implements ILifecycleTask {
                 toolExecutionService, mcpToolProviderManager, a2aToolProviderManager, restAgentStore,
                 restWorkflowStore, resourceClientLibrary, apiCallExecutor, jsonSerialization, memoryItemConverter, userMemoryStore,
                 toolResponseTruncator, tenantQuotaService, memorySnapshotService,
-                agentSetupService, capabilityRegistryService, conversationService, agentFactory, agentStore);
+                agentSetupService, capabilityRegistryService, conversationService, agentFactory, agentStore,
+                hitlToolJournalStore, conversationHistoryBuilder);
         this.ragContextProvider = ragContextProvider;
         this.tokenCounterFactory = tokenCounterFactory;
         this.apiCallExecutor = apiCallExecutor;

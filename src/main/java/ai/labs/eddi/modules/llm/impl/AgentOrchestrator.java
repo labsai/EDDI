@@ -14,8 +14,10 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentCon
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
+import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
@@ -139,6 +141,10 @@ class AgentOrchestrator {
     private final IAgentFactory agentFactory;
     private final IAgentStore agentStore;
 
+    // HITL tool-approval resume dependencies (Task 9)
+    private final IHitlToolJournalStore journalStore;
+    private final ConversationHistoryBuilder conversationHistoryBuilder;
+
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
             FetchToolResponsePageTool fetchToolResponsePageTool,
@@ -148,7 +154,8 @@ class AgentOrchestrator {
             IUserMemoryStore userMemoryStore, ToolResponseTruncator toolResponseTruncator, TenantQuotaService tenantQuotaService,
             MemorySnapshotService memorySnapshotService,
             AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
-            IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore) {
+            IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
+            IHitlToolJournalStore journalStore, ConversationHistoryBuilder conversationHistoryBuilder) {
         this.calculatorTool = calculatorTool;
         this.dateTimeTool = dateTimeTool;
         this.webSearchTool = webSearchTool;
@@ -176,6 +183,8 @@ class AgentOrchestrator {
         this.conversationService = conversationService;
         this.agentFactory = agentFactory;
         this.agentStore = agentStore;
+        this.journalStore = journalStore;
+        this.conversationHistoryBuilder = conversationHistoryBuilder;
     }
 
     /**
@@ -219,40 +228,16 @@ class AgentOrchestrator {
                                           IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex)
             throws LifecycleException {
 
-        // Collect enabled built-in tools
-        List<Object> enabledTools = collectEnabledTools(task, memory);
+        // Discover + register all tools (built-in + http + mcp + a2a) — the SAME
+        // prologue the resume path uses.
+        ToolSetup setup = buildToolSetup(task, memory);
 
-        // Discover httpcall tools from workflow (auto-discovery)
-        boolean enableHttpCallTools = task.getEnableHttpCallTools() == null || task.getEnableHttpCallTools();
-        HttpCallToolsResult httpCallTools = null;
-        if (enableHttpCallTools) {
-            httpCallTools = discoverHttpCallTools(memory);
-        }
-        boolean hasHttpCallTools = httpCallTools != null && !httpCallTools.toolSpecs().isEmpty();
-
-        // Discover mcpcalls tools from workflow (auto-discovery)
-        boolean enableMcpCallTools = task.getEnableMcpCallTools() == null || task.getEnableMcpCallTools();
-        McpToolProviderManager.McpToolsResult mcpCallWorkflowTools = null;
-        if (enableMcpCallTools) {
-            mcpCallWorkflowTools = discoverMcpCallTools(memory);
-        }
-        boolean hasMcpCallWorkflowTools = mcpCallWorkflowTools != null && !mcpCallWorkflowTools.toolSpecs().isEmpty();
-
-        // Discover A2A agent tools (if configured)
-        A2AToolProviderManager.A2AToolsResult a2aTools = null;
-        List<A2AAgentConfig> a2aAgents = task.getA2aAgents();
-        if (a2aAgents != null && !a2aAgents.isEmpty()) {
-            a2aTools = a2aToolProviderManager.discoverTools(a2aAgents);
-        }
-        boolean hasA2aTools = a2aTools != null && !a2aTools.toolSpecs().isEmpty();
-
-        // No tools? Return null — caller should use legacy mode
-        if (enabledTools.isEmpty() && !hasHttpCallTools && !hasMcpCallWorkflowTools && !hasA2aTools) {
+        // No tools? Return null — caller should use legacy mode.
+        if (setup.toolSpecs().isEmpty()) {
             return null;
         }
 
-        return executeWithTools(chatModel, systemMessage, chatMessages, enabledTools, httpCallTools, mcpCallWorkflowTools, a2aTools, task, memory,
-                effectiveToolApprovals, llmTaskIndex);
+        return executeWithTools(chatModel, systemMessage, chatMessages, setup, task, memory, effectiveToolApprovals, llmTaskIndex);
     }
 
     /**
@@ -291,13 +276,50 @@ class AgentOrchestrator {
     }
 
     /**
-     * Executes the tool-calling loop using direct ChatModel API.
+     * The tool discovery + registration result shared by the live path
+     * ({@link #executeWithTools}) and the HITL resume path
+     * ({@link #resumeToolLoop}). Holds the fully merged specs/executors/sources
+     * plus the built-in-only specs (needed for LAZY activation).
+     *
+     * @param toolSpecs
+     *            every registered tool spec (built-in + http + mcp + a2a)
+     * @param toolExecutors
+     *            dispatch name → executor for every registered tool
+     * @param toolSources
+     *            dispatch name → provenance tag for gate qualified matching
+     * @param builtInSpecs
+     *            built-in specs only (copy taken before external merge — LAZY needs
+     *            it to activate discovered built-ins)
      */
-    private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, List<Object> tools,
-                                             HttpCallToolsResult httpCallTools, McpToolProviderManager.McpToolsResult mcpCallWorkflowTools,
-                                             A2AToolProviderManager.A2AToolsResult a2aTools, LlmConfiguration.Task task, IConversationMemory memory,
-                                             ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex)
-            throws LifecycleException {
+    record ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
+            Map<String, String> toolSources, List<ToolSpecification> builtInSpecs) {
+    }
+
+    /**
+     * Runs the same tool discovery + registration prologue for a task that the live
+     * loop uses, so the live path and {@link #resumeToolLoop} share ONE copy.
+     * Collects enabled built-in tools, discovers httpcall/mcpcall/a2a tools from
+     * the workflow, builds specs + executors via reflection, and merges external
+     * tools — returning the fully populated {@link ToolSetup}.
+     */
+    ToolSetup buildToolSetup(LlmConfiguration.Task task, IConversationMemory memory) {
+        // Collect enabled built-in tools
+        List<Object> tools = collectEnabledTools(task, memory);
+
+        // Discover httpcall tools from workflow (auto-discovery)
+        boolean enableHttpCallTools = task.getEnableHttpCallTools() == null || task.getEnableHttpCallTools();
+        HttpCallToolsResult httpCallTools = enableHttpCallTools ? discoverHttpCallTools(memory) : null;
+
+        // Discover mcpcalls tools from workflow (auto-discovery)
+        boolean enableMcpCallTools = task.getEnableMcpCallTools() == null || task.getEnableMcpCallTools();
+        McpToolProviderManager.McpToolsResult mcpCallWorkflowTools = enableMcpCallTools ? discoverMcpCallTools(memory) : null;
+
+        // Discover A2A agent tools (if configured)
+        A2AToolProviderManager.A2AToolsResult a2aTools = null;
+        List<A2AAgentConfig> a2aAgents = task.getA2aAgents();
+        if (a2aAgents != null && !a2aAgents.isEmpty()) {
+            a2aTools = a2aToolProviderManager.discoverTools(a2aAgents);
+        }
 
         // Build tool specifications and executors from built-in tool objects.
         // toolSources maps dispatch name → provenance ("builtin"/"http"/"mcp"/…) so
@@ -328,13 +350,8 @@ class AgentOrchestrator {
             }
         }
 
-        // --- LAZY mode: separate built-in specs from external specs ---
-        // In LAZY mode, all built-in tool executors are registered (so they CAN be
-        // called), but initially only discover_tools spec is presented to the LLM.
-        // After the LLM calls discover_tools, we parse the result and activate the
-        // matching built-in specs for subsequent iterations.
-        boolean isLazy = task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY;
-        List<ToolSpecification> builtInSpecs = new ArrayList<>(toolSpecs); // copy before merging external
+        // Copy built-in specs before merging external ones — LAZY activation needs it.
+        List<ToolSpecification> builtInSpecs = new ArrayList<>(toolSpecs);
 
         // Merge httpcall tools discovered from workflow (if any)
         if (httpCallTools != null && !httpCallTools.toolSpecs().isEmpty()) {
@@ -357,35 +374,58 @@ class AgentOrchestrator {
             a2aTools.executors().keySet().forEach(name -> toolSources.put(name, "a2a"));
         }
 
-        // Active specs: what the LLM currently sees
-        List<ToolSpecification> activeSpecs;
-        if (isLazy) {
-            // Start with only discover_tools + all external tools (HTTP/MCP/A2A)
-            activeSpecs = new ArrayList<>();
-            for (ToolSpecification spec : builtInSpecs) {
-                if ("discover_tools".equals(spec.name())) {
-                    activeSpecs.add(spec);
-                }
-            }
-            // Add external tool specs (always visible regardless of strategy)
-            int externalCount = 0;
-            if (httpCallTools != null) {
-                activeSpecs.addAll(httpCallTools.toolSpecs());
-                externalCount += httpCallTools.toolSpecs().size();
-            }
-            if (mcpCallWorkflowTools != null) {
-                activeSpecs.addAll(mcpCallWorkflowTools.toolSpecs());
-                externalCount += mcpCallWorkflowTools.toolSpecs().size();
-            }
-            if (a2aTools != null) {
-                activeSpecs.addAll(a2aTools.toolSpecs());
-                externalCount += a2aTools.toolSpecs().size();
-            }
-            LOGGER.infof("LAZY mode: presenting %d specs initially (discover_tools + %d external)",
-                    activeSpecs.size(), externalCount);
-        } else {
-            activeSpecs = toolSpecs;
+        return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs);
+    }
+
+    /**
+     * Computes the specs the LLM initially sees given a {@link ToolSetup}. For
+     * EAGER, that is every registered spec. For LAZY, only {@code discover_tools}
+     * plus the external (http/mcp/a2a) specs — the built-ins stay hidden until
+     * discovery activates them. Shared by the live loop and resume so both present
+     * an identical initial surface. Returns a fresh mutable list (LAZY activation
+     * mutates it in place).
+     */
+    private static List<ToolSpecification> computeInitialActiveSpecs(ToolSetup setup, boolean isLazy) {
+        if (!isLazy) {
+            return setup.toolSpecs();
         }
+        // External = every registered spec whose name is not a built-in spec name.
+        Set<String> builtInNames = new HashSet<>();
+        for (ToolSpecification spec : setup.builtInSpecs()) {
+            builtInNames.add(spec.name());
+        }
+        List<ToolSpecification> activeSpecs = new ArrayList<>();
+        int externalCount = 0;
+        for (ToolSpecification spec : setup.toolSpecs()) {
+            if ("discover_tools".equals(spec.name())) {
+                activeSpecs.add(spec);
+            } else if (!builtInNames.contains(spec.name())) {
+                activeSpecs.add(spec);
+                externalCount++;
+            }
+        }
+        LOGGER.infof("LAZY mode: presenting %d specs initially (discover_tools + %d external)",
+                activeSpecs.size(), externalCount);
+        return activeSpecs;
+    }
+
+    /**
+     * Executes the tool-calling loop using direct ChatModel API against a pre-built
+     * {@link ToolSetup} (shared with the resume path).
+     */
+    private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, ToolSetup setup,
+                                             LlmConfiguration.Task task, IConversationMemory memory,
+                                             ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex)
+            throws LifecycleException {
+
+        Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
+        Map<String, String> toolSources = setup.toolSources();
+        List<ToolSpecification> builtInSpecs = setup.builtInSpecs();
+
+        boolean isLazy = task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY;
+
+        // Active specs: what the LLM currently sees (LAZY starts narrow).
+        List<ToolSpecification> activeSpecs = computeInitialActiveSpecs(setup, isLazy);
 
         // Build message list with system message if provided
         List<ChatMessage> messages = new ArrayList<>();
