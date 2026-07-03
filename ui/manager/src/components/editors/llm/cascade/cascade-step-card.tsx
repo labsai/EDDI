@@ -15,8 +15,14 @@ import type { CascadeIssue } from "./cascade-validation";
 import { CascadeIssues } from "./cascade-issues";
 import { parseNum as num, nextParamKey } from "./cascade-utils";
 
-/** Params surfaced through dedicated controls — excluded from the advanced grid. */
-const STEP_HIDDEN_PARAM_KEYS = new Set(["model", "apikey"]);
+/**
+ * Params owned by the dedicated controls (model input + API key picker), hidden
+ * from the advanced grid. Matched EXACT-case: the dedicated controls only read
+ * `model` / `apiKey`, so a mis-cased key like `apikey` / `Model` must stay
+ * visible in the grid — otherwise the cross-provider warning fires on a key the
+ * user cannot see or remove.
+ */
+const STEP_HIDDEN_PARAM_KEYS = new Set(["model", "apiKey"]);
 const SENSITIVE_KEYS = new Set(["apikey", "password", "secret", "token"]);
 
 /**
@@ -60,7 +66,7 @@ export function CascadeStepCard({
   };
 
   const extraParamEntries = Object.entries(params).filter(
-    ([k]) => !STEP_HIDDEN_PARAM_KEYS.has(k.toLowerCase()),
+    ([k]) => !STEP_HIDDEN_PARAM_KEYS.has(k),
   );
   const isCrossProvider = !!step.type && step.type !== taskType;
 
