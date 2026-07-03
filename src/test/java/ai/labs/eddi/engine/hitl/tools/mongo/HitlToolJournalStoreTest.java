@@ -1,0 +1,205 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.engine.hitl.tools.mongo;
+
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.JournalEntry;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.Status;
+import com.mongodb.MongoWriteException;
+import com.mongodb.ServerAddress;
+import com.mongodb.WriteError;
+import com.mongodb.client.FindIterable;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.result.UpdateResult;
+import org.bson.BsonDocument;
+import org.bson.Document;
+import org.bson.conversions.Bson;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+import static org.mockito.MockitoAnnotations.openMocks;
+
+/**
+ * Mirrors the mock-based Mongo store test harness used by
+ * {@code AgentTriggerStoreTest} and {@code MongoScheduleStoreTest} (see
+ * {@code AgentTriggerStore}/{@code MongoScheduleStore}, both of which create
+ * their indexes in the {@code @Inject} constructor and are tested against a
+ * mocked {@link MongoCollection} rather than Testcontainers). The real
+ * duplicate-key/TTL semantics are exercised in production by MongoDB itself;
+ * here we verify the store's Java-side logic: what it inserts, what it updates,
+ * and how it reacts to a duplicate-key failure from the driver.
+ */
+@SuppressWarnings("unchecked")
+@DisplayName("HitlToolJournalStore")
+class HitlToolJournalStoreTest {
+
+    private static final String COLLECTION_NAME = "hitltoolexecutionjournal";
+
+    @Mock
+    private MongoDatabase database;
+
+    @Mock
+    private MongoCollection<Document> collection;
+
+    @Mock
+    private FindIterable<Document> findIterable;
+
+    private HitlToolJournalStore store;
+
+    @BeforeEach
+    void setUp() {
+        openMocks(this);
+        doReturn(collection).when(database).getCollection(COLLECTION_NAME);
+        UpdateResult updateResult = mock(UpdateResult.class);
+        doReturn(1L).when(updateResult).getMatchedCount();
+        doReturn(updateResult).when(collection).updateOne(any(Bson.class), any(Bson.class));
+        store = new HitlToolJournalStore(database, Duration.ofDays(30));
+    }
+
+    @Test
+    @DisplayName("constructor creates unique compound index and TTL index")
+    void constructorCreatesIndexes() {
+        // Two createIndex calls: unique compound (conversationId, pauseEpoch, callId)
+        // and TTL on executedAt.
+        verify(collection, times(2)).createIndex(any(Bson.class), any());
+    }
+
+    @Nested
+    @DisplayName("tryClaim")
+    class TryClaim {
+
+        @Test
+        @DisplayName("inserts EXECUTING entry and returns true when no prior entry exists")
+        void claimsWhenNoExistingEntry() {
+            boolean claimed = store.tryClaim("conv-1", "epoch-1", "call-1", "toolA", "user-1");
+
+            assertTrue(claimed);
+            verify(collection).insertOne(any(Document.class));
+        }
+
+        @Test
+        @DisplayName("returns false on duplicate-key without leaking MongoWriteException")
+        void returnsFalseOnDuplicateKey() {
+            MongoWriteException duplicateKeyEx = new MongoWriteException(
+                    new WriteError(11000, "E11000 duplicate key error", new BsonDocument()),
+                    new ServerAddress());
+            doThrow(duplicateKeyEx).when(collection).insertOne(any(Document.class));
+
+            boolean claimed = store.tryClaim("conv-1", "epoch-1", "call-1", "toolA", "user-1");
+
+            assertFalse(claimed);
+        }
+
+        @Test
+        @DisplayName("same callId under a different pauseEpoch claims independently")
+        void differentPauseEpochClaimsIndependently() {
+            boolean firstClaim = store.tryClaim("conv-1", "epoch-1", "call-1", "toolA", "user-1");
+            boolean secondClaim = store.tryClaim("conv-1", "epoch-2", "call-1", "toolA", "user-1");
+
+            assertTrue(firstClaim);
+            assertTrue(secondClaim);
+            verify(collection, times(2)).insertOne(any(Document.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("markExecuted")
+    class MarkExecuted {
+
+        @Test
+        @DisplayName("updates status to EXECUTED with capped result")
+        void updatesStatusAndResult() {
+            store.markExecuted("conv-1", "epoch-1", "call-1", "the result");
+
+            verify(collection).updateOne(any(Bson.class), any(Bson.class));
+        }
+
+        @Test
+        @DisplayName("caps result at 32 KB")
+        void capsResultAt32Kb() {
+            String oversized = "x".repeat(40_000);
+
+            store.markExecuted("conv-1", "epoch-1", "call-1", oversized);
+
+            var updateCaptor = org.mockito.ArgumentCaptor.forClass(Bson.class);
+            verify(collection).updateOne(any(Bson.class), updateCaptor.capture());
+            BsonDocument rendered = updateCaptor.getValue()
+                    .toBsonDocument(Document.class, com.mongodb.MongoClientSettings.getDefaultCodecRegistry());
+            String cappedResult = rendered.getDocument("$set").getString("resultCapped").getValue();
+            assertEquals(32 * 1024, cappedResult.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+        }
+    }
+
+    @Nested
+    @DisplayName("find")
+    class Find {
+
+        @Test
+        @DisplayName("returns empty when no entry exists")
+        void returnsEmptyWhenMissing() {
+            doReturn(findIterable).when(collection).find(any(Bson.class));
+            doReturn(null).when(findIterable).first();
+
+            Optional<JournalEntry> result = store.find("conv-1", "epoch-1", "call-1");
+
+            assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("returns EXECUTING entry after tryClaim")
+        void returnsExecutingAfterClaim() {
+            Document doc = new Document()
+                    .append("conversationId", "conv-1")
+                    .append("pauseEpoch", "epoch-1")
+                    .append("callId", "call-1")
+                    .append("toolName", "toolA")
+                    .append("status", Status.EXECUTING.name())
+                    .append("decidedBy", "user-1");
+            doReturn(findIterable).when(collection).find(any(Bson.class));
+            doReturn(doc).when(findIterable).first();
+
+            Optional<JournalEntry> result = store.find("conv-1", "epoch-1", "call-1");
+
+            assertTrue(result.isPresent());
+            assertEquals(Status.EXECUTING, result.get().status());
+            assertEquals("toolA", result.get().toolName());
+            assertNull(result.get().resultCapped());
+        }
+
+        @Test
+        @DisplayName("returns EXECUTED entry with result after markExecuted")
+        void returnsExecutedWithResult() {
+            Document doc = new Document()
+                    .append("conversationId", "conv-1")
+                    .append("pauseEpoch", "epoch-1")
+                    .append("callId", "call-1")
+                    .append("toolName", "toolA")
+                    .append("status", Status.EXECUTED.name())
+                    .append("resultCapped", "the result")
+                    .append("executedAt", Instant.now().toEpochMilli())
+                    .append("decidedBy", "user-1");
+            doReturn(findIterable).when(collection).find(any(Bson.class));
+            doReturn(doc).when(findIterable).first();
+
+            Optional<JournalEntry> result = store.find("conv-1", "epoch-1", "call-1");
+
+            assertTrue(result.isPresent());
+            assertEquals(Status.EXECUTED, result.get().status());
+            assertEquals("the result", result.get().resultCapped());
+            assertNotNull(result.get().executedAt());
+        }
+    }
+}
