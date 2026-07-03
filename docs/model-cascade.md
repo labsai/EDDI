@@ -83,7 +83,9 @@ Cascading is configured per-task in a `langchain.json` resource:
 | `timeoutMs` | long | `30000` | Per-step timeout in milliseconds. Also bounded by the remaining `maxTotalDurationMs` budget. |
 | `inputPricePer1M` / `outputPricePer1M` | double | cascade default | Per-step token pricing (overrides the cascade-level default). |
 
-> **Merge note:** Step parameters are merged over base task parameters. Steps only specify overrides (e.g., a different `model`); shared params like `apiKey` and `systemMessage` are inherited.
+> **Merge note:** Step parameters are merged over base task parameters (step wins). Steps only specify overrides (e.g., a different `model`); shared params like `systemMessage` are inherited.
+>
+> **⚠️ Cross-provider credentials:** Because parameters are inherited, a step (or `judgeModel`) that targets a **different provider** than the task must supply **its own credentials** — otherwise it silently inherits the task's `apiKey`, which is wrong for a different provider and fails at runtime as a 401 (which the cascade then treats as an escalation). A different-provider step/judge that omits its own `apiKey` is flagged with a deploy-time warning. Give each cross-provider step its own full parameter set (`apiKey`, `baseUrl`, etc.). Same-provider steps may safely inherit the task's credentials.
 
 ## Confidence Evaluation Strategies
 

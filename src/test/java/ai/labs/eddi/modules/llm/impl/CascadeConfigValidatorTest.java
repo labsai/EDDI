@@ -189,6 +189,36 @@ class CascadeConfigValidatorTest {
     }
 
     @Test
+    @DisplayName("cross-provider step without its own apiKey — validates (warns only)")
+    void crossProviderStepMissingApiKey_ok() {
+        // task provider is openai (with apiKey); step 2 is anthropic without its own
+        // key
+        var c = enabled(List.of(step("openai", 0.7), step("anthropic", null)));
+        assertDoesNotThrow(() -> CascadeConfigValidator.validate(configWith(c, Map.of("apiKey", "k"))));
+    }
+
+    @Test
+    @DisplayName("cross-provider step with its own apiKey — validates cleanly")
+    void crossProviderStepWithApiKey_ok() {
+        var s2 = new CascadeStep();
+        s2.setType("anthropic");
+        s2.setParameters(Map.of("apiKey", "anthropic-key"));
+        var c = enabled(List.of(step("openai", 0.7), s2));
+        assertDoesNotThrow(() -> CascadeConfigValidator.validate(configWith(c, Map.of("apiKey", "k"))));
+    }
+
+    @Test
+    @DisplayName("cross-provider judge without apiKey — validates (warns only)")
+    void crossProviderJudgeMissingApiKey_ok() {
+        var c = enabled(List.of(step("openai", null)));
+        c.setEvaluationStrategy("judge_model");
+        var judge = new JudgeModelConfig();
+        judge.setType("anthropic"); // different provider, no own params
+        c.setJudgeModel(judge);
+        assertDoesNotThrow(() -> CascadeConfigValidator.validate(configWith(c, Map.of("apiKey", "k"))));
+    }
+
+    @Test
     @DisplayName("valid two-step cascade — ok")
     void validCascade_ok() {
         var c = enabled(List.of(step("openai", 0.7), step("anthropic", null)));

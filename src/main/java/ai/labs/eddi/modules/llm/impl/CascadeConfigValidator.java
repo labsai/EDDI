@@ -11,6 +11,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.ModelCascadeConfig;
 import org.jboss.logging.Logger;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -74,6 +75,22 @@ final class CascadeConfigValidator {
             }
         }
 
+        // Cross-provider credential check. Step/judge parameters are merged OVER the
+        // task parameters (step wins), so a step targeting a DIFFERENT provider than
+        // the task silently inherits the task's apiKey — the wrong key for that
+        // provider (fails at runtime as a 401 that looks like an escalation). Warn at
+        // deploy time so the step/judge is given its own credentials. Not a hard error
+        // because some providers (e.g. Ollama, Bedrock) don't use apiKey.
+        boolean baseHasApiKey = task.getParameters() != null && task.getParameters().containsKey("apiKey");
+        for (int i = 0; i < steps.size(); i++) {
+            CascadeStep s = steps.get(i);
+            warnIfCrossProviderMissingCredentials(taskId, "step " + i, task.getType(), s.getType(), s.getParameters(), baseHasApiKey);
+        }
+        if (cascade.getJudgeModel() != null) {
+            warnIfCrossProviderMissingCredentials(taskId, "judgeModel", task.getType(), cascade.getJudgeModel().getType(),
+                    cascade.getJudgeModel().getParameters(), baseHasApiKey);
+        }
+
         // convertToObject + structured_output → auto-downgraded at runtime (warn once).
         boolean convertToObject = task.getParameters() != null && Boolean.parseBoolean(task.getParameters().get("convertToObject"));
         if (convertToObject && (evalStrategy == null || "structured_output".equalsIgnoreCase(evalStrategy))) {
@@ -117,6 +134,23 @@ final class CascadeConfigValidator {
     private static void checkPrice(String taskId, String what, Double price) throws WorkflowConfigurationException {
         if (price != null && price < 0) {
             throw fail(taskId, what + " must be >= 0");
+        }
+    }
+
+    /**
+     * Warn when a step / judge uses a different provider than the task but does not
+     * define its own {@code apiKey}, so it would inherit the task's (wrong) key.
+     */
+    private static void warnIfCrossProviderMissingCredentials(String taskId, String where, String taskType, String stepType,
+                                                              Map<String, String> stepParams, boolean baseHasApiKey) {
+        if (!baseHasApiKey || stepType == null || stepType.equalsIgnoreCase(taskType)) {
+            return; // no key to inherit, or same provider — inheriting is correct
+        }
+        boolean stepHasApiKey = stepParams != null && stepParams.containsKey("apiKey");
+        if (!stepHasApiKey) {
+            LOGGER.warnf("LLM task '%s': %s uses provider '%s' (different from the task provider '%s') but does not define its own 'apiKey' — "
+                    + "it would inherit the task's apiKey, which is likely incorrect for a different provider. "
+                    + "Give the step/judge its own credentials (apiKey, baseUrl, etc.).", taskId, where, stepType, taskType);
         }
     }
 

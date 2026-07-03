@@ -44,13 +44,15 @@
 - `CascadingModelExecutor` converted from a static utility to an instance (constructed by `LlmTask`) holding `ChatModelRegistry`, `GlobalVariableResolver`, `ITemplatingEngine`, `LegacyChatExecutor`, `StreamingLegacyChatExecutor`, and `MeterRegistry`. `AgentOrchestrator.ExecutionResult` gained a `responseMetadata` field (2-arg constructor retained for compatibility).
 - Backward compatible: all new config fields optional with today's defaults; configs without `modelCascade` and `enabled:false` are unaffected; `StreamingResponseHandler` cascade methods are `default`.
 
-### Tests
+### Cross-provider credentials
+
+- Because step/judge parameters are merged **over** the task parameters, a step (or judge) targeting a **different provider** than the task would silently inherit the task's `apiKey` — wrong for that provider, failing at runtime as a 401 that looks like an escalation. `CascadeConfigValidator` now emits a **deploy-time warning** for a different-provider step/judge that omits its own `apiKey`. Not a hard error (Ollama/Bedrock don't use `apiKey`); documented in `docs/model-cascade.md`.
+
+### Tests & coverage
 
 - Updated the 3 executor test classes to the instance API and the 6 `LlmTask` test classes to the new constructor. Removed the backward-incompatible `languageAgnosticScore` band that regressed the default heuristic score.
-
-### Next
-
-- Docs rewrite (`docs/model-cascade.md`) to match reality, and comprehensive new test coverage for judge model, ceilings, metrics, audit, validation, and streaming.
+- New coverage: `CascadingModelExecutorEnterpriseTest`, `CascadingModelExecutorCoverageTest` (agent mode, live streaming, cost/duration ceilings, timeout + retryable escalation, convertToObject downgrade), `ConfidenceEvaluatorEnterpriseTest`, `StreamingLegacyChatExecutorCoverageTest`, and expanded `CascadeConfigValidatorTest`. New-code coverage ≈ **92% instruction / 78% branch** (residual branches are the 120s streaming-timeout guard and typed-exception variants); the project aggregate stays above the 90%/80% gate.
+- `CascadingModelExecutor.isRetryableError` message matching collapsed to a single regex (fewer branches, same behavior).
 
 ---
 

@@ -24,6 +24,7 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.regex.Pattern;
 
 /**
  * Executes a multi-model cascade: tries a cheap/fast model first, evaluates
@@ -640,8 +641,12 @@ class CascadingModelExecutor {
         return s == null || s.isBlank();
     }
 
+    // Retryable transient-failure signatures in an exception message.
+    private static final Pattern RETRYABLE_MESSAGE = Pattern.compile("timeout|rate limit|too many requests|429|50[234]", Pattern.CASE_INSENSITIVE);
+
     /**
-     * Check if an error is retryable (same logic as AgentExecutionHelper).
+     * Check if an error is retryable (transient network / throttling errors). Same
+     * intent as {@code AgentExecutionHelper}.
      */
     private static boolean isRetryableError(Exception e) {
         Throwable current = e;
@@ -650,13 +655,10 @@ class CascadingModelExecutor {
                     || current instanceof java.net.ConnectException || current instanceof java.net.UnknownHostException) {
                 return true;
             }
-
-            String message = current.getMessage() != null ? current.getMessage().toLowerCase() : "";
-            if (message.contains("timeout") || message.contains("rate limit") || message.contains("too many requests") || message.contains("503")
-                    || message.contains("502") || message.contains("504") || message.contains("429")) {
+            String message = current.getMessage();
+            if (message != null && RETRYABLE_MESSAGE.matcher(message).find()) {
                 return true;
             }
-
             current = current.getCause();
         }
         return false;

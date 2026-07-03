@@ -103,6 +103,25 @@ class ConfidenceEvaluatorEnterpriseTest {
     }
 
     @Test
+    @DisplayName("fully configured heuristic — every custom score path applied")
+    void heuristic_fullyConfigured() {
+        var cfg = new HeuristicConfig();
+        cfg.setShortLengthThreshold(10);
+        cfg.setShortScore(0.11);
+        cfg.setRefusalScore(0.22);
+        cfg.setHedgingScore(0.33);
+        cfg.setDefaultScore(0.77);
+        cfg.setRefusalPhrases(List.of("refuse-token"));
+        cfg.setLowConfidencePhrases(List.of("hedge-token"));
+
+        assertEquals(0.11, ConfidenceEvaluator.evaluateHeuristic("short", cfg).confidence(), 0.001);
+        assertEquals(0.22, ConfidenceEvaluator.evaluateHeuristic("this contains refuse-token somewhere in here", cfg).confidence(), 0.001);
+        assertEquals(0.33, ConfidenceEvaluator.evaluateHeuristic("this contains hedge-token somewhere in here", cfg).confidence(), 0.001);
+        assertEquals(0.77, ConfidenceEvaluator.evaluateHeuristic("a perfectly ordinary answer with no flagged tokens present at all", cfg)
+                .confidence(), 0.001);
+    }
+
+    @Test
     @DisplayName("config-driven short threshold + short score")
     void heuristic_customShort() {
         var cfg = new HeuristicConfig();
@@ -152,5 +171,79 @@ class ConfidenceEvaluatorEnterpriseTest {
         String text = "prefix {\"a\": {\"b\": \"}\"}, \"c\": 1} suffix";
         assertEquals("{\"a\": {\"b\": \"}\"}, \"c\": 1}", ConfidenceEvaluator.extractFirstBalancedObject(text));
         assertNull(ConfidenceEvaluator.extractFirstBalancedObject("no braces here"));
+    }
+
+    // ─── additional edge cases ───────────────────────────────────────
+
+    @Test
+    @DisplayName("wrapper object with confidence but no response field — returns the object text")
+    void wrapper_noResponseField() {
+        var r = ConfidenceEvaluator.evaluateStructuredOutput("{\"confidence\": 0.4}", null);
+        assertEquals(0.4, r.confidence(), 0.001);
+        assertTrue(r.response().contains("confidence"));
+    }
+
+    @Test
+    @DisplayName("object-shaped but malformed JSON — regex fallback extracts confidence and response")
+    void objectShaped_malformed_regexFallback() {
+        // Missing comma → Jackson rejects → regex fallback within the object shape.
+        var r = ConfidenceEvaluator.evaluateStructuredOutput("{\"confidence\": 0.55 \"response\": \"hello\"}", null);
+        assertEquals(0.55, r.confidence(), 0.001);
+        assertEquals("hello", r.response());
+    }
+
+    @Test
+    @DisplayName("code fence without a closing fence — still unwrapped")
+    void fence_withoutClosing() {
+        var r = ConfidenceEvaluator.evaluateStructuredOutput("```json\n{\"response\":\"x\",\"confidence\":0.6}", null);
+        assertEquals(0.6, r.confidence(), 0.001);
+        assertEquals("x", r.response());
+    }
+
+    @Test
+    @DisplayName("escaped characters in the response field are unescaped")
+    void wrapper_unescapes() {
+        var r = ConfidenceEvaluator.evaluateStructuredOutput("{\"response\": \"line1\\nline2 \\\"q\\\"\", \"confidence\": 0.5}", null);
+        assertEquals(0.5, r.confidence(), 0.001);
+        assertTrue(r.response().contains("\n"));
+        assertTrue(r.response().contains("\"q\""));
+    }
+
+    @Test
+    @DisplayName("heuristic — null/blank returns 0.0")
+    void heuristic_blank() {
+        assertEquals(0.0, ConfidenceEvaluator.evaluateHeuristic(null).confidence(), 0.001);
+        assertEquals(0.0, ConfidenceEvaluator.evaluateHeuristic("   ").confidence(), 0.001);
+    }
+
+    @Test
+    @DisplayName("evaluate — 'none' strategy always returns 1.0")
+    void evaluate_none() {
+        assertEquals(1.0, ConfidenceEvaluator.evaluate("none", "anything at all", null).confidence(), 0.001);
+    }
+
+    @Test
+    @DisplayName("judge output without any JSON confidence — falls back to heuristic")
+    void judge_noConfidence_fallsBack() {
+        ChatModel judge = mock(ChatModel.class);
+        when(judge.chat(anyList())).thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("I think it's pretty good honestly.")).build());
+        EvaluationResult r = ConfidenceEvaluator.evaluateWithJudge("A confident, complete answer to the user's question here.", judge, null);
+        assertEquals(0.8, r.confidence(), 0.001);
+    }
+
+    @Test
+    @DisplayName("judge that throws — falls back to heuristic")
+    void judge_throws_fallsBack() {
+        ChatModel judge = mock(ChatModel.class);
+        when(judge.chat(anyList())).thenThrow(new RuntimeException("judge down"));
+        EvaluationResult r = ConfidenceEvaluator.evaluateWithJudge("A confident, complete answer to the user's question here.", judge, null);
+        assertEquals(0.8, r.confidence(), 0.001);
+    }
+
+    @Test
+    @DisplayName("buildConfidenceInstruction mentions response and confidence")
+    void buildInstruction() {
+        String s = ConfidenceEvaluator.buildConfidenceInstruction();
+        assertTrue(s.contains("response") && s.contains("confidence"));
     }
 }

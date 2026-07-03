@@ -269,4 +269,22 @@ class CascadingModelExecutorEnterpriseTest {
         step.setInputPricePer1M(5.0);
         assertEquals(0.0, CascadingModelExecutor.computeCost(step, cascade, null), 0.0001);
     }
+
+    @Test
+    @DisplayName("computeCost — only input price set")
+    void computeCost_onlyInputPrice() {
+        var step = new CascadeStep();
+        step.setInputPricePer1M(4.0);
+        assertEquals(4.0, CascadingModelExecutor.computeCost(step, new ModelCascadeConfig(), Map.of("inputTokens", 1_000_000, "outputTokens", 999)),
+                0.0001);
+    }
+
+    @Test
+    @DisplayName("computeCost — only output price set")
+    void computeCost_onlyOutputPrice() {
+        var step = new CascadeStep();
+        step.setOutputPricePer1M(4.0);
+        assertEquals(4.0, CascadingModelExecutor.computeCost(step, new ModelCascadeConfig(), Map.of("inputTokens", 999, "outputTokens", 1_000_000)),
+                0.0001);
+    }
 }
