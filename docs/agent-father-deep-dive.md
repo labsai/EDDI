@@ -468,38 +468,38 @@ public class BehaviorRulesTask implements ILifecycleTask {
 }
 ```
 
-### HTTP Calls Task (executes API calls)
+### API Calls Task (executes API calls)
 
 ```java
-public class HttpCallsTask implements ILifecycleTask {
+public class ApiCallsTask implements ILifecycleTask {
     @Override
     public void execute(IConversationMemory memory, Object component) {
-        HttpCallsConfiguration config = (HttpCallsConfiguration) component;
+        ApiCallsConfiguration config = (ApiCallsConfiguration) component;
 
         // Get actions from previous task (behavior rules)
         List<String> actions = memory.getCurrentStep()
             .getLatestData("actions").getResult();
 
-        for (HttpCallDefinition httpCall : config.getHttpCalls()) {
-            if (actions.contains("httpcall(" + httpCall.getName() + ")")) {
+        for (ApiCall apiCall : config.getHttpCalls()) {
+            if (actions.contains("httpcall(" + apiCall.getName() + ")")) {
                 // Execute HTTP call
-                String url = config.getTargetServerUrl() + httpCall.getRequest().getPath();
-                String body = applyTemplate(httpCall.getRequest().getBody(), memory);
+                String url = config.getTargetServerUrl() + apiCall.getRequest().getPath();
+                String body = applyTemplate(apiCall.getRequest().getBody(), memory);
 
                 Response response = httpClient.post(url, body);
 
                 // Store response in memory
-                if (httpCall.isSaveResponse()) {
+                if (apiCall.isSaveResponse()) {
                     memory.getCurrentStep().storeData(
                         dataFactory.createData(
-                            "httpCalls." + httpCall.getResponseObjectName(),
+                            "httpCalls." + apiCall.getResponseObjectName(),
                             response.getBody()
                         )
                     );
                 }
 
                 // Extract properties from response
-                for (PropertyInstruction instruction : httpCall.getPostResponse().getPropertyInstructions()) {
+                for (PropertyInstruction instruction : apiCall.getPostResponse().getPropertyInstructions()) {
                     Object value = extractFromJsonPath(response.getBody(), instruction.getFromObjectPath());
                     memory.getConversationProperties().put(
                         "context." + instruction.getName(),
