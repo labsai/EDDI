@@ -135,14 +135,20 @@ class GroupConversationServiceTest {
         }
 
         @Test
-        void materialize_noStore_ignored() {
+        void materialize_noStore_dropsInlineButKeepsUrl() {
             service.attachmentStore = null;
             var inline = new Attachment();
             inline.setBase64Data("x");
+            var url = new Attachment();
+            url.setMimeType("image/png");
+            url.setUrl("https://example.com/y.png");
             var gc = gc("gc-1");
 
-            service.materializeAttachments(gc, List.of(inline));
-            assertNull(gc.getAttachments());
+            service.materializeAttachments(gc, List.of(inline, url));
+
+            // inline base64 dropped (no store), url kept (no store needed)
+            assertEquals(1, gc.getAttachments().size());
+            assertEquals("https://example.com/y.png", gc.getAttachments().get(0).getUrl());
         }
 
         @Test

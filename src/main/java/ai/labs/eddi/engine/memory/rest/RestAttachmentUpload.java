@@ -226,14 +226,17 @@ public class RestAttachmentUpload {
                         .header("Content-Type", meta.mimeType() != null ? meta.mimeType() : "application/octet-stream")
                         .header("Content-Disposition", "attachment; filename=\"" + downloadName + "\"")
                         .build());
+            } catch (IAttachmentStore.AttachmentAccessDeniedException e) {
+                LOGGER.debugf("Attachment download denied for conversation '%s': %s",
+                        sanitize(conversationId), e.getMessage());
+                asyncResponse.resume(Response.status(Response.Status.FORBIDDEN)
+                        .entity(Map.of("error", e.getMessage(), "code", "ATTACHMENT_ACCESS_DENIED"))
+                        .build());
             } catch (IAttachmentStore.AttachmentStoreException e) {
-                boolean denied = e.getMessage() != null && e.getMessage().contains("denied");
-                var status = denied ? Response.Status.FORBIDDEN : Response.Status.NOT_FOUND;
-                LOGGER.debugf("Attachment download %s for conversation '%s': %s",
-                        denied ? "denied" : "not found", sanitize(conversationId), e.getMessage());
-                asyncResponse.resume(Response.status(status)
-                        .entity(Map.of("error", e.getMessage(), "code",
-                                denied ? "ATTACHMENT_ACCESS_DENIED" : "ATTACHMENT_NOT_FOUND"))
+                LOGGER.debugf("Attachment download not found for conversation '%s': %s",
+                        sanitize(conversationId), e.getMessage());
+                asyncResponse.resume(Response.status(Response.Status.NOT_FOUND)
+                        .entity(Map.of("error", e.getMessage(), "code", "ATTACHMENT_NOT_FOUND"))
                         .build());
             } catch (Exception e) {
                 LOGGER.errorf(e, "Failed to download attachment for conversation '%s'", sanitize(conversationId));
@@ -270,7 +273,7 @@ public class RestAttachmentUpload {
                             .entity(Map.of("error", "Attachment not found", "code", "ATTACHMENT_NOT_FOUND"))
                             .build());
                 }
-            } catch (IAttachmentStore.AttachmentStoreException e) {
+            } catch (IAttachmentStore.AttachmentAccessDeniedException e) {
                 LOGGER.debugf("Attachment delete denied for conversation '%s': %s",
                         sanitize(conversationId), e.getMessage());
                 asyncResponse.resume(Response.status(Response.Status.FORBIDDEN)

@@ -213,7 +213,7 @@ public class PostgresAttachmentStore implements IAttachmentStore {
                 }
             }
             if (owner != null && !owner.equals(requestingConversationId)) {
-                throw new AttachmentStoreException(
+                throw new AttachmentAccessDeniedException(
                         "Delete denied: attachment belongs to '%s', requested from '%s'"
                                 .formatted(owner, requestingConversationId));
             }
@@ -245,12 +245,25 @@ public class PostgresAttachmentStore implements IAttachmentStore {
 
     @Override
     public List<Attachment> listByConversation(String conversationId) {
+        return listWhere("conversation_id = ?", conversationId, null);
+    }
+
+    @Override
+    public List<Attachment> listAccessible(String conversationId) {
+        // Owned by the conversation OR granted to it.
+        return listWhere("conversation_id = ? OR ? = ANY(COALESCE(grants, '{}'))", conversationId, conversationId);
+    }
+
+    private List<Attachment> listWhere(String whereClause, String param1, String param2) {
         ensureSchema();
         String sql = "SELECT storage_ref, filename, mime_type, size_bytes, conversation_id "
-                + "FROM attachments WHERE conversation_id = ? ORDER BY created_at";
+                + "FROM attachments WHERE " + whereClause + " ORDER BY created_at";
         try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, conversationId);
+            ps.setString(1, param1);
+            if (param2 != null) {
+                ps.setString(2, param2);
+            }
             try (ResultSet rs = ps.executeQuery()) {
                 List<Attachment> results = new ArrayList<>();
                 while (rs.next()) {
@@ -302,7 +315,7 @@ public class PostgresAttachmentStore implements IAttachmentStore {
         if (grantsContain(rs, requester)) {
             return;
         }
-        throw new AttachmentStoreException(
+        throw new AttachmentAccessDeniedException(
                 "Cross-conversation access denied: attachment belongs to '%s', requested from '%s'"
                         .formatted(owner, requester));
     }

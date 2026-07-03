@@ -251,19 +251,20 @@ public class GroupConversationService implements IGroupConversationService {
         if (incoming == null || incoming.isEmpty()) {
             return;
         }
-        if (attachmentStore == null) {
-            LOGGER.warn("Group attachments were provided but no attachment store is configured; ignoring them.");
-            return;
-        }
         List<Attachment> materialized = new ArrayList<>();
         for (Attachment a : incoming) {
             try {
-                if (a.getBase64Data() != null && !a.getBase64Data().isBlank()) {
+                if (a.getUrl() != null && !a.getUrl().isBlank()) {
+                    // Hosted URL — forwarded as-is; no blob store required.
+                    materialized.add(a);
+                } else if (a.getBase64Data() != null && !a.getBase64Data().isBlank()) {
+                    if (attachmentStore == null) {
+                        LOGGER.warn("Inline group attachment provided but no attachment store is configured; skipping it.");
+                        continue;
+                    }
                     byte[] bytes = Base64.getDecoder().decode(a.getBase64Data());
                     var stored = attachmentStore.store(bytes, a.getMimeType(), a.getFileName(), gc.getId(), defaultTenantId);
                     materialized.add(new Attachment(stored.mimeType(), stored.filename(), stored.sizeBytes(), stored.storageRef()));
-                } else if (a.getUrl() != null && !a.getUrl().isBlank()) {
-                    materialized.add(a);
                 } else if (a.getStorageRef() != null && !a.getStorageRef().isBlank()) {
                     materialized.add(a);
                 }

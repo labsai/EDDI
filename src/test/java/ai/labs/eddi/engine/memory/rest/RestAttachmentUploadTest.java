@@ -427,7 +427,7 @@ class RestAttachmentUploadTest {
         @Test
         void shouldReturn403WhenDenied() throws Exception {
             when(attachmentStore.getMetadata("ref-1", "conv-other"))
-                    .thenThrow(new AttachmentStoreException(
+                    .thenThrow(new IAttachmentStore.AttachmentAccessDeniedException(
                             "Cross-conversation access denied: attachment belongs to 'conv-1', requested from 'conv-other'"));
 
             Response response = captureAsync(ar -> endpoint.downloadAttachment("conv-other", "ref-1", ar));
@@ -491,7 +491,7 @@ class RestAttachmentUploadTest {
         @Test
         void shouldReturn403WhenNotOwner() throws Exception {
             when(attachmentStore.delete("ref-1", "conv-other"))
-                    .thenThrow(new AttachmentStoreException(
+                    .thenThrow(new IAttachmentStore.AttachmentAccessDeniedException(
                             "Delete denied: attachment belongs to 'conv-1', requested from 'conv-other'"));
 
             Response response = captureAsync(ar -> endpoint.deleteAttachment("conv-other", "ref-1", ar));

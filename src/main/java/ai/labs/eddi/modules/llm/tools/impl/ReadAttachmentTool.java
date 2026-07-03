@@ -48,7 +48,7 @@ public class ReadAttachmentTool {
     @Tool("Lists the files attached to this conversation. Returns each attachment's name, type and size. "
             + "Use this to discover what is available before calling readAttachment.")
     public String listAttachments() {
-        List<Attachment> attachments = attachmentStore.listByConversation(conversationId);
+        List<Attachment> attachments = attachmentStore.listAccessible(conversationId);
         if (attachments.isEmpty()) {
             return "No attachments are available in this conversation.";
         }
@@ -103,7 +103,7 @@ public class ReadAttachmentTool {
         if (nameOrRef == null || nameOrRef.isBlank()) {
             return null;
         }
-        List<Attachment> attachments = attachmentStore.listByConversation(conversationId);
+        List<Attachment> attachments = attachmentStore.listAccessible(conversationId);
         // Prefer an exact storageRef match, then an exact file-name match, then
         // case-insensitive name.
         for (Attachment a : attachments) {

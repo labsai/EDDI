@@ -5,6 +5,21 @@
 
 ---
 
+## 📎 Multimodal Attachments Completion — Automated review fixes (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+Addressed the GitHub code-quality / Copilot review of PR #588:
+
+1. **(High) `readAttachment` couldn't see group-shared blobs.** `listByConversation` returns only *owned* blobs, so a group member — whose shared attachments are owned by the group conversation and merely *granted* to it — got an empty list and couldn't recall them via the tool. Added `IAttachmentStore.listAccessible(conversationId)` (owned **OR** granted) in both backends (GridFS `metadata.grants` array match / Postgres `? = ANY(grants)`), and `ReadAttachmentTool` now lists/resolves through it.
+2. **(Medium) URL attachments dropped when no store configured.** `GroupConversationService.materializeAttachments` returned early on a null store, discarding hosted-`url` attachments that don't need a store. Restructured to skip only the inline-base64 (store-requiring) path.
+3. **(Medium) Brittle access-denied detection.** The download endpoint keyed 403-vs-404 off `message.contains("denied")`. Added a typed `IAttachmentStore.AttachmentAccessDeniedException` (thrown by both backends' authz/delete paths); the REST layer catches it for 403 and treats other store exceptions as 404/500.
+4. **(Note) Unused local variable** removed from a GridFS test.
+
+Tests updated + added (grant-aware listing, url-without-store materialize, typed-exception 403 paths); 277 green across the affected classes, coverage gate still met.
+
+---
+
 ## 📎 Multimodal Attachments Completion — Adversarial review + fixes (2026-07-03)
 
 **Repo:** EDDI (`feat/multimodal-attachments-completion`)

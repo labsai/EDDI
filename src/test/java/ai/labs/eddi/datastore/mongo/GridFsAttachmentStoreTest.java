@@ -316,7 +316,6 @@ class GridFsAttachmentStoreTest {
 
     @Test
     void getMetadata_nullMetadataDefaults() throws Exception {
-        ObjectId id = new ObjectId();
         GridFSFile f = mock(GridFSFile.class);
         when(f.getFilename()).thenReturn("x.bin");
         when(f.getLength()).thenReturn(9L);
@@ -406,7 +405,8 @@ class GridFsAttachmentStoreTest {
         when(f1.getFilename()).thenReturn("image.png");
         when(f1.getLength()).thenReturn(1024L);
         when(f1.getMetadata()).thenReturn(new Document()
-                .append("mimeType", "image/png").append("storageRef", "uuid-1"));
+                .append("mimeType", "image/png").append("storageRef", "uuid-1")
+                .append("conversationId", "conv-1"));
         whenFindIterate(f1);
 
         List<Attachment> results = sut.listByConversation("conv-1");
@@ -438,5 +438,24 @@ class GridFsAttachmentStoreTest {
     void listByConversation_emptyResults() {
         whenFindIterate();
         assertTrue(sut.listByConversation("conv-empty").isEmpty());
+    }
+
+    @Test
+    void listAccessible_returnsOwnerFromMetadata() {
+        // A blob owned by another conversation but granted to the requester: the
+        // OR filter returns it, and its owner (not the requester) is reported.
+        GridFSFile f = mock(GridFSFile.class);
+        when(f.getObjectId()).thenReturn(new ObjectId());
+        when(f.getFilename()).thenReturn("shared.pdf");
+        when(f.getLength()).thenReturn(10L);
+        when(f.getMetadata()).thenReturn(new Document()
+                .append("mimeType", "application/pdf").append("storageRef", "uuid-g")
+                .append("conversationId", "owner-conv"));
+        whenFindIterate(f);
+
+        List<Attachment> results = sut.listAccessible("member-conv");
+        assertEquals(1, results.size());
+        assertEquals("uuid-g", results.getFirst().storageRef());
+        assertEquals("owner-conv", results.getFirst().conversationId());
     }
 }

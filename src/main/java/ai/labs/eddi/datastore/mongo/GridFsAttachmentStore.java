@@ -168,7 +168,7 @@ public class GridFsAttachmentStore implements IAttachmentStore {
         Document metadata = file.getMetadata();
         String owner = metadata != null ? metadata.getString(META_CONVERSATION_ID) : null;
         if (owner != null && !owner.equals(requestingConversationId)) {
-            throw new AttachmentStoreException(
+            throw new AttachmentAccessDeniedException(
                     "Delete denied: attachment belongs to '%s', requested from '%s'"
                             .formatted(owner, requestingConversationId));
         }
@@ -191,8 +191,21 @@ public class GridFsAttachmentStore implements IAttachmentStore {
 
     @Override
     public List<Attachment> listByConversation(String conversationId) {
+        return listMatching(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId));
+    }
+
+    @Override
+    public List<Attachment> listAccessible(String conversationId) {
+        // Owned by the conversation OR granted to it. Filters.eq on the array field
+        // matches documents whose grants array contains the value (Mongo semantics).
+        return listMatching(Filters.or(
+                Filters.eq("metadata." + META_CONVERSATION_ID, conversationId),
+                Filters.eq("metadata." + META_GRANTS, conversationId)));
+    }
+
+    private List<Attachment> listMatching(Bson filter) {
         List<Attachment> results = new ArrayList<>();
-        for (GridFSFile file : gridFSBucket.find(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId))) {
+        for (GridFSFile file : gridFSBucket.find(filter)) {
             Document metadata = file.getMetadata();
             String ref = metadata != null && metadata.getString(META_STORAGE_REF) != null
                     ? metadata.getString(META_STORAGE_REF)
@@ -204,7 +217,7 @@ public class GridFsAttachmentStore implements IAttachmentStore {
                             ? metadata.getString(META_MIME_TYPE)
                             : "application/octet-stream",
                     file.getLength(),
-                    conversationId));
+                    metadata != null ? metadata.getString(META_CONVERSATION_ID) : null));
         }
         return results;
     }
@@ -258,7 +271,7 @@ public class GridFsAttachmentStore implements IAttachmentStore {
         if (grants != null && grants.contains(requester)) {
             return;
         }
-        throw new AttachmentStoreException(
+        throw new AttachmentAccessDeniedException(
                 "Cross-conversation access denied: attachment belongs to '%s', requested from '%s'"
                         .formatted(owner, requester));
     }

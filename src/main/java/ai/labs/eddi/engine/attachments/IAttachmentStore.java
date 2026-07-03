@@ -124,13 +124,25 @@ public interface IAttachmentStore {
     long deleteByConversation(String conversationId);
 
     /**
-     * List all attachments for a conversation.
+     * List attachments <em>owned</em> by a conversation.
      *
      * @param conversationId
      *            the conversation ID
      * @return list of attachment metadata
      */
     List<Attachment> listByConversation(String conversationId);
+
+    /**
+     * List all attachments a conversation can <em>read</em> — those it owns plus
+     * those it has been {@linkplain #grantAccess granted}. Used by the
+     * {@code readAttachment} tool so group members can enumerate blobs shared with
+     * them (owned by the group conversation, granted to the member).
+     *
+     * @param conversationId
+     *            the requesting conversation ID
+     * @return owned + granted attachment metadata
+     */
+    List<Attachment> listAccessible(String conversationId);
 
     /**
      * Attachment metadata record.
@@ -157,6 +169,17 @@ public interface IAttachmentStore {
 
         public AttachmentStoreException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    /**
+     * Thrown specifically when a conversation is not permitted to access a blob
+     * (not the owner and no grant). Lets callers distinguish an authorization
+     * failure (403) from a missing blob (404) without matching on message text.
+     */
+    class AttachmentAccessDeniedException extends AttachmentStoreException {
+        public AttachmentAccessDeniedException(String message) {
+            super(message);
         }
     }
 }

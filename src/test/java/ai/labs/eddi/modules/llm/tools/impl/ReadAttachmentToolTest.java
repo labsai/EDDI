@@ -46,13 +46,13 @@ class ReadAttachmentToolTest {
 
     @Test
     void list_empty() {
-        when(store.listByConversation(CONV)).thenReturn(List.of());
+        when(store.listAccessible(CONV)).thenReturn(List.of());
         assertTrue(tool.listAttachments().contains("No attachments"));
     }
 
     @Test
     void list_formatsEntries() {
-        when(store.listByConversation(CONV)).thenReturn(List.of(
+        when(store.listAccessible(CONV)).thenReturn(List.of(
                 att("r1", "report.pdf", "application/pdf", 2048),
                 att("r2", "notes.txt", "text/plain", 12)));
         String out = tool.listAttachments();
@@ -66,7 +66,7 @@ class ReadAttachmentToolTest {
 
     @Test
     void read_byFileName_extractsText() throws Exception {
-        when(store.listByConversation(CONV)).thenReturn(List.of(att("r1", "notes.txt", "text/plain", 5)));
+        when(store.listAccessible(CONV)).thenReturn(List.of(att("r1", "notes.txt", "text/plain", 5)));
         when(store.load("r1", CONV)).thenReturn("hello world".getBytes(StandardCharsets.UTF_8));
 
         String out = tool.readAttachment("notes.txt", 0);
@@ -75,7 +75,7 @@ class ReadAttachmentToolTest {
 
     @Test
     void read_byStorageRef_extractsText() throws Exception {
-        when(store.listByConversation(CONV)).thenReturn(List.of(att("r1", "notes.txt", "text/plain", 5)));
+        when(store.listAccessible(CONV)).thenReturn(List.of(att("r1", "notes.txt", "text/plain", 5)));
         when(store.load("r1", CONV)).thenReturn("body".getBytes(StandardCharsets.UTF_8));
 
         assertTrue(tool.readAttachment("r1", 0).contains("body"));
@@ -83,7 +83,7 @@ class ReadAttachmentToolTest {
 
     @Test
     void read_caseInsensitiveFileName() throws Exception {
-        when(store.listByConversation(CONV)).thenReturn(List.of(att("r1", "Notes.TXT", "text/plain", 5)));
+        when(store.listAccessible(CONV)).thenReturn(List.of(att("r1", "Notes.TXT", "text/plain", 5)));
         when(store.load("r1", CONV)).thenReturn("x".getBytes(StandardCharsets.UTF_8));
         assertTrue(tool.readAttachment("notes.txt", 0).contains("x"));
     }
@@ -91,7 +91,7 @@ class ReadAttachmentToolTest {
     @Test
     void read_pdfPage() throws Exception {
         byte[] pdf = multiPagePdf("Alpha page", "Beta page");
-        when(store.listByConversation(CONV)).thenReturn(List.of(att("r1", "doc.pdf", "application/pdf", pdf.length)));
+        when(store.listAccessible(CONV)).thenReturn(List.of(att("r1", "doc.pdf", "application/pdf", pdf.length)));
         when(store.load("r1", CONV)).thenReturn(pdf);
 
         String out = tool.readAttachment("doc.pdf", 2);
@@ -101,34 +101,34 @@ class ReadAttachmentToolTest {
 
     @Test
     void read_notFound() {
-        when(store.listByConversation(CONV)).thenReturn(List.of(att("r1", "a.txt", "text/plain", 1)));
+        when(store.listAccessible(CONV)).thenReturn(List.of(att("r1", "a.txt", "text/plain", 1)));
         assertTrue(tool.readAttachment("missing.txt", 0).contains("No attachment named"));
     }
 
     @Test
     void read_nonExtractableType_note() throws Exception {
-        when(store.listByConversation(CONV)).thenReturn(List.of(att("r1", "pic.png", "image/png", 100)));
+        when(store.listAccessible(CONV)).thenReturn(List.of(att("r1", "pic.png", "image/png", 100)));
         when(store.load("r1", CONV)).thenReturn(new byte[]{1, 2, 3});
         assertTrue(tool.readAttachment("pic.png", 0).contains("no extractable text"));
     }
 
     @Test
     void read_loadDenied_error() throws Exception {
-        when(store.listByConversation(CONV)).thenReturn(List.of(att("r1", "a.txt", "text/plain", 1)));
+        when(store.listAccessible(CONV)).thenReturn(List.of(att("r1", "a.txt", "text/plain", 1)));
         when(store.load("r1", CONV)).thenThrow(new AttachmentStoreException("access denied"));
         assertTrue(tool.readAttachment("a.txt", 0).contains("Could not read attachment"));
     }
 
     @Test
     void read_emptyText_note() throws Exception {
-        when(store.listByConversation(CONV)).thenReturn(List.of(att("r1", "empty.txt", "text/plain", 0)));
+        when(store.listAccessible(CONV)).thenReturn(List.of(att("r1", "empty.txt", "text/plain", 0)));
         when(store.load("r1", CONV)).thenReturn(new byte[0]);
         assertTrue(tool.readAttachment("empty.txt", 0).contains("no extractable text"));
     }
 
     @Test
     void read_blankRef_notFound() {
-        when(store.listByConversation(CONV)).thenReturn(List.of(att("r1", "a.txt", "text/plain", 1)));
+        when(store.listAccessible(CONV)).thenReturn(List.of(att("r1", "a.txt", "text/plain", 1)));
         assertTrue(tool.readAttachment("  ", 0).contains("No attachment named"));
     }
 
