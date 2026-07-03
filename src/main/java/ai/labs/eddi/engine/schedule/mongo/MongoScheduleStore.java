@@ -458,6 +458,17 @@ public class MongoScheduleStore implements IScheduleStore {
             doc.put(field, inst.toEpochMilli());
         } else if (val instanceof Date date) {
             doc.put(field, date.getTime());
+        } else if (val instanceof String str && !str.isBlank()) {
+            // The serializer may render Instants as ISO-8601 strings rather than
+            // epoch numbers (depends on the ObjectMapper's WRITE_DATES_AS_TIMESTAMPS
+            // setting). Range queries (findDueSchedules: lte(nextFire, nowMs)) compare
+            // numerically, so an ISO string would never match — normalize it to
+            // epoch-millis here so storage is correct regardless of the date format.
+            try {
+                doc.put(field, Instant.parse(str).toEpochMilli());
+            } catch (java.time.format.DateTimeParseException e) {
+                LOGGER.warnf("Schedule field '%s' value '%s' is neither epoch-millis nor ISO-8601 — left as-is", field, str);
+            }
         }
         // null or other types left as-is
     }
