@@ -280,18 +280,23 @@ public class RestAgentEngine implements IRestAgentEngine {
             String cancelledBy = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
             var outcome = conversationService.cancelConversation(conversationId,
                     ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL, cancelledBy);
+            // Plain-text, curated bodies: never reflect the raw conversationId (it is
+            // a caller-supplied path param — echoing it is a reflected-XSS vector) and
+            // never leak internal exception detail to the client.
             return switch (outcome) {
                 case CANCELLED -> Response.ok().build();
                 case NOT_FOUND -> Response.status(Response.Status.NOT_FOUND)
-                        .entity("Conversation not found: " + conversationId).build();
+                        .type(TEXT_PLAIN).entity("Conversation not found.").build();
                 case NOTHING_TO_CANCEL -> Response.status(Response.Status.CONFLICT)
+                        .type(TEXT_PLAIN)
                         .entity("Nothing to cancel: conversation is neither awaiting approval nor executing."
                                 + " Use endConversation to close it.")
                         .build();
             };
         } catch (ResourceStoreException e) {
-            LOGGER.error("Failed to cancel conversation: " + conversationId, e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
+            LOGGER.error("Failed to cancel conversation: " + sanitize(conversationId), e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .type(TEXT_PLAIN).entity("Failed to cancel conversation.").build();
         }
     }
 
@@ -319,14 +324,20 @@ public class RestAgentEngine implements IRestAgentEngine {
             conversationService.resumeConversation(conversationId, decision, null);
             return Response.ok().build();
         } catch (ResourceNotFoundException e) {
-            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("Conversation not found.").build();
         } catch (IllegalStateException e) {
-            // wrong state (already resumed/cancelled/timed out, agent not deployed)
-            return Response.status(Response.Status.CONFLICT).entity(e.getMessage()).build();
+            // wrong state (already resumed/cancelled/timed out, agent not deployed) —
+            // a curated, non-reflecting message (do not echo raw exception text).
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("Conversation is not in a resumable state — it may have been resumed, "
+                            + "cancelled, or timed out already, or its agent is not deployed.")
+                    .build();
         } catch (ResourceStoreException e) {
             // genuine infrastructure failure — the pause was restored by the service
-            LOGGER.error("Resume failed for conversation " + conversationId, e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
+            LOGGER.error("Resume failed for conversation " + sanitize(conversationId), e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).type(TEXT_PLAIN)
+                    .entity("Failed to resume conversation.").build();
         }
     }
 
@@ -364,9 +375,12 @@ public class RestAgentEngine implements IRestAgentEngine {
                     "approvalTimeout", paused && snapshot.getHitlApprovalTimeout() != null ? snapshot.getHitlApprovalTimeout() : "");
             return Response.ok(summary).build();
         } catch (ResourceNotFoundException e) {
-            return Response.status(Response.Status.NOT_FOUND).entity(e.getMessage()).build();
+            return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
+                    .entity("Conversation not found.").build();
         } catch (ResourceStoreException e) {
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(e.getMessage()).build();
+            LOGGER.error("Failed to read approval status for conversation " + sanitize(conversationId), e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).type(TEXT_PLAIN)
+                    .entity("Failed to read approval status.").build();
         }
     }
 
