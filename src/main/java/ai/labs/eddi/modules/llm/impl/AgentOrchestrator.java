@@ -706,7 +706,10 @@ class AgentOrchestrator {
         if (attachmentStore == null || attachmentTextExtractor == null) {
             return;
         }
-        IData<List<?>> attachmentData = memory.getCurrentStep().getLatestData(MemoryKeys.ATTACHMENTS);
+        // Exact-match read (getData, not the prefix-scanning getLatestData):
+        // "attachments"
+        // is a prefix of the attachments:extracts/errors keys the forwarder persists.
+        IData<List<?>> attachmentData = memory.getCurrentStep().getData(MemoryKeys.ATTACHMENTS);
         if (attachmentData == null || attachmentData.getResult() == null || attachmentData.getResult().isEmpty()) {
             return;
         }

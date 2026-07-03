@@ -202,6 +202,43 @@ class ConversationLogGeneratorTest {
             var log = new ConversationLogGenerator(memory).generate(-1, true, true);
             assertEquals("Hi", log.getMessages().getFirst().getContent().getLast().getValue());
         }
+
+        @Test
+        @DisplayName("multi-turn: extract lands on its own turn, not the mirror turn")
+        void stitchesOntoCorrectTurnAcrossTurns() {
+            // Three turns; the extract lives on the OLDEST turn (output index 0).
+            var out0 = new ConversationOutput();
+            out0.put("input", "turn0");
+            var out1 = new ConversationOutput();
+            out1.put("input", "turn1");
+            var out2 = new ConversationOutput();
+            out2.put("input", "turn2");
+            var memory = mock(IConversationMemory.class);
+            when(memory.getConversationOutputs()).thenReturn(new ArrayList<>(List.of(out0, out1, out2)));
+
+            var oldestStep = mock(IConversationMemory.IConversationStep.class);
+            @SuppressWarnings("unchecked")
+            IData<List<String>> data = mock(IData.class);
+            when(data.getResult()).thenReturn(List.of("PDF EXTRACT"));
+            when(oldestStep.getLatestData(MemoryKeys.ATTACHMENT_EXTRACTS)).thenReturn(data);
+            var otherStep = mock(IConversationMemory.IConversationStep.class);
+            when(otherStep.getLatestData(MemoryKeys.ATTACHMENT_EXTRACTS)).thenReturn(null);
+
+            // Stack.get() is reverse-ordered: get(0)=newest(turn2) … get(2)=oldest(turn0).
+            var stack = mock(IConversationMemory.IConversationStepStack.class);
+            when(stack.size()).thenReturn(3);
+            when(stack.get(0)).thenReturn(otherStep);
+            when(stack.get(1)).thenReturn(otherStep);
+            when(stack.get(2)).thenReturn(oldestStep);
+            when(memory.getAllSteps()).thenReturn(stack);
+
+            var log = new ConversationLogGenerator(memory).generate(-1, true, true);
+
+            String turn0 = log.getMessages().get(0).getContent().getLast().getValue();
+            String turn2 = log.getMessages().get(2).getContent().getLast().getValue();
+            assertTrue(turn0.contains("PDF EXTRACT"), "extract must land on turn 0: " + turn0);
+            assertFalse(turn2.contains("PDF EXTRACT"), "extract must NOT leak onto turn 2: " + turn2);
+        }
     }
 
     // ─── Basic generation ───────────────────────────────────────

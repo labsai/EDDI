@@ -324,7 +324,13 @@ public class AttachmentForwarder {
     }
 
     private List<Attachment> readAttachments(IConversationMemory memory) {
-        IData<List<?>> data = memory.getCurrentStep().getLatestData(ATTACHMENTS);
+        // Exact-match read: getLatestData is a prefix scan, and ATTACHMENTS
+        // ("attachments")
+        // is a prefix of the attachments:extracts / attachments:errors keys this
+        // forwarder
+        // persists — a prefix read would return the wrong entry on a second forwarder
+        // invocation in the same step.
+        IData<List<?>> data = memory.getCurrentStep().getData(ATTACHMENTS);
         if (data == null || data.getResult() == null) {
             return List.of();
         }

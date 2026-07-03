@@ -84,7 +84,7 @@ class AttachmentForwarderTest {
 
         @Test
         void noAttachments() {
-            when(currentStep.getLatestData(ATTACHMENTS)).thenReturn(null);
+            when(currentStep.getData(ATTACHMENTS)).thenReturn(null);
             List<ChatMessage> messages = messages(UserMessage.from("Hi"));
             forwarder.forward(messages, memory, "openai", "gpt-4o");
             assertEquals(1, messages.size());
@@ -442,6 +442,31 @@ class AttachmentForwarderTest {
     }
 
     @Test
+    void secondInvocation_withPersistedExtractsErrors_stillForwards() {
+        // Regression: a prior forwarder pass in the same step persisted the
+        // attachments:extracts / attachments:errors keys. A prefix read of
+        // "attachments" would return one of those List<String> entries and forward
+        // nothing; the exact-match read must still find the List<Attachment>.
+        var realMemory = new ai.labs.eddi.engine.memory.ConversationMemory("agent-1", 1, "user-1");
+        var step = realMemory.getCurrentStep();
+        Attachment att = new Attachment();
+        att.setMimeType("image/png");
+        att.setBase64Data(Base64.getEncoder().encodeToString("png".getBytes()));
+        step.storeData(new ai.labs.eddi.engine.memory.model.Data<>(ATTACHMENTS.key(), List.of(att)));
+        // Inserted AFTER attachments — this is what a prefix reverse-scan would return
+        // first.
+        step.storeData(new ai.labs.eddi.engine.memory.model.Data<>(
+                ai.labs.eddi.engine.memory.MemoryKeys.ATTACHMENT_ERRORS.key(), List.of("earlier error")));
+        step.storeData(new ai.labs.eddi.engine.memory.model.Data<>(
+                ai.labs.eddi.engine.memory.MemoryKeys.ATTACHMENT_EXTRACTS.key(), List.of("doc: earlier extract")));
+
+        List<ChatMessage> messages = messages(UserMessage.from("look"));
+        forwarder.forward(messages, realMemory, "openai", "gpt-4o");
+
+        assertInstanceOf(ImageContent.class, ((UserMessage) messages.get(0)).contents().get(1));
+    }
+
+    @Test
     void noContentSource_skipped() {
         Attachment att = new Attachment(); // NONE
         att.setMimeType("image/png");
@@ -504,7 +529,7 @@ class AttachmentForwarderTest {
     private void mockAttachments(Attachment... attachments) {
         IData data = mock(IData.class);
         when(data.getResult()).thenReturn(List.of(attachments));
-        when(currentStep.getLatestData(ATTACHMENTS)).thenReturn(data);
+        when(currentStep.getData(ATTACHMENTS)).thenReturn(data);
     }
 
     private static byte[] tinyPdf(String text) throws Exception {

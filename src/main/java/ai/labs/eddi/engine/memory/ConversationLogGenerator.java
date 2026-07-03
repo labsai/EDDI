@@ -164,7 +164,13 @@ public class ConversationLogGenerator {
         if (allSteps == null || input == null || stepIndex < 0 || stepIndex >= allSteps.size()) {
             return input;
         }
-        IData<List<String>> data = allSteps.get(stepIndex).getLatestData(MemoryKeys.ATTACHMENT_EXTRACTS);
+        // conversationOutputs is forward-ordered (0 = oldest) but
+        // IConversationStepStack.get()
+        // is reverse-ordered (get(0) = newest), so convert the forward output index to
+        // the
+        // reverse step index to land on the SAME turn (not its mirror).
+        IConversationMemory.IConversationStep step = allSteps.get(allSteps.size() - 1 - stepIndex);
+        IData<List<String>> data = step.getLatestData(MemoryKeys.ATTACHMENT_EXTRACTS);
         if (data == null || data.getResult() == null || data.getResult().isEmpty()) {
             return input;
         }

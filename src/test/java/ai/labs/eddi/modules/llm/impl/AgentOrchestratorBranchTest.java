@@ -163,9 +163,9 @@ class AgentOrchestratorBranchTest {
             if (present) {
                 IData data = mock(IData.class);
                 doReturn(List.of(new Object())).when(data).getResult();
-                doReturn(data).when(step).getLatestData(MemoryKeys.ATTACHMENTS);
+                doReturn(data).when(step).getData(MemoryKeys.ATTACHMENTS);
             } else {
-                doReturn(null).when(step).getLatestData(MemoryKeys.ATTACHMENTS);
+                doReturn(null).when(step).getData(MemoryKeys.ATTACHMENTS);
             }
         }
 
