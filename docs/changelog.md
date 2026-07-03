@@ -5,6 +5,28 @@
 
 ---
 
+## 🛠️ Tool-level HITL — foundational layer (Tasks 1–4 of 17) (2026-07-03)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Implementing **tool-level HITL approval gating**: pausing a conversation for human approval when the LLM invokes a *gated tool* (any source — built-in `@Tool`, MCP, A2A, httpcall, dynamic-agent, memory, recall), configured via allow/disallow pattern lists, co-existing with the behavior-rule `PAUSE_CONVERSATION` mechanism. Full plan: [`planning/hitl-tool-approval-plan.md`](../planning/hitl-tool-approval-plan.md). This closes the deferred "Tool-level HITL" limitation (`docs/hitl.md` Known Limitations).
+
+**Architecture — Durable Re-entry (ToolGate-DR):** a batch gate in `AgentOrchestrator.executeWithTools()` intercepts gated calls *before execution* (fail-safe), serializes the exact in-flight langchain4j message list, persists it + pending-call metadata on `ConversationMemorySnapshot`, and aborts the LLM loop with an unchecked `ToolApprovalRequiredException` that `LifecycleManager` converts into the existing `ConversationPauseException` (new `pauseOrigin=TOOL_CALL`). Resume re-enters the **same** task index, replays the transcript, applies verdicts (write-ahead journal → at-most-once), and continues the loop. Chosen over a turn-completing "pending result" design after a 3-way design panel + 2 adversarial judges: durable replay uniquely preserves *exactly the state the human is approving against* (a multi-iteration turn that rebuilds from memory loses intermediate tool results).
+
+**Method:** two adversarial subagent workflows (design-judge, then fact-verification against the codebase); 20 verification findings (1 blocker, 5 major) folded back into the plan before execution.
+
+**Landed (each task = its own commit, TDD, all tests green locally):**
+- **Task 1 — the architectural gate.** `ChatTranscriptCodec` wraps langchain4j 1.17.0 `ChatMessageSerializer`/`Deserializer` with a size cap + typed failure. Its test **empirically proves** the round-trip the whole design depends on (`AiMessage`+`ToolExecutionRequest`+`ToolExecutionResultMessage`+multimodal content survive serialize→deserialize). 6 tests. *If this had failed, execution was gated to stop-and-escalate — it passed.*
+- **Task 2 — pattern engine + gate.** `ToolApprovalPatterns` (ReDoS-safe `*`-only glob, source-prefix validation with typo suggestions), `ToolApprovalGate` (batch classify; precedence exempt-beats-require; `source:name` then bare-name matching = fail-safe), `ToolApprovalsConfig` POJO. 9 tests.
+- **Task 3 — config homes + validation.** `toolApprovals` on `AgentConfiguration.HitlConfig` (agent-level default) and `LlmConfiguration.Task` (per-task full-replace override). `HitlConfigValidation.validateToolApprovals` (actionable 400s: bad pattern w/ index, both-lists conflict, duplicates, exempt-without-require, range checks, reserved `INBOX`, timeout/reason length); wired into `LlmStore` create/update; agent-level `AUTO_APPROVE`-inheritance WARN. 15 tests + all existing validation suites still green.
+- **Task 4 — memory model.** `PendingToolCallBatch` (+ `PendingToolCall`, size caps); `ConversationPauseException.PauseOrigin` (RULE default / TOOL_CALL, backward-compatible 3-arg ctor); transient `hitlPauseType`/`hitlPendingToolCalls`/`agentToolApprovalsConfig`/`hitlResumeDecision` on `ConversationMemory`+`IConversationMemory`; persisted mirrors on `ConversationMemorySnapshot`; both-directions copy in `ConversationMemoryUtilities`. Round-trips through Jackson; legacy documents (null pauseType) treated as RULE. 4 tests + all existing HITL/resume/lifecycle suites green.
+
+**Design decisions locked for the remaining tasks (flag if wrong):** (1) `AUTO_APPROVE` never applies to tool pauses implicitly — explicit per-gate opt-in only; (2) crash-inside-an-approved-tool yields honest `EXECUTION_OUTCOME_UNKNOWN`, never silent re-execution; (3) group-member tool pauses auto-reject gracefully (`system:group`); (4) ungated calls in a mixed batch execute before the human sees the pause (approver is shown which ran); (5) a multi-day pause resumes against pause-time prompt state.
+
+**Next:** Task 5 (the gate hook + signal plumbing + pause commit in `AgentOrchestrator`/`LifecycleManager`/`Conversation` — the heaviest single task), then 6 (journal store), 7 (per-call verdict REST model), 8 (same-index re-entry), 9 (`resumeToolLoop`), 10 (timeout/no-progress), 11–13 (approver surfaces, Slack, delegated/group parity), 14 (crash recovery), 15 (lints), 16 (ITs), 17 (docs). Tasks 8→9 share a `resumeToolLoop` stub to keep each commit building.
+
+---
+
 ## 🐰 CodeRabbit review triage — 21 fixes, adversarially verified (2026-07-03)
 
 **Repo:** EDDI (`feat/hitl-framework`, PR #585)
