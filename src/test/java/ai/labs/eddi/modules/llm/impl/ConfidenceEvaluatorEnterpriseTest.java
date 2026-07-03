@@ -246,4 +246,44 @@ class ConfidenceEvaluatorEnterpriseTest {
         String s = ConfidenceEvaluator.buildConfidenceInstruction();
         assertTrue(s.contains("response") && s.contains("confidence"));
     }
+
+    @Test
+    @DisplayName("heuristic — out-of-range configured scores are clamped to [0,1]")
+    void heuristic_clampsConfiguredScores() {
+        var high = new HeuristicConfig();
+        high.setDefaultScore(5.0);
+        assertEquals(1.0, ConfidenceEvaluator.evaluateHeuristic("a decent, ordinary answer with no flags at all", high).confidence(), 0.001);
+
+        var low = new HeuristicConfig();
+        low.setShortLengthThreshold(1000);
+        low.setShortScore(-3.0);
+        assertEquals(0.0, ConfidenceEvaluator.evaluateHeuristic("short-ish", low).confidence(), 0.001);
+    }
+
+    @Test
+    @DisplayName("structured_output regex fallback — escaped backslash is unescaped correctly (\\\\ -> \\)")
+    void structuredOutput_unescapesBackslash() {
+        // Missing comma → Jackson rejects → regex fallback uses the single-pass
+        // unescaper.
+        var r = ConfidenceEvaluator.evaluateStructuredOutput("{\"confidence\": 0.5 \"response\": \"c:\\\\path\"}", null);
+        assertEquals(0.5, r.confidence(), 0.001);
+        assertEquals("c:\\path", r.response());
+        assertFalse(r.response().contains("\n"));
+    }
+
+    @Test
+    @DisplayName("structured_output regex fallback — common escapes unescaped, unknown escape preserved")
+    void structuredOutput_unescapesCommon() {
+        // JSON text: {"confidence": 0.4 "response": "a\nb\tc\"d\re\/f\x"} (malformed →
+        // regex path)
+        var r = ConfidenceEvaluator.evaluateStructuredOutput("{\"confidence\": 0.4 \"response\": \"a\\nb\\tc\\\"d\\re\\/f\\x\"}", null);
+        assertEquals(0.4, r.confidence(), 0.001);
+        String resp = r.response();
+        assertTrue(resp.contains("\n"), "newline");
+        assertTrue(resp.contains("\t"), "tab");
+        assertTrue(resp.contains("\""), "quote");
+        assertTrue(resp.contains("\r"), "carriage return");
+        assertTrue(resp.contains("/"), "slash");
+        assertTrue(resp.contains("\\x"), "unknown escape preserved");
+    }
 }

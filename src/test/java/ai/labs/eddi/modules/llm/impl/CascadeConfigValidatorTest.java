@@ -67,19 +67,18 @@ class CascadeConfigValidatorTest {
     }
 
     @Test
-    @DisplayName("enabled but empty steps — throws")
-    void emptySteps_throws() {
+    @DisplayName("enabled but empty steps — warns, does not block load (fails at runtime as before)")
+    void emptySteps_warnsNotThrows() {
         var c = enabled(List.of());
-        var ex = assertThrows(WorkflowConfigurationException.class, () -> CascadeConfigValidator.validate(configWith(c)));
-        assertTrue(ex.getMessage().contains("no steps"));
+        assertDoesNotThrow(() -> CascadeConfigValidator.validate(configWith(c)));
     }
 
     @Test
-    @DisplayName("unknown strategy — throws")
-    void unknownStrategy_throws() {
+    @DisplayName("unknown strategy — warns, does not throw (ran sequentially before)")
+    void unknownStrategy_warns() {
         var c = enabled(List.of(step("openai", null)));
         c.setStrategy("magic");
-        assertThrows(WorkflowConfigurationException.class, () -> CascadeConfigValidator.validate(configWith(c)));
+        assertDoesNotThrow(() -> CascadeConfigValidator.validate(configWith(c)));
     }
 
     @Test
@@ -91,20 +90,19 @@ class CascadeConfigValidatorTest {
     }
 
     @Test
-    @DisplayName("unknown evaluationStrategy — throws")
-    void unknownEvaluationStrategy_throws() {
+    @DisplayName("unknown evaluationStrategy — warns, does not throw (defaulted before)")
+    void unknownEvaluationStrategy_warns() {
         var c = enabled(List.of(step("openai", null)));
         c.setEvaluationStrategy("vibes");
-        assertThrows(WorkflowConfigurationException.class, () -> CascadeConfigValidator.validate(configWith(c)));
+        assertDoesNotThrow(() -> CascadeConfigValidator.validate(configWith(c)));
     }
 
     @Test
-    @DisplayName("judge_model without judge config — throws")
-    void judgeModelWithoutJudge_throws() {
+    @DisplayName("judge_model without judge config — warns, does not throw (heuristic fallback)")
+    void judgeModelWithoutJudge_warns() {
         var c = enabled(List.of(step("openai", null)));
         c.setEvaluationStrategy("judge_model");
-        var ex = assertThrows(WorkflowConfigurationException.class, () -> CascadeConfigValidator.validate(configWith(c)));
-        assertTrue(ex.getMessage().contains("judge_model"));
+        assertDoesNotThrow(() -> CascadeConfigValidator.validate(configWith(c)));
     }
 
     @Test
@@ -119,26 +117,24 @@ class CascadeConfigValidatorTest {
     }
 
     @Test
-    @DisplayName("threshold > 1.0 — throws (unreachable)")
-    void thresholdAboveOne_throws() {
+    @DisplayName("threshold > 1.0 — warns, does not throw (unreachable but tolerated)")
+    void thresholdAboveOne_warns() {
         var c = enabled(List.of(step("openai", 1.5), step("anthropic", null)));
-        var ex = assertThrows(WorkflowConfigurationException.class, () -> CascadeConfigValidator.validate(configWith(c)));
-        assertTrue(ex.getMessage().contains("confidenceThreshold"));
+        assertDoesNotThrow(() -> CascadeConfigValidator.validate(configWith(c)));
     }
 
     @Test
-    @DisplayName("negative threshold — throws")
-    void negativeThreshold_throws() {
+    @DisplayName("negative threshold — warns, does not throw")
+    void negativeThreshold_warns() {
         var c = enabled(List.of(step("openai", -0.1), step("anthropic", null)));
-        assertThrows(WorkflowConfigurationException.class, () -> CascadeConfigValidator.validate(configWith(c)));
+        assertDoesNotThrow(() -> CascadeConfigValidator.validate(configWith(c)));
     }
 
     @Test
-    @DisplayName("non-last step with null threshold — throws (dead-step trap)")
-    void nonLastNullThreshold_throws() {
+    @DisplayName("non-last step with null threshold — warns, does not throw (dead-step trap tolerated)")
+    void nonLastNullThreshold_warns() {
         var c = enabled(List.of(step("openai", null), step("anthropic", null)));
-        var ex = assertThrows(WorkflowConfigurationException.class, () -> CascadeConfigValidator.validate(configWith(c)));
-        assertTrue(ex.getMessage().contains("not the last step"));
+        assertDoesNotThrow(() -> CascadeConfigValidator.validate(configWith(c)));
     }
 
     @Test
@@ -173,11 +169,11 @@ class CascadeConfigValidatorTest {
     }
 
     @Test
-    @DisplayName("non-positive step timeout — throws")
-    void badStepTimeout_throws() {
+    @DisplayName("non-positive step timeout — warns, does not throw")
+    void badStepTimeout_warns() {
         var s = step("openai", null);
         s.setTimeoutMs(0L);
-        assertThrows(WorkflowConfigurationException.class, () -> CascadeConfigValidator.validate(configWith(enabled(List.of(s)))));
+        assertDoesNotThrow(() -> CascadeConfigValidator.validate(configWith(enabled(List.of(s)))));
     }
 
     @Test

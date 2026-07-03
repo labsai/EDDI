@@ -413,10 +413,11 @@ public class LlmTask implements ILifecycleTask {
             responseMetadata.put("cascadeStep", cascadeResult.stepUsed());
             responseMetadata.put("cascadeConfidence", cascadeResult.confidence());
 
-            // Stream final response if streaming is active and it was not already streamed
-            // live by the executor (final-step streaming) or by agent mode.
-            if (eventSink != null && responseContent != null && cascadeResult.agentResult() == null && !addToOutputExplicitlyFalse
-                    && !cascadeResult.streamedLive()) {
+            // Emit the final response to the stream unless the executor already streamed
+            // it live token-by-token (legacy final-step streaming). Agent-mode results are
+            // emitted here as a single chunk, matching the standard (non-cascade) agent
+            // path.
+            if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse && !cascadeResult.streamedLive()) {
                 eventSink.onToken(responseContent);
             }
 

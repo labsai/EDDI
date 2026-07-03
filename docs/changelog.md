@@ -54,6 +54,18 @@
 - New coverage: `CascadingModelExecutorEnterpriseTest`, `CascadingModelExecutorCoverageTest` (agent mode, live streaming, cost/duration ceilings, timeout + retryable escalation, convertToObject downgrade), `ConfidenceEvaluatorEnterpriseTest`, `StreamingLegacyChatExecutorCoverageTest`, and expanded `CascadeConfigValidatorTest`. New-code coverage ≈ **92% instruction / 78% branch** (residual branches are the 120s streaming-timeout guard and typed-exception variants); the project aggregate stays above the 90%/80% gate.
 - `CascadingModelExecutor.isRetryableError` message matching collapsed to a single regex (fewer branches, same behavior).
 
+### Adversarial-review fixes
+
+A multi-lens adversarial review (7 reviewers → independent skeptics) surfaced several real defects, now fixed:
+
+- **`returnBestAcrossSteps` vs. live streaming (high):** a final step already streamed live is no longer superseded by an earlier higher-scoring step — that would have replaced text the client had already received. The trace marks the superseded step accordingly.
+- **Agent-mode cascade streaming (medium):** the cascade now emits the agent-mode final response to the SSE stream as a single chunk, matching the standard (non-cascade) agent path (it was silently dropped before); docs corrected.
+- **Validator backward-compat (medium):** `CascadeConfigValidator` now **warns** (instead of hard-failing) for conditions older releases tolerated at load — unknown strategy/evaluationStrategy, out-of-range thresholds, dead non-last steps, judge_model without a judge, empty steps — so upgrading cannot stop a previously-loading agent from deploying. Only the new pricing/ceiling fields hard-fail on an invalid value.
+- **Heuristic clamping (medium):** config-supplied heuristic scores are clamped to [0,1] so a mis-set value can't produce an out-of-range confidence.
+- **`unescapeJsonString` (low):** rewritten as a single-pass scanner so an escaped backslash is consumed before the following char (chained `replace` corrupted `\\n`). Judge regex fallback scoped to the extracted object.
+- **Streaming-timeout caveat** documented (partial tokens of an abandoned final step).
+- New regression tests for all of the above, plus the previously-missing SSE-forwarding and cooperative-cancellation tests. New-code coverage ≈ **92% instruction / 79% branch**.
+
 ---
 
 ## 🐛 Fix: PostgreSQL group conversations broken — JDBC `?|` operator escape (2026-07-02)

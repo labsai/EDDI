@@ -801,6 +801,45 @@ class AgentOrchestratorExtendedTest {
         }
 
         @Test
+        @DisplayName("Cooperative cancellation — interrupted thread stops the tool loop (plan #9)")
+        void cooperativeCancellation_interruptedThreadThrows() {
+            var task = new LlmConfiguration.Task();
+            task.setEnableBuiltInTools(true);
+            task.setBuiltInToolsWhitelist(List.of("calculator"));
+            task.setEnableHttpCallTools(false);
+            task.setEnableMcpCallTools(false);
+            var retry = new LlmConfiguration.RetryConfiguration();
+            retry.setMaxAttempts(1);
+            task.setRetry(retry);
+
+            when(mockMemory.getAgentId()).thenReturn(null);
+            when(mockMemory.getAgentVersion()).thenReturn(null);
+            when(mockMemory.getConversationId()).thenReturn("conv-1");
+
+            // chatModel would return tool calls, but the interrupt check fires first.
+            ChatModel chatModel = mock(ChatModel.class);
+
+            Thread.currentThread().interrupt(); // simulate a cascade per-step timeout cancel
+            try {
+                var ex = assertThrows(LifecycleException.class, () -> orchestrator.executeIfToolsEnabled(
+                        chatModel, "sys", List.of(UserMessage.from("hi")), task, mockMemory));
+                // The retry helper wraps the cancellation message — search the cause chain.
+                boolean mentionsCancel = false;
+                for (Throwable t = ex; t != null; t = t.getCause()) {
+                    if (t.getMessage() != null && t.getMessage().toLowerCase().contains("cancel")) {
+                        mentionsCancel = true;
+                        break;
+                    }
+                }
+                assertTrue(mentionsCancel, "expected a cancellation message in the chain, got: " + ex.getMessage());
+                // Cancellation must stop before the model is ever called.
+                verify(chatModel, never()).chat(any(ChatRequest.class));
+            } finally {
+                Thread.interrupted(); // clear the flag so it does not leak to other tests
+            }
+        }
+
+        @Test
         @DisplayName("Should return ExecutionResult with multiple built-in tools")
         void returnExecutionResult_withMultipleTools() throws LifecycleException {
             var task = new LlmConfiguration.Task();

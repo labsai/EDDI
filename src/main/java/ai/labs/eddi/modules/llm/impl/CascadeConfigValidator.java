@@ -16,9 +16,16 @@ import java.util.Set;
 
 /**
  * Deploy-time validation for {@link ModelCascadeConfig}. Runs from
- * {@code LlmTask.configure()} so misconfigurations fail fast at agent
- * deployment rather than surfacing mid-conversation. Emits one-time warnings
- * (not per-turn) for legal-but-degraded combinations.
+ * {@code LlmTask.configure()} so misconfigurations surface at agent deployment
+ * rather than per-turn mid-conversation.
+ * <p>
+ * <b>Backward compatibility:</b> conditions that older releases tolerated at
+ * load (they still failed/degraded at runtime exactly as before — unknown
+ * strategies, out-of-range thresholds, dead non-last steps, judge_model without
+ * a judge) are emitted as <b>warnings</b>, not hard errors, so upgrading does
+ * not stop a previously-loading agent from deploying. Only the <b>new</b>
+ * pricing/ceiling fields (which no stored config predating this release can
+ * contain) are hard errors on an invalid value.
  */
 final class CascadeConfigValidator {
     private static final Logger LOGGER = Logger.getLogger(CascadeConfigValidator.class);
@@ -49,29 +56,31 @@ final class CascadeConfigValidator {
 
         List<CascadeStep> steps = cascade.getSteps();
         if (steps == null || steps.isEmpty()) {
-            throw fail(taskId, "modelCascade is enabled but has no steps");
+            // The executor throws at runtime for empty steps (as before) — warn, don't
+            // block the agent from loading.
+            warn(taskId, "modelCascade is enabled but has no steps — the cascade will fail when it runs");
+            return;
         }
 
-        // strategy
+        // strategy (legacy field — warn only)
         String strategy = cascade.getStrategy();
         if (strategy != null && !KNOWN_STRATEGIES.contains(strategy.toLowerCase())) {
-            throw fail(taskId, "unknown cascade strategy '" + strategy + "' (expected 'cascade' or 'parallel')");
-        }
-        if (strategy != null && "parallel".equalsIgnoreCase(strategy)) {
-            LOGGER.warnf("LLM task '%s': cascade strategy 'parallel' is not implemented yet — steps will run sequentially.", taskId);
+            warn(taskId, "unknown cascade strategy '" + strategy + "' (expected 'cascade' or 'parallel') — running sequentially");
+        } else if (strategy != null && "parallel".equalsIgnoreCase(strategy)) {
+            warn(taskId, "cascade strategy 'parallel' is not implemented yet — steps will run sequentially");
         }
 
-        // evaluationStrategy
+        // evaluationStrategy (legacy field — warn only)
         String evalStrategy = cascade.getEvaluationStrategy();
         if (evalStrategy != null && !VALID_EVALUATION_STRATEGIES.contains(evalStrategy.toLowerCase())) {
-            throw fail(taskId, "unknown evaluationStrategy '" + evalStrategy + "' (expected one of " + VALID_EVALUATION_STRATEGIES + ")");
+            warn(taskId, "unknown evaluationStrategy '" + evalStrategy + "' (expected one of " + VALID_EVALUATION_STRATEGIES
+                    + ") — defaulting to structured_output");
         }
 
-        boolean isJudgeStrategy = "judge_model".equalsIgnoreCase(evalStrategy);
-        if (isJudgeStrategy) {
+        if ("judge_model".equalsIgnoreCase(evalStrategy)) {
             var judge = cascade.getJudgeModel();
             if (judge == null || isBlank(judge.getType())) {
-                throw fail(taskId, "evaluationStrategy 'judge_model' requires a judgeModel config with a 'type'");
+                warn(taskId, "evaluationStrategy 'judge_model' has no judgeModel with a 'type' — confidence will fall back to heuristic");
             }
         }
 
@@ -99,15 +108,16 @@ final class CascadeConfigValidator {
                     cascade.getJudgeModel() != null ? "judge_model" : "heuristic");
         }
 
-        // ceilings + pricing
+        // Ceilings + pricing are NEW fields — no stored config predating this release
+        // can contain them, so an invalid value is a fresh typo worth failing fast on.
         if (cascade.getMaxTotalDurationMs() != null && cascade.getMaxTotalDurationMs() <= 0) {
             throw fail(taskId, "maxTotalDurationMs must be > 0");
         }
         if (cascade.getMaxCostPerRun() != null && cascade.getMaxCostPerRun() < 0) {
             throw fail(taskId, "maxCostPerRun must be >= 0");
         }
-        checkPrice(taskId, "cascade inputPricePer1M", cascade.getInputPricePer1M());
-        checkPrice(taskId, "cascade outputPricePer1M", cascade.getOutputPricePer1M());
+        requireNonNegativePrice(taskId, "cascade inputPricePer1M", cascade.getInputPricePer1M());
+        requireNonNegativePrice(taskId, "cascade outputPricePer1M", cascade.getOutputPricePer1M());
 
         // per-step
         for (int i = 0; i < steps.size(); i++) {
@@ -115,26 +125,32 @@ final class CascadeConfigValidator {
             boolean isLast = i == steps.size() - 1;
             Double threshold = step.getConfidenceThreshold();
 
+            // Legacy fields (threshold, timeoutMs) — warn only.
             if (threshold != null && (threshold < 0.0 || threshold > 1.0)) {
-                throw fail(taskId, "step " + i + " confidenceThreshold must be within [0.0, 1.0] (was " + threshold
-                        + "); values > 1.0 are unreachable because confidence is clamped to 1.0");
+                warn(taskId, "step " + i + " confidenceThreshold " + threshold + " is outside [0.0, 1.0]; confidence is clamped to 1.0 so this step "
+                        + (threshold > 1.0 ? "always escalates" : "always accepts"));
             }
             if (!isLast && threshold == null) {
-                throw fail(taskId, "step " + i + " is not the last step and must define a confidenceThreshold "
-                        + "(a null threshold on a non-last step is always accepted, making later steps unreachable)");
+                warn(taskId, "step " + i + " is not the last step and has no confidenceThreshold — it is always accepted, "
+                        + "making later steps unreachable");
             }
             if (step.getTimeoutMs() != null && step.getTimeoutMs() <= 0) {
-                throw fail(taskId, "step " + i + " timeoutMs must be > 0");
+                warn(taskId, "step " + i + " timeoutMs " + step.getTimeoutMs() + " is not positive — the step will time out immediately");
             }
-            checkPrice(taskId, "step " + i + " inputPricePer1M", step.getInputPricePer1M());
-            checkPrice(taskId, "step " + i + " outputPricePer1M", step.getOutputPricePer1M());
+            // Pricing is NEW — hard error on a negative value.
+            requireNonNegativePrice(taskId, "step " + i + " inputPricePer1M", step.getInputPricePer1M());
+            requireNonNegativePrice(taskId, "step " + i + " outputPricePer1M", step.getOutputPricePer1M());
         }
     }
 
-    private static void checkPrice(String taskId, String what, Double price) throws WorkflowConfigurationException {
+    private static void requireNonNegativePrice(String taskId, String what, Double price) throws WorkflowConfigurationException {
         if (price != null && price < 0) {
             throw fail(taskId, what + " must be >= 0");
         }
+    }
+
+    private static void warn(String taskId, String message) {
+        LOGGER.warnf("LLM task '%s': modelCascade — %s.", taskId, message);
     }
 
     /**

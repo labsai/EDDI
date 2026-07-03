@@ -99,7 +99,7 @@ Appends a JSON-format instruction to the system prompt asking the model to respo
 
 The evaluator tries a **real JSON parse first** (Jackson), and only treats the response as a confidence wrapper when the whole response is a single JSON object — so a stray `"confidence": ...` inside legitimate answer content (e.g. a code sample) is **not** mistaken for the score. A regex fallback handles a malformed-but-object-shaped wrapper. If the response is not a JSON-object wrapper, it falls back to `heuristic`.
 
-> **Agent mode / convertToObject:** the wrapper cannot be used with tools or with `convertToObject: true` (it would collide with the raw-schema JSON). In those cases the cascade automatically uses `judge_model` (if a judge is configured) or `heuristic`, and warns once at deploy time. See below.
+> **Agent mode / convertToObject:** the wrapper cannot be used with tools or with `convertToObject: true` (it would collide with the raw-schema JSON). In those cases the cascade automatically uses `judge_model` (if a judge is configured) or `heuristic`. The `convertToObject` + `structured_output` combination is flagged with a deploy-time warning; the agent-mode downgrade is logged at debug level at runtime (agent mode is only known when the task runs). See below.
 
 ### `heuristic`
 
@@ -152,7 +152,9 @@ Two SSE event types provide real-time visibility, emitted through `ConversationE
 
 ## Streaming the Final Step
 
-When streaming (SSE), the always-accepted final step is streamed **live** token-by-token — as long as it runs in legacy (no-tools) mode, uses a non-wrapper strategy (`heuristic`, `judge_model`, or `none`), and the provider supports streaming. Earlier steps are buffered (their full text is needed to evaluate confidence). In agent mode, the cascade streams the final response as a single chunk, as before.
+When streaming (SSE), the always-accepted final step is streamed **live** token-by-token — as long as it runs in legacy (no-tools) mode, uses a non-wrapper strategy (`heuristic`, `judge_model`, or `none`), and the provider supports streaming. Earlier steps are buffered (their full text is needed to evaluate confidence). In agent mode, the cascade emits the final response as a single chunk.
+
+> **Caveat:** if the live-streamed final step **times out or errors** after some tokens were already sent, the cascade falls back to the best earlier response — but the client has already received the partial tokens of the abandoned step. Live streaming therefore trades this small mismatch risk for lower perceived latency; disable it (non-streaming `say`) if exact-match delivery matters. When `returnBestAcrossSteps` is set, a step that was streamed live is never superseded, precisely to avoid this mismatch.
 
 ## Observability
 

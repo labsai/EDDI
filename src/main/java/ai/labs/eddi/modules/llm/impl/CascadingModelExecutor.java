@@ -274,10 +274,15 @@ class CascadingModelExecutor {
                             durationMs);
 
                     // returnBestAcrossSteps: an earlier escalated step may have scored higher.
-                    if (cascade.isReturnBestAcrossSteps() && bestSoFar != null && bestSoFar.stepUsed() != i
+                    // Do NOT swap when the accepted step was already streamed live — the client
+                    // has already received its tokens, so returning a different step's text would
+                    // mismatch the stream.
+                    if (cascade.isReturnBestAcrossSteps() && !stepResult.streamedLive && bestSoFar != null && bestSoFar.stepUsed() != i
                             && bestSoFar.confidence() > stepResult.confidence) {
                         LOGGER.infof("returnBestAcrossSteps: returning step %d (confidence=%.2f) over accepted step %d (confidence=%.2f)",
                                 bestSoFar.stepUsed(), bestSoFar.confidence(), i, stepResult.confidence);
+                        // Reflect the override in the trace so audit artifacts agree with stepUsed.
+                        stepTrace.put("status", "superseded_by_best");
                         return withRun(bestSoFar, runCostUsd, trace);
                     }
 

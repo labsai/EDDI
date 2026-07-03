@@ -187,10 +187,12 @@ class ConfidenceEvaluator {
         int shortThreshold = heuristicConfig != null && heuristicConfig.getShortLengthThreshold() != null
                 ? heuristicConfig.getShortLengthThreshold()
                 : DEFAULT_SHORT_LENGTH_THRESHOLD;
-        double shortScore = value(heuristicConfig != null ? heuristicConfig.getShortScore() : null, DEFAULT_SHORT_SCORE);
-        double refusalScore = value(heuristicConfig != null ? heuristicConfig.getRefusalScore() : null, DEFAULT_REFUSAL_SCORE);
-        double hedgingScore = value(heuristicConfig != null ? heuristicConfig.getHedgingScore() : null, DEFAULT_HEDGING_SCORE);
-        double defaultScore = value(heuristicConfig != null ? heuristicConfig.getDefaultScore() : null, DEFAULT_SCORE);
+        // Scores may come from user config — clamp to [0,1] so a mis-set value cannot
+        // produce an out-of-range confidence that breaks threshold gating / metrics.
+        double shortScore = clamp(value(heuristicConfig != null ? heuristicConfig.getShortScore() : null, DEFAULT_SHORT_SCORE));
+        double refusalScore = clamp(value(heuristicConfig != null ? heuristicConfig.getRefusalScore() : null, DEFAULT_REFUSAL_SCORE));
+        double hedgingScore = clamp(value(heuristicConfig != null ? heuristicConfig.getHedgingScore() : null, DEFAULT_HEDGING_SCORE));
+        double defaultScore = clamp(value(heuristicConfig != null ? heuristicConfig.getDefaultScore() : null, DEFAULT_SCORE));
 
         // Very short responses are likely low quality.
         if (lowerResponse.length() < shortThreshold) {
@@ -251,8 +253,10 @@ class ConfidenceEvaluator {
 
             String judgeText = judgeResponse.aiMessage() != null ? judgeResponse.aiMessage().text() : null;
             if (judgeText != null) {
-                // Prefer a real JSON parse of the judge's object, regex fallback.
+                // Prefer a real JSON parse of the judge's object; regex fallback is scoped
+                // to that object (not the whole text) to avoid picking up a stray value.
                 String balanced = extractFirstBalancedObject(judgeText);
+                String regexScope = balanced != null ? balanced : judgeText;
                 if (balanced != null) {
                     try {
                         JsonNode node = MAPPER.readTree(balanced);
@@ -263,7 +267,7 @@ class ConfidenceEvaluator {
                         // fall through to regex
                     }
                 }
-                Matcher matcher = CONFIDENCE_JSON_PATTERN.matcher(judgeText);
+                Matcher matcher = CONFIDENCE_JSON_PATTERN.matcher(regexScope);
                 if (matcher.find()) {
                     return new EvaluationResult(response, clamp(Double.parseDouble(matcher.group(1))));
                 }
@@ -302,9 +306,32 @@ class ConfidenceEvaluator {
 
     /**
      * Unescape a raw JSON string body (regex-extracted, so not parsed by Jackson).
+     * Single-pass so an escaped backslash ({@code \\}) is consumed before the
+     * following character — a chained {@code replace} would corrupt e.g.
+     * {@code \\n} (an escaped backslash then a literal {@code n}).
      */
     private static String unescapeJsonString(String raw) {
-        return raw.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r").replace("\\\"", "\"").replace("\\/", "/").replace("\\\\", "\\");
+        StringBuilder sb = new StringBuilder(raw.length());
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c == '\\' && i + 1 < raw.length()) {
+                char next = raw.charAt(++i);
+                switch (next) {
+                    case 'n' -> sb.append('\n');
+                    case 't' -> sb.append('\t');
+                    case 'r' -> sb.append('\r');
+                    case 'b' -> sb.append('\b');
+                    case 'f' -> sb.append('\f');
+                    case '"' -> sb.append('"');
+                    case '/' -> sb.append('/');
+                    case '\\' -> sb.append('\\');
+                    default -> sb.append('\\').append(next);
+                }
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /** Remove surrounding markdown code fences (```json ... ``` or ``` ... ```). */

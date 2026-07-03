@@ -213,6 +213,44 @@ class CascadingModelExecutorCoverageTest {
     }
 
     @Test
+    @DisplayName("returnBestAcrossSteps does NOT supersede a live-streamed final step (avoids stream mismatch)")
+    void returnBestAcrossSteps_keepsStreamedFinalStep() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("heuristic");
+        cascade.setReturnBestAcrossSteps(true);
+
+        var step1 = new CascadeStep();
+        step1.setType("cheap");
+        step1.setConfidenceThreshold(0.99); // confident (0.8) but forced to escalate
+        var step2 = new CascadeStep();
+        step2.setType("expensive"); // last — streamed live
+        cascade.setSteps(List.of(step1, step2));
+
+        var sink = mock(ConversationEventSink.class);
+
+        ChatModel cheap = modelReturning("A thorough, confident, well-structured answer to the question.");
+        StreamingChatModel expensiveStream = mock(StreamingChatModel.class);
+        doAnswer(inv -> {
+            StreamingChatResponseHandler h = inv.getArgument(1);
+            h.onPartialResponse("I'm not sure, I don't know."); // hedging → heuristic ~0.4
+            h.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("I'm not sure, I don't know.")).build());
+            return null;
+        }).when(expensiveStream).chat(any(ChatRequest.class), any(StreamingChatResponseHandler.class));
+
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+        when(registry.getOrCreate(eq("cheap"), anyMap())).thenReturn(cheap);
+        when(registry.getOrCreate(eq("expensive"), anyMap())).thenReturn(mock(ChatModel.class));
+        when(registry.getOrCreateStreaming(eq("expensive"), anyMap())).thenReturn(expensiveStream);
+
+        var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(sink),
+                mock(AgentOrchestrator.class), Map.of(), false, false, /* allowLiveStreaming */ true);
+
+        assertEquals(1, result.stepUsed(), "the streamed final step must be kept, not superseded by the earlier better step");
+        assertTrue(result.streamedLive());
+    }
+
+    @Test
     @DisplayName("streaming allowed but provider has no streaming model — falls back to buffered")
     void streaming_noStreamingModel_buffered() throws Exception {
         var cascade = new ModelCascadeConfig();
