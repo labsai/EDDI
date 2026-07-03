@@ -341,9 +341,12 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     @Override
     public void clearHitlBookmark(String conversationId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
+        // Terminal cleanup must also drop the tool-level HITL fields so no stale
+        // hitlPauseType / pending batch lingers on an ended or cancelled document.
         String sql = "UPDATE conversation_memories SET data = data "
                 + "- 'hitlPausedWorkflowId' - 'hitlPausedAbsoluteTaskIndex' - 'hitlPausedAt' "
                 + "- 'hitlPauseReason' - 'hitlTimeoutPolicy' - 'hitlApprovalTimeout' "
+                + "- 'hitlPauseType' - 'hitlPendingToolCalls' "
                 + "WHERE id = ?::uuid";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, conversationId);

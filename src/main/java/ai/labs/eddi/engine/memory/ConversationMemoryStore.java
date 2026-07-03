@@ -252,8 +252,12 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     @Override
     public void clearHitlBookmark(String conversationId) {
         var unset = new Document();
+        // Terminal cleanup (end/cancel) must remove ALL pause state, including the
+        // tool-level HITL fields — otherwise a stale hitlPauseType / pending batch
+        // would linger on an ended or cancelled conversation document.
         for (String field : List.of("hitlPausedWorkflowId", "hitlPausedAbsoluteTaskIndex", "hitlPausedAt",
-                "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout")) {
+                "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout",
+                "hitlPauseType", "hitlPendingToolCalls")) {
             unset.append(field, "");
         }
         conversationCollectionDocument.updateOne(

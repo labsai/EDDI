@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapsho
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -45,6 +46,10 @@ class ConversationMemoryUtilitiesHitlTest {
             memory.setHitlPauseReason("Needs review");
             memory.setHitlTimeoutPolicy("AUTO_REJECT");
             memory.setHitlApprovalTimeout("PT15M");
+            memory.setHitlPauseType("TOOL_CALL");
+            var batch = new PendingToolCallBatch();
+            batch.setPauseEpoch("epoch-1");
+            memory.setHitlPendingToolCalls(batch);
 
             // Must have at least one step with data for conversion to work
             memory.getCurrentStep().storeData(new Data<>("input", "hello"));
@@ -57,6 +62,9 @@ class ConversationMemoryUtilitiesHitlTest {
             assertEquals("Needs review", snapshot.getHitlPauseReason());
             assertEquals("AUTO_REJECT", snapshot.getHitlTimeoutPolicy());
             assertEquals("PT15M", snapshot.getHitlApprovalTimeout());
+            assertEquals("TOOL_CALL", snapshot.getHitlPauseType());
+            assertNotNull(snapshot.getHitlPendingToolCalls());
+            assertEquals("epoch-1", snapshot.getHitlPendingToolCalls().getPauseEpoch());
         }
 
         @Test
@@ -73,6 +81,8 @@ class ConversationMemoryUtilitiesHitlTest {
             assertNull(snapshot.getHitlPauseReason());
             assertNull(snapshot.getHitlTimeoutPolicy());
             assertNull(snapshot.getHitlApprovalTimeout());
+            assertNull(snapshot.getHitlPauseType());
+            assertNull(snapshot.getHitlPendingToolCalls());
         }
     }
 
@@ -96,6 +106,10 @@ class ConversationMemoryUtilitiesHitlTest {
             snapshot.setHitlPauseReason("Approval required");
             snapshot.setHitlTimeoutPolicy("AUTO_APPROVE");
             snapshot.setHitlApprovalTimeout("PT1H");
+            snapshot.setHitlPauseType("TOOL_CALL");
+            var batch = new PendingToolCallBatch();
+            batch.setPauseEpoch("epoch-2");
+            snapshot.setHitlPendingToolCalls(batch);
 
             var restored = ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot);
 
@@ -105,6 +119,9 @@ class ConversationMemoryUtilitiesHitlTest {
             assertEquals("Approval required", restored.getHitlPauseReason());
             assertEquals("AUTO_APPROVE", restored.getHitlTimeoutPolicy());
             assertEquals("PT1H", restored.getHitlApprovalTimeout());
+            assertEquals("TOOL_CALL", restored.getHitlPauseType());
+            assertNotNull(restored.getHitlPendingToolCalls());
+            assertEquals("epoch-2", restored.getHitlPendingToolCalls().getPauseEpoch());
         }
 
         @Test
@@ -121,6 +138,8 @@ class ConversationMemoryUtilitiesHitlTest {
             assertNull(restored.getHitlPauseReason());
             assertNull(restored.getHitlTimeoutPolicy());
             assertNull(restored.getHitlApprovalTimeout());
+            assertNull(restored.getHitlPauseType());
+            assertNull(restored.getHitlPendingToolCalls());
         }
     }
 

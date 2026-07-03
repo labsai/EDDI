@@ -40,4 +40,16 @@ class ToolApprovalPatternsTest {
         assertTrue(ToolApprovalPatterns.validate("mcp:read_*").isEmpty());
         assertTrue(ToolApprovalPatterns.validate("plainName").isEmpty());
     }
+
+    @Test
+    void validate_rejectsLeadingOrTrailingColon() {
+        // ":foo" would compile to a pattern matching nothing at runtime — reject it
+        // at save time with an actionable message instead of silently accepting.
+        var lead = ToolApprovalPatterns.validate(":foo");
+        assertTrue(lead.isPresent());
+        assertTrue(lead.get().contains("colon"), lead.get());
+        var trail = ToolApprovalPatterns.validate("mcp:");
+        assertTrue(trail.isPresent());
+        assertTrue(trail.get().contains("colon"), trail.get());
+    }
 }

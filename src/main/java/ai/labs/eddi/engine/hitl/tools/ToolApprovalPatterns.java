@@ -52,6 +52,10 @@ public final class ToolApprovalPatterns {
         if (!LEGAL_CHARS.matcher(pattern).matches()) {
             return Optional.of("pattern '" + pattern + "' contains illegal characters — allowed: A-Za-z0-9_-.:* (tool names never contain spaces)");
         }
+        if (pattern.startsWith(":") || pattern.endsWith(":")) {
+            return Optional.of("pattern '" + pattern
+                    + "' must not start or end with a colon — the colon separates a source prefix (e.g. 'mcp:read_*') from the tool name");
+        }
         int colon = pattern.indexOf(':');
         if (colon > 0) {
             String prefix = pattern.substring(0, colon);

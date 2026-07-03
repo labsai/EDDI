@@ -1287,6 +1287,8 @@ The riskiest task. Everything here lives in `AgentOrchestrator` so it shares `ex
 
 **Extend:** the recovery sweep's stale-state repair should clear a `hitlPendingToolCalls` batch found on a conversation that is NOT `AWAITING_HUMAN`/`IN_PROGRESS` (orphan from a crash between gate-trip and pause-commit — normally impossible since both persist in one document, but a defensive one-liner + WARN + test).
 
+**Also (review follow-up — real-codec round-trip):** the Task 4 unit test `PendingToolCallBatchSnapshotTest` only proves the POJOs are bean-shaped via a plain Jackson `ObjectMapper`. Add a **Testcontainers** round-trip in `MongoConversationMemoryStoreTest` (CI-only) that stores a `ConversationMemorySnapshot` with `hitlPauseType="TOOL_CALL"` and a fully-populated `PendingToolCallBatch` (incl. `traceSoFar` with a nested `Map<String,Object>` and two calls) via `store.storeConversationMemorySnapshot`, loads it back, and asserts every batch field survives — this exercises the real `JacksonCodec` (BSON-backed) path the unit test cannot. Mirror it for Postgres (JSONB) if that store's test harness exists.
+
 - [ ] Steps: tests → (minimal) fixes → green. Commit: `test(hitl): crash-recovery, retention and undeploy coverage for tool pauses`
 
 ---

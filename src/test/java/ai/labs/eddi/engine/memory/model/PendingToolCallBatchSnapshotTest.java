@@ -15,9 +15,18 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Round-trips the new tool-HITL fields through Jackson (the mechanism the
- * Mongo/Postgres snapshot persistence uses) and verifies backward compatibility
- * with pre-feature documents.
+ * Round-trips the new tool-HITL fields through a plain Jackson
+ * {@code ObjectMapper} and verifies backward compatibility with pre-feature
+ * documents.
+ * <p>
+ * <strong>Scope:</strong> this is a <em>structural</em> proxy — it proves the
+ * POJOs are bean-shaped and null-tolerant. The production Mongo path serializes
+ * the snapshot through {@code JacksonCodec} (a BSON-backed
+ * {@code ObjectMapper}) and Postgres stores it as JSONB; the true BSON
+ * round-trip of a populated {@link PendingToolCallBatch} (incl.
+ * {@code traceSoFar} nested maps) belongs in the Testcontainers integration
+ * test (see the plan's later tasks) which is CI-only. This unit test
+ * intentionally does not exercise that codec.
  */
 class PendingToolCallBatchSnapshotTest {
 
