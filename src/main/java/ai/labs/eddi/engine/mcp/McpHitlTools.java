@@ -4,12 +4,16 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.SharedTaskList;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
@@ -28,6 +32,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
@@ -272,6 +277,201 @@ public class McpHitlTools {
         } catch (ResourceStoreException e) {
             LOGGER.warn("MCP cancel_conversation failed", e);
             return errorJson("Failed to cancel conversation", "INTERNAL", null);
+        }
+    }
+
+    // ==================================================================
+    // Group (multi-agent) surface
+    // ==================================================================
+
+    @Tool(name = "list_group_pending_approvals",
+          description = "List a group's conversations awaiting human approval. Admins and approvers see all; other "
+                  + "callers see only their own; unauthenticated callers see nothing.")
+    @Blocking
+    public String listGroupPendingApprovals(
+                                            @ToolArg(description = "Group ID") String groupId,
+                                            @ToolArg(description = "Max entries to return (optional, default 100)") String limit) {
+        if (groupId == null || groupId.isBlank()) {
+            return errorJson("groupId is required", "BAD_REQUEST", null);
+        }
+        try {
+            var result = hitlAccessGuard.listScopedGroupPendingApprovals(groupId, parseIntOrDefault(limit, 100));
+            meterRegistry.counter("eddi.mcp.hitl.pending.listed", "surface", "group").increment();
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.warn("MCP list_group_pending_approvals failed", e);
+            return errorJson("Failed to list group pending approvals", "INTERNAL", null);
+        }
+    }
+
+    @Tool(name = "list_all_group_pending_approvals",
+          description = "Cross-group HITL inbox: all group conversations awaiting approval across all groups. Admins "
+                  + "and approvers see all; other callers see only their own; unauthenticated callers see nothing.")
+    @Blocking
+    public String listAllGroupPendingApprovals(
+                                               @ToolArg(description = "Max entries to return (optional, default 100)") String limit) {
+        try {
+            var result = hitlAccessGuard.listScopedGroupPendingApprovals(null, parseIntOrDefault(limit, 100));
+            meterRegistry.counter("eddi.mcp.hitl.pending.listed", "surface", "group-all").increment();
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            LOGGER.warn("MCP list_all_group_pending_approvals failed", e);
+            return errorJson("Failed to list group pending approvals", "INTERNAL", null);
+        }
+    }
+
+    @Tool(name = "get_group_approval_status",
+          description = "Read the approval status (summary) of a paused group discussion — state, paused phase, "
+                  + "pauseType, and the task ids awaiting approval. detail=full returns the whole group conversation "
+                  + "(incl. transcript) — owner/admin, or approver only while awaiting approval.")
+    @Blocking
+    public String getGroupApprovalStatus(
+                                         @ToolArg(description = "Group ID") String groupId,
+                                         @ToolArg(description = "Group conversation ID") String conversationId,
+                                         @ToolArg(description = "summary (default) or full (optional)") String detail) {
+        if (groupId == null || groupId.isBlank() || conversationId == null || conversationId.isBlank()) {
+            return errorJson("groupId and conversationId are required", "BAD_REQUEST", null);
+        }
+        try {
+            hitlAccessGuard.requireGroupConversationHitlAccess(groupId, conversationId);
+            GroupConversation gc = groupConversationService.readGroupConversation(conversationId);
+            boolean paused = gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL;
+            if ("full".equals(detail)) {
+                if (!paused && !ownershipValidator.isAdmin(identity) && !ownershipValidator.isOwner(identity, gc.getUserId())) {
+                    return errorJson("Full approval status is available to approvers only while the group conversation "
+                            + "is awaiting approval — use the summary view", "FORBIDDEN", null);
+                }
+                return jsonSerialization.serialize(gc);
+            }
+            List<String> awaitingTaskIds = paused && gc.getTaskList() != null
+                    ? gc.getTaskList().all().stream()
+                            .filter(t -> t.status() == SharedTaskList.TaskStatus.AWAITING_APPROVAL)
+                            .map(SharedTaskList.TaskItem::id)
+                            .toList()
+                    : List.of();
+            var summary = new LinkedHashMap<String, Object>();
+            summary.put("groupConversationId", conversationId);
+            summary.put("state", gc.getState() != null ? gc.getState().name() : "");
+            summary.put("pausedAt", paused && gc.getPausedAt() != null ? gc.getPausedAt().toString() : "");
+            summary.put("pausedPhaseName", paused && gc.getPausedPhaseName() != null ? gc.getPausedPhaseName() : "");
+            summary.put("pauseType", paused && gc.getHitlPauseType() != null ? gc.getHitlPauseType().name() : "");
+            summary.put("pauseReason", paused && gc.getHitlPauseReason() != null ? gc.getHitlPauseReason() : "");
+            summary.put("timeoutPolicy", paused && gc.getHitlTimeoutPolicy() != null ? gc.getHitlTimeoutPolicy() : "");
+            summary.put("awaitingApprovalTaskIds", awaitingTaskIds);
+            return jsonSerialization.serialize(summary);
+        } catch (ForbiddenException e) {
+            return errorJson("Access denied", "FORBIDDEN", null);
+        } catch (jakarta.ws.rs.NotFoundException e) {
+            return errorJson("Group conversation not found", "NOT_FOUND", null);
+        } catch (ResourceNotFoundException e) {
+            return errorJson("Group conversation not found", "NOT_FOUND", null);
+        } catch (Exception e) {
+            LOGGER.warn("MCP get_group_approval_status failed", e);
+            return errorJson("Failed to read group approval status", "INTERNAL", null);
+        }
+    }
+
+    @Tool(name = "approve_group_phase",
+          description = "Approve or reject a paused group discussion phase (or specific tasks for TASK-granularity). "
+                  + "verdict=APPROVED or REJECTED (case-insensitive). taskApprovals is an optional JSON object mapping "
+                  + "task-id to APPROVED/REJECTED. Returns the resumed group conversation. The decision is attributed "
+                  + "to the authenticated caller.")
+    @Blocking
+    @SuppressWarnings("unchecked")
+    public String approveGroupPhase(
+                                    @ToolArg(description = "Group ID") String groupId,
+                                    @ToolArg(description = "Group conversation ID") String conversationId,
+                                    @ToolArg(description = "APPROVED or REJECTED (case-insensitive)") String verdict,
+                                    @ToolArg(description = "Optional reviewer note (max 4096 chars)") String note,
+                                    @ToolArg(description = "Optional JSON object mapping task-id to APPROVED/REJECTED, e.g. {\"t1\":\"APPROVED\"}") String taskApprovalsJson) {
+        String disabled = disabledIfMutationsOff();
+        if (disabled != null) {
+            return disabled;
+        }
+        if (groupId == null || groupId.isBlank() || conversationId == null || conversationId.isBlank()) {
+            return errorJson("groupId and conversationId are required", "BAD_REQUEST", null);
+        }
+        HitlVerdict parsed = parseVerdictOrNull(verdict);
+        if (parsed == null) {
+            return errorJson("Invalid verdict; use APPROVED or REJECTED", "BAD_REQUEST", null);
+        }
+        if (note != null && note.length() > HitlDecision.MAX_NOTE_LENGTH) {
+            return errorJson("Note exceeds the maximum length of " + HitlDecision.MAX_NOTE_LENGTH + " characters",
+                    "BAD_REQUEST", null);
+        }
+        Map<String, String> taskApprovals = null;
+        if (taskApprovalsJson != null && !taskApprovalsJson.isBlank()) {
+            try {
+                taskApprovals = (Map<String, String>) jsonSerialization.deserialize(taskApprovalsJson, Map.class);
+            } catch (Exception e) {
+                return errorJson("Malformed taskApprovals JSON (expected a JSON object of task-id to APPROVED/REJECTED)",
+                        "BAD_REQUEST", null);
+            }
+        }
+        try {
+            hitlAccessGuard.requireGroupConversationHitlAccess(groupId, conversationId);
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(parsed);
+            decision.setNote(note);
+            decision.setDecidedBy(principalWithMcpPrefix());
+            GroupApprovalRequest request = new GroupApprovalRequest();
+            request.setDecision(decision);
+            request.setTaskApprovals(taskApprovals);
+            GroupConversation result = groupConversationService.resumeDiscussion(conversationId, request, null);
+            meterRegistry.counter("eddi.mcp.hitl.decision", "surface", "group", "verdict", parsed.name()).increment();
+            return jsonSerialization.serialize(result);
+        } catch (ForbiddenException e) {
+            return errorJson("Access denied", "FORBIDDEN", null);
+        } catch (jakarta.ws.rs.NotFoundException e) {
+            return errorJson("Group conversation not found", "NOT_FOUND", null);
+        } catch (IResourceStore.ResourceModifiedException e) {
+            return errorJson("The group conversation was modified concurrently — reload and retry", "CONFLICT", null);
+        } catch (ResourceNotFoundException
+                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
+            return errorJson("Group conversation not found", "NOT_FOUND", null);
+        } catch (IGroupConversationService.GroupDiscussionException e) {
+            return errorJson("Group conversation is not awaiting approval — it may have been resolved, cancelled, "
+                    + "or already approved", "WRONG_STATE", null);
+        } catch (IllegalArgumentException e) {
+            return errorJson("Invalid approval request: an unknown task id was referenced, or a task is not awaiting "
+                    + "approval", "BAD_REQUEST", null);
+        } catch (Exception e) {
+            LOGGER.warn("MCP approve_group_phase failed", e);
+            return errorJson("Failed to approve group phase", "INTERNAL", null);
+        }
+    }
+
+    @Tool(name = "cancel_group_discussion",
+          description = "Cancel an in-progress or paused group discussion. Attributed to the authenticated caller.")
+    @Blocking
+    public String cancelGroupDiscussion(
+                                        @ToolArg(description = "Group ID") String groupId,
+                                        @ToolArg(description = "Group conversation ID") String conversationId) {
+        String disabled = disabledIfMutationsOff();
+        if (disabled != null) {
+            return disabled;
+        }
+        if (groupId == null || groupId.isBlank() || conversationId == null || conversationId.isBlank()) {
+            return errorJson("groupId and conversationId are required", "BAD_REQUEST", null);
+        }
+        try {
+            hitlAccessGuard.requireGroupConversationHitlAccess(groupId, conversationId);
+            boolean cancelled = groupConversationService.cancelDiscussion(conversationId, ControlSignal.CANCEL_GRACEFUL);
+            meterRegistry.counter("eddi.mcp.hitl.cancelled", "surface", "group").increment();
+            return cancelled
+                    ? "{\"status\":\"CANCELLED\"}"
+                    : errorJson("Group conversation is already in a terminal state — nothing to cancel",
+                            "WRONG_STATE", null);
+        } catch (ForbiddenException e) {
+            return errorJson("Access denied", "FORBIDDEN", null);
+        } catch (jakarta.ws.rs.NotFoundException e) {
+            return errorJson("Group conversation not found", "NOT_FOUND", null);
+        } catch (ResourceNotFoundException
+                | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
+            return errorJson("Group conversation not found", "NOT_FOUND", null);
+        } catch (Exception e) {
+            LOGGER.warn("MCP cancel_group_discussion failed", e);
+            return errorJson("Failed to cancel group discussion", "INTERNAL", null);
         }
     }
 }

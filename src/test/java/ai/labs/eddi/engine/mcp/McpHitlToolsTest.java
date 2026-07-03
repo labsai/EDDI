@@ -4,10 +4,12 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -166,5 +168,74 @@ class McpHitlToolsTest {
 
         String out = tools.getApprovalStatus("c1", "summary");
         assertTrue(out.contains("TOOL_CALL"), out);
+    }
+
+    // ---- group surface -----------------------------------------------------
+
+    @Test
+    void approveGroup_disabledByKillSwitch_returnsDisabled() {
+        tools = build(true, false);
+        String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null);
+        assertTrue(out.contains("\"errorCode\":\"DISABLED\""), out);
+        verifyNoInteractions(groupConversationService);
+    }
+
+    @Test
+    void approveGroup_invalidVerdict_returnsBadRequest() {
+        String out = tools.approveGroupPhase("g1", "gc1", "perhaps", null, null);
+        assertTrue(out.contains("\"errorCode\":\"BAD_REQUEST\""), out);
+    }
+
+    @Test
+    void approveGroup_malformedTaskApprovals_returnsBadRequest() throws Exception {
+        when(json.deserialize(eq("{bad"), eq(java.util.Map.class))).thenThrow(new java.io.IOException("parse"));
+        String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", null, "{bad");
+        assertTrue(out.contains("\"errorCode\":\"BAD_REQUEST\""), out);
+        verifyNoInteractions(groupConversationService);
+    }
+
+    @Test
+    void approveGroup_happyPath_delegatesWithMcpDecidedBy() throws Exception {
+        when(json.serialize(any())).thenReturn("{\"ok\":true}");
+        String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", "note", null);
+        assertTrue(out.contains("ok"), out);
+        ArgumentCaptor<GroupApprovalRequest> cap = ArgumentCaptor.forClass(GroupApprovalRequest.class);
+        verify(groupConversationService).resumeDiscussion(eq("gc1"), cap.capture(), isNull());
+        assertEquals("mcp:alice", cap.getValue().getDecision().getDecidedBy());
+        assertEquals(HitlDecision.HitlVerdict.APPROVED, cap.getValue().getDecision().getVerdict());
+    }
+
+    @Test
+    void listAllGroupPendingApprovals_delegatesToGuardWithNullGroup() throws Exception {
+        when(guard.listScopedGroupPendingApprovals(isNull(), anyInt())).thenReturn(java.util.List.of());
+        when(json.serialize(any())).thenReturn("[]");
+        String out = tools.listAllGroupPendingApprovals("100");
+        assertEquals("[]", out);
+        verify(guard).listScopedGroupPendingApprovals(null, 100);
+    }
+
+    @Test
+    void cancelGroup_happyPath_delegates() throws Exception {
+        when(groupConversationService.cancelDiscussion(eq("gc1"), any())).thenReturn(true);
+        String out = tools.cancelGroupDiscussion("g1", "gc1");
+        assertTrue(out.contains("CANCELLED"), out);
+    }
+
+    @Test
+    void cancelGroup_terminalState_returnsWrongState() throws Exception {
+        when(groupConversationService.cancelDiscussion(eq("gc1"), any())).thenReturn(false);
+        String out = tools.cancelGroupDiscussion("g1", "gc1");
+        assertTrue(out.contains("\"errorCode\":\"WRONG_STATE\""), out);
+    }
+
+    @Test
+    void getGroupApprovalStatus_summary_serializes() throws Exception {
+        GroupConversation gc = mock(GroupConversation.class);
+        when(gc.getState()).thenReturn(GroupConversation.GroupConversationState.AWAITING_APPROVAL);
+        when(gc.getUserId()).thenReturn("alice");
+        when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
+        when(json.serialize(any())).thenAnswer(inv -> inv.getArgument(0).toString());
+        String out = tools.getGroupApprovalStatus("g1", "gc1", "summary");
+        assertTrue(out.contains("AWAITING_APPROVAL"), out);
     }
 }
