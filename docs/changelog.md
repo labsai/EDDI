@@ -5,9 +5,15 @@
 
 ---
 
-## 🐘 HITL Postgres Instant-serialization hardening (2026-07-03, final gate)
+## 🛡️ CI gate fixes — CodeQL (XSS/ReDoS) + Postgres Instant serialization (2026-07-03, final gate)
 
 **Repo:** EDDI (`feat/hitl-framework`, PR #585)
+
+**CodeQL (high-severity) — both blockers fixed:**
+- `RestAgentEngine` HITL error bodies reflected the raw `conversationId` path param (`java/xss`) and echoed internal exception messages to the client — now `text/plain` with curated, non-reflecting messages; detail logged server-side (id sanitized). New-in-PR, HITL-introduced.
+- `SecretRedactionFilter` ReDoS (`java/polynomial-redos`, pre-existing on `main`): the redaction patterns used ambiguous/unbounded backtracking quantifiers, quadratic on adversarial inputs (long `${vault:` repetitions). Made the quantifiers **possessive** (`++`/`*+`/`{n,}+`) — behavior-preserving (every quantified class is followed by a literal outside the class, so no backtrack is ever needed for a correct match) and linear-time. `SecretRedactionFilterTest` 6/6 still green. Addressed here because it was the sole remaining CodeQL gate blocker.
+
+
 
 Final full-suite verification surfaced a latent Postgres-only defect: the JSONB-backed resource storage serializes snapshots through the shared Jackson mapper (`SerializationCustomizer.configureObjectMapper`), which did **not** explicitly register `JavaTimeModule` — it relied on Quarkus auto-registration. The HITL bookmark carries an `Instant` (`hitlPausedAt`); a **non-null** `Instant` (i.e. an actual pause) would fail serialization ("Java 8 date/time type not supported") on the Postgres backend, so HITL pause persistence was one module-registration-order change away from breaking on Postgres (Mongo was unaffected — its BSON codec handles `Instant`; null `Instant`s serialize fine, which is why it stayed latent). `SerializationCustomizer` now registers `JavaTimeModule` explicitly — the date **format is deliberately left at the default numeric timestamps** (an initial attempt to also switch to ISO-8601 strings was reverted: `MongoScheduleStore` normalizes date fields to epoch-millis for numeric range queries and expects numbers, so an ISO string silently broke `findDueSchedules`). As defence in depth, `MongoScheduleStore.convertInstantField` now also parses ISO-8601 strings → epoch-millis, so schedule storage is correct regardless of the mapper's date format. The Postgres store tests (and the MCP HITL test) now build their mapper via `configureObjectMapper` instead of a bare `new ObjectMapper()`, so they exercise the production serialization path — `PostgresConversationMemoryStoreTest` goes 20/22 → 22/22.
 

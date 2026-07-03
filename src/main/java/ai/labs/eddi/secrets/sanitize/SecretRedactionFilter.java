@@ -20,24 +20,31 @@ public final class SecretRedactionFilter {
      * Ordered list of redaction patterns. Each pattern has a compiled regex and a
      * replacement strategy.
      */
+    // Quantifiers below are POSSESSIVE (++, *+, {n,}+) to eliminate ReDoS
+    // backtracking. This is behavior-preserving here: every quantified class is
+    // followed by a literal that is NOT a member of the class (a '.', '}', or the
+    // string end), so a correct match never needs to give characters back — the
+    // possessive form yields identical results while running in linear time on
+    // adversarial inputs (e.g. long repetitions of "${vault:").
     private static final List<RedactionRule> RULES = List.of(
             // OpenAI API keys: sk-... (at least 20 chars)
-            new RedactionRule(Pattern.compile("sk-[a-zA-Z0-9]{20,}"), "sk-" + REDACTED),
+            new RedactionRule(Pattern.compile("sk-[a-zA-Z0-9]{20,}+"), "sk-" + REDACTED),
 
             // Anthropic API keys: sk-ant-...
-            new RedactionRule(Pattern.compile("sk-ant-[a-zA-Z0-9\\-]{20,}"), "sk-ant-" + REDACTED),
+            new RedactionRule(Pattern.compile("sk-ant-[a-zA-Z0-9\\-]{20,}+"), "sk-ant-" + REDACTED),
 
             // Bearer tokens (JWTs and opaque tokens)
-            new RedactionRule(Pattern.compile("Bearer\\s+[A-Za-z0-9\\-_=]+\\.[A-Za-z0-9\\-_=]+\\.?[A-Za-z0-9\\-_.+/=]*"), "Bearer " + REDACTED),
+            new RedactionRule(Pattern.compile("Bearer\\s++[A-Za-z0-9\\-_=]++\\.[A-Za-z0-9\\-_=]++\\.?+[A-Za-z0-9\\-_.+/=]*+"),
+                    "Bearer " + REDACTED),
 
             // Generic API key patterns: key=... or apikey=... in query strings
-            new RedactionRule(Pattern.compile("(?i)(api[_-]?key|token|secret|password|authorization)\\s*[=:]\\s*['\"]?[^'\"\\s,;}{\\]]{8,}"),
+            new RedactionRule(Pattern.compile("(?i)(api[_-]?key|token|secret|password|authorization)\\s*+[=:]\\s*+['\"]?+[^'\"\\s,;}{\\]]{8,}+"),
                     "$1=" + REDACTED),
 
             // Vault references (should never appear in logs, but defense-in-depth)
             // Matches both ${vault:...} and legacy ${eddivault:...}
             // Note: $ must be escaped in replacement strings for Matcher.replaceAll()
-            new RedactionRule(Pattern.compile("\\$\\{(?:vault|eddivault):[^}]+}"), "\\${vault:" + REDACTED + "}"));
+            new RedactionRule(Pattern.compile("\\$\\{(?:vault|eddivault):[^}]++}"), "\\${vault:" + REDACTED + "}"));
 
     private SecretRedactionFilter() {
         // Utility class
