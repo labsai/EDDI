@@ -565,7 +565,13 @@ public class Conversation implements IConversation {
             props.put("hitlVerdict",
                     new Property("hitlVerdict", decision.getVerdict().name(), Scope.conversation));
 
-            if (decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED) {
+            // TOOL_CALL pauses re-enter the SAME task (same index) on BOTH verdicts:
+            // APPROVED runs the approved calls, and REJECTED is turned by LlmTask into
+            // synthetic tool-rejection results so the model can still answer the user
+            // gracefully (Task 9). Only RULE pauses short-circuit on REJECTED.
+            boolean toolPause = "TOOL_CALL".equals(conversationMemory.getHitlPauseType());
+
+            if (decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED && !toolPause) {
                 String rejectionMessage = "This action was rejected by a human reviewer."
                         + (decision.getNote() != null ? " Reason: " + decision.getNote() : "");
                 // Public step data for snapshot consumers + ConversationOutput so
@@ -585,7 +591,18 @@ public class Conversation implements IConversation {
             }
 
             String pausedWorkflowId = conversationMemory.getHitlPausedWorkflowId();
-            int resumeFromIndex = conversationMemory.getHitlPausedAbsoluteTaskIndex() + 1;
+            // RULE pauses resume AFTER the paused task (the rule already evaluated;
+            // +1 = backward compat). TOOL_CALL pauses resume AT the paused task so
+            // LlmTask re-enters the same LLM turn and consumes the pending batch.
+            int resumeFromIndex = conversationMemory.getHitlPausedAbsoluteTaskIndex() + (toolPause ? 0 : 1);
+            // Stash the decision on the live memory BEFORE clearing the bookmark so
+            // LlmTask.executeResume (reached at the same index) can consume it. The
+            // pending batch + pauseType survive clearHitlBookmark() — that method only
+            // owns the six bookmark fields — and are cleared by LlmTask after
+            // consumption (Task 9) or by the finally safety-net below.
+            if (toolPause) {
+                conversationMemory.setHitlResumeDecision(decision);
+            }
             clearHitlBookmark();
 
             // Belt-and-braces for Blocker #1: strip PAUSE_CONVERSATION from the
@@ -629,6 +646,16 @@ public class Conversation implements IConversation {
             ConversationState finalState = getConversationState();
             if (finalState == ConversationState.IN_PROGRESS)
                 setConversationState(ConversationState.READY);
+            // Tool-pause safety-net: the batch normally survives clearHitlBookmark()
+            // until LlmTask consumes it and clears it. But on any exit where LlmTask
+            // did NOT consume it — config drift, a degraded path, an error, or simply
+            // a lifecycle that never reached the paused LlmTask — a stale batch would
+            // linger on memory and poison the next turn's resume-mode detection. If the
+            // batch is still present and this was NOT a fresh re-pause (AWAITING_HUMAN),
+            // clear it. A fresh re-pause legitimately re-arms the batch, so leave it.
+            if (conversationMemory.getHitlPendingToolCalls() != null && finalState != ConversationState.AWAITING_HUMAN) {
+                clearToolPauseState();
+            }
             // Persist long-term properties only on a clean outcome. Skip on a
             // re-pause (AWAITING_HUMAN — the pause is not the end of the turn) and
             // on ERROR — mirroring the say path (executeConversationStep only runs

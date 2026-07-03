@@ -25,6 +25,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -252,6 +253,41 @@ class AgentOrchestrator {
 
         return executeWithTools(chatModel, systemMessage, chatMessages, enabledTools, httpCallTools, mcpCallWorkflowTools, a2aTools, task, memory,
                 effectiveToolApprovals, llmTaskIndex);
+    }
+
+    /**
+     * Re-enter the tool-calling loop after a HITL tool pause was resolved by a
+     * human. Replays the persisted transcript, applies the per-call verdicts from
+     * {@code decision} (approved calls execute at-most-once via the write-ahead
+     * journal; rejected calls become synthetic error tool results), then continues
+     * the loop until the model produces a final response — or re-pauses on a fresh
+     * gated call.
+     * <p>
+     * <strong>Task 8 ships only the signature.</strong> The body is implemented in
+     * Task 9. {@code LlmTask.executeResume} calls this method; the Task-8 unit test
+     * mocks the orchestrator, so the stub is never actually reached. The signature
+     * here is byte-identical to what Task 9 fills in.
+     *
+     * @param chatModel
+     *            the resolved chat model for the paused task (rebuilt by
+     *            {@code LlmTask.executeResume} exactly as the normal path does)
+     * @param task
+     *            the paused LLM task (identity-bound to {@code batch})
+     * @param memory
+     *            the live conversation memory
+     * @param batch
+     *            the interrupted tool-call batch carrying the frozen transcript and
+     *            gated calls
+     * @param decision
+     *            the human decision being applied
+     * @param templateDataObjects
+     *            the template data map (for post-response and fallback rebuild)
+     * @return the execution result (final response + tool trace)
+     */
+    ExecutionResult resumeToolLoop(ChatModel chatModel, LlmConfiguration.Task task, IConversationMemory memory, PendingToolCallBatch batch,
+                                   HitlDecision decision, Map<String, Object> templateDataObjects)
+            throws LifecycleException {
+        throw new UnsupportedOperationException("implemented in Task 9");
     }
 
     /**

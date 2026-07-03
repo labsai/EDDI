@@ -37,7 +37,10 @@ import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.model.chat.ChatModel;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -213,8 +216,37 @@ public class LlmTask implements ILifecycleTask {
                 return;
             }
 
+            // === HITL tool-pause resume detection ===
+            // A tool pause froze THIS task mid-LLM-loop. On resume, both the pending
+            // batch and the human decision are present on memory (set by
+            // Conversation.resume). We must NOT re-run the normal path for the paused
+            // task — that would re-execute RAG, preRequest property mutations, and the
+            // model call from scratch. Instead the paused task re-enters via
+            // executeResume, which replays the frozen transcript and applies the
+            // verdict; tasks BEFORE it already ran pre-pause, tasks AFTER it run the
+            // normal path so the turn completes fully.
+            PendingToolCallBatch batch = memory.getHitlPendingToolCalls();
+            HitlDecision resumeDecision = memory.getHitlResumeDecision();
+            boolean resumeMode = batch != null && resumeDecision != null;
+            int resumeIndex = resumeMode ? batch.getLlmTaskIndex() : -1;
+
+            if (resumeMode) {
+                // Same-index re-entry FIRST — deterministically, not via the loop.
+                // executeResume owns the config-drift guard (bounds + id), so it must
+                // run even when resumeIndex is out of range for the current config
+                // (redeploy) — otherwise a drifted pause would silently never clear.
+                // Tasks BEFORE resumeIndex already ran pre-pause and are skipped.
+                executeResume(memory, llmConfig, batch, resumeDecision, currentStep, templateDataObjects);
+            }
+
             var tasks = llmConfig.tasks();
             for (int taskIndex = 0; taskIndex < tasks.size(); taskIndex++) {
+                // In resume mode, only tasks AFTER the resumed index run the normal
+                // path so the turn completes fully; the resumed task was handled above
+                // and earlier tasks already ran pre-pause.
+                if (resumeMode && taskIndex <= resumeIndex) {
+                    continue;
+                }
                 var task = tasks.get(taskIndex);
                 if (task.getActions().contains(MATCH_ALL_OPERATOR) || task.getActions().stream().anyMatch(actions::contains)) {
                     executeTask(memory, task, currentStep, templateDataObjects, taskIndex);
@@ -585,6 +617,135 @@ public class LlmTask implements ILifecycleTask {
                 // Non-fatal — conversation continues, summary will catch up next turn
             }
         }
+    }
+
+    /**
+     * Re-enter the paused LLM task after a HITL tool pause was resolved by a human.
+     * <p>
+     * This is the RESUME mirror of {@link #executeTask}: it rebuilds the chat model
+     * for the paused task, hands the frozen batch + human decision to
+     * {@link AgentOrchestrator#resumeToolLoop} (which replays the transcript and
+     * applies the verdicts — implemented in Task 9), then stores the final result
+     * EXACTLY like the normal path and runs {@code postResponse}.
+     * <p>
+     * <strong>Pre-LLM bypass:</strong> unlike {@code executeTask}, this method
+     * deliberately skips every side-effecting step that already ran before the
+     * pause — httpCall RAG, vector RAG, {@code preRequest} property instructions,
+     * history rebuild + multimodal enhancement, the cascade branch, and
+     * identity-masking / counterweight re-application. Those are baked into the
+     * frozen transcript; re-running them would double-execute external calls and
+     * mutate state twice.
+     */
+    private void executeResume(IConversationMemory memory, LlmConfiguration llmConfig, PendingToolCallBatch batch, HitlDecision resumeDecision,
+                               IWritableConversationStep currentStep, Map<String, Object> templateDataObjects)
+            throws ITemplatingEngine.TemplateEngineException, ChatModelRegistry.UnsupportedLlmTaskException, IOException, LifecycleException {
+
+        // === Task-identity binding (config-drift guard) ===
+        // The batch records the task index AND id at pause time. If the workflow/llm
+        // config was redeployed while awaiting approval, the task at that index may be
+        // gone or different. In that case we FAIL SAFE: the gated tools never ran, so
+        // we degrade gracefully — surface a clear message, clear the pause state, and
+        // let the rest of the pipeline continue. We never guess and execute.
+        int index = batch.getLlmTaskIndex();
+        var tasks = llmConfig.tasks();
+        Task task = (index >= 0 && index < tasks.size()) ? tasks.get(index) : null;
+        if (task == null || !Objects.equals(task.getId(), batch.getLlmTaskId())) {
+            clearToolPauseState(memory);
+            String driftMessage = "The pending approval could not be applied because the agent's configuration changed. "
+                    + "No gated action was executed.";
+            var driftData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":drift", driftMessage);
+            currentStep.storeData(driftData);
+            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(new TextOutputItem(driftMessage, 0)));
+            // Audit: no lightweight hitl.tool.* audit collector is reachable from this
+            // task (the AuditEntry record is built by LifecycleManager per-task with
+            // HMAC context we do not have here). WARN-log with a distinctive marker so
+            // operators can alert on drift; a first-class audit hook can be added later.
+            LOGGER.warnf("hitl.tool.config_drift: pending tool approval discarded for conversation '%s' — recorded task id '%s' at index %d "
+                    + "no longer matches deployed config (found '%s'). No gated action executed.",
+                    sanitize(memory.getConversationId()), batch.getLlmTaskId(), index, task != null ? task.getId() : "<out-of-bounds>");
+            return;
+        }
+
+        // === Rebuild the chat model for THIS task only (normal-path parity) ===
+        var processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects);
+        var resolvedType = globalVariableResolver.resolveValue(task.getType());
+        var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams);
+
+        // === Hand off to the resume loop (Task 9) ===
+        var result = agentOrchestrator.resumeToolLoop(chatModel, task, memory, batch, resumeDecision, templateDataObjects);
+
+        String responseContent = result != null ? result.response() : null;
+        List<Map<String, Object>> toolTrace = result != null && result.trace() != null ? result.trace() : new ArrayList<>();
+
+        // === Store the result EXACTLY like the normal path (executeTask) ===
+        var responseObjectName = task.getResponseObjectName();
+        if (isNullOrEmpty(responseObjectName)) {
+            responseObjectName = task.getId();
+        }
+
+        var langchainData = dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), responseContent);
+        currentStep.storeData(langchainData);
+
+        if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
+            String trimmed = responseContent != null ? responseContent.trim() : "";
+            if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+                var contentAsObject = jsonSerialization.deserialize(responseContent, Map.class);
+                templateDataObjects.put(responseObjectName, contentAsObject);
+            } else {
+                LOGGER.warn("convertToObject=true but resumed LLM response is not JSON, storing as string");
+                templateDataObjects.put(responseObjectName, responseContent);
+            }
+        } else {
+            templateDataObjects.put(responseObjectName, responseContent);
+        }
+
+        // Audit keys (mirror executeTask)
+        if (memory.getAuditCollector() != null) {
+            if (responseContent != null) {
+                var modelResponse = dataFactory.createData("audit:model_response", responseContent);
+                currentStep.storeData(modelResponse);
+            }
+            String modelName = processedParams.getOrDefault("model", task.getType());
+            var modelNameData = dataFactory.createData("audit:model_name", modelName);
+            currentStep.storeData(modelNameData);
+        }
+
+        // Tool trace (mirror executeTask)
+        if (!toolTrace.isEmpty()) {
+            var traceData = dataFactory.createData(KEY_LANGCHAIN + ":trace:" + task.getType() + ":" + task.getId(), toolTrace);
+            currentStep.storeData(traceData);
+        }
+
+        // Output add. On resume the task used tool mode (that is why it paused), so
+        // add the final response unless addToOutput was explicitly false.
+        boolean addToOutputExplicitlyFalse = "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT));
+        if (!addToOutputExplicitlyFalse) {
+            var outputData = dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(), responseContent);
+            currentStep.storeData(outputData);
+            var outputItem = new TextOutputItem(responseContent, 0);
+            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
+        }
+
+        // postResponse DOES run on resume — it reacts to the final response, which
+        // only exists now that the tool loop completed.
+        prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, 200, false);
+
+        // Batch consumed — clear the transient tool-pause state so the next turn does
+        // not re-detect resume mode.
+        clearToolPauseState(memory);
+    }
+
+    /**
+     * Nulls the transient tool-pause state on memory (pending batch, resume
+     * decision, pause type) after the batch has been consumed on resume — or when a
+     * config-drift degradation discards it. Mirrors the private clearing helper on
+     * {@code Conversation}; kept local because {@code IConversationMemory} exposes
+     * the three setters but no combined clear method.
+     */
+    private void clearToolPauseState(IConversationMemory memory) {
+        memory.setHitlPendingToolCalls(null);
+        memory.setHitlResumeDecision(null);
+        memory.setHitlPauseType(null);
     }
 
     /**
