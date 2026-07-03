@@ -374,6 +374,61 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
         }
 
         @Test
+        @DisplayName("G8: forged divergence — load reports the COLUMN state even when the JSONB document says AWAITING_HUMAN")
+        void loadReportsColumnStateOverForgedDivergentDocument() throws Exception {
+            // Store a paused conversation, then forge TRUE divergence with raw SQL:
+            // set the COLUMN to a terminal state but re-write the JSONB document's
+            // conversationState BACK to AWAITING_HUMAN. Unlike compareAndSetState
+            // (which patches both in one statement, so document and column never
+            // actually diverge — making the sibling test vacuous), this leaves the
+            // document genuinely stale. This is exactly the condition applyStateColumn
+            // (the load-side reconciliation) exists to defend against: with it deleted,
+            // the assertions below fail.
+            var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            String id = store.storeConversationMemorySnapshot(snapshot);
+
+            try (var conn = ds.getConnection();
+                    var stmt = conn.prepareStatement(
+                            "UPDATE conversation_memories SET conversation_state = 'EXECUTION_INTERRUPTED', "
+                                    + "data = jsonb_set(data, '{conversationState}', '\"AWAITING_HUMAN\"') WHERE id = ?::uuid")) {
+                stmt.setString(1, id);
+                assertEquals(1, stmt.executeUpdate());
+            }
+
+            // Sanity: the raw document really is stale (still AWAITING_HUMAN) while the
+            // column carries the terminal state.
+            try (var conn = ds.getConnection();
+                    var stmt = conn.prepareStatement(
+                            "SELECT data->>'conversationState' AS doc_state, conversation_state AS col_state "
+                                    + "FROM conversation_memories WHERE id = ?::uuid")) {
+                stmt.setString(1, id);
+                try (var rs = stmt.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals("AWAITING_HUMAN", rs.getString("doc_state"),
+                            "the forged document must be stale (still AWAITING_HUMAN)");
+                    assertEquals("EXECUTION_INTERRUPTED", rs.getString("col_state"),
+                            "the column must be the terminal state");
+                }
+            }
+
+            // The single-document load MUST report the COLUMN state, not the stale
+            // document — deleting applyStateColumn would fail this assertion.
+            var loaded = store.loadConversationMemorySnapshot(id);
+            assertNotNull(loaded);
+            assertEquals(ConversationState.EXECUTION_INTERRUPTED, loaded.getConversationState(),
+                    "loadConversationMemorySnapshot must reconcile to the column over the stale document");
+
+            // The active-conversation batch load reconciles too (separate query path
+            // with its own applyStateColumn call).
+            var active = store.loadActiveConversationMemorySnapshot("agent1", 1);
+            var loadedActive = active.stream()
+                    .filter(s -> id.equals(s.getConversationId()) || id.equals(s.getId()))
+                    .findFirst().orElseThrow(() -> new AssertionError("active load must include the non-ENDED conversation"));
+            assertEquals(ConversationState.EXECUTION_INTERRUPTED, loadedActive.getConversationState(),
+                    "loadActiveConversationMemorySnapshot must reconcile to the column over the stale document");
+        }
+
+        @Test
         @DisplayName("setConversationState converges document and column — a reloaded snapshot matches the column")
         void setConversationStateConvergesDocumentAndColumn() throws Exception {
             var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);

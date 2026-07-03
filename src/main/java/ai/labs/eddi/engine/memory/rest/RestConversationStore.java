@@ -252,7 +252,9 @@ public class RestConversationStore implements IRestConversationStore {
             // nonexistent conversation until TTL).
             try {
                 if (conversationMemoryStore.getConversationState(conversationId) == ConversationState.AWAITING_HUMAN) {
-                    conversationService.endConversation(conversationId);
+                    // G4: attribute the pause-terminating end (this store has no request
+                    // principal and also runs from scheduled cleanup).
+                    conversationService.endConversation(conversationId, "system:admin-end");
                 }
             } catch (Exception e) {
                 log.warn(format("HITL cleanup before permanent delete failed for conversation %s: %s",
@@ -373,7 +375,8 @@ public class RestConversationStore implements IRestConversationStore {
                 // miss the in-flight-resume signal that stops a concurrent resume
                 // from persisting its snapshot back over the ENDED state.
                 if (conversationStatus.getConversationState() == ConversationState.AWAITING_HUMAN) {
-                    conversationService.endConversation(conversationId);
+                    // G4: attribute the pause-terminating end (admin bulk-end path).
+                    conversationService.endConversation(conversationId, "system:admin-end");
                 } else {
                     conversationMemoryStore.setConversationState(conversationId, ConversationState.ENDED);
                 }

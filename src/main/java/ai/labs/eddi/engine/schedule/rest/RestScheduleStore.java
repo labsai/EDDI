@@ -113,6 +113,17 @@ public class RestScheduleStore implements IRestScheduleStore {
     @Override
     public Response createSchedule(ScheduleConfiguration schedule) {
         try {
+            // G3: HITL timeout schedules are minted ONLY internally (ConversationService,
+            // GroupConversationService, crash recovery — none of which go through REST).
+            // Reject any request body carrying the hitl_timeout marker for EVERYONE
+            // (even admins): a forged timeout schedule would let the poller
+            // force-resume/abort a victim's pending approval with a system actor,
+            // side-stepping the owner/admin/approver check on /resume.
+            Response bodyGuard = rejectHitlTimeoutBody(schedule, "create");
+            if (bodyGuard != null) {
+                return bodyGuard;
+            }
+
             // Validate
             validateSchedule(schedule);
 
@@ -139,6 +150,14 @@ public class RestScheduleStore implements IRestScheduleStore {
     @Override
     public Response updateSchedule(String scheduleId, ScheduleConfiguration schedule) {
         try {
+            // G3: reject any request body that would CONVERT a schedule into a HITL
+            // timeout (checked on the incoming body — for EVERYONE, even admins),
+            // closing the create/update forgery path that side-steps the /resume gate.
+            Response bodyGuard = rejectHitlTimeoutBody(schedule, "update");
+            if (bodyGuard != null) {
+                return bodyGuard;
+            }
+
             // A HITL timeout schedule is a safety timer — a plain editor must not
             // be able to mutate it (e.g. push its nextFire far out to defeat an
             // ABORT/AUTO_REJECT deadline). Detect via the STORED schedule so a
@@ -288,6 +307,31 @@ public class RestScheduleStore implements IRestScheduleStore {
     private static boolean isHitlSchedule(ScheduleConfiguration schedule) {
         Map<String, Object> md = schedule != null ? schedule.getMetadata() : null;
         return md != null && HITL_TYPE_TIMEOUT.equals(md.get(HITL_TYPE_KEY));
+    }
+
+    /**
+     * G3: refuses a create/update whose request BODY declares the schedule as a
+     * HITL approval timeout. These schedules are only ever minted internally (they
+     * bypass REST), so no REST caller — admin or editor — has a legitimate reason
+     * to forge one; letting them would hand an attacker a way to force-resume/abort
+     * another user's pending approval with a system actor and no authorization
+     * check.
+     *
+     * @return a 400 {@link Response} to short-circuit the caller when the body is a
+     *         HITL timeout schedule; {@code null} when the operation may proceed
+     */
+    private Response rejectHitlTimeoutBody(ScheduleConfiguration schedule, String operation) {
+        if (isHitlSchedule(schedule)) {
+            LOGGER.warnf("Refused %s of a schedule whose body declares hitlType=%s — "
+                    + "HITL timeout schedules are minted internally only", operation, HITL_TYPE_TIMEOUT);
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Schedules marked as human-in-the-loop approval timeouts (metadata hitlType="
+                            + HITL_TYPE_TIMEOUT + ") cannot be created or updated via this API. "
+                            + "They are managed automatically by the HITL framework. "
+                            + "Resolve a pending approval via POST /agents/{conversationId}/resume or .../cancel.")
+                    .build();
+        }
+        return null;
     }
 
     /**

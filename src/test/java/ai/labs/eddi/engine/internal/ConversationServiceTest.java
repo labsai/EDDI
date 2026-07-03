@@ -46,6 +46,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -98,17 +99,22 @@ class ConversationServiceTest {
     private ICache<String, ConversationState> conversationStateCache;
 
     private ConversationService conversationService;
+    // Held reference (not the shared no-op fixture) so HITL event-firing paths
+    // (G5) can be verified.
+    private jakarta.enterprise.event.Event<ai.labs.eddi.engine.events.HitlResumeCompletedEvent> hitlResumeCompletedEvent;
 
     @BeforeEach
+    @SuppressWarnings("unchecked")
     void setUp() {
         MockitoAnnotations.openMocks(this);
         doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
+        hitlResumeCompletedEvent = mock(jakarta.enterprise.event.Event.class);
         conversationService = new ConversationService(
                 agentFactory, conversationMemoryStore, conversationDescriptorStore,
                 userMemoryStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
-                new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), AGENT_TIMEOUT);
+                new SimpleMeterRegistry(), hitlResumeCompletedEvent, AGENT_TIMEOUT);
     }
 
     // =========================================================================
@@ -247,6 +253,65 @@ class ConversationServiceTest {
 
             verify(conversationMemoryStore).setConversationState(CONVERSATION_ID, ConversationState.ENDED);
             verify(conversationStateCache).put(CONVERSATION_ID, ConversationState.ENDED);
+        }
+
+        @Test
+        @DisplayName("G4: ending a READY conversation writes no HITL audit and fires no event")
+        void endingReady_noHitlSideEffects() throws Exception {
+            doReturn(ConversationState.READY).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+
+            conversationService.endConversation(CONVERSATION_ID, "alice");
+
+            verify(auditLedgerService, never()).submit(any());
+            verify(hitlResumeCompletedEvent, never()).fireAsync(any());
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+        }
+
+        @Test
+        @DisplayName("G4/G5: ending an AWAITING_HUMAN conversation audits with the actor, disarms the schedule, clears the bookmark, and fires the terminal event")
+        void endingPaused_auditsAndFiresEvent() throws Exception {
+            doReturn(true).when(auditLedgerService).isEnabled();
+            // previousState is AWAITING_HUMAN → the pause-terminating branch runs.
+            doReturn(ConversationState.AWAITING_HUMAN).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            doReturn(createMinimalSnapshot(AGENT_ID, USER_ID)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            conversationService.endConversation(CONVERSATION_ID, "alice");
+
+            // The armed timeout schedule is disarmed and the bookmark cleared.
+            verify(scheduleStore).deleteSchedulesByName("hitl-timeout-" + CONVERSATION_ID);
+            verify(conversationMemoryStore).clearHitlBookmark(CONVERSATION_ID);
+
+            // G4: an hitl.approval cancellation is audited attributed to the actor.
+            ArgumentCaptor<ai.labs.eddi.engine.audit.model.AuditEntry> auditCaptor = ArgumentCaptor
+                    .forClass(ai.labs.eddi.engine.audit.model.AuditEntry.class);
+            verify(auditLedgerService).submit(auditCaptor.capture());
+            var detail = auditCaptor.getValue().output(); // hitl.approval detail is carried in the 'output' map
+            assertEquals("alice", detail.get("decidedBy"));
+            assertEquals("CANCELLED", detail.get("verdict"));
+
+            // G5: the terminal resume-completed event fires with a null verdict and
+            // the actor so channel observers (Slack) can render the outcome.
+            ArgumentCaptor<ai.labs.eddi.engine.events.HitlResumeCompletedEvent> eventCaptor = ArgumentCaptor
+                    .forClass(ai.labs.eddi.engine.events.HitlResumeCompletedEvent.class);
+            verify(hitlResumeCompletedEvent).fireAsync(eventCaptor.capture());
+            assertNull(eventCaptor.getValue().verdict(), "cancel/end fires a null verdict");
+            assertEquals("alice", eventCaptor.getValue().decidedBy());
+            assertNotNull(eventCaptor.getValue().snapshot());
+        }
+
+        @Test
+        @DisplayName("G4: the no-arg overload attributes to system:end")
+        void noArgOverload_attributesSystemEnd() throws Exception {
+            doReturn(true).when(auditLedgerService).isEnabled();
+            doReturn(ConversationState.AWAITING_HUMAN).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            doReturn(createMinimalSnapshot(AGENT_ID, USER_ID)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            conversationService.endConversation(CONVERSATION_ID);
+
+            ArgumentCaptor<ai.labs.eddi.engine.audit.model.AuditEntry> auditCaptor = ArgumentCaptor
+                    .forClass(ai.labs.eddi.engine.audit.model.AuditEntry.class);
+            verify(auditLedgerService).submit(auditCaptor.capture());
+            assertEquals("system:end", auditCaptor.getValue().output().get("decidedBy"));
         }
     }
 

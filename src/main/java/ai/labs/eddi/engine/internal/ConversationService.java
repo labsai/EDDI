@@ -249,6 +249,15 @@ public class ConversationService implements IConversationService {
 
     @Override
     public void endConversation(String conversationId) {
+        // Default actor for callers that cannot attribute (background/scheduled
+        // cleanup, private group-member teardown). REST/admin callers pass an actor
+        // via the overload so a pause-terminating end is attributable in the audit
+        // trail (G4).
+        endConversation(conversationId, "system:end");
+    }
+
+    @Override
+    public void endConversation(String conversationId, String endedBy) {
         long startTime = System.nanoTime();
         // Signal any in-flight resume on this pod (mirrors cancelConversation): a
         // resume that already passed the AWAITING_HUMAN->IN_PROGRESS CAS would
@@ -267,12 +276,20 @@ public class ConversationService implements IConversationService {
         setConversationState(conversationId, ConversationState.ENDED);
         if (previousState == ConversationState.AWAITING_HUMAN) {
             deleteHitlTimeoutSchedule(conversationId);
+            // G4: an end that terminates a pending approval is an oversight decision
+            // too — audit it with the actor (EU AI Act; parity with cancel) so every
+            // pause-terminating path is attributed. G5: notify channel observers
+            // (Slack, …) with a null verdict + terminal snapshot so the originating
+            // surface can render the outcome (mirrors cancel/timeout).
+            auditHitlCancellation(conversationId, null, endedBy);
+            fireHitlResumeCompletedTerminal(conversationId, endedBy);
             try {
                 conversationMemoryStore.clearHitlBookmark(conversationId);
             } catch (Exception e) {
                 LOGGER.warnf("Failed to clear HITL bookmark while ending %s: %s", conversationId, e.getMessage());
             }
-            LOGGER.warnf("Conversation %s was ended while awaiting human approval — the pending approval is terminated", conversationId);
+            LOGGER.warnf("Conversation %s was ended by %s while awaiting human approval — the pending approval is terminated",
+                    conversationId, endedBy);
         }
         recordMetrics(timerConversationEnd, counterConversationEnd, startTime);
     }
@@ -828,14 +845,18 @@ public class ConversationService implements IConversationService {
         return () -> {
             // Queued-say guard: this memory copy was loaded at REST-request time;
             // a previously queued turn may have committed a pause (or a resume may
-            // be executing) in the meantime. Skip the turn entirely — executing it
-            // against the stale snapshot would end with a full-document store that
-            // silently overwrites the pause (destroying the pending approval and
-            // orphaning its timeout schedule). The skip notifier completes the
+            // be executing), or the conversation may have been terminally resolved
+            // (ENDED via endConversation, EXECUTION_INTERRUPTED via cancel) in the
+            // meantime. Skip the turn entirely — executing it against the stale
+            // snapshot would end with a full-document store that silently overwrites
+            // the pause (destroying the pending approval and orphaning its timeout
+            // schedule) or RESURRECTS a terminated conversation to READY with
+            // post-termination side effects. The skip notifier completes the
             // caller's response handler with the persisted state, so the client
             // gets a prompt, honest answer instead of a watchdog timeout.
             ConversationState persistedState = conversationMemoryStore.getConversationState(conversationId);
-            if (persistedState == ConversationState.AWAITING_HUMAN || persistedState == ConversationState.IN_PROGRESS) {
+            if (persistedState == ConversationState.AWAITING_HUMAN || persistedState == ConversationState.IN_PROGRESS
+                    || persistedState == ConversationState.ENDED || persistedState == ConversationState.EXECUTION_INTERRUPTED) {
                 conversationMemory.setConversationState(persistedState);
                 contextLogger.setLoggingContext(loggingContext);
                 LOGGER.warnf("Skipping queued turn for conversation %s: persisted state is %s (turn arrived before the state change)",
@@ -878,6 +899,29 @@ public class ConversationService implements IConversationService {
                     @Override
                     public void onComplete(Void result) {
                         try {
+                            // #2 (say path parity with resume): a concurrent cancel/end
+                            // may have signalled this in-flight memory (e.g. a group
+                            // handleMemberPause → cancelConversation that lost both
+                            // state CAS races because this turn's pause was not yet
+                            // persisted). Honor the cooperative-cancel flag: never
+                            // persist AWAITING_HUMAN, arm a timeout, or count a pause
+                            // nobody wants — that strands the approval. Persist
+                            // EXECUTION_INTERRUPTED via CAS from the (non-terminal)
+                            // running state so a cross-pod terminal writer (ENDED) still
+                            // wins and a resurrected READY never lingers.
+                            if (conversationMemory.isCancelled()) {
+                                contextLogger.setLoggingContext(loggingContext);
+                                LOGGER.infof("Turn of conversation %s completed after a cancel signal — "
+                                        + "discarding its outcome (no pause persisted/armed)", conversationId);
+                                ConversationState runningState = conversationMemoryStore.getConversationState(conversationId);
+                                if (runningState == ConversationState.READY || runningState == ConversationState.IN_PROGRESS) {
+                                    if (conversationMemoryStore.compareAndSetState(conversationId,
+                                            runningState, ConversationState.EXECUTION_INTERRUPTED)) {
+                                        cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
+                                    }
+                                }
+                                return;
+                            }
                             boolean awaitingHuman = conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN;
                             if (awaitingHuman && memoryStateAtSubmit == ConversationState.AWAITING_HUMAN) {
                                 // Stale pause carried in from the loaded snapshot —
@@ -1046,15 +1090,20 @@ public class ConversationService implements IConversationService {
             cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
             if (pauseCancelled) {
                 // A pending human approval was terminally resolved outside resume:
-                // remove the stale bookmark (it would otherwise round-trip forever
-                // and confuse approval-status + crash recovery) and audit the
-                // cancellation (EU AI Act — cancels are decisions too).
+                // audit the cancellation (EU AI Act — cancels are decisions too), G5
+                // notify channel observers with a null verdict + terminal snapshot so
+                // the originating surface (Slack, …) renders the outcome, then remove
+                // the stale bookmark (it would otherwise round-trip forever and
+                // confuse approval-status + crash recovery). The event is fired BEFORE
+                // the bookmark clear so any observer that inspects the reason still
+                // sees it, and the snapshot already carries the terminal state.
+                auditHitlCancellation(conversationId, mode, cancelledBy);
+                fireHitlResumeCompletedTerminal(conversationId, cancelledBy);
                 try {
                     conversationMemoryStore.clearHitlBookmark(conversationId);
                 } catch (Exception e) {
                     LOGGER.warnf("Failed to clear HITL bookmark on cancel of %s: %s", conversationId, e.getMessage());
                 }
-                auditHitlCancellation(conversationId, mode, cancelledBy);
             }
             return CancelOutcome.CANCELLED;
         }
@@ -1066,6 +1115,21 @@ public class ConversationService implements IConversationService {
         // READY / ENDED / ERROR / EXECUTION_INTERRUPTED: nothing paused, nothing
         // running. Use endConversation to close a READY conversation.
         return CancelOutcome.NOTHING_TO_CANCEL;
+    }
+
+    /**
+     * Sentinel for the DELIBERATE agent-not-deployed resume rejection, which has
+     * already restored the pause + dropped the in-flight entry before throwing.
+     * Being an {@link IllegalStateException} it still maps to REST 409, but its
+     * distinct type lets the resume catch re-throw it WITHOUT a second (double)
+     * restore, while any OTHER IllegalStateException (e.g. one bubbling out of
+     * continueConversation) falls through to the restore-and-wrap path (review
+     * carve-out narrowing).
+     */
+    private static final class AgentNotDeployedForResumeException extends IllegalStateException {
+        AgentNotDeployedForResumeException(String message) {
+            super(message);
+        }
     }
 
     @Override
@@ -1131,7 +1195,7 @@ public class ConversationService implements IConversationService {
                 // next restart (crash recovery) or a manual resume.
                 inFlightConversations.remove(conversationId, memory);
                 restorePauseAfterFailedResume(conversationId, memory, false);
-                throw new IllegalStateException("Agent not deployed for resume (agentId=" + agentId + ", version=" + agentVersion
+                throw new AgentNotDeployedForResumeException("Agent not deployed for resume (agentId=" + agentId + ", version=" + agentVersion
                         + ") — the conversation remains AWAITING_HUMAN; redeploy the agent and retry");
             }
 
@@ -1255,16 +1319,20 @@ public class ConversationService implements IConversationService {
             // trail or the counter.
             counterHitlResume.increment();
             auditHitlDecision(conversationId, agentId, agentVersion, memory.getUserId(), environment, decision);
-        } catch (IllegalStateException e) {
-            // Deliberately thrown for the agent-not-deployed case, which already
-            // removed the in-flight entry and restored the pause above. Propagate
-            // as-is so the REST layer maps it to 409 (not 500).
+        } catch (AgentNotDeployedForResumeException e) {
+            // The ONLY IllegalStateException that already removed the in-flight entry
+            // and restored the pause above — re-throw as-is (REST 409) WITHOUT a
+            // double restore. Any OTHER ISE (e.g. one bubbling out of
+            // continueConversation) is NOT this type and falls through to the
+            // restore-and-wrap path below, so an unexpected ISE never strands the
+            // pause IN_PROGRESS (review carve-out narrowing).
             throw e;
         } catch (ServiceException | InstantiationException | IllegalAccessException | RuntimeException e) {
             // #7 + review: transient OR unexpected failures anywhere between the CAS
-            // and submitInOrder (e.g. an unchecked exception from continueConversation)
-            // must restore the pause and drop the in-flight registration — otherwise
-            // the conversation is left stuck IN_PROGRESS with a leaked registry entry.
+            // and submitInOrder (e.g. an unchecked exception — including an unexpected
+            // IllegalStateException — from continueConversation) must restore the pause
+            // and drop the in-flight registration — otherwise the conversation is left
+            // stuck IN_PROGRESS with a leaked registry entry.
             inFlightConversations.remove(conversationId, memory);
             restorePauseAfterFailedResume(conversationId, memory, true);
             throw new ResourceStoreException("Failed to resume conversation: " + e.getLocalizedMessage(), e);
@@ -1321,6 +1389,39 @@ public class ConversationService implements IConversationService {
                     snapshot));
         } catch (Exception e) {
             LOGGER.warnf("Failed to fire HITL resume-completed event for %s: %s", conversationId, e.getMessage());
+        }
+    }
+
+    /**
+     * G5: fires {@link HitlResumeCompletedEvent} with a {@code null} verdict and
+     * the TERMINAL conversation snapshot after a pending approval is resolved
+     * WITHOUT a human decision — cancel/ABORT/end/timeout-abort. Channel observers
+     * (Slack, …) render these outcomes on the originating surface just like a
+     * resume; the null verdict distinguishes a cancellation/end from an
+     * APPROVE/REJECT. Best-effort and fully isolated: any failure loading the
+     * snapshot, converting it, or firing is logged and swallowed — the terminal
+     * state has already been persisted and must not be affected by delivery-side
+     * concerns.
+     */
+    private void fireHitlResumeCompletedTerminal(String conversationId, String decidedBy) {
+        try {
+            var stored = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (stored == null) {
+                return; // deleted concurrently — nothing to render
+            }
+            var memory = convertConversationMemorySnapshot(stored);
+            // The column is the source of truth for the state; reflect the terminal
+            // state the caller just persisted so observers never see a stale pause.
+            var terminalState = conversationMemoryStore.getConversationState(conversationId);
+            if (terminalState != null) {
+                memory.setConversationState(terminalState);
+            }
+            var snapshot = convertSimpleConversationMemorySnapshot(memory, false, true, List.of());
+            snapshot.setEnvironment(stored.getEnvironment());
+            hitlResumeCompletedEvent.fireAsync(new HitlResumeCompletedEvent(
+                    conversationId, null, decidedBy, snapshot));
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to fire terminal HITL resume-completed event for %s: %s", conversationId, e.getMessage());
         }
     }
 
@@ -1457,11 +1558,25 @@ public class ConversationService implements IConversationService {
     }
 
     /**
+     * Minimum delay before a past-due re-armed timeout fires (mirrors crash
+     * recovery).
+     */
+    private static final Duration HITL_REARM_GRACE = Duration.ofMinutes(2);
+
+    /**
      * Creates a one-shot schedule that fires the {@link HitlTimeoutHandler} when
      * the configured approval timeout expires. Reads the policy from the memory's
      * HITL BOOKMARK (populated by {@link #populateHitlTimeoutBookmark} just before
      * — single config resolution per pause, and bookmark and schedule can never
      * diverge). No-ops without a finite policy + timeout.
+     * <p>
+     * G7: the deadline is anchored to the ORIGINAL pause time ({@code pausedAt +
+     * timeout}) when the bookmark carries a pausedAt — so a
+     * restore-after-failed-resume re-arms at the same absolute due time
+     * approval-status reports, instead of silently extending it by another full
+     * timeout. A past-due deadline is clamped to {@code now + grace} (mirrors crash
+     * recovery's rearmSchedule). A fresh pause has pausedAt ≈ now, so this reduces
+     * to now + timeout.
      */
     private void scheduleHitlTimeout(String conversationId, IConversationMemory memory) {
         try {
@@ -1473,7 +1588,12 @@ public class ConversationService implements IConversationService {
             }
 
             Duration timeout = Duration.parse(timeoutStr);
-            Instant fireAt = Instant.now().plus(timeout);
+            Instant pausedAt = memory.getHitlPausedAt();
+            Instant fireAt = pausedAt != null ? pausedAt.plus(timeout) : Instant.now().plus(timeout);
+            Instant earliest = Instant.now().plus(HITL_REARM_GRACE);
+            if (fireAt.isBefore(earliest)) {
+                fireAt = earliest;
+            }
 
             var schedule = new ScheduleConfiguration();
             schedule.setName(HitlSchedules.regularTimeoutScheduleName(conversationId));

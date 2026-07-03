@@ -34,6 +34,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -88,17 +89,22 @@ class ConversationServiceHitlTest {
     private ICache<String, ConversationState> conversationStateCache;
 
     private ConversationService conversationService;
+    // Held reference (not the shared no-op fixture) so the cancel-path HITL event
+    // firing (G5) can be verified.
+    private jakarta.enterprise.event.Event<ai.labs.eddi.engine.events.HitlResumeCompletedEvent> hitlResumeCompletedEvent;
 
     @BeforeEach
+    @SuppressWarnings("unchecked")
     void setUp() {
         MockitoAnnotations.openMocks(this);
         doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
+        hitlResumeCompletedEvent = mock(jakarta.enterprise.event.Event.class);
         conversationService = new ConversationService(
                 agentFactory, conversationMemoryStore, conversationDescriptorStore,
                 userMemoryStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
-                new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), AGENT_TIMEOUT);
+                new SimpleMeterRegistry(), hitlResumeCompletedEvent, AGENT_TIMEOUT);
     }
 
     // =========================================================================
@@ -131,6 +137,40 @@ class ConversationServiceHitlTest {
             // now-terminal bookmark.
             verify(scheduleStore).deleteSchedulesByName("hitl-timeout-" + CONVERSATION_ID);
             verify(conversationMemoryStore).clearHitlBookmark(CONVERSATION_ID);
+        }
+
+        @Test
+        @DisplayName("G5: cancelling a pause audits with the actor and fires the terminal resume-completed event (null verdict)")
+        void awaitingHuman_auditsAndFiresEvent() throws Exception {
+            doReturn(true).when(auditLedgerService).isEnabled();
+            doReturn(ConversationState.AWAITING_HUMAN)
+                    .when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
+            // The terminal event fire loads the snapshot to build its payload.
+            doReturn(createHitlSnapshot(CONVERSATION_ID, AGENT_ID, Instant.now(), "needs review", "WAIT_INDEFINITELY"))
+                    .when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            var outcome = conversationService.cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL, "alice");
+
+            assertEquals(IConversationService.CancelOutcome.CANCELLED, outcome);
+
+            // G4-parity audit: the cancel is attributed to the actor with a CANCELLED
+            // verdict.
+            ArgumentCaptor<ai.labs.eddi.engine.audit.model.AuditEntry> auditCaptor = ArgumentCaptor
+                    .forClass(ai.labs.eddi.engine.audit.model.AuditEntry.class);
+            verify(auditLedgerService).submit(auditCaptor.capture());
+            assertEquals("alice", auditCaptor.getValue().output().get("decidedBy"));
+            assertEquals("CANCELLED", auditCaptor.getValue().output().get("verdict"));
+
+            // G5: the terminal resume-completed event fires with a null verdict and the
+            // actor.
+            ArgumentCaptor<ai.labs.eddi.engine.events.HitlResumeCompletedEvent> eventCaptor = ArgumentCaptor
+                    .forClass(ai.labs.eddi.engine.events.HitlResumeCompletedEvent.class);
+            verify(hitlResumeCompletedEvent).fireAsync(eventCaptor.capture());
+            assertNull(eventCaptor.getValue().verdict());
+            assertEquals("alice", eventCaptor.getValue().decidedBy());
+            assertNotNull(eventCaptor.getValue().snapshot());
         }
 
         @Test

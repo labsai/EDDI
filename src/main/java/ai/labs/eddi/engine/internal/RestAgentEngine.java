@@ -99,7 +99,10 @@ public class RestAgentEngine implements IRestAgentEngine {
     @Override
     public Response endConversation(String conversationId) {
         validateConversationOwnership(conversationId);
-        conversationService.endConversation(conversationId);
+        // G4: attribute a pause-terminating end to the calling principal so it lands
+        // in the hitl.approval audit trail (null-safe for anonymous callers).
+        String endedBy = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
+        conversationService.endConversation(conversationId, endedBy);
         return Response.ok().build();
     }
 
@@ -308,7 +311,9 @@ public class RestAgentEngine implements IRestAgentEngine {
                     .build();
         }
         validateConversationOwnership(conversationId, true);
-        String userId = identity.getPrincipal().getName();
+        // Null-safe principal (parity with the cancel/end paths): an anonymous caller
+        // must not NPE — the decision is attributed to "unknown" downstream.
+        String userId = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
         decision.setDecidedBy(userId);
         try {
             conversationService.resumeConversation(conversationId, decision, null);

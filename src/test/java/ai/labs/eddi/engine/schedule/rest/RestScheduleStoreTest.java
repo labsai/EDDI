@@ -315,6 +315,56 @@ class RestScheduleStoreTest {
         verify(scheduleStore, never()).updateSchedule(eq("h1"), any());
     }
 
+    // --- G3: forging a HITL timeout schedule via create/update is denied for
+    // EVERYONE (even admin). These schedules are minted internally only; a forged
+    // one would let the poller force-resume/abort a victim's approval
+    // unauthenticated.
+
+    @Test
+    void createSchedule_hitlBody_rejectedForEditor() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+
+        Response response = rest.createSchedule(hitlSchedule("v1"));
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
+    void createSchedule_hitlBody_rejectedForAdmin() throws Exception {
+        // Even an admin cannot mint a HITL timeout schedule via REST.
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+
+        Response response = rest.createSchedule(hitlSchedule("v1"));
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
+    void updateSchedule_convertBodyToHitl_rejectedForEditor() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        // Stored schedule is a plain (non-HITL) cron — the guard must catch the
+        // hitl_timeout marker on the INCOMING body, closing the conversion path.
+        when(scheduleStore.readSchedule("r1")).thenReturn(makeCronSchedule("r1"));
+
+        Response response = rest.updateSchedule("r1", hitlSchedule("r1"));
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(eq("r1"), any());
+    }
+
+    @Test
+    void updateSchedule_convertBodyToHitl_rejectedForAdmin() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        when(scheduleStore.readSchedule("r1")).thenReturn(makeCronSchedule("r1"));
+
+        Response response = rest.updateSchedule("r1", hitlSchedule("r1"));
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(eq("r1"), any());
+    }
+
     @Test
     void readAllSchedules_redactsHitlForEditor() throws Exception {
         when(identity.hasRole("eddi-admin")).thenReturn(false);

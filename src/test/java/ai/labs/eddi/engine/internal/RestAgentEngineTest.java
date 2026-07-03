@@ -123,7 +123,9 @@ class RestAgentEngineTest {
             Response response = restAgentEngine.endConversation("conv-1");
 
             assertEquals(200, response.getStatus());
-            verify(conversationService).endConversation("conv-1");
+            // G4: the engine attributes the end to the calling principal (null for the
+            // unauthenticated mock identity here) via the 2-arg overload.
+            verify(conversationService).endConversation("conv-1", null);
         }
     }
 

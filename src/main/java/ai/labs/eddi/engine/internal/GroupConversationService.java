@@ -701,11 +701,23 @@ public class GroupConversationService implements IGroupConversationService {
     }
 
     /**
+     * Minimum delay before a past-due re-armed group timeout fires (mirrors crash
+     * recovery).
+     */
+    private static final java.time.Duration GROUP_HITL_REARM_GRACE = java.time.Duration.ofMinutes(2);
+
+    /**
      * Creates a one-shot schedule for group HITL timeout. Reads the pause bookmark
      * fields already set on the conversation (by commitPause/restoreGroupPause) —
      * NOT the group config, so the schedule always matches what approval-status
      * reports even if the config changed since the pause. No-ops if not configured
      * or WAIT_INDEFINITELY.
+     * <p>
+     * G7: the deadline is anchored to the ORIGINAL pause time ({@code pausedAt +
+     * timeout}) so a restore-after-failed-resume re-arms at the same absolute due
+     * time approval-status reports, not now + another full timeout. A past-due
+     * deadline is clamped to {@code now + grace} (mirrors crash recovery). A fresh
+     * pause has pausedAt ≈ now, so this reduces to now + timeout.
      */
     private void scheduleGroupHitlTimeout(GroupConversation gc) {
         try {
@@ -718,7 +730,12 @@ public class GroupConversationService implements IGroupConversationService {
             }
 
             java.time.Duration timeout = java.time.Duration.parse(timeoutStr);
-            Instant fireAt = Instant.now().plus(timeout);
+            Instant pausedAt = gc.getPausedAt();
+            Instant fireAt = pausedAt != null ? pausedAt.plus(timeout) : Instant.now().plus(timeout);
+            Instant earliest = Instant.now().plus(GROUP_HITL_REARM_GRACE);
+            if (fireAt.isBefore(earliest)) {
+                fireAt = earliest;
+            }
 
             var schedule = new ScheduleConfiguration();
             schedule.setName(ai.labs.eddi.engine.hitl.HitlSchedules.groupTimeoutScheduleName(gc.getId()));

@@ -274,6 +274,125 @@ class ConversationServiceSayHitlTest {
             verify(conversation).say(eq("queued message"), any());
             verify(handler, never()).onSkipped(any());
         }
+
+        @Test
+        @DisplayName("G1: persisted ENDED (endConversation ran while queued) → onSkipped, turn not executed, no resurrection")
+        void persistedEnded_skips() throws Exception {
+            IConversation conversation = mock(IConversation.class);
+            ConversationResponseHandler handler = mock(ConversationResponseHandler.class);
+
+            Callable<Void> queued = acceptTurnAndCaptureCallable(conversation, handler);
+
+            // The conversation was terminally ENDED after this turn was accepted but
+            // before the coordinator ran it. Executing it would run the pipeline and
+            // its onComplete would persist READY over ENDED — a resurrection with
+            // post-termination side effects.
+            doReturn(ConversationState.ENDED)
+                    .when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+
+            queued.call();
+
+            // The pipeline never ran and no full-document store overwrote ENDED.
+            verify(runtime, never()).submitCallable(any(), any(), any());
+            verify(conversation, never()).say(anyString(), any());
+            verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+
+            // The caller is told honestly via onSkipped carrying the terminal state.
+            ArgumentCaptor<SimpleConversationMemorySnapshot> snapCaptor = ArgumentCaptor.forClass(SimpleConversationMemorySnapshot.class);
+            verify(handler).onSkipped(snapCaptor.capture());
+            assertEquals(ConversationState.ENDED, snapCaptor.getValue().getConversationState(),
+                    "onSkipped snapshot must reflect the persisted terminal state");
+            verify(handler, never()).onComplete(any());
+        }
+
+        @Test
+        @DisplayName("G1: persisted EXECUTION_INTERRUPTED (cancel ran while queued) → onSkipped, turn not executed")
+        void persistedInterrupted_skips() throws Exception {
+            IConversation conversation = mock(IConversation.class);
+            ConversationResponseHandler handler = mock(ConversationResponseHandler.class);
+
+            Callable<Void> queued = acceptTurnAndCaptureCallable(conversation, handler);
+
+            // A cancel flipped the conversation to EXECUTION_INTERRUPTED after this
+            // turn was accepted — the queued turn must not run and resurrect it.
+            doReturn(ConversationState.EXECUTION_INTERRUPTED)
+                    .when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+
+            queued.call();
+
+            verify(runtime, never()).submitCallable(any(), any(), any());
+            verify(conversation, never()).say(anyString(), any());
+            verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+
+            ArgumentCaptor<SimpleConversationMemorySnapshot> snapCaptor = ArgumentCaptor.forClass(SimpleConversationMemorySnapshot.class);
+            verify(handler).onSkipped(snapCaptor.capture());
+            assertEquals(ConversationState.EXECUTION_INTERRUPTED, snapCaptor.getValue().getConversationState());
+        }
+    }
+
+    // =========================================================================
+    // G2: a cancel signalled between callable start and completion — the say
+    // onComplete honors the cooperative-cancel flag: no AWAITING_HUMAN store,
+    // no timeout schedule, no pause counter (root cause of the group
+    // member-pause stranded-approval race).
+    // =========================================================================
+
+    @Nested
+    @DisplayName("G2: cancel during a completing say turn")
+    class CancelDuringSayTurn {
+
+        @Test
+        @DisplayName("memory cancelled at completion → no AWAITING_HUMAN store, no schedule; persists EXECUTION_INTERRUPTED via CAS")
+        void cancelledAtCompletion_doesNotPersistPause() throws Exception {
+            // The loaded memory is READY at say()-entry (fast-fail passes).
+            doReturn(snapshot(ConversationState.READY))
+                    .when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            doReturn(QuotaCheckResult.OK).when(tenantQuotaService).acquireApiCallSlot();
+
+            IAgent agent = mock(IAgent.class);
+            IConversation conversation = mock(IConversation.class);
+            doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+            doReturn(false).when(conversation).isEnded();
+            var memoryRef = new java.util.concurrent.atomic.AtomicReference<IConversationMemory>();
+            doAnswer(inv -> {
+                memoryRef.set(inv.getArgument(0));
+                return conversation;
+            }).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+
+            // Persisted (column) state is READY → the queued-say guard passes.
+            doReturn(ConversationState.READY)
+                    .when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            // Cancel path (e.g. group handleMemberPause → cancelConversation) lost both
+            // state CAS races because this turn's pause was not yet persisted, so the
+            // persisted READY→EXECUTION_INTERRUPTED CAS must succeed here.
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.READY, ConversationState.EXECUTION_INTERRUPTED);
+            stubRuntimeInline();
+
+            ConversationResponseHandler handler = mock(ConversationResponseHandler.class);
+            conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, true, List.of(),
+                    new InputData("please delete my account", Map.of()), false, handler);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Callable<Void>> captor = ArgumentCaptor.forClass(Callable.class);
+            verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), captor.capture());
+
+            // The pipeline pauses THIS turn AND a concurrent cancel signals the memory.
+            doAnswer(inv -> {
+                memoryRef.get().setConversationState(ConversationState.AWAITING_HUMAN);
+                memoryRef.get().setCancelled(true);
+                return null;
+            }).when(conversation).say(anyString(), any());
+
+            captor.getValue().call();
+
+            // The cancelled turn's pause is NOT persisted and NOT armed — the approval
+            // is never stranded. The interrupt is CAS'd from the running state.
+            verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+            verify(scheduleStore, never()).createSchedule(any());
+            verify(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.READY, ConversationState.EXECUTION_INTERRUPTED);
+        }
     }
 
     // =========================================================================

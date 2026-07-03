@@ -42,9 +42,24 @@ public interface IConversationService {
             throws AgentNotReadyException, ResourceStoreException, ResourceNotFoundException;
 
     /**
-     * End a conversation by setting its state to ENDED.
+     * End a conversation by setting its state to ENDED. Delegates to
+     * {@link #endConversation(String, String)} with a {@code system:end} actor —
+     * use the two-arg overload from an authenticated context so a pause-terminating
+     * end is attributable in the audit trail.
      */
     void endConversation(String conversationId);
+
+    /**
+     * End a conversation with actor attribution. When the conversation was
+     * {@code AWAITING_HUMAN}, ending it terminally resolves the pending approval:
+     * the timeout schedule is disarmed, the bookmark cleared, an
+     * {@code hitl.approval} cancellation is audited with {@code endedBy}, and a
+     * {@link ai.labs.eddi.engine.events.HitlResumeCompletedEvent} (null verdict,
+     * terminal snapshot) is fired for channel observers — so every
+     * pause-terminating path is attributed and rendered. {@code endedBy} is a
+     * principal name or a {@code system:*} identifier for automated ends.
+     */
+    void endConversation(String conversationId, String endedBy);
 
     /**
      * Get the current state of a conversation (from cache or DB).

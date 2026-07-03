@@ -152,8 +152,9 @@ class RestConversationStoreTest {
             restConversationStore.deleteConversationLog("conv-paused", true);
 
             // endConversation disarms the schedule, clears the bookmark, audits,
-            // and clears the cached state before the document is removed.
-            verify(conversationService).endConversation("conv-paused");
+            // and clears the cached state before the document is removed. G4: the
+            // pause-terminating end is attributed to system:admin-end.
+            verify(conversationService).endConversation("conv-paused", "system:admin-end");
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-paused");
         }
 
@@ -166,6 +167,7 @@ class RestConversationStoreTest {
             restConversationStore.deleteConversationLog("conv-ready", true);
 
             verify(conversationService, never()).endConversation(any());
+            verify(conversationService, never()).endConversation(any(), any());
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-ready");
         }
 
@@ -387,7 +389,8 @@ class RestConversationStoreTest {
 
             restConversationStore.endActiveConversations(List.of(paused));
 
-            verify(conversationService).endConversation("conv-paused");
+            // G4: the pause-terminating end is attributed to system:admin-end.
+            verify(conversationService).endConversation("conv-paused", "system:admin-end");
             // Must NOT take the raw ENDED write path for a paused conversation.
             verify(conversationMemoryStore, never())
                     .setConversationState(eq("conv-paused"), any());

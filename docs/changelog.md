@@ -5,6 +5,25 @@
 
 ---
 
+## 🛠️ HITL Round-2 Engine-Core Remediation (2026-07-03, WS-G)
+
+**Repo:** EDDI (`fix/hitl-r2-engine`, branched from `feat/hitl-framework`)
+**Scope:** Confirmed findings from a second adversarial review of the HITL remediation, engine-core only (no `integrations/slack/**`, no tool/mcp bridges).
+
+- **G1 (HIGH) — queued say resurrecting a terminated conversation:** `ConversationService.processConversationStep`'s queued-turn skip set only covered AWAITING_HUMAN/IN_PROGRESS. Added ENDED and EXECUTION_INTERRUPTED so a say queued behind a running turn that terminates (endConversation / cancel) before it runs is routed through `onSkipped` with the persisted terminal state instead of executing the pipeline and persisting READY over the terminal state.
+- **G2 (HIGH) — say-path onComplete ignoring cooperative-cancel (group member-pause stranded approval):** `runGuardedConversationStep`'s onComplete now checks `memory.isCancelled()` (parity with the resume path). A concurrent cancel/end (e.g. group `handleMemberPause → cancelConversation` that loses both state CAS races because the pause isn't persisted yet) makes the completing turn skip pause persistence/schedule/counter and CAS the running state to EXECUTION_INTERRUPTED — the approval is never stranded.
+- **G3 (HIGH) — approval gate bypass via schedule create/update:** `RestScheduleStore.createSchedule`/`updateSchedule` now reject any request BODY whose metadata is a `hitl_timeout` (via `HitlSchedules.isHitlTimeout`) for EVERYONE (even admin) with 400 — these schedules are minted internally only. Closes the forge/convert path that let an editor mint a timeout schedule the poller would fire to force-resume/abort a victim's approval unauthenticated.
+- **G4 (MEDIUM) — endConversation terminating a pause with no audit/actor:** added `endConversation(String, String endedBy)`; the AWAITING_HUMAN branch now writes the `hitl.approval` cancellation audit with the actor. Callers attribute: RestAgentEngine → principal, RestConversationStore delete/bulk-end paths → `system:admin-end`, 1-arg overload → `system:end`. AgentDeploymentManagement already SKIPs paused conversations (verified — no change).
+- **G5 (MEDIUM) — cancel/end never fired HitlResumeCompletedEvent:** cancelConversation's pauseCancelled branch and endConversation's AWAITING_HUMAN branch now fire `HitlResumeCompletedEvent` with `verdict=null`, the cancelling/ending actor, and the terminal snapshot (new `fireHitlResumeCompletedTerminal` helper, async + fully isolated). The Slack observer renders these; the event's fields/signature are unchanged.
+- **G6 (MEDIUM) — retention sweep attributed to "unknown":** `HitlCrashRecoveryObserver.sweepExpiredPendingApprovals` now calls the 3-arg `cancelConversation(id, CANCEL_GRACEFUL, "system:retention")`.
+- **G7 (LOW) — restored pause re-armed at now+timeout:** `ConversationService.scheduleHitlTimeout` and `GroupConversationService.scheduleGroupHitlTimeout` now anchor `fireAt` to `pausedAt + timeout` (clamped to `now + 2m` grace, mirroring crash recovery) so restore-after-failed-resume re-arms at the original deadline instead of extending it.
+- **G8 (test) — vacuous Postgres zombie regression:** added `loadReportsColumnStateOverForgedDivergentDocument` (Testcontainers, CI-only) that forges TRUE document/column divergence via raw SQL and asserts both `loadConversationMemorySnapshot` and `loadActiveConversationMemorySnapshot` report the COLUMN state — deleting `applyStateColumn` now fails a test.
+- **Cheap extras:** `RestAgentEngine.resumeConversation` null-guards `identity.getPrincipal()` (parity with cancel/end — no NPE for anonymous). The resume `catch (IllegalStateException)` carve-out is narrowed via a private `AgentNotDeployedForResumeException` sentinel so ONLY the deliberate agent-not-deployed ISE re-throws without a double restore; any other ISE (e.g. from continueConversation) now restores the pause and maps to 500.
+
+Verification: `./mvnw -q compile test-compile` clean. Plain-Mockito tests for all touched classes run green locally (G1/G2 in ConversationServiceSayHitlTest, G4/G5 end in ConversationServiceTest, G5 cancel in ConversationServiceHitlTest, G3 in RestScheduleStoreTest, G6 in HitlCrashRecoveryObserverTest, plus reconciled RestAgentEngineTest/RestConversationStoreTest). The G8 Postgres test is Testcontainers → CI-only.
+
+---
+
 ## 🧪 HITL Coverage Closure + Schedule-Contract Consolidation (2026-07-03, WS-F + merge)
 
 **Repo:** EDDI (`feat/hitl-framework`, PR #585)

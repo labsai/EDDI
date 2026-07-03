@@ -365,22 +365,24 @@ class HitlCrashRecoveryObserverTest {
 
             observer(true, true).sweepExpiredPendingApprovals();
 
-            verify(conversationService, never()).cancelConversation(any(), any());
+            verify(conversationService, never()).cancelConversation(any(), any(), any());
         }
 
         @Test
-        @DisplayName("cancels pauses older than max-age via the audited path")
+        @DisplayName("G6: cancels pauses older than max-age via the audited path attributed to system:retention")
         void cancelsExpiredPauses() throws Exception {
             var oldOne = summary("old", Instant.now().minus(40, ChronoUnit.DAYS));
             var recentOne = summary("recent", Instant.now().minus(1, ChronoUnit.DAYS));
             when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of(oldOne, recentOne));
-            when(conversationService.cancelConversation(eq("old"), any()))
+            when(conversationService.cancelConversation(eq("old"), any(), eq("system:retention")))
                     .thenReturn(IConversationService.CancelOutcome.CANCELLED);
 
             observerWithRetention(Duration.ofDays(30)).sweepExpiredPendingApprovals();
 
-            verify(conversationService).cancelConversation(eq("old"), eq(ControlSignal.CANCEL_GRACEFUL));
-            verify(conversationService, never()).cancelConversation(eq("recent"), any());
+            // G6: the 3-arg form with the system actor — so the audit records
+            // decidedBy=system:retention (automated), not the default "unknown".
+            verify(conversationService).cancelConversation(eq("old"), eq(ControlSignal.CANCEL_GRACEFUL), eq("system:retention"));
+            verify(conversationService, never()).cancelConversation(eq("recent"), any(), any());
         }
 
         @Test
@@ -391,7 +393,7 @@ class HitlCrashRecoveryObserverTest {
 
             observerWithRetention(Duration.ZERO).sweepExpiredPendingApprovals();
 
-            verify(conversationService, never()).cancelConversation(any(), any());
+            verify(conversationService, never()).cancelConversation(any(), any(), any());
         }
     }
 }
