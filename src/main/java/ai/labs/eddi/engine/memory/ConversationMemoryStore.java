@@ -191,7 +191,9 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                 Filters.eq(KEY_CONVERSATION_STATE, expected.name()));
         var update = new Document("$set", new Document(KEY_CONVERSATION_STATE, target.name()));
         var result = conversationCollectionDocument.updateOne(filter, update);
-        return result.getModifiedCount() > 0;
+        // matchedCount (not modifiedCount) so a no-op CAS (expected == target) still
+        // reports success — consistent with storeConversationMemorySnapshotIfState.
+        return result.getMatchedCount() > 0;
     }
 
     @Override

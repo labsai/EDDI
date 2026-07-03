@@ -253,5 +253,25 @@ class RestSlackWebhookTest {
             assertNull(RestSlackWebhook.extractPayloadParam(""));
             assertNull(RestSlackWebhook.extractPayloadParam(null));
         }
+
+        @Test
+        @DisplayName("extractPayloadParam returns null for malformed percent-encoding (does not throw)")
+        void extractPayloadParamMalformed() {
+            // URLDecoder throws IllegalArgumentException on "%zz"; extractPayloadParam
+            // now catches it and returns null rather than letting it bubble to a 500.
+            assertNull(RestSlackWebhook.extractPayloadParam("payload=%zz"));
+        }
+
+        @Test
+        @DisplayName("returns 400 (not 500) for a malformed URL-encoded payload")
+        void malformedPayloadYields400() {
+            Response response = webhook.handleInteractive("payload=%zz", "sig", "ts");
+
+            // Malformed payload → extractPayloadParam returns null → 400 client error;
+            // never reaches secret resolution or dispatch.
+            assertEquals(400, response.getStatus());
+            verify(interactivityHandler, never()).resolveSigningSecretForDecision(any());
+            verify(interactivityHandler, never()).handlePayloadAsync(any());
+        }
     }
 }

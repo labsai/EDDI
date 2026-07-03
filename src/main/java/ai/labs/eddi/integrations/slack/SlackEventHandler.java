@@ -106,12 +106,16 @@ public class SlackEventHandler {
     private final ICache<String, SlackGroupDiscussionListener> activeGroupListeners;
 
     /**
-     * conversationId → posted marker for approval notifications. Prevents a second
-     * approval card for the same pending pause: a card is posted once when a pause
-     * is first observed (a normal-turn pause, or an init-turn/CONVERSATION_START
-     * pause detected on the next say — H8), and re-message-while-paused must not
-     * re-post. TTL-bounded to stay small; a stale eviction only risks one duplicate
-     * card, never a missed one.
+     * pause-identity key ({@code conversationId + '|' + hitlPausedAt-epochMillis})
+     * → posted marker for approval notifications. Prevents a second approval card
+     * for the same pending pause: a card is posted once when a pause is first
+     * observed (a normal-turn pause, or an init-turn/CONVERSATION_START pause
+     * detected on the next say — H8), and re-message-while-paused must not re-post.
+     * Keying by pause identity (not conversationId alone) means a later distinct
+     * pause in the same conversation (pause → resume → pause) still gets its own
+     * card (F12). The marker is cleared on FAILED delivery so a retry can
+     * re-attempt. TTL-bounded to stay small; a stale eviction only risks one
+     * duplicate card, never a missed one.
      */
     private final ICache<String, Boolean> approvalNotified;
 
@@ -437,8 +441,10 @@ public class SlackEventHandler {
      * Data minimization: only the pause reason (which the agent designer controls)
      * is included — never the user's raw message.
      */
-    private void notifyApprovers(ResolvedTarget resolved, String conversationId,
-                                 String agentId, ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot bookmark) {
+    // Package-private for unit testing (F12): the idempotency keying and
+    // failed-delivery marker-clear are verified directly against this method.
+    void notifyApprovers(ResolvedTarget resolved, String conversationId,
+                         String agentId, ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot bookmark) {
         var integration = resolved.integration();
         if (integration == null || integration.getPlatformConfig() == null) {
             return; // legacy connectors have no HITL config
@@ -449,10 +455,21 @@ public class SlackEventHandler {
             return; // notification-only disabled
         }
 
-        // Idempotency (H8): post exactly one approval card per pending pause. A
-        // normal-turn pause and an init-turn pause detected on the next say both
-        // route here — the first wins the slot; re-message-while-paused is a no-op.
-        if (approvalNotified.putIfAbsent(conversationId, Boolean.TRUE) != null) {
+        // Idempotency (H8/F12): post exactly one approval card per pending pause.
+        // The marker is keyed by PAUSE IDENTITY (conversationId + the bookmark's
+        // hitlPausedAt), NOT by conversationId alone — so a second distinct pause in
+        // the same conversation (pause → resume → pause) is NOT suppressed. When the
+        // best-effort bookmark load returns a non-AWAITING snapshot (hitlPausedAt
+        // null), fall back to conversationId-only keying rather than blocking the
+        // card. A normal-turn pause and an init-turn pause detected on the next say
+        // both route here — the first wins the slot; re-message-while-paused is a
+        // no-op. Marker is cleared below if delivery fails, so a stale eviction only
+        // risks one duplicate card, never a missed one.
+        String notifyKey = conversationId + '|'
+                + (bookmark != null && bookmark.getHitlPausedAt() != null
+                        ? bookmark.getHitlPausedAt().toEpochMilli()
+                        : "");
+        if (approvalNotified.putIfAbsent(notifyKey, Boolean.TRUE) != null) {
             return;
         }
 
@@ -488,6 +505,9 @@ public class SlackEventHandler {
         try {
             slackApi.postBlocksMessage(auth, approvalChannel, null, blocks, fallback);
         } catch (SlackDeliveryException e) {
+            // F12: delivery failed — clear the marker so a later retry can re-attempt
+            // instead of being suppressed for the full 24h TTL.
+            approvalNotified.remove(notifyKey);
             LOGGER.warnf("Failed to post HITL approval notification for %s: %s",
                     sanitize(conversationId), e.getMessage());
         }

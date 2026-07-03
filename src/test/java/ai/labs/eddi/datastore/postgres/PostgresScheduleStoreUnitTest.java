@@ -285,7 +285,7 @@ class PostgresScheduleStoreUnitTest {
         when(preparedStatement.executeUpdate()).thenReturn(1);
 
         // when
-        boolean claimed = sut.tryClaim("sched-1", "node-1", Instant.now());
+        boolean claimed = sut.tryClaim("sched-1", "node-1", Instant.now(), Instant.now().minusSeconds(300));
 
         // then
         assertTrue(claimed);
@@ -297,7 +297,7 @@ class PostgresScheduleStoreUnitTest {
         when(preparedStatement.executeUpdate()).thenReturn(0);
 
         // when
-        boolean claimed = sut.tryClaim("sched-1", "node-2", Instant.now());
+        boolean claimed = sut.tryClaim("sched-1", "node-2", Instant.now(), Instant.now().minusSeconds(300));
 
         // then
         assertFalse(claimed);
@@ -310,7 +310,7 @@ class PostgresScheduleStoreUnitTest {
 
         // when/then
         assertThrows(IResourceStore.ResourceStoreException.class,
-                () -> sut.tryClaim("sched-1", "node-1", Instant.now()));
+                () -> sut.tryClaim("sched-1", "node-1", Instant.now(), Instant.now().minusSeconds(300)));
     }
 
     // ─── markCompleted ──────────────────────────────────────────

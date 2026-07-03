@@ -248,6 +248,56 @@ class RestScheduleStoreExpandedTest {
         }
     }
 
+    // ─── HITL admin guard fails closed ──────────────────────────────────────────
+
+    @Nested
+    @DisplayName("requireAdminForHitl fail-closed")
+    class HitlGuardFailClosed {
+
+        @Test
+        @DisplayName("delete returns 500 and does NOT delete when the guard's readSchedule fails non-not-found")
+        void deleteStoreErrorFailsClosed() throws Exception {
+            // A non-ResourceNotFoundException from the guard's readSchedule means we
+            // cannot prove the target is NOT a HITL safety timeout → fail closed with
+            // 500 and refuse the mutation. Triggers regardless of admin role because
+            // the read failure precedes the isHitl/admin check.
+            when(scheduleStore.readSchedule("s1"))
+                    .thenThrow(new IResourceStore.ResourceStoreException("boom"));
+
+            Response response = sut.deleteSchedule("s1");
+
+            assertEquals(500, response.getStatus());
+            verify(scheduleStore, never()).deleteSchedule(anyString());
+        }
+
+        @Test
+        @DisplayName("update returns 500 and does NOT update when the guard's readSchedule fails non-not-found")
+        void updateStoreErrorFailsClosed() throws Exception {
+            when(scheduleStore.readSchedule("s1"))
+                    .thenThrow(new IResourceStore.ResourceStoreException("boom"));
+
+            Response response = sut.updateSchedule("s1", makeCronSchedule("s1"));
+
+            assertEquals(500, response.getStatus());
+            verify(scheduleStore, never()).updateSchedule(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("delete proceeds normally when the guard's readSchedule is a genuine not-found (guard returns null)")
+        void deleteNotFoundFallsThrough() throws Exception {
+            // A genuine not-found is the ONLY case the guard lets through: it returns
+            // null so the downstream op runs (and here succeeds, since deleteSchedule
+            // is idempotent on a missing id).
+            when(scheduleStore.readSchedule("gone"))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
+
+            Response response = sut.deleteSchedule("gone");
+
+            assertEquals(204, response.getStatus());
+            verify(scheduleStore).deleteSchedule("gone");
+        }
+    }
+
     // ─── fireNow ───────────────────────────────────────────────────────────────
 
     @Nested

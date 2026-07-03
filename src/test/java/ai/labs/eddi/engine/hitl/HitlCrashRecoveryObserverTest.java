@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -47,6 +48,7 @@ class HitlCrashRecoveryObserverTest {
     private IGroupConversationStore gcStore;
     private IScheduleStore scheduleStore;
     private IConversationService conversationService;
+    private IGroupConversationService groupConversationService;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -54,19 +56,21 @@ class HitlCrashRecoveryObserverTest {
         gcStore = mock(IGroupConversationStore.class);
         scheduleStore = mock(IScheduleStore.class);
         conversationService = mock(IConversationService.class);
+        groupConversationService = mock(IGroupConversationService.class);
         when(memStore.findConversationIdsByState(any())).thenReturn(List.of());
         when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of());
         when(gcStore.findByState(any())).thenReturn(List.of());
+        when(gcStore.findByState(any(), any(), anyInt())).thenReturn(List.of());
     }
 
     private HitlCrashRecoveryObserver observer(boolean enabled, boolean recoverInProgress) {
         return new HitlCrashRecoveryObserver(memStore, gcStore, scheduleStore, conversationService,
-                enabled, recoverInProgress, Optional.empty());
+                groupConversationService, enabled, recoverInProgress, Optional.empty());
     }
 
     private HitlCrashRecoveryObserver observerWithRetention(Duration maxAge) {
         return new HitlCrashRecoveryObserver(memStore, gcStore, scheduleStore, conversationService,
-                true, true, Optional.ofNullable(maxAge));
+                groupConversationService, true, true, Optional.ofNullable(maxAge));
     }
 
     /** Projected summary of a paused conversation, as the sweep now reads them. */
@@ -83,6 +87,18 @@ class HitlCrashRecoveryObserverTest {
         snapshot.setHitlPausedAt(pausedAt);
         snapshot.setHitlTimeoutPolicy(policy);
         snapshot.setHitlApprovalTimeout(timeout);
+        return snapshot;
+    }
+
+    /**
+     * Snapshot as the post-rearm re-check re-reads it: AWAITING_HUMAN with the
+     * given bookmark timestamp. Used to exercise the KEPT-schedule path — the
+     * re-check requires the current pausedAt to still equal the scanned one.
+     */
+    private static ConversationMemorySnapshot awaitingSnapshot(Instant pausedAt) {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+        snapshot.setHitlPausedAt(pausedAt);
         return snapshot;
     }
 
@@ -137,7 +153,10 @@ class HitlCrashRecoveryObserverTest {
             Instant pausedAt = Instant.now().minus(48, ChronoUnit.HOURS);
             when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of(
                     pausedSummary("AUTO_REJECT", "PT30M", pausedAt)));
-            when(memStore.getConversationState(CONV_ID)).thenReturn(ConversationState.AWAITING_HUMAN);
+            // Post-create re-check re-reads the snapshot: still AWAITING_HUMAN and the
+            // SAME pausedAt the sweep scanned → schedule kept.
+            when(memStore.loadConversationMemorySnapshot(CONV_ID))
+                    .thenReturn(awaitingSnapshot(pausedAt));
 
             observer(true, true).runRecovery();
 
@@ -165,7 +184,8 @@ class HitlCrashRecoveryObserverTest {
             Instant pausedAt = Instant.now().minus(1, ChronoUnit.HOURS);
             when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of(
                     pausedSummary("AUTO_APPROVE", "PT72H", pausedAt)));
-            when(memStore.getConversationState(CONV_ID)).thenReturn(ConversationState.AWAITING_HUMAN);
+            when(memStore.loadConversationMemorySnapshot(CONV_ID))
+                    .thenReturn(awaitingSnapshot(pausedAt));
 
             observer(true, true).runRecovery();
 
@@ -189,15 +209,41 @@ class HitlCrashRecoveryObserverTest {
         @Test
         @DisplayName("re-armed schedule is WITHDRAWN when the conversation is no longer paused")
         void rearmWithdrawnWhenNoLongerPaused() throws Exception {
+            Instant pausedAt = Instant.now().minus(1, ChronoUnit.HOURS);
             when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of(
-                    pausedSummary("AUTO_REJECT", "PT30M", Instant.now().minus(1, ChronoUnit.HOURS))));
-            // Resume landed between the sweep read and the re-arm
-            when(memStore.getConversationState(CONV_ID)).thenReturn(ConversationState.READY);
+                    pausedSummary("AUTO_REJECT", "PT30M", pausedAt)));
+            // Resume landed between the sweep read and the re-arm — no longer
+            // AWAITING_HUMAN
+            var resumed = new ConversationMemorySnapshot();
+            resumed.setConversationState(ConversationState.READY);
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(resumed);
 
             observer(true, true).runRecovery();
 
             verify(scheduleStore).createSchedule(any());
             // deleted twice: once before create (idempotent replace), once to withdraw
+            verify(scheduleStore, times(2)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+        }
+
+        @Test
+        @DisplayName("F3: re-armed schedule is WITHDRAWN when a DIFFERENT pause was created after resume+re-pause")
+        void rearmWithdrawnWhenPausedAtDiffersFromScanned() throws Exception {
+            // The sweep scanned the OLD pause; between scan and re-arm the conversation
+            // was resumed and re-paused, producing a NEW pausedAt. Still AWAITING_HUMAN,
+            // but the bookmark no longer matches — the stale schedule must be withdrawn
+            // so recovery does not keep an OLD-policy timeout on the NEW approval.
+            Instant scannedPausedAt = Instant.now().minus(1, ChronoUnit.HOURS);
+            when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of(
+                    pausedSummary("AUTO_REJECT", "PT30M", scannedPausedAt)));
+            Instant newerPausedAt = Instant.now().minus(1, ChronoUnit.MINUTES);
+            when(memStore.loadConversationMemorySnapshot(CONV_ID))
+                    .thenReturn(awaitingSnapshot(newerPausedAt));
+
+            observer(true, true).runRecovery();
+
+            verify(scheduleStore).createSchedule(any());
+            // deleted twice: once before create (idempotent replace), once to withdraw
+            // the stale schedule (state is AWAITING_HUMAN but the bookmark differs)
             verify(scheduleStore, times(2)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
         }
     }
@@ -225,13 +271,16 @@ class HitlCrashRecoveryObserverTest {
         @Test
         @DisplayName("IN_PROGRESS with intact bookmark and finite policy → pause restored AND schedule re-armed")
         void crashedResumeRestoredWithSchedule() throws Exception {
+            Instant pausedAt = Instant.now().minus(1, ChronoUnit.HOURS);
+            var snapshot = pausedSnapshot("ABORT", "PT15M", pausedAt);
+            // Post-CAS the conversation is AWAITING_HUMAN again — the re-arm re-check
+            // re-reads this same snapshot and matches the captured pausedAt → kept.
+            snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
             when(memStore.findConversationIdsByState(ConversationState.IN_PROGRESS))
                     .thenReturn(List.of(CONV_ID));
-            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(
-                    pausedSnapshot("ABORT", "PT15M", Instant.now().minus(1, ChronoUnit.HOURS)));
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(snapshot);
             when(memStore.compareAndSetState(CONV_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN))
                     .thenReturn(true);
-            when(memStore.getConversationState(CONV_ID)).thenReturn(ConversationState.AWAITING_HUMAN);
 
             observer(true, true).runRecovery();
 
@@ -394,6 +443,41 @@ class HitlCrashRecoveryObserverTest {
             observerWithRetention(Duration.ZERO).sweepExpiredPendingApprovals();
 
             verify(conversationService, never()).cancelConversation(any(), any(), any());
+        }
+
+        private GroupConversation groupPausedAt(String id, Instant pausedAt) {
+            var gc = new GroupConversation();
+            gc.setId(id);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAt(pausedAt);
+            gc.setHitlTimeoutPolicy("WAIT_INDEFINITELY");
+            return gc;
+        }
+
+        @Test
+        @DisplayName("F2: expired WAIT_INDEFINITELY GROUP pause is cancelled via cancelDiscussion; recent one spared")
+        void cancelsExpiredGroupPauses() throws Exception {
+            var oldGc = groupPausedAt("gc-old", Instant.now().minus(40, ChronoUnit.DAYS));
+            var recentGc = groupPausedAt("gc-recent", Instant.now().minus(1, ChronoUnit.DAYS));
+            when(gcStore.findByState(eq(GroupConversationState.AWAITING_APPROVAL), isNull(), anyInt()))
+                    .thenReturn(List.of(oldGc, recentGc));
+            when(groupConversationService.cancelDiscussion(eq("gc-old"), any())).thenReturn(true);
+
+            observerWithRetention(Duration.ofDays(30)).sweepExpiredPendingApprovals();
+
+            verify(groupConversationService).cancelDiscussion("gc-old", ControlSignal.CANCEL_GRACEFUL);
+            verify(groupConversationService, never()).cancelDiscussion(eq("gc-recent"), any());
+        }
+
+        @Test
+        @DisplayName("F2: group retention pass is OFF by default — never cancels group discussions")
+        void groupRetentionDisabledByDefault() throws Exception {
+            when(gcStore.findByState(eq(GroupConversationState.AWAITING_APPROVAL), isNull(), anyInt()))
+                    .thenReturn(List.of(groupPausedAt("gc-old", Instant.now().minus(365, ChronoUnit.DAYS))));
+
+            observer(true, true).sweepExpiredPendingApprovals();
+
+            verify(groupConversationService, never()).cancelDiscussion(any(), any());
         }
     }
 }

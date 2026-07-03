@@ -1457,6 +1457,179 @@ class GroupConversationServiceHitlTest {
             assertEquals(GroupConversationState.COMPLETED, gc.getState(),
                     "the group discussion completes past the skipped member");
         }
+
+        @Test
+        @DisplayName("say() throwing ConversationAwaitingApprovalException is routed to handleMemberPause (SKIPPED + cancel), NOT handleAgentFailure")
+        void memberSayThrowsAwaitingApprovalRoutedToPause() throws Exception {
+            // O1: the member's private conversation is ALREADY AWAITING_HUMAN before
+            // the say callback runs (e.g. it paused on CONVERSATION_START during
+            // startConversation, which returns normally, then say() sees the pause and
+            // throws SYNCHRONOUSLY). This is NOT a Timeout/Quota error, so before the
+            // fix it fell through to the generic catch → handleAgentFailure, which
+            // records FAILURE and leaves the stranded member pause armed. The correct
+            // path is handleMemberPause: cancel the private conversation + record SKIPPED.
+            var phases = List.of(
+                    new DiscussionPhase("Opinion", PhaseType.OPINION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL,
+                            false, null, 1, false));
+            var config = buildConfig(phases);
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+            doReturn("gc-member-say-throws").when(conversationStore).create(any());
+
+            doReturn(mock(ai.labs.eddi.engine.runtime.IAgent.class))
+                    .when(agentFactory).getLatestReadyAgent(any(), eq(AGENT_A));
+            var convResult = new IConversationService.ConversationResult("member-conv-throws", null);
+            doReturn(convResult).when(conversationService).startConversation(any(), any(), any(), any());
+
+            // say() throws synchronously — the callback is NEVER invoked.
+            doThrow(new IConversationService.ConversationAwaitingApprovalException(
+                    "member conversation is awaiting a human decision"))
+                    .when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+
+            GroupConversation gc = service.discuss(GROUP_ID, "Question?", USER_ID, 0);
+
+            // The stranded member pause must have been cancelled (handleMemberPause),
+            // attributed to the group system actor — NOT left armed by handleAgentFailure.
+            verify(conversationService).cancelConversation(eq("member-conv-throws"),
+                    eq(ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL), eq("system:group"));
+
+            // The member turn is recorded SKIPPED with the group-HITL note — NOT FAILURE.
+            var memberEntries = gc.getTranscript().stream()
+                    .filter(e -> AGENT_A.equals(e.speakerAgentId()))
+                    .toList();
+            assertEquals(1, memberEntries.size(), "exactly one member entry expected");
+            var entry = memberEntries.get(0);
+            assertEquals(GroupConversation.TranscriptEntryType.SKIPPED, entry.type(),
+                    "a synchronous AWAITING_APPROVAL throw must be SKIPPED (handleMemberPause), not FAILURE (handleAgentFailure)");
+            assertNull(entry.content(), "a skipped member turn must not carry content");
+            assertNotNull(entry.errorReason(), "the SKIPPED entry must explain why");
+            assertTrue(entry.errorReason().contains("requiresApproval"),
+                    "the note should point the designer at group-level HITL");
+
+            // The discussion itself completes normally (does not stall / FAIL).
+            assertEquals(GroupConversationState.COMPLETED, gc.getState(),
+                    "the group discussion completes past the skipped member");
+        }
+    }
+
+    // =================================================================
+    // O2: cancel racing the resume CAS→token-registration window
+    // =================================================================
+
+    @Nested
+    @DisplayName("Cancel racing resume CAS window (O2)")
+    class CancelRacingResumeCasWindow {
+
+        @Test
+        @DisplayName("token is registered BEFORE onHitlResume — a cancel in the CAS→submit window takes the SIGNAL path, and the resumed leg stops without running member work")
+        void cancelInResumeWindowTakesSignalPathAndStopsResumedLeg() throws Exception {
+            // O2: resumeDiscussion CAS-flips AWAITING_APPROVAL → IN_PROGRESS, then MUST
+            // register the control token immediately (before deleting the schedule and
+            // notifying listeners). Otherwise a cancel landing in the window between the
+            // CAS and a later token put finds no token, takes the DB branch, sees
+            // IN_PROGRESS (non-terminal), CAS's to CANCELLED and returns true — while
+            // resume then registers a FRESH non-cancelled token and runs a full phase on
+            // a discussion the operator was told was cancelled.
+            //
+            // We observe the window deterministically via onHitlResume, which fires
+            // synchronously on the resume thread AFTER the token put but BEFORE submit.
+            // Firing a cancel from inside that callback reproduces the exact race.
+            var phases = List.of(
+                    new DiscussionPhase("Opinion", PhaseType.OPINION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL,
+                            false, null, 1, false),
+                    new DiscussionPhase("Summary", PhaseType.OPINION,
+                            "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL,
+                            false, null, 1, false));
+
+            var gc = new GroupConversation();
+            gc.setId("gc-o2-window");
+            gc.setGroupId(GROUP_ID);
+            gc.setState(GroupConversationState.AWAITING_APPROVAL);
+            gc.setPausedAtPhaseIndex(0);
+            gc.setPausedPhaseName("Opinion");
+            gc.setPausedAt(Instant.now());
+            gc.setHitlPauseType(GroupConversation.HitlPauseType.TASK); // re-enter phase 0
+            gc.setOriginalQuestion("O2 window test");
+
+            doReturn(gc).when(conversationStore).read("gc-o2-window");
+
+            var config = buildConfig(phases);
+            var resId = mockResourceId();
+            doReturn(resId).when(groupStore).getCurrentResourceId(GROUP_ID);
+            doReturn(config).when(groupStore).read(GROUP_ID, 1);
+            // A member say() here would mean the resumed leg ran a phase — which the
+            // fix must PREVENT. We stub it to record if it is ever called.
+            stubAgentSay();
+
+            // Reflective handle on activeTokens to assert the token is present in-window.
+            var field = GroupConversationService.class.getDeclaredField("activeTokens");
+            field.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var activeTokens = (java.util.concurrent.ConcurrentHashMap<String, ?>) field.get(service);
+
+            var tokenPresentInWindow = new java.util.concurrent.atomic.AtomicBoolean(false);
+            var cancelReturnedTrue = new java.util.concurrent.atomic.AtomicBoolean(false);
+            var cancelThrew = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+            var resumeDone = new java.util.concurrent.CountDownLatch(1);
+
+            var listener = new ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener() {
+                @Override
+                public void onHitlResume(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.HitlResumeEvent event) {
+                    // We are now in the CAS→submit window, on the resume thread.
+                    // O2 guarantees the token is ALREADY registered here.
+                    tokenPresentInWindow.set(activeTokens.containsKey("gc-o2-window"));
+                    try {
+                        // Concurrent cancel: with the token present it must take the
+                        // SIGNAL path (setSignal + return true), NOT the DB branch.
+                        cancelReturnedTrue.set(service.cancelDiscussion("gc-o2-window",
+                                ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL));
+                    } catch (Throwable t) {
+                        cancelThrew.set(t);
+                    }
+                }
+
+                @Override
+                public void onCancelled(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.CancelledEvent event) {
+                    // The resumed leg honoured the in-window cancel signal at its
+                    // top-of-phase check → notifyCancelled → onCancelled.
+                    resumeDone.countDown();
+                }
+
+                @Override
+                public void onGroupComplete(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupCompleteEvent event) {
+                    resumeDone.countDown();
+                }
+
+                @Override
+                public void onGroupError(ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.GroupErrorEvent event) {
+                    resumeDone.countDown();
+                }
+            };
+
+            var request = new GroupApprovalRequest();
+            var dec = new HitlDecision();
+            dec.setVerdict(HitlVerdict.APPROVED);
+            request.setDecision(dec);
+
+            service.resumeDiscussion("gc-o2-window", request, listener);
+
+            assertNull(cancelThrew.get(), "cancel in the resume window must not throw");
+            assertTrue(tokenPresentInWindow.get(),
+                    "O2: the control token MUST be registered before onHitlResume fires (i.e. right after the CAS)");
+            assertTrue(cancelReturnedTrue.get(),
+                    "a cancel finding the in-window token must take the SIGNAL path and return true");
+
+            // The resumed leg observes the cancelled token at its top-of-phase check and
+            // stops with CANCELLED — it must NEVER run a member turn or complete normally.
+            assertTrue(resumeDone.await(5, java.util.concurrent.TimeUnit.SECONDS),
+                    "resumed leg should terminate quickly");
+            assertEquals(GroupConversationState.CANCELLED, gc.getState(),
+                    "the resumed leg must end CANCELLED, honouring the in-window signal");
+            verify(conversationService, never()).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        }
     }
 
     // =================================================================

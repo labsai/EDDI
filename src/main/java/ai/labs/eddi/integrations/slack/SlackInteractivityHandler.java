@@ -219,18 +219,22 @@ public class SlackInteractivityHandler {
     }
 
     /**
-     * Resolve the owning integration for a parsed decision. Prefers the integration
-     * NAME carried in the button value (deterministic, IDOR-safe). Falls back to a
-     * by-approval-channel lookup ONLY for legacy bare values (no name) — those are
-     * rejected up-front at the endpoint (unbindable), so this path is effectively
-     * dead for signed traffic and kept only for defensiveness.
+     * Resolve the owning integration for a parsed decision STRICTLY by the
+     * integration NAME carried in the button value (deterministic, IDOR-safe). A
+     * legacy/bare value with no name is UNBINDABLE and resolves to empty — it must
+     * NOT fall back to a by-approval-channel lookup: in a shared approval channel
+     * that would non-deterministically bind the decision to whichever integration
+     * happens to own the channel, reintroducing the cross-integration ambiguity the
+     * integration-bound value exists to close. Empty here → the endpoint's
+     * signature-secret resolution fails → 403 (a bare value is rejected, not
+     * routed).
      */
     private Optional<ChannelIntegrationConfiguration> resolveOwningIntegration(ParsedAction parsed) {
         String integrationName = parsed.value().integrationName();
-        if (integrationName != null && !integrationName.isBlank()) {
-            return channelTargetRouter.getIntegrationByName(CHANNEL_TYPE_SLACK, integrationName);
+        if (integrationName == null || integrationName.isBlank()) {
+            return Optional.empty();
         }
-        return channelTargetRouter.getIntegrationByApprovalChannel(CHANNEL_TYPE_SLACK, parsed.approvalChannelId());
+        return channelTargetRouter.getIntegrationByName(CHANNEL_TYPE_SLACK, integrationName);
     }
 
     private void resolveConversation(String conversationId, HitlVerdict verdict, String slackUserId,

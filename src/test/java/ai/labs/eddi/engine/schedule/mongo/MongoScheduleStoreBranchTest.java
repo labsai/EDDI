@@ -163,7 +163,7 @@ class MongoScheduleStoreBranchTest {
                 .findOneAndUpdate(any(Bson.class), any(Bson.class));
 
         assertThrows(IResourceStore.ResourceStoreException.class,
-                () -> store.tryClaim("s1", "inst1", Instant.now()));
+                () -> store.tryClaim("s1", "inst1", Instant.now(), Instant.now().minusSeconds(300)));
     }
 
     // ==================== markCompleted error path ====================

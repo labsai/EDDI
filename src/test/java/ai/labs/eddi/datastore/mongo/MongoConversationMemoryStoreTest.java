@@ -313,6 +313,20 @@ class MongoConversationMemoryStoreTest {
         }
 
         @Test
+        @DisplayName("a no-op CAS (expected == target) succeeds even though nothing is modified")
+        void compareAndSetStateNoOp() {
+            var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            String id = store.storeConversationMemorySnapshot(snapshot);
+
+            // The filter matches (state is AWAITING_HUMAN) but the $set writes the same
+            // value, so modifiedCount == 0. matchedCount-based CAS must still report
+            // success — a false negative here would spuriously fail a caller's guard.
+            assertTrue(store.compareAndSetState(id, ConversationState.AWAITING_HUMAN, ConversationState.AWAITING_HUMAN),
+                    "a no-op CAS from the matching state must succeed (matchedCount, not modifiedCount)");
+            assertEquals(ConversationState.AWAITING_HUMAN, store.getConversationState(id));
+        }
+
+        @Test
         @DisplayName("after a CAS the reloaded snapshot reports the new state (parity with the Postgres column-wins guarantee)")
         void loadReportsCasState() {
             var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);

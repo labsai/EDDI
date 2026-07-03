@@ -111,6 +111,23 @@ class SlackInteractivityHandlerTest {
     }
 
     @Test
+    void resolveSigningSecretForDecision_bareValue_neverFallsBackToApprovalChannel() {
+        // Proves the removed fallback: even with a by-approval-channel integration
+        // CONFIGURED (which the old code would have bound the decision to), a bare
+        // value with no integration name resolves to null/unbindable and the
+        // channel lookup is NEVER consulted — closing the cross-integration
+        // ambiguity in a shared approval channel.
+        var byChannel = integrationWith("channel-owner", "U_APPROVER", "channel-secret");
+        when(router.getIntegrationByApprovalChannel(any(), any())).thenReturn(Optional.of(byChannel));
+
+        assertNull(handler.resolveSigningSecretForDecision(approvePayload("U_APPROVER", "conv-1")),
+                "a bare value must remain unbindable, not be routed by approval channel");
+
+        verify(router, never()).getIntegrationByApprovalChannel(any(), any());
+        verify(router, never()).getIntegrationByName(any(), any());
+    }
+
+    @Test
     void resolveSigningSecretForDecision_unknownIntegration_returnsNull() {
         when(router.getIntegrationByName("slack", INT_NAME)).thenReturn(Optional.empty());
         assertNull(handler.resolveSigningSecretForDecision(approvePayload("U_APPROVER", value("conv-1"))));

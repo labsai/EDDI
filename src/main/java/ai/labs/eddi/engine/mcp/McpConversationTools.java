@@ -159,11 +159,27 @@ public class McpConversationTools {
             return errorJson("message is required");
         try {
             var snapshot = sendMessageAndWait(conversationId, message);
+
+            // Finding 25: this turn itself paused for human approval — return a
+            // structured PAUSED signal (not BUSY/error) so the MCP client can inform
+            // its user and re-invoke after a reviewer decides.
+            if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                return pausedForApprovalJson(agentId, conversationId);
+            }
+
             var result = buildConversationResponse(snapshot, null);
             return jsonSerialization.serialize(result);
+        } catch (IConversationService.ConversationAwaitingApprovalException e) {
+            // Finding 25: already-paused at submit — say() rejects the input
+            // synchronously. Report the pending approval instead of a generic error.
+            return pausedForApprovalJson(agentId, conversationId);
         } catch (ConversationSkippedException e) {
             // H7: the turn was dropped without processing — report busy/not-active
             // instead of a stale previous-turn reply.
+            if (e.state() == ConversationState.AWAITING_HUMAN) {
+                // Finding 25: queued-then-paused — a deliberate pause, not busy.
+                return pausedForApprovalJson(agentId, conversationId);
+            }
             return skippedResultJson(conversationId, e.state());
         } catch (Exception e) {
             LOGGER.error("MCP talk_to_agent failed for Agent " + agentId + " conversation " + conversationId, e);
@@ -184,11 +200,14 @@ public class McpConversationTools {
             return errorJson("agentId is required");
         if (message == null || message.isBlank())
             return errorJson("message is required");
+        // O4: hoist convId out of the try so a freshly-created conversation id is
+        // still in scope for the catch — otherwise a skip/pause after auto-creation
+        // would report the (nullable) method arg and lose the real id.
+        String convId = conversationId;
         try {
             var env = parseEnvironment(environment);
 
             // Step 1: Create conversation if not provided
-            String convId = conversationId;
             if (convId == null || convId.isBlank()) {
                 ConversationResult convResult = conversationService.startConversation(env, agentId, null, Collections.emptyMap());
                 convId = convResult.conversationId();
@@ -197,17 +216,32 @@ public class McpConversationTools {
             // Step 2: Send the message
             var snapshot = sendMessageAndWait(convId, message);
 
+            // Finding 25: this turn itself paused for human approval — return a
+            // structured PAUSED signal (not BUSY/error) so the MCP client can inform
+            // its user and re-invoke after a reviewer decides.
+            if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                return pausedForApprovalJson(agentId, convId);
+            }
+
             // Step 3: Return AI-agent-friendly summary + full snapshot
             var result = buildConversationResponse(snapshot, convId);
             result.putFirst("environment", env.name());
             result.putFirst("agentId", agentId);
             result.putFirst("conversationId", convId);
             return jsonSerialization.serialize(result);
+        } catch (IConversationService.ConversationAwaitingApprovalException e) {
+            // Finding 25: already-paused at submit — say() rejects the input
+            // synchronously. Report the pending approval instead of a generic error.
+            return pausedForApprovalJson(agentId, convId);
         } catch (ConversationSkippedException e) {
             // H7: the turn was dropped without processing — report busy/not-active
-            // instead of a stale previous-turn reply. convId may be uninitialized if
-            // startConversation failed, so fall back to the provided conversationId.
-            return skippedResultJson(conversationId, e.state());
+            // instead of a stale previous-turn reply. convId carries the real id even
+            // when auto-created above (O4).
+            if (e.state() == ConversationState.AWAITING_HUMAN) {
+                // Finding 25: queued-then-paused — a deliberate pause, not busy.
+                return pausedForApprovalJson(agentId, convId);
+            }
+            return skippedResultJson(convId, e.state());
         } catch (Exception e) {
             LOGGER.error("MCP chat_with_agent failed for Agent " + agentId, e);
             return errorJson("Failed to chat with agent: " + e.getMessage());
@@ -577,6 +611,30 @@ public class McpConversationTools {
                 + " requires human approval before it can continue. A reviewer must decide via "
                 + "POST /agents/" + conversationId + "/resume (APPROVED or REJECTED); "
                 + "re-invoke chat_managed with the same intent and userId afterwards to continue.");
+        try {
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            return errorJson("Conversation " + conversationId + " is awaiting human approval");
+        }
+    }
+
+    /**
+     * Agent-scoped counterpart of the intent-scoped
+     * {@link #pausedForApprovalJson(String, String, String, String)} used by
+     * chat_managed. Reports a deliberate HITL pause for the direct
+     * agent-conversation tools (talk_to_agent / chat_with_agent) — a PAUSED signal
+     * the MCP client should relay to its user, not retry blindly. Re-invoke the
+     * same tool with the same conversationId after a reviewer decides.
+     */
+    private String pausedForApprovalJson(String agentId, String conversationId) {
+        var result = new LinkedHashMap<String, Object>();
+        result.put("status", "PAUSED_FOR_APPROVAL");
+        result.put("agentId", agentId);
+        result.put("conversationId", conversationId);
+        result.put("conversationState", ConversationState.AWAITING_HUMAN.name());
+        result.put("message", "Conversation " + conversationId
+                + " requires human approval before it can continue; resolve via POST /agents/"
+                + conversationId + "/resume (APPROVED or REJECTED), then resend.");
         try {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {

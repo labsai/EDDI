@@ -274,8 +274,13 @@ public class ConversationService implements IConversationService {
         // leave a dead schedule row forever) and clear the persisted bookmark.
         ConversationState previousState = conversationMemoryStore.getConversationState(conversationId);
         setConversationState(conversationId, ConversationState.ENDED);
+        // Disarm the timeout UNCONDITIONALLY (idempotent, no-ops when absent): a resume
+        // in flight may have already flipped AWAITING_HUMAN->IN_PROGRESS and deferred
+        // its
+        // own schedule delete, so gating this on AWAITING_HUMAN would miss that window
+        // and leave a stale one-shot timer armed against the now-ended conversation.
+        deleteHitlTimeoutSchedule(conversationId);
         if (previousState == ConversationState.AWAITING_HUMAN) {
-            deleteHitlTimeoutSchedule(conversationId);
             // G4: an end that terminates a pending approval is an oversight decision
             // too — audit it with the actor (EU AI Act; parity with cancel) so every
             // pause-terminating path is attributed. G5: notify channel observers

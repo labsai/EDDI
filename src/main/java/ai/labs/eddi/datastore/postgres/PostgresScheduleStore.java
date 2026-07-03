@@ -372,15 +372,21 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public boolean tryClaim(String scheduleId, String instanceId, Instant now) throws IResourceStore.ResourceStoreException {
+    public boolean tryClaim(String scheduleId, String instanceId, Instant now, Instant leaseExpiry) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         long nowMs = now.toEpochMilli();
+        long leaseMs = leaseExpiry.toEpochMilli();
         String fireId = scheduleId + "_" + now;
 
+        // The CLAIMED+lease-expired clause steals a crashed/wedged instance's claim
+        // and MUST mirror findDueSchedules, else expired CLAIMED rows are returned
+        // every poll but never re-fired.
         String sql = """
                 UPDATE eddi_schedules
                 SET fire_status = 'CLAIMED', claimed_by = ?, claimed_at = ?, fire_id = ?, updated_at = ?
-                WHERE id = ? AND (fire_status = 'PENDING' OR (fire_status = 'FAILED' AND next_retry_at <= ?))
+                WHERE id = ? AND (fire_status = 'PENDING'
+                    OR (fire_status = 'FAILED' AND next_retry_at <= ?)
+                    OR (fire_status = 'CLAIMED' AND claimed_at <= ?))
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, instanceId);
@@ -389,6 +395,7 @@ public class PostgresScheduleStore implements IScheduleStore {
             ps.setLong(4, nowMs);
             ps.setString(5, scheduleId);
             ps.setLong(6, nowMs);
+            ps.setLong(7, leaseMs);
             int rows = ps.executeUpdate();
             if (rows > 0) {
                 LOGGER.debugf("Claimed schedule %s on instance %s", scheduleId, instanceId);
@@ -552,7 +559,7 @@ public class PostgresScheduleStore implements IScheduleStore {
 
     // ========================= Helpers =========================
 
-    private List<ScheduleConfiguration> readScheduleList(PreparedStatement ps) throws SQLException {
+    private List<ScheduleConfiguration> readScheduleList(PreparedStatement ps) throws SQLException, IResourceStore.ResourceStoreException {
         List<ScheduleConfiguration> result = new ArrayList<>();
         try (ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
@@ -562,7 +569,7 @@ public class PostgresScheduleStore implements IScheduleStore {
         return result;
     }
 
-    private ScheduleConfiguration fromResultSet(ResultSet rs) throws SQLException {
+    private ScheduleConfiguration fromResultSet(ResultSet rs) throws SQLException, IResourceStore.ResourceStoreException {
         ScheduleConfiguration config = new ScheduleConfiguration();
         config.setId(rs.getString("id"));
         config.setName(rs.getString("name"));
@@ -606,28 +613,32 @@ public class PostgresScheduleStore implements IScheduleStore {
         return config;
     }
 
-    private String serializeMetadata(Map<String, Object> metadata) {
+    private String serializeMetadata(Map<String, Object> metadata) throws IResourceStore.ResourceStoreException {
         if (metadata == null || metadata.isEmpty()) {
             return null;
         }
         try {
             return jsonSerialization.serialize(metadata);
         } catch (Exception e) {
-            LOGGER.warnf("Failed to serialize schedule metadata: %s", e.getMessage());
-            return null;
+            // Fail closed: the metadata carries the HITL contract (hitlType/policy/
+            // surface/conversationId). Silently storing null would persist a HITL
+            // timeout schedule the poller no longer recognizes and the manual-fire
+            // guard no longer protects — worse than failing the write.
+            throw new IResourceStore.ResourceStoreException("Failed to serialize schedule metadata", e);
         }
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> deserializeMetadata(String json) {
+    private Map<String, Object> deserializeMetadata(String json) throws IResourceStore.ResourceStoreException {
         if (json == null || json.isBlank()) {
             return null;
         }
         try {
             return jsonSerialization.deserialize(json, Map.class);
         } catch (Exception e) {
-            LOGGER.warnf("Failed to deserialize schedule metadata: %s", e.getMessage());
-            return null;
+            // Fail closed (see serializeMetadata): loading a HITL schedule without its
+            // metadata would make it fire wrong / bypass the manual-fire guard.
+            throw new IResourceStore.ResourceStoreException("Failed to deserialize schedule metadata", e);
         }
     }
 

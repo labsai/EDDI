@@ -105,12 +105,12 @@ class SchedulePollerServiceTest {
     void poll_claimAndFire_cron_success() throws Exception {
         var schedule = makeCronSchedule("sched-1", "0 9 * * *", "Hello");
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-        when(scheduleStore.tryClaim(eq("sched-1"), eq("test-instance"), any())).thenReturn(true);
+        when(scheduleStore.tryClaim(eq("sched-1"), eq("test-instance"), any(), any())).thenReturn(true);
         when(fireExecutor.fire(eq(schedule), eq("test-instance"), eq(1))).thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
         poller.pollDueSchedules();
 
-        verify(scheduleStore).tryClaim(eq("sched-1"), eq("test-instance"), any());
+        verify(scheduleStore).tryClaim(eq("sched-1"), eq("test-instance"), any(), any());
         verify(fireExecutor).fire(eq(schedule), eq("test-instance"), eq(1));
         verify(scheduleStore).markCompleted(eq("sched-1"), any()); // nextFire recomputed
     }
@@ -124,7 +124,7 @@ class SchedulePollerServiceTest {
         var schedule = makeCronSchedule("sched-1", "0 9 * * *", "Hello");
         assertNull(schedule.getFireId(), "fireId must be unset before claiming");
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-        when(scheduleStore.tryClaim(eq("sched-1"), eq("test-instance"), any())).thenReturn(true);
+        when(scheduleStore.tryClaim(eq("sched-1"), eq("test-instance"), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
         poller.pollDueSchedules();
@@ -140,11 +140,11 @@ class SchedulePollerServiceTest {
     void poll_claimConflict_skips() throws Exception {
         var schedule = makeCronSchedule("sched-1", "0 9 * * *", "Hello");
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-        when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(false);
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(false);
 
         poller.pollDueSchedules();
 
-        verify(scheduleStore).tryClaim(eq("sched-1"), eq("test-instance"), any());
+        verify(scheduleStore).tryClaim(eq("sched-1"), eq("test-instance"), any(), any());
         verifyNoInteractions(fireExecutor);
     }
 
@@ -161,7 +161,7 @@ class SchedulePollerServiceTest {
 
         var schedule = makeCronSchedule("sched-stalled", "0 9 * * *", "Hello");
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-        when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         // Simulate a downstream call that never returns within the poll cycle.
         when(fireExecutor.fire(any(), any(), anyInt())).thenAnswer(inv -> {
             Thread.sleep(Duration.ofSeconds(30));
@@ -173,6 +173,37 @@ class SchedulePollerServiceTest {
                 "a stalled fire task must not hang the poll cycle beyond the lease timeout");
         long elapsedMs = (System.nanoTime() - start) / 1_000_000;
         assertTrue(elapsedMs < 5000, "poll cycle took " + elapsedMs + "ms — expected it to return around the 200ms lease timeout");
+    }
+
+    @Test
+    void poll_multipleStalledFires_shareOneBatchDeadline_doesNotStackWaits() throws Exception {
+        // The batch wait must be bounded by ONE shared deadline (~leaseTimeout), NOT
+        // leaseTimeout PER stalled future summed sequentially. With N due+claimed
+        // schedules whose fire() all stall, a per-future bound would pin the poll
+        // thread for up to N * leaseTimeout; the shared deadline keeps the whole
+        // cycle near a single leaseTimeout regardless of N.
+        var shortLeasePoller = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true,
+                Duration.ofMillis(200), // leaseTimeout — the ONE shared batch bound
+                5, 15, 4, Optional.of("test-instance"), "UTC");
+        shortLeasePoller.init();
+
+        var s1 = makeCronSchedule("stall-1", "0 9 * * *", "a");
+        var s2 = makeCronSchedule("stall-2", "0 9 * * *", "b");
+        var s3 = makeCronSchedule("stall-3", "0 9 * * *", "c");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(s1, s2, s3));
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
+        // Every fire stalls well past the batch deadline — all three concurrently.
+        when(fireExecutor.fire(any(), any(), anyInt())).thenAnswer(inv -> {
+            Thread.sleep(Duration.ofSeconds(30));
+            return makeFireLog("stalled", FireStatus.COMPLETED.name());
+        });
+
+        // If the waits STACKED, this would take ~3 * 200ms + fire time; the shared
+        // deadline keeps it near a single 200ms lease. 2s gives generous CI slack
+        // while staying far below 30s (the real fire duration) proving the fires do
+        // not run to completion serially.
+        assertTimeoutPreemptively(Duration.ofSeconds(2), shortLeasePoller::pollDueSchedules,
+                "multiple stalled fires must share one batch deadline, not stack to N * leaseTimeout");
     }
 
     @Test
@@ -190,7 +221,7 @@ class SchedulePollerServiceTest {
 
         var schedule = makeCronSchedule("sched-wedged", "0 9 * * *", "Hello");
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-        when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
 
         var release = new java.util.concurrent.CountDownLatch(1);
         var entered = new java.util.concurrent.CountDownLatch(1);
@@ -224,7 +255,7 @@ class SchedulePollerServiceTest {
         var schedule = makeCronSchedule("sched-1", "0 9 * * *", "Hello");
         schedule.setFailCount(0);
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-        when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-1", FireStatus.FAILED.name()));
 
         poller.pollDueSchedules();
@@ -239,7 +270,7 @@ class SchedulePollerServiceTest {
         var schedule = makeCronSchedule("sched-1", "0 9 * * *", "Hello");
         schedule.setFailCount(4); // 4 previous failures, this is attempt 5 = maxRetries
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-        when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-1", FireStatus.FAILED.name()));
 
         poller.pollDueSchedules();
@@ -254,7 +285,7 @@ class SchedulePollerServiceTest {
     void poll_heartbeat_completedSetsIntervalBasedNextFire() throws Exception {
         var schedule = makeHeartbeatSchedule("hb-1", 300L, "check");
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-        when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("hb-1", FireStatus.COMPLETED.name()));
 
         poller.pollDueSchedules();
@@ -272,7 +303,7 @@ class SchedulePollerServiceTest {
         var schedule = makeCronSchedule("one-1", null, "do-it");
         schedule.setOneTimeAt(Instant.now().minusSeconds(60).toString());
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
-        when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("one-1", FireStatus.COMPLETED.name()));
 
         poller.pollDueSchedules();
@@ -289,16 +320,16 @@ class SchedulePollerServiceTest {
         var s2 = makeCronSchedule("s2", "0 9 * * *", "b");
         var s3 = makeCronSchedule("s3", "0 9 * * *", "c");
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(s1, s2, s3));
-        when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt()))
                 .thenAnswer(inv -> makeFireLog(((ScheduleConfiguration) inv.getArgument(0)).getId(), FireStatus.COMPLETED.name()));
 
         poller.pollDueSchedules();
 
         // Every due schedule is claimed (CAS runs on the poll thread) and fired.
-        verify(scheduleStore).tryClaim(eq("s1"), any(), any());
-        verify(scheduleStore).tryClaim(eq("s2"), any(), any());
-        verify(scheduleStore).tryClaim(eq("s3"), any(), any());
+        verify(scheduleStore).tryClaim(eq("s1"), any(), any(), any());
+        verify(scheduleStore).tryClaim(eq("s2"), any(), any(), any());
+        verify(scheduleStore).tryClaim(eq("s3"), any(), any(), any());
         verify(fireExecutor).fire(eq(s1), any(), anyInt());
         verify(fireExecutor).fire(eq(s2), any(), anyInt());
         verify(fireExecutor).fire(eq(s3), any(), anyInt());
@@ -309,7 +340,7 @@ class SchedulePollerServiceTest {
         var good = makeCronSchedule("good", "0 9 * * *", "a");
         var bad = makeCronSchedule("bad", "0 9 * * *", "b");
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(bad, good));
-        when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         // The "bad" fire throws; the "good" fire must still complete.
         when(fireExecutor.fire(eq(bad), any(), anyInt())).thenThrow(new RuntimeException("boom"));
         when(fireExecutor.fire(eq(good), any(), anyInt())).thenReturn(makeFireLog("good", FireStatus.COMPLETED.name()));
@@ -326,8 +357,8 @@ class SchedulePollerServiceTest {
         var mine = makeCronSchedule("mine", "0 9 * * *", "a");
         var theirs = makeCronSchedule("theirs", "0 9 * * *", "b");
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(mine, theirs));
-        when(scheduleStore.tryClaim(eq("mine"), any(), any())).thenReturn(true);
-        when(scheduleStore.tryClaim(eq("theirs"), any(), any())).thenReturn(false); // lost the CAS
+        when(scheduleStore.tryClaim(eq("mine"), any(), any(), any())).thenReturn(true);
+        when(scheduleStore.tryClaim(eq("theirs"), any(), any(), any())).thenReturn(false); // lost the CAS
         when(fireExecutor.fire(eq(mine), any(), anyInt())).thenReturn(makeFireLog("mine", FireStatus.COMPLETED.name()));
 
         poller.pollDueSchedules();

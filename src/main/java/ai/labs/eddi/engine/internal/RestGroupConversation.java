@@ -134,8 +134,12 @@ public class RestGroupConversation implements IRestGroupConversation {
      */
     private void requireGroupMembership(String groupId, String gcId, GroupConversation gc) {
         if (groupId != null && gc != null && !groupId.equals(gc.getGroupId())) {
-            throw new jakarta.ws.rs.NotFoundException(
-                    "Group conversation " + gcId + " does not belong to group " + groupId);
+            // Curated body: the caller-supplied gcId/groupId are never reflected
+            // (CodeQL reflected-value/XSS — there is no ExceptionMapper for jakarta
+            // NotFoundException, so RESTEasy would echo the message verbatim); the
+            // detail is logged server-side with both ids sanitized.
+            LOGGER.infof("Group conversation %s does not belong to group %s", sanitize(gcId), sanitize(groupId));
+            throw new jakarta.ws.rs.NotFoundException("Group conversation not found.");
         }
     }
 
@@ -271,16 +275,36 @@ public class RestGroupConversation implements IRestGroupConversation {
         var listener = createStreamingListener(eventSink, sse);
         try {
             groupConversationService.resumeDiscussion(gcId, request, listener);
-        } catch (IResourceStore.ResourceModifiedException | IllegalArgumentException
+        } catch (IResourceStore.ResourceModifiedException e) {
+            // Curated messages throughout (parity with the non-streaming
+            // approveGroupPhase): never forward e.getMessage() over SSE — it can
+            // embed the caller-supplied gcId/taskIds and internal detail.
+            sendErrorEvent(eventSink, sse,
+                    "The group conversation was modified concurrently — reload and retry.");
+            closeQuietly(eventSink);
+        } catch (IResourceStore.ResourceNotFoundException
                 | ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException e) {
-            sendErrorEvent(eventSink, sse, e.getMessage());
+            // deleted concurrently — a genuine 404 equivalent
+            sendErrorEvent(eventSink, sse, "Group conversation not found.");
             closeQuietly(eventSink);
         } catch (IGroupConversationService.GroupDiscussionException e) {
-            sendErrorEvent(eventSink, sse, e.getMessage());
+            // wrong-state (e.g., double-approve) — the current state is discoverable
+            // via the approval-status endpoint.
+            sendErrorEvent(eventSink, sse,
+                    "Group conversation is not awaiting approval — it may have been resolved, cancelled, "
+                            + "or already approved.");
+            closeQuietly(eventSink);
+        } catch (IllegalArgumentException e) {
+            // invalid taskApprovals (unknown taskId / task not awaiting) — keep the
+            // hint generic, never reflect the caller-supplied taskId.
+            sendErrorEvent(eventSink, sse,
+                    "Invalid approval request: an unknown task id was referenced, or a task is not awaiting "
+                            + "approval.");
             closeQuietly(eventSink);
         } catch (Exception e) {
+            LOGGER.error("Failed to approve group conversation " + sanitize(gcId), e);
             sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
-                    toJson(new GroupConversationEventSink.GroupErrorEvent(e.getMessage())));
+                    toJson(new GroupConversationEventSink.GroupErrorEvent("Failed to process group approval.")));
             closeQuietly(eventSink);
         }
     }
@@ -374,8 +398,11 @@ public class RestGroupConversation implements IRestGroupConversation {
         // Membership check first: a wrong-group path must look like "not found" here,
         // never leak the conversation's existence or owner via an authz error.
         if (groupId != null && !groupId.equals(gc.getGroupId())) {
-            throw new jakarta.ws.rs.NotFoundException(
-                    "Group conversation " + gcId + " does not belong to group " + groupId);
+            // Curated body: never reflect the caller-supplied gcId/groupId (CodeQL
+            // reflected-value/XSS — no ExceptionMapper for jakarta NotFoundException);
+            // the detail is logged server-side with both ids sanitized.
+            LOGGER.infof("Group conversation %s does not belong to group %s", sanitize(gcId), sanitize(groupId));
+            throw new jakarta.ws.rs.NotFoundException("Group conversation not found.");
         }
         if (hitlOperation) {
             ownershipValidator.requireOwnerAdminOrApprover(identity, gc.getUserId(), "group conversation");

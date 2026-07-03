@@ -352,21 +352,30 @@ public class RestScheduleStore implements IRestScheduleStore {
 
     /**
      * For mutating operations on a HITL timeout schedule, require the eddi-admin
-     * role. Reads the STORED schedule so a request body cannot hide the marker. If
-     * the schedule cannot be read (missing/store error), returns {@code null} so
-     * the downstream operation runs and surfaces its own not-found/error response —
-     * the guard only ever short-circuits to DENY, never to allow.
+     * role. Reads the STORED schedule so a request body cannot hide the marker. The
+     * guard fails CLOSED: only a genuine not-found falls through (so the downstream
+     * op surfaces its own 404); any other read/verification failure returns 500 and
+     * STOPS the operation, so a transient store error can never let a non-admin
+     * mutate a schedule that might be a HITL safety timeout.
      *
-     * @return a 403 {@link Response} to short-circuit the caller when the target is
-     *         a HITL schedule and the caller is not an admin; {@code null} when the
-     *         operation may proceed
+     * @return a 403/500 {@link Response} to short-circuit the caller when the
+     *         target is (or cannot be proven not to be) a HITL schedule;
+     *         {@code null} only when the schedule is confirmed non-HITL or
+     *         genuinely absent
      */
     private Response requireAdminForHitl(String scheduleId, String operation) {
         ScheduleConfiguration stored;
         try {
             stored = scheduleStore.readSchedule(scheduleId);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null; // no schedule to protect — let the downstream op surface its 404
         } catch (Exception e) {
-            return null; // let the downstream operation surface the real outcome
+            // Fail closed: we could not prove this is NOT a HITL safety timeout, so we
+            // must not let the mutation proceed unauthenticated.
+            LOGGER.error("Failed to verify HITL guard for schedule " + scheduleId + " (" + operation + ")", e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity("Unable to verify schedule authorization; refusing to " + operation + " schedule.")
+                    .build();
         }
         if (isHitlSchedule(stored) && !ownershipValidator.isAdmin(identity)) {
             LOGGER.warnf("Refused %s of HITL timeout schedule %s (name=%s) by non-admin", operation, scheduleId, stored.getName());

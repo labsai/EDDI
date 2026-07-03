@@ -5,6 +5,48 @@
 
 ---
 
+## 🐰 CodeRabbit review triage — 21 fixes, adversarially verified (2026-07-03)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+
+CodeRabbit posted 23 actionable findings (16 inline + 7 outside-diff) plus observability nitpicks. Each was **adversarially re-verified against HEAD** (two parallel review passes) before any change — several overlapped fixes already made, some were stale/unreachable, and one CRITICAL-tagged item turned out already-mitigated-or-worse than described. Fixed the 21 that survived verification; skipped 2 as INVALID; deferred 1 as a scoped follow-up. **No PR threads were replied to or resolved** (standing instruction).
+
+**Scheduler / crash-recovery:**
+- **(HIGH) Lease-expired `CLAIMED` schedules were never reclaimable.** `findDueSchedules` returns lease-expired `CLAIMED` rows, but both `tryClaim` impls only matched `PENDING`/`FAILED` — so a crashed/wedged pod's claim was fetched every poll and never re-fired. `tryClaim` now takes a `leaseExpiry` and steals a `CLAIMED` row with `claimedAt <= leaseExpiry` (Mongo + Postgres, mirroring `findDueSchedules`).
+- **(MEDIUM) `dispatchClaimed` per-future timeout could stack to N×leaseTimeout.** Now bounded by one shared batch deadline.
+- **(MEDIUM) Retention sweep ignored group conversations.** `HitlCrashRecoveryObserver.sweepExpiredPendingApprovals` now also cancels expired group `AWAITING_APPROVAL` pauses (new `IGroupConversationService` dependency).
+- **(MEDIUM) Crash-recovery re-arm could keep a stale timeout across pause→resume→pause.** The re-arm re-check now compares the pause bookmark (`pausedAt`), not just the awaiting state, at all three sites.
+- **(HIGH) `PostgresScheduleStore` metadata (de)serialization failed open** (returned `null`, silently stripping the HITL contract). Now fails closed with `ResourceStoreException`.
+- **(HIGH) `RestScheduleStore.requireAdminForHitl` failed open** on any read error. Now only `ResourceNotFoundException` falls through; other failures return 500 and stop the mutation.
+- **(doc) "exactly-once" was an overclaim** — the design is at-least-once with idempotent HITL fire targets (the lease-steal above makes this explicit). Corrected `SchedulePollerService`/`IScheduleStore` javadoc + `docs/hitl.md`.
+
+**Engine / conversation:**
+- **(LOW) `endConversation` only disarmed the timeout when `AWAITING_HUMAN`** — a resume-in-flight `IN_PROGRESS` window could leave a stale timer. Now disarms unconditionally (idempotent).
+- **(nitpick) `ConversationMemoryStore.compareAndSetState`** now uses `getMatchedCount()` (consistency with `storeConversationMemorySnapshotIfState`; avoids a no-op-CAS false negative).
+
+**Group surface:**
+- **(MEDIUM) Synchronous member-pause exception stranded the member approval.** `executeAgentTurn` now catches `ConversationAwaitingApprovalException` and routes to `handleMemberPause` (cancel + SKIPPED) instead of `handleAgentFailure`.
+- **(MEDIUM) Cancel window between the resume CAS and control-token registration.** The `DiscussionControlToken` is now registered immediately after the CAS, so a concurrent cancel takes the signal path and stops before any phase runs.
+- **(LOW) `RestGroupConversation` reflected raw ids** in `requireGroupMembership`/`validateGroupConversationOwnership` `NotFoundException` messages, and **(MEDIUM)** the streaming approve endpoint echoed raw exception text over SSE. Both now curated (generic message + sanitized server-side log), matching the non-streaming hardening.
+- **(MEDIUM) `GroupConversationStore.findByState` aborted the whole batch** on one record's `ResourceStoreException`. Now logged-and-skipped per record (mirrors `listByGroupId`).
+
+**Slack / MCP tools:**
+- **(HIGH) Slack approval-notification idempotency was too coarse** (keyed by `conversationId`, marked before the post). Now keyed per-pause (`hitlPausedAt`) and cleared on failed delivery, so retries deliver and a second distinct pause is not suppressed.
+- **(HIGH) Slack HITL `resolveOwningIntegration` fell back to a by-approval-channel lookup** for unbindable (bare) action values, reintroducing shared-channel cross-integration ambiguity. Removed — bare values now resolve to empty and are rejected (403).
+- **(HIGH) MCP `talk_to_agent`/`chat_with_agent` reported a deliberate `AWAITING_HUMAN` pause as BUSY** (and `chat_with_agent` lost a freshly-created conversation id on skip). Both now return a structured `PAUSED_FOR_APPROVAL` and preserve the created id.
+- **(MEDIUM) `CreateSubAgentTool`** treated a skipped initial turn as a real reply. Now mirrors `ConverseWithAgentTool`'s `onSkipped` handling.
+- **(LOW) `RestSlackWebhook`** malformed percent-encoding threw → 500 before signature check. Now caught → 400.
+- **(HIGH) `SecretRedactionFilter`** Bearer rule only matched dotted JWTs; opaque tokens leaked. Now redacts opaque tokens too (possessive, ReDoS-safe).
+
+**Skipped/deferred (with reason):**
+- **INVALID:** F9 (fractional-second read compat) — moot for unreleased/disposable schedule rows and would reintroduce the seconds-heuristic the epoch-millis fix removed; F14 (`ConverseWithAgentTool` ERROR-skip) — `onSkipped` provably never receives `ERROR`.
+- **DEFERRED (follow-up task):** owner-scoped group pending-approvals query (owner filter applied after the limit → possible starvation). The safe fix needs a DB-agnostic exact-match for `userId` (the query layer treats string filters as regex on both backends; `Pattern.quote` is Postgres-incompatible), so it warrants its own focused change rather than a rushed regex that could over-match.
+- Observability nitpicks (Micrometer counters, `SafeHttpClient` for the fixed Slack host, managed executor for one-shot startup recovery, `CREATE INDEX CONCURRENTLY`, test-style suggestions) — intentionally out of scope for this correctness/security pass.
+
+Every fix has a regression test; all touched unit suites are green locally (Testcontainers ITs run in CI).
+
+---
+
 ## 🔬 Critical adversarial re-review — 7 findings fixed (2026-07-03)
 
 **Repo:** EDDI (`feat/hitl-framework`, PR #585)

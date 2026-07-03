@@ -193,7 +193,7 @@ A TASK-gate pause caused by turn-budget exhaustion could previously loop forever
 | `AUTO_REJECT` | REJECTED decision → regular: turn skipped; group: `FAILED` | Strict SLA gates |
 | `ABORT` | Cancels the conversation/discussion | Safety-critical pipelines |
 
-Timeouts are one-shot schedules on EDDI's cluster-aware `ScheduleFireExecutor` — they fire exactly once, on whichever pod claims them, and route through the **same** resume/cancel machinery as human decisions.
+Timeouts are one-shot schedules on EDDI's cluster-aware `ScheduleFireExecutor` — exactly one pod owns each claim, and they route through the **same** resume/cancel machinery as human decisions. Delivery is at-least-once (a lease-expired claim can be re-stolen after a pod crash), but that is safe: the timeout resolves through the resume/cancel state CAS, so a duplicate fire against an already-resolved conversation is a no-op.
 
 ---
 

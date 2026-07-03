@@ -13,8 +13,11 @@ import java.util.List;
 
 /**
  * Store interface for schedule configurations and fire logs. Implementations
- * must provide atomic CAS (compare-and-swap) claiming to ensure exactly-once
- * execution in clustered deployments.
+ * must provide atomic CAS (compare-and-swap) claiming so exactly one instance
+ * owns a schedule per fire. Note this yields <strong>at-least-once</strong>
+ * delivery, not exactly-once: an expired lease may be stolen (see
+ * {@link #tryClaim}) while a wedged original fire can still commit, so fire
+ * targets must be idempotent.
  *
  * @author ginccc
  * @since 6.0.0
@@ -85,8 +88,12 @@ public interface IScheduleStore {
 
     /**
      * Atomically claim a schedule for this instance. Uses CAS (compare-and-swap):
-     * only succeeds if the schedule is still in a claimable state (PENDING or
-     * retryable FAILED with retryAt <= now).
+     * succeeds only if the schedule is still in a claimable state — PENDING, a
+     * retryable FAILED (retryAt <= now), or a CLAIMED row whose lease has expired
+     * (claimedAt <= leaseExpiry). The lease-expired CLAIMED case lets a crashed or
+     * wedged instance's schedule be reclaimed; it MUST match what
+     * {@link #findDueSchedules} returns, or such rows are fetched every poll but
+     * never re-fired.
      *
      * @param scheduleId
      *            schedule to claim
@@ -94,9 +101,12 @@ public interface IScheduleStore {
      *            this instance's unique identifier
      * @param now
      *            current time
+     * @param leaseExpiry
+     *            cutoff for stealing an expired lease (now - leaseTimeout); a
+     *            CLAIMED row with claimedAt <= this is reclaimable
      * @return true if this instance successfully claimed the schedule
      */
-    boolean tryClaim(String scheduleId, String instanceId, Instant now) throws IResourceStore.ResourceStoreException;
+    boolean tryClaim(String scheduleId, String instanceId, Instant now, Instant leaseExpiry) throws IResourceStore.ResourceStoreException;
 
     /**
      * Mark a schedule fire as completed. Resets fire state and sets nextFire. If

@@ -279,18 +279,23 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public boolean tryClaim(String scheduleId, String instanceId, Instant now) throws IResourceStore.ResourceStoreException {
+    public boolean tryClaim(String scheduleId, String instanceId, Instant now, Instant leaseExpiry) throws IResourceStore.ResourceStoreException {
         try {
             long nowMs = epochMillis(now);
+            long leaseMs = epochMillis(leaseExpiry);
 
-            // Fix #2: Atomic CAS with complete guards
-            // Only claim if PENDING, or FAILED with retry due + under max retries
+            // Atomic CAS with complete guards. Claim if PENDING, FAILED with retry
+            // due, OR a CLAIMED row whose lease expired (claimedAt <= leaseExpiry) —
+            // the last clause steals a crashed/wedged instance's claim and MUST mirror
+            // findDueSchedules' leaseExpiredFilter, else expired CLAIMED rows are
+            // returned every poll but never re-fired.
             Bson filter = and(eq(ID, scheduleId),
-                    or(eq(FIRE_STATUS, FireStatus.PENDING.name()), and(eq(FIRE_STATUS, FireStatus.FAILED.name()), lte(NEXT_RETRY_AT, nowMs)
-                    // Note: maxRetries guard is in findDueSchedules —
-                    // we trust the poller already filtered, but adding
-                    // the retryAt guard prevents premature claiming
-                    )));
+                    or(eq(FIRE_STATUS, FireStatus.PENDING.name()),
+                            and(eq(FIRE_STATUS, FireStatus.FAILED.name()), lte(NEXT_RETRY_AT, nowMs)),
+                            // Note: maxRetries guard is in findDueSchedules —
+                            // we trust the poller already filtered, but adding
+                            // the retryAt guard prevents premature claiming
+                            and(eq(FIRE_STATUS, FireStatus.CLAIMED.name()), lte(CLAIMED_AT, leaseMs))));
 
             Bson update = combine(set(FIRE_STATUS, FireStatus.CLAIMED.name()), set(CLAIMED_BY, instanceId), set(CLAIMED_AT, nowMs),
                     set(FIRE_ID, scheduleId + "_" + now.toString()), set(UPDATED_AT, nowMs));

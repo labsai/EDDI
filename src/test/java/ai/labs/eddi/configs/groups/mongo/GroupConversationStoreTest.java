@@ -200,6 +200,34 @@ class GroupConversationStoreTest {
         verify(storage, never()).findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt());
     }
 
+    @Test
+    @DisplayName("findByState — a store-level read failure on one record is skipped, the scan continues")
+    void findByStateContinuesPastStoreException() throws Exception {
+        // Two matches: reading the first fails at the storage layer (IOException →
+        // ResourceStoreException), the second reads fine. The bad record must not
+        // abort the whole scan (backs crash recovery + pending-approvals listing).
+        IResourceStore.IResourceId badId = mock(IResourceStore.IResourceId.class);
+        when(badId.getId()).thenReturn("gc-bad");
+        IResourceStore.IResourceId goodId = mock(IResourceStore.IResourceId.class);
+        when(goodId.getId()).thenReturn("gc-good");
+
+        when(storage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt()))
+                .thenReturn(List.of(badId, goodId));
+
+        // read("gc-bad") wraps this IOException as a ResourceStoreException
+        when(storage.read("gc-bad", 1)).thenThrow(new IOException("disk error"));
+
+        GroupConversation goodConversation = new GroupConversation();
+        IResourceStorage.IResource<GroupConversation> goodResource = mock(IResourceStorage.IResource.class);
+        when(goodResource.getData()).thenReturn(goodConversation);
+        when(storage.read("gc-good", 1)).thenReturn(goodResource);
+
+        List<GroupConversation> result = store.findByState(GroupConversationState.AWAITING_APPROVAL);
+
+        assertEquals(1, result.size(), "the readable record must still be returned");
+        assertEquals("gc-good", result.get(0).getId());
+    }
+
     // ==================== updateIfState (conditional CAS) ====================
 
     @Test

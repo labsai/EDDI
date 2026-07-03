@@ -33,8 +33,10 @@ public final class SecretRedactionFilter {
             // Anthropic API keys: sk-ant-...
             new RedactionRule(Pattern.compile("sk-ant-[a-zA-Z0-9\\-]{20,}+"), "sk-ant-" + REDACTED),
 
-            // Bearer tokens (JWTs and opaque tokens)
-            new RedactionRule(Pattern.compile("Bearer\\s++[A-Za-z0-9\\-_=]++\\.[A-Za-z0-9\\-_=]++\\.?+[A-Za-z0-9\\-_.+/=]*+"),
+            // Bearer tokens — JWTs AND opaque tokens. A single possessive character
+            // class (no mandatory '.') so 'Bearer <opaque>' is redacted too, not only
+            // dotted JWTs; min length 20 avoids redacting short benign words.
+            new RedactionRule(Pattern.compile("Bearer\\s++[A-Za-z0-9\\-_.+/=]{20,}+"),
                     "Bearer " + REDACTED),
 
             // Generic API key patterns: key=... or apikey=... in query strings

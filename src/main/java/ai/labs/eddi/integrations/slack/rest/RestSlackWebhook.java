@@ -221,7 +221,14 @@ public class RestSlackWebhook {
             }
             String key = pair.substring(0, eq);
             if ("payload".equals(key)) {
-                return URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+                try {
+                    return URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8);
+                } catch (IllegalArgumentException e) {
+                    // malformed percent-encoding — treat as a bad payload (handleInteractive
+                    // maps null -> 400) rather than letting it become a 500. This runs
+                    // before signature verification, so fail as a client error.
+                    return null;
+                }
             }
         }
         return null;

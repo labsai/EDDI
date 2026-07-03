@@ -35,9 +35,14 @@ import java.util.concurrent.TimeoutException;
 /**
  * Polls the schedule store for due schedules and fires them.
  * <p>
- * Uses atomic CAS claiming to ensure exactly-once execution across clustered
- * EDDI instances. Implements exponential backoff on failure with dead-lettering
- * after max retries.
+ * Uses atomic CAS claiming so exactly one instance owns a schedule per fire.
+ * Delivery is <strong>at-least-once</strong>, not exactly-once: a claim's lease
+ * can expire and be stolen by another instance (see
+ * {@link IScheduleStore#tryClaim}) while the original, possibly-wedged fire may
+ * still commit, so a fire can run more than once. Fire targets are therefore
+ * expected to be idempotent — HITL timeout fires resolve via a state CAS
+ * (resume/cancel) and no-op on a duplicate. Implements exponential backoff on
+ * failure with dead-lettering after max retries.
  * <p>
  * Supports two trigger types:
  * <ul>
@@ -151,7 +156,7 @@ public class SchedulePollerService {
             // this instance won are dispatched.
             List<ScheduleConfiguration> claimed = new ArrayList<>();
             for (ScheduleConfiguration schedule : dueSchedules) {
-                if (claimSchedule(schedule, now)) {
+                if (claimSchedule(schedule, now, leaseExpiry)) {
                     claimed.add(schedule);
                 }
             }
@@ -170,9 +175,9 @@ public class SchedulePollerService {
      * Atomically claim a schedule for this instance. Returns true only if the CAS
      * claim succeeded.
      */
-    private boolean claimSchedule(ScheduleConfiguration schedule, Instant now) {
+    private boolean claimSchedule(ScheduleConfiguration schedule, Instant now, Instant leaseExpiry) {
         try {
-            boolean claimed = scheduleStore.tryClaim(schedule.getId(), instanceId, now);
+            boolean claimed = scheduleStore.tryClaim(schedule.getId(), instanceId, now, leaseExpiry);
             if (!claimed) {
                 claimConflictCounter.increment();
                 LOGGER.debugf("[SCHEDULE] Claim conflict for schedule %s — another instance got it", schedule.getId());
@@ -216,18 +221,21 @@ public class SchedulePollerService {
             for (ScheduleConfiguration schedule : claimed) {
                 futures.add(executor.submit(() -> fireClaimedSchedule(schedule)));
             }
-            // Join each task with a bound: an unbounded future.get() would let one
-            // stalled fire hang the whole poll cycle. Bound the wait by leaseTimeout —
-            // the same window after which another instance may reclaim this schedule
+            // Bound the WHOLE batch by ONE shared deadline, not leaseTimeout per
+            // future: a per-future bound in this sequential loop would let N stalled
+            // fires pin the poll thread for up to N*leaseTimeout (hours for a large
+            // batch), defeating the point of the timeout. leaseTimeout is the window
+            // after which another instance may reclaim these schedules anyway
             // (findDueSchedules' leaseExpiredFilter), so waiting longer serves no
-            // purpose. On timeout, cancel (best-effort interrupt) and move on.
-            long timeoutMillis = Math.max(leaseTimeout.toMillis(), 1);
+            // purpose. On per-future timeout, cancel (best-effort interrupt) and move on.
+            long deadlineNanos = System.nanoTime() + Math.max(leaseTimeout.toNanos(), 1_000_000L);
             for (Future<?> future : futures) {
+                long remainingMs = Math.max(0L, (deadlineNanos - System.nanoTime()) / 1_000_000L);
                 try {
-                    future.get(timeoutMillis, TimeUnit.MILLISECONDS);
+                    future.get(remainingMs, TimeUnit.MILLISECONDS);
                 } catch (TimeoutException e) {
                     future.cancel(true);
-                    LOGGER.errorf("[SCHEDULE] Dispatched fire task exceeded the lease timeout (%s) — cancelling; "
+                    LOGGER.errorf("[SCHEDULE] Dispatched fire task exceeded the batch lease deadline (%s) — cancelling; "
                             + "the schedule will become reclaimable once its lease expires", leaseTimeout);
                 } catch (Exception e) {
                     LOGGER.errorf(e, "[SCHEDULE] Dispatched fire task failed unexpectedly");

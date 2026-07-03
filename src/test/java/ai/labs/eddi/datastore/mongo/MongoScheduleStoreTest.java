@@ -144,7 +144,9 @@ class MongoScheduleStoreTest extends MongoTestBase {
             cfg.setFireStatus(FireStatus.PENDING);
             String id = store.createSchedule(cfg);
 
-            assertTrue(store.tryClaim(id, "node-1", Instant.now()));
+            // Past leaseExpiry: a fresh PENDING row is claimed via the PENDING clause,
+            // never the lease-steal clause.
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Instant.now().minusSeconds(300)));
             assertEquals(FireStatus.CLAIMED, store.readSchedule(id).getFireStatus());
         }
 
@@ -157,8 +159,51 @@ class MongoScheduleStoreTest extends MongoTestBase {
             cfg.setFireStatus(FireStatus.PENDING);
             String id = store.createSchedule(cfg);
 
-            assertTrue(store.tryClaim(id, "node-1", Instant.now()));
-            assertFalse(store.tryClaim(id, "node-2", Instant.now()));
+            // A PAST leaseExpiry (300s ago) means the second claim cannot steal the
+            // fresh lease: node-1's claimedAt ≈ now is NOT <= leaseExpiry, so node-2's
+            // claim correctly fails.
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Instant.now().minusSeconds(300)));
+            assertFalse(store.tryClaim(id, "node-2", Instant.now(), Instant.now().minusSeconds(300)));
+        }
+
+        @Test
+        @DisplayName("tryClaim steals a CLAIMED schedule whose lease expired")
+        void claimStealsExpiredLease() throws Exception {
+            var cfg = newSchedule("Steal", "a");
+            cfg.setEnabled(true);
+            cfg.setNextFire(Instant.now().minusSeconds(60));
+            cfg.setFireStatus(FireStatus.PENDING);
+            String id = store.createSchedule(cfg);
+
+            // node-1 claims at a fixed instant T; its lease is now anchored at T.
+            Instant t = Instant.now().minusSeconds(600);
+            assertTrue(store.tryClaim(id, "node-1", t, t.minusSeconds(300)));
+            assertEquals("node-1", store.readSchedule(id).getClaimedBy());
+
+            // node-2 polls later with a leaseExpiry AFTER node-1's claimedAt (T) — the
+            // lease is considered expired, so the CLAIMED row is stolen.
+            assertTrue(store.tryClaim(id, "node-2", Instant.now(), t.plusSeconds(1)),
+                    "an expired-lease CLAIMED schedule must be reclaimable");
+            var read = store.readSchedule(id);
+            assertEquals(FireStatus.CLAIMED, read.getFireStatus());
+            assertEquals("node-2", read.getClaimedBy(), "the stolen lease is now owned by node-2");
+        }
+
+        @Test
+        @DisplayName("tryClaim does NOT steal a CLAIMED schedule whose lease is still valid")
+        void claimDoesNotStealValidLease() throws Exception {
+            var cfg = newSchedule("NoSteal", "a");
+            cfg.setEnabled(true);
+            cfg.setNextFire(Instant.now().minusSeconds(60));
+            cfg.setFireStatus(FireStatus.PENDING);
+            String id = store.createSchedule(cfg);
+
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Instant.now().minusSeconds(300)));
+
+            // leaseExpiry BEFORE node-1's fresh claimedAt → lease still valid → no steal.
+            assertFalse(store.tryClaim(id, "node-2", Instant.now(), Instant.now().minusSeconds(300)),
+                    "a still-valid lease must not be stolen");
+            assertEquals("node-1", store.readSchedule(id).getClaimedBy(), "node-1 keeps its valid lease");
         }
 
         @Test

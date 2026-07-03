@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.mcp;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
+import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -18,14 +19,19 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Finding 25: {@code chat_managed} must return a structured PAUSED_FOR_APPROVAL
- * result (not a 60s hang + generic error) when the managed conversation is
- * awaiting human approval, and must NOT recreate the mapping.
+ * Finding 25 / O3 / O4: the direct-conversation MCP tools (talk_to_agent,
+ * chat_with_agent) and the managed variant (chat_managed) must return a
+ * structured PAUSED_FOR_APPROVAL result — not a 60s hang, a generic error, or a
+ * BUSY misreport — when a conversation is deliberately paused for human
+ * approval; and chat_with_agent must preserve an auto-created conversation id
+ * on a skip.
  */
 class McpConversationToolsHitlTest {
 
@@ -147,5 +153,114 @@ class McpConversationToolsHitlTest {
 
         assertTrue(result.contains("PAUSED_FOR_APPROVAL"), result);
         verify(userConversationStore, never()).deleteUserConversation("customer_support", "U1");
+    }
+
+    // ==================== O3: talk_to_agent ====================
+
+    @Test
+    void talkToAgent_alreadyPaused_returnsPausedForApproval() throws Exception {
+        // Already-paused at submit: say() rejects the input synchronously.
+        doThrow(new IConversationService.ConversationAwaitingApprovalException("paused"))
+                .when(conversationService).say(eq("conv-1"), any(), any(), any(), any(), anyBoolean(), any());
+
+        String result = tools.talkToAgent("agent-1", "conv-1", "hi", "production");
+
+        assertTrue(result.contains("PAUSED_FOR_APPROVAL"), result);
+        assertTrue(result.contains("conv-1"));
+        assertTrue(result.contains("/resume"));
+        assertTrue(result.contains("AWAITING_HUMAN"));
+    }
+
+    @Test
+    void talkToAgent_turnPauses_returnsPausedForApproval() throws Exception {
+        // This turn pauses: say() completes with an AWAITING_HUMAN snapshot.
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+        doAnswer(inv -> {
+            ConversationResponseHandler handler = inv.getArgument(6);
+            handler.onComplete(snapshot);
+            return null;
+        }).when(conversationService).say(eq("conv-1"), any(), any(), any(), any(), anyBoolean(), any());
+
+        String result = tools.talkToAgent("agent-1", "conv-1", "please delete prod", "production");
+
+        assertTrue(result.contains("PAUSED_FOR_APPROVAL"), result);
+        assertTrue(result.contains("conv-1"));
+        assertTrue(result.contains("AWAITING_HUMAN"));
+    }
+
+    @Test
+    void talkToAgent_skipWhilePaused_returnsPausedForApproval() throws Exception {
+        // Queued-then-paused: the turn is skipped with state AWAITING_HUMAN — a
+        // deliberate pause, must NOT be reported as BUSY.
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+        doAnswer(inv -> {
+            ConversationResponseHandler handler = inv.getArgument(6);
+            handler.onSkipped(snapshot);
+            return null;
+        }).when(conversationService).say(eq("conv-1"), any(), any(), any(), any(), anyBoolean(), any());
+
+        String result = tools.talkToAgent("agent-1", "conv-1", "another message", "production");
+
+        assertTrue(result.contains("PAUSED_FOR_APPROVAL"), result);
+        assertFalse(result.contains("\"BUSY\""), result);
+    }
+
+    // ==================== O3 / O4: chat_with_agent ====================
+
+    @Test
+    void chatWithAgent_alreadyPaused_returnsPausedForApproval() throws Exception {
+        // Already-paused at submit on an existing conversation.
+        doThrow(new IConversationService.ConversationAwaitingApprovalException("paused"))
+                .when(conversationService).say(eq("conv-1"), any(), any(), any(), any(), anyBoolean(), any());
+
+        String result = tools.chatWithAgent("agent-1", "hi", "conv-1", "production");
+
+        assertTrue(result.contains("PAUSED_FOR_APPROVAL"), result);
+        assertTrue(result.contains("conv-1"));
+        assertTrue(result.contains("/resume"));
+    }
+
+    @Test
+    void chatWithAgent_turnPauses_returnsPausedForApproval() throws Exception {
+        // This turn pauses on an existing conversation.
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+        doAnswer(inv -> {
+            ConversationResponseHandler handler = inv.getArgument(6);
+            handler.onComplete(snapshot);
+            return null;
+        }).when(conversationService).say(eq("conv-1"), any(), any(), any(), any(), anyBoolean(), any());
+
+        String result = tools.chatWithAgent("agent-1", "please delete prod", "conv-1", "production");
+
+        assertTrue(result.contains("PAUSED_FOR_APPROVAL"), result);
+        assertTrue(result.contains("conv-1"));
+        assertTrue(result.contains("AWAITING_HUMAN"));
+    }
+
+    @Test
+    void chatWithAgent_autoCreatedId_preservedOnSkip() throws Exception {
+        // O4: no conversationId provided → chat_with_agent auto-creates one. When the
+        // turn is then skipped (busy), the freshly-created id must be reported, NOT
+        // the (null) method arg.
+        when(conversationService.startConversation(any(), eq("agent-1"), any(), any()))
+                .thenReturn(new ConversationResult("auto-created-conv", URI.create("eddi://conv/auto-created-conv")));
+
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.IN_PROGRESS);
+        doAnswer(inv -> {
+            ConversationResponseHandler handler = inv.getArgument(6);
+            handler.onSkipped(snapshot);
+            return null;
+        }).when(conversationService).say(eq("auto-created-conv"), any(), any(), any(), any(), anyBoolean(), any());
+
+        String result = tools.chatWithAgent("agent-1", "hi", null, "production");
+
+        assertTrue(result.contains("BUSY"), result);
+        // The real auto-created id must be preserved (O4) — never a stale null.
+        assertTrue(result.contains("auto-created-conv"), result);
+        assertFalse(result.contains("null"), result);
     }
 }

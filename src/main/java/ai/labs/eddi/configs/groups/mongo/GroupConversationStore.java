@@ -180,6 +180,11 @@ public class GroupConversationStore implements IGroupConversationStore {
                     out.add(gc);
             } catch (IResourceStore.ResourceNotFoundException e) {
                 LOGGER.warnf("Group conversation %s disappeared during findByState: %s", id.getId(), e.getMessage());
+            } catch (IResourceStore.ResourceStoreException e) {
+                // A single unreadable record (e.g. wrapped IOException) must not abort
+                // the whole scan — this backs crash recovery and pending-approvals
+                // listing. Log the id and continue (mirrors listByGroupId).
+                LOGGER.warnf("Failed to read group conversation %s during findByState: %s", id.getId(), e.getMessage());
             }
         }
         if (ids.size() >= limit) {

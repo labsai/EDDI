@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -83,6 +84,7 @@ public class HitlCrashRecoveryObserver {
     private final IGroupConversationStore groupConversationStore;
     private final IScheduleStore scheduleStore;
     private final IConversationService conversationService;
+    private final IGroupConversationService groupConversationService;
     private final boolean enabled;
     private final boolean recoverInProgress;
     private final Optional<Duration> pendingMaxAge;
@@ -93,6 +95,7 @@ public class HitlCrashRecoveryObserver {
             IGroupConversationStore groupConversationStore,
             IScheduleStore scheduleStore,
             IConversationService conversationService,
+            IGroupConversationService groupConversationService,
             @ConfigProperty(name = "eddi.hitl.crash-recovery.enabled",
                             defaultValue = "true") boolean enabled,
             @ConfigProperty(name = "eddi.hitl.crash-recovery.recover-in-progress",
@@ -102,6 +105,7 @@ public class HitlCrashRecoveryObserver {
         this.groupConversationStore = groupConversationStore;
         this.scheduleStore = scheduleStore;
         this.conversationService = conversationService;
+        this.groupConversationService = groupConversationService;
         this.enabled = enabled;
         this.recoverInProgress = recoverInProgress;
         this.pendingMaxAge = pendingMaxAge;
@@ -150,9 +154,12 @@ public class HitlCrashRecoveryObserver {
      * OFF by default (property empty): no pause is ever cancelled by this sweep,
      * preserving the WAIT_INDEFINITELY contract for deployments that want it.
      * <p>
-     * Cancellation goes through {@link IConversationService#cancelConversation}, so
-     * each reaped pause is audited (EU AI Act) and its timeout schedule disarmed —
-     * never a raw state write.
+     * Cancellation goes through {@link IConversationService#cancelConversation}
+     * (regular surface) and {@link IGroupConversationService#cancelDiscussion}
+     * (group surface), so each reaped pause is audited (EU AI Act) and its timeout
+     * schedule disarmed — never a raw state write. Both surfaces are swept against
+     * the same cutoff; group discussions paused under WAIT_INDEFINITELY would
+     * otherwise accumulate forever just like regular pauses.
      * <p>
      * The property is read once at startup. See {@code docs/hitl.md} (owned by a
      * later phase) for the operator-facing description.
@@ -189,11 +196,42 @@ public class HitlCrashRecoveryObserver {
                     LOGGER.warnf("Failed to auto-cancel expired pending approval %s: %s", conversationId, e.getMessage());
                 }
             }
-            if (cancelled > 0) {
-                LOGGER.warnf("HITL pending-approval retention: auto-cancelled %d pause(s) older than %s", cancelled, maxAge);
-            }
         } catch (Exception e) {
             LOGGER.warnf("Error during HITL pending-approval retention sweep: %s", e.getMessage());
+        }
+
+        // Group pass: WAIT_INDEFINITELY group discussions paused AWAITING_APPROVAL
+        // are never swept by the regular loop above and would accumulate forever.
+        // Same cutoff, gated by the same max-age-configured condition (reached only
+        // when retention is enabled and positive).
+        int cancelledGroups = 0;
+        try {
+            var pausedGcs = groupConversationStore.findByState(
+                    GroupConversationState.AWAITING_APPROVAL, null, RETENTION_SCAN_LIMIT);
+            for (GroupConversation gc : pausedGcs) {
+                Instant pausedAt = gc.getPausedAt();
+                if (pausedAt == null || !pausedAt.isBefore(cutoff)) {
+                    continue; // unknown age or still within retention
+                }
+                String groupConversationId = gc.getId();
+                try {
+                    // cancelDiscussion is CAS/terminal-guarded: it no-ops if the
+                    // discussion was resumed/cancelled between the scan and here.
+                    if (groupConversationService.cancelDiscussion(groupConversationId, ControlSignal.CANCEL_GRACEFUL)) {
+                        cancelledGroups++;
+                    }
+                } catch (Exception e) {
+                    LOGGER.warnf("Failed to auto-cancel expired group pending approval %s: %s",
+                            groupConversationId, e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Error during HITL group pending-approval retention sweep: %s", e.getMessage());
+        }
+
+        if (cancelled > 0 || cancelledGroups > 0) {
+            LOGGER.warnf("HITL pending-approval retention: auto-cancelled %d regular pause(s) + "
+                    + "%d group discussion(s) older than %s", cancelled, cancelledGroups, maxAge);
         }
     }
 
@@ -216,11 +254,15 @@ public class HitlCrashRecoveryObserver {
                     if (policy == HitlTimeoutPolicy.WAIT_INDEFINITELY) {
                         continue; // legitimate indefinite pause — never touch
                     }
+                    // Capture the SCANNED pause timestamp: the post-create re-check
+                    // must keep the schedule only for THIS pause, not a different one
+                    // created after an intervening resume+re-pause.
+                    Instant scannedPausedAt = summary.getPausedAt();
                     if (rearmSchedule(HitlSchedules.regularTimeoutScheduleName(conversationId),
                             HitlSchedules.SURFACE_REGULAR, conversationId,
                             summary.getAgentId(), policy, summary.getApprovalTimeout(),
-                            summary.getPausedAt(),
-                            () -> conversationMemoryStore.getConversationState(conversationId) == ConversationState.AWAITING_HUMAN)) {
+                            scannedPausedAt,
+                            () -> regularStillPaused(conversationId, scannedPausedAt))) {
                         count++;
                     }
                 } catch (Exception e) {
@@ -258,11 +300,12 @@ public class HitlCrashRecoveryObserver {
                             count++;
                             HitlTimeoutPolicy policy = parsePolicy(snapshot.getHitlTimeoutPolicy());
                             if (policy != HitlTimeoutPolicy.WAIT_INDEFINITELY) {
+                                Instant scannedPausedAt = snapshot.getHitlPausedAt();
                                 rearmSchedule(HitlSchedules.regularTimeoutScheduleName(conversationId),
                                         HitlSchedules.SURFACE_REGULAR, conversationId,
                                         snapshot.getAgentId(), policy, snapshot.getHitlApprovalTimeout(),
-                                        snapshot.getHitlPausedAt(),
-                                        () -> conversationMemoryStore.getConversationState(conversationId) == ConversationState.AWAITING_HUMAN);
+                                        scannedPausedAt,
+                                        () -> regularStillPaused(conversationId, scannedPausedAt));
                             }
                         }
                     } else {
@@ -295,16 +338,12 @@ public class HitlCrashRecoveryObserver {
                     if (policy == HitlTimeoutPolicy.WAIT_INDEFINITELY) {
                         continue;
                     }
-                    if (rearmSchedule(HitlSchedules.groupTimeoutScheduleName(gc.getId()),
-                            HitlSchedules.SURFACE_GROUP, gc.getId(),
-                            null, policy, gc.getHitlApprovalTimeout(), gc.getPausedAt(),
-                            () -> {
-                                try {
-                                    return groupConversationStore.read(gc.getId()).getState() == GroupConversationState.AWAITING_APPROVAL;
-                                } catch (Exception e) {
-                                    return true; // cannot verify — keep the schedule
-                                }
-                            })) {
+                    String groupConversationId = gc.getId();
+                    Instant scannedPausedAt = gc.getPausedAt();
+                    if (rearmSchedule(HitlSchedules.groupTimeoutScheduleName(groupConversationId),
+                            HitlSchedules.SURFACE_GROUP, groupConversationId,
+                            null, policy, gc.getHitlApprovalTimeout(), scannedPausedAt,
+                            () -> groupStillPaused(groupConversationId, scannedPausedAt))) {
                         count++;
                     }
                 } catch (Exception e) {
@@ -392,6 +431,49 @@ public class HitlCrashRecoveryObserver {
         } catch (Exception e) {
             LOGGER.warnf("Failed to re-arm HITL timeout for %s: %s", conversationId, e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Post-create bookmark re-check for a regular pause. The re-armed schedule is
+     * kept only if the conversation is STILL AWAITING_HUMAN <em>and</em> its
+     * current pause is the very one the sweep scanned — a resume+re-pause between
+     * the scan and now produces a NEW pausedAt, and the schedule computed from the
+     * OLD pausedAt/policy must NOT survive onto that new approval. A transient read
+     * error keeps the schedule (the timeout handler is CAS-guarded anyway).
+     */
+    private boolean regularStillPaused(String conversationId, Instant scannedPausedAt) {
+        try {
+            var current = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (current == null || current.getConversationState() != ConversationState.AWAITING_HUMAN) {
+                return false;
+            }
+            if (scannedPausedAt == null) {
+                return true; // scan had no bookmark timestamp — fall back to state-only
+            }
+            return scannedPausedAt.equals(current.getHitlPausedAt());
+        } catch (Exception e) {
+            return true; // cannot verify — keep the schedule
+        }
+    }
+
+    /**
+     * Post-create bookmark re-check for a group pause — see
+     * {@link #regularStillPaused}. Kept only if the discussion is STILL
+     * AWAITING_APPROVAL and its current pausedAt equals the scanned one.
+     */
+    private boolean groupStillPaused(String groupConversationId, Instant scannedPausedAt) {
+        try {
+            GroupConversation current = groupConversationStore.read(groupConversationId);
+            if (current == null || current.getState() != GroupConversationState.AWAITING_APPROVAL) {
+                return false;
+            }
+            if (scannedPausedAt == null) {
+                return true; // scan had no pausedAt — fall back to state-only
+            }
+            return scannedPausedAt.equals(current.getPausedAt());
+        } catch (Exception e) {
+            return true; // cannot verify — keep the schedule
         }
     }
 

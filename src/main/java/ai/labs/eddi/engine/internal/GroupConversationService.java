@@ -1961,6 +1961,12 @@ public class GroupConversationService implements IGroupConversationService {
                 return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
                         Instant.now(), "Timeout after " + timeout + "s", targetAgentId);
 
+            } catch (IConversationService.ConversationAwaitingApprovalException e) {
+                // Member's private conversation is (or became) AWAITING_HUMAN before the say
+                // callback ran — member-level HITL is unsupported inside a group. Cancel the
+                // stranded pause and record SKIPPED (mirrors the memberPaused[0] path).
+                // convId is try-scoped, so pass the method-level privateConvId (same value).
+                return handleMemberPause(member, gc, privateConvId, phaseIdx, phase, targetAgentId, listener);
             } catch (Exception e) {
                 Throwable cause = e instanceof ExecutionException ? e.getCause() : e;
                 // Quota errors are non-retryable and affect all agents — abort immediately
@@ -2741,6 +2747,16 @@ public class GroupConversationService implements IGroupConversationService {
         // surfaces as (unchecked) GroupConversationGoneException → REST 404, a
         // genuine state race as ResourceModifiedException → REST 409.
         conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+        // O2: register the control token IMMEDIATELY after the resume CAS — before
+        // deleting the schedule and notifying listeners. Otherwise a concurrent
+        // cancelDiscussion landing between the CAS and a later put finds no token,
+        // takes the DB branch, sees IN_PROGRESS (non-terminal), CAS's to CANCELLED,
+        // and returns success — yet the resume then registers a FRESH non-cancelled
+        // token and runs a full phase on a discussion the operator was told was
+        // cancelled. With the token present here, that cancel takes the SIGNAL path
+        // (setSignal) and executeDiscussion's top-of-phase isCancelled() check stops
+        // before any member-agent work runs.
+        activeTokens.put(gc.getId(), new DiscussionControlToken());
         // Delete timeout schedule only after CAS succeeds (Phase 5e) — if CAS
         // fails, the schedule is preserved so the timeout can still fire.
         deleteGroupHitlTimeoutSchedule(groupConversationId);
@@ -2776,11 +2792,11 @@ public class GroupConversationService implements IGroupConversationService {
         final String savedPhaseName = pausedPhaseName;
         final var savedPauseType = pauseType;
 
-        // Register the control token BEFORE submitting: a cancel landing between
-        // the CAS above and the executor thread reaching executeDiscussion must
-        // find a signalable token, not fall through to the DB branch and be
-        // overwritten by the resumed leg's unconditional updates.
-        activeTokens.put(gc.getId(), new DiscussionControlToken());
+        // O2: the control token is registered right after the resume CAS above (not
+        // here) so a cancel racing the window between the CAS and the executor thread
+        // reaching executeDiscussion finds a signalable token and takes the SIGNAL
+        // path, rather than falling through to the DB branch and being overwritten by
+        // the resumed leg's unconditional updates.
 
         Runnable resumeWork = () -> {
             AgentGroupConfiguration groupConfig;
