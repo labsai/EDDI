@@ -89,6 +89,15 @@ class ConversationPauseExceptionTest {
         }
 
         @Test
+        @DisplayName("blank reason also falls back to the safe default in getMessage")
+        void blankReasonInMessage() {
+            var ex = new ConversationPauseException("wf-1", 0, "   ");
+
+            assertEquals("Conversation paused: human approval required", ex.getMessage());
+            assertEquals("   ", ex.getPauseReason(), "the raw (blank) reason is still exposed via the getter");
+        }
+
+        @Test
         @DisplayName("exception is a checked Exception subclass")
         void isCheckedException() {
             var ex = new ConversationPauseException("wf-1", 0, "reason");

@@ -16,7 +16,7 @@ public class ConversationPauseException extends Exception {
     private final String pauseReason;
 
     public ConversationPauseException(String pausedWorkflowId, int pausedAbsoluteTaskIndex, String pauseReason) {
-        super("Conversation paused: " + (pauseReason != null ? pauseReason : "human approval required"));
+        super("Conversation paused: " + (pauseReason == null || pauseReason.isBlank() ? "human approval required" : pauseReason));
         this.pausedWorkflowId = pausedWorkflowId;
         this.pausedAbsoluteTaskIndex = pausedAbsoluteTaskIndex;
         this.pauseReason = pauseReason;
