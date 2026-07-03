@@ -139,7 +139,8 @@
     "copyFailed": "क्लिपबोर्ड पर कॉपी करने में विफल",
     "loadError": "डेटा लोड करने में विफल",
     "actions": "क्रियाएँ",
-    "view": "देखें"
+    "view": "देखें",
+    "refresh": "ताज़ा करें"
   },
   "agents": {
     "deploy": "तैनात करें",
@@ -1533,7 +1534,8 @@
     "verificationPassed": "उत्तीर्ण",
     "verificationFailed": "विफल",
     "showMore": "और दिखाएं",
-    "showLess": "कम दिखाएं"
+    "showLess": "कम दिखाएं",
+    "awaitingApproval": "अनुमोदन की प्रतीक्षा"
   },
   "memories": {
     "title": "उपयोगकर्ता स्मृति",
@@ -1957,6 +1959,7 @@
     "granularityTask": "कार्य",
     "rejectionFail": "कार्य विफल करें",
     "rejectionRetry": "कार्य पुनः प्रयास करें",
-    "groupsTruncated": "यहाँ दिखाई गई से अधिक समूह स्वीकृतियाँ मौजूद हैं।"
+    "groupsTruncated": "यहाँ दिखाई गई से अधिक समूह स्वीकृतियाँ मौजूद हैं।",
+    "groupsLoadError": "समूह स्वीकृतियाँ लोड नहीं हो सकीं।"
   }
 }

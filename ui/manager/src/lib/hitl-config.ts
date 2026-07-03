@@ -145,6 +145,27 @@ export function isValidIsoDuration(iso: string): boolean {
   return parseIsoDurationMs(iso) !== null;
 }
 
+/** Format a positive millisecond duration as "1d 2h" / "5m 3s" / "42s" (top 2 units). */
+export function formatDurationMs(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const d = Math.floor(totalSec / 86400);
+  const h = Math.floor((totalSec % 86400) / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const parts: [number, string][] = [[d, "d"], [h, "h"], [m, "m"], [s, "s"]];
+  const nonzero = parts.filter(([n]) => n > 0);
+  const shown = (nonzero.length ? nonzero : [[0, "s"] as [number, string]]).slice(0, 2);
+  return shown.map(([n, u]) => `${n}${u}`).join(" ");
+}
+
+/** Format an ISO-8601 duration for display (e.g. "PT1H30M" → "1h 30m"); falls
+ *  back to the raw string if it isn't a parseable positive duration. */
+export function formatIsoDuration(iso?: string | null): string {
+  if (!iso) return "";
+  const ms = parseIsoDurationMs(iso);
+  return ms == null ? iso : formatDurationMs(ms);
+}
+
 /** A finite timeout policy requires a positive approvalTimeout to ever fire. */
 export function requiresApprovalTimeout(policy?: string | null): boolean {
   return !!policy && policy !== "WAIT_INDEFINITELY";

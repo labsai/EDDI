@@ -1100,7 +1100,9 @@ export const HitlConfigSection = memo(function HitlConfigSection({
   // TYPING — a controlled input bound to the committed value can't, since we
   // deliberately don't persist an invalid finite-policy timeout.
   const [timeoutDraft, setTimeoutDraft] = useState(hitl.approvalTimeout ?? "");
-  useEffect(() => setTimeoutDraft(hitl.approvalTimeout ?? ""), [hitl.approvalTimeout]);
+  // Resync to the committed value when it changes OR when the field is
+  // re-shown after a policy toggle, so a stale unsaved draft can't linger.
+  useEffect(() => setTimeoutDraft(hitl.approvalTimeout ?? ""), [hitl.approvalTimeout, finite]);
   const invalid = finite && (!timeoutDraft.trim() || !isValidIsoDuration(timeoutDraft.trim()));
 
   return (

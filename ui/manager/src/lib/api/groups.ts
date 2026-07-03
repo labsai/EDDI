@@ -216,9 +216,9 @@ export interface GroupConversation {
   pausedTurnCount?: number;
   pausedPhaseName?: string;
   pausedAt?: string;
-  hitlPauseType?: "PHASE" | "TASK";
+  hitlPauseType?: import("./hitl").HitlGranularity;
   hitlPauseReason?: string;
-  hitlTimeoutPolicy?: string;
+  hitlTimeoutPolicy?: import("./hitl").HitlTimeoutPolicy;
   hitlApprovalTimeout?: string;
 }
 
@@ -496,6 +496,19 @@ async function* readGroupSSE(response: Response): AsyncGenerator<GroupSSEEvent> 
   }
 }
 
+/** POST a JSON body to an SSE endpoint (shared auth/header scaffolding). */
+function postSSE(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
+  return fetch(`${api.getBaseUrl()}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...api.getAuthHeader(),
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
 /**
  * Start a group discussion via SSE streaming.
  * Returns an async generator yielding SSE events as they arrive.
@@ -507,19 +520,11 @@ export async function* streamGroupDiscussion(
   userId?: string,
   signal?: AbortSignal,
 ): AsyncGenerator<GroupSSEEvent> {
-  const response = await fetch(
-    `${api.getBaseUrl()}/groups/${groupId}/conversations/stream`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...api.getAuthHeader(),
-      },
-      body: JSON.stringify({ question, userId: userId || "manager-user" }),
-      signal,
-    }
+  const response = await postSSE(
+    `/groups/${groupId}/conversations/stream`,
+    { question, userId: userId || "manager-user" },
+    signal,
   );
-
   yield* readGroupSSE(response);
 }
 
@@ -534,19 +539,11 @@ export async function* streamGroupApproval(
   request: import("./hitl").GroupApprovalRequest,
   signal?: AbortSignal,
 ): AsyncGenerator<GroupSSEEvent> {
-  const response = await fetch(
-    `${api.getBaseUrl()}/groups/${groupId}/conversations/${gcId}/approve/stream`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...api.getAuthHeader(),
-      },
-      body: JSON.stringify(request),
-      signal,
-    }
+  const response = await postSSE(
+    `/groups/${groupId}/conversations/${gcId}/approve/stream`,
+    request,
+    signal,
   );
-
   yield* readGroupSSE(response);
 }
 

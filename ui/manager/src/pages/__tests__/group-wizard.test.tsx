@@ -26,23 +26,28 @@ describe("GroupWizardPage", () => {
       expect(screen.getByTestId("gw-hitl-policy")).toBeInTheDocument();
     });
 
-    it("a finite timeout policy requires a valid duration before proceeding", async () => {
+    it("a finite timeout policy seeds a valid duration, and validates edits", async () => {
       const user = userEvent.setup();
       renderWithProviders(<GroupWizardPage />, { initialRoute: "/manage/groups/wizard" });
       await user.click(screen.getByTestId("template-blank"));
       await user.type(screen.getByTestId("gw-name"), "Approvals Group");
       await user.click(screen.getByTestId("gw-hitl-enable"));
 
-      // Default policy WAIT_INDEFINITELY + one gate → valid.
+      // Default policy WAIT_INDEFINITELY + one gate → valid, no timeout field.
       expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
       expect(screen.queryByTestId("gw-hitl-timeout")).not.toBeInTheDocument();
 
-      // A finite policy needs an approvalTimeout — Next blocks until one is valid.
+      // A finite policy seeds a default timeout (PT15M) so the config stays valid.
       await user.selectOptions(screen.getByTestId("gw-hitl-policy"), "AUTO_REJECT");
-      expect(screen.getByTestId("gw-hitl-timeout")).toBeInTheDocument();
-      expect(screen.getByTestId("group-wizard-next")).toBeDisabled();
+      const timeout = screen.getByTestId("gw-hitl-timeout");
+      expect(timeout).toBeInTheDocument();
+      expect(timeout).toHaveValue("PT15M");
+      expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
 
-      await user.type(screen.getByTestId("gw-hitl-timeout"), "PT15M");
+      // Clearing it blocks Next; a valid value re-enables it.
+      await user.clear(timeout);
+      expect(screen.getByTestId("group-wizard-next")).toBeDisabled();
+      await user.type(timeout, "PT30M");
       expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
     });
 

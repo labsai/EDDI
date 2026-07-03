@@ -139,7 +139,8 @@
     "copyFailed": "Error al copiar al portapapeles",
     "loadError": "Error al cargar los datos",
     "actions": "Acciones",
-    "view": "Ver"
+    "view": "Ver",
+    "refresh": "Actualizar"
   },
   "agents": {
     "deploy": "Desplegar",
@@ -1533,7 +1534,8 @@
     "verificationPassed": "Aprobado",
     "verificationFailed": "Fallido",
     "showMore": "mostrar más",
-    "showLess": "mostrar menos"
+    "showLess": "mostrar menos",
+    "awaitingApproval": "Esperando aprobación"
   },
   "memories": {
     "title": "Memoria del usuario",
@@ -1957,6 +1959,7 @@
     "granularityTask": "Tarea",
     "rejectionFail": "Marcar la tarea como fallida",
     "rejectionRetry": "Reintentar la tarea",
-    "groupsTruncated": "Existen más aprobaciones de grupo de las que se muestran aquí."
+    "groupsTruncated": "Existen más aprobaciones de grupo de las que se muestran aquí.",
+    "groupsLoadError": "No se pudieron cargar las aprobaciones de grupo."
   }
 }

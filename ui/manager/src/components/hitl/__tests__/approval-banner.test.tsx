@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, act } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { ApprovalBanner } from "@/components/hitl/approval-banner";
 
@@ -85,5 +85,34 @@ describe("ApprovalBanner", () => {
       t1: "REJECTED",
       t2: "REJECTED",
     });
+  });
+
+  it("shows a live countdown that ticks down and flips to Overdue", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+    try {
+      renderWithProviders(
+        <ApprovalBanner
+          surface="group"
+          pausedAt="2026-01-01T00:00:00.000Z"
+          approvalTimeout="PT1M"
+          timeoutPolicy="AUTO_REJECT"
+          onDecide={vi.fn()}
+        />,
+      );
+
+      // Before the deadline: a "Remaining: …" chip is shown, not "Overdue".
+      expect(screen.getByText(/Remaining:/)).toBeInTheDocument();
+      expect(screen.queryByText("Overdue")).not.toBeInTheDocument();
+
+      // Advance past the 1-minute deadline — the 1s interval flips it to Overdue.
+      act(() => {
+        vi.advanceTimersByTime(65_000);
+      });
+      expect(screen.getByText("Overdue")).toBeInTheDocument();
+      expect(screen.queryByText(/Remaining:/)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

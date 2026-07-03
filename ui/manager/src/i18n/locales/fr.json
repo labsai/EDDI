@@ -139,7 +139,8 @@
     "copyFailed": "Échec de la copie dans le presse-papiers",
     "loadError": "Échec du chargement des données",
     "actions": "Actions",
-    "view": "Voir"
+    "view": "Voir",
+    "refresh": "Actualiser"
   },
   "agents": {
     "deploy": "Déployer",
@@ -1533,7 +1534,8 @@
     "verificationPassed": "Réussi",
     "verificationFailed": "Échoué",
     "showMore": "afficher plus",
-    "showLess": "afficher moins"
+    "showLess": "afficher moins",
+    "awaitingApproval": "En attente d'approbation"
   },
   "memories": {
     "title": "Mémoire utilisateur",
@@ -1957,6 +1959,7 @@
     "granularityTask": "Tâche",
     "rejectionFail": "Faire échouer la tâche",
     "rejectionRetry": "Réessayer la tâche",
-    "groupsTruncated": "Il existe plus d'approbations de groupe que celles affichées ici."
+    "groupsTruncated": "Il existe plus d'approbations de groupe que celles affichées ici.",
+    "groupsLoadError": "Impossible de charger les approbations de groupe."
   }
 }

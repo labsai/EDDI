@@ -139,7 +139,8 @@
     "copyFailed": "คัดลอกไปยังคลิปบอร์ดล้มเหลว",
     "loadError": "โหลดข้อมูลไม่สำเร็จ",
     "actions": "การดำเนินการ",
-    "view": "ดู"
+    "view": "ดู",
+    "refresh": "รีเฟรช"
   },
   "agents": {
     "deploy": "ติดตั้ง (Deploy)",
@@ -1533,7 +1534,8 @@
     "verificationPassed": "ผ่าน",
     "verificationFailed": "ไม่ผ่าน",
     "showMore": "แสดงเพิ่มเติม",
-    "showLess": "แสดงน้อยลง"
+    "showLess": "แสดงน้อยลง",
+    "awaitingApproval": "รอการอนุมัติ"
   },
   "memories": {
     "title": "หน่วยความจำผู้ใช้",
@@ -1957,6 +1959,7 @@
     "granularityTask": "งาน",
     "rejectionFail": "ทำให้งานล้มเหลว",
     "rejectionRetry": "ลองทำงานใหม่",
-    "groupsTruncated": "มีการอนุมัติกลุ่มมากกว่าที่แสดงที่นี่"
+    "groupsTruncated": "มีการอนุมัติกลุ่มมากกว่าที่แสดงที่นี่",
+    "groupsLoadError": "ไม่สามารถโหลดการอนุมัติกลุ่มได้"
   }
 }

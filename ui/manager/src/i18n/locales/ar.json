@@ -139,7 +139,8 @@
     "copyFailed": "فشل النسخ إلى الحافظة",
     "loadError": "فشل تحميل البيانات",
     "actions": "إجراءات",
-    "view": "عرض"
+    "view": "عرض",
+    "refresh": "تحديث"
   },
   "agents": {
     "deploy": "نشر",
@@ -1533,7 +1534,8 @@
     "verificationPassed": "ناجح",
     "verificationFailed": "فاشل",
     "showMore": "عرض المزيد",
-    "showLess": "عرض أقل"
+    "showLess": "عرض أقل",
+    "awaitingApproval": "في انتظار الموافقة"
   },
   "memories": {
     "title": "ذاكرة المستخدم",
@@ -1957,6 +1959,7 @@
     "granularityTask": "مهمة",
     "rejectionFail": "إفشال المهمة",
     "rejectionRetry": "إعادة محاولة المهمة",
-    "groupsTruncated": "توجد موافقات مجموعات أكثر مما هو معروض هنا."
+    "groupsTruncated": "توجد موافقات مجموعات أكثر مما هو معروض هنا.",
+    "groupsLoadError": "تعذر تحميل موافقات المجموعات."
   }
 }

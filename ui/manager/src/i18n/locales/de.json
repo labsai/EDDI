@@ -139,7 +139,8 @@
     "copyFailed": "Kopieren in die Zwischenablage fehlgeschlagen",
     "loadError": "Daten konnten nicht geladen werden",
     "actions": "Aktionen",
-    "view": "Ansehen"
+    "view": "Ansehen",
+    "refresh": "Aktualisieren"
   },
   "agents": {
     "deploy": "Bereitstellen",
@@ -1533,7 +1534,8 @@
     "verificationPassed": "Bestanden",
     "verificationFailed": "Fehlgeschlagen",
     "showMore": "mehr anzeigen",
-    "showLess": "weniger anzeigen"
+    "showLess": "weniger anzeigen",
+    "awaitingApproval": "Warten auf Genehmigung"
   },
   "groupWizard": {
     "title": "Gruppen-Assistent",
@@ -1957,6 +1959,7 @@
     "granularityTask": "Aufgabe",
     "rejectionFail": "Aufgabe fehlschlagen lassen",
     "rejectionRetry": "Aufgabe wiederholen",
-    "groupsTruncated": "Es gibt mehr Gruppenfreigaben, als hier angezeigt werden."
+    "groupsTruncated": "Es gibt mehr Gruppenfreigaben, als hier angezeigt werden.",
+    "groupsLoadError": "Gruppenfreigaben konnten nicht geladen werden."
   }
 }

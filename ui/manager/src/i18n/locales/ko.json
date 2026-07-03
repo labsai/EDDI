@@ -139,7 +139,8 @@
     "copyFailed": "클립보드 복사 실패",
     "loadError": "데이터를 불러오지 못했습니다",
     "actions": "동작",
-    "view": "보기"
+    "view": "보기",
+    "refresh": "새로고침"
   },
   "agents": {
     "deploy": "배포",
@@ -1533,7 +1534,8 @@
     "verificationPassed": "통과",
     "verificationFailed": "실패",
     "showMore": "더 보기",
-    "showLess": "접기"
+    "showLess": "접기",
+    "awaitingApproval": "승인 대기 중"
   },
   "memories": {
     "title": "사용자 메모리",
@@ -1957,6 +1959,7 @@
     "granularityTask": "작업",
     "rejectionFail": "작업 실패 처리",
     "rejectionRetry": "작업 재시도",
-    "groupsTruncated": "여기에 표시된 것보다 더 많은 그룹 승인이 있습니다."
+    "groupsTruncated": "여기에 표시된 것보다 더 많은 그룹 승인이 있습니다.",
+    "groupsLoadError": "그룹 승인을 불러오지 못했습니다."
   }
 }

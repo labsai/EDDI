@@ -7,6 +7,7 @@ import { cn, hashColor, getInitials } from "@/lib/utils";
 import type { AgentGroupConfiguration, DiscussionStyle, DiscussionPhase } from "@/lib/api/groups";
 import { STYLE_INFO } from "@/lib/api/groups";
 import { timeoutPolicyLabel, granularityLabel, rejectionPolicyLabel } from "@/lib/hitl-labels";
+import { formatIsoDuration } from "@/lib/hitl-config";
 import { toast } from "sonner";
 import { useDeleteGroup, useDeleteGroupWithMembers } from "@/hooks/use-groups";
 import { useNavigate } from "react-router-dom";
@@ -209,7 +210,7 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
                 label={t("hitl.timeoutPolicy", "Timeout")}
                 value={
                   timeoutPolicyLabel(t, hitl.timeoutPolicy) +
-                  (hitl.approvalTimeout ? ` (${hitl.approvalTimeout})` : "")
+                  (hitl.approvalTimeout ? ` (${formatIsoDuration(hitl.approvalTimeout)})` : "")
                 }
               />
             )}

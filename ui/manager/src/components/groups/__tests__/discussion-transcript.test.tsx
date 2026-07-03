@@ -146,6 +146,33 @@ describe("DiscussionTranscript", () => {
     expect(mockWriteText).toHaveBeenCalledWith("### Hybrid Systems\nWe need both deterministic guardrails and LLMs.");
   });
 
+  it("renders the approval banner for an AWAITING_APPROVAL conversation and wires the decision callbacks", () => {
+    const onApprove = vi.fn();
+    const onCancelDiscussion = vi.fn();
+    const conv: GroupConversation = {
+      ...mockConversation,
+      id: "gc-1",
+      state: "AWAITING_APPROVAL",
+      hitlPauseReason: "Needs manager sign-off",
+    };
+    renderWithProviders(
+      <DiscussionTranscript
+        conversation={conv}
+        discussionStyle="ROUND_TABLE"
+        onApprove={onApprove}
+        onCancelDiscussion={onCancelDiscussion}
+      />,
+    );
+
+    expect(screen.getByTestId("approval-banner")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("approve-button"));
+    expect(onApprove).toHaveBeenCalledWith("gc-1", "APPROVED", undefined, undefined);
+
+    fireEvent.click(screen.getByTestId("cancel-button"));
+    expect(onCancelDiscussion).toHaveBeenCalledWith("gc-1");
+  });
+
   it("renders live streaming state and speaking indicators", () => {
     const mockStreamState: GroupStreamState = {
       conversationId: "conv-test-1", isStreaming: true,

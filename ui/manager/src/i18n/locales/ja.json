@@ -139,7 +139,8 @@
     "copyFailed": "クリップボードへのコピーに失敗しました",
     "loadError": "データの読み込みに失敗しました",
     "actions": "操作",
-    "view": "表示"
+    "view": "表示",
+    "refresh": "更新"
   },
   "agents": {
     "deploy": "デプロイ",
@@ -1533,7 +1534,8 @@
     "verificationPassed": "合格",
     "verificationFailed": "不合格",
     "showMore": "もっと表示",
-    "showLess": "折りたたむ"
+    "showLess": "折りたたむ",
+    "awaitingApproval": "承認待ち"
   },
   "memories": {
     "title": "ユーザーメモリ",
@@ -1957,6 +1959,7 @@
     "granularityTask": "タスク",
     "rejectionFail": "タスクを失敗にする",
     "rejectionRetry": "タスクを再試行する",
-    "groupsTruncated": "ここに表示されているよりも多くのグループ承認があります。"
+    "groupsTruncated": "ここに表示されているよりも多くのグループ承認があります。",
+    "groupsLoadError": "グループ承認を読み込めませんでした。"
   }
 }

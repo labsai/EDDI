@@ -200,7 +200,7 @@ Every PR runs through these automated gates:
 | Check          | What It Does                                       | Must Pass? |
 | -------------- | -------------------------------------------------- | ---------- |
 | **Lint**       | ESLint with `--max-warnings 0`                     | ✅ Yes     |
-| **Type Check** | `tsc --noEmit` (full project type-check)           | ✅ Yes     |
+| **Type Check** | `tsc -b` (build-mode full project type-check)      | ✅ Yes     |
 | **Unit Tests** | Vitest with 630+ component tests                   | ✅ Yes     |
 | **Build**      | Production build via `tsc -b && vite build`        | ✅ Yes     |
 | **E2E Tests**  | Playwright UI tests with MSW mocks                 | ✅ Yes     |

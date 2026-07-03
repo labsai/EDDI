@@ -24,18 +24,19 @@ export interface HitlDecision {
   decidedBy?: string;
 }
 
-/** Summary of a conversation awaiting human approval. */
+/** Summary of a conversation awaiting human approval.
+ *  Jackson serializes absent fields as null, so nullable fields are `| null`. */
 export interface PendingApprovalSummary {
   conversationId: string;
-  agentId?: string;
+  agentId?: string | null;
   /** Set only for group-surface pauses. */
-  groupId?: string;
-  userId?: string;
+  groupId?: string | null;
+  userId?: string | null;
   pausedAt: string;
-  pauseReason?: string;
-  timeoutPolicy?: string;
+  pauseReason?: string | null;
+  timeoutPolicy?: HitlTimeoutPolicy | string | null;
   /** ISO-8601 duration of the configured approval timeout. */
-  approvalTimeout?: string;
+  approvalTimeout?: string | null;
 }
 
 /** Group discussion approval request body. */

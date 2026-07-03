@@ -139,7 +139,8 @@
     "copyFailed": "复制到剪贴板失败",
     "loadError": "加载数据失败",
     "actions": "操作",
-    "view": "查看"
+    "view": "查看",
+    "refresh": "刷新"
   },
   "agents": {
     "deploy": "部署",
@@ -1533,7 +1534,8 @@
     "verificationPassed": "通过",
     "verificationFailed": "未通过",
     "showMore": "显示更多",
-    "showLess": "收起"
+    "showLess": "收起",
+    "awaitingApproval": "等待审批"
   },
   "memories": {
     "title": "用户记忆",
@@ -1957,6 +1959,7 @@
     "granularityTask": "任务",
     "rejectionFail": "将任务标记为失败",
     "rejectionRetry": "重试任务",
-    "groupsTruncated": "存在的群组审批多于此处显示的数量。"
+    "groupsTruncated": "存在的群组审批多于此处显示的数量。",
+    "groupsLoadError": "无法加载群组审批。"
   }
 }

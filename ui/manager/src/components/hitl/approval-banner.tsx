@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { timeoutPolicyLabel, granularityLabel } from "@/lib/hitl-labels";
-import { parseIsoDurationMs } from "@/lib/hitl-config";
+import { parseIsoDurationMs, formatDurationMs, formatIsoDuration } from "@/lib/hitl-config";
 import type { HitlVerdict } from "@/lib/api/hitl";
 
 interface ApprovalBannerProps {
@@ -38,27 +38,6 @@ interface ApprovalBannerProps {
   onCancel?: () => void;
 }
 
-/** Format a millisecond duration as "1d 2h", "5m 3s", "42s", … (top 2 units). */
-function formatMs(ms: number): string {
-  const totalSec = Math.floor(ms / 1000);
-  const d = Math.floor(totalSec / 86400);
-  const h = Math.floor((totalSec % 86400) / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  const parts: [number, string][] = [[d, "d"], [h, "h"], [m, "m"], [s, "s"]];
-  const nonzero = parts.filter(([n]) => n > 0);
-  const shown = (nonzero.length ? nonzero : [[0, "s"] as [number, string]]).slice(0, 2);
-  return shown.map(([n, u]) => `${n}${u}`).join(" ");
-}
-
-/** Format an ISO-8601 duration (e.g. "PT15M", "P1DT2H") for display.
- *  Falls back to the raw string if it isn't a parseable positive duration. */
-function formatDuration(iso?: string): string {
-  if (!iso) return "";
-  const ms = parseIsoDurationMs(iso);
-  return ms == null ? iso : formatMs(ms);
-}
-
 /** Whether a date string parses to a real instant. */
 function isValidDate(iso?: string): boolean {
   return !!iso && !Number.isNaN(new Date(iso).getTime());
@@ -82,7 +61,7 @@ function getTimeRemaining(
 
 /** Format a remaining-milliseconds value as "5m 3s" / "42s". */
 function formatRemaining(ms: number): string {
-  return formatMs(ms);
+  return formatDurationMs(ms);
 }
 
 export function ApprovalBanner({
@@ -181,7 +160,7 @@ export function ApprovalBanner({
           <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
             <AlertTriangle className="h-3 w-3" aria-hidden="true" />
             {timeoutPolicyLabel(t, timeoutPolicy)}
-            {approvalTimeout && ` (${formatDuration(approvalTimeout)})`}
+            {approvalTimeout && ` (${formatIsoDuration(approvalTimeout)})`}
           </span>
         )}
         {timeRemaining && (

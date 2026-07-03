@@ -852,7 +852,20 @@ function HitlWizardSection({
               <select
                 id="gw-hitl-policy"
                 value={hitl.timeoutPolicy ?? "WAIT_INDEFINITELY"}
-                onChange={(e) => patchHitl({ timeoutPolicy: e.target.value as GroupHitlConfig["timeoutPolicy"] })}
+                onChange={(e) => {
+                  const policy = e.target.value as GroupHitlConfig["timeoutPolicy"];
+                  const updates: Partial<GroupHitlConfig> = { timeoutPolicy: policy };
+                  // Seed a valid default when switching to a finite policy (which
+                  // requires a positive timeout) so the config isn't left invalid —
+                  // mirrors the agent-level HITL editor.
+                  if (
+                    requiresApprovalTimeout(policy) &&
+                    !(hitl.approvalTimeout && isValidIsoDuration(hitl.approvalTimeout))
+                  ) {
+                    updates.approvalTimeout = "PT15M";
+                  }
+                  patchHitl(updates);
+                }}
                 className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-2 pe-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 data-testid="gw-hitl-policy"
               >

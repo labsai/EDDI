@@ -30,7 +30,7 @@ export function ApprovalsPage() {
   const [search, setSearch] = useState("");
   const queryClient = useQueryClient();
   const { data: regular, isLoading, isError, refetch } = usePendingApprovals();
-  const { data: groupPendings, truncated: groupsTruncated } = useAllGroupPendingApprovals();
+  const { data: groupPendings, isError: groupsError, truncated: groupsTruncated } = useAllGroupPendingApprovals();
   const resumeMutation = useResumeConversation();
   const cancelMutation = useCancelConversation();
 
@@ -150,10 +150,12 @@ export function ApprovalsPage() {
           </div>
           <button
             onClick={handleRefresh}
+            aria-label={t("common.refresh", "Refresh")}
+            title={t("common.refresh", "Refresh")}
             className="inline-flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
             data-testid="refresh-approvals"
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -176,6 +178,13 @@ export function ApprovalsPage() {
           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" data-testid="approvals-truncated">
             <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
             {t("hitl.groupsTruncated", "More group approvals exist than are shown here.")}
+          </span>
+        )}
+        {/* Group inbox failed but regular list is fine — warn without blocking. */}
+        {groupsError && !isError && (
+          <span className="inline-flex items-center gap-1 text-xs text-destructive" data-testid="approvals-groups-error">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {t("hitl.groupsLoadError", "Group approvals could not be loaded.")}
           </span>
         )}
       </div>

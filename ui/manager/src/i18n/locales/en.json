@@ -139,7 +139,8 @@
     "copyFailed": "Failed to copy to clipboard",
     "loadError": "Failed to load data",
     "actions": "Actions",
-    "view": "View"
+    "view": "View",
+    "refresh": "Refresh"
   },
   "createOrWizard": {
     "title": "New {{type}}",
@@ -1575,7 +1576,8 @@
     "verificationPassed": "Passed",
     "verificationFailed": "Failed",
     "showMore": "show more",
-    "showLess": "show less"
+    "showLess": "show less",
+    "awaitingApproval": "Awaiting Approval"
   },
   "groupWizard": {
     "title": "Group Setup Wizard",
@@ -1986,6 +1988,7 @@
     "granularityTask": "Task",
     "rejectionFail": "Fail the task",
     "rejectionRetry": "Retry the task",
-    "groupsTruncated": "More group approvals exist than are shown here."
+    "groupsTruncated": "More group approvals exist than are shown here.",
+    "groupsLoadError": "Group approvals could not be loaded."
   }
 }
