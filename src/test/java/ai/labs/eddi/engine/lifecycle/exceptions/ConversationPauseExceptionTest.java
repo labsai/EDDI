@@ -80,11 +80,12 @@ class ConversationPauseExceptionTest {
         }
 
         @Test
-        @DisplayName("null reason in getMessage produces 'Conversation paused: null'")
+        @DisplayName("null reason in getMessage falls back to a safe default, not 'Conversation paused: null'")
         void nullReasonInMessage() {
             var ex = new ConversationPauseException("wf-1", 0, null);
 
-            assertEquals("Conversation paused: null", ex.getMessage());
+            assertEquals("Conversation paused: human approval required", ex.getMessage());
+            assertNull(ex.getPauseReason(), "the raw (null) reason is still exposed via the getter");
         }
 
         @Test

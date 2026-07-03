@@ -5,6 +5,20 @@
 
 ---
 
+## 🔍 Copilot PR review — 5 findings (2026-07-03, post-push)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+
+Automated PR review (`copilot-pull-request-reviewer`) flagged 5 issues in the already-pushed HITL work; all fixed:
+
+- **`SchedulePollerService.dispatchClaimed`**: each claimed fire's `Future#get()` had no timeout — one stalled downstream call (e.g. a hung LLM call inside a fired schedule) could block the `@Scheduled` poll loop forever, stopping this instance from claiming or firing *any* further schedule. Now bounded by `leaseTimeout` (the same window after which another instance may reclaim the schedule anyway) — a timeout cancels the future (best-effort interrupt) and logs, instead of hanging. New regression test asserts the poll cycle returns promptly under a stalled fire.
+- **`SchedulePollerService.claimSchedule`**: after a successful CAS claim, the in-memory `ScheduleConfiguration` still carried its pre-claim `fireId` (often `null`) — both `tryClaim()` implementations (Mongo, Postgres) persist a fresh `fireId` (`scheduleId + "_" + now`) but only return a `boolean`, so the caller never saw it. `ScheduleFireExecutor` uses this field for fire-log correlation and injects it into the agent context, so every claimed fire's correlation id was wrong. The poller now derives the identical value and sets it on the in-memory object after a successful claim. New regression test asserts the fired schedule carries a non-null, correctly-derived `fireId`.
+- **`ConversationPauseException`**: the exception message was built as `"Conversation paused: " + pauseReason`, producing the confusing `"Conversation paused: null"` in logs/clients when no `pauseReason` was configured (the common case, since `pauseReason` is optional). Now falls back to `"human approval required"` for the message only — `getPauseReason()` still returns the raw (possibly null) value for callers that need it.
+- **`GroupConversationStore.listByGroupId`**: called `SAFE_ID.matcher(groupId)` without a null guard — a `null` groupId (a defensive REST layer, or an internal caller) threw NPE instead of returning an honest empty list. Fixed; regression test added. (The sibling `findByState` already guarded this correctly.)
+- **`UserConversationStore`/`PostgresUserConversationStore`**: `readUserConversationByConversationId` (added by the Slack HITL continuation-push work) queried by `conversationId` with no supporting index — a full collection/table scan on every reverse lookup (which happens on every HITL resume that needs to notify a Slack thread). Added a dedicated index on both backends (Mongo: ascending index; Postgres: expression index on the JSONB field) and a regression test asserting the Mongo index is created on construction.
+
+---
+
 ## 🛡️ CI gate fixes — CodeQL (XSS/ReDoS) + Postgres Instant serialization (2026-07-03, final gate)
 
 **Repo:** EDDI (`feat/hitl-framework`, PR #585)

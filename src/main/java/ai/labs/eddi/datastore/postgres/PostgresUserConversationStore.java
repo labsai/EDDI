@@ -38,6 +38,12 @@ public class PostgresUserConversationStore implements IUserConversationStore {
             )
             """;
 
+    // Backs readUserConversationByConversationId — the reverse lookup used after a
+    // HITL resume to find the originating Slack thread. Without this, every such
+    // lookup is a full-table JSONB scan (parity with the Mongo store's index).
+    private static final String CREATE_INDEX_CONVERSATION_ID = "CREATE INDEX IF NOT EXISTS idx_user_conv_conversation_id "
+            + "ON user_conversations ((data->>'conversationId'))";
+
     private final Instance<DataSource> dataSourceInstance;
     private final IJsonSerialization jsonSerialization;
     private volatile boolean schemaInitialized = false;
@@ -53,6 +59,7 @@ public class PostgresUserConversationStore implements IUserConversationStore {
             return;
         try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_TABLE);
+            stmt.execute(CREATE_INDEX_CONVERSATION_ID);
             schemaInitialized = true;
         } catch (SQLException e) {
             LOGGER.error("Failed to initialize user_conversations table", e);

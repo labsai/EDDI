@@ -100,7 +100,7 @@ public class GroupConversationStore implements IGroupConversationStore {
         // queries.
         // This is a placeholder that works with both DB backends.
         var results = new ArrayList<GroupConversation>();
-        if (!SAFE_ID.matcher(groupId).matches()) {
+        if (groupId == null || !SAFE_ID.matcher(groupId).matches()) {
             // no stored group can carry such an id — honest empty result, and the
             // value never reaches either backend's regex engine
             LOGGER.warnf("listByGroupId called with non-id value — returning empty");

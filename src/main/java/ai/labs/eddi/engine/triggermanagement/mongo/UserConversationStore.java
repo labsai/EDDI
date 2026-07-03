@@ -51,6 +51,10 @@ public class UserConversationStore implements IUserConversationStore {
         this.userConversationStore = new UserConversationResourceStore();
         collection.createIndex(Indexes.compoundIndex(Indexes.ascending(INTENT_FIELD), Indexes.ascending(USER_ID_FIELD)),
                 new IndexOptions().unique(true));
+        // Backs readUserConversationByConversationId — the reverse lookup used after
+        // a HITL resume to find the originating Slack thread. Without this, every
+        // such lookup is a full collection scan.
+        collection.createIndex(Indexes.ascending(CONVERSATION_ID_FIELD));
     }
 
     @Override

@@ -116,6 +116,27 @@ class SchedulePollerServiceTest {
     }
 
     @Test
+    void poll_claimSuccess_populatesFireIdOnInMemorySchedule() throws Exception {
+        // tryClaim() only returns a boolean; it does not hand back the fireId it
+        // persisted. The in-memory schedule handed to fireExecutor.fire() must carry
+        // the SAME fireId the store just wrote (scheduleId + "_" + now), or fire-log
+        // correlation and the agent-context fireId are wrong for every claimed fire.
+        var schedule = makeCronSchedule("sched-1", "0 9 * * *", "Hello");
+        assertNull(schedule.getFireId(), "fireId must be unset before claiming");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(eq("sched-1"), eq("test-instance"), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
+
+        poller.pollDueSchedules();
+
+        var scheduleCaptor = org.mockito.ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        verify(fireExecutor).fire(scheduleCaptor.capture(), eq("test-instance"), eq(1));
+        String firedFireId = scheduleCaptor.getValue().getFireId();
+        assertNotNull(firedFireId, "fireId must be populated after a successful claim");
+        assertTrue(firedFireId.startsWith("sched-1_"), "fireId must be derived from the claimed schedule id");
+    }
+
+    @Test
     void poll_claimConflict_skips() throws Exception {
         var schedule = makeCronSchedule("sched-1", "0 9 * * *", "Hello");
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
@@ -125,6 +146,33 @@ class SchedulePollerServiceTest {
 
         verify(scheduleStore).tryClaim(eq("sched-1"), eq("test-instance"), any());
         verifyNoInteractions(fireExecutor);
+    }
+
+    @Test
+    void poll_stalledFire_doesNotHangPollCycle() throws Exception {
+        // dispatchClaimed() must bound its wait on each fire: a stalled downstream
+        // call must not block this poll cycle forever, or this instance would stop
+        // claiming/firing ANY schedule until the process is restarted. The wait is
+        // bounded by leaseTimeout — use a short one so the test itself stays fast.
+        var shortLeasePoller = new SchedulePollerService(scheduleStore, fireExecutor, new SimpleMeterRegistry(), true,
+                Duration.ofMillis(200), // leaseTimeout — the bound under test
+                5, 15, 4, Optional.of("test-instance"), "UTC");
+        shortLeasePoller.init();
+
+        var schedule = makeCronSchedule("sched-stalled", "0 9 * * *", "Hello");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(any(), any(), any())).thenReturn(true);
+        // Simulate a downstream call that never returns within the poll cycle.
+        when(fireExecutor.fire(any(), any(), anyInt())).thenAnswer(inv -> {
+            Thread.sleep(Duration.ofSeconds(30));
+            return makeFireLog("sched-stalled", FireStatus.COMPLETED.name());
+        });
+
+        long start = System.nanoTime();
+        assertTimeoutPreemptively(Duration.ofSeconds(5), shortLeasePoller::pollDueSchedules,
+                "a stalled fire task must not hang the poll cycle beyond the lease timeout");
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+        assertTrue(elapsedMs < 5000, "poll cycle took " + elapsedMs + "ms — expected it to return around the 200ms lease timeout");
     }
 
     @Test

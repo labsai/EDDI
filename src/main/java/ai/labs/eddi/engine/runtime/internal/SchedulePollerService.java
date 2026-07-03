@@ -29,6 +29,8 @@ import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Polls the schedule store for due schedules and fires them.
@@ -174,8 +176,18 @@ public class SchedulePollerService {
             if (!claimed) {
                 claimConflictCounter.increment();
                 LOGGER.debugf("[SCHEDULE] Claim conflict for schedule %s — another instance got it", schedule.getId());
+                return false;
             }
-            return claimed;
+            // tryClaim() returns only a boolean; it does not hand back the fireId it
+            // just persisted. Without this, the in-memory ScheduleConfiguration keeps
+            // its stale pre-claim fireId (often null), which ScheduleFireExecutor uses
+            // for fire-log correlation and injects into the agent context — the fired
+            // turn couldn't be correlated to the claimed DB row. Both MongoScheduleStore
+            // and PostgresScheduleStore derive the persisted fireId identically as
+            // `scheduleId + "_" + now` — mirror that here to keep the in-memory copy in
+            // sync with what was actually written.
+            schedule.setFireId(schedule.getId() + "_" + now);
+            return true;
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Error claiming schedule %s", schedule.getId());
             return false;
@@ -196,11 +208,22 @@ public class SchedulePollerService {
             for (ScheduleConfiguration schedule : claimed) {
                 futures.add(executor.submit(() -> fireClaimedSchedule(schedule)));
             }
-            // Join each task; fireClaimedSchedule swallows its own errors, so this
-            // only guards against unexpected escapes.
+            // Join each task with a bound: an unbounded future.get() here would let one
+            // stalled fire (e.g. a downstream call that never returns) hang this whole
+            // @Scheduled poll cycle forever, stopping this instance from claiming or
+            // firing ANY further schedules. Bound the wait by leaseTimeout — the same
+            // window after which another instance is already allowed to reclaim this
+            // schedule (findDueSchedules' leaseExpiredFilter), so waiting any longer
+            // serves no purpose. On timeout, cancel (best-effort interrupt) and move on;
+            // the claim's lease will simply expire and the schedule becomes reclaimable.
+            long timeoutMillis = Math.max(leaseTimeout.toMillis(), 1);
             for (Future<?> future : futures) {
                 try {
-                    future.get();
+                    future.get(timeoutMillis, TimeUnit.MILLISECONDS);
+                } catch (TimeoutException e) {
+                    future.cancel(true);
+                    LOGGER.errorf("[SCHEDULE] Dispatched fire task exceeded the lease timeout (%s) — cancelling; "
+                            + "the schedule will become reclaimable once its lease expires", leaseTimeout);
                 } catch (Exception e) {
                     LOGGER.errorf(e, "[SCHEDULE] Dispatched fire task failed unexpectedly");
                 }

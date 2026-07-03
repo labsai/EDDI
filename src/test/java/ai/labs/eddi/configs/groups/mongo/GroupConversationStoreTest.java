@@ -144,6 +144,15 @@ class GroupConversationStoreTest {
         assertTrue(result.isEmpty());
     }
 
+    @Test
+    @DisplayName("listByGroupId — null groupId returns empty without NPE")
+    void listByGroupIdNull() throws Exception {
+        List<GroupConversation> result = store.listByGroupId(null, 0, 10);
+
+        assertTrue(result.isEmpty());
+        verify(storage, never()).findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt());
+    }
+
     // ==================== findByState ====================
 
     @Test
