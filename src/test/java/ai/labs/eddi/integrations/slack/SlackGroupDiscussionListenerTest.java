@@ -382,6 +382,30 @@ class SlackGroupDiscussionListenerTest {
     }
 
     @Test
+    void onHitlPause_withIntegrationName_buttonValueBindsIntegration() {
+        // H2/H1: the group approval button value carries
+        // "<integrationName>|group:<gcId>"
+        // so the decision binds to that integration at the interactivity endpoint.
+        var withHitl = new SlackGroupDiscussionListener(slackApi, AUTH_TOKEN, CHANNEL, USER_THREAD,
+                "C_APPROVAL", "U1,U2", "acme-int");
+        withHitl.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+
+        var blocksCaptor = org.mockito.ArgumentCaptor.forClass(java.util.List.class);
+        verify(slackApi).postBlocksMessage(eq(AUTH_TOKEN), eq("C_APPROVAL"), isNull(), blocksCaptor.capture(), anyString());
+        @SuppressWarnings("unchecked")
+        var blocks = (java.util.List<java.util.Map<String, Object>>) blocksCaptor.getValue();
+        var actions = blocks.stream().filter(b -> "actions".equals(b.get("type"))).findFirst().orElseThrow();
+        @SuppressWarnings("unchecked")
+        var elements = (java.util.List<java.util.Map<String, Object>>) actions.get("elements");
+        String value = (String) elements.get(0).get("value");
+        var parsed = SlackHitlSupport.parseActionValue(value);
+        assertEquals("acme-int", parsed.integrationName());
+        assertTrue(parsed.isGroup());
+    }
+
+    @Test
     void onHitlPause_noApprovalChannel_noBlockMessage() {
         listener.onGroupStart(groupStart("ROUND_TABLE", 2));
         listener.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));

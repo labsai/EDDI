@@ -251,6 +251,11 @@ public class ChannelTargetRouter {
      * {@code approvalChannelId}. Used by the interactivity endpoint to resolve
      * which integration owns an approval message (and thus which approver list and
      * bot token govern the decision).
+     * <p>
+     * <b>Caveat:</b> when two integrations of the same type share one
+     * {@code hitlApprovalChannel}, the first match (unspecified map order) is
+     * returned — see {@link #getIntegrationByName}, which HITL decisions prefer
+     * because the owning integration is carried explicitly in the button value.
      *
      * @return the owning integration, or empty if none is configured to post HITL
      *         approvals to this channel
@@ -269,6 +274,35 @@ public class ChannelTargetRouter {
             var cfg = entry.getValue();
             if (cfg.getPlatformConfig() != null
                     && approvalChannelId.equals(cfg.getPlatformConfig().get("hitlApprovalChannel"))) {
+                return Optional.of(cfg);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Find the new-style integration with the given (case-sensitive) name for a
+     * channel type. Unlike {@link #getIntegrationByApprovalChannel}, this resolves
+     * a specific integration deterministically even when several share one
+     * {@code hitlApprovalChannel} — the HITL interactivity handler carries the
+     * owning integration name in the approval button value and authorizes/verifies
+     * against exactly that integration (prevents cross-integration IDOR and the
+     * shared-channel nondeterminism).
+     *
+     * @return the named integration, or empty if none matches
+     */
+    public Optional<ChannelIntegrationConfiguration> getIntegrationByName(String channelType, String name) {
+        refreshIfNeeded();
+        if (name == null || name.isBlank()) {
+            return Optional.empty();
+        }
+        String prefix = (channelType != null ? channelType.toLowerCase(Locale.ROOT) : "") + ":";
+        for (var entry : integrationMap.entrySet()) {
+            if (!entry.getKey().startsWith(prefix)) {
+                continue;
+            }
+            var cfg = entry.getValue();
+            if (name.equals(cfg.getName())) {
                 return Optional.of(cfg);
             }
         }

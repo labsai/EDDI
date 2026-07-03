@@ -86,10 +86,27 @@ public class ConverseWithAgentTool {
             inputData.setInput(message);
 
             CompletableFuture<SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();
+            final java.util.concurrent.atomic.AtomicBoolean skipped = new java.util.concurrent.atomic.AtomicBoolean();
             final String convId = conversationId;
 
+            // Finding H7: a busy-skip (onSkipped, e.g. IN_PROGRESS) must NOT be
+            // treated as a fresh response — the default onSkipped→onComplete would
+            // return the PREVIOUS turn's output as if it answered this message.
+            // Flag the skip and discriminate below (busy vs paused vs not-active).
             conversationService.say(DEFAULT_ENV, agentId, convId,
-                    false, true, null, inputData, false, responseFuture::complete);
+                    false, true, null, inputData, false,
+                    new IConversationService.ConversationResponseHandler() {
+                        @Override
+                        public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                            responseFuture.complete(snapshot);
+                        }
+
+                        @Override
+                        public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                            skipped.set(true);
+                            responseFuture.complete(snapshot);
+                        }
+                    });
 
             SimpleConversationMemorySnapshot snapshot = responseFuture.get(60, TimeUnit.SECONDS);
 
@@ -100,6 +117,19 @@ public class ConverseWithAgentTool {
             if (snapshot != null
                     && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
                 return pausedForApprovalMessage(convId);
+            }
+
+            // Finding H7: the input was dropped without being processed (busy or no
+            // longer active). Return an actionable "retry"/"not active" result — not
+            // the stale previous-turn output.
+            if (skipped.get()) {
+                ConversationState state = snapshot != null ? snapshot.getConversationState() : null;
+                if (state == ConversationState.ENDED || state == ConversationState.EXECUTION_INTERRUPTED) {
+                    return ("⚠️ Agent conversation %s is no longer active (state: %s); the message was not "
+                            + "delivered.").formatted(convId, state);
+                }
+                return ("⏳ Agent conversation %s is busy processing another turn; the message was not "
+                        + "delivered — retry shortly.").formatted(convId);
             }
 
             String response = extractResponse(snapshot);

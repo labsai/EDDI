@@ -161,6 +161,10 @@ public class McpConversationTools {
             var snapshot = sendMessageAndWait(conversationId, message);
             var result = buildConversationResponse(snapshot, null);
             return jsonSerialization.serialize(result);
+        } catch (ConversationSkippedException e) {
+            // H7: the turn was dropped without processing — report busy/not-active
+            // instead of a stale previous-turn reply.
+            return skippedResultJson(conversationId, e.state());
         } catch (Exception e) {
             LOGGER.error("MCP talk_to_agent failed for Agent " + agentId + " conversation " + conversationId, e);
             return errorJson("Failed to talk to agent: " + e.getMessage());
@@ -199,6 +203,11 @@ public class McpConversationTools {
             result.putFirst("agentId", agentId);
             result.putFirst("conversationId", convId);
             return jsonSerialization.serialize(result);
+        } catch (ConversationSkippedException e) {
+            // H7: the turn was dropped without processing — report busy/not-active
+            // instead of a stale previous-turn reply. convId may be uninitialized if
+            // startConversation failed, so fall back to the provided conversationId.
+            return skippedResultJson(conversationId, e.state());
         } catch (Exception e) {
             LOGGER.error("MCP chat_with_agent failed for Agent " + agentId, e);
             return errorJson("Failed to chat with agent: " + e.getMessage());
@@ -520,6 +529,13 @@ public class McpConversationTools {
                 snapshot = sendMessageAndWait(conversationId, message);
             } catch (IConversationService.ConversationAwaitingApprovalException e) {
                 return pausedForApprovalJson(intent, userId, userConversation.getAgentId(), conversationId);
+            } catch (ConversationSkippedException e) {
+                // H7: a busy-skip (AWAITING_HUMAN → pending approval; else busy /
+                // not-active). Report the accurate state — never a stale reply.
+                if (e.state() == ConversationState.AWAITING_HUMAN) {
+                    return pausedForApprovalJson(intent, userId, userConversation.getAgentId(), conversationId);
+                }
+                return skippedResultJson(conversationId, e.state());
             }
 
             // Finding 25: this turn itself paused for approval — same structured
@@ -642,6 +658,13 @@ public class McpConversationTools {
     /**
      * Send a message to a Agent synchronously and wait for the response. Bridges
      * the async callback pattern to a blocking call.
+     * <p>
+     * Finding H7: a busy-skip ({@code onSkipped}, e.g. IN_PROGRESS) must NOT be
+     * reported as a fresh agent response — the default onSkipped→onComplete would
+     * return the PREVIOUS turn's output as if it answered this message. On a skip
+     * we surface a {@link ConversationSkippedException} carrying the persisted
+     * state so callers can report "busy — retry" / "not active" instead of a stale
+     * reply.
      */
     private SimpleConversationMemorySnapshot sendMessageAndWait(String conversationId, String message) throws Exception {
 
@@ -651,15 +674,78 @@ public class McpConversationTools {
 
         var responseFuture = new CompletableFuture<SimpleConversationMemorySnapshot>();
 
-        conversationService.say(conversationId, false, true, Collections.emptyList(), inputData, false, snapshot -> {
-            if (snapshot != null) {
-                responseFuture.complete(snapshot);
-            } else {
-                responseFuture.completeExceptionally(new RuntimeException("Agent returned null response"));
-            }
-        });
+        conversationService.say(conversationId, false, true, Collections.emptyList(), inputData, false,
+                new IConversationService.ConversationResponseHandler() {
+                    @Override
+                    public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                        if (snapshot != null) {
+                            responseFuture.complete(snapshot);
+                        } else {
+                            responseFuture.completeExceptionally(new RuntimeException("Agent returned null response"));
+                        }
+                    }
 
-        return responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                    @Override
+                    public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                        ConversationState state = snapshot != null ? snapshot.getConversationState() : null;
+                        responseFuture.completeExceptionally(new ConversationSkippedException(state));
+                    }
+                });
+
+        try {
+            return responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (java.util.concurrent.ExecutionException e) {
+            // Unwrap the skip signal so callers can catch it directly.
+            if (e.getCause() instanceof ConversationSkippedException cse) {
+                throw cse;
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Signals that a queued {@code say} was DROPPED without processing the input
+     * (paused/busy/ended by the time the turn ran). {@code state} is the persisted
+     * conversation state at skip time (may be {@code null}). Distinguishes a
+     * dropped turn from a real response so a stale previous-turn reply is never
+     * returned.
+     */
+    private static final class ConversationSkippedException extends RuntimeException {
+        private final ConversationState state;
+
+        ConversationSkippedException(ConversationState state) {
+            super("Conversation turn was skipped (state=" + state + ")");
+            this.state = state;
+        }
+
+        ConversationState state() {
+            return state;
+        }
+    }
+
+    /**
+     * Build a "turn skipped" result for a busy/paused/not-active conversation
+     * (finding H7). AWAITING_HUMAN is handled by the caller's pause branch; here we
+     * report busy (IN_PROGRESS) vs no-longer-active (ENDED/EXECUTION_INTERRUPTED).
+     */
+    private String skippedResultJson(String conversationId, ConversationState state) {
+        var result = new LinkedHashMap<String, Object>();
+        boolean notActive = state == ConversationState.ENDED || state == ConversationState.EXECUTION_INTERRUPTED;
+        result.put("status", notActive ? "CONVERSATION_NOT_ACTIVE" : "BUSY");
+        result.put("conversationId", conversationId);
+        if (state != null) {
+            result.put("conversationState", state.name());
+        }
+        result.put("message", notActive
+                ? "Conversation " + conversationId + " is no longer active (state: " + state
+                        + "); your message was not processed."
+                : "Conversation " + conversationId + " is processing another turn; your message was "
+                        + "not processed — retry shortly.");
+        try {
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            return errorJson("Conversation " + conversationId + " could not process the message right now");
+        }
     }
 
     /**

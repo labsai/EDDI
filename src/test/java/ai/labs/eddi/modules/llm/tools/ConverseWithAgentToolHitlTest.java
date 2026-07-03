@@ -67,4 +67,46 @@ class ConverseWithAgentToolHitlTest {
         // Must NOT surface a generic error
         assertFalse(result.startsWith("❌"));
     }
+
+    @Test
+    void busySkip_inProgress_returnsRetry_notStaleReply() throws Exception {
+        // H7: onSkipped with IN_PROGRESS — the input was dropped (busy). Must return
+        // a "busy — retry" result, NOT the previous turn's output.
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.IN_PROGRESS);
+
+        Answer<Void> skip = invocation -> {
+            ConversationResponseHandler handler = invocation.getArgument(8);
+            handler.onSkipped(snapshot);
+            return null;
+        };
+        doAnswer(skip).when(conversationService).say(any(), eq("agent-b"), eq("conv-x"),
+                any(), any(), any(), any(), anyBoolean(), any());
+
+        String result = tool.converseWithAgent("agent-b", "another message", "conv-x");
+
+        assertTrue(result.contains("busy"), result);
+        assertTrue(result.contains("conv-x"));
+        assertFalse(result.startsWith("✅"), "must not report a fresh agent response");
+    }
+
+    @Test
+    void skip_endedConversation_returnsNotActive() throws Exception {
+        // H7: onSkipped with ENDED — the conversation is no longer active.
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.ENDED);
+
+        Answer<Void> skip = invocation -> {
+            ConversationResponseHandler handler = invocation.getArgument(8);
+            handler.onSkipped(snapshot);
+            return null;
+        };
+        doAnswer(skip).when(conversationService).say(any(), eq("agent-b"), eq("conv-x"),
+                any(), any(), any(), any(), anyBoolean(), any());
+
+        String result = tool.converseWithAgent("agent-b", "another message", "conv-x");
+
+        assertTrue(result.contains("no longer active"), result);
+        assertFalse(result.startsWith("✅"));
+    }
 }

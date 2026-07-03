@@ -51,6 +51,12 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
     private final String hitlApprovalChannel;
     /** Comma-separated approver Slack user ids, or {@code null}. */
     private final String hitlApproverUserIds;
+    /**
+     * Owning integration name — carried in the approval button value so a group
+     * HITL decision binds to THIS integration at the interactivity endpoint. May be
+     * {@code null} (e.g. no integration context), yielding a legacy bare value.
+     */
+    private final String integrationName;
 
     /** agentId → Slack message ts of their first contribution (for threading). */
     private final Map<String, String> agentMessageTs = new ConcurrentHashMap<>();
@@ -85,7 +91,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
 
     public SlackGroupDiscussionListener(SlackWebApiClient slackApi, String authToken,
             String channelId, String userThreadTs) {
-        this(slackApi, authToken, channelId, userThreadTs, null, null);
+        this(slackApi, authToken, channelId, userThreadTs, null, null, null);
     }
 
     /**
@@ -97,12 +103,23 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
     public SlackGroupDiscussionListener(SlackWebApiClient slackApi, String authToken,
             String channelId, String userThreadTs,
             String hitlApprovalChannel, String hitlApproverUserIds) {
+        this(slackApi, authToken, channelId, userThreadTs, hitlApprovalChannel, hitlApproverUserIds, null);
+    }
+
+    /**
+     * Constructor carrying the owning integration name (for IDOR-safe approval
+     * button values) in addition to the HITL approval configuration.
+     */
+    public SlackGroupDiscussionListener(SlackWebApiClient slackApi, String authToken,
+            String channelId, String userThreadTs,
+            String hitlApprovalChannel, String hitlApproverUserIds, String integrationName) {
         this.slackApi = slackApi;
         this.authToken = authToken;
         this.channelId = channelId;
         this.userThreadTs = userThreadTs;
         this.hitlApprovalChannel = hitlApprovalChannel;
         this.hitlApproverUserIds = hitlApproverUserIds;
+        this.integrationName = integrationName;
     }
 
     @Override
@@ -269,10 +286,14 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         }
         boolean includeButtons = !SlackHitlSupport.parseApproverUserIds(hitlApproverUserIds).isEmpty();
         String phase = event.phaseName() != null ? event.phaseName() : ("phase " + event.phaseIndex());
+        // The button value carries the owning integration name so the group
+        // decision is bound to THIS integration at the interactivity endpoint.
+        String actionValue = SlackHitlSupport.buildActionValue(integrationName,
+                SlackHitlSupport.GROUP_VALUE_PREFIX + groupConversationId);
         var blocks = SlackHitlSupport.buildApprovalBlocks(
                 "⏸️ Discussion awaiting approval", "Discussion", groupConversationId,
                 phase, event.reason(), null,
-                SlackHitlSupport.GROUP_VALUE_PREFIX + groupConversationId, includeButtons);
+                actionValue, includeButtons);
         String fallback = "Group discussion " + groupConversationId + " is awaiting human approval.";
         try {
             slackApi.postBlocksMessage(authToken, hitlApprovalChannel, null, blocks, fallback);

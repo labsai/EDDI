@@ -24,6 +24,60 @@ Verification: `./mvnw -q compile test-compile` clean. Plain-Mockito tests for al
 
 ---
 
+## 🔐 HITL Slack round-2 remediation — IDOR fix + approval-flow correctness (2026-07-03, WS-H r2)
+
+**Repo:** EDDI (`fix/hitl-r2-slack-impl`, branched from `feat/hitl-framework`)
+**Scope:** Ten confirmed re-review findings (H1–H10) plus cancellation-rendering (H-consume) on the new Slack HITL surface + tool bridges. Ownership: `integrations/slack/**`, `integrations/channels/ChannelTargetRouter.java`, `modules/llm/tools/ConverseWithAgentTool.java`, `engine/mcp/McpConversationTools.java`, and their tests. No `engine/internal/*` or `engine/api/*` touched.
+
+### H1 (HIGH, security) — cross-integration IDOR on `/interactive`
+
+`/interactive` previously verified the raw-body signature against the **pooled** set of all Slack signing secrets (incl. legacy per-agent ChannelConnector secrets) and only checked authz afterward — so a holder of ANY one Slack secret could forge an approval on another integration's paused conversation. **Fix:** the decision is now **bound to the integration that owns it**, carried explicitly in the button value. New `SlackSignatureVerifier.verifyWithSecret(ts, body, sig, secret)` verifies against exactly ONE secret. `RestSlackWebhook.handleInteractive` resolves the owning integration's secret from the payload first (`SlackInteractivityHandler.resolveSigningSecretForDecision`), then verifies against only that; an unbindable decision (legacy/unknown → no owning new-style integration) is rejected. `/events` keeps pooled verification (unchanged).
+
+### H2 (MEDIUM) — shared-approval-channel nondeterminism
+
+The approval button `value` format changed from `<subject>` to **`<integrationName>|<subject>`** (`<integrationName>|<conversationId>` and `<integrationName>|group:<gcId>`). The handler resolves the owning integration by NAME (`ChannelTargetRouter.getIntegrationByName`), not by an arbitrary-first channel lookup — so authz + verification are deterministic even when integrations share one `hitlApprovalChannel`. New `SlackHitlSupport.buildActionValue`/`parseActionValue` (+ `ActionValue` record). Legacy bare values (no name) parse with a null integration and are rejected up-front (acceptable per spec).
+
+### H3 (MEDIUM) — group double-click idempotency
+
+`SlackInteractivityHandler.resolveGroup` caught only `IllegalStateException`; `resumeDiscussion` signals a non-paused group with the CHECKED `GroupDiscussionException`, a race with `ResourceModifiedException`, and a deleted group with the unchecked `GroupConversationGoneException` — all fell into the generic catch (warn-spam + live buttons). Now all four route to `finalizeAlreadyResolved`.
+
+### H4/H7 — dropped-turn (onSkipped) discrimination
+
+`SlackEventHandler.sendAndWait` now uses a full `ConversationResponseHandler` overriding `onSkipped`, mapping a skip to sentinel snapshots: `AWAITING_HUMAN` → STILL_AWAITING notice (no second approval card, H4); else → new `CONVERSATION_NOT_ACTIVE_NOTICE` (H7). `ConverseWithAgentTool` and `McpConversationTools` (talk_to_agent/chat_with_agent/chat_managed) detect `onSkipped` and return busy/not-active (chat_managed: AWAITING_HUMAN-skip → PAUSED_FOR_APPROVAL) instead of replaying the previous turn's output (mirrors RestAgentEngine's 409 discrimination).
+
+### H5 + H-consume — resume ERROR / cancellation rendering (defensive)
+
+`SlackHitlResumeObserver.decisionSummary` now takes the snapshot: an approved resume that ended in `ERROR` renders a failure ("continuation failed…") not "continuing" (H5), and a null-verdict event (cancel/timeout-abort/end, terminal `EXECUTION_INTERRUPTED`/`ENDED`) renders "⛔ cancelled or expired" — the previously-dead branch is now live and correct (H-consume). Implemented **defensively**: works whether or not the engine's parallel change to fire `HitlResumeCompletedEvent` with `verdict==null` on cancel/end has landed. (Approval-card button-removal on cancel is not done — the approval card's message ts is not resolvable from the conversationId in the current data model; the thread message, which IS resolvable, is delivered.)
+
+### H6 — "Bearer null" guard
+
+`notifyApprovers` now skips the call and logs an explicit "no bot token — HITL approval notification NOT delivered for <id>" error when neither the resolved integration token nor the approval-channel lookup yields a non-blank token (mirrors `postMessage`'s guard).
+
+### H8 — init-turn (CONVERSATION_START) pause never notified approvers
+
+An init-turn pause happens inside `getOrCreateConversation → startConversation`; the first user say then throws `ConversationAwaitingApprovalException` and no approval card was ever posted. The exception branch now calls `notifyApprovers`, made idempotent via a `slack-hitl-approval-notified` cache (`putIfAbsent`) so re-message-while-paused never posts a second card.
+
+### H9 — follow-up conversations get the resume continuation push
+
+`SlackHitlResumeObserver` now recognizes the `channel:followup:<channelId>:<parentTs>` intent shape (in the prefix guard and `parseIntent`) in addition to `channel:slack:...`, so agent-thread follow-ups receive the verdict/continuation in their thread.
+
+### H10 — pause card read the bookmark before it was persisted
+
+The say callback completes before `ConversationService` persists the HITL bookmark, so `getConversationMemorySnapshot` re-reads returned the previous turn (null pause reason/timeout). New `loadHitlBookmark` retries the read (5×100ms) until state==AWAITING_HUMAN and is loaded ONCE per pause, shared by the in-thread notice and the approval card.
+
+### New contracts
+
+- `SlackSignatureVerifier.verifyWithSecret(String ts, String body, String sig, String secret)` — single-secret (integration-bound) verification for `/interactive`.
+- `SlackInteractivityHandler.resolveSigningSecretForDecision(String payloadJson)` — resolves the owning integration's signing secret from the button value; null → endpoint rejects.
+- `ChannelTargetRouter.getIntegrationByName(String channelType, String name)` — deterministic by-name lookup.
+- Approval button `value` format: **`<integrationName>|<conversationId>`** / **`<integrationName>|group:<gcId>`** (was bare `<conversationId>` / `group:<gcId>`).
+
+### Tests
+
+Plain JUnit/Mockito (compile + test-compile pass; touched suites run green locally): `SlackSignatureVerifierTest` (+verifyWithSecret), `SlackHitlSupportTest` (+buildActionValue/parseActionValue), `SlackInteractivityHandlerTest` (rewritten for value-binding + H1 cross-integration + H3 group double-click + resolveSigningSecretForDecision), `SlackHitlResumeObserverTest` (3-arg decisionSummary, ERROR/cancellation/followup delivery), `RestSlackWebhookTest` (new interactivity flow), `SlackGroupDiscussionListenerTest` (integration-bound group value), `ConverseWithAgentToolHitlTest`/`McpConversationToolsHitlTest` (H7 skip), `ChannelTargetRouterRefreshTest` (getIntegrationByName).
+
+---
+
 ## 🧪 HITL Coverage Closure + Schedule-Contract Consolidation (2026-07-03, WS-F + merge)
 
 **Repo:** EDDI (`feat/hitl-framework`, PR #585)
