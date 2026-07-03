@@ -5,6 +5,14 @@
 
 ---
 
+## 🐘 HITL Postgres Instant-serialization hardening (2026-07-03, final gate)
+
+**Repo:** EDDI (`feat/hitl-framework`, PR #585)
+
+Final full-suite verification surfaced a latent Postgres-only defect: the JSONB-backed resource storage serializes snapshots through the shared Jackson mapper (`SerializationCustomizer.configureObjectMapper`), which did **not** explicitly register `JavaTimeModule` — it relied on Quarkus auto-registration. The HITL bookmark carries an `Instant` (`hitlPausedAt`); a **non-null** `Instant` (i.e. an actual pause) would fail serialization ("Java 8 date/time type not supported") on the Postgres backend, so HITL pause persistence was one module-registration-order change away from breaking on Postgres (Mongo was unaffected — its BSON codec handles `Instant`; null `Instant`s serialize fine, which is why it stayed latent). `SerializationCustomizer` now registers `JavaTimeModule` + disables `WRITE_DATES_AS_TIMESTAMPS` (ISO-8601), mirroring the BSON mapper in `PersistenceModule` so both backends agree. The Postgres store tests (and the MCP HITL test) now build their mapper via `configureObjectMapper` instead of a bare `new ObjectMapper()`, so they exercise the production serialization path — `PostgresConversationMemoryStoreTest` goes 20/22 → 22/22.
+
+---
+
 ## 🛠️ HITL Round-2 Engine-Core Remediation (2026-07-03, WS-G)
 
 **Repo:** EDDI (`fix/hitl-r2-engine`, branched from `feat/hitl-framework`)

@@ -32,7 +32,8 @@ class PostgresAgentTriggerStoreTest extends PostgresTestBase {
     static void init() {
         var dsInstance = createDataSourceInstance();
         ds = dsInstance.get();
-        IJsonSerialization json = new JsonSerialization(new ObjectMapper());
+        IJsonSerialization json = new JsonSerialization(
+                ai.labs.eddi.datastore.serialization.SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false));
         store = new PostgresAgentTriggerStore(dsInstance, json);
     }
 

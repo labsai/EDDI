@@ -42,7 +42,9 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
     static void init() {
         var dsInstance = createDataSourceInstance();
         ds = dsInstance.get();
-        store = new PostgresScheduleStore(dsInstance, new JsonSerialization(new ObjectMapper()), 100);
+        store = new PostgresScheduleStore(dsInstance,
+                new JsonSerialization(ai.labs.eddi.datastore.serialization.SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false)),
+                100);
     }
 
     @BeforeEach

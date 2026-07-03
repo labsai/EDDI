@@ -46,7 +46,7 @@ class McpConversationToolsHitlTest {
                 conversationService, mock(ai.labs.eddi.engine.api.IRestAgentAdministration.class),
                 mock(ai.labs.eddi.configs.agents.IRestAgentStore.class),
                 mock(ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory.class),
-                new JsonSerialization(new ObjectMapper()),
+                new JsonSerialization(ai.labs.eddi.datastore.serialization.SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false)),
                 mock(ai.labs.eddi.engine.runtime.BoundedLogStore.class),
                 mock(ai.labs.eddi.engine.audit.rest.IRestAuditStore.class),
                 agentTriggerStore, userConversationStore, restAgentEngine,
