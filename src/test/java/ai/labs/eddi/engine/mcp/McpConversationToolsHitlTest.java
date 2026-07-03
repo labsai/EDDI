@@ -98,4 +98,54 @@ class McpConversationToolsHitlTest {
         assertTrue(result.contains("PAUSED_FOR_APPROVAL"), result);
         assertTrue(result.contains("AWAITING_HUMAN"));
     }
+
+    @Test
+    void chatManaged_busySkip_returnsBusy_notStaleReply() throws Exception {
+        var existing = new UserConversation("customer_support", "U1",
+                Deployment.Environment.production, "agent-1", "conv-1");
+        when(userConversationStore.readUserConversation("customer_support", "U1")).thenReturn(existing);
+        when(agentTriggerStore.readAgentTrigger("customer_support"))
+                .thenReturn(mock(ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration.class));
+        when(restAgentEngine.getConversationState("conv-1")).thenReturn(ConversationState.READY);
+
+        // H7: say skips the queued turn (IN_PROGRESS busy) — must NOT be reported as
+        // a fresh response.
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.IN_PROGRESS);
+        doAnswer(inv -> {
+            ConversationResponseHandler handler = inv.getArgument(6);
+            handler.onSkipped(snapshot);
+            return null;
+        }).when(conversationService).say(eq("conv-1"), any(), any(), any(), any(), anyBoolean(), any());
+
+        String result = tools.chatManaged("customer_support", "U1", "another message", "production");
+
+        assertTrue(result.contains("BUSY"), result);
+        assertTrue(result.contains("conv-1"));
+        assertFalse(result.contains("PAUSED_FOR_APPROVAL"));
+    }
+
+    @Test
+    void chatManaged_skipWhilePaused_returnsPausedForApproval() throws Exception {
+        var existing = new UserConversation("customer_support", "U1",
+                Deployment.Environment.production, "agent-1", "conv-1");
+        when(userConversationStore.readUserConversation("customer_support", "U1")).thenReturn(existing);
+        when(agentTriggerStore.readAgentTrigger("customer_support"))
+                .thenReturn(mock(ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration.class));
+        when(restAgentEngine.getConversationState("conv-1")).thenReturn(ConversationState.AWAITING_HUMAN);
+
+        // H7: a skip whose state is AWAITING_HUMAN → pending approval, not busy.
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+        doAnswer(inv -> {
+            ConversationResponseHandler handler = inv.getArgument(6);
+            handler.onSkipped(snapshot);
+            return null;
+        }).when(conversationService).say(eq("conv-1"), any(), any(), any(), any(), anyBoolean(), any());
+
+        String result = tools.chatManaged("customer_support", "U1", "another message", "production");
+
+        assertTrue(result.contains("PAUSED_FOR_APPROVAL"), result);
+        verify(userConversationStore, never()).deleteUserConversation("customer_support", "U1");
+    }
 }

@@ -71,6 +71,20 @@ public class SlackEventHandler {
     /** Maximum Slack message length (safe limit under 4000). */
     private static final int MAX_SLACK_MESSAGE_LENGTH = 3900;
 
+    /** Retry budget for reading the HITL bookmark after a pause (see H10). */
+    private static final int HITL_BOOKMARK_READ_ATTEMPTS = 5;
+    private static final long HITL_BOOKMARK_READ_DELAY_MS = 100;
+
+    /**
+     * Sentinel snapshots returned by {@link #sendAndWait} when a queued turn was
+     * DROPPED (onSkipped) rather than executed. Distinguishing them from a real
+     * pause snapshot prevents a dropped input from being mistaken for a fresh pause
+     * (→ duplicate approval card, H4) or for a fresh agent response (→ stale
+     * replay, H7). Identity-compared with {@code ==} — never inspected as data.
+     */
+    private static final SimpleConversationMemorySnapshot SKIPPED_STILL_AWAITING = new SimpleConversationMemorySnapshot();
+    private static final SimpleConversationMemorySnapshot SKIPPED_NOT_ACTIVE = new SimpleConversationMemorySnapshot();
+
     private final ChannelTargetRouter channelTargetRouter;
     private final SlackWebApiClient slackApi;
     private final IConversationService conversationService;
@@ -91,6 +105,16 @@ public class SlackEventHandler {
      */
     private final ICache<String, SlackGroupDiscussionListener> activeGroupListeners;
 
+    /**
+     * conversationId → posted marker for approval notifications. Prevents a second
+     * approval card for the same pending pause: a card is posted once when a pause
+     * is first observed (a normal-turn pause, or an init-turn/CONVERSATION_START
+     * pause detected on the next say — H8), and re-message-while-paused must not
+     * re-post. TTL-bounded to stay small; a stale eviction only risks one duplicate
+     * card, never a missed one.
+     */
+    private final ICache<String, Boolean> approvalNotified;
+
     @Inject
     public SlackEventHandler(ChannelTargetRouter channelTargetRouter,
             SlackWebApiClient slackApi,
@@ -105,6 +129,7 @@ public class SlackEventHandler {
         this.userConversationStore = userConversationStore;
         this.eventDedup = cacheFactory.getCache("slack-event-dedup", Duration.ofMinutes(10));
         this.activeGroupListeners = cacheFactory.getCache("slack-group-listeners", Duration.ofHours(2));
+        this.approvalNotified = cacheFactory.getCache("slack-hitl-approval-notified", Duration.ofHours(24));
         this.executorService = Executors.newVirtualThreadPerTaskExecutor();
     }
 
@@ -309,9 +334,29 @@ public class SlackEventHandler {
         try {
             snapshot = sendAndWait(conversationId, message);
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
-            // Subsequent message while the conversation is already paused — input
-            // was NOT consumed. Never surface the generic error message.
+            // The conversation is already paused — input was NOT consumed. Never
+            // surface the generic error message.
             postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
+            // H8: a CONVERSATION_START (init-turn) pause happens inside
+            // getOrCreateConversation → startConversation, so no approval card was
+            // ever posted for it. If we have not notified for this pause yet, post
+            // the approval card now (idempotent via approvalNotified).
+            notifyApprovers(resolved, conversationId, agentId, loadHitlBookmark(conversationId));
+            return;
+        }
+
+        // A queued-say skip (pause/busy committed by a prior turn) surfaces here as
+        // the STILL_AWAITING marker — the input was dropped, not this turn pausing.
+        // Post the "still awaiting" notice and do NOT re-notify approvers (no second
+        // approval card for the same pending pause).
+        if (snapshot == SKIPPED_STILL_AWAITING) {
+            postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
+            return;
+        }
+        // A skip for a non-active conversation (busy/interrupted/ended) — the
+        // message was dropped; tell the user rather than replaying a stale turn.
+        if (snapshot == SKIPPED_NOT_ACTIVE) {
+            postMessage(channelId, threadTs, SlackHitlSupport.CONVERSATION_NOT_ACTIVE_NOTICE, botToken);
             return;
         }
 
@@ -322,31 +367,61 @@ public class SlackEventHandler {
         // when paused with no output it returns a placeholder we suppress.
         String response = SlackHitlSupport.extractSlackResponseText(snapshot);
         if (paused) {
+            // Load the HITL bookmark ONCE (with a brief retry until the pause is
+            // persisted) and reuse it for both the in-thread notice and the approval
+            // card — the say callback can fire before the bookmark is stored (H10),
+            // so a naive re-read returns the previous turn's null pause fields.
+            var bookmark = loadHitlBookmark(conversationId);
             if (response != null && !response.startsWith("_")) {
                 postMessageChunked(channelId, threadTs, response, botToken);
             }
-            postMessage(channelId, threadTs, buildPauseNotice(conversationId), botToken);
-            notifyApprovers(resolved, conversationId, agentId, threadTs);
+            postMessage(channelId, threadTs, buildPauseNotice(bookmark), botToken);
+            notifyApprovers(resolved, conversationId, agentId, bookmark);
         } else {
             postMessageChunked(channelId, threadTs, response, botToken);
         }
     }
 
     /**
+     * Load the HITL bookmark for a just-paused conversation, retrying briefly until
+     * the stored snapshot reports {@code AWAITING_HUMAN}. The say callback
+     * completes from the Conversation {@code finally} block BEFORE
+     * ConversationService persists the bookmark, so an immediate re-read can return
+     * the previous turn (pauseReason/timeout come back null, and the configurable
+     * pause reason would be invisible on Slack). Best-effort: returns whatever the
+     * last read produced — possibly {@code null} — so the notices degrade
+     * gracefully.
+     */
+    private ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot loadHitlBookmark(String conversationId) {
+        ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot last = null;
+        for (int attempt = 0; attempt < HITL_BOOKMARK_READ_ATTEMPTS; attempt++) {
+            try {
+                last = conversationService.getConversationMemorySnapshot(conversationId);
+                if (last != null && last.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                    return last;
+                }
+            } catch (Exception e) {
+                LOGGER.debugf("Could not load HITL bookmark for %s (attempt %d): %s",
+                        sanitize(conversationId), attempt + 1, e.getMessage());
+            }
+            if (attempt < HITL_BOOKMARK_READ_ATTEMPTS - 1) {
+                try {
+                    Thread.sleep(HITL_BOOKMARK_READ_DELAY_MS);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+        return last;
+    }
+
+    /**
      * Build the in-thread pause notice, appending the pause reason from the HITL
      * bookmark when available.
      */
-    private String buildPauseNotice(String conversationId) {
-        String reason = null;
-        try {
-            var full = conversationService.getConversationMemorySnapshot(conversationId);
-            if (full != null) {
-                reason = full.getHitlPauseReason();
-            }
-        } catch (Exception e) {
-            LOGGER.debugf("Could not load pause reason for %s: %s",
-                    sanitize(conversationId), e.getMessage());
-        }
+    private String buildPauseNotice(ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot bookmark) {
+        String reason = bookmark != null ? bookmark.getHitlPauseReason() : null;
         if (reason != null && !reason.isBlank()) {
             return SlackHitlSupport.PAUSE_NOTICE + "\n> " + reason;
         }
@@ -363,7 +438,7 @@ public class SlackEventHandler {
      * is included — never the user's raw message.
      */
     private void notifyApprovers(ResolvedTarget resolved, String conversationId,
-                                 String agentId, String userThreadTs) {
+                                 String agentId, ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot bookmark) {
         var integration = resolved.integration();
         if (integration == null || integration.getPlatformConfig() == null) {
             return; // legacy connectors have no HITL config
@@ -374,30 +449,42 @@ public class SlackEventHandler {
             return; // notification-only disabled
         }
 
+        // Idempotency (H8): post exactly one approval card per pending pause. A
+        // normal-turn pause and an init-turn pause detected on the next say both
+        // route here — the first wins the slot; re-message-while-paused is a no-op.
+        if (approvalNotified.putIfAbsent(conversationId, Boolean.TRUE) != null) {
+            return;
+        }
+
         String approverIds = platformConfig.get(SlackHitlSupport.CFG_HITL_APPROVER_USER_IDS);
         boolean includeButtons = !SlackHitlSupport.parseApproverUserIds(approverIds).isEmpty();
 
-        String pauseReason = null;
-        String timeoutInfo = null;
-        try {
-            var full = conversationService.getConversationMemorySnapshot(conversationId);
-            if (full != null) {
-                pauseReason = full.getHitlPauseReason();
-                timeoutInfo = formatTimeoutInfo(full.getHitlTimeoutPolicy(), full.getHitlApprovalTimeout());
-            }
-        } catch (Exception e) {
-            LOGGER.debugf("Could not load HITL bookmark for %s: %s", sanitize(conversationId), e.getMessage());
-        }
+        String pauseReason = bookmark != null ? bookmark.getHitlPauseReason() : null;
+        String timeoutInfo = bookmark != null
+                ? formatTimeoutInfo(bookmark.getHitlTimeoutPolicy(), bookmark.getHitlApprovalTimeout())
+                : null;
 
+        // The button value carries the owning integration name so the decision is
+        // bound to THIS integration at the interactivity endpoint (IDOR-safe).
+        String actionValue = SlackHitlSupport.buildActionValue(integration.getName(), conversationId);
         var blocks = SlackHitlSupport.buildApprovalBlocks(
                 "⏸️ Conversation awaiting approval", "Conversation", conversationId,
-                agentId, pauseReason, timeoutInfo, conversationId, includeButtons);
+                agentId, pauseReason, timeoutInfo, actionValue, includeButtons);
         String fallback = "Conversation " + conversationId + " is awaiting human approval.";
 
+        // H6: never send "Bearer null". If neither the resolved integration token
+        // nor the approval-channel lookup yields a non-blank token, skip the call
+        // and log an explicit non-delivery error (a bare invalid_auth warn hides it).
         String botToken = resolved.botToken();
-        String auth = botToken != null && !botToken.isBlank()
-                ? "Bearer " + botToken
-                : "Bearer " + channelTargetRouter.getBotToken("slack", approvalChannel);
+        if (botToken == null || botToken.isBlank()) {
+            botToken = channelTargetRouter.getBotToken("slack", approvalChannel);
+        }
+        if (botToken == null || botToken.isBlank()) {
+            LOGGER.errorf("No bot token — HITL approval notification NOT delivered for %s",
+                    sanitize(conversationId));
+            return;
+        }
+        String auth = "Bearer " + botToken;
         try {
             slackApi.postBlocksMessage(auth, approvalChannel, null, blocks, fallback);
         } catch (SlackDeliveryException e) {
@@ -441,15 +528,19 @@ public class SlackEventHandler {
         // pause can notify approvers with buttons.
         String hitlApprovalChannel = null;
         String hitlApproverUserIds = null;
+        String integrationName = null;
         var integration = resolved.integration();
         if (integration != null && integration.getPlatformConfig() != null) {
             hitlApprovalChannel = integration.getPlatformConfig().get(SlackHitlSupport.CFG_HITL_APPROVAL_CHANNEL);
             hitlApproverUserIds = integration.getPlatformConfig().get(SlackHitlSupport.CFG_HITL_APPROVER_USER_IDS);
+            integrationName = integration.getName();
         }
 
-        // Create the listener that streams discussion into Slack
+        // Create the listener that streams discussion into Slack. The integration
+        // name is carried into the approval button value so a group HITL decision
+        // binds to THIS integration at the interactivity endpoint (IDOR-safe).
         var listener = new SlackGroupDiscussionListener(slackApi, token, channelId, threadTs,
-                hitlApprovalChannel, hitlApproverUserIds);
+                hitlApprovalChannel, hitlApproverUserIds, integrationName);
 
         String question = resolved.strippedMessage() != null ? resolved.strippedMessage() : originalText;
         try {
@@ -531,6 +622,14 @@ public class SlackEventHandler {
         // still apply so the user is never left with a generic error.
         try {
             SimpleConversationMemorySnapshot snapshot = sendAndWait(conversationId, enrichedInput);
+            if (snapshot == SKIPPED_STILL_AWAITING) {
+                postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, null);
+                return true;
+            }
+            if (snapshot == SKIPPED_NOT_ACTIVE) {
+                postMessage(channelId, threadTs, SlackHitlSupport.CONVERSATION_NOT_ACTIVE_NOTICE, null);
+                return true;
+            }
             boolean paused = snapshot != null
                     && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
             String response = SlackHitlSupport.extractSlackResponseText(snapshot);
@@ -538,7 +637,7 @@ public class SlackEventHandler {
                 if (response != null && !response.startsWith("_")) {
                     postMessageChunked(channelId, threadTs, response, null);
                 }
-                postMessage(channelId, threadTs, buildPauseNotice(conversationId), null);
+                postMessage(channelId, threadTs, buildPauseNotice(loadHitlBookmark(conversationId)), null);
             } else {
                 postMessageChunked(channelId, threadTs, response, null);
             }
@@ -610,8 +709,16 @@ public class SlackEventHandler {
      * Throws {@link IConversationService.ConversationAwaitingApprovalException}
      * (synchronously, from {@code say}) when the conversation is already paused —
      * the caller must translate that into a "still awaiting" notice rather than a
-     * generic error. When THIS turn pauses, {@code say} completes normally and the
-     * returned snapshot carries state {@code AWAITING_HUMAN}.
+     * generic error. When THIS turn pauses, {@code say} completes normally
+     * ({@code onComplete}) and the returned snapshot carries state
+     * {@code AWAITING_HUMAN}.
+     * <p>
+     * A queued-say skip ({@code onSkipped}) means the input was DROPPED without
+     * being processed — the conversation was paused/busy/ended by the time the
+     * queued turn ran. It is NOT a fresh pause and NOT a fresh response: it is
+     * mapped to a sentinel ({@link #SKIPPED_STILL_AWAITING} when the drop was a
+     * pause, else {@link #SKIPPED_NOT_ACTIVE}) so callers post the right notice
+     * instead of a duplicate approval card (H4) or a stale replay (H7).
      */
     private SimpleConversationMemorySnapshot sendAndWait(String conversationId, String message) throws Exception {
         var inputData = new InputData();
@@ -620,13 +727,27 @@ public class SlackEventHandler {
 
         var responseFuture = new CompletableFuture<SimpleConversationMemorySnapshot>();
 
-        conversationService.say(conversationId, false, true, Collections.emptyList(), inputData, false, snapshot -> {
-            if (snapshot != null) {
-                responseFuture.complete(snapshot);
-            } else {
-                responseFuture.completeExceptionally(new RuntimeException("Agent returned null response"));
-            }
-        });
+        conversationService.say(conversationId, false, true, Collections.emptyList(), inputData, false,
+                new IConversationService.ConversationResponseHandler() {
+                    @Override
+                    public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                        if (snapshot != null) {
+                            responseFuture.complete(snapshot);
+                        } else {
+                            responseFuture.completeExceptionally(new RuntimeException("Agent returned null response"));
+                        }
+                    }
+
+                    @Override
+                    public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                        // Dropped turn — do NOT deliver the (stale) snapshot as a
+                        // fresh outcome. AWAITING_HUMAN → still-awaiting; anything
+                        // else (IN_PROGRESS/ENDED/EXECUTION_INTERRUPTED) → not-active.
+                        boolean stillAwaiting = snapshot != null
+                                && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
+                        responseFuture.complete(stillAwaiting ? SKIPPED_STILL_AWAITING : SKIPPED_NOT_ACTIVE);
+                    }
+                });
 
         return responseFuture.get(CONVERSATION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }

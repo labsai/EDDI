@@ -45,14 +45,92 @@ public final class SlackHitlSupport {
      */
     public static final String GROUP_VALUE_PREFIX = "group:";
 
+    /**
+     * Separator between the owning integration name and the subject in an approval
+     * button value: {@code <integrationName>|<conversationId>} or
+     * {@code <integrationName>|group:<groupConversationId>}. Carrying the owning
+     * integration in the value binds the HITL decision to a specific integration —
+     * so signature verification and authorization use THAT integration's secret and
+     * approver list, closing the cross-integration IDOR (a shared approval channel
+     * can no longer let one integration's secret govern another's decision).
+     */
+    public static final String VALUE_SEPARATOR = "|";
+
     /** In-thread notice posted when a conversation enters AWAITING_HUMAN. */
     public static final String PAUSE_NOTICE = "⏸️ This conversation is awaiting human approval.";
 
     /** Notice when the user keeps messaging a paused conversation. */
     public static final String STILL_AWAITING_NOTICE = "⏸️ Still awaiting approval — a reviewer must decide before I can continue.";
 
+    /**
+     * Notice when a message was dropped because the conversation is not currently
+     * accepting input (busy processing another turn, ended, or interrupted).
+     */
+    public static final String CONVERSATION_NOT_ACTIVE_NOTICE = "⚠️ I couldn't process that just now — the conversation is busy or no longer active. Please try again.";
+
     private SlackHitlSupport() {
         // Utility class
+    }
+
+    // ─── Action value (button payload) ───
+
+    /**
+     * Build the approval button value that carries the owning integration name so
+     * the decision can be bound to that integration:
+     * {@code <integrationName>|<subject>}. {@code subject} is a plain
+     * conversationId or {@code group:<groupConversationId>}.
+     * <p>
+     * When {@code integrationName} is null/blank the legacy bare-subject form is
+     * produced (backward compat with cards posted before this change).
+     */
+    public static String buildActionValue(String integrationName, String subject) {
+        if (integrationName == null || integrationName.isBlank()) {
+            return subject;
+        }
+        return integrationName + VALUE_SEPARATOR + subject;
+    }
+
+    /**
+     * Parse an approval button value into the owning integration name (may be null
+     * for legacy bare values) and the subject (conversationId or
+     * {@code group:<id>}). Only the FIRST separator splits — integration names must
+     * not contain {@code |} (validated at the integration store), but a subject id
+     * never does, so splitting on the first separator is safe. Returns {@code null}
+     * only for a null/blank value.
+     */
+    public static ActionValue parseActionValue(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        int sep = value.indexOf(VALUE_SEPARATOR);
+        if (sep < 0) {
+            // Legacy bare value — no integration binding available.
+            return new ActionValue(null, value);
+        }
+        String integrationName = value.substring(0, sep);
+        String subject = value.substring(sep + VALUE_SEPARATOR.length());
+        return new ActionValue(integrationName.isBlank() ? null : integrationName, subject);
+    }
+
+    /**
+     * Parsed approval button value.
+     *
+     * @param integrationName
+     *            the owning integration name, or {@code null} for a legacy bare
+     *            value (no integration binding — treated as unverifiable)
+     * @param subject
+     *            the conversationId, or {@code group:<groupConversationId>}
+     */
+    public record ActionValue(String integrationName, String subject) {
+        /** Whether the subject targets a group discussion. */
+        public boolean isGroup() {
+            return subject != null && subject.startsWith(GROUP_VALUE_PREFIX);
+        }
+
+        /** The groupConversationId (subject minus the {@code group:} prefix). */
+        public String groupConversationId() {
+            return isGroup() ? subject.substring(GROUP_VALUE_PREFIX.length()) : null;
+        }
     }
 
     // ─── Config access ───

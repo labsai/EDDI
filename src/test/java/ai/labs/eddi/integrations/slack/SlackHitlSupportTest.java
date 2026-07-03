@@ -112,6 +112,63 @@ class SlackHitlSupportTest {
         assertEquals("section", blocks.get(0).get("type"));
     }
 
+    // ─── Action value (integration-bound button payload) ───
+
+    @Test
+    void buildActionValue_withIntegration_prefixesName() {
+        assertEquals("my-int|conv-1", SlackHitlSupport.buildActionValue("my-int", "conv-1"));
+        assertEquals("my-int|group:gc-9",
+                SlackHitlSupport.buildActionValue("my-int", SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-9"));
+    }
+
+    @Test
+    void buildActionValue_noIntegration_returnsBareSubject() {
+        assertEquals("conv-1", SlackHitlSupport.buildActionValue(null, "conv-1"));
+        assertEquals("conv-1", SlackHitlSupport.buildActionValue("", "conv-1"));
+    }
+
+    @Test
+    void parseActionValue_integrationBound_conversation() {
+        var v = SlackHitlSupport.parseActionValue("my-int|conv-1");
+        assertNotNull(v);
+        assertEquals("my-int", v.integrationName());
+        assertEquals("conv-1", v.subject());
+        assertFalse(v.isGroup());
+        assertNull(v.groupConversationId());
+    }
+
+    @Test
+    void parseActionValue_integrationBound_group() {
+        var v = SlackHitlSupport.parseActionValue("my-int|group:gc-9");
+        assertNotNull(v);
+        assertEquals("my-int", v.integrationName());
+        assertTrue(v.isGroup());
+        assertEquals("gc-9", v.groupConversationId());
+    }
+
+    @Test
+    void parseActionValue_legacyBareValue_hasNoIntegration() {
+        var v = SlackHitlSupport.parseActionValue("conv-1");
+        assertNotNull(v);
+        assertNull(v.integrationName());
+        assertEquals("conv-1", v.subject());
+    }
+
+    @Test
+    void parseActionValue_nullOrBlank_returnsNull() {
+        assertNull(SlackHitlSupport.parseActionValue(null));
+        assertNull(SlackHitlSupport.parseActionValue(""));
+        assertNull(SlackHitlSupport.parseActionValue("  "));
+    }
+
+    @Test
+    void parseActionValue_roundTrip() {
+        String built = SlackHitlSupport.buildActionValue("int", SlackHitlSupport.GROUP_VALUE_PREFIX + "gc-1");
+        var v = SlackHitlSupport.parseActionValue(built);
+        assertEquals("int", v.integrationName());
+        assertEquals("gc-1", v.groupConversationId());
+    }
+
     // ─── Response extraction ───
 
     @Test

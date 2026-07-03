@@ -145,9 +145,17 @@ public class RestSlackWebhook {
      * buttons). Slack sends {@code application/x-www-form-urlencoded} with a single
      * {@code payload} parameter containing a JSON string.
      * <p>
-     * Signature verification runs over the RAW body (before form parsing) using the
-     * same signing secrets as {@code /events}. Responds 200 within Slack's 3-second
-     * window and processes the decision asynchronously.
+     * Unlike {@code /events} (which may verify against the pooled set of signing
+     * secrets), a HITL decision is bound to the integration that OWNS it: we
+     * resolve the owning integration from the button value first, then verify the
+     * RAW body against ONLY that integration's signing secret. This prevents a
+     * holder of any one Slack secret from forging an approval on another
+     * integration's paused conversation (cross-integration IDOR). Legacy per-agent
+     * ChannelConnector secrets are excluded — a decision that cannot be bound to a
+     * new-style integration is rejected.
+     * <p>
+     * Responds 200 within Slack's 3-second window and processes the decision
+     * asynchronously.
      *
      * @param rawBody
      *            the raw request body (needed for signature verification)
@@ -155,8 +163,8 @@ public class RestSlackWebhook {
      *            the X-Slack-Signature header
      * @param timestamp
      *            the X-Slack-Request-Timestamp header
-     * @return 200 OK for valid requests; 403 for invalid signatures; 400 for a
-     *         missing/malformed payload
+     * @return 200 OK for valid requests; 403 for invalid/unbindable signatures; 400
+     *         for a missing/malformed payload
      */
     @POST
     @Path("/interactive")
@@ -165,17 +173,7 @@ public class RestSlackWebhook {
                                       @HeaderParam("X-Slack-Signature") String signature,
                                       @HeaderParam("X-Slack-Request-Timestamp") String timestamp) {
 
-        // Step 1: Verify signature against all known signing secrets — over the
-        // RAW body, exactly like /events (never the parsed form).
-        Set<String> signingSecrets = channelTargetRouter.getSigningSecrets("slack");
-        if (!signatureVerifier.verify(timestamp, rawBody, signature, signingSecrets)) {
-            LOGGER.warnf("Slack interactive signature verification failed (timestamp=%s)", sanitize(timestamp));
-            return Response.status(Response.Status.FORBIDDEN)
-                    .entity("{\"error\":\"Invalid signature\"}")
-                    .build();
-        }
-
-        // Step 2: Extract the "payload" form parameter (URL-encoded JSON string).
+        // Step 1: Extract the "payload" form parameter (URL-encoded JSON string).
         String payloadJson = extractPayloadParam(rawBody);
         if (payloadJson == null || payloadJson.isBlank()) {
             return Response.status(Response.Status.BAD_REQUEST)
@@ -183,7 +181,27 @@ public class RestSlackWebhook {
                     .build();
         }
 
-        // Step 3: Process async (Slack's 3-second requirement) and ack immediately.
+        // Step 2: Resolve the owning integration's signing secret from the payload
+        // (button value carries the integration name). A null secret means the
+        // decision cannot be bound to a new-style integration (legacy/unknown) —
+        // reject rather than accepting a pooled secret.
+        String owningSecret = interactivityHandler.resolveSigningSecretForDecision(payloadJson);
+        if (owningSecret == null) {
+            LOGGER.warn("Slack interactive decision could not be bound to an owning integration — rejecting");
+            return Response.status(Response.Status.FORBIDDEN)
+                    .entity("{\"error\":\"Invalid signature\"}")
+                    .build();
+        }
+
+        // Step 3: Verify the RAW body against ONLY the owning integration's secret.
+        if (!signatureVerifier.verifyWithSecret(timestamp, rawBody, signature, owningSecret)) {
+            LOGGER.warnf("Slack interactive signature verification failed (timestamp=%s)", sanitize(timestamp));
+            return Response.status(Response.Status.FORBIDDEN)
+                    .entity("{\"error\":\"Invalid signature\"}")
+                    .build();
+        }
+
+        // Step 4: Process async (Slack's 3-second requirement) and ack immediately.
         interactivityHandler.handlePayloadAsync(payloadJson);
         return Response.ok().build();
     }

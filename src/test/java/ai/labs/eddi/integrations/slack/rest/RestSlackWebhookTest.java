@@ -175,56 +175,68 @@ class RestSlackWebhookTest {
     class Interactivity {
 
         private static final String FORM_BODY = "payload=%7B%22type%22%3A%22block_actions%22%7D"; // {"type":"block_actions"}
+        private static final String DECODED = "{\"type\":\"block_actions\"}";
 
         @Test
-        @DisplayName("returns 403 + does not dispatch when signature is invalid")
+        @DisplayName("returns 403 + does not verify/dispatch when decision cannot be bound to an integration")
+        void rejectsUnbindableDecision() {
+            // Legacy/unknown decision → no owning secret → reject before any verify.
+            when(interactivityHandler.resolveSigningSecretForDecision(DECODED)).thenReturn(null);
+
+            Response response = webhook.handleInteractive(FORM_BODY, "sig", "ts");
+
+            assertEquals(403, response.getStatus());
+            verify(signatureVerifier, never()).verifyWithSecret(any(), any(), any(), any());
+            verify(interactivityHandler, never()).handlePayloadAsync(any());
+        }
+
+        @Test
+        @DisplayName("returns 403 + does not dispatch when signature does not match the owning secret")
         void rejectsBadSignature() {
-            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
-            when(signatureVerifier.verify(eq("ts"), eq(FORM_BODY), eq("bad-sig"), any()))
+            when(interactivityHandler.resolveSigningSecretForDecision(DECODED)).thenReturn("owning-secret");
+            when(signatureVerifier.verifyWithSecret("ts", FORM_BODY, "bad-sig", "owning-secret"))
                     .thenReturn(false);
 
             Response response = webhook.handleInteractive(FORM_BODY, "bad-sig", "ts");
 
             assertEquals(403, response.getStatus());
-            verifyNoInteractions(interactivityHandler);
+            verify(interactivityHandler, never()).handlePayloadAsync(any());
         }
 
         @Test
         @DisplayName("returns 403 when signature header is absent")
         void rejectsAbsentSignature() {
-            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
-            when(signatureVerifier.verify(isNull(), eq(FORM_BODY), isNull(), any()))
+            when(interactivityHandler.resolveSigningSecretForDecision(DECODED)).thenReturn("owning-secret");
+            when(signatureVerifier.verifyWithSecret(isNull(), eq(FORM_BODY), isNull(), eq("owning-secret")))
                     .thenReturn(false);
 
             Response response = webhook.handleInteractive(FORM_BODY, null, null);
 
             assertEquals(403, response.getStatus());
-            verifyNoInteractions(interactivityHandler);
+            verify(interactivityHandler, never()).handlePayloadAsync(any());
         }
 
         @Test
-        @DisplayName("verifies against the RAW body, then dispatches decoded payload async")
+        @DisplayName("verifies raw body against the OWNING secret, then dispatches decoded payload async")
         void dispatchesDecodedPayload() {
-            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
-            when(signatureVerifier.verify(eq("ts"), eq(FORM_BODY), eq("sig"), any()))
+            when(interactivityHandler.resolveSigningSecretForDecision(DECODED)).thenReturn("owning-secret");
+            when(signatureVerifier.verifyWithSecret("ts", FORM_BODY, "sig", "owning-secret"))
                     .thenReturn(true);
 
             Response response = webhook.handleInteractive(FORM_BODY, "sig", "ts");
 
             assertEquals(200, response.getStatus());
-            verify(interactivityHandler).handlePayloadAsync("{\"type\":\"block_actions\"}");
+            verify(interactivityHandler).handlePayloadAsync(DECODED);
         }
 
         @Test
-        @DisplayName("returns 400 when payload param is missing")
+        @DisplayName("returns 400 when payload param is missing (before any secret resolution)")
         void missingPayload() {
-            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
-            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
-
             Response response = webhook.handleInteractive("foo=bar", "sig", "ts");
 
             assertEquals(400, response.getStatus());
-            verifyNoInteractions(interactivityHandler);
+            verify(interactivityHandler, never()).resolveSigningSecretForDecision(any());
+            verify(interactivityHandler, never()).handlePayloadAsync(any());
         }
 
         @Test

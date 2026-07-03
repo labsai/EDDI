@@ -5,8 +5,11 @@
 package ai.labs.eddi.integrations.slack;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
@@ -32,14 +35,23 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * raw-body signature has been verified.
  * <p>
  * Handles {@code block_actions} with action ids {@code hitl_approve} /
- * {@code hitl_reject}. The button value is either a conversationId (single
- * conversation resume) or {@code group:<groupConversationId>} (group discussion
- * resume).
+ * {@code hitl_reject}. The button value carries the owning integration name
+ * followed by the subject: {@code <integrationName>|<conversationId>} for a
+ * single conversation resume, or {@code <integrationName>|group:<gcId>} for a
+ * group discussion resume. Legacy bare values (no integration name) are treated
+ * as unbindable and rejected.
+ * <p>
+ * The owning integration — resolved by NAME from the button value, not by a
+ * channel lookup — governs both signature verification (see
+ * {@link #resolveSigningSecretForDecision}) and authorization. This binds every
+ * decision to a specific integration even when several share one approval
+ * channel, closing the cross-integration IDOR and the shared-channel
+ * nondeterminism.
  * <p>
  * Authorization is <b>fail-closed</b>: the acting Slack user must appear in the
- * {@code hitlApproverUserIds} of the integration that owns the approval channel
- * the message was posted to. {@code decidedBy} is always derived server-side
- * ({@code slack:<userId>}) — never trusted from the payload.
+ * owning integration's {@code hitlApproverUserIds}. {@code decidedBy} is always
+ * derived server-side ({@code slack:<userId>}) — never trusted from the
+ * payload.
  *
  * @since 6.1.0
  */
@@ -98,42 +110,50 @@ public class SlackInteractivityHandler {
         });
     }
 
+    /**
+     * Resolve the signing secret of the integration that OWNS the decision in this
+     * payload — the one carried by the button value ({@code <name>|<subject>}). The
+     * interactivity endpoint verifies the raw body against ONLY this secret so a
+     * decision can never be authenticated with a different integration's secret.
+     * <p>
+     * Returns {@code null} (→ reject) when the payload is not an actionable HITL
+     * decision, or when it cannot be bound to a new-style integration (legacy bare
+     * value, or an unknown integration name). Never throws — a malformed payload
+     * resolves to {@code null}.
+     */
+    public String resolveSigningSecretForDecision(String payloadJson) {
+        try {
+            var parsed = parseAction(payloadJson);
+            if (parsed == null) {
+                return null;
+            }
+            var integration = resolveOwningIntegration(parsed);
+            if (integration.isEmpty() || integration.get().getPlatformConfig() == null) {
+                return null;
+            }
+            String secret = integration.get().getPlatformConfig().get("signingSecret");
+            return (secret != null && !secret.isBlank()) ? secret : null;
+        } catch (Exception e) {
+            LOGGER.debugf("Could not resolve owning integration secret for Slack decision: %s", e.getMessage());
+            return null;
+        }
+    }
+
     void handlePayload(String payloadJson) throws Exception {
-        JsonNode payload = objectMapper.readTree(payloadJson);
-        String type = payload.path("type").asText("");
-        if (!"block_actions".equals(type)) {
-            LOGGER.debugf("Ignoring Slack interactivity payload of type %s", sanitize(type));
+        ParsedAction parsed = parseAction(payloadJson);
+        if (parsed == null) {
             return;
         }
 
-        JsonNode actions = payload.path("actions");
-        if (!actions.isArray() || actions.isEmpty()) {
-            return;
-        }
-        JsonNode action = actions.get(0);
-        String actionId = action.path("action_id").asText("");
-        String value = action.path("value").asText("");
-        String slackUserId = payload.path("user").path("id").asText("");
-        String approvalChannelId = payload.path("channel").path("id").asText("");
-        String messageTs = payload.path("message").path("ts").asText(null);
-
-        HitlVerdict verdict = verdictFor(actionId);
-        if (verdict == null) {
-            LOGGER.debugf("Ignoring unknown Slack action_id %s", sanitize(actionId));
-            return;
-        }
-        if (value.isBlank()) {
-            LOGGER.warn("Slack HITL action missing value — ignoring");
-            return;
-        }
-
-        // Resolve the integration that owns this approval channel — it governs
-        // the approver list and bot token.
-        Optional<ChannelIntegrationConfiguration> integrationOpt = channelTargetRouter.getIntegrationByApprovalChannel(CHANNEL_TYPE_SLACK,
-                approvalChannelId);
+        // Resolve the OWNING integration (by name from the button value) — it
+        // governs the approver list and bot token. This is the same integration
+        // whose secret verified the request signature at the endpoint, so authz
+        // and authentication are bound to one integration (no cross-integration
+        // IDOR, no shared-channel nondeterminism).
+        Optional<ChannelIntegrationConfiguration> integrationOpt = resolveOwningIntegration(parsed);
         if (integrationOpt.isEmpty()) {
-            LOGGER.warnf("No integration owns approval channel %s — ignoring HITL action",
-                    sanitize(approvalChannelId));
+            LOGGER.warnf("No integration owns Slack HITL decision (channel %s) — ignoring",
+                    sanitize(parsed.approvalChannelId()));
             return;
         }
         ChannelIntegrationConfiguration integration = integrationOpt.get();
@@ -144,20 +164,73 @@ public class SlackInteractivityHandler {
                 : null;
 
         // AUTHZ (fail-closed): the acting user must be an approver.
-        if (!SlackHitlSupport.isAuthorizedApprover(slackUserId, approverIds)) {
+        if (!SlackHitlSupport.isAuthorizedApprover(parsed.slackUserId(), approverIds)) {
             LOGGER.warnf("Unauthorized Slack HITL decision attempt by user %s on channel %s",
-                    sanitize(slackUserId), sanitize(approvalChannelId));
-            postAuthzDenied(botToken, approvalChannelId, slackUserId);
+                    sanitize(parsed.slackUserId()), sanitize(parsed.approvalChannelId()));
+            postAuthzDenied(botToken, parsed.approvalChannelId(), parsed.slackUserId());
             return;
         }
 
         String auth = botToken != null && !botToken.isBlank() ? "Bearer " + botToken : null;
-        if (value.startsWith(SlackHitlSupport.GROUP_VALUE_PREFIX)) {
-            String groupConversationId = value.substring(SlackHitlSupport.GROUP_VALUE_PREFIX.length());
-            resolveGroup(groupConversationId, verdict, slackUserId, auth, approvalChannelId, messageTs);
+        if (parsed.value().isGroup()) {
+            resolveGroup(parsed.value().groupConversationId(), parsed.verdict(), parsed.slackUserId(),
+                    auth, parsed.approvalChannelId(), parsed.messageTs());
         } else {
-            resolveConversation(value, verdict, slackUserId, auth, approvalChannelId, messageTs);
+            resolveConversation(parsed.value().subject(), parsed.verdict(), parsed.slackUserId(),
+                    auth, parsed.approvalChannelId(), parsed.messageTs());
         }
+    }
+
+    /**
+     * Parse a block_actions payload into its actionable HITL fields, or
+     * {@code null} if it is not an actionable HITL decision (wrong type, unknown
+     * action id, empty/blank value).
+     */
+    private ParsedAction parseAction(String payloadJson) throws Exception {
+        JsonNode payload = objectMapper.readTree(payloadJson);
+        String type = payload.path("type").asText("");
+        if (!"block_actions".equals(type)) {
+            LOGGER.debugf("Ignoring Slack interactivity payload of type %s", sanitize(type));
+            return null;
+        }
+
+        JsonNode actions = payload.path("actions");
+        if (!actions.isArray() || actions.isEmpty()) {
+            return null;
+        }
+        JsonNode action = actions.get(0);
+        String actionId = action.path("action_id").asText("");
+        String rawValue = action.path("value").asText("");
+        String slackUserId = payload.path("user").path("id").asText("");
+        String approvalChannelId = payload.path("channel").path("id").asText("");
+        String messageTs = payload.path("message").path("ts").asText(null);
+
+        HitlVerdict verdict = verdictFor(actionId);
+        if (verdict == null) {
+            LOGGER.debugf("Ignoring unknown Slack action_id %s", sanitize(actionId));
+            return null;
+        }
+        SlackHitlSupport.ActionValue value = SlackHitlSupport.parseActionValue(rawValue);
+        if (value == null || value.subject() == null || value.subject().isBlank()) {
+            LOGGER.warn("Slack HITL action missing value — ignoring");
+            return null;
+        }
+        return new ParsedAction(verdict, value, slackUserId, approvalChannelId, messageTs);
+    }
+
+    /**
+     * Resolve the owning integration for a parsed decision. Prefers the integration
+     * NAME carried in the button value (deterministic, IDOR-safe). Falls back to a
+     * by-approval-channel lookup ONLY for legacy bare values (no name) — those are
+     * rejected up-front at the endpoint (unbindable), so this path is effectively
+     * dead for signed traffic and kept only for defensiveness.
+     */
+    private Optional<ChannelIntegrationConfiguration> resolveOwningIntegration(ParsedAction parsed) {
+        String integrationName = parsed.value().integrationName();
+        if (integrationName != null && !integrationName.isBlank()) {
+            return channelTargetRouter.getIntegrationByName(CHANNEL_TYPE_SLACK, integrationName);
+        }
+        return channelTargetRouter.getIntegrationByApprovalChannel(CHANNEL_TYPE_SLACK, parsed.approvalChannelId());
     }
 
     private void resolveConversation(String conversationId, HitlVerdict verdict, String slackUserId,
@@ -170,6 +243,11 @@ public class SlackInteractivityHandler {
             // Already decided / timed out / not paused — idempotent. Do NOT
             // error-spam; reflect the resolved state on the original message.
             LOGGER.debugf("HITL conversation %s already resolved: %s",
+                    sanitize(conversationId), e.getMessage());
+            finalizeAlreadyResolved(auth, approvalChannelId, messageTs);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // Conversation gone — nothing to resume; treat as resolved (idempotent).
+            LOGGER.debugf("HITL conversation %s not found on resume: %s",
                     sanitize(conversationId), e.getMessage());
             finalizeAlreadyResolved(auth, approvalChannelId, messageTs);
         } catch (Exception e) {
@@ -186,14 +264,31 @@ public class SlackInteractivityHandler {
         try {
             groupConversationService.resumeDiscussion(groupConversationId, request, null);
             finalizeMessage(auth, approvalChannelId, messageTs, verdict, slackUserId);
-        } catch (IllegalStateException e) {
-            LOGGER.debugf("HITL group %s already resolved: %s",
+        } catch (IllegalStateException
+                | GroupDiscussionException
+                | IResourceStore.ResourceModifiedException
+                | IResourceStore.ResourceNotFoundException
+                | GroupConversationGoneException e) {
+            // Already resolved / not awaiting / CAS lost / gone — idempotent.
+            // resumeDiscussion signals a non-paused group with a (checked)
+            // GroupDiscussionException, a concurrent race with
+            // ResourceModifiedException, and a deleted group with the unchecked
+            // GroupConversationGoneException. A double-click must NOT warn-spam or
+            // leave live buttons — reflect the resolved state instead.
+            LOGGER.debugf("HITL group %s already resolved/gone: %s",
                     sanitize(groupConversationId), e.getMessage());
             finalizeAlreadyResolved(auth, approvalChannelId, messageTs);
         } catch (Exception e) {
             LOGGER.warnf("Failed to resume group discussion %s from Slack: %s",
                     sanitize(groupConversationId), e.getMessage());
         }
+    }
+
+    /**
+     * A parsed, actionable HITL decision from a block_actions payload.
+     */
+    private record ParsedAction(HitlVerdict verdict, SlackHitlSupport.ActionValue value,
+            String slackUserId, String approvalChannelId, String messageTs) {
     }
 
     /**
