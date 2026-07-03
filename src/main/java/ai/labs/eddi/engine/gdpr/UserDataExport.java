@@ -39,7 +39,29 @@ public record UserDataExport(
         List<UserMemoryEntry> memories,
         List<ConversationExportEntry> conversations,
         List<UserConversation> managedConversations,
-        List<AuditExportEntry> auditEntries) {
+        List<AuditExportEntry> auditEntries,
+        List<AttachmentExportEntry> attachments) {
+
+    /**
+     * Backward-compatible constructor without attachment metadata.
+     */
+    public UserDataExport(String userId, Instant exportedAt, List<UserMemoryEntry> memories,
+            List<ConversationExportEntry> conversations, List<UserConversation> managedConversations,
+            List<AuditExportEntry> auditEntries) {
+        this(userId, exportedAt, memories, conversations, managedConversations, auditEntries, List.of());
+    }
+
+    /**
+     * Attachment metadata for export — never includes the binary payload
+     * (portability is metadata; the bytes can be fetched via the download API).
+     */
+    public record AttachmentExportEntry(
+            String conversationId,
+            String storageRef,
+            String fileName,
+            String mimeType,
+            long sizeBytes) {
+    }
 
     /**
      * Lightweight conversation summary for export.

@@ -78,12 +78,14 @@ public class AttachmentForwarder {
     private final SafeHttpClient httpClient;
     private final long maxForwardBytes;
     private final long maxAggregateBytes;
+    private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
 
     @Inject
     public AttachmentForwarder(IAttachmentStore attachmentStore,
             ModelCapabilityService capabilityService,
             AttachmentTextExtractor textExtractor,
             SafeHttpClient httpClient,
+            io.micrometer.core.instrument.MeterRegistry meterRegistry,
             @ConfigProperty(name = "eddi.attachments.max-forward-bytes",
                             defaultValue = "10485760") long maxForwardBytes,
             @ConfigProperty(name = "eddi.attachments.max-forward-aggregate-bytes",
@@ -92,6 +94,7 @@ public class AttachmentForwarder {
         this.capabilityService = capabilityService;
         this.textExtractor = textExtractor;
         this.httpClient = httpClient;
+        this.meterRegistry = meterRegistry;
         this.maxForwardBytes = maxForwardBytes;
         this.maxAggregateBytes = maxAggregateBytes;
     }
@@ -159,7 +162,20 @@ public class AttachmentForwarder {
             messages.set(lastUserIdx, UserMessage.from(contents));
             LOGGER.debugf("Forwarded %d attachment content item(s) to the LLM", added);
         }
+        recordMetrics(added, errors.size());
         persist(memory.getCurrentStep(), extracts, errors);
+    }
+
+    private void recordMetrics(int forwarded, int errored) {
+        if (meterRegistry == null) {
+            return;
+        }
+        if (forwarded > 0) {
+            meterRegistry.counter("eddi.attachment.forwarded").increment(forwarded);
+        }
+        if (errored > 0) {
+            meterRegistry.counter("eddi.attachment.errors").increment(errored);
+        }
     }
 
     private Content process(Attachment att, String conversationId, String provider, String model,

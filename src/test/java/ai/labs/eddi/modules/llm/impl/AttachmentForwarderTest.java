@@ -61,7 +61,8 @@ class AttachmentForwarderTest {
     private AttachmentForwarder newForwarder(long perFile, long aggregate) {
         var capability = new ModelCapabilityService(k -> Optional.empty());
         var extractor = new AttachmentTextExtractor(10_000);
-        return new AttachmentForwarder(store, capability, extractor, httpClient, perFile, aggregate);
+        return new AttachmentForwarder(store, capability, extractor, httpClient,
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), perFile, aggregate);
     }
 
     // ==================== No-op cases ====================
@@ -419,6 +420,25 @@ class AttachmentForwarderTest {
 
         Content c = ((UserMessage) messages.get(0)).contents().get(1);
         assertTrue(((TextContent) c).text().contains("invalid base64"));
+    }
+
+    @Test
+    void metrics_recordForwardedAndErrors() {
+        var registry = new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        var f = new AttachmentForwarder(store, new ModelCapabilityService(k -> Optional.empty()),
+                new AttachmentTextExtractor(10_000), httpClient, registry, 10L * 1024 * 1024, 20L * 1024 * 1024);
+        Attachment ok = new Attachment();
+        ok.setMimeType("image/png");
+        ok.setBase64Data(Base64.getEncoder().encodeToString("png".getBytes()));
+        Attachment bad = new Attachment();
+        bad.setMimeType("image/png"); // no source → error, no content
+        mockAttachments(ok, bad);
+        List<ChatMessage> messages = messages(UserMessage.from("look"));
+
+        f.forward(messages, memory, "openai", "gpt-4o");
+
+        assertEquals(1.0, registry.counter("eddi.attachment.forwarded").count());
+        assertEquals(1.0, registry.counter("eddi.attachment.errors").count());
     }
 
     @Test

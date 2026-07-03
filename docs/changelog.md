@@ -5,6 +5,26 @@
 
 ---
 
+## 📎 Multimodal Attachments Completion — Phase 6 (partial): Metrics + GDPR portability (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 6 of 6, partial).
+
+### What changed
+
+- **Forwarder metrics** — `AttachmentForwarder` now takes a `MeterRegistry` and records `eddi.attachment.forwarded` (content items sent to the LLM) and `eddi.attachment.errors` (dropped/gated/failed) per turn, satisfying AGENTS.md's "always add metrics" rule for the multimodal hot path.
+- **GDPR portability** — `UserDataExport` gains an `attachments` list (`AttachmentExportEntry` = conversationId/storageRef/fileName/mimeType/sizeBytes, **metadata only, never bytes**) plus a backward-compatible constructor. `GdprComplianceService.exportUserData` collects attachment metadata across the user's conversations via `IAttachmentStore.listByConversation`, and the compliance audit event records `attachmentsExported`.
+
+### Deferred (documented follow-ups)
+
+Still open in Phase 6: nightly reaper (orphaned blobs / stale grants via `ScheduleFireExecutor`), `CostTracker` multimodal token estimates, and an `attachmentsForwarded` audit-ledger entry. Phase 5 (multipart 1:1 `say`, SSE/output chips, and the EDDI-Manager / eddi-chat-ui frontend in their own repos) is likewise a follow-up — the two-step upload→say flow already works end-to-end.
+
+### Tests
+
+Forwarder metrics assertion + GDPR attachment-metadata export test. Both green.
+
+---
+
 ## 📎 Multimodal Attachments Completion — Phase 3: Group parity (2026-07-03)
 
 **Repo:** EDDI (`feat/multimodal-attachments-completion`)

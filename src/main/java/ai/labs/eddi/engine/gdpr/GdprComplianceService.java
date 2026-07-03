@@ -258,20 +258,38 @@ public class GdprComplianceService {
                     pseudonym);
         }
 
+        // 5. Attachment metadata (no bytes — the payload is fetched via the
+        // download API; portability requires the metadata, not the blobs).
+        var attachmentEntries = new ArrayList<UserDataExport.AttachmentExportEntry>();
+        try {
+            if (attachmentStorageInstance.isResolvable()) {
+                var store = attachmentStorageInstance.get();
+                for (var convId : conversationMemoryStore.getConversationIdsByUserId(userId)) {
+                    for (var a : store.listByConversation(convId)) {
+                        attachmentEntries.add(new UserDataExport.AttachmentExportEntry(
+                                convId, a.storageRef(), a.filename(), a.mimeType(), a.sizeBytes()));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to export attachment metadata [%s]", pseudonym);
+        }
+
         LOGGER.infof("[GDPR] Export complete [%s]: memories=%d, "
-                + "conversations=%d, managedConversations=%d, auditEntries=%d",
+                + "conversations=%d, managedConversations=%d, auditEntries=%d, attachments=%d",
                 pseudonym, memories.size(), conversations.size(),
-                managedConversations.size(), auditExportEntries.size());
+                managedConversations.size(), auditExportEntries.size(), attachmentEntries.size());
 
         // Write compliance event to immutable audit ledger
         submitComplianceAuditEntry("GDPR_EXPORT", pseudonym, Map.of(
                 "memoriesExported", memories.size(),
                 "conversationsExported", conversations.size(),
                 "managedConversationsExported", managedConversations.size(),
-                "auditEntriesExported", auditExportEntries.size()));
+                "auditEntriesExported", auditExportEntries.size(),
+                "attachmentsExported", attachmentEntries.size()));
 
         return new UserDataExport(userId, Instant.now(), memories,
-                conversations, managedConversations, auditExportEntries);
+                conversations, managedConversations, auditExportEntries, attachmentEntries);
     }
 
     // === Right to Restriction of Processing (GDPR Art. 18) ===
