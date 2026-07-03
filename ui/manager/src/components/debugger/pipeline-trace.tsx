@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useDebugStore, type PipelineTurn, type PipelineEvent } from "@/hooks/use-debug-events";
+import { useDebugStore, buildCascadeSteps, type PipelineTurn, type PipelineEvent } from "@/hooks/use-debug-events";
 import { useQuery } from "@tanstack/react-query";
 import { getAuditTrail, type AuditEntry } from "@/lib/api/audit";
 import { cn, formatDuration } from "@/lib/utils";
-import { Clock, Zap, ChevronDown, AlertTriangle } from "lucide-react";
+import { cascadeReasonText } from "@/lib/cascade-reason";
+import { Clock, Zap, ChevronDown, AlertTriangle, Layers, ArrowUpRight, Check } from "lucide-react";
 
 
 // ==================== Task Type Colors ====================
@@ -173,6 +174,8 @@ function TurnChart({ turn }: { turn: PipelineTurn }) {
             ))}
         </div>
       )}
+
+      <CascadeSummary events={turn.events} />
     </div>
   );
 }
@@ -193,6 +196,7 @@ function LiveEventsChart({ events }: { events: PipelineEvent[] }) {
       {tasks.map((task, i) => (
         <TaskBar key={i} task={task} maxDuration={maxDuration} />
       ))}
+      <CascadeSummary events={events} />
     </div>
   );
 }
@@ -270,6 +274,63 @@ function TaskBar({ task, maxDuration }: { task: TaskBarData; maxDuration: number
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+// ==================== Cascade Summary ====================
+
+function CascadeSummary({ events }: { events: PipelineEvent[] }) {
+  const { t } = useTranslation();
+  const steps = buildCascadeSteps(events);
+  if (steps.length === 0) return null;
+
+  return (
+    <div
+      className="rounded-md border border-purple-500/20 bg-purple-500/5 p-2"
+      data-testid="cascade-summary"
+    >
+      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-purple-600 dark:text-purple-400">
+        <Layers className="h-3 w-3" />
+        {t("cascadeTrace.title", "Model Cascade")}
+      </div>
+      <div className="space-y-0.5">
+        {steps.map((step, i) => (
+          <div
+            key={step.stepIndex}
+            className="flex items-center gap-1.5 text-[10px]"
+            data-testid={`cascade-summary-step-${step.stepIndex}`}
+          >
+            <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-purple-500/10 text-[9px] font-bold text-purple-600 dark:text-purple-400">
+              {step.stepIndex + 1}
+            </span>
+            <span className="truncate font-mono text-foreground">
+              {step.modelName ?? step.modelType ?? "—"}
+            </span>
+            {step.escalatedFrom ? (
+              <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
+                <ArrowUpRight className="h-2.5 w-2.5" />
+                {step.escalatedFrom.confidence != null && step.escalatedFrom.threshold != null
+                  ? t("cascadeTrace.escalated", "conf {{c}} < {{th}}", {
+                      c: step.escalatedFrom.confidence.toFixed(2),
+                      th: step.escalatedFrom.threshold.toFixed(2),
+                    })
+                  : t("cascadeTrace.escalatedShort", "escalated")}
+                {step.escalatedFrom.reason && (
+                  <span className="text-muted-foreground">
+                    · {cascadeReasonText(t, step.escalatedFrom.reason)}
+                  </span>
+                )}
+              </span>
+            ) : i === steps.length - 1 ? (
+              <span className="inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
+                <Check className="h-2.5 w-2.5" />
+                {t("cascadeTrace.accepted", "accepted")}
+              </span>
+            ) : null}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

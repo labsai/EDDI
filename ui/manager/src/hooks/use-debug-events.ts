@@ -18,6 +18,21 @@ export interface PipelineEvent {
   actions?: string[];
   confidence?: number;
   toolTrace?: ToolTraceEntry[];
+  // ── Cascade-specific (model cascade SSE events) ──
+  /** Model name for the cascade step (e.g. "gpt-4o-mini"). */
+  modelName?: string;
+  /** Total number of steps in the cascade. */
+  totalSteps?: number;
+  /** 0-based index of the cascade step this event refers to. */
+  stepIndex?: number;
+  /** Escalation source step (0-based). */
+  fromStep?: number;
+  /** Escalation destination step (0-based). */
+  toStep?: number;
+  /** Confidence threshold that triggered an escalation. */
+  threshold?: number;
+  /** Why the cascade escalated: low_confidence | timeout | error | retryable_error. */
+  reason?: string;
   timestamp: number;
 }
 
@@ -26,6 +41,48 @@ export interface PipelineTurn {
   events: PipelineEvent[];
   totalDurationMs: number;
   startTime: number;
+}
+
+export interface CascadeStepInfo {
+  stepIndex: number;
+  modelName?: string;
+  modelType?: string;
+  /** Set on steps that were reached via an escalation. */
+  escalatedFrom?: {
+    fromStep?: number;
+    confidence?: number;
+    threshold?: number;
+    reason?: string;
+  };
+}
+
+/**
+ * Fold `cascade_step_start` / `cascade_escalation` events into an ordered
+ * per-step view (model name + escalation info). Returns an empty list when
+ * the turn had no cascade activity.
+ */
+export function buildCascadeSteps(events: PipelineEvent[]): CascadeStepInfo[] {
+  const byStep = new Map<number, CascadeStepInfo>();
+  for (const e of events) {
+    if (e.type === "cascade_step_start" && e.stepIndex != null) {
+      byStep.set(e.stepIndex, {
+        ...(byStep.get(e.stepIndex) ?? { stepIndex: e.stepIndex }),
+        modelName: e.modelName,
+        modelType: e.taskType,
+      });
+    } else if (e.type === "cascade_escalation" && e.toStep != null) {
+      byStep.set(e.toStep, {
+        ...(byStep.get(e.toStep) ?? { stepIndex: e.toStep }),
+        escalatedFrom: {
+          fromStep: e.fromStep,
+          confidence: e.confidence,
+          threshold: e.threshold,
+          reason: e.reason,
+        },
+      });
+    }
+  }
+  return Array.from(byStep.values()).sort((a, b) => a.stepIndex - b.stepIndex);
 }
 
 export type DebugTab = "pipeline" | "costs" | "memory" | "logs" | "prompt";

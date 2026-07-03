@@ -1,7 +1,12 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import type { PipelineEvent, ToolTraceEntry } from "@/hooks/use-debug-events";
+import {
+  buildCascadeSteps,
+  type PipelineEvent,
+  type ToolTraceEntry,
+  type CascadeStepInfo,
+} from "@/hooks/use-debug-events";
 import {
   Zap,
   ChevronDown,
@@ -12,8 +17,11 @@ import {
   AlertTriangle,
   Wrench,
   Copy,
+  Layers,
+  ArrowUpRight,
 } from "lucide-react";
 import { getExtensionIcon, getExtensionColor } from "@/lib/api/extensions";
+import { cascadeReasonText } from "@/lib/cascade-reason";
 
 // ==================== Types ====================
 
@@ -103,6 +111,7 @@ export function ChatActivity({ events, isLive, totalSteps }: ChatActivityProps) 
   const [expanded, setExpanded] = useState(isLive);
 
   const tasks = useMemo(() => buildTaskSummaries(events), [events]);
+  const cascadeSteps = useMemo(() => buildCascadeSteps(events), [events]);
 
   const totalDuration = useMemo(
     () => tasks.reduce((sum, task) => sum + (task.durationMs ?? 0), 0),
@@ -124,7 +133,7 @@ export function ChatActivity({ events, isLive, totalSteps }: ChatActivityProps) 
   // Auto-expand when live processing starts, auto-collapse when done
   const shouldPulse = isLive && hasRunning;
 
-  if (tasks.length === 0) return null;
+  if (tasks.length === 0 && cascadeSteps.length === 0) return null;
 
   return (
     <div className="flex justify-center px-4 py-1" data-testid="chat-activity">
@@ -197,11 +206,67 @@ export function ChatActivity({ events, isLive, totalSteps }: ChatActivityProps) 
           )}
         >
           <div className="border-t border-border/30 px-3 pb-2.5 pt-1.5 space-y-0.5">
+            {cascadeSteps.length > 0 && <CascadeTrace steps={cascadeSteps} />}
             {tasks.map((task, i) => (
               <TaskRow key={`${task.taskType}-${task.index}-${i}`} task={task} />
             ))}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ==================== Cascade Trace ====================
+
+function CascadeTrace({ steps }: { steps: CascadeStepInfo[] }) {
+  const { t } = useTranslation();
+
+  const reasonText = (r?: string): string => cascadeReasonText(t, r);
+
+  return (
+    <div
+      className="mb-1 rounded-lg border border-purple-500/20 bg-purple-500/5 p-2"
+      data-testid="cascade-trace"
+    >
+      <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-purple-600 dark:text-purple-400">
+        <Layers className="h-3 w-3" />
+        {t("cascadeTrace.title", "Model Cascade")}
+      </div>
+      <div className="space-y-0.5">
+        {steps.map((step, i) => (
+          <div
+            key={step.stepIndex}
+            className="flex items-center gap-1.5 text-[10px]"
+            data-testid={`cascade-trace-step-${step.stepIndex}`}
+          >
+            <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-purple-500/10 text-[9px] font-bold text-purple-600 dark:text-purple-400">
+              {step.stepIndex + 1}
+            </span>
+            <span className="truncate font-mono text-foreground">
+              {step.modelName ?? step.modelType ?? "—"}
+            </span>
+            {step.escalatedFrom ? (
+              <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
+                <ArrowUpRight className="h-2.5 w-2.5" />
+                {step.escalatedFrom.confidence != null && step.escalatedFrom.threshold != null
+                  ? t("cascadeTrace.escalated", "conf {{c}} < {{th}}", {
+                      c: step.escalatedFrom.confidence.toFixed(2),
+                      th: step.escalatedFrom.threshold.toFixed(2),
+                    })
+                  : t("cascadeTrace.escalatedShort", "escalated")}
+                {step.escalatedFrom.reason && (
+                  <span className="text-muted-foreground">· {reasonText(step.escalatedFrom.reason)}</span>
+                )}
+              </span>
+            ) : i === steps.length - 1 ? (
+              <span className="inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
+                <Check className="h-2.5 w-2.5" />
+                {t("cascadeTrace.accepted", "accepted")}
+              </span>
+            ) : null}
+          </div>
+        ))}
       </div>
     </div>
   );
