@@ -136,7 +136,10 @@
     "saving": "सहेज रहे हैं…",
     "showMore": "Show More",
     "showLess": "Show Less",
-    "copyFailed": "क्लिपबोर्ड पर कॉपी करने में विफल"
+    "copyFailed": "क्लिपबोर्ड पर कॉपी करने में विफल",
+    "loadError": "डेटा लोड करने में विफल",
+    "actions": "क्रियाएँ",
+    "view": "देखें"
   },
   "agents": {
     "deploy": "तैनात करें",
@@ -234,7 +237,16 @@
     "slackStep2": "बॉट टोकन (xoxb-…) और साइनिंग सीक्रेट को EDDI वॉल्ट में कॉपी करें और नीचे चैनल कॉन्फ़िगर करें।",
     "slackStep3": "फिर अपने Slack ऐप में Event Subscriptions सक्षम करें, ऊपर Webhook URL पेस्ट करें और सब्सक्राइब करें:",
     "slackSetupNote": "महत्वपूर्ण: Event Subscriptions सक्षम करने से पहले नीचे चैनल कॉन्फ़िगर करें — Slack एक URL सत्यापन चुनौती भेजता है जिसके लिए EDDI में साइनिंग सीक्रेट कॉन्फ़िगर होना आवश्यक है।",
-    "slackRequiredScopes": "आवश्यक बॉट टोकन स्कोप"
+    "slackRequiredScopes": "आवश्यक बॉट टोकन स्कोप",
+    "hitlConfig": "ह्यूमन-इन-द-लूप",
+    "hitlConfigDesc": "जब यह एजेंट मानवीय स्वीकृति के लिए बातचीत रोकता है, तो ये सेटिंग्स नियंत्रित करती हैं कि कितनी देर प्रतीक्षा करनी है और समय पर निर्णय न होने पर क्या होगा।",
+    "hitlEnable": "मानवीय-स्वीकृति समय-सीमाएँ कॉन्फ़िगर करें",
+    "hitlTimeoutPolicy": "यदि समय पर निर्णय न हो",
+    "hitlApprovalTimeout": "स्वीकृति समय-सीमा (ISO-8601)",
+    "hitlTimeoutInvalid": "एक सीमित नीति के लिए धनात्मक ISO-8601 अवधि आवश्यक है, जैसे PT15M।",
+    "hitlTimeoutHint": "जैसे PT30S, PT15M, PT2H।",
+    "hitlPauseReason": "स्वीकृति का कारण (अनुमोदकों को दिखाया गया)",
+    "hitlPauseReasonPlaceholder": "उदा. हटाने के लिए प्रबंधक की स्वीकृति आवश्यक है"
   },
   "wizard": {
     "title": "Agent विज़ार्ड"
@@ -1499,7 +1511,10 @@
     "hideDiscussions": "चर्चा पैनल छिपाएँ",
     "showDiscussions": "चर्चा पैनल दिखाएँ",
     "hideConfig": "कॉन्फ़िगरेशन पैनल छिपाएँ",
-    "showConfig": "कॉन्फ़िगरेशन पैनल दिखाएँ"
+    "showConfig": "कॉन्फ़िगरेशन पैनल दिखाएँ",
+    "hitlSection": "मानवीय स्वीकृति",
+    "hitlApprovalPoints": "स्वीकृति पर",
+    "hitlOnTaskRejection": "अस्वीकृति पर"
   },
   "taskBoard": {
     "title": "कार्य बोर्ड",
@@ -1779,7 +1794,21 @@
     "hintTaskForce": "मॉडरेटर एक कार्य योजना बनाता है, एजेंटों को समानांतर में काम सौंपता है, फिर परिणामों की जांच करता है और उन्हें संश्लेषित करता है।",
     "hintCustom": "अपने स्वयं के चरण मैन्युअल रूप से परिभाषित करें। कस्टम चरण बनाने के बाद API के माध्यम से कॉन्फ़िगर किए जा सकते हैं।",
     "hintRoundTable": "सभी सदस्य अपनी राय साझा करते हैं, फिर कई दौरों में एक-दूसरे के विचारों पर चर्चा करते हैं, इसके बाद मॉडरेटर संश्लेषण करता है।",
-    "protocolSummary": "प्रोटोकॉल"
+    "protocolSummary": "प्रोटोकॉल",
+    "hitlTitle": "मानवीय स्वीकृति आवश्यक करें",
+    "hitlDesc": "चुने गए चरणों पर चर्चा रोकें और जारी रखने से पहले मानवीय निर्णय की प्रतीक्षा करें।",
+    "hitlApprovalPoints": "स्वीकृति के लिए रोकें",
+    "hitlNoPhases": "इस शैली में नियंत्रित करने योग्य कोई पूर्व-निर्धारित चरण नहीं हैं।",
+    "hitlNoApprovalPoints": "कम से कम एक चरण चुनें, अन्यथा चर्चा कभी नहीं रुकेगी।",
+    "hitlTimeoutPolicy": "यदि समय पर निर्णय न हो",
+    "hitlApprovalTimeout": "स्वीकृति समय-सीमा",
+    "hitlTimeoutInvalid": "एक धनात्मक ISO-8601 अवधि दर्ज करें, जैसे PT15M या PT1H30M।",
+    "hitlTimeoutHint": "ISO-8601 अवधि, जैसे PT30S, PT15M, PT2H।",
+    "hitlGranularity": "स्वीकृति सूक्ष्मता",
+    "hitlGranularityHint": "कार्य-स्तरीय स्वीकृति TASK_FORCE निष्पादन पर लागू होती है — प्रत्येक कार्य को अलग-अलग स्वीकृत या अस्वीकृत करें।",
+    "hitlOnTaskRejection": "जब कोई कार्य अस्वीकृत हो",
+    "hitlPinNote": "स्वीकृति बिंदु सक्षम करने से इस समूह के चर्चा चरण स्थिर हो जाते हैं ({{granularity}} सूक्ष्मता)।",
+    "hitlReviewBadge": "मानवीय स्वीकृति"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
@@ -1916,6 +1945,18 @@
     "taskApprovals": "कार्य अनुमोदन",
     "approveAll": "सभी को अनुमोदित करें",
     "note": "नोट जोड़ें (वैकल्पिक)",
-    "notePlaceholder": "निर्णय के लिए एक नोट जोड़ें..."
+    "notePlaceholder": "निर्णय के लिए एक नोट जोड़ें...",
+    "discussionCancelled": "चर्चा रद्द की गई",
+    "cancelDiscussion": "चर्चा रद्द करें",
+    "rejectAll": "सभी अस्वीकार करें",
+    "timeoutWaitIndefinitely": "अनिश्चित काल तक प्रतीक्षा करें",
+    "timeoutAutoApprove": "स्वतः-स्वीकृत",
+    "timeoutAutoReject": "स्वतः-अस्वीकृत",
+    "timeoutAbort": "निरस्त करें",
+    "granularityPhase": "चरण",
+    "granularityTask": "कार्य",
+    "rejectionFail": "कार्य विफल करें",
+    "rejectionRetry": "कार्य पुनः प्रयास करें",
+    "groupsTruncated": "यहाँ दिखाई गई से अधिक समूह स्वीकृतियाँ मौजूद हैं।"
   }
 }

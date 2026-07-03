@@ -56,6 +56,7 @@ import {
   UserMemorySection,
   MemoryPolicySection,
   SessionManagementSection,
+  HitlConfigSection,
   ChannelsSection,
 } from "@/components/editors/agent-config-sections";
 
@@ -636,6 +637,9 @@ export function AgentDetailPage() {
 
       {/* Session Management */}
       <SessionManagementSection agent={agent} agentId={id!} version={resolvedVersion} />
+
+      {/* Human-in-the-Loop */}
+      <HitlConfigSection agent={agent} agentId={id!} version={resolvedVersion} />
 
       {/* Channel Connectors */}
       <ChannelsSection agent={agent} agentId={id!} version={resolvedVersion} />

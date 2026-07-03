@@ -10,6 +10,7 @@ import { AgentResponseCard } from "./agent-response-card";
 import { TaskBoard } from "./task-board";
 import { parseTranscriptContent, safeFormatDate } from "./group-utils";
 import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle, SharedTaskList, TaskDefinition } from "@/lib/api/groups";
+import type { HitlVerdict } from "@/lib/api/hitl";
 import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +26,20 @@ interface DiscussionTranscriptProps {
   discussionStyle?: DiscussionStyle;
   /** Pre-configured tasks from group config (for TASK_FORCE style) */
   preConfiguredTasks?: TaskDefinition[];
+  /**
+   * Submit a HITL approve/reject decision for the paused discussion. Receives
+   * the group conversation id so the parent can resume the right discussion.
+   */
+  onApprove?: (
+    gcId: string,
+    verdict: HitlVerdict,
+    note?: string,
+    taskApprovals?: Record<string, string>,
+  ) => void;
+  /** Cancel the paused/in-progress discussion. */
+  onCancelDiscussion?: (gcId: string) => void;
+  /** Whether an approve/reject/cancel decision is currently in-flight. */
+  isDeciding?: boolean;
 }
 
 interface PhaseGroup {
@@ -188,6 +203,9 @@ export function DiscussionTranscript({
   isLoading,
   discussionStyle,
   preConfiguredTasks,
+  onApprove,
+  onCancelDiscussion,
+  isDeciding,
 }: DiscussionTranscriptProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
@@ -227,6 +245,28 @@ export function DiscussionTranscript({
     : (conversation?.created ?? new Date().toISOString());
   const activeSpeakers = isStreaming ? streamState!.activeSpeakers : new Set<string>();
   const streamError = isStreaming ? streamState!.error : null;
+
+  // The group conversation id to act on when paused: persisted conversation when
+  // viewing history, else the live-streamed conversation id.
+  const gcId = conversation?.id ?? streamState?.conversationId ?? null;
+
+  // Task ids awaiting per-task approval (TASK granularity) — ONLY the persisted
+  // task list's AWAITING_APPROVAL entries. We deliberately do NOT fall back to
+  // the full live task plan: sending a decision for tasks the backend hasn't
+  // gated would be rejected (400) or approve the wrong tasks. When paused, the
+  // page switches to the persisted conversation (which carries these statuses);
+  // with no awaiting list, the banner falls back to a plain phase-level decision.
+  const pendingTaskIds = useMemo(() => {
+    return (conversation?.taskList?.tasks ?? [])
+      .filter((task) => task.status === "AWAITING_APPROVAL")
+      .map((task) => task.id);
+  }, [conversation?.taskList]);
+
+  // Only surface the task-board "Awaiting Approval" column while actually paused.
+  const tasksAwaitingApproval = useMemo(
+    () => (effectiveState === "AWAITING_APPROVAL" ? new Set(pendingTaskIds) : undefined),
+    [effectiveState, pendingTaskIds],
+  );
 
   // Memoize phases to avoid re-grouping on every render
   const phases = useMemo(() => groupByPhase(effectiveTranscript), [effectiveTranscript]);
@@ -394,6 +434,7 @@ export function DiscussionTranscript({
             tasksInProgress={streamState.tasksInProgress}
             tasksCompleted={streamState.tasksCompleted}
             taskVerifications={streamState.taskVerifications}
+            tasksAwaitingApproval={tasksAwaitingApproval}
             isStreaming={streamState.isStreaming}
           />
         )}
@@ -544,8 +585,14 @@ export function DiscussionTranscript({
               approvalTimeout={conversation?.hitlApprovalTimeout}
               pausedPhaseName={streamState?.hitlPause?.phaseName || conversation?.pausedPhaseName}
               granularity={streamState?.hitlPause?.granularity || conversation?.hitlPauseType}
-              isSubmitting={false}
-              onDecide={() => {}}
+              pendingTaskIds={pendingTaskIds}
+              isSubmitting={isDeciding}
+              onDecide={(verdict, note, taskApprovals) => {
+                if (gcId) onApprove?.(gcId, verdict, note, taskApprovals);
+              }}
+              onCancel={
+                onCancelDiscussion && gcId ? () => onCancelDiscussion(gcId) : undefined
+              }
             />
           </div>
         )}
@@ -588,6 +635,15 @@ function MemoizedApiTaskBoard({ taskList, t }: { taskList: SharedTaskList; t: (k
     ),
     [taskList],
   );
+  // Tasks paused for per-task human approval — so the "Awaiting Approval" column
+  // populates on a persisted TASK-granularity pause (undefined when none, to
+  // preserve non-HITL behavior).
+  const tasksAwaitingApproval = useMemo(() => {
+    const s = new Set(
+      taskList.tasks.filter(task => task.status === "AWAITING_APPROVAL").map(task => task.id),
+    );
+    return s.size ? s : undefined;
+  }, [taskList]);
 
   return (
     <TaskBoard
@@ -595,6 +651,7 @@ function MemoizedApiTaskBoard({ taskList, t }: { taskList: SharedTaskList; t: (k
       tasksInProgress={tasksInProgress}
       tasksCompleted={tasksCompleted}
       taskVerifications={taskVerifications}
+      tasksAwaitingApproval={tasksAwaitingApproval}
       isStreaming={false}
     />
   );

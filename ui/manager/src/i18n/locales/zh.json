@@ -136,7 +136,10 @@
     "saving": "保存中…",
     "showMore": "Show More",
     "showLess": "Show Less",
-    "copyFailed": "复制到剪贴板失败"
+    "copyFailed": "复制到剪贴板失败",
+    "loadError": "加载数据失败",
+    "actions": "操作",
+    "view": "查看"
   },
   "agents": {
     "deploy": "部署",
@@ -234,7 +237,16 @@
     "slackStep2": "将 Bot 令牌 (xoxb-…) 和签名密钥复制到 EDDI 保管库中，并在下方配置频道。",
     "slackStep3": "然后在 Slack 应用中启用 Event Subscriptions，粘贴上面的 Webhook URL，并订阅：",
     "slackSetupNote": "重要提示：在启用 Event Subscriptions 之前，请先在下方配置频道 — Slack 会发送 URL 验证请求，需要在 EDDI 中配置签名密钥。",
-    "slackRequiredScopes": "所需的 Bot 令牌权限"
+    "slackRequiredScopes": "所需的 Bot 令牌权限",
+    "hitlConfig": "人机协同",
+    "hitlConfigDesc": "当此智能体为人工批准暂停对话时，这些设置控制等待时长以及未及时决定时的处理方式。",
+    "hitlEnable": "配置人工批准超时",
+    "hitlTimeoutPolicy": "若未及时决定",
+    "hitlApprovalTimeout": "批准超时（ISO-8601）",
+    "hitlTimeoutInvalid": "有限策略需要正的 ISO-8601 时长，例如 PT15M。",
+    "hitlTimeoutHint": "例如 PT30S、PT15M、PT2H。",
+    "hitlPauseReason": "审批原因（对审批者显示）",
+    "hitlPauseReasonPlaceholder": "例如：删除需要经理批准"
   },
   "wizard": {
     "title": "Agent 向导"
@@ -1499,7 +1511,10 @@
     "hideDiscussions": "隐藏讨论面板",
     "showDiscussions": "显示讨论面板",
     "hideConfig": "隐藏配置面板",
-    "showConfig": "显示配置面板"
+    "showConfig": "显示配置面板",
+    "hitlSection": "人工批准",
+    "hitlApprovalPoints": "批准于",
+    "hitlOnTaskRejection": "拒绝时"
   },
   "taskBoard": {
     "title": "任务看板",
@@ -1779,7 +1794,21 @@
     "hintTaskForce": "主持人创建任务计划，将工作并行分配给代理，然后验证并综合结果。",
     "hintCustom": "手动定义您自己的阶段。自定义阶段可以在创建后通过 API 进行配置。",
     "hintRoundTable": "所有成员分享意见，然后在多轮中讨论彼此的观点，最后由主持人进行综合。",
-    "protocolSummary": "协议"
+    "protocolSummary": "协议",
+    "hitlTitle": "需要人工批准",
+    "hitlDesc": "在所选阶段暂停讨论，等待人工决定后再继续。",
+    "hitlApprovalPoints": "在以下阶段暂停以待批准",
+    "hitlNoPhases": "此样式没有可控制的预设阶段。",
+    "hitlNoApprovalPoints": "请至少选择一个阶段，否则讨论将永不暂停。",
+    "hitlTimeoutPolicy": "若未及时决定",
+    "hitlApprovalTimeout": "批准超时",
+    "hitlTimeoutInvalid": "请输入正的 ISO-8601 时长，例如 PT15M 或 PT1H30M。",
+    "hitlTimeoutHint": "ISO-8601 时长，例如 PT30S、PT15M、PT2H。",
+    "hitlGranularity": "批准粒度",
+    "hitlGranularityHint": "任务级批准适用于 TASK_FORCE 执行——可逐个批准或拒绝每个任务。",
+    "hitlOnTaskRejection": "当任务被拒绝时",
+    "hitlPinNote": "启用批准点会固定该组的讨论阶段（{{granularity}} 粒度）。",
+    "hitlReviewBadge": "人工批准"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
@@ -1916,6 +1945,18 @@
     "taskApprovals": "任务审批",
     "approveAll": "全部批准",
     "note": "添加备注（可选）",
-    "notePlaceholder": "为决定添加备注..."
+    "notePlaceholder": "为决定添加备注...",
+    "discussionCancelled": "讨论已取消",
+    "cancelDiscussion": "取消讨论",
+    "rejectAll": "全部拒绝",
+    "timeoutWaitIndefinitely": "无限期等待",
+    "timeoutAutoApprove": "自动批准",
+    "timeoutAutoReject": "自动拒绝",
+    "timeoutAbort": "中止",
+    "granularityPhase": "阶段",
+    "granularityTask": "任务",
+    "rejectionFail": "将任务标记为失败",
+    "rejectionRetry": "重试任务",
+    "groupsTruncated": "存在的群组审批多于此处显示的数量。"
   }
 }

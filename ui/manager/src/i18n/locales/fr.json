@@ -136,7 +136,10 @@
     "saving": "Enregistrement…",
     "showMore": "Show More",
     "showLess": "Show Less",
-    "copyFailed": "Échec de la copie dans le presse-papiers"
+    "copyFailed": "Échec de la copie dans le presse-papiers",
+    "loadError": "Échec du chargement des données",
+    "actions": "Actions",
+    "view": "Voir"
   },
   "agents": {
     "deploy": "Déployer",
@@ -234,7 +237,16 @@
     "slackStep2": "Copiez le token du bot (xoxb-…) et le secret de signature dans le vault EDDI et configurez les canaux ci-dessous.",
     "slackStep3": "Ensuite, activez les Event Subscriptions dans votre application Slack, collez l'URL du webhook ci-dessus et abonnez-vous à :",
     "slackSetupNote": "Important : Configurez le canal ci-dessous avant d'activer les Event Subscriptions — Slack envoie un défi de vérification d'URL qui nécessite que le secret de signature soit configuré dans EDDI.",
-    "slackRequiredScopes": "Permissions requises pour le token du bot"
+    "slackRequiredScopes": "Permissions requises pour le token du bot",
+    "hitlConfig": "Human-in-the-Loop",
+    "hitlConfigDesc": "Lorsque cet agent met une conversation en pause pour approbation humaine, ces paramètres contrôlent le temps d'attente et ce qui se passe sans décision à temps.",
+    "hitlEnable": "Configurer les délais d'approbation humaine",
+    "hitlTimeoutPolicy": "Si aucune décision à temps",
+    "hitlApprovalTimeout": "Délai d'approbation (ISO-8601)",
+    "hitlTimeoutInvalid": "Une politique finie nécessite une durée ISO-8601 positive, p. ex. PT15M.",
+    "hitlTimeoutHint": "p. ex. PT30S, PT15M, PT2H.",
+    "hitlPauseReason": "Motif d'approbation (visible par les approbateurs)",
+    "hitlPauseReasonPlaceholder": "p. ex. La suppression nécessite l'accord du responsable"
   },
   "wizard": {
     "title": "Assistant Agent"
@@ -1499,7 +1511,10 @@
     "hideDiscussions": "Masquer le panneau de discussions",
     "showDiscussions": "Afficher le panneau de discussions",
     "hideConfig": "Masquer le panneau de configuration",
-    "showConfig": "Afficher le panneau de configuration"
+    "showConfig": "Afficher le panneau de configuration",
+    "hitlSection": "Approbation humaine",
+    "hitlApprovalPoints": "Approbation à",
+    "hitlOnTaskRejection": "En cas de rejet"
   },
   "taskBoard": {
     "title": "Tableau des tâches",
@@ -1779,7 +1794,21 @@
     "hintTaskForce": "Le modérateur crée un plan de tâches, assigne le travail aux agents en parallèle, puis vérifie et synthétise les résultats.",
     "hintCustom": "Définissez vos propres phases manuellement. Les phases personnalisées peuvent être configurées via l'API après la création.",
     "hintRoundTable": "Tous les membres partagent leurs opinions, puis discutent des points de vue des autres sur plusieurs tours avant que le modérateur ne synthétise.",
-    "protocolSummary": "Protocole"
+    "protocolSummary": "Protocole",
+    "hitlTitle": "Exiger une approbation humaine",
+    "hitlDesc": "Mettre la discussion en pause aux phases choisies et attendre une décision humaine avant de continuer.",
+    "hitlApprovalPoints": "Mettre en pause pour approbation à",
+    "hitlNoPhases": "Ce style n'a pas de phases prédéfinies à contrôler.",
+    "hitlNoApprovalPoints": "Sélectionnez au moins une phase, sinon la discussion ne s'arrêtera jamais.",
+    "hitlTimeoutPolicy": "Si aucune décision à temps",
+    "hitlApprovalTimeout": "Délai d'approbation",
+    "hitlTimeoutInvalid": "Saisissez une durée ISO-8601 positive, p. ex. PT15M ou PT1H30M.",
+    "hitlTimeoutHint": "Durée ISO-8601, p. ex. PT30S, PT15M, PT2H.",
+    "hitlGranularity": "Granularité d'approbation",
+    "hitlGranularityHint": "L'approbation par tâche s'applique à l'exécution TASK_FORCE — approuvez ou rejetez chaque tâche individuellement.",
+    "hitlOnTaskRejection": "Quand une tâche est rejetée",
+    "hitlPinNote": "Activer les points d'approbation fige les phases de discussion de ce groupe (granularité {{granularity}}).",
+    "hitlReviewBadge": "Approbation humaine"
   },
   "groupTemplates": {
     "advisoryBoard": "Conseil consultatif",
@@ -1916,6 +1945,18 @@
     "taskApprovals": "Approbations de tâches",
     "approveAll": "Tout approuver",
     "note": "Ajouter une note (optionnel)",
-    "notePlaceholder": "Ajouter une note pour la décision..."
+    "notePlaceholder": "Ajouter une note pour la décision...",
+    "discussionCancelled": "Discussion annulée",
+    "cancelDiscussion": "Annuler la discussion",
+    "rejectAll": "Tout rejeter",
+    "timeoutWaitIndefinitely": "Attendre indéfiniment",
+    "timeoutAutoApprove": "Approbation auto",
+    "timeoutAutoReject": "Rejet auto",
+    "timeoutAbort": "Abandonner",
+    "granularityPhase": "Phase",
+    "granularityTask": "Tâche",
+    "rejectionFail": "Faire échouer la tâche",
+    "rejectionRetry": "Réessayer la tâche",
+    "groupsTruncated": "Il existe plus d'approbations de groupe que celles affichées ici."
   }
 }

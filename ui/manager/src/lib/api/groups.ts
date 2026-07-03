@@ -354,11 +354,16 @@ export type GroupSSEEventType =
   | "synthesis_start"
   | "group_complete"
   | "group_error"
+  // Emitted by the approve/stream endpoint for expected resume rejections.
+  | "error"
   | "task_plan_created"
   | "task_verified"
   | "awaiting_approval"
   | "hitl_resume"
-  | "cancelled";
+  | "cancelled"
+  // A member agent's own conversation paused mid-turn (unsupported in a group);
+  // its turn is recorded SKIPPED with a reason.
+  | "member_pause_skipped";
 
 export interface GroupSSEEvent {
   type: GroupSSEEventType;
@@ -425,7 +430,9 @@ export interface GroupErrorPayload {
 }
 
 export interface TaskPlanCreatedPayload {
-  tasks: { id: string; subject: string; assignedTo: string; assignedAgentId?: string; priority: number }[];
+  // Matches the backend TaskSummary record: { id, subject, assignedTo, priority }.
+  // (assignedTo is the assignee's display name.)
+  tasks: { id: string; subject: string; assignedTo: string; priority: number }[];
   preConfigured: boolean;
 }
 
@@ -437,29 +444,10 @@ export interface TaskVerifiedPayload {
 }
 
 /**
- * Start a group discussion via SSE streaming.
- * Returns an async generator yielding SSE events as they arrive.
- * Same pattern as chat's `sendMessageStreaming()`.
+ * Read a Server-Sent Events response body as a stream of parsed group events.
+ * Shared by the initial-discussion and approve/resume streaming endpoints.
  */
-export async function* streamGroupDiscussion(
-  groupId: string,
-  question: string,
-  userId?: string,
-  signal?: AbortSignal,
-): AsyncGenerator<GroupSSEEvent> {
-  const response = await fetch(
-    `${api.getBaseUrl()}/groups/${groupId}/conversations/stream`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...api.getAuthHeader(),
-      },
-      body: JSON.stringify({ question, userId: userId || "manager-user" }),
-      signal,
-    }
-  );
-
+async function* readGroupSSE(response: Response): AsyncGenerator<GroupSSEEvent> {
   if (!response.ok) {
     // M5 fix: throw a proper Error, not a plain object
     throw new Error(`Group streaming failed: ${response.status} ${response.statusText}`);
@@ -506,6 +494,60 @@ export async function* streamGroupDiscussion(
   } finally {
     reader.releaseLock();
   }
+}
+
+/**
+ * Start a group discussion via SSE streaming.
+ * Returns an async generator yielding SSE events as they arrive.
+ * Same pattern as chat's `sendMessageStreaming()`.
+ */
+export async function* streamGroupDiscussion(
+  groupId: string,
+  question: string,
+  userId?: string,
+  signal?: AbortSignal,
+): AsyncGenerator<GroupSSEEvent> {
+  const response = await fetch(
+    `${api.getBaseUrl()}/groups/${groupId}/conversations/stream`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...api.getAuthHeader(),
+      },
+      body: JSON.stringify({ question, userId: userId || "manager-user" }),
+      signal,
+    }
+  );
+
+  yield* readGroupSSE(response);
+}
+
+/**
+ * Resume a paused group discussion via the approve/stream SSE endpoint.
+ * Submits the human decision AND streams the resumed discussion progress
+ * (hitl_resume, phase_start, speaker_*, group_complete, …) over one connection.
+ */
+export async function* streamGroupApproval(
+  groupId: string,
+  gcId: string,
+  request: import("./hitl").GroupApprovalRequest,
+  signal?: AbortSignal,
+): AsyncGenerator<GroupSSEEvent> {
+  const response = await fetch(
+    `${api.getBaseUrl()}/groups/${groupId}/conversations/${gcId}/approve/stream`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...api.getAuthHeader(),
+      },
+      body: JSON.stringify(request),
+      signal,
+    }
+  );
+
+  yield* readGroupSSE(response);
 }
 
 

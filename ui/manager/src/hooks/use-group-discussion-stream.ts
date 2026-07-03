@@ -1,6 +1,7 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   streamGroupDiscussion,
+  streamGroupApproval,
   type TranscriptEntry,
   type TranscriptEntryType,
   type GroupConversationState,
@@ -13,6 +14,7 @@ import {
   type TaskPlanCreatedPayload,
   type TaskVerifiedPayload,
 } from "@/lib/api/groups";
+import type { GroupApprovalRequest } from "@/lib/api/hitl";
 
 // ─── Streaming State ────────────────────────────────────────────
 
@@ -36,7 +38,7 @@ export interface GroupStreamState {
   /** Timestamp when the stream was started (stable, not recalculated per render) */
   startedAt: string | null;
   /** Task plan received from task_plan_created SSE event */
-  taskPlan: { id: string; subject: string; assignedTo: string; assignedAgentId?: string; priority: number }[] | null;
+  taskPlan: { id: string; subject: string; assignedTo: string; priority: number }[] | null;
   /** Task verification results from task_verified SSE events */
   taskVerifications: Map<string, { passed: boolean; feedback: string }>;
   /** Set of task IDs currently being executed (inferred from speaker events during EXECUTE phase) */
@@ -96,6 +98,39 @@ export function useGroupDiscussionStream() {
   const [streamState, setStreamState] = useState<GroupStreamState>(initialState);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Drain an SSE event source into state, then settle isStreaming. Shared by the
+  // initial-discussion and approve/resume flows.
+  const consumeStream = useCallback(
+    async (events: AsyncGenerator<GroupSSEEvent>, abort: AbortController) => {
+      try {
+        for await (const event of events) {
+          const isDone = handleSSEEvent(event, setStreamState);
+          if (isDone) {
+            abort.abort();
+            break;
+          }
+        }
+      } catch (e) {
+        // AbortError is expected when we abort after a terminal event
+        if (e instanceof DOMException && e.name === "AbortError") {
+          // expected — swallow
+        } else {
+          const errorMsg = e instanceof Error ? e.message : String(e);
+          setStreamState((s) => ({
+            ...s,
+            isStreaming: false,
+            state: "FAILED",
+            error: errorMsg,
+          }));
+        }
+      }
+
+      // Safety-net: if the stream ended without a done event
+      setStreamState((s) => (s.isStreaming ? { ...s, isStreaming: false } : s));
+    },
+    [],
+  );
+
   const startStream = useCallback(async (groupId: string, question: string) => {
     // Abort any existing stream
     abortRef.current?.abort();
@@ -114,39 +149,36 @@ export function useGroupDiscussionStream() {
       taskVerifications: new Map(),
     });
 
-    try {
-      const events = streamGroupDiscussion(groupId, question, undefined, abort.signal);
+    await consumeStream(streamGroupDiscussion(groupId, question, undefined, abort.signal), abort);
+  }, [consumeStream]);
 
-      for await (const event of events) {
-        const isDone = handleSSEEvent(event, setStreamState);
-        if (isDone) {
-          abort.abort();
-          break;
-        }
-      }
-    } catch (e) {
-      // AbortError is expected when we abort after "group_complete"
-      if (e instanceof DOMException && e.name === "AbortError") {
-        // expected — swallow
-      } else {
-        const errorMsg = e instanceof Error ? e.message : String(e);
-        setStreamState((s) => ({
-          ...s,
-          isStreaming: false,
-          state: "FAILED",
-          error: errorMsg,
-        }));
-      }
-    }
+  /**
+   * Submit an approve/reject decision for a paused group discussion AND stream
+   * the resumed progress over the same connection. Preserves the existing
+   * transcript so a live pause→resume appends rather than restarts.
+   */
+  const approveAndStream = useCallback(
+    async (groupId: string, gcId: string, request: GroupApprovalRequest) => {
+      abortRef.current?.abort();
+      const abort = new AbortController();
+      abortRef.current = abort;
 
-    // Safety-net: if the stream ended without a done event
-    setStreamState((s) => {
-      if (s.isStreaming) {
-        return { ...s, isStreaming: false };
-      }
-      return s;
-    });
-  }, []);
+      setStreamState((s) => ({
+        ...s,
+        isStreaming: true,
+        state: "IN_PROGRESS",
+        conversationId: gcId,
+        hitlPause: null,
+        hitlResume: null,
+        error: null,
+        startedAt: s.startedAt ?? new Date().toISOString(),
+        activeSpeakers: new Set(),
+      }));
+
+      await consumeStream(streamGroupApproval(groupId, gcId, request, abort.signal), abort);
+    },
+    [consumeStream],
+  );
 
   const abortStream = useCallback(() => {
     abortRef.current?.abort();
@@ -156,7 +188,11 @@ export function useGroupDiscussionStream() {
     }));
   }, []);
 
-  return { streamState, startStream, abortStream };
+  // Abort any in-flight stream when the consuming component unmounts, so the
+  // SSE connection is released and no setState runs after teardown.
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  return { streamState, startStream, approveAndStream, abortStream };
 }
 
 // ─── Event Handler ──────────────────────────────────────────────
@@ -226,12 +262,11 @@ function handleSSEEvent(
           let newTasksInProgress = s.tasksInProgress;
           if (s.currentPhase?.type === "EXECUTE" && s.taskPlan) {
             newTasksInProgress = new Set(s.tasksInProgress);
-            // Find the next pending task for this agent — prefer agentId, fall back to displayName
+            // Match the next pending task for this speaker by display name
+            // (the backend task plan carries assignedTo = display name only).
             const agentTask = s.taskPlan.find(
               (t) =>
-                (t.assignedAgentId
-                  ? t.assignedAgentId === payload.agentId
-                  : t.assignedTo === payload.displayName) &&
+                t.assignedTo === payload.displayName &&
                 !s.tasksCompleted.has(t.id) &&
                 !s.tasksInProgress.has(t.id)
             );
@@ -315,12 +350,10 @@ function handleSSEEvent(
           let newTasksInProgress2 = s.tasksInProgress;
           let newTasksCompleted = s.tasksCompleted;
           if (s.currentPhase?.type === "EXECUTE" && s.taskPlan) {
-            // Prefer agentId matching, fall back to displayName
+            // Match by display name (see speaker_start above).
             const agentTask = s.taskPlan.find(
               (t) =>
-                (t.assignedAgentId
-                  ? t.assignedAgentId === payload.agentId
-                  : t.assignedTo === payload.displayName) &&
+                t.assignedTo === payload.displayName &&
                 s.tasksInProgress.has(t.id)
             );
             if (agentTask) {
@@ -418,13 +451,17 @@ function handleSSEEvent(
       return true;
     }
 
+    // "group_error" is the generic failure event; "error" is what the
+    // approve/stream endpoint emits for expected rejections (409 concurrent
+    // decision, 400 invalid taskApprovals/note). Both are terminal failures.
+    case "error":
     case "group_error": {
       let errorMsg = "Unknown error";
       try {
         const payload = JSON.parse(event.data);
         errorMsg = payload.error || payload.message || errorMsg;
       } catch (e) {
-        console.warn('[SSE] Failed to parse group_error event:', e);
+        console.warn('[SSE] Failed to parse error event:', e);
         errorMsg = event.data || errorMsg;
       }
       setState((s) => ({
@@ -504,6 +541,45 @@ function handleSSEEvent(
         console.warn('[SSE] Failed to parse cancelled event:', e);
       }
       return true;
+    }
+
+    case "member_pause_skipped": {
+      // A member agent's own turn paused for approval (unsupported in a group);
+      // the backend records it SKIPPED. Promote the live placeholder to a
+      // SKIPPED-with-reason card so the live view matches the reloaded transcript
+      // (otherwise the null-content placeholder renders as a bare "No response").
+      try {
+        const payload = JSON.parse(event.data) as {
+          agentId: string;
+          displayName: string;
+          phaseIndex: number;
+          phaseName: string;
+          reason: string;
+        };
+        setState((s) => {
+          const newSpeakers = new Set(s.activeSpeakers);
+          newSpeakers.delete(payload.agentId);
+          const transcript = [...s.transcript];
+          const idx = transcript.findIndex(
+            (e) =>
+              e.speakerAgentId === payload.agentId &&
+              e.content === null &&
+              e.phaseIndex === payload.phaseIndex,
+          );
+          if (idx >= 0) {
+            const prev = transcript[idx]!;
+            transcript[idx] = {
+              ...prev,
+              type: "SKIPPED" as TranscriptEntryType,
+              errorReason: payload.reason,
+            };
+          }
+          return { ...s, activeSpeakers: newSpeakers, transcript };
+        });
+      } catch (e) {
+        console.warn('[SSE] Failed to parse member_pause_skipped event:', e);
+      }
+      return false;
     }
 
     default:

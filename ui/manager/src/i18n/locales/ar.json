@@ -136,7 +136,10 @@
     "saving": "جارٍ الحفظ…",
     "showMore": "Show More",
     "showLess": "Show Less",
-    "copyFailed": "فشل النسخ إلى الحافظة"
+    "copyFailed": "فشل النسخ إلى الحافظة",
+    "loadError": "فشل تحميل البيانات",
+    "actions": "إجراءات",
+    "view": "عرض"
   },
   "agents": {
     "deploy": "نشر",
@@ -234,7 +237,16 @@
     "slackStep2": "انسخ رمز البوت (xoxb-…) وسر التوقيع إلى خزنة EDDI وأعد تكوين القنوات أدناه.",
     "slackStep3": "ثم فعّل Event Subscriptions في تطبيق Slack الخاص بك، والصق عنوان Webhook أعلاه واشترك في:",
     "slackSetupNote": "مهم: أعد تكوين القناة أدناه قبل تفعيل Event Subscriptions — يرسل Slack تحدي تحقق URL يتطلب تكوين سر التوقيع في EDDI.",
-    "slackRequiredScopes": "أذونات رمز البوت المطلوبة"
+    "slackRequiredScopes": "أذونات رمز البوت المطلوبة",
+    "hitlConfig": "التدخل البشري",
+    "hitlConfigDesc": "عندما يوقف هذا العميل محادثة للموافقة البشرية، تتحكم هذه الإعدادات في مدة الانتظار وما يحدث إذا لم يُتخذ قرار في الوقت المحدد.",
+    "hitlEnable": "تكوين مهل الموافقة البشرية",
+    "hitlTimeoutPolicy": "إذا لم يُتخذ قرار في الوقت المحدد",
+    "hitlApprovalTimeout": "مهلة الموافقة (ISO-8601)",
+    "hitlTimeoutInvalid": "تتطلب السياسة المحدودة مدة ISO-8601 موجبة، مثل PT15M.",
+    "hitlTimeoutHint": "مثل PT30S وPT15M وPT2H.",
+    "hitlPauseReason": "سبب الموافقة (يظهر للموافقين)",
+    "hitlPauseReasonPlaceholder": "مثال: يتطلب الحذف موافقة المدير"
   },
   "wizard": {
     "title": "معالج Agent"
@@ -1499,7 +1511,10 @@
     "hideDiscussions": "إخفاء لوحة المناقشات",
     "showDiscussions": "إظهار لوحة المناقشات",
     "hideConfig": "إخفاء لوحة الإعدادات",
-    "showConfig": "إظهار لوحة الإعدادات"
+    "showConfig": "إظهار لوحة الإعدادات",
+    "hitlSection": "الموافقة البشرية",
+    "hitlApprovalPoints": "الموافقة عند",
+    "hitlOnTaskRejection": "عند الرفض"
   },
   "taskBoard": {
     "title": "لوحة المهام",
@@ -1779,7 +1794,21 @@
     "hintTaskForce": "ينشئ المشرف خطة مهام، ويوزع العمل على الوكلاء بشكل متوازٍ، ثم يتحقق من النتائج ويجمعها.",
     "hintCustom": "حدد مراحلك الخاصة يدوياً. يمكن تكوين المراحل المخصصة عبر واجهة API بعد الإنشاء.",
     "hintRoundTable": "يشارك جميع الأعضاء آراءهم، ثم يناقشون وجهات نظر بعضهم عبر جولات متعددة قبل أن يقوم المشرف بالتجميع.",
-    "protocolSummary": "البروتوكول"
+    "protocolSummary": "البروتوكول",
+    "hitlTitle": "طلب موافقة بشرية",
+    "hitlDesc": "إيقاف المناقشة مؤقتًا عند المراحل المختارة وانتظار قرار بشري قبل المتابعة.",
+    "hitlApprovalPoints": "الإيقاف للموافقة عند",
+    "hitlNoPhases": "هذا النمط لا يحتوي على مراحل معدة مسبقًا للتحكم بها.",
+    "hitlNoApprovalPoints": "اختر مرحلة واحدة على الأقل، وإلا فلن تتوقف المناقشة أبدًا.",
+    "hitlTimeoutPolicy": "إذا لم يُتخذ قرار في الوقت المحدد",
+    "hitlApprovalTimeout": "مهلة الموافقة",
+    "hitlTimeoutInvalid": "أدخل مدة ISO-8601 موجبة، مثل PT15M أو PT1H30M.",
+    "hitlTimeoutHint": "مدة ISO-8601، مثل PT30S وPT15M وPT2H.",
+    "hitlGranularity": "دقة الموافقة",
+    "hitlGranularityHint": "تنطبق الموافقة على مستوى المهمة على تنفيذ TASK_FORCE — وافق على كل مهمة أو ارفضها على حدة.",
+    "hitlOnTaskRejection": "عند رفض مهمة",
+    "hitlPinNote": "تفعيل نقاط الموافقة يثبّت مراحل مناقشة هذه المجموعة (دقة {{granularity}}).",
+    "hitlReviewBadge": "موافقة بشرية"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
@@ -1916,6 +1945,18 @@
     "taskApprovals": "موافقات المهام",
     "approveAll": "الموافقة على الكل",
     "note": "إضافة ملاحظة (اختياري)",
-    "notePlaceholder": "أضف ملاحظة للقرار..."
+    "notePlaceholder": "أضف ملاحظة للقرار...",
+    "discussionCancelled": "تم إلغاء المناقشة",
+    "cancelDiscussion": "إلغاء المناقشة",
+    "rejectAll": "رفض الكل",
+    "timeoutWaitIndefinitely": "انتظار غير محدود",
+    "timeoutAutoApprove": "موافقة تلقائية",
+    "timeoutAutoReject": "رفض تلقائي",
+    "timeoutAbort": "إحباط",
+    "granularityPhase": "مرحلة",
+    "granularityTask": "مهمة",
+    "rejectionFail": "إفشال المهمة",
+    "rejectionRetry": "إعادة محاولة المهمة",
+    "groupsTruncated": "توجد موافقات مجموعات أكثر مما هو معروض هنا."
   }
 }

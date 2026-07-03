@@ -1,18 +1,16 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listPendingApprovals,
+  listAllGroupPendingApprovals,
   resumeConversation,
   cancelConversation,
-  approveGroupPhase,
   cancelGroupDiscussion,
-  listGroupPendingApprovals,
   type HitlDecision,
-  type GroupApprovalRequest,
 } from "@/lib/api/hitl";
 
 // ── Queries ──────────────────────────────────────────────────────
 
-/** Pending approvals for regular conversations. */
+/** Pending approvals for regular (1:1) conversations. */
 export function usePendingApprovals(limit = 200) {
   return useQuery({
     queryKey: ["pending-approvals", { limit }],
@@ -21,14 +19,23 @@ export function usePendingApprovals(limit = 200) {
   });
 }
 
-/** Pending approvals for a specific group's discussions. */
-export function useGroupPendingApprovals(groupId: string | undefined, limit = 100) {
-  return useQuery({
-    queryKey: ["group-pending-approvals", groupId, { limit }],
-    queryFn: () => listGroupPendingApprovals(groupId!, limit),
-    enabled: !!groupId,
+/**
+ * Cross-group HITL inbox — every group's pending approvals in ONE request via
+ * the backend's `GET /groups/pending-approvals` (no per-group fan-out). The
+ * backend caps the response at `limit`; `truncated` signals when more exist.
+ */
+export function useAllGroupPendingApprovals(limit = 200) {
+  const query = useQuery({
+    queryKey: ["all-group-pending-approvals", { limit }],
+    queryFn: () => listAllGroupPendingApprovals(limit),
     refetchInterval: 10_000,
   });
+  return {
+    data: query.data,
+    isLoading: query.isLoading,
+    isError: query.isError,
+    truncated: (query.data?.length ?? 0) >= limit,
+  };
 }
 
 // ── Mutations ────────────────────────────────────────────────────
@@ -58,19 +65,6 @@ export function useCancelConversation() {
   });
 }
 
-/** Approve or reject a paused group discussion phase. */
-export function useApproveGroupPhase() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ groupId, gcId, request }: { groupId: string; gcId: string; request: GroupApprovalRequest }) =>
-      approveGroupPhase(groupId, gcId, request),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["group-conversations"] });
-      qc.invalidateQueries({ queryKey: ["group-pending-approvals"] });
-    },
-  });
-}
-
 /** Cancel a group discussion. */
 export function useCancelGroupDiscussion() {
   const qc = useQueryClient();
@@ -78,8 +72,9 @@ export function useCancelGroupDiscussion() {
     mutationFn: ({ groupId, gcId }: { groupId: string; gcId: string }) =>
       cancelGroupDiscussion(groupId, gcId),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["group-conversations"] });
-      qc.invalidateQueries({ queryKey: ["group-pending-approvals"] });
+      // Real list key is camelCase ["groupConversations", …] (see use-groups.ts).
+      qc.invalidateQueries({ queryKey: ["groupConversations"] });
+      qc.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
     },
   });
 }

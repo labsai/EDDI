@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   CheckCircle2,
@@ -9,6 +9,8 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { timeoutPolicyLabel, granularityLabel } from "@/lib/hitl-labels";
+import { parseIsoDurationMs } from "@/lib/hitl-config";
 import type { HitlVerdict } from "@/lib/api/hitl";
 
 interface ApprovalBannerProps {
@@ -36,42 +38,52 @@ interface ApprovalBannerProps {
   onCancel?: () => void;
 }
 
-/** Format an ISO-8601 duration like "PT15M" into a human-readable string. */
+/** Format a millisecond duration as "1d 2h", "5m 3s", "42s", … (top 2 units). */
+function formatMs(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const d = Math.floor(totalSec / 86400);
+  const h = Math.floor((totalSec % 86400) / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const parts: [number, string][] = [[d, "d"], [h, "h"], [m, "m"], [s, "s"]];
+  const nonzero = parts.filter(([n]) => n > 0);
+  const shown = (nonzero.length ? nonzero : [[0, "s"] as [number, string]]).slice(0, 2);
+  return shown.map(([n, u]) => `${n}${u}`).join(" ");
+}
+
+/** Format an ISO-8601 duration (e.g. "PT15M", "P1DT2H") for display.
+ *  Falls back to the raw string if it isn't a parseable positive duration. */
 function formatDuration(iso?: string): string {
   if (!iso) return "";
-  const match = iso.match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/i);
-  if (!match) return iso;
-  const parts: string[] = [];
-  if (match[1]) parts.push(`${match[1]}h`);
-  if (match[2]) parts.push(`${match[2]}m`);
-  if (match[3]) parts.push(`${match[3]}s`);
-  return parts.join(" ") || iso;
+  const ms = parseIsoDurationMs(iso);
+  return ms == null ? iso : formatMs(ms);
 }
 
-/** Calculate time remaining from pausedAt + duration. */
-function getTimeRemaining(pausedAt?: string, duration?: string): string | null {
-  if (!pausedAt || !duration) return null;
-  const match = duration.match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/i);
-  if (!match) return null;
-  const ms =
-    (parseInt(match[1] || "0") * 3600 +
-      parseInt(match[2] || "0") * 60 +
-      parseInt(match[3] || "0")) *
-    1000;
-  const deadline = new Date(pausedAt).getTime() + ms;
-  const remaining = deadline - Date.now();
-  if (remaining <= 0) return "Overdue";
-  const mins = Math.floor(remaining / 60_000);
-  const secs = Math.floor((remaining % 60_000) / 1000);
-  return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+/** Whether a date string parses to a real instant. */
+function isValidDate(iso?: string): boolean {
+  return !!iso && !Number.isNaN(new Date(iso).getTime());
 }
 
-const TIMEOUT_LABELS: Record<string, string> = {
-  WAIT_INDEFINITELY: "Wait Indefinitely",
-  AUTO_APPROVE: "Auto-Approve",
-  AUTO_REJECT: "Auto-Reject",
-  ABORT: "Abort",
-};
+/** Calculate time remaining from pausedAt + duration, evaluated at `nowMs`.
+ *  Returns a structured result (not a display string) so the "overdue" branch
+ *  isn't keyed off a translatable literal. */
+function getTimeRemaining(
+  pausedAt: string | undefined,
+  duration: string | undefined,
+  nowMs: number,
+): { overdue: boolean; ms: number } | null {
+  if (!isValidDate(pausedAt) || !duration) return null;
+  const durationMs = parseIsoDurationMs(duration);
+  if (durationMs == null) return null;
+  const deadline = new Date(pausedAt!).getTime() + durationMs;
+  const remaining = deadline - nowMs;
+  return { overdue: remaining <= 0, ms: Math.max(0, remaining) };
+}
+
+/** Format a remaining-milliseconds value as "5m 3s" / "42s". */
+function formatRemaining(ms: number): string {
+  return formatMs(ms);
+}
 
 export function ApprovalBanner({
   surface,
@@ -91,14 +103,32 @@ export function ApprovalBanner({
   const [showNote, setShowNote] = useState(false);
   const [taskApprovals, setTaskApprovals] = useState<Record<string, string>>({});
 
-  const timeRemaining = getTimeRemaining(pausedAt, approvalTimeout);
-  const isTaskGranularity = granularity === "TASK" && pendingTaskIds && pendingTaskIds.length > 0;
+  // Tick every second so the countdown updates live and flips to "Overdue"
+  // while the banner is on screen (the banner shows precisely when paused, so
+  // no other render is forcing updates).
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!pausedAt || !approvalTimeout) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [pausedAt, approvalTimeout]);
+
+  const timeRemaining = getTimeRemaining(pausedAt, approvalTimeout, nowMs);
+  const isTaskGranularity =
+    granularity === "TASK" && !!pendingTaskIds && pendingTaskIds.length > 0;
 
   const handleSubmit = (verdict: HitlVerdict) => {
     const finalNote = note.trim() || undefined;
-    const finalTaskApprovals = isTaskGranularity && Object.keys(taskApprovals).length > 0
-      ? taskApprovals
-      : undefined;
+    // For TASK granularity, send an explicit decision for every pending task:
+    // any task the reviewer didn't individually toggle defaults to the
+    // top-level verdict, so no task is left ambiguous.
+    let finalTaskApprovals: Record<string, string> | undefined;
+    if (isTaskGranularity && pendingTaskIds) {
+      finalTaskApprovals = {};
+      for (const id of pendingTaskIds) {
+        finalTaskApprovals[id] = taskApprovals[id] ?? verdict;
+      }
+    }
     onDecide(verdict, finalNote, finalTaskApprovals);
   };
 
@@ -106,10 +136,10 @@ export function ApprovalBanner({
     setTaskApprovals((prev) => ({ ...prev, [taskId]: verdict }));
   };
 
-  const handleApproveAll = () => {
+  const handleSetAll = (verdict: "APPROVED" | "REJECTED") => {
     if (!pendingTaskIds) return;
     const all: Record<string, string> = {};
-    for (const id of pendingTaskIds) all[id] = "APPROVED";
+    for (const id of pendingTaskIds) all[id] = verdict;
     setTaskApprovals(all);
   };
 
@@ -137,34 +167,34 @@ export function ApprovalBanner({
 
       {/* Metadata chips */}
       <div className="mb-3 flex flex-wrap gap-2 text-xs">
-        {pausedAt && (
+        {isValidDate(pausedAt) && (
           <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
             <Clock className="h-3 w-3" aria-hidden="true" />
             {t("hitl.pausedAt", "Paused")}:{" "}
             {new Intl.DateTimeFormat(undefined, {
               dateStyle: "short",
               timeStyle: "medium",
-            }).format(new Date(pausedAt))}
+            }).format(new Date(pausedAt!))}
           </span>
         )}
         {timeoutPolicy && timeoutPolicy !== "WAIT_INDEFINITELY" && (
           <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
             <AlertTriangle className="h-3 w-3" aria-hidden="true" />
-            {TIMEOUT_LABELS[timeoutPolicy] || timeoutPolicy}
+            {timeoutPolicyLabel(t, timeoutPolicy)}
             {approvalTimeout && ` (${formatDuration(approvalTimeout)})`}
           </span>
         )}
         {timeRemaining && (
           <span className={cn(
             "inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-medium",
-            timeRemaining === "Overdue"
+            timeRemaining.overdue
               ? "bg-destructive/10 text-destructive"
               : "bg-amber-500/10 text-amber-600",
           )}>
             <Clock className="h-3 w-3" aria-hidden="true" />
-            {timeRemaining === "Overdue"
+            {timeRemaining.overdue
               ? t("hitl.overdue", "Overdue")
-              : `${t("hitl.timeRemaining", "Remaining")}: ${timeRemaining}`}
+              : `${t("hitl.timeRemaining", "Remaining")}: ${formatRemaining(timeRemaining.ms)}`}
           </span>
         )}
         {pausedPhaseName && (
@@ -174,7 +204,7 @@ export function ApprovalBanner({
         )}
         {granularity && (
           <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
-            {t("hitl.granularity", "Granularity")}: {granularity}
+            {t("hitl.granularity", "Granularity")}: {granularityLabel(t, granularity)}
           </span>
         )}
       </div>
@@ -186,14 +216,24 @@ export function ApprovalBanner({
             <p className="text-xs font-medium text-muted-foreground">
               {t("hitl.taskApprovals", "Task Approvals")}
             </p>
-            <button
-              type="button"
-              onClick={handleApproveAll}
-              className="text-xs text-amber-600 hover:text-amber-500 transition-colors"
-              data-testid="approve-all-tasks"
-            >
-              {t("hitl.approveAll", "Approve All")}
-            </button>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => handleSetAll("APPROVED")}
+                className="text-xs text-emerald-600 hover:text-emerald-500 transition-colors"
+                data-testid="approve-all-tasks"
+              >
+                {t("hitl.approveAll", "Approve All")}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetAll("REJECTED")}
+                className="text-xs text-destructive hover:text-destructive/80 transition-colors"
+                data-testid="reject-all-tasks"
+              >
+                {t("hitl.rejectAll", "Reject All")}
+              </button>
+            </div>
           </div>
           <div className="space-y-1.5">
             {pendingTaskIds.map((taskId) => (
@@ -205,6 +245,8 @@ export function ApprovalBanner({
                 <div className="flex gap-1">
                   <button
                     type="button"
+                    aria-pressed={taskApprovals[taskId] === "APPROVED"}
+                    aria-label={`${t("hitl.approve", "Approve")} — ${taskId}`}
                     onClick={() => handleTaskToggle(taskId, "APPROVED")}
                     className={cn(
                       "rounded-md px-2 py-0.5 text-xs transition-colors",
@@ -218,6 +260,8 @@ export function ApprovalBanner({
                   </button>
                   <button
                     type="button"
+                    aria-pressed={taskApprovals[taskId] === "REJECTED"}
+                    aria-label={`${t("hitl.reject", "Reject")} — ${taskId}`}
                     onClick={() => handleTaskToggle(taskId, "REJECTED")}
                     className={cn(
                       "rounded-md px-2 py-0.5 text-xs transition-colors",
@@ -254,6 +298,7 @@ export function ApprovalBanner({
           <textarea
             value={note}
             onChange={(e) => setNote(e.target.value)}
+            aria-label={t("hitl.note", "Add note (optional)")}
             placeholder={t("hitl.notePlaceholder", "Add a note for the decision...")}
             className="mt-2 w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             rows={2}

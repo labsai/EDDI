@@ -28,6 +28,7 @@ import { ErrorState } from "@/components/shared/error-state";
 import { cn } from "@/lib/utils";
 import { getErrorMessage } from "@/lib/api-client";
 import { STYLE_INFO, type DiscussionStyle, type AgentGroupConfiguration } from "@/lib/api/groups";
+import type { HitlVerdict } from "@/lib/api/hitl";
 import { STYLE_THEME } from "@/components/groups/discussion-transcript";
 import { safeFormatDate } from "@/components/groups/group-utils";
 
@@ -80,25 +81,89 @@ export function GroupDetailPage() {
   } = useGroupConversation(groupId || "", selectedConvId || "");
 
   // SSE streaming hook
-  const { streamState, startStream, abortStream } = useGroupDiscussionStream();
+  const { streamState, startStream, approveAndStream, abortStream } = useGroupDiscussionStream();
 
   const deleteConvMutation = useDeleteGroupConversation();
   const cancelDiscussionMutation = useCancelGroupDiscussion();
 
-  // Auto-select the first conversation if none selected and not streaming
+  // Track an in-flight HITL decision so we can toast on the ACTUAL outcome
+  // (hitl_resume ack / FAILED) rather than optimistically.
+  const pendingDecisionRef = useRef<HitlVerdict | null>(null);
+
+  // Auto-select the first conversation on load — but never override the
+  // conversation the stream is driving (its settle effect handles selection).
   useEffect(() => {
-    if (!selectedConvId && !streamState.isStreaming && conversations && conversations.length > 0) {
+    if (
+      !selectedConvId &&
+      !streamState.isStreaming &&
+      !streamState.conversationId &&
+      conversations &&
+      conversations.length > 0
+    ) {
       setSelectedConvId(conversations[0]!.id);
     }
-  }, [conversations, selectedConvId, streamState.isStreaming]);
+  }, [conversations, selectedConvId, streamState.isStreaming, streamState.conversationId]);
 
   const handleStartDiscussion = useCallback((question: string) => {
     if (!groupId) return;
+    pendingDecisionRef.current = null; // abandon any un-acked prior decision
     // Clear the selected conversation so we show the stream instead
     setSelectedConvId(null);
     startStream(groupId, question);
     toast.success(t("groups.discussionStarted", "Discussion started — streaming live"));
   }, [groupId, startStream, t]);
+
+  // Approve/reject a paused group discussion. Resumes over the approve/stream
+  // SSE endpoint so the continued discussion renders live in the transcript.
+  const handleApproveDiscussion = useCallback(
+    (gcId: string, verdict: HitlVerdict, note?: string, taskApprovals?: Record<string, string>) => {
+      if (!groupId) return;
+      // Feedback is driven off the resume outcome (see effect below), not fired
+      // optimistically — the resume can fail (409 stale, 400 invalid decision).
+      pendingDecisionRef.current = verdict;
+      setSelectedConvId(null); // switch the transcript to the live resumed stream
+      approveAndStream(groupId, gcId, { decision: { verdict, note }, taskApprovals });
+    },
+    [groupId, approveAndStream],
+  );
+
+  // Toast the decision outcome once the resumed stream confirms (hitl_resume) or
+  // fails (FAILED). approveAndStream never rejects, so we cannot use .catch/.then.
+  useEffect(() => {
+    const verdict = pendingDecisionRef.current;
+    if (!verdict) return;
+    if (streamState.hitlResume) {
+      toast.success(
+        verdict === "APPROVED" ? t("hitl.approved", "Approved") : t("hitl.rejected", "Rejected"),
+      );
+      // The conversation left AWAITING_APPROVAL — clear it from the cross-group
+      // Approvals inbox now (mirrors the cancel path) rather than waiting for the poll.
+      queryClient.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
+      pendingDecisionRef.current = null;
+    } else if (streamState.state === "FAILED") {
+      toast.error(streamState.error || t("common.error", "Something went wrong"));
+      pendingDecisionRef.current = null;
+    }
+  }, [streamState.hitlResume, streamState.state, streamState.error, queryClient, t]);
+
+  const handleCancelDiscussion = useCallback(
+    (gcId: string) => {
+      if (!groupId) return;
+      cancelDiscussionMutation.mutate(
+        { groupId, gcId },
+        {
+          onSuccess: () => {
+            toast.success(t("hitl.discussionCancelled", "Discussion cancelled"));
+            queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
+          },
+          onError: (err) => {
+            toast.error(getErrorMessage(err));
+          },
+        },
+      );
+    },
+    [groupId, cancelDiscussionMutation, queryClient, t],
+  );
 
   // Invalidate conversation list when stream starts (so the new entry appears in sidebar)
   // AND when it completes (so the state updates to COMPLETED)
@@ -106,12 +171,19 @@ export function GroupDetailPage() {
     if (
       streamState.conversationId &&
       groupId &&
-      (streamState.state === "IN_PROGRESS" || streamState.state === "COMPLETED")
+      (streamState.state === "IN_PROGRESS" ||
+        streamState.state === "COMPLETED" ||
+        streamState.state === "AWAITING_APPROVAL")
     ) {
       queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
     }
-    // Auto-select the completed conversation
-    if (streamState.state === "COMPLETED" && streamState.conversationId) {
+    // When the stream settles (completed) or pauses (awaiting approval), switch
+    // the transcript to the persisted conversation so it shows the full pause
+    // metadata (pausedAt, timeout policy/countdown, per-task awaiting list).
+    if (
+      (streamState.state === "COMPLETED" || streamState.state === "AWAITING_APPROVAL") &&
+      streamState.conversationId
+    ) {
       setSelectedConvId(streamState.conversationId);
     }
   }, [streamState.state, streamState.conversationId, groupId, queryClient]);
@@ -131,6 +203,7 @@ export function GroupDetailPage() {
 
   function handleSelectConversation(convId: string) {
     if (streamState.isStreaming) abortStream();
+    pendingDecisionRef.current = null; // abandon any un-acked prior decision
     setSelectedConvId(convId);
     setHistoryOpen(false);
   }
@@ -164,6 +237,16 @@ export function GroupDetailPage() {
 
   // Determine whether to show streaming or static transcript
   const isStreamActive = streamState.isStreaming || (streamState.state !== "CREATED" && !selectedConvId);
+
+  // On a live pause/complete the settle effect switches to the persisted
+  // conversation, whose detail may not be cached yet. Keep showing the live
+  // streamState (banner from hitlPause) instead of a loading skeleton until the
+  // persisted conversation has loaded — avoids a flash at the decision moment.
+  const showStreamFallback =
+    !isStreamActive &&
+    convLoading &&
+    streamState.state !== "CREATED" &&
+    selectedConvId === streamState.conversationId;
 
   const conversationCount = conversations?.length ?? 0;
 
@@ -240,19 +323,7 @@ export function GroupDetailPage() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (!groupId) return;
-                      cancelDiscussionMutation.mutate(
-                        { groupId, conversationId: conv.id },
-                        {
-                          onSuccess: () => {
-                            toast.success(t("hitl.discussionCancelled", "Discussion cancelled"));
-                            queryClient.invalidateQueries({ queryKey: ["groupConversations", groupId] });
-                          },
-                          onError: (err) => {
-                            toast.error(getErrorMessage(err));
-                          },
-                        },
-                      );
+                      handleCancelDiscussion(conv.id);
                     }}
                     className="opacity-0 group-hover/item:opacity-100 rounded p-0.5 text-muted-foreground hover:text-destructive transition-all"
                     title={t("hitl.cancelDiscussion", "Cancel discussion")}
@@ -395,10 +466,13 @@ export function GroupDetailPage() {
           <div className="flex-1 min-h-0 overflow-hidden">
             <DiscussionTranscript
               conversation={isStreamActive ? null : (selectedConversation ?? null)}
-              streamState={isStreamActive ? streamState : undefined}
-              isLoading={convLoading && !!selectedConvId}
+              streamState={isStreamActive || showStreamFallback ? streamState : undefined}
+              isLoading={convLoading && !!selectedConvId && !showStreamFallback}
               discussionStyle={groupConfig.style as DiscussionStyle}
               preConfiguredTasks={groupConfig.tasks}
+              onApprove={handleApproveDiscussion}
+              onCancelDiscussion={handleCancelDiscussion}
+              isDeciding={cancelDiscussionMutation.isPending}
             />
           </div>
           {/* Input always at the bottom of the transcript panel */}

@@ -183,6 +183,9 @@ describe("DiscussionTranscript", () => {
       taskVerifications: new Map(),
       tasksInProgress: new Set(),
       tasksCompleted: new Set(),
+      hitlPause: null,
+      hitlResume: null,
+      cancelInfo: null,
     };
 
     renderWithProviders(
@@ -217,6 +220,9 @@ describe("DiscussionTranscript", () => {
       taskVerifications: new Map(),
       tasksInProgress: new Set(),
       tasksCompleted: new Set(),
+      hitlPause: null,
+      hitlResume: null,
+      cancelInfo: null,
     };
 
     renderWithProviders(

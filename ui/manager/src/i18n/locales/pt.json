@@ -136,7 +136,10 @@
     "saving": "A guardar…",
     "showMore": "Show More",
     "showLess": "Show Less",
-    "copyFailed": "Falha ao copiar para a área de transferência"
+    "copyFailed": "Falha ao copiar para a área de transferência",
+    "loadError": "Falha ao carregar os dados",
+    "actions": "Ações",
+    "view": "Ver"
   },
   "agents": {
     "deploy": "Implementar",
@@ -234,7 +237,16 @@
     "slackStep2": "Copie o token do bot (xoxb-…) e o segredo de assinatura para o vault do EDDI e configure os canais abaixo.",
     "slackStep3": "Em seguida, ative Event Subscriptions no seu app Slack, cole a URL do webhook acima e inscreva-se em:",
     "slackSetupNote": "Importante: Configure o canal abaixo antes de ativar Event Subscriptions — o Slack envia um desafio de verificação de URL que requer que o segredo de assinatura esteja configurado no EDDI.",
-    "slackRequiredScopes": "Permissões de token do bot necessárias"
+    "slackRequiredScopes": "Permissões de token do bot necessárias",
+    "hitlConfig": "Human-in-the-Loop",
+    "hitlConfigDesc": "Quando este agente pausa uma conversa para aprovação humana, estas configurações controlam quanto tempo esperar e o que acontece se não houver decisão a tempo.",
+    "hitlEnable": "Configurar tempos limite de aprovação humana",
+    "hitlTimeoutPolicy": "Se não houver decisão a tempo",
+    "hitlApprovalTimeout": "Tempo limite de aprovação (ISO-8601)",
+    "hitlTimeoutInvalid": "Uma política finita precisa de uma duração ISO-8601 positiva, por exemplo PT15M.",
+    "hitlTimeoutHint": "por exemplo PT30S, PT15M, PT2H.",
+    "hitlPauseReason": "Motivo da aprovação (visível para os aprovadores)",
+    "hitlPauseReasonPlaceholder": "ex.: A exclusão requer aprovação do gerente"
   },
   "wizard": {
     "title": "Assistente de Agent"
@@ -1499,7 +1511,10 @@
     "hideDiscussions": "Ocultar painel de discussões",
     "showDiscussions": "Mostrar painel de discussões",
     "hideConfig": "Ocultar painel de configuração",
-    "showConfig": "Mostrar painel de configuração"
+    "showConfig": "Mostrar painel de configuração",
+    "hitlSection": "Aprovação humana",
+    "hitlApprovalPoints": "Aprovação em",
+    "hitlOnTaskRejection": "Ao rejeitar"
   },
   "taskBoard": {
     "title": "Quadro de tarefas",
@@ -1779,7 +1794,21 @@
     "hintTaskForce": "O moderador cria um plano de tarefas, atribui trabalho aos agentes em paralelo, depois verifica e sintetiza os resultados.",
     "hintCustom": "Defina suas próprias fases manualmente. Fases personalizadas podem ser configuradas via API após a criação.",
     "hintRoundTable": "Todos os membros compartilham suas opiniões, depois discutem os pontos de vista uns dos outros em várias rodadas antes que o moderador sintetize.",
-    "protocolSummary": "Protocolo"
+    "protocolSummary": "Protocolo",
+    "hitlTitle": "Exigir aprovação humana",
+    "hitlDesc": "Pausar a discussão nas fases escolhidas e aguardar uma decisão humana antes de continuar.",
+    "hitlApprovalPoints": "Pausar para aprovação em",
+    "hitlNoPhases": "Este estilo não tem fases predefinidas para controlar.",
+    "hitlNoApprovalPoints": "Selecione pelo menos uma fase, ou a discussão nunca pausará.",
+    "hitlTimeoutPolicy": "Se não houver decisão a tempo",
+    "hitlApprovalTimeout": "Tempo limite de aprovação",
+    "hitlTimeoutInvalid": "Insira uma duração ISO-8601 positiva, por exemplo PT15M ou PT1H30M.",
+    "hitlTimeoutHint": "Duração ISO-8601, por exemplo PT30S, PT15M, PT2H.",
+    "hitlGranularity": "Granularidade de aprovação",
+    "hitlGranularityHint": "A aprovação por tarefa aplica-se à execução TASK_FORCE — aprove ou rejeite cada tarefa individualmente.",
+    "hitlOnTaskRejection": "Quando uma tarefa é rejeitada",
+    "hitlPinNote": "Ativar pontos de aprovação fixa as fases de discussão deste grupo (granularidade {{granularity}}).",
+    "hitlReviewBadge": "Aprovação humana"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
@@ -1916,6 +1945,18 @@
     "taskApprovals": "Aprovações de tarefas",
     "approveAll": "Aprovar tudo",
     "note": "Adicionar nota (opcional)",
-    "notePlaceholder": "Adicionar uma nota para a decisão..."
+    "notePlaceholder": "Adicionar uma nota para a decisão...",
+    "discussionCancelled": "Discussão cancelada",
+    "cancelDiscussion": "Cancelar discussão",
+    "rejectAll": "Rejeitar tudo",
+    "timeoutWaitIndefinitely": "Aguardar indefinidamente",
+    "timeoutAutoApprove": "Auto-aprovar",
+    "timeoutAutoReject": "Auto-rejeitar",
+    "timeoutAbort": "Abortar",
+    "granularityPhase": "Fase",
+    "granularityTask": "Tarefa",
+    "rejectionFail": "Falhar a tarefa",
+    "rejectionRetry": "Repetir a tarefa",
+    "groupsTruncated": "Existem mais aprovações de grupo do que as mostradas aqui."
   }
 }

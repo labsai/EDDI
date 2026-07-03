@@ -123,6 +123,26 @@ describe("TaskBoard", () => {
   });
 
   // ------------------------------------------------------------------
+  //  3b. Awaiting-approval outranks completed (HITL TASK pause)
+  // ------------------------------------------------------------------
+  it("buckets a completed-but-gated task into Awaiting Approval, not Done", () => {
+    const tasks = [makeTask("t1", "Gated task", "Agent A", 0)];
+    renderWithProviders(
+      <TaskBoard
+        {...defaultProps()}
+        taskPlan={tasks}
+        tasksCompleted={new Set(["t1"])}
+        tasksAwaitingApproval={new Set(["t1"])}
+      />,
+    );
+
+    const awaitingCol = screen.getByTestId("task-column-awaiting-approval");
+    expect(within(awaitingCol).getByTestId("task-card-t1")).toBeInTheDocument();
+    const doneCol = screen.getByTestId("task-column-completed");
+    expect(within(doneCol).queryByTestId("task-card-t1")).not.toBeInTheDocument();
+  });
+
+  // ------------------------------------------------------------------
   //  4. Streaming indicator visible when isStreaming=true
   // ------------------------------------------------------------------
   it("shows streaming indicator when isStreaming is true", () => {

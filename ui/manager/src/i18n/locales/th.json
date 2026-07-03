@@ -136,7 +136,10 @@
     "saving": "กำลังบันทึก…",
     "showMore": "Show More",
     "showLess": "Show Less",
-    "copyFailed": "คัดลอกไปยังคลิปบอร์ดล้มเหลว"
+    "copyFailed": "คัดลอกไปยังคลิปบอร์ดล้มเหลว",
+    "loadError": "โหลดข้อมูลไม่สำเร็จ",
+    "actions": "การดำเนินการ",
+    "view": "ดู"
   },
   "agents": {
     "deploy": "ติดตั้ง (Deploy)",
@@ -234,7 +237,16 @@
     "slackStep2": "คัดลอกโทเค็นบอท (xoxb-…) และซีเคร็ตลายเซ็นไปยัง vault ของ EDDI แล้วกำหนดค่าช่องด้านล่าง",
     "slackStep3": "จากนั้นเปิดใช้งาน Event Subscriptions ในแอป Slack วาง URL Webhook ด้านบนแล้วสมัครรับ:",
     "slackSetupNote": "สำคัญ: กำหนดค่าช่องด้านล่างก่อนเปิดใช้งาน Event Subscriptions — Slack จะส่งคำท้าทายการตรวจสอบ URL ที่ต้องกำหนดค่าซีเคร็ตลายเซ็นใน EDDI",
-    "slackRequiredScopes": "สิทธิ์โทเค็นบอทที่จำเป็น"
+    "slackRequiredScopes": "สิทธิ์โทเค็นบอทที่จำเป็น",
+    "hitlConfig": "Human-in-the-Loop",
+    "hitlConfigDesc": "เมื่อเอเจนต์นี้หยุดการสนทนาเพื่อขออนุมัติจากมนุษย์ การตั้งค่าเหล่านี้จะควบคุมระยะเวลารอและสิ่งที่จะเกิดขึ้นหากไม่มีการตัดสินใจในเวลาที่กำหนด",
+    "hitlEnable": "กำหนดค่าการหมดเวลาการอนุมัติจากมนุษย์",
+    "hitlTimeoutPolicy": "หากไม่มีการตัดสินใจในเวลาที่กำหนด",
+    "hitlApprovalTimeout": "หมดเวลาการอนุมัติ (ISO-8601)",
+    "hitlTimeoutInvalid": "นโยบายแบบจำกัดต้องมีระยะเวลา ISO-8601 ที่เป็นบวก เช่น PT15M",
+    "hitlTimeoutHint": "เช่น PT30S, PT15M, PT2H",
+    "hitlPauseReason": "เหตุผลการอนุมัติ (แสดงต่อผู้อนุมัติ)",
+    "hitlPauseReasonPlaceholder": "เช่น การลบต้องได้รับการอนุมัติจากผู้จัดการ"
   },
   "wizard": {
     "title": "ตัวช่วยสร้าง Agent"
@@ -1499,7 +1511,10 @@
     "hideDiscussions": "ซ่อนแผงการสนทนา",
     "showDiscussions": "แสดงแผงการสนทนา",
     "hideConfig": "ซ่อนแผงการกำหนดค่า",
-    "showConfig": "แสดงแผงการกำหนดค่า"
+    "showConfig": "แสดงแผงการกำหนดค่า",
+    "hitlSection": "การอนุมัติจากมนุษย์",
+    "hitlApprovalPoints": "อนุมัติที่",
+    "hitlOnTaskRejection": "เมื่อปฏิเสธ"
   },
   "taskBoard": {
     "title": "บอร์ดงาน",
@@ -1779,7 +1794,21 @@
     "hintTaskForce": "ผู้ดำเนินรายการสร้างแผนงาน มอบหมายงานให้เอเจนต์แบบขนาน จากนั้นตรวจสอบและสังเคราะห์ผลลัพธ์",
     "hintCustom": "กำหนดเฟสของคุณเองด้วยตนเอง เฟสที่กำหนดเองสามารถตั้งค่าผ่าน API หลังจากสร้าง",
     "hintRoundTable": "สมาชิกทุกคนแบ่งปันความเห็น จากนั้นอภิปรายมุมมองของกันและกันหลายรอบก่อนที่ผู้ดำเนินรายการจะสังเคราะห์",
-    "protocolSummary": "โปรโตคอล"
+    "protocolSummary": "โปรโตคอล",
+    "hitlTitle": "ต้องได้รับการอนุมัติจากมนุษย์",
+    "hitlDesc": "หยุดการสนทนาชั่วคราวที่เฟสที่เลือกและรอการตัดสินใจจากมนุษย์ก่อนดำเนินการต่อ",
+    "hitlApprovalPoints": "หยุดเพื่อขออนุมัติที่",
+    "hitlNoPhases": "รูปแบบนี้ไม่มีเฟสที่กำหนดไว้ล่วงหน้าให้ควบคุม",
+    "hitlNoApprovalPoints": "เลือกอย่างน้อยหนึ่งเฟส มิฉะนั้นการสนทนาจะไม่หยุดเลย",
+    "hitlTimeoutPolicy": "หากไม่มีการตัดสินใจในเวลาที่กำหนด",
+    "hitlApprovalTimeout": "หมดเวลาการอนุมัติ",
+    "hitlTimeoutInvalid": "ป้อนระยะเวลา ISO-8601 ที่เป็นบวก เช่น PT15M หรือ PT1H30M",
+    "hitlTimeoutHint": "ระยะเวลา ISO-8601 เช่น PT30S, PT15M, PT2H",
+    "hitlGranularity": "ระดับการอนุมัติ",
+    "hitlGranularityHint": "การอนุมัติระดับงานใช้กับการดำเนินการ TASK_FORCE — อนุมัติหรือปฏิเสธแต่ละงานทีละงาน",
+    "hitlOnTaskRejection": "เมื่องานถูกปฏิเสธ",
+    "hitlPinNote": "การเปิดใช้จุดอนุมัติจะตรึงเฟสการสนทนาของกลุ่มนี้ (ระดับ {{granularity}})",
+    "hitlReviewBadge": "การอนุมัติจากมนุษย์"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
@@ -1916,6 +1945,18 @@
     "taskApprovals": "การอนุมัติงาน",
     "approveAll": "อนุมัติทั้งหมด",
     "note": "เพิ่มหมายเหตุ (ไม่บังคับ)",
-    "notePlaceholder": "เพิ่มหมายเหตุสำหรับการตัดสินใจ..."
+    "notePlaceholder": "เพิ่มหมายเหตุสำหรับการตัดสินใจ...",
+    "discussionCancelled": "ยกเลิกการสนทนาแล้ว",
+    "cancelDiscussion": "ยกเลิกการสนทนา",
+    "rejectAll": "ปฏิเสธทั้งหมด",
+    "timeoutWaitIndefinitely": "รอไม่มีกำหนด",
+    "timeoutAutoApprove": "อนุมัติอัตโนมัติ",
+    "timeoutAutoReject": "ปฏิเสธอัตโนมัติ",
+    "timeoutAbort": "ยกเลิก",
+    "granularityPhase": "เฟส",
+    "granularityTask": "งาน",
+    "rejectionFail": "ทำให้งานล้มเหลว",
+    "rejectionRetry": "ลองทำงานใหม่",
+    "groupsTruncated": "มีการอนุมัติกลุ่มมากกว่าที่แสดงที่นี่"
   }
 }

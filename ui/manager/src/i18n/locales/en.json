@@ -136,7 +136,10 @@
     "saving": "Saving...",
     "showMore": "Show more",
     "showLess": "Show less",
-    "copyFailed": "Failed to copy to clipboard"
+    "copyFailed": "Failed to copy to clipboard",
+    "loadError": "Failed to load data",
+    "actions": "Actions",
+    "view": "View"
   },
   "createOrWizard": {
     "title": "New {{type}}",
@@ -261,7 +264,16 @@
     "slackStep2": "Copy the Bot Token (xoxb-…) and Signing Secret into the EDDI vault and configure channels below.",
     "slackStep3": "Then enable Event Subscriptions in your Slack App, paste the Webhook URL above, and subscribe to:",
     "slackSetupNote": "Important: Configure the channel below before enabling Event Subscriptions — Slack sends a URL verification challenge that requires the signing secret to be configured in EDDI.",
-    "slackRequiredScopes": "Required Bot Token Scopes"
+    "slackRequiredScopes": "Required Bot Token Scopes",
+    "hitlConfig": "Human-in-the-Loop",
+    "hitlConfigDesc": "When this agent pauses a conversation for human approval, these settings control how long to wait and what happens if no decision is made in time.",
+    "hitlEnable": "Configure human-approval timeouts",
+    "hitlTimeoutPolicy": "If no decision in time",
+    "hitlApprovalTimeout": "Approval timeout (ISO-8601)",
+    "hitlTimeoutInvalid": "A finite policy needs a positive ISO-8601 duration, e.g. PT15M.",
+    "hitlTimeoutHint": "e.g. PT30S, PT15M, PT2H.",
+    "hitlPauseReason": "Approval reason (shown to approvers)",
+    "hitlPauseReasonPlaceholder": "e.g. Deletion requires manager sign-off"
   },
   "wizard": {
     "title": "Agent Wizard"
@@ -1541,7 +1553,10 @@
     "hideDiscussions": "Hide discussions panel",
     "showDiscussions": "Show discussions panel",
     "hideConfig": "Hide config panel",
-    "showConfig": "Show config panel"
+    "showConfig": "Show config panel",
+    "hitlSection": "Human Approval",
+    "hitlApprovalPoints": "Approval at",
+    "hitlOnTaskRejection": "On rejection"
   },
   "taskBoard": {
     "title": "Task Board",
@@ -1637,7 +1652,21 @@
     "hintTaskForce": "The moderator creates a task plan, assigns work to agents in parallel, then verifies and synthesizes the results.",
     "hintCustom": "Define your own phases manually. Custom phases can be configured via the API after creation.",
     "hintRoundTable": "All members share their opinions, then discuss each other's views across multiple rounds before the moderator synthesizes.",
-    "protocolSummary": "Protocol"
+    "protocolSummary": "Protocol",
+    "hitlTitle": "Require human approval",
+    "hitlDesc": "Pause the discussion at chosen phases and wait for a human decision before continuing.",
+    "hitlApprovalPoints": "Pause for approval at",
+    "hitlNoPhases": "This style has no preset phases to gate.",
+    "hitlNoApprovalPoints": "Select at least one phase, or the discussion will never pause.",
+    "hitlTimeoutPolicy": "If no decision in time",
+    "hitlApprovalTimeout": "Approval timeout",
+    "hitlTimeoutInvalid": "Enter a positive ISO-8601 duration, e.g. PT15M or PT1H30M.",
+    "hitlTimeoutHint": "ISO-8601 duration, e.g. PT30S, PT15M, PT2H.",
+    "hitlGranularity": "Approval granularity",
+    "hitlGranularityHint": "Task-level approval applies to TASK_FORCE execution — approve or reject each task individually.",
+    "hitlOnTaskRejection": "When a task is rejected",
+    "hitlPinNote": "Enabling approval points fixes this group's discussion phases ({{granularity}} granularity).",
+    "hitlReviewBadge": "Human approval"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
@@ -1945,6 +1974,18 @@
     "taskApprovals": "Task Approvals",
     "approveAll": "Approve All",
     "note": "Add note (optional)",
-    "notePlaceholder": "Add a note for the decision..."
+    "notePlaceholder": "Add a note for the decision...",
+    "discussionCancelled": "Discussion cancelled",
+    "cancelDiscussion": "Cancel discussion",
+    "rejectAll": "Reject All",
+    "timeoutWaitIndefinitely": "Wait Indefinitely",
+    "timeoutAutoApprove": "Auto-Approve",
+    "timeoutAutoReject": "Auto-Reject",
+    "timeoutAbort": "Abort",
+    "granularityPhase": "Phase",
+    "granularityTask": "Task",
+    "rejectionFail": "Fail the task",
+    "rejectionRetry": "Retry the task",
+    "groupsTruncated": "More group approvals exist than are shown here."
   }
 }

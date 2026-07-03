@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/test-utils";
 import { GroupWizardPage } from "@/pages/group-wizard";
@@ -7,6 +7,63 @@ import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 describe("GroupWizardPage", () => {
+  describe("HITL configuration", () => {
+    it("enabling human approval reveals phase gates with one sensible default", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<GroupWizardPage />, { initialRoute: "/manage/groups/wizard" });
+      await user.click(screen.getByTestId("template-blank"));
+
+      // Off by default — no phase list, no policy.
+      expect(screen.queryByTestId("gw-hitl-phases")).not.toBeInTheDocument();
+
+      await user.click(screen.getByTestId("gw-hitl-enable"));
+
+      const phasesBox = screen.getByTestId("gw-hitl-phases");
+      // ROUND_TABLE @ 2 rounds: Initial Opinions, Discussion, Synthesis.
+      const checks = within(phasesBox).getAllByRole("checkbox");
+      expect(checks).toHaveLength(3);
+      expect(checks.filter((c) => (c as HTMLInputElement).checked)).toHaveLength(1);
+      expect(screen.getByTestId("gw-hitl-policy")).toBeInTheDocument();
+    });
+
+    it("a finite timeout policy requires a valid duration before proceeding", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<GroupWizardPage />, { initialRoute: "/manage/groups/wizard" });
+      await user.click(screen.getByTestId("template-blank"));
+      await user.type(screen.getByTestId("gw-name"), "Approvals Group");
+      await user.click(screen.getByTestId("gw-hitl-enable"));
+
+      // Default policy WAIT_INDEFINITELY + one gate → valid.
+      expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
+      expect(screen.queryByTestId("gw-hitl-timeout")).not.toBeInTheDocument();
+
+      // A finite policy needs an approvalTimeout — Next blocks until one is valid.
+      await user.selectOptions(screen.getByTestId("gw-hitl-policy"), "AUTO_REJECT");
+      expect(screen.getByTestId("gw-hitl-timeout")).toBeInTheDocument();
+      expect(screen.getByTestId("group-wizard-next")).toBeDisabled();
+
+      await user.type(screen.getByTestId("gw-hitl-timeout"), "PT15M");
+      expect(screen.getByTestId("group-wizard-next")).not.toBeDisabled();
+    });
+
+    it("granularity control only shows for TASK_FORCE, and TASK reveals on-rejection", async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<GroupWizardPage />, { initialRoute: "/manage/groups/wizard" });
+      await user.click(screen.getByTestId("template-blank"));
+      await user.click(screen.getByTestId("gw-hitl-enable"));
+
+      // ROUND_TABLE (default) has no task phase → no granularity control.
+      expect(screen.queryByTestId("gw-hitl-granularity")).not.toBeInTheDocument();
+
+      // Switch to TASK_FORCE → granularity appears; picking TASK reveals on-rejection.
+      await user.click(screen.getByTestId("gw-style-TASK_FORCE"));
+      expect(screen.getByTestId("gw-hitl-granularity")).toBeInTheDocument();
+      expect(screen.queryByTestId("gw-hitl-rejection")).not.toBeInTheDocument();
+      await user.selectOptions(screen.getByTestId("gw-hitl-granularity"), "TASK");
+      expect(screen.getByTestId("gw-hitl-rejection")).toBeInTheDocument();
+    });
+  });
+
   it("renders wizard heading and step indicator", () => {
     renderWithProviders(<GroupWizardPage />, {
       initialRoute: "/manage/groups/wizard",

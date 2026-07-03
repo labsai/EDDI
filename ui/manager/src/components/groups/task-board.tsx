@@ -73,8 +73,10 @@ function deriveStatus(
   tasksAwaitingApproval?: Set<string>,
 ): TaskStatus {
   if (taskVerifications.has(taskId)) return "verified";
-  if (tasksCompleted.has(taskId)) return "completed";
+  // A task awaiting human approval must surface in the Awaiting Approval column
+  // even though it has already "completed" execution (both sets contain it).
   if (tasksAwaitingApproval?.has(taskId)) return "awaiting-approval";
+  if (tasksCompleted.has(taskId)) return "completed";
   if (tasksInProgress.has(taskId)) return "in-progress";
   return "pending";
 }

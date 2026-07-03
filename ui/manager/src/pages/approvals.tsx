@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   HandMetal,
   CheckCircle2,
@@ -15,24 +16,42 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
-import { usePendingApprovals, useResumeConversation, useCancelConversation } from "@/hooks/use-hitl";
+import {
+  usePendingApprovals,
+  useAllGroupPendingApprovals,
+  useResumeConversation,
+  useCancelConversation,
+} from "@/hooks/use-hitl";
+import { timeoutPolicyLabel } from "@/lib/hitl-labels";
 import type { PendingApprovalSummary, HitlVerdict } from "@/lib/api/hitl";
-
-const TIMEOUT_LABELS: Record<string, string> = {
-  WAIT_INDEFINITELY: "Wait Indefinitely",
-  AUTO_APPROVE: "Auto-Approve",
-  AUTO_REJECT: "Auto-Reject",
-  ABORT: "Abort",
-};
 
 export function ApprovalsPage() {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
-  const { data: approvals, isLoading, isError, refetch } = usePendingApprovals();
+  const queryClient = useQueryClient();
+  const { data: regular, isLoading, isError, refetch } = usePendingApprovals();
+  const { data: groupPendings, truncated: groupsTruncated } = useAllGroupPendingApprovals();
   const resumeMutation = useResumeConversation();
   const cancelMutation = useCancelConversation();
 
-  const filtered = (approvals ?? []).filter((a) => {
+  // Merge 1:1 (regular) and group-surface pendings into one queue. The regular
+  // /agents/pending-approvals endpoint never carries a groupId, so group items
+  // come from the backend's single cross-group GET /groups/pending-approvals.
+  const approvals = useMemo(() => {
+    const seen = new Set<string>();
+    return [...(regular ?? []), ...(groupPendings ?? [])].filter((a) => {
+      if (seen.has(a.conversationId)) return false;
+      seen.add(a.conversationId);
+      return true;
+    });
+  }, [regular, groupPendings]);
+
+  const handleRefresh = () => {
+    refetch();
+    queryClient.invalidateQueries({ queryKey: ["all-group-pending-approvals"] });
+  };
+
+  const filtered = approvals.filter((a) => {
     if (!search) return true;
     const q = search.toLowerCase();
     return (
@@ -96,7 +115,7 @@ export function ApprovalsPage() {
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-8 text-center">
           <AlertTriangle className="mx-auto h-8 w-8 text-destructive" />
           <p className="mt-2 text-destructive">{t("common.loadError", "Failed to load data")}</p>
-          <button onClick={() => refetch()} className="mt-3 text-sm text-primary hover:underline">
+          <button onClick={handleRefresh} className="mt-3 text-sm text-primary hover:underline">
             {t("common.retry", "Retry")}
           </button>
         </div>
@@ -130,7 +149,7 @@ export function ApprovalsPage() {
             />
           </div>
           <button
-            onClick={() => refetch()}
+            onClick={handleRefresh}
             className="inline-flex items-center gap-1.5 rounded-lg border border-input bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors"
             data-testid="refresh-approvals"
           >
@@ -140,7 +159,7 @@ export function ApprovalsPage() {
       </div>
 
       {/* Queue count badge */}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <span className={cn(
           "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium",
           filtered.length > 0
@@ -153,6 +172,12 @@ export function ApprovalsPage() {
             <><CheckCircle2 className="h-4 w-4" /> {t("hitl.emptyQueue", "No pending approvals")}</>
           )}
         </span>
+        {groupsTruncated && (
+          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" data-testid="approvals-truncated">
+            <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+            {t("hitl.groupsTruncated", "More group approvals exist than are shown here.")}
+          </span>
+        )}
       </div>
 
       {/* Empty state */}
@@ -218,7 +243,7 @@ export function ApprovalsPage() {
                   </td>
                   <td className="px-4 py-3">
                     <span className="text-xs text-muted-foreground">
-                      {TIMEOUT_LABELS[item.timeoutPolicy || ""] || item.timeoutPolicy || "—"}
+                      {timeoutPolicyLabel(t, item.timeoutPolicy) || "—"}
                     </span>
                   </td>
                   <td className="px-4 py-3">
@@ -227,7 +252,7 @@ export function ApprovalsPage() {
                         <>
                           <button
                             onClick={() => handleQuickAction(item, "APPROVED")}
-                            disabled={resumeMutation.isPending}
+                            disabled={resumeMutation.isPending && resumeMutation.variables?.conversationId === item.conversationId}
                             className="rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-500 transition-colors disabled:opacity-50"
                             data-testid={`approve-${item.conversationId}`}
                           >
@@ -235,7 +260,7 @@ export function ApprovalsPage() {
                           </button>
                           <button
                             onClick={() => handleQuickAction(item, "REJECTED")}
-                            disabled={resumeMutation.isPending}
+                            disabled={resumeMutation.isPending && resumeMutation.variables?.conversationId === item.conversationId}
                             className="rounded-md bg-destructive px-2.5 py-1 text-xs font-medium text-destructive-foreground hover:bg-destructive/90 transition-colors disabled:opacity-50"
                             data-testid={`reject-${item.conversationId}`}
                           >
@@ -243,7 +268,7 @@ export function ApprovalsPage() {
                           </button>
                           <button
                             onClick={() => handleCancel(item)}
-                            disabled={cancelMutation.isPending}
+                            disabled={cancelMutation.isPending && cancelMutation.variables === item.conversationId}
                             className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
                             data-testid={`cancel-${item.conversationId}`}
                           >

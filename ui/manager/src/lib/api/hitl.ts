@@ -52,6 +52,9 @@ export interface AgentHitlConfig {
   /** ISO-8601 duration (e.g., "PT15M"), null = indefinite. */
   approvalTimeout?: string | null;
   timeoutPolicy?: HitlTimeoutPolicy;
+  /** Designer-supplied reason shown to approvers in pending-approval listings
+   *  and approval-status (e.g. "Deletion requires manager sign-off"). */
+  pauseReason?: string | null;
 }
 
 /** Group-level HITL configuration (extends agent-level with granularity). */
@@ -123,6 +126,12 @@ export function cancelConversation(
 // ── Group discussion HITL API ─────────────────────────────────────
 
 /** Approve or reject a paused group discussion phase.
+ *
+ *  The manager UI resumes group discussions via the streaming variant
+ *  (`streamGroupApproval` in `lib/api/groups.ts`, `POST .../approve/stream`),
+ *  which submits the decision AND streams the resumed progress on one
+ *  connection. This non-streaming binding is kept for programmatic callers that
+ *  only need the decision submitted.
  *  POST /groups/{groupId}/conversations/{gcId}/approve */
 export function approveGroupPhase(
   groupId: string,
@@ -147,14 +156,14 @@ export function getGroupApprovalStatus(
   );
 }
 
-/** List this group's conversations currently awaiting human approval.
- *  GET /groups/{groupId}/conversations/pending-approvals */
-export function listGroupPendingApprovals(
-  groupId: string,
-  limit = 100,
+/** Cross-group HITL inbox: group conversations awaiting approval across ALL
+ *  groups, in one request (backend answers this natively — no per-group fan-out).
+ *  GET /groups/pending-approvals */
+export function listAllGroupPendingApprovals(
+  limit = 200,
 ): Promise<PendingApprovalSummary[]> {
   return api.get<PendingApprovalSummary[]>(
-    `/groups/${groupId}/conversations/pending-approvals?limit=${limit}`,
+    `/groups/pending-approvals?limit=${limit}`,
   );
 }
 

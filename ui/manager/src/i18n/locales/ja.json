@@ -136,7 +136,10 @@
     "saving": "保存中…",
     "showMore": "Show More",
     "showLess": "Show Less",
-    "copyFailed": "クリップボードへのコピーに失敗しました"
+    "copyFailed": "クリップボードへのコピーに失敗しました",
+    "loadError": "データの読み込みに失敗しました",
+    "actions": "操作",
+    "view": "表示"
   },
   "agents": {
     "deploy": "デプロイ",
@@ -234,7 +237,16 @@
     "slackStep2": "ボットトークン（xoxb-…）と署名シークレットをEDDI Vaultにコピーし、以下でチャネルを設定します。",
     "slackStep3": "次にSlackアプリでEvent Subscriptionsを有効にし、上記のWebhook URLを貼り付けて、以下を購読します：",
     "slackSetupNote": "重要：Event Subscriptionsを有効にする前に、下のチャネルを設定してください — SlackはURL検証チャレンジを送信し、EDDIで署名シークレットが設定されている必要があります。",
-    "slackRequiredScopes": "必要なボットトークンスコープ"
+    "slackRequiredScopes": "必要なボットトークンスコープ",
+    "hitlConfig": "ヒューマン・イン・ザ・ループ",
+    "hitlConfigDesc": "このエージェントが人間の承認のために会話を一時停止するとき、これらの設定で待機時間と、時間内に判断がない場合の動作を制御します。",
+    "hitlEnable": "人間承認のタイムアウトを設定",
+    "hitlTimeoutPolicy": "時間内に判断がない場合",
+    "hitlApprovalTimeout": "承認タイムアウト（ISO-8601）",
+    "hitlTimeoutInvalid": "有限のポリシーには正の ISO-8601 期間が必要です（例: PT15M）。",
+    "hitlTimeoutHint": "例: PT30S、PT15M、PT2H。",
+    "hitlPauseReason": "承認理由（承認者に表示）",
+    "hitlPauseReasonPlaceholder": "例: 削除にはマネージャーの承認が必要です"
   },
   "wizard": {
     "title": "Agent ウィザード"
@@ -1499,7 +1511,10 @@
     "hideDiscussions": "ディスカッションパネルを非表示",
     "showDiscussions": "ディスカッションパネルを表示",
     "hideConfig": "設定パネルを非表示",
-    "showConfig": "設定パネルを表示"
+    "showConfig": "設定パネルを表示",
+    "hitlSection": "人間の承認",
+    "hitlApprovalPoints": "承認箇所",
+    "hitlOnTaskRejection": "却下時"
   },
   "taskBoard": {
     "title": "タスクボード",
@@ -1779,7 +1794,21 @@
     "hintTaskForce": "モデレーターがタスク計画を作成し、エージェントに並列で作業を割り当て、結果を検証・統合します。",
     "hintCustom": "独自のフェーズを手動で定義します。カスタムフェーズは作成後にAPIで設定できます。",
     "hintRoundTable": "全メンバーが意見を共有し、複数ラウンドにわたって互いの見解を議論した後、モデレーターが統合します。",
-    "protocolSummary": "プロトコル"
+    "protocolSummary": "プロトコル",
+    "hitlTitle": "人間の承認を必須にする",
+    "hitlDesc": "選択したフェーズでディスカッションを一時停止し、続行する前に人間の判断を待ちます。",
+    "hitlApprovalPoints": "承認のため一時停止する箇所",
+    "hitlNoPhases": "このスタイルには制御できる既定フェーズがありません。",
+    "hitlNoApprovalPoints": "少なくとも1つのフェーズを選択してください。そうしないと一時停止しません。",
+    "hitlTimeoutPolicy": "時間内に判断がない場合",
+    "hitlApprovalTimeout": "承認タイムアウト",
+    "hitlTimeoutInvalid": "正の ISO-8601 期間を入力してください（例: PT15M、PT1H30M）。",
+    "hitlTimeoutHint": "ISO-8601 期間（例: PT30S、PT15M、PT2H）。",
+    "hitlGranularity": "承認の粒度",
+    "hitlGranularityHint": "タスク単位の承認は TASK_FORCE の実行に適用されます。各タスクを個別に承認または却下します。",
+    "hitlOnTaskRejection": "タスクが却下されたとき",
+    "hitlPinNote": "承認ポイントを有効にすると、このグループのディスカッションフェーズが固定されます（{{granularity}} 粒度）。",
+    "hitlReviewBadge": "人間の承認"
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",
@@ -1916,6 +1945,18 @@
     "taskApprovals": "タスク承認",
     "approveAll": "すべて承認",
     "note": "メモを追加（任意）",
-    "notePlaceholder": "決定のメモを追加..."
+    "notePlaceholder": "決定のメモを追加...",
+    "discussionCancelled": "ディスカッションをキャンセルしました",
+    "cancelDiscussion": "ディスカッションをキャンセル",
+    "rejectAll": "すべて却下",
+    "timeoutWaitIndefinitely": "無期限で待機",
+    "timeoutAutoApprove": "自動承認",
+    "timeoutAutoReject": "自動却下",
+    "timeoutAbort": "中止",
+    "granularityPhase": "フェーズ",
+    "granularityTask": "タスク",
+    "rejectionFail": "タスクを失敗にする",
+    "rejectionRetry": "タスクを再試行する",
+    "groupsTruncated": "ここに表示されているよりも多くのグループ承認があります。"
   }
 }

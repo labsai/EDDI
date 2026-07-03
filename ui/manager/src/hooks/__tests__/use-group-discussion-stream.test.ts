@@ -3,18 +3,21 @@ import { renderHook, act } from "@testing-library/react";
 import { useGroupDiscussionStream } from "@/hooks/use-group-discussion-stream";
 
 const mockStreamGroupDiscussion = vi.fn();
+const mockStreamGroupApproval = vi.fn();
 
 vi.mock("@/lib/api/groups", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/api/groups")>();
   return {
     ...original,
     streamGroupDiscussion: (...args: unknown[]) => mockStreamGroupDiscussion(...args),
+    streamGroupApproval: (...args: unknown[]) => mockStreamGroupApproval(...args),
   };
 });
 
 describe("useGroupDiscussionStream", () => {
   beforeEach(() => {
     mockStreamGroupDiscussion.mockReset();
+    mockStreamGroupApproval.mockReset();
   });
 
   it("returns initial state", () => {
@@ -379,5 +382,134 @@ describe("useGroupDiscussionStream", () => {
 
     expect(result.current.streamState.tasksInProgress.size).toBe(0);
     expect(result.current.streamState.tasksCompleted.size).toBe(0);
+  });
+
+  // ── HITL: pause / resume / cancel ──
+
+  it("pauses on awaiting_approval and records the pause", async () => {
+    async function* mockEvents() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-hitl-1", question: "Approve?" }) };
+      yield { type: "phase_start", data: JSON.stringify({ phaseIndex: 1, phaseName: "Execute", phaseType: "EXECUTE" }) };
+      yield { type: "awaiting_approval", data: JSON.stringify({ phaseIndex: 1, phaseName: "Execute", reason: "Needs sign-off", granularity: "PHASE" }) };
+    }
+    mockStreamGroupDiscussion.mockReturnValue(mockEvents());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+    await act(async () => {
+      await result.current.startStream("group-1", "Approve?");
+    });
+
+    expect(result.current.streamState.state).toBe("AWAITING_APPROVAL");
+    expect(result.current.streamState.isStreaming).toBe(false);
+    expect(result.current.streamState.hitlPause).toEqual({
+      phaseIndex: 1,
+      phaseName: "Execute",
+      reason: "Needs sign-off",
+      granularity: "PHASE",
+    });
+  });
+
+  it("handles cancelled event", async () => {
+    async function* mockEvents() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-hitl-2", question: "Cancel?" }) };
+      yield { type: "cancelled", data: JSON.stringify({ reason: "User aborted", cancelledBy: "manager-user" }) };
+    }
+    mockStreamGroupDiscussion.mockReturnValue(mockEvents());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+    await act(async () => {
+      await result.current.startStream("group-1", "Cancel?");
+    });
+
+    expect(result.current.streamState.state).toBe("CANCELLED");
+    expect(result.current.streamState.isStreaming).toBe(false);
+    expect(result.current.streamState.cancelInfo).toEqual({ reason: "User aborted", cancelledBy: "manager-user" });
+  });
+
+  it("approveAndStream submits the decision and streams the resumed discussion", async () => {
+    async function* paused() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "conv-hitl-3", question: "Q" }) };
+      yield { type: "speaker_complete", data: JSON.stringify({ agentId: "a1", displayName: "Alpha", phaseIndex: 0, response: "Pre-pause answer" }) };
+      yield { type: "awaiting_approval", data: JSON.stringify({ phaseIndex: 0, phaseName: "Opinion", reason: "r", granularity: "PHASE" }) };
+    }
+    async function* resumed() {
+      yield { type: "hitl_resume", data: JSON.stringify({ verdict: "APPROVED", decidedBy: "manager-user" }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "Final" }) };
+    }
+    mockStreamGroupDiscussion.mockReturnValue(paused());
+    mockStreamGroupApproval.mockReturnValue(resumed());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+    await act(async () => {
+      await result.current.startStream("group-1", "Q");
+    });
+    expect(result.current.streamState.state).toBe("AWAITING_APPROVAL");
+    const transcriptLenBefore = result.current.streamState.transcript.length;
+
+    await act(async () => {
+      await result.current.approveAndStream("group-1", "conv-hitl-3", { decision: { verdict: "APPROVED" } });
+    });
+
+    expect(mockStreamGroupApproval).toHaveBeenCalledWith(
+      "group-1",
+      "conv-hitl-3",
+      { decision: { verdict: "APPROVED" } },
+      expect.anything(),
+    );
+    expect(result.current.streamState.state).toBe("COMPLETED");
+    expect(result.current.streamState.synthesizedAnswer).toBe("Final");
+    expect(result.current.streamState.hitlResume).toEqual({ verdict: "APPROVED", note: undefined, decidedBy: "manager-user" });
+    expect(result.current.streamState.hitlPause).toBeNull();
+    // Transcript accrued before the pause is preserved across the resume.
+    expect(result.current.streamState.transcript.length).toBeGreaterThanOrEqual(transcriptLenBefore);
+  });
+
+  it("promotes a member_pause_skipped turn to a SKIPPED entry carrying the reason", async () => {
+    async function* mockEvents() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "c1", question: "Q" }) };
+      yield { type: "phase_start", data: JSON.stringify({ phaseIndex: 0, phaseName: "Opinion", phaseType: "OPINION" }) };
+      yield { type: "speaker_start", data: JSON.stringify({ agentId: "a1", displayName: "Alpha", phaseIndex: 0, phaseName: "Opinion" }) };
+      yield { type: "member_pause_skipped", data: JSON.stringify({ agentId: "a1", displayName: "Alpha", phaseIndex: 0, phaseName: "Opinion", reason: "Member paused — unsupported in a group" }) };
+      yield { type: "speaker_complete", data: JSON.stringify({ agentId: "a1", displayName: "Alpha", phaseIndex: 0, response: null }) };
+      yield { type: "group_complete", data: JSON.stringify({ synthesizedAnswer: "Done" }) };
+    }
+    mockStreamGroupDiscussion.mockReturnValue(mockEvents());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+    await act(async () => {
+      await result.current.startStream("g", "Q");
+    });
+
+    const entry = result.current.streamState.transcript.find((e) => e.speakerAgentId === "a1");
+    expect(entry?.type).toBe("SKIPPED");
+    expect(entry?.errorReason).toBe("Member paused — unsupported in a group");
+    expect(result.current.streamState.activeSpeakers.has("a1")).toBe(false);
+  });
+
+  it("surfaces an in-band 'error' event (approve/stream rejection) as FAILED", async () => {
+    async function* paused() {
+      yield { type: "group_start", data: JSON.stringify({ groupConversationId: "c1", question: "Q" }) };
+      yield { type: "awaiting_approval", data: JSON.stringify({ phaseIndex: 0, phaseName: "P", reason: "r", granularity: "PHASE" }) };
+    }
+    // The approve/stream endpoint emits event name "error" (not "group_error")
+    // for expected rejections like a concurrent/duplicate decision (409).
+    async function* rejected() {
+      yield { type: "error", data: JSON.stringify({ error: "Concurrent modification" }) };
+    }
+    mockStreamGroupDiscussion.mockReturnValue(paused());
+    mockStreamGroupApproval.mockReturnValue(rejected());
+
+    const { result } = renderHook(() => useGroupDiscussionStream());
+    await act(async () => {
+      await result.current.startStream("g", "Q");
+    });
+    await act(async () => {
+      await result.current.approveAndStream("g", "c1", { decision: { verdict: "APPROVED" } });
+    });
+
+    expect(result.current.streamState.state).toBe("FAILED");
+    expect(result.current.streamState.error).toBe("Concurrent modification");
+    expect(result.current.streamState.isStreaming).toBe(false);
+    expect(result.current.streamState.hitlResume).toBeNull();
   });
 });

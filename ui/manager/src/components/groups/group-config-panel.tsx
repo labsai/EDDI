@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2 } from "lucide-react";
+import { Users, Settings2, ArrowRight, Trash2, AlertTriangle, RefreshCw, ClipboardList, Bot, Link2, HandMetal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import type { AgentGroupConfiguration, DiscussionStyle, DiscussionPhase } from "@/lib/api/groups";
 import { STYLE_INFO } from "@/lib/api/groups";
+import { timeoutPolicyLabel, granularityLabel, rejectionPolicyLabel } from "@/lib/hitl-labels";
 import { toast } from "sonner";
 import { useDeleteGroup, useDeleteGroupWithMembers } from "@/hooks/use-groups";
 import { useNavigate } from "react-router-dom";
@@ -47,6 +48,10 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<"group" | "all" | null>(null);
   const deleteGroupMutation = useDeleteGroup();
   const deleteWithMembersMutation = useDeleteGroupWithMembers();
+
+  const hitl = config.hitlConfig;
+  const approvalPhaseNames = (config.phases ?? []).filter((p) => p.requiresApproval).map((p) => p.name);
+  const hasHitl = !!hitl || approvalPhaseNames.length > 0;
 
   function handleDeleteGroupOnly() {
     if (!groupId || groupVersion == null) return;
@@ -180,6 +185,45 @@ export function GroupConfigPanel({ config, groupId, groupVersion, className }: G
             <InfoRow label={t("groups.protocolMaxRounds", "Max Rounds")} value={String(config.maxRounds)} />
             {config.protocol.maxTurns != null && config.protocol.maxTurns > 0 && (
               <InfoRow label={t("groups.protocolMaxTurns", "Max Turns")} value={String(config.protocol.maxTurns)} />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Human-in-the-Loop approval */}
+      {hasHitl && (
+        <div>
+          <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+            <HandMetal className="inline h-3 w-3 me-1" />
+            {t("groups.hitlSection", "Human Approval")}
+          </h4>
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-1">
+            {approvalPhaseNames.length > 0 && (
+              <InfoRow
+                label={t("groups.hitlApprovalPoints", "Approval at")}
+                value={approvalPhaseNames.join(", ")}
+              />
+            )}
+            {hitl?.timeoutPolicy && (
+              <InfoRow
+                label={t("hitl.timeoutPolicy", "Timeout")}
+                value={
+                  timeoutPolicyLabel(t, hitl.timeoutPolicy) +
+                  (hitl.approvalTimeout ? ` (${hitl.approvalTimeout})` : "")
+                }
+              />
+            )}
+            {hitl?.granularity && (
+              <InfoRow
+                label={t("hitl.granularity", "Granularity")}
+                value={granularityLabel(t, hitl.granularity)}
+              />
+            )}
+            {hitl?.granularity === "TASK" && hitl?.onTaskRejection && (
+              <InfoRow
+                label={t("groups.hitlOnTaskRejection", "On rejection")}
+                value={rejectionPolicyLabel(t, hitl.onTaskRejection)}
+              />
             )}
           </div>
         </div>
