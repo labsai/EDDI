@@ -8,7 +8,9 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.api.IRestGroupConversation.AttachmentRef;
 import ai.labs.eddi.engine.api.IRestGroupConversation.DiscussRequest;
+import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -17,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -76,6 +79,40 @@ class RestGroupConversationTest {
 
             assertEquals(201, response.getStatus());
             verify(groupService).discuss("group-1", "Hello", "anonymous", 0);
+        }
+
+        @Test
+        @DisplayName("routes inline attachments through the attachment-aware overload")
+        @SuppressWarnings("unchecked")
+        void discussWithAttachments() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-3");
+            when(groupService.discuss(eq("group-1"), eq("Q"), eq("user-1"), eq(0), isNull(), anyList()))
+                    .thenReturn(gc);
+
+            var req = new DiscussRequest("Q", "user-1",
+                    List.of(new AttachmentRef("image/png", "aGVsbG8=", null, "a.png")));
+            Response response = restGroupConversation.discuss("group-1", req);
+
+            assertEquals(201, response.getStatus());
+            ArgumentCaptor<List<Attachment>> captor = ArgumentCaptor.forClass(List.class);
+            verify(groupService).discuss(eq("group-1"), eq("Q"), eq("user-1"), eq(0), isNull(), captor.capture());
+            assertEquals(1, captor.getValue().size());
+            assertEquals("aGVsbG8=", captor.getValue().get(0).getBase64Data());
+            assertEquals("image/png", captor.getValue().get(0).getMimeType());
+            verify(groupService, never()).discuss("group-1", "Q", "user-1", 0);
+        }
+
+        @Test
+        @DisplayName("empty attachments use the plain overload")
+        void discussWithEmptyAttachments() throws Exception {
+            var gc = new GroupConversation();
+            gc.setId("gc-4");
+            when(groupService.discuss("group-1", "Q", "user-1", 0)).thenReturn(gc);
+
+            restGroupConversation.discuss("group-1", new DiscussRequest("Q", "user-1", List.of()));
+
+            verify(groupService).discuss("group-1", "Q", "user-1", 0);
         }
 
         @Test

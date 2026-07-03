@@ -5,6 +5,28 @@
 
 ---
 
+## 📎 Multimodal Attachments Completion — Phase 3: Group parity (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 3 of 6).
+
+### What changed
+
+- **`DiscussRequest` carries attachments** — `IRestGroupConversation.DiscussRequest` gains an optional `List<AttachmentRef> attachments` (`AttachmentRef = {mimeType, data, url, fileName}`) plus a two-argument compat constructor, so existing JSON clients and call sites are unaffected. `IGroupConversationService.discuss(...)` and `startAndDiscussAsync(...)` gain attachment-carrying overloads (default methods → real impl overrides).
+- **Materialize + bind at fan-out** — `GroupConversationService.materializeAttachments` stores inline base64 files in `IAttachmentStore` **bound to the group conversation id** (so they can be granted and reaped with it) and passes hosted `url` refs through, stashing the result on the (transient) `GroupConversation.attachments`.
+- **Grant + inject per member** — on each member's **first** turn, `grantAndInjectAttachments` calls `IAttachmentStore.grantAccess(storageRef, memberConversationId)` (the only place grants are minted — trusted server code, D2) and injects `attachment_*` context into the member's `InputData`. Stored refs are granted; URL refs are forwarded without a grant. Later phases rely on the Phase-2 extract-stitching and the Phase-4 `readAttachment` tool. Nested groups receive the parent's attachments and re-grant down the chain.
+- **REST routing** — `RestGroupConversation` converts `AttachmentRef → Attachment` and routes through the attachment overload only when attachments are present (so the no-attachment path — and its existing mock-based tests — is untouched).
+
+### Design note
+
+Group members run in their **own** conversations, so strict per-conversation ownership would block them from reading a group-uploaded blob — grants are exactly the primitive that makes this safe without opening cross-conversation access generally. Transport is JSON inline (base64/url); a multipart file-part variant of the endpoint is a thin follow-up (the capability and service path are complete).
+
+### Tests
+
+7 service tests (materialize base64/url/no-store/empty; grant+inject stored-ref/url/grant-failure/none) + 2 REST routing tests (attachment overload vs plain). Group ITs (member observes content, grant-before-turn, nested) stay CI-only.
+
+---
+
 ## 📎 Multimodal Attachments Completion — Phase 4: readAttachment tool (2026-07-03)
 
 **Repo:** EDDI (`feat/multimodal-attachments-completion`)

@@ -38,6 +38,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
@@ -88,6 +89,11 @@ public class GroupConversationService implements IGroupConversationService {
     private final IAgentStore agentStore;
     private final NonceCacheService nonceCacheService;
     private final String defaultTenantId;
+
+    // Field-injected so the direct-construction unit tests stay unchanged; used to
+    // materialize and share discussion attachments with member conversations.
+    @jakarta.inject.Inject
+    ai.labs.eddi.engine.attachments.IAttachmentStore attachmentStore;
 
     // Incremental peer verification: tracks the last verified transcript index
     // per group conversation ID, so we only verify new entries each turn (O(N)
@@ -147,6 +153,13 @@ public class GroupConversationService implements IGroupConversationService {
     @Override
     public GroupConversation discuss(String groupId, String question, String userId, int depth, GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return discuss(groupId, question, userId, depth, listener, null);
+    }
+
+    @Override
+    public GroupConversation discuss(String groupId, String question, String userId, int depth,
+                                     GroupDiscussionEventListener listener, List<Attachment> attachments)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         if (depth > maxDepth) {
             throw new GroupDepthExceededException("Maximum group discussion depth (%d) exceeded".formatted(maxDepth));
@@ -173,11 +186,19 @@ public class GroupConversationService implements IGroupConversationService {
         }
 
         GroupConversation gc = createGroupConversation(groupId, question, userId, depth);
+        materializeAttachments(gc, attachments);
         return executeDiscussion(gc, config, phases, question, listener);
     }
 
     @Override
     public GroupConversation startAndDiscussAsync(String groupId, String question, String userId, GroupDiscussionEventListener listener)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return startAndDiscussAsync(groupId, question, userId, listener, null);
+    }
+
+    @Override
+    public GroupConversation startAndDiscussAsync(String groupId, String question, String userId,
+                                                  GroupDiscussionEventListener listener, List<Attachment> attachments)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         if (groupId == null) {
@@ -201,6 +222,7 @@ public class GroupConversationService implements IGroupConversationService {
 
         // Create the conversation synchronously so we can return its ID
         GroupConversation gc = createGroupConversation(groupId, question, userId, 0);
+        materializeAttachments(gc, attachments);
 
         // Run the discussion in a virtual thread — reuse the same gc (no duplicate
         // creation)
@@ -216,6 +238,84 @@ public class GroupConversationService implements IGroupConversationService {
         });
 
         return gc;
+    }
+
+    /**
+     * Materialize discussion attachments and bind them to the group conversation.
+     * Inline base64 files are stored in the blob store owned by {@code gc.getId()}
+     * (so they can be granted to members and reaped with the conversation); hosted
+     * {@code url} references and pre-stored {@code storageRef}s pass through. The
+     * resulting list is stashed on the {@link GroupConversation} for fan-out.
+     */
+    void materializeAttachments(GroupConversation gc, List<Attachment> incoming) {
+        if (incoming == null || incoming.isEmpty()) {
+            return;
+        }
+        if (attachmentStore == null) {
+            LOGGER.warn("Group attachments were provided but no attachment store is configured; ignoring them.");
+            return;
+        }
+        List<Attachment> materialized = new ArrayList<>();
+        for (Attachment a : incoming) {
+            try {
+                if (a.getBase64Data() != null && !a.getBase64Data().isBlank()) {
+                    byte[] bytes = Base64.getDecoder().decode(a.getBase64Data());
+                    var stored = attachmentStore.store(bytes, a.getMimeType(), a.getFileName(), gc.getId(), defaultTenantId);
+                    materialized.add(new Attachment(stored.mimeType(), stored.filename(), stored.sizeBytes(), stored.storageRef()));
+                } else if (a.getUrl() != null && !a.getUrl().isBlank()) {
+                    materialized.add(a);
+                } else if (a.getStorageRef() != null && !a.getStorageRef().isBlank()) {
+                    materialized.add(a);
+                }
+            } catch (Exception e) {
+                LOGGER.warnf("Failed to materialize group attachment '%s': %s", a.getFileName(), e.getMessage());
+            }
+        }
+        if (!materialized.isEmpty()) {
+            gc.setAttachments(materialized);
+            LOGGER.infof("Group conversation '%s' has %d shared attachment(s)", gc.getId(), materialized.size());
+        }
+    }
+
+    /**
+     * Grant a member conversation access to the group's stored attachments and
+     * inject them as {@code attachment_*} context on the member's first turn. URL
+     * references are forwarded as-is (no grant needed).
+     */
+    void grantAndInjectAttachments(GroupConversation gc, String memberConvId, Map<String, Context> context) {
+        List<Attachment> atts = gc.getAttachments();
+        if (atts == null || atts.isEmpty()) {
+            return;
+        }
+        int index = 0;
+        for (Attachment a : atts) {
+            Map<String, Object> value = new LinkedHashMap<>();
+            if (a.getStorageRef() != null) {
+                if (attachmentStore != null) {
+                    try {
+                        attachmentStore.grantAccess(a.getStorageRef(), memberConvId);
+                    } catch (Exception e) {
+                        LOGGER.warnf("Failed to grant attachment '%s' to member conversation '%s': %s",
+                                a.getStorageRef(), memberConvId, e.getMessage());
+                        continue;
+                    }
+                }
+                value.put("storageRef", a.getStorageRef());
+                if (a.getFileName() != null) {
+                    value.put("fileName", a.getFileName());
+                }
+            } else if (a.getUrl() != null) {
+                value.put("mimeType", a.getMimeType());
+                value.put("url", a.getUrl());
+                if (a.getFileName() != null) {
+                    value.put("fileName", a.getFileName());
+                }
+            } else {
+                continue;
+            }
+            context.put("attachment_" + index, new Context(Context.ContextType.object, value));
+            index++;
+        }
     }
 
     /**
@@ -1267,6 +1367,7 @@ public class GroupConversationService implements IGroupConversationService {
 
         // Get or create private conversation
         String privateConvId = gc.getMemberConversationIds().get(member.agentId());
+        boolean firstMemberTurn = privateConvId == null;
         if (privateConvId == null) {
             try {
                 Map<String, Context> groupContext = new LinkedHashMap<>();
@@ -1296,6 +1397,13 @@ public class GroupConversationService implements IGroupConversationService {
         // AgentOrchestrator can enforce caps, allowed providers/models, etc.
         if (gc.getDynamicAgentConfig() != null) {
             context.put("dynamicAgentConfig", new Context(Context.ContextType.object, gc.getDynamicAgentConfig()));
+        }
+
+        // Share discussion attachments with this member on its first turn: grant the
+        // member conversation access to group-owned blobs and inject attachment_*.
+        // Later phases rely on extraction-in-history and the readAttachment tool.
+        if (firstMemberTurn) {
+            grantAndInjectAttachments(gc, privateConvId, context);
         }
 
         // Wave 6: Peer verification — if the receiving agent requires it,
@@ -1674,7 +1782,9 @@ public class GroupConversationService implements IGroupConversationService {
 
             LOGGER.infof("Executing sub-group '%s' (depth %d) as member of parent group '%s'", subGroupId, nextDepth, gc.getGroupId());
 
-            GroupConversation subConversation = discuss(subGroupId, input, gc.getUserId(), nextDepth);
+            // Propagate the parent's attachments to the nested group so its members
+            // receive them too (each nested member conversation is granted in turn).
+            GroupConversation subConversation = discuss(subGroupId, input, gc.getUserId(), nextDepth, null, gc.getAttachments());
 
             // Extract the synthesized answer, or concatenate all responses
             String response = subConversation.getSynthesizedAnswer();

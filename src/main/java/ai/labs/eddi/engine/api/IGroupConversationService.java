@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.api;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.engine.memory.model.Attachment;
 
 import java.util.List;
 
@@ -41,6 +42,17 @@ public interface IGroupConversationService {
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     /**
+     * Start a group discussion with event callbacks, sharing {@code attachments}
+     * with every member agent (stored bound to the group conversation, members
+     * granted access). {@code attachments} may be null/empty.
+     */
+    default GroupConversation discuss(String groupId, String question, String userId, int depth,
+                                      GroupDiscussionEventListener listener, List<Attachment> attachments)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return discuss(groupId, question, userId, depth, listener);
+    }
+
+    /**
      * Start a group discussion asynchronously. Creates the GroupConversation record
      * synchronously (so the caller gets the ID), then runs phases in a background
      * virtual thread. Progress is emitted via the listener.
@@ -49,6 +61,16 @@ public interface IGroupConversationService {
      */
     GroupConversation startAndDiscussAsync(String groupId, String question, String userId, GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+
+    /**
+     * Async variant sharing {@code attachments} with every member agent.
+     * {@code attachments} may be null/empty.
+     */
+    default GroupConversation startAndDiscussAsync(String groupId, String question, String userId,
+                                                   GroupDiscussionEventListener listener, List<Attachment> attachments)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return startAndDiscussAsync(groupId, question, userId, listener);
+    }
 
     /**
      * Read a group conversation transcript.

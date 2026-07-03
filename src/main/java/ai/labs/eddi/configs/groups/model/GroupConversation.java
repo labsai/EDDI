@@ -52,6 +52,16 @@ public class GroupConversation {
     private transient AgentGroupConfiguration.DynamicAgentConfig dynamicAgentConfig;
 
     /**
+     * Transient attachments for this discussion. Set at fan-out by
+     * {@code GroupConversationService} — inline files are materialized into the
+     * blob store (owned by this group conversation) and each member conversation is
+     * granted access. Not persisted to the transcript document; the blobs live in
+     * {@code IAttachmentStore} bound to this conversation's id.
+     */
+    @JsonIgnore
+    private transient List<ai.labs.eddi.engine.memory.model.Attachment> attachments;
+
+    /**
      * A single entry in the discussion transcript. Each entry records one agent's
      * contribution during a specific phase.
      *
@@ -295,5 +305,14 @@ public class GroupConversation {
 
     public void setDynamicAgentConfig(AgentGroupConfiguration.DynamicAgentConfig dynamicAgentConfig) {
         this.dynamicAgentConfig = dynamicAgentConfig;
+    }
+
+    @JsonIgnore
+    public List<ai.labs.eddi.engine.memory.model.Attachment> getAttachments() {
+        return attachments;
+    }
+
+    public void setAttachments(List<ai.labs.eddi.engine.memory.model.Attachment> attachments) {
+        this.attachments = attachments;
     }
 }

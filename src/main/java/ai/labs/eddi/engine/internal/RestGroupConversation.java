@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -22,6 +23,7 @@ import jakarta.ws.rs.sse.SseEventSink;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -58,7 +60,10 @@ public class RestGroupConversation implements IRestGroupConversation {
             String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
             if (userId == null || userId.isBlank())
                 userId = "anonymous";
-            GroupConversation gc = groupConversationService.discuss(groupId, request.question(), userId, 0);
+            List<Attachment> attachments = toAttachments(request.attachments());
+            GroupConversation gc = attachments == null
+                    ? groupConversationService.discuss(groupId, request.question(), userId, 0)
+                    : groupConversationService.discuss(groupId, request.question(), userId, 0, null, attachments);
             URI location = URI.create("/groups/" + groupId + "/conversations/" + gc.getId());
             return Response.created(location).entity(gc).build();
         } catch (IGroupConversationService.GroupDepthExceededException e) {
@@ -132,7 +137,12 @@ public class RestGroupConversation implements IRestGroupConversation {
                 }
             };
 
-            groupConversationService.startAndDiscussAsync(groupId, request.question(), userId, listener);
+            List<Attachment> attachments = toAttachments(request.attachments());
+            if (attachments == null) {
+                groupConversationService.startAndDiscussAsync(groupId, request.question(), userId, listener);
+            } else {
+                groupConversationService.startAndDiscussAsync(groupId, request.question(), userId, listener, attachments);
+            }
 
         } catch (IResourceStore.ResourceNotFoundException e) {
             sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
@@ -144,6 +154,34 @@ public class RestGroupConversation implements IRestGroupConversation {
                     toJson(new GroupConversationEventSink.GroupErrorEvent(e.getMessage())));
             closeQuietly(eventSink);
         }
+    }
+
+    /**
+     * Convert request-level attachment refs into the memory model carrier the
+     * service materializes. Refs without inline data or a url are skipped.
+     */
+    private static List<Attachment> toAttachments(List<AttachmentRef> refs) {
+        if (refs == null || refs.isEmpty()) {
+            return null;
+        }
+        List<Attachment> out = new ArrayList<>();
+        for (AttachmentRef r : refs) {
+            if (r == null) {
+                continue;
+            }
+            Attachment a = new Attachment();
+            a.setMimeType(r.mimeType());
+            a.setFileName(r.fileName());
+            if (r.data() != null && !r.data().isBlank()) {
+                a.setBase64Data(r.data());
+            } else if (r.url() != null && !r.url().isBlank()) {
+                a.setUrl(r.url());
+            } else {
+                continue;
+            }
+            out.add(a);
+        }
+        return out.isEmpty() ? null : out;
     }
 
     @Override
