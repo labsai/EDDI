@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
+import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -70,9 +71,14 @@ class RestAgentEngineHitlTest {
         doReturn(principal).when(identity).getPrincipal();
         doReturn(USER_ID).when(principal).getName();
 
+        // Real guard wired with the same mocks — the HITL ownership check and the
+        // owner-scoped listing now live here, so every assertion below still exercises
+        // that logic end-to-end through the delegating REST endpoint.
+        var hitlAccessGuard = new HitlAccessGuard(
+                identity, ownershipValidator, conversationDescriptorStore, conversationService);
         restAgentEngine = new RestAgentEngine(
                 conversationService, conversationDescriptorStore,
-                identity, ownershipValidator, AGENT_TIMEOUT);
+                identity, ownershipValidator, hitlAccessGuard, AGENT_TIMEOUT);
     }
 
     // =========================================================================

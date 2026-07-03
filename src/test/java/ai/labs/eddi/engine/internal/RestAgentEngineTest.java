@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
+import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -55,7 +56,8 @@ class RestAgentEngineTest {
         // Default: descriptor not found → ownership check skipped gracefully
         when(descriptorStore.readDescriptor(anyString(), anyInt()))
                 .thenThrow(new ResourceNotFoundException("test default"));
-        restAgentEngine = new RestAgentEngine(conversationService, descriptorStore, identity, ownershipValidator, 30);
+        var hitlAccessGuard = new HitlAccessGuard(identity, ownershipValidator, descriptorStore, conversationService);
+        restAgentEngine = new RestAgentEngine(conversationService, descriptorStore, identity, ownershipValidator, hitlAccessGuard, 30);
     }
 
     @Nested

@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
+import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
@@ -56,6 +57,7 @@ public class RestAgentEngine implements IRestAgentEngine {
     private final IConversationDescriptorStore conversationDescriptorStore;
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
+    private final HitlAccessGuard hitlAccessGuard;
     private final int agentTimeout;
 
     private static final Logger LOGGER = Logger.getLogger(RestAgentEngine.class);
@@ -65,11 +67,13 @@ public class RestAgentEngine implements IRestAgentEngine {
             IConversationDescriptorStore conversationDescriptorStore,
             SecurityIdentity identity,
             OwnershipValidator ownershipValidator,
+            HitlAccessGuard hitlAccessGuard,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.conversationService = conversationService;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
+        this.hitlAccessGuard = hitlAccessGuard;
         this.agentTimeout = agentTimeout;
     }
 
@@ -397,22 +401,10 @@ public class RestAgentEngine implements IRestAgentEngine {
     public List<PendingApprovalSummary> listPendingApprovals(Integer limit) {
         try {
             int effectiveLimit = limit != null ? limit : 200;
-
-            // MAJOR-6: Admins and designated approvers see all; other callers see
-            // only their own conversations (an approver who can decide approvals
-            // must also be able to list them).
-            if (ownershipValidator.isAdmin(identity) || ownershipValidator.isApprover(identity)) {
-                return conversationService.listPendingApprovals(effectiveLimit);
-            }
-
-            String callerId = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
-            if (callerId == null || callerId.isBlank()) {
-                return List.of(); // Fail-closed: anonymous user sees nothing
-            }
-
-            // Owner filter is applied INSIDE the query (before the limit), so the
-            // caller's inbox is complete even behind a large global backlog.
-            return conversationService.listPendingApprovals(callerId, effectiveLimit);
+            // Owner-scoping (admins/approvers see all; others see only their own;
+            // anonymous sees nothing) lives in HitlAccessGuard so the MCP surface
+            // shares the exact same rule verbatim.
+            return hitlAccessGuard.listScopedPendingApprovals(effectiveLimit);
         } catch (ResourceStoreException e) {
             throw new InternalServerErrorException(e.getMessage(), e);
         }
@@ -436,25 +428,18 @@ public class RestAgentEngine implements IRestAgentEngine {
      *         was not found (the actual operation handles the 404)
      */
     private String validateConversationOwnership(String conversationId, boolean hitlOperation) {
+        if (hitlOperation) {
+            // Strict HITL ownership (owner/admin/approver, fail-closed on a missing
+            // descriptor) is shared with the MCP surface via HitlAccessGuard.
+            return hitlAccessGuard.requireConversationHitlAccess(conversationId);
+        }
         try {
             var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
-            if (hitlOperation) {
-                ownershipValidator.requireOwnerAdminOrApprover(identity, descriptor.getUserId(), "conversation");
-            } else {
-                ownershipValidator.requireOwnerOrAdmin(identity, descriptor.getUserId(), "conversation");
-            }
+            ownershipValidator.requireOwnerOrAdmin(identity, descriptor.getUserId(), "conversation");
             return descriptor.getUserId();
         } catch (ForbiddenException e) {
             throw e;
         } catch (ResourceNotFoundException e) {
-            if (hitlOperation && !ownershipValidator.isAdmin(identity) && !ownershipValidator.isApprover(identity)) {
-                // Fail-closed for HITL state changes: a conversation without a
-                // descriptor (legacy/corruption) has no verifiable owner — only
-                // admins/approvers may decide its approvals.
-                LOGGER.warnf("HITL operation on conversation %s denied: no descriptor to verify ownership against",
-                        sanitize(conversationId));
-                throw new ForbiddenException("Access denied: conversation ownership cannot be verified");
-            }
             // Descriptor not found — let the actual operation handle it
             LOGGER.debugf("Conversation descriptor not found for %s", sanitize(conversationId));
             return null;
