@@ -66,6 +66,18 @@ A multi-lens adversarial review (7 reviewers → independent skeptics) surfaced 
 - **Streaming-timeout caveat** documented (partial tokens of an abandoned final step).
 - New regression tests for all of the above, plus the previously-missing SSE-forwarding and cooperative-cancellation tests. New-code coverage ≈ **92% instruction / 79% branch**.
 
+### Second-pass review fixes
+
+A lean second adversarial pass (5 reviewers → synthesizer) found five more real issues, now fixed:
+
+- **Live-stream timeout (high):** a live-streamed step is no longer subject to the per-step/duration timeout — cancelling it couldn't stop the provider's callback thread, so tokens leaked to the client while the cascade re-emitted a different response (concurrent SSE writes). A streamed step now runs under the streaming executor's own ~120 s bound and its result (even if partial) is the accepted answer; no re-emit, no mid-stream cancel. `streamLive` also tightened to *guaranteed-accept* steps only (last, null-threshold, or `none`≤1.0).
+- **Judge confidence regression (medium):** the judge regex fallback runs over the full judge text again (scoping it to the first balanced object dropped the score when a reasoning object preceded the rating).
+- **Docs vs. validator (medium):** the Configure-time Validation section now states the real two tiers (hard-error only for new pricing/ceiling fields; warnings for legacy conditions).
+- **Single-line code fence (low):** `stripCodeFences` now unwraps ```` ```{...}``` ```` (no newline), which was being discarded.
+- **`returnBestAcrossSteps` trace (low):** the earlier winning step's trace entry is relabeled `accepted_as_best` so the trace agrees with `stepUsed`.
+
+Regression tests added for each. Full touched-area suite green.
+
 ---
 
 ## 🐛 Fix: PostgreSQL group conversations broken — JDBC `?|` operator escape (2026-07-02)

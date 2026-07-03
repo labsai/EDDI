@@ -251,6 +251,38 @@ class CascadingModelExecutorCoverageTest {
     }
 
     @Test
+    @DisplayName("live-streamed step is NOT cancelled by a tiny per-step timeout (runs to completion)")
+    void streaming_ignoresPerStepTimeout() throws Exception {
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("none");
+        var step = new CascadeStep();
+        step.setType("openai");
+        step.setTimeoutMs(5L); // tiny — would cancel a buffered call, must NOT cancel the stream
+        cascade.setSteps(List.of(step));
+
+        var sink = mock(ConversationEventSink.class);
+        StreamingChatModel streaming = mock(StreamingChatModel.class);
+        doAnswer(inv -> {
+            StreamingChatResponseHandler h = inv.getArgument(1);
+            Thread.sleep(120); // slower than the 5ms per-step timeout
+            h.onPartialResponse("streamed answer");
+            h.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("streamed answer")).build());
+            return null;
+        }).when(streaming).chat(any(ChatRequest.class), any(StreamingChatResponseHandler.class));
+
+        ChatModelRegistry registry = mock(ChatModelRegistry.class);
+        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(mock(ChatModel.class));
+        when(registry.getOrCreateStreaming(anyString(), anyMap())).thenReturn(streaming);
+
+        var result = executor(registry, null).execute(cascade, messages(), "sys", Map.of("apiKey", "k"), task(), memory(sink),
+                mock(AgentOrchestrator.class), Map.of(), false, false, /* allowLiveStreaming */ true);
+
+        assertEquals("streamed answer", result.response(), "the tiny per-step timeout must not cancel the live stream");
+        assertTrue(result.streamedLive());
+    }
+
+    @Test
     @DisplayName("streaming allowed but provider has no streaming model — falls back to buffered")
     void streaming_noStreamingModel_buffered() throws Exception {
         var cascade = new ModelCascadeConfig();

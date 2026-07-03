@@ -253,10 +253,8 @@ class ConfidenceEvaluator {
 
             String judgeText = judgeResponse.aiMessage() != null ? judgeResponse.aiMessage().text() : null;
             if (judgeText != null) {
-                // Prefer a real JSON parse of the judge's object; regex fallback is scoped
-                // to that object (not the whole text) to avoid picking up a stray value.
+                // Prefer a real JSON parse of the judge's first object.
                 String balanced = extractFirstBalancedObject(judgeText);
-                String regexScope = balanced != null ? balanced : judgeText;
                 if (balanced != null) {
                     try {
                         JsonNode node = MAPPER.readTree(balanced);
@@ -267,7 +265,10 @@ class ConfidenceEvaluator {
                         // fall through to regex
                     }
                 }
-                Matcher matcher = CONFIDENCE_JSON_PATTERN.matcher(regexScope);
+                // Regex over the FULL judge text — the confidence object may not be the first
+                // balanced object in the reply (e.g. a reasoning object precedes it). The judge
+                // output is our own controlled prompt, so there is no stray-confidence risk.
+                Matcher matcher = CONFIDENCE_JSON_PATTERN.matcher(judgeText);
                 if (matcher.find()) {
                     return new EvaluationResult(response, clamp(Double.parseDouble(matcher.group(1))));
                 }
@@ -339,8 +340,18 @@ class ConfidenceEvaluator {
         String t = text.trim();
         if (t.startsWith("```")) {
             int firstNewline = t.indexOf('\n');
-            if (firstNewline > 0) {
+            if (firstNewline >= 0) {
+                // Multi-line: drop everything up to and including the first newline (the
+                // ``` fence and any language token live on that line).
                 t = t.substring(firstNewline + 1);
+            } else {
+                // Single-line form (```{...}``` or ```json {...}```): drop the leading fence
+                // marker and an optional language token.
+                int idx = 3;
+                while (idx < t.length() && Character.isLetter(t.charAt(idx))) {
+                    idx++;
+                }
+                t = t.substring(idx);
             }
             if (t.endsWith("```")) {
                 t = t.substring(0, t.length() - 3);

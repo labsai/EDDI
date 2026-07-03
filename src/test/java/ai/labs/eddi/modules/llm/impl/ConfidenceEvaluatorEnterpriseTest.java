@@ -46,6 +46,22 @@ class ConfidenceEvaluatorEnterpriseTest {
     }
 
     @Test
+    @DisplayName("single-line fenced wrapper (no newline) — still unwrapped")
+    void wrapper_singleLineFence() {
+        var r = ConfidenceEvaluator.evaluateStructuredOutput("```{\"response\":\"hi\",\"confidence\":0.9}```", null);
+        assertEquals(0.9, r.confidence(), 0.001);
+        assertEquals("hi", r.response());
+    }
+
+    @Test
+    @DisplayName("single-line fenced wrapper with language token — still unwrapped")
+    void wrapper_singleLineFenceWithLang() {
+        var r = ConfidenceEvaluator.evaluateStructuredOutput("```json{\"response\":\"yo\",\"confidence\":0.5}```", null);
+        assertEquals(0.5, r.confidence(), 0.001);
+        assertEquals("yo", r.response());
+    }
+
+    @Test
     @DisplayName("stray \"confidence\" inside prose answer — NOT mistaken for the score")
     void strayConfidence_ignored() {
         // A confident, prose answer that happens to contain a JSON snippet with a
@@ -161,6 +177,16 @@ class ConfidenceEvaluatorEnterpriseTest {
     void judge_nullFallsBack() {
         EvaluationResult r = ConfidenceEvaluator.evaluateWithJudge("A confident, complete, well-formed answer to the user's question.", null, null);
         assertEquals(0.8, r.confidence(), 0.001);
+    }
+
+    @Test
+    @DisplayName("judge emits a non-confidence object BEFORE the rating — full-text regex still finds it")
+    void judge_confidenceInSecondObject() {
+        ChatModel judge = mock(ChatModel.class);
+        when(judge.chat(anyList())).thenReturn(
+                ChatResponse.builder().aiMessage(AiMessage.from("Analysis: {\"note\":\"unsure\"} Rating: {\"confidence\": 0.3}")).build());
+        EvaluationResult r = ConfidenceEvaluator.evaluateWithJudge("ans", judge, null);
+        assertEquals(0.3, r.confidence(), 0.001);
     }
 
     // ─── extractFirstBalancedObject ──────────────────────────────────

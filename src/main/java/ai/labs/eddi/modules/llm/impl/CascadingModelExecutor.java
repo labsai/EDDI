@@ -55,6 +55,13 @@ class CascadingModelExecutor {
     // I/O-bound model calls
     private static final ExecutorService TIMEOUT_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
 
+    // Bound for a live-streamed step's future — must exceed
+    // StreamingLegacyChatExecutor's
+    // own internal latch timeout (120s) so the streaming executor returns its
+    // (possibly
+    // partial) result before this backstop could cancel it mid-stream.
+    private static final long STREAMING_STEP_TIMEOUT_MS = 125_000L;
+
     /**
      * Parameter keys that must NOT be run through the template engine
      * (credentials).
@@ -222,27 +229,40 @@ class CascadingModelExecutor {
             stepTrace.put("model", modelName);
             stepTrace.put("modelType", modelType);
 
-            // Cap this step's timeout by the remaining duration budget.
-            long stepTimeout = step.getTimeoutMs() != null ? step.getTimeoutMs() : 30000L;
-            if (maxTotalDurationMs != null) {
-                long remaining = maxTotalDurationMs - (System.currentTimeMillis() - cascadeStart);
-                if (remaining <= 0) {
-                    increment("eddi.llm.cascade.ceiling.exceeded", "kind", "duration");
-                    return finalizeBest(bestSoFar, runCostUsd, trace, errors);
-                }
-                stepTimeout = Math.min(stepTimeout, remaining);
-            }
-
             try {
                 ChatModel chatModel = registry.getOrCreate(modelType, mergedParams);
 
-                // Live-stream the always-accepted final step for non-wrapper strategies —
-                // the raw tokens are the actual answer, so nothing needs to be unwrapped.
-                // Only when the provider supports streaming (getOrCreateStreaming may return
-                // null).
-                boolean streamLive = allowLiveStreaming && !useAgentMode && !"structured_output".equalsIgnoreCase(effectiveStrategy)
-                        && (isLastStep || ("none".equalsIgnoreCase(effectiveStrategy) && i == 0));
-                StreamingChatModel streamingModel = streamLive ? registry.getOrCreateStreaming(modelType, mergedParams) : null;
+                // Live-stream a step only when it is GUARANTEED to be accepted regardless of
+                // the confidence value — otherwise tokens could be sent for a step that then
+                // escalates. That is: the last step (always accepted), a null-threshold step
+                // (always accepted), or a 'none'-strategy step whose threshold ≤ 1.0 (its
+                // confidence is always 1.0). Non-wrapper strategies only, so the raw tokens are
+                // the actual answer; and only when the provider supports streaming.
+                boolean guaranteedAccept = isLastStep || step.getConfidenceThreshold() == null
+                        || ("none".equalsIgnoreCase(effectiveStrategy) && step.getConfidenceThreshold() <= 1.0);
+                boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode && !"structured_output".equalsIgnoreCase(effectiveStrategy)
+                        && guaranteedAccept;
+                StreamingChatModel streamingModel = streamLiveCandidate ? registry.getOrCreateStreaming(modelType, mergedParams) : null;
+
+                // A live stream is terminal and MUST NOT be cancelled mid-flight: cancelling
+                // the awaiting virtual thread does not stop the provider's callback thread, so
+                // it would keep emitting tokens to the SSE client while the cascade moves on
+                // and
+                // re-emits a different response. A streamed step therefore runs under the
+                // streaming executor's own internal bound (plus a small backstop) and is NOT
+                // subject to the per-step / remaining-duration cap. Buffered steps use the
+                // configured timeout, capped by the remaining duration budget (the loop's
+                // pre-step ceiling check already bails out when the budget is fully spent).
+                long stepTimeout;
+                if (streamingModel != null) {
+                    stepTimeout = STREAMING_STEP_TIMEOUT_MS;
+                } else {
+                    stepTimeout = step.getTimeoutMs() != null ? step.getTimeoutMs() : 30000L;
+                    if (maxTotalDurationMs != null) {
+                        long remaining = maxTotalDurationMs - (System.currentTimeMillis() - cascadeStart);
+                        stepTimeout = Math.max(1L, Math.min(stepTimeout, remaining));
+                    }
+                }
 
                 StepResult stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, messages, systemMessage, effectiveStrategy, task,
                         step, memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, jsonMode, stepTimeout);
@@ -281,8 +301,15 @@ class CascadingModelExecutor {
                             && bestSoFar.confidence() > stepResult.confidence) {
                         LOGGER.infof("returnBestAcrossSteps: returning step %d (confidence=%.2f) over accepted step %d (confidence=%.2f)",
                                 bestSoFar.stepUsed(), bestSoFar.confidence(), i, stepResult.confidence);
-                        // Reflect the override in the trace so audit artifacts agree with stepUsed.
+                        // Reflect the override in the trace so audit artifacts agree with
+                        // stepUsed: the accepted step is superseded, and the earlier winner (which
+                        // was recorded as "escalated") is relabeled as the returned answer.
                         stepTrace.put("status", "superseded_by_best");
+                        for (Map<String, Object> entry : trace) {
+                            if (Integer.valueOf(bestSoFar.stepUsed()).equals(entry.get("step"))) {
+                                entry.put("status", "accepted_as_best");
+                            }
+                        }
                         return withRun(bestSoFar, runCostUsd, trace);
                     }
 

@@ -79,7 +79,7 @@ Cascading is configured per-task in a `langchain.json` resource:
 |---|---|---|---|
 | `type` | string | task `type` | Provider type (e.g., `openai`, `anthropic`, `ollama`). Resolved through global variables, like the task type. |
 | `parameters` | object | `{}` | Provider-specific params. Merged over the base task parameters (step wins). Values are resolved for `${vault:...}` secrets, global variables, and Qute templates — parity with task params. |
-| `confidenceThreshold` | Double | `null` | Minimum confidence to accept this step. Below it, escalate. **A non-last step must set a threshold** (a null threshold there would be always-accepted, making later steps unreachable — rejected at deploy time). The last step's threshold is ignored (always accepted). |
+| `confidenceThreshold` | Double | `null` | Minimum confidence to accept this step. Below it, escalate. **A non-last step should set a threshold** (a null threshold there is always-accepted, making later steps unreachable — flagged with a deploy-time warning). The last step's threshold is ignored (always accepted). |
 | `timeoutMs` | long | `30000` | Per-step timeout in milliseconds. Also bounded by the remaining `maxTotalDurationMs` budget. |
 | `inputPricePer1M` / `outputPricePer1M` | double | cascade default | Per-step token pricing (overrides the cascade-level default). |
 
@@ -154,7 +154,7 @@ Two SSE event types provide real-time visibility, emitted through `ConversationE
 
 When streaming (SSE), the always-accepted final step is streamed **live** token-by-token — as long as it runs in legacy (no-tools) mode, uses a non-wrapper strategy (`heuristic`, `judge_model`, or `none`), and the provider supports streaming. Earlier steps are buffered (their full text is needed to evaluate confidence). In agent mode, the cascade emits the final response as a single chunk.
 
-> **Caveat:** if the live-streamed final step **times out or errors** after some tokens were already sent, the cascade falls back to the best earlier response — but the client has already received the partial tokens of the abandoned step. Live streaming therefore trades this small mismatch risk for lower perceived latency; disable it (non-streaming `say`) if exact-match delivery matters. When `returnBestAcrossSteps` is set, a step that was streamed live is never superseded, precisely to avoid this mismatch.
+> **Bounds & consistency:** a live-streamed step is **not** subject to the per-step / duration timeout (which would otherwise cancel it mid-stream while the provider keeps emitting tokens); it runs under the streaming executor's own internal bound (~120 s) and its result — even if partial at that bound — is the accepted answer, so the client never receives tokens for a response that is then replaced. `returnBestAcrossSteps` also never supersedes a step that was streamed live. Only genuinely-terminal steps (last step, null-threshold step, or `none`-strategy step) are streamed live.
 
 ## Observability
 
@@ -192,7 +192,10 @@ When `enableInAgentMode` is `false`, cascading is skipped in agent mode and the 
 
 ## Configure-time Validation
 
-Cascade configs are validated at deploy (`LlmTask.configure`) and fail fast on: empty steps; unknown `evaluationStrategy`; `judge_model` without a `judgeModel`; `confidenceThreshold` outside `[0.0, 1.0]`; a non-last step with a null threshold; non-positive `timeoutMs` / `maxTotalDurationMs`; negative pricing / `maxCostPerRun`; unknown `strategy`. `convertToObject: true` with `structured_output` is allowed but warns (auto-downgraded at runtime).
+Cascade configs are validated at deploy (`LlmTask.configure`), in two tiers so an upgrade never stops a previously-loading agent from deploying:
+
+- **Hard error (deployment fails)** — only the **new** numeric fields, since no stored config predating this release can contain them: non-positive `maxTotalDurationMs`, negative `maxCostPerRun`, negative per-step / cascade `inputPricePer1M` / `outputPricePer1M`.
+- **Warning (logged, deployment proceeds)** — conditions older releases tolerated at load and that still fail/degrade at runtime exactly as before: empty steps, unknown `strategy`, unknown `evaluationStrategy`, `judge_model` without a `judgeModel`, `confidenceThreshold` outside `[0.0, 1.0]`, a non-last step with a null threshold (dead-step trap), non-positive `timeoutMs`, a cross-provider step/judge missing its own `apiKey`, and `convertToObject: true` with `structured_output` (auto-downgraded at runtime).
 
 ## Backward Compatibility
 
