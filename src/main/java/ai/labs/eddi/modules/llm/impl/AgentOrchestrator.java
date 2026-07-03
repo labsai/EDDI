@@ -57,6 +57,7 @@ import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
+import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -800,6 +801,14 @@ class AgentOrchestrator {
                                 capStep.put("error", "hitl_pause_cap");
                                 trace.add(capStep);
                             }
+                            // Task 10 — the pause-cap guard fired: record it as a guard
+                            // (metric + audit) HERE where the audit context lives (the
+                            // memory's audit collector, set by ConversationService on the
+                            // say/resume paths). AgentOrchestrator is not CDI and has no
+                            // MeterRegistry, so the metric uses the Micrometer global
+                            // registry (same idiom as LifecycleManager). Emitted once per
+                            // capped batch, carrying the gated fingerprint.
+                            recordPauseCapGuard(memory, fingerprint(gateResult.gated()));
                             // ungated calls still execute below
                         } else {
                             // 1) execute the ungated calls of this batch normally
@@ -1159,6 +1168,44 @@ class AgentOrchestrator {
         } catch (java.security.NoSuchAlgorithmException e) {
             // SHA-256 is guaranteed present on every JVM; treat as unreachable.
             throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    /**
+     * Task 10 — records the pause-cap guard activation as BOTH a metric
+     * ({@code eddi_hitl_tool_guard_count{guard=pause_cap}}) and an audit-ledger
+     * entry ({@code hitl.tool.pause_cap}). The metric uses the Micrometer global
+     * registry (AgentOrchestrator is not CDI and has no injected registry — same
+     * idiom as {@code LifecycleManager}); the audit is submitted through the live
+     * memory's audit collector (the seam that carries the audit context, wired by
+     * {@code ConversationService} on the say/resume paths). Best-effort: any
+     * failure is swallowed so guard bookkeeping never breaks the LLM loop.
+     */
+    private void recordPauseCapGuard(IConversationMemory memory, String fingerprint) {
+        try {
+            Metrics.globalRegistry.counter("eddi_hitl_tool_guard_count", "guard", "pause_cap").increment();
+        } catch (Exception e) {
+            LOGGER.debugf("pause_cap metric emit failed: %s", e.getMessage());
+        }
+        try {
+            var collector = memory.getAuditCollector();
+            if (collector == null) {
+                return;
+            }
+            var detail = new LinkedHashMap<String, Object>();
+            detail.put("guard", "pause_cap");
+            detail.put("decidedBy", "system:pause-cap");
+            detail.put("automated", true);
+            if (fingerprint != null) {
+                detail.put("fingerprint", fingerprint);
+            }
+            collector.collect(new ai.labs.eddi.engine.audit.model.AuditEntry(
+                    UUID.randomUUID().toString(), memory.getConversationId(), null, null, memory.getUserId(),
+                    null, -1, "hitl.tool.pause_cap", "hitl", -1, 0L,
+                    Map.of(), detail, null, null, List.of(), 0.0,
+                    java.time.Instant.now(), null, null));
+        } catch (Exception e) {
+            LOGGER.debugf("pause_cap audit emit failed: %s", e.getMessage());
         }
     }
 

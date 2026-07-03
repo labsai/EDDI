@@ -127,6 +127,9 @@ public class ConversationService implements IConversationService {
     private final Counter counterConversationRedo;
     private final Counter counterHitlPause;
     private final Counter counterHitlResume;
+    // Task 10 — tool-level HITL metrics registry (new meters, never re-tag
+    // existing).
+    private final MeterRegistry meterRegistry;
 
     private final List<String> processingConversationReferences;
 
@@ -185,6 +188,9 @@ public class ConversationService implements IConversationService {
         this.counterHitlPause = meterRegistry.counter("eddi_hitl_pause_count", "surface", "regular");
         this.counterHitlResume = meterRegistry.counter("eddi_hitl_resume_count", "surface", "regular");
         // (timeout fires are counted in HitlTimeoutHandler, tagged by surface)
+        // Task 10 — tool-level HITL meters are registered lazily via the registry (tags
+        // vary per emission: verdict on resume, guard name on guard activation).
+        this.meterRegistry = meterRegistry;
 
         meterRegistry.gaugeCollectionSize("eddi_processing_conversation_count", Tags.empty(), processingConversationReferences);
     }
@@ -1209,6 +1215,16 @@ public class ConversationService implements IConversationService {
         final String agentId;
         final Integer agentVersion;
         final Environment environment;
+        // Task 10 — capture the PRE-resume tool-pause identity BEFORE the async resume
+        // mutates the live memory. Used for (a) the argsDigest audit detail (the batch
+        // the human/timeout decision applies to) and (b) the no-progress guard's
+        // same-turn same-fingerprint comparison in onComplete.
+        final boolean prePauseWasToolCall;
+        final String prePauseFingerprint;
+        final int prePauseAutoApproveCount;
+        // The pending batch the DECISION applies to — captured here so the audit reads
+        // it deterministically even though the async resume may mutate the live memory.
+        final PendingToolCallBatch prePauseBatch;
         try {
             var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
             if (snapshot == null) {
@@ -1219,6 +1235,10 @@ public class ConversationService implements IConversationService {
             agentId = snapshot.getAgentId();
             agentVersion = snapshot.getAgentVersion();
             environment = snapshot.getEnvironment();
+            prePauseWasToolCall = ConversationPauseException.PauseOrigin.TOOL_CALL.name().equals(memory.getHitlPauseType());
+            prePauseBatch = memory.getHitlPendingToolCalls();
+            prePauseFingerprint = prePauseBatch != null ? prePauseBatch.getFingerprint() : null;
+            prePauseAutoApproveCount = prePauseBatch != null ? prePauseBatch.getAutoApproveCount() : 0;
         } catch (ResourceNotFoundException e) {
             throw e; // genuinely deleted — nothing to restore into
         } catch (Exception e) {
@@ -1264,6 +1284,12 @@ public class ConversationService implements IConversationService {
                 String envName = environment.toString();
                 memory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
             }
+
+            // Carry the agent-level tool-approval config onto memory BEFORE the resumed
+            // pipeline runs — parity with the say path. The resumed tool loop resolves
+            // its effective gate from it, and Task 10's no-progress guard reads
+            // onNoProgress / maxAutoApprovalsPerTurn from it in onComplete.
+            populateToolApprovalsConfig(memory);
 
             IConversation conversation = agent.continueConversation(memory,
                     createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig()),
@@ -1312,8 +1338,28 @@ public class ConversationService implements IConversationService {
                     }
                     try {
                         // #6: keep the timeout-policy bookmark populated on re-pause
-                        if (memory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                        boolean rePaused = memory.getConversationState() == ConversationState.AWAITING_HUMAN;
+                        if (rePaused) {
                             populateHitlTimeoutBookmark(memory);
+                        }
+                        // Task 10 — no-progress guard: a TOOL_CALL pause that RE-PAUSES in
+                        // the same turn with an IDENTICAL fingerprint after a system
+                        // decision is a wedged auto-approval loop. Resolve the carried
+                        // autoApproveCount and, once the budget is spent, apply onNoProgress
+                        // (WAIT_FOR_HUMAN demotes / AUTO_REJECT resumes reject-all / ABORT
+                        // cancels). Runs BEFORE the persist so a demotion is reflected in the
+                        // stored bookmark and the schedule below.
+                        NoProgressOutcome noProgress = NoProgressOutcome.NONE;
+                        if (rePaused && prePauseWasToolCall) {
+                            noProgress = evaluateAndApplyNoProgressGuard(conversationId, agentId, agentVersion,
+                                    memory, environment, decision, prePauseFingerprint, prePauseAutoApproveCount);
+                            if (noProgress == NoProgressOutcome.ABORT) {
+                                // Cancel owns the terminal state — do NOT persist a re-pause.
+                                cancelConversation(conversationId,
+                                        ai.labs.eddi.engine.lifecycle.model.ControlSignal.CANCEL_GRACEFUL,
+                                        "system:no-progress");
+                                return;
+                            }
                         }
                         // Persist ONLY while we still own IN_PROGRESS — the state the
                         // AWAITING_HUMAN->IN_PROGRESS CAS set at resume start. The
@@ -1332,9 +1378,20 @@ public class ConversationService implements IConversationService {
                             return;
                         }
                         cacheConversationState(conversationId, memory.getConversationState());
+                        // Task 10 — AUTO_REJECT no-progress: the re-pause is now durably
+                        // persisted (AWAITING_HUMAN); break the loop with a reject-all resume
+                        // through the SAME resume path (journal-bearing, no shortcut). The
+                        // coordinator serializes this follow-up after the current callable.
+                        if (noProgress == NoProgressOutcome.RESUME_REJECT_ALL) {
+                            counterHitlPause.increment();
+                            counterToolPause(prePauseWasToolCall);
+                            issueNoProgressRejectAllResume(conversationId);
+                            return;
+                        }
                         // #3 (schedule) + metric: a re-pause is a pause
                         if (memory.getConversationState() == ConversationState.AWAITING_HUMAN) {
                             counterHitlPause.increment();
+                            counterToolPause(prePauseWasToolCall);
                             scheduleHitlTimeout(conversationId, memory);
                         } else {
                             // Resume settled to a non-paused outcome — notify channel
@@ -1392,7 +1449,12 @@ public class ConversationService implements IConversationService {
             // metric drift): rolled-back attempts must not pollute the audit
             // trail or the counter.
             counterHitlResume.increment();
-            auditHitlDecision(conversationId, agentId, agentVersion, memory.getUserId(), environment, decision);
+            auditHitlDecision(conversationId, agentId, agentVersion, memory.getUserId(), environment, decision,
+                    prePauseWasToolCall, prePauseBatch);
+            // Task 10 — tool-resume metric, tagged by aggregate verdict.
+            if (prePauseWasToolCall) {
+                recordToolResumeMetric(decision, prePauseBatch);
+            }
         } catch (AgentNotDeployedForResumeException e) {
             // The ONLY IllegalStateException that already removed the in-flight entry
             // and restored the pause above — re-throw as-is (REST 409) WITHOUT a
@@ -1507,13 +1569,209 @@ public class ConversationService implements IConversationService {
     }
 
     /**
+     * Default max consecutive system auto-approvals per turn (mirrors
+     * ToolApprovalsConfig doc).
+     */
+    private static final int DEFAULT_MAX_AUTO_APPROVALS_PER_TURN = 2;
+
+    /**
+     * Outcome of the no-progress guard, driving the onComplete persistence branch.
+     */
+    private enum NoProgressOutcome {
+        /** No wedged loop detected — proceed with the normal re-pause. */
+        NONE,
+        /**
+         * WAIT_FOR_HUMAN: the re-pause was demoted to WAIT_INDEFINITELY (no schedule).
+         */
+        DEMOTED_WAIT,
+        /**
+         * AUTO_REJECT: persist the re-pause, then resume reject-all
+         * (system:no-progress).
+         */
+        RESUME_REJECT_ALL,
+        /** ABORT: cancel the conversation via the existing cancel path. */
+        ABORT
+    }
+
+    /**
+     * Task 10 — no-progress guard. Runs in the resume onComplete AFTER a TOOL_CALL
+     * pause has RE-PAUSED in the same turn. Carries the {@code autoApproveCount}
+     * across the re-pause and, once the auto-approval budget is spent, applies the
+     * configured {@code onNoProgress} policy. A HUMAN decision (decidedBy not
+     * {@code system:*}) resets the counter to 0 (group fresh-budget convention).
+     * <p>
+     * For DEMOTED_WAIT it mutates the live memory bookmark IN PLACE (policy →
+     * WAIT_INDEFINITELY) so the subsequent persist + schedule see the demotion; for
+     * RESUME_REJECT_ALL / ABORT it records the guard (metric + audit) and returns
+     * the outcome for the caller to enact. The new batch's autoApproveCount is
+     * always updated so it is persisted with the re-pause.
+     */
+    private NoProgressOutcome evaluateAndApplyNoProgressGuard(String conversationId, String agentId,
+                                                              Integer agentVersion, IConversationMemory memory, Environment environment,
+                                                              ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
+                                                              String prePauseFingerprint, int prePauseAutoApproveCount) {
+        PendingToolCallBatch newBatch = memory.getHitlPendingToolCalls();
+        if (newBatch == null) {
+            return NoProgressOutcome.NONE;
+        }
+        boolean systemDecision = decision.getDecidedBy() != null && decision.getDecidedBy().startsWith("system:");
+        boolean sameFingerprint = prePauseFingerprint != null
+                && prePauseFingerprint.equals(newBatch.getFingerprint());
+
+        if (!systemDecision) {
+            // A human broke into the loop — reset the fresh budget.
+            newBatch.setAutoApproveCount(0);
+            return NoProgressOutcome.NONE;
+        }
+        if (!sameFingerprint) {
+            // Progress was made (a different batch) — the loop counter does not carry.
+            newBatch.setAutoApproveCount(0);
+            return NoProgressOutcome.NONE;
+        }
+
+        // System decision + identical fingerprint → a wedged loop. Carry + increment.
+        int carried = prePauseAutoApproveCount + 1;
+        newBatch.setAutoApproveCount(carried);
+
+        int maxAutoApprovals = resolveMaxAutoApprovals(memory.getAgentToolApprovalsConfig());
+        boolean hardThreshold = carried >= 2;
+        boolean capReached = carried >= maxAutoApprovals;
+        boolean budgetSpent = hardThreshold || capReached;
+        if (!budgetSpent) {
+            // Still within budget — allow the re-pause to proceed with the carried count.
+            return NoProgressOutcome.NONE;
+        }
+
+        // The auto-approval CAP being reached is its own guard signal (distinct from
+        // the
+        // fixed >=2 no-progress threshold) — record it so operators can tell a
+        // config-limited stop from the built-in loop breaker.
+        if (capReached) {
+            recordGuard("auto_approve_cap");
+            auditGuard(conversationId, agentId, agentVersion, memory.getUserId(), environment,
+                    "auto_approve_cap", newBatch.getFingerprint(), "system:no-progress");
+        }
+
+        String onNoProgress = resolveOnNoProgress(memory.getAgentToolApprovalsConfig());
+        switch (onNoProgress) {
+            case "AUTO_REJECT" -> {
+                recordGuard("no_progress");
+                auditGuard(conversationId, agentId, agentVersion, memory.getUserId(), environment,
+                        "no_progress", newBatch.getFingerprint(), "system:no-progress");
+                return NoProgressOutcome.RESUME_REJECT_ALL;
+            }
+            case "ABORT" -> {
+                recordGuard("no_progress");
+                auditGuard(conversationId, agentId, agentVersion, memory.getUserId(), environment,
+                        "no_progress", newBatch.getFingerprint(), "system:no-progress");
+                return NoProgressOutcome.ABORT;
+            }
+            default -> {
+                // WAIT_FOR_HUMAN (default): demote the new pause so no finite timeout can
+                // auto-decide it again — a human MUST break the loop.
+                memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY.name());
+                recordGuard("no_progress");
+                auditGuard(conversationId, agentId, agentVersion, memory.getUserId(), environment,
+                        "no_progress", newBatch.getFingerprint(), "system:no-progress");
+                return NoProgressOutcome.DEMOTED_WAIT;
+            }
+        }
+    }
+
+    /**
+     * Effective max consecutive system auto-approvals per turn (default 2, clamped
+     * 0..10).
+     */
+    private static int resolveMaxAutoApprovals(ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig cfg) {
+        if (cfg == null || cfg.getMaxAutoApprovalsPerTurn() == null) {
+            return DEFAULT_MAX_AUTO_APPROVALS_PER_TURN;
+        }
+        return Math.max(0, Math.min(10, cfg.getMaxAutoApprovalsPerTurn()));
+    }
+
+    /** Effective onNoProgress policy (WAIT_FOR_HUMAN default). */
+    private static String resolveOnNoProgress(ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig cfg) {
+        if (cfg == null || isNullOrEmpty(cfg.getOnNoProgress())) {
+            return "WAIT_FOR_HUMAN";
+        }
+        return cfg.getOnNoProgress();
+    }
+
+    /**
+     * Issues the reject-all follow-up resume that breaks a no-progress loop. Routed
+     * through the standard {@link #resumeConversation} path (journal-bearing — no
+     * shortcut) with {@code decidedBy=system:no-progress}; the coordinator
+     * serializes it after the current callable. Best-effort: a failure is logged,
+     * leaving the (now WAIT_INDEFINITELY, since we could not break it) pause for a
+     * human.
+     */
+    private void issueNoProgressRejectAllResume(String conversationId) {
+        var reject = new ai.labs.eddi.engine.lifecycle.model.HitlDecision();
+        reject.setVerdict(ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.REJECTED);
+        reject.setDecidedBy("system:no-progress");
+        reject.setNote("Automatic reject-all: repeated identical tool-call pause made no progress");
+        try {
+            resumeConversation(conversationId, reject, null);
+        } catch (Exception e) {
+            LOGGER.warnf("No-progress reject-all resume failed for %s: %s — the pause remains for a human",
+                    conversationId, e.getMessage());
+        }
+    }
+
+    /**
+     * Increments the tool-pause metric alongside the generic pause counter (Task
+     * 10).
+     */
+    private void counterToolPause(boolean toolCallPause) {
+        if (toolCallPause) {
+            meterRegistry.counter("eddi_hitl_tool_pause_count").increment();
+        }
+    }
+
+    /** Task 10 — increments the per-guard metric tagged by guard name. */
+    private void recordGuard(String guard) {
+        meterRegistry.counter("eddi_hitl_tool_guard_count", "guard", guard).increment();
+    }
+
+    /**
+     * Task 10 — writes a per-guard audit-ledger entry ({@code hitl.tool.<guard>})
+     * recording the guard name, the fingerprint (for no_progress), and
+     * {@code decidedBy}. Mirrors {@link #auditHitlDecision}'s HMAC/context; the raw
+     * arguments are NEVER included (only the fingerprint).
+     */
+    private void auditGuard(String conversationId, String agentId, Integer agentVersion, String userId,
+                            Environment environment, String guard, String fingerprint, String decidedBy) {
+        if (!auditLedgerService.isEnabled()) {
+            return;
+        }
+        try {
+            var detail = new LinkedHashMap<String, Object>();
+            detail.put("guard", guard);
+            detail.put("decidedBy", decidedBy != null ? decidedBy : "unknown");
+            detail.put("automated", decidedBy != null && decidedBy.startsWith("system:"));
+            if (fingerprint != null) {
+                detail.put("fingerprint", fingerprint);
+            }
+            auditLedgerService.submit(new ai.labs.eddi.engine.audit.model.AuditEntry(
+                    UUID.randomUUID().toString(), conversationId, agentId, agentVersion, userId,
+                    environment != null ? environment.toString() : null, -1,
+                    "hitl.tool." + guard, "hitl", -1, 0L,
+                    Map.of(), detail, null, null, List.of(), 0.0,
+                    Instant.now(), null, null));
+        } catch (Exception e) {
+            LOGGER.warnf("Failed to submit HITL tool-guard audit entry for %s: %s", conversationId, e.getMessage());
+        }
+    }
+
+    /**
      * Submits an {@code hitl.approval} audit entry for a HITL decision. Covers both
      * human decisions and automated timeout decisions
      * ({@code decidedBy=system:timeout}).
      */
     private void auditHitlDecision(String conversationId, String agentId, Integer agentVersion,
                                    String userId, Environment environment,
-                                   ai.labs.eddi.engine.lifecycle.model.HitlDecision decision) {
+                                   ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
+                                   boolean toolCallPause, PendingToolCallBatch pendingBatch) {
         if (!auditLedgerService.isEnabled()) {
             return;
         }
@@ -1525,6 +1783,15 @@ public class ConversationService implements IConversationService {
             if (decision.getNote() != null) {
                 detail.put("note", decision.getNote());
             }
+            // Task 10 — TOOL_CALL pauses carry a per-call decision summary. Each entry
+            // records the callId, resolved verdict, whether the args were amended, and
+            // the tool name — plus a SHA-256 argsDigest so the ledger can prove WHICH
+            // arguments were approved WITHOUT ever storing the raw (possibly sensitive)
+            // arguments.
+            if (toolCallPause) {
+                detail.put("pauseType", ConversationPauseException.PauseOrigin.TOOL_CALL.name());
+                detail.put("toolDecisions", buildToolDecisionSummary(decision, pendingBatch));
+            }
             auditLedgerService.submit(new ai.labs.eddi.engine.audit.model.AuditEntry(
                     UUID.randomUUID().toString(), conversationId, agentId, agentVersion, userId,
                     environment != null ? environment.toString() : null, -1,
@@ -1534,6 +1801,100 @@ public class ConversationService implements IConversationService {
         } catch (Exception e) {
             LOGGER.warnf("Failed to submit HITL audit entry for %s: %s", conversationId, e.getMessage());
         }
+    }
+
+    /**
+     * Task 10 — builds the {@code toolDecisions} audit summary for a TOOL_CALL
+     * resume: one entry per gated call with {@code callId}, resolved
+     * {@code verdict}, {@code amended} flag, {@code toolName}, and a per-call
+     * SHA-256 {@code argsDigest}. The digest is over the raw arguments the decision
+     * applies to (the amended arguments when a per-call amendment was supplied,
+     * otherwise the persisted raw args) so the ledger can bind a decision to
+     * exactly the arguments approved — the raw arguments themselves are NEVER
+     * written.
+     */
+    private List<Map<String, Object>> buildToolDecisionSummary(
+                                                               ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
+                                                               PendingToolCallBatch pendingBatch) {
+        List<Map<String, Object>> summary = new ArrayList<>();
+        if (pendingBatch == null || pendingBatch.getCalls() == null) {
+            return summary;
+        }
+        Map<String, ToolCallDecision> perCall = decision.getToolDecisions() != null
+                ? decision.getToolDecisions()
+                : Map.of();
+        for (PendingToolCallBatch.PendingToolCall call : pendingBatch.getCalls()) {
+            ToolCallDecision cd = perCall.get(call.getCallId());
+            var verdict = cd != null && cd.getVerdict() != null ? cd.getVerdict() : decision.getVerdict();
+            String amended = cd != null ? cd.getAmendedArguments() : null;
+            String argsForDigest = amended != null ? amended : call.getArgumentsRaw();
+            var entry = new LinkedHashMap<String, Object>();
+            entry.put("callId", call.getCallId());
+            entry.put("verdict", verdict != null ? verdict.name() : "UNKNOWN");
+            entry.put("amended", amended != null);
+            entry.put("toolName", call.getToolName());
+            entry.put("argsDigest", sha256Hex(argsForDigest != null ? argsForDigest : ""));
+            summary.add(entry);
+        }
+        return summary;
+    }
+
+    /** SHA-256 hex of the given string (lower-case, 64 chars). */
+    private static String sha256Hex(String s) {
+        try {
+            var md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            var sb = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+                sb.append(Character.forDigit(b & 0xF, 16));
+            }
+            return sb.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            // SHA-256 is guaranteed present on every JVM; unreachable.
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    /**
+     * Aggregate verdict for the tool-resume metric: approved | rejected | mixed.
+     */
+    private void recordToolResumeMetric(ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
+                                        PendingToolCallBatch pendingBatch) {
+        String verdict = aggregateVerdict(decision, pendingBatch);
+        meterRegistry.counter("eddi_hitl_tool_resume_count", "verdict", verdict).increment();
+    }
+
+    /**
+     * Resolves the aggregate verdict across all gated calls: {@code approved} when
+     * every call resolves APPROVED, {@code rejected} when every call resolves
+     * REJECTED, {@code mixed} otherwise (per-call verdicts diverge).
+     */
+    private static String aggregateVerdict(ai.labs.eddi.engine.lifecycle.model.HitlDecision decision,
+                                           PendingToolCallBatch pendingBatch) {
+        var top = decision.getVerdict();
+        Map<String, ToolCallDecision> perCall = decision.getToolDecisions() != null
+                ? decision.getToolDecisions()
+                : Map.of();
+        if ((pendingBatch == null || pendingBatch.getCalls() == null || pendingBatch.getCalls().isEmpty())
+                || perCall.isEmpty()) {
+            return top == HitlDecision.HitlVerdict.REJECTED ? "rejected" : "approved";
+        }
+        boolean anyApproved = false;
+        boolean anyRejected = false;
+        for (PendingToolCallBatch.PendingToolCall call : pendingBatch.getCalls()) {
+            ToolCallDecision cd = perCall.get(call.getCallId());
+            var v = cd != null && cd.getVerdict() != null ? cd.getVerdict() : top;
+            if (v == HitlDecision.HitlVerdict.REJECTED) {
+                anyRejected = true;
+            } else {
+                anyApproved = true;
+            }
+        }
+        if (anyApproved && anyRejected) {
+            return "mixed";
+        }
+        return anyRejected ? "rejected" : "approved";
     }
 
     /**
@@ -1675,6 +2036,19 @@ public class ConversationService implements IConversationService {
             if (!isToolCallPause && !isNullOrEmpty(hitlConfig.getPauseReason())) {
                 memory.setHitlPauseReason(hitlConfig.getPauseReason());
             }
+            if (isToolCallPause) {
+                // Tool-pause timeout policy has its OWN scoping (Task 10): a TOOL_CALL
+                // pause resolves from toolApprovals when it carries an explicit override,
+                // otherwise it inherits the outer hitlConfig — EXCEPT an inherited
+                // AUTO_APPROVE is demoted to WAIT_INDEFINITELY. Auto-approving a gated
+                // tool call on a silent timeout is exactly the un-reviewed side effect
+                // the gate exists to prevent, so an inherited AUTO_APPROVE (which the
+                // designer set for RULE pauses, warned about at save time in Task 3) must
+                // NOT auto-execute the tool. An EXPLICIT toolApprovals.timeoutPolicy=
+                // AUTO_APPROVE is honored — the designer opted in at the tool level.
+                applyEffectiveToolTimeoutPolicy(memory, hitlConfig);
+                return;
+            }
             if (hitlConfig.getTimeoutPolicy() == null)
                 return;
             memory.setHitlTimeoutPolicy(hitlConfig.getTimeoutPolicy().name());
@@ -1683,6 +2057,50 @@ public class ConversationService implements IConversationService {
             LOGGER.warnf("Could not populate HITL timeout bookmark for %s: %s",
                     memory.getConversationId(), e.getMessage());
         }
+    }
+
+    /**
+     * Task 10 — resolves the EFFECTIVE tool-pause timeout policy and writes it into
+     * the memory bookmark. Precedence:
+     * <ol>
+     * <li>an explicit {@code toolApprovals.timeoutPolicy} (with its own
+     * {@code approvalTimeout}) wins verbatim — an explicit AUTO_APPROVE is
+     * honored;</li>
+     * <li>otherwise inherit the outer {@code hitlConfig.timeoutPolicy}/
+     * {@code approvalTimeout}, but demote an inherited {@code AUTO_APPROVE} to
+     * {@code WAIT_INDEFINITELY} so a silent timeout never auto-executes a gated
+     * tool call.</li>
+     * </ol>
+     * Absent config on both levels leaves the default WAIT_INDEFINITELY already set
+     * by the caller.
+     */
+    private void applyEffectiveToolTimeoutPolicy(IConversationMemory memory, AgentConfiguration.HitlConfig hitlConfig) {
+        ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovals = hitlConfig.getToolApprovals();
+        HitlTimeoutPolicy effectivePolicy;
+        String effectiveTimeout;
+        if (toolApprovals != null && toolApprovals.getTimeoutPolicy() != null) {
+            // Explicit tool-level override — honored verbatim (AUTO_APPROVE included).
+            effectivePolicy = toolApprovals.getTimeoutPolicy();
+            effectiveTimeout = !isNullOrEmpty(toolApprovals.getApprovalTimeout())
+                    ? toolApprovals.getApprovalTimeout()
+                    : hitlConfig.getApprovalTimeout();
+        } else {
+            // Inherit the outer policy, demoting AUTO_APPROVE to WAIT_INDEFINITELY.
+            effectivePolicy = hitlConfig.getTimeoutPolicy();
+            if (effectivePolicy == HitlTimeoutPolicy.AUTO_APPROVE) {
+                effectivePolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
+            }
+            // A tool-level approvalTimeout may still be set even without a tool-level
+            // policy — prefer it, else inherit the outer timeout.
+            effectiveTimeout = toolApprovals != null && !isNullOrEmpty(toolApprovals.getApprovalTimeout())
+                    ? toolApprovals.getApprovalTimeout()
+                    : hitlConfig.getApprovalTimeout();
+        }
+        if (effectivePolicy == null) {
+            effectivePolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
+        }
+        memory.setHitlTimeoutPolicy(effectivePolicy.name());
+        memory.setHitlApprovalTimeout(effectiveTimeout);
     }
 
     /**

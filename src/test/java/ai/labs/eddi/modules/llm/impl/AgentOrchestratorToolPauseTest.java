@@ -272,6 +272,37 @@ class AgentOrchestratorToolPauseTest {
     }
 
     @Test
+    @DisplayName("pause-cap reached: writes a hitl.tool.pause_cap audit entry via the memory audit collector (guard audit)")
+    void pauseCapReached_writesGuardAudit() throws Exception {
+        var task = twoToolTask();
+        var cfg = gateCalculate();
+        cfg.setMaxPausesPerTurn(1);
+        ChatModel chatModel = mock(ChatModel.class);
+
+        var gatedReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        when(chatModel.chat(any(ChatRequest.class)))
+                .thenReturn(toolBatch(gatedReq))
+                .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("done")).build());
+        doReturn(dataOfInt(1)).when(currentStep).getLatestData("hitl:tool_pause_count");
+
+        // Audit context present — Task 10 records the guard through the collector.
+        var collected = new java.util.ArrayList<ai.labs.eddi.engine.audit.model.AuditEntry>();
+        when(memory.getUserId()).thenReturn("user-1");
+        when(memory.getAuditCollector()).thenReturn(collected::add);
+
+        orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory, cfg, 0);
+
+        var guard = collected.stream()
+                .filter(e -> "hitl.tool.pause_cap".equals(e.taskId()))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("expected a hitl.tool.pause_cap guard audit entry, got: "
+                        + collected.stream().map(ai.labs.eddi.engine.audit.model.AuditEntry::taskId).toList()));
+        assertEquals("pause_cap", guard.output().get("guard"));
+        assertNotNull(guard.output().get("fingerprint"), "guard audit carries the gated fingerprint");
+        assertEquals(true, guard.output().get("automated"));
+    }
+
+    @Test
     @DisplayName("null effective config: zero behavior change — gate short-circuits, model text returned")
     void nullConfig_noGate() throws Exception {
         var task = twoToolTask();
