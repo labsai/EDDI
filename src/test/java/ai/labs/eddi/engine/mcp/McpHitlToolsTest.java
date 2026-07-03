@@ -24,6 +24,7 @@ import org.mockito.ArgumentCaptor;
 import java.security.Principal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -237,5 +238,54 @@ class McpHitlToolsTest {
         when(json.serialize(any())).thenAnswer(inv -> inv.getArgument(0).toString());
         String out = tools.getGroupApprovalStatus("g1", "gc1", "summary");
         assertTrue(out.contains("AWAITING_APPROVAL"), out);
+    }
+
+    // ---- detail=full read-scope gate (security-critical: approver may read full
+    // ONLY while paused)
+
+    @Test
+    void getApprovalStatus_detailFull_nonOwnerApproverNotPaused_returnsForbidden() throws Exception {
+        when(guard.requireConversationHitlAccess("c1")).thenReturn("someone-else");
+        ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY); // not paused
+        when(conversationService.getConversationMemorySnapshot("c1")).thenReturn(snapshot);
+        // caller is neither admin nor owner (ownershipValidator mock defaults to false)
+        String out = tools.getApprovalStatus("c1", "full");
+        assertTrue(out.contains("\"errorCode\":\"FORBIDDEN\""), out);
+    }
+
+    @Test
+    void getApprovalStatus_detailFull_whilePaused_returnsSnapshot() throws Exception {
+        when(guard.requireConversationHitlAccess("c1")).thenReturn("someone-else");
+        ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN); // paused
+        when(conversationService.getConversationMemorySnapshot("c1")).thenReturn(snapshot);
+        when(json.serialize(any())).thenReturn("{\"full\":true}");
+        // paused => the gate passes even for a non-owner approver
+        String out = tools.getApprovalStatus("c1", "full");
+        assertTrue(out.contains("full"), out);
+        assertFalse(out.contains("FORBIDDEN"), out);
+    }
+
+    @Test
+    void getGroupApprovalStatus_detailFull_nonOwnerApproverNotPaused_returnsForbidden() throws Exception {
+        GroupConversation gc = mock(GroupConversation.class);
+        // getState() unstubbed => null => not AWAITING_APPROVAL => not paused
+        when(gc.getUserId()).thenReturn("someone-else");
+        when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
+        String out = tools.getGroupApprovalStatus("g1", "gc1", "full");
+        assertTrue(out.contains("\"errorCode\":\"FORBIDDEN\""), out);
+    }
+
+    @Test
+    void getGroupApprovalStatus_detailFull_whilePaused_returnsFullConversation() throws Exception {
+        GroupConversation gc = mock(GroupConversation.class);
+        when(gc.getState()).thenReturn(GroupConversation.GroupConversationState.AWAITING_APPROVAL); // paused
+        when(gc.getUserId()).thenReturn("someone-else");
+        when(groupConversationService.readGroupConversation("gc1")).thenReturn(gc);
+        when(json.serialize(any())).thenReturn("{\"full\":true}");
+        String out = tools.getGroupApprovalStatus("g1", "gc1", "full");
+        assertTrue(out.contains("full"), out);
+        assertFalse(out.contains("FORBIDDEN"), out);
     }
 }
