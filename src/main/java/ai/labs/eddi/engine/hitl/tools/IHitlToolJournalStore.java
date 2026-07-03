@@ -26,8 +26,12 @@ public interface IHitlToolJournalStore {
     }
 
     /**
-     * @return true if this call claimed execution; false if an entry already exists
-     *         (crashed or completed attempt).
+     * @return true if this call claimed execution; false ONLY if an entry already
+     *         exists (duplicate key — crashed or completed attempt). Any other
+     *         write or connectivity failure is NOT a duplicate and is propagated as
+     *         an unchecked exception rather than returned as {@code false}, so
+     *         callers can distinguish "already claimed" from "claim attempt failed"
+     *         and retry instead of silently skipping a human-approved tool.
      */
     boolean tryClaim(String conversationId, String pauseEpoch, String callId, String toolName, String decidedBy);
 

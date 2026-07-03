@@ -36,8 +36,11 @@ import static com.mongodb.client.model.Updates.set;
  * {@code (conversationId, pauseEpoch, callId)} for atomicity: a plain
  * {@code insertOne} either succeeds (this call won the claim) or fails with a
  * duplicate-key error (another attempt already claimed or completed this
- * execution). The duplicate-key error is caught here and never leaked to
- * callers — a {@code false} return is the only signal.
+ * execution). Only the duplicate-key error (Mongo error code 11000) is caught
+ * here and translated to a {@code false} return. Any other write or
+ * connectivity failure is NOT a duplicate and must not be conflated with one —
+ * it is propagated as an unchecked exception so the caller fails cleanly (and
+ * can retry) instead of silently skipping a human-approved tool.
  *
  * @since 6.0.0
  */
@@ -98,16 +101,18 @@ public class HitlToolJournalStore implements IHitlToolJournalStore {
                         conversationId, pauseEpoch, callId);
                 return false;
             }
+            // Not a duplicate — a transient write failure must never be conflated
+            // with "already claimed". Propagate so the caller fails cleanly and can
+            // retry, rather than silently skipping a human-approved tool.
             LOGGER.errorf(e, "HITL tool journal: unexpected write error claiming conversationId=%s pauseEpoch=%s callId=%s",
                     conversationId, pauseEpoch, callId);
-            return false;
-        } catch (Exception e) {
-            // Never leak a duplicate-key (or any other Mongo) exception to callers —
-            // an honest "not claimed" is always safe; the caller must treat this as
-            // outcome-unknown rather than crash the resume path.
+            throw e;
+        } catch (RuntimeException e) {
+            // Any other unexpected failure (e.g. MongoException for connectivity/
+            // timeout issues) is likewise not a duplicate and must propagate.
             LOGGER.errorf(e, "HITL tool journal: failed to claim conversationId=%s pauseEpoch=%s callId=%s",
                     conversationId, pauseEpoch, callId);
-            return false;
+            throw e;
         }
     }
 

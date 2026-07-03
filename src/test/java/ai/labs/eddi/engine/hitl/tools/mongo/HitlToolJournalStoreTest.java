@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.hitl.tools.mongo;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.JournalEntry;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.Status;
+import com.mongodb.MongoException;
 import com.mongodb.MongoWriteException;
 import com.mongodb.ServerAddress;
 import com.mongodb.WriteError;
@@ -113,6 +114,32 @@ class HitlToolJournalStoreTest {
             assertTrue(secondClaim);
             verify(collection, times(2)).insertOne(any(Document.class));
         }
+
+        @Test
+        @DisplayName("propagates non-duplicate MongoWriteException instead of returning false")
+        void propagatesNonDuplicateWriteException() {
+            MongoWriteException timeoutEx = new MongoWriteException(
+                    new WriteError(50, "ExceededTimeLimit", new BsonDocument()),
+                    new ServerAddress());
+            doThrow(timeoutEx).when(collection).insertOne(any(Document.class));
+
+            MongoWriteException thrown = assertThrows(MongoWriteException.class,
+                    () -> store.tryClaim("conv-1", "epoch-1", "call-1", "toolA", "user-1"));
+
+            assertSame(timeoutEx, thrown);
+        }
+
+        @Test
+        @DisplayName("propagates generic MongoException instead of returning false")
+        void propagatesGenericMongoException() {
+            MongoException connectivityEx = new MongoException("connection reset");
+            doThrow(connectivityEx).when(collection).insertOne(any(Document.class));
+
+            MongoException thrown = assertThrows(MongoException.class,
+                    () -> store.tryClaim("conv-1", "epoch-1", "call-1", "toolA", "user-1"));
+
+            assertSame(connectivityEx, thrown);
+        }
     }
 
     @Nested
@@ -140,6 +167,39 @@ class HitlToolJournalStoreTest {
                     .toBsonDocument(Document.class, com.mongodb.MongoClientSettings.getDefaultCodecRegistry());
             String cappedResult = rendered.getDocument("$set").getString("resultCapped").getValue();
             assertEquals(32 * 1024, cappedResult.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+        }
+
+        @Test
+        @DisplayName("caps result at 32 KB without splitting a multi-byte UTF-8 code point")
+        void capsResultAt32KbWithoutSplittingMultiByteCharacter() {
+            // U+1F600 GRINNING FACE is a 4-byte UTF-8 code point (surrogate pair in
+            // Java's UTF-16 String). Repeating it past the 32 KB cap forces the
+            // capUtf8 back-trim loop to walk back over continuation bytes (0x80-0xBF).
+            String emoji = "😀";
+            String oversized = emoji.repeat(10_000);
+
+            store.markExecuted("conv-1", "epoch-1", "call-1", oversized);
+
+            var updateCaptor = org.mockito.ArgumentCaptor.forClass(Bson.class);
+            verify(collection).updateOne(any(Bson.class), updateCaptor.capture());
+            BsonDocument rendered = updateCaptor.getValue()
+                    .toBsonDocument(Document.class, com.mongodb.MongoClientSettings.getDefaultCodecRegistry());
+            String cappedResult = rendered.getDocument("$set").getString("resultCapped").getValue();
+
+            byte[] cappedBytes = cappedResult.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            assertTrue(cappedBytes.length <= 32 * 1024, "capped result must be at or under the 32 KB byte cap");
+            // A split code point would decode as the UTF-8 replacement character.
+            assertFalse(cappedResult.contains("�"), "capped result must not contain a split code point");
+            // Every emoji is a UTF-16 surrogate pair (2 chars); a clean cap means the
+            // string is composed entirely of whole emoji, so its length is even and
+            // its trailing char is a low surrogate (never a lone high surrogate).
+            assertEquals(0, cappedResult.length() % 2, "capped result must not end mid surrogate-pair");
+            assertFalse(Character.isHighSurrogate(cappedResult.charAt(cappedResult.length() - 1)),
+                    "capped result must not end on a lone high surrogate");
+            // Re-encoding to UTF-8 and back must round-trip exactly — proof the
+            // cap landed on a whole-code-point boundary, not mid-sequence.
+            String roundTripped = new String(cappedBytes, java.nio.charset.StandardCharsets.UTF_8);
+            assertEquals(cappedResult, roundTripped);
         }
     }
 
