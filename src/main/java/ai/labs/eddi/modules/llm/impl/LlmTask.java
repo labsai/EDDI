@@ -112,6 +112,22 @@ public class LlmTask implements ILifecycleTask {
     @jakarta.inject.Inject
     AttachmentForwarder attachmentForwarder;
 
+    @jakarta.inject.Inject
+    AttachmentTextExtractor attachmentTextExtractor;
+
+    /**
+     * Wire the attachment services into the (constructor-built) AgentOrchestrator
+     * after CDI field injection completes, so the {@code readAttachment} tool can
+     * be offered. Skipped in direct-construction unit tests (no CDI) — the tool is
+     * simply never added there.
+     */
+    @jakarta.annotation.PostConstruct
+    void wireAttachmentServices() {
+        if (agentOrchestrator != null) {
+            agentOrchestrator.setAttachmentServices(attachmentStore, attachmentTextExtractor);
+        }
+    }
+
     // Retained for httpCall RAG discovery + execution (Phase 8c-0)
     private final IApiCallExecutor apiCallExecutor;
     private final IRestAgentStore restAgentStore;

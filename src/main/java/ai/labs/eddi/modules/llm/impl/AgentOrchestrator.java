@@ -18,8 +18,11 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -113,6 +116,21 @@ class AgentOrchestrator {
     private final IConversationService conversationService;
     private final IAgentFactory agentFactory;
     private final IAgentStore agentStore;
+
+    // Wired post-construction by LlmTask (see setAttachmentServices) so the long
+    // constructor and its many direct-construction unit tests stay unchanged.
+    private IAttachmentStore attachmentStore;
+    private AttachmentTextExtractor attachmentTextExtractor;
+
+    /**
+     * Provide the attachment services used to build the {@code readAttachment}
+     * tool. Called by {@code LlmTask} after CDI injection completes; when unset
+     * (e.g. in isolated unit tests) the tool is simply never added.
+     */
+    void setAttachmentServices(IAttachmentStore attachmentStore, AttachmentTextExtractor attachmentTextExtractor) {
+        this.attachmentStore = attachmentStore;
+        this.attachmentTextExtractor = attachmentTextExtractor;
+    }
 
     AgentOrchestrator(CalculatorTool calculatorTool, DateTimeTool dateTimeTool, WebSearchTool webSearchTool, DataFormatterTool dataFormatterTool,
             WebScraperTool webScraperTool, TextSummarizerTool textSummarizerTool, PdfReaderTool pdfReaderTool, WeatherTool weatherTool,
@@ -563,6 +581,8 @@ class AgentOrchestrator {
                 addUserMemoryToolIfEnabled(tools, memory);
             if (whitelist.contains("conversationRecall"))
                 addConversationRecallToolIfEnabled(tools, task, memory);
+            if (whitelist.contains("readattachment"))
+                addReadAttachmentToolIfEnabled(tools, memory);
             // Dynamic agent tools (whitelist-gated, shared tracking lists)
             {
                 List<String> sharedCreatedIds = new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -620,6 +640,8 @@ class AgentOrchestrator {
             addUserMemoryToolIfEnabled(tools, memory);
             // Auto-add conversation recall tool if rolling summary is active
             addConversationRecallToolIfEnabled(tools, task, memory);
+            // Auto-add the readAttachment tool when this turn has attachments
+            addReadAttachmentToolIfEnabled(tools, memory);
         }
 
         return tools;
@@ -672,6 +694,26 @@ class AgentOrchestrator {
         tools.add(tool);
         LOGGER.infof("[RECALL] ConversationRecallTool enabled: summaryThroughStep=%d, maxRecallTurns=%d", throughStep,
                 summaryConfig.getMaxRecallTurns());
+    }
+
+    /**
+     * Constructs and adds a {@link ReadAttachmentTool} when this turn carries
+     * attachments, giving the LLM on-demand access to attachment text (recall of an
+     * earlier turn's file, oversize files not inlined, page-targeted PDF reads).
+     * The conversation id is implicit — the tool never takes it as a parameter.
+     */
+    private void addReadAttachmentToolIfEnabled(List<Object> tools, IConversationMemory memory) {
+        if (attachmentStore == null || attachmentTextExtractor == null) {
+            return;
+        }
+        IData<List<?>> attachmentData = memory.getCurrentStep().getLatestData(MemoryKeys.ATTACHMENTS);
+        if (attachmentData == null || attachmentData.getResult() == null || attachmentData.getResult().isEmpty()) {
+            return;
+        }
+        var tool = new ReadAttachmentTool(attachmentStore, attachmentTextExtractor, memory.getConversationId());
+        tools.add(tool);
+        LOGGER.infof("[ATTACHMENTS] ReadAttachmentTool enabled for conversation='%s' with %d attachment(s)",
+                sanitize(memory.getConversationId()), attachmentData.getResult().size());
     }
 
     /**

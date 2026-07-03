@@ -5,6 +5,22 @@
 
 ---
 
+## 📎 Multimodal Attachments Completion — Phase 4: readAttachment tool (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+**Plan:** `planning/multimodal-attachments-completion-plan.md` (Phase 4 of 6).
+
+### What changed
+
+- **`ReadAttachmentTool`** (`modules/llm/tools/impl`, `@Vetoed`) — the multi-turn recall path. Two `@Tool`s: `listAttachments()` (name/type/size/ref of every attachment in the conversation) and `readAttachment(nameOrRef, page)` (loads one attachment, extracts text — 1-based PDF page or 0 for whole doc — else a "no extractable text" note). The conversation id is implicit (constructor-injected), so the LLM never supplies a userId/conversationId and can only reach its own (or granted) attachments — enforced by `IAttachmentStore`.
+- **Auto-add wiring** — `AgentOrchestrator` gains `setAttachmentServices(store, extractor)` (wired by `LlmTask` in a new `@PostConstruct`, after CDI injection, so the long constructor + its six direct-construction tests are untouched). `addReadAttachmentToolIfEnabled` adds the tool in the no-whitelist branch when the turn has attachments, and in the whitelist branch under key `readattachment`; skipped when the services are unset (isolated tests) or the turn has no attachments. The forwarder's fallback notes already point the model at this tool.
+
+### Tests
+
+`ReadAttachmentToolTest` (11 — list/read by name & ref, case-insensitive, PDF page, not-found, non-extractable, denied load, empty text, blank ref) + 5 orchestrator auto-add branch tests (no-whitelist, whitelisted, whitelist-excluded, services-unset, no-attachments). Existing orchestrator/LlmTask tests unchanged.
+
+---
+
 ## 📎 Multimodal Attachments Completion — Phase 2: Unified forwarder (2026-07-03)
 
 **Repo:** EDDI (`feat/multimodal-attachments-completion`)
