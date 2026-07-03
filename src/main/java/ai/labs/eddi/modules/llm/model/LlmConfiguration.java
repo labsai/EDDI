@@ -298,6 +298,13 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          */
         private IdentityMaskingConfig identityMasking;
 
+        /**
+         * Per-task tool-approval gating override (tool-level HITL). When present, it
+         * FULLY REPLACES the agent-level {@code hitlConfig.toolApprovals} for this task
+         * (no list merging). Absent = inherit the agent-level default.
+         */
+        private ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovals;
+
         // === Helper Methods ===
 
         /**
@@ -332,6 +339,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setId(String id) {
             this.id = id;
+        }
+
+        public ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig getToolApprovals() {
+            return toolApprovals;
+        }
+
+        public void setToolApprovals(ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovals) {
+            this.toolApprovals = toolApprovals;
         }
 
         public String getType() {

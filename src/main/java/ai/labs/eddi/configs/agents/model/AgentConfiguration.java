@@ -889,5 +889,22 @@ public class AgentConfiguration {
         public void setPauseReason(String pauseReason) {
             this.pauseReason = pauseReason;
         }
+
+        /**
+         * Agent-level default tool-approval gating (tool-level HITL). Applies to every
+         * LLM task in the agent unless a task overrides it with its own
+         * {@code toolApprovals}. Absent = no tool gating.
+         *
+         * @since 6.0.0
+         */
+        private ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovals;
+
+        public ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig getToolApprovals() {
+            return toolApprovals;
+        }
+
+        public void setToolApprovals(ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovals) {
+            this.toolApprovals = toolApprovals;
+        }
     }
 }
