@@ -455,6 +455,11 @@ public class LlmTask implements ILifecycleTask {
                 var chatResult = legacyChatExecutor.execute(chatModel, messages, task, jsonMode);
                 responseContent = chatResult.response();
                 responseMetadata = chatResult.responseMetadata();
+                // Forward the buffered response to the stream so an SSE client is not left
+                // empty.
+                if (eventSink != null && responseContent != null && !addToOutputExplicitlyFalse) {
+                    eventSink.onToken(responseContent);
+                }
             }
 
         } else {

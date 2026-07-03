@@ -107,7 +107,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                                                         long durationMs) {
                             sendEvent(eventSink, sse, "cascade_escalation", String.format(java.util.Locale.ROOT,
                                     "{\"fromStep\":%d,\"toStep\":%d,\"confidence\":%.4f,\"threshold\":%.4f,\"reason\":\"%s\",\"durationMs\":%d}",
-                                    fromStep, toStep, confidence, threshold, escapeJson(reason), durationMs));
+                                    fromStep, toStep, finite(confidence), finite(threshold), escapeJson(reason), durationMs));
                         }
 
                         @Override
@@ -157,6 +157,14 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         } catch (Exception e) {
             LOGGER.debugf("Error closing SSE sink: %s", e.getMessage());
         }
+    }
+
+    /**
+     * Coerce a non-finite double (NaN/Infinity) to 0.0 so it serializes as valid
+     * JSON.
+     */
+    private static double finite(double v) {
+        return Double.isFinite(v) ? v : 0.0;
     }
 
     private String escapeJson(String text) {

@@ -325,13 +325,13 @@ class AgentOrchestrator {
         Double maxBudget = task.getMaxBudgetPerConversation();
         String conversationId = memory.getConversationId();
 
-        // Accumulates token usage across tool-loop iterations. Reset at the start of
-        // each retry attempt so only the successful attempt's usage is reported.
+        // Accumulates token usage across ALL tool-loop iterations AND retry attempts —
+        // every LLM call is billed, so the reported usage/cost must include earlier
+        // failed attempts, not just the successful one.
         final TokenUsage[] tokenHolder = new TokenUsage[1];
 
         // Execute with retry logic — the tool execution loop
         String response = AgentExecutionHelper.executeWithRetry(() -> {
-            tokenHolder[0] = null;
             List<ChatMessage> currentMessages = new ArrayList<>(messages);
             int maxIterations = task.getMaxToolIterations() != null ? task.getMaxToolIterations() : 10;
 
@@ -351,8 +351,9 @@ class AgentOrchestrator {
                 // Cooperative cancellation: if this step was interrupted (e.g. a cascade
                 // per-step timeout called future.cancel(true)), stop before issuing another
                 // model call — avoids launching further side-effectful tools on a step whose
-                // result will be discarded.
-                if (Thread.currentThread().isInterrupted()) {
+                // result will be discarded. Thread.interrupted() also CLEARS the flag so it
+                // cannot leak to any later work on this thread.
+                if (Thread.interrupted()) {
                     throw new LifecycleException("Agent execution cancelled (interrupted)");
                 }
 
@@ -376,7 +377,8 @@ class AgentOrchestrator {
                 if (aiMessage.hasToolExecutionRequests()) {
                     for (ToolExecutionRequest toolRequest : aiMessage.toolExecutionRequests()) {
                         // Cooperative cancellation before each (potentially side-effectful) tool.
-                        if (Thread.currentThread().isInterrupted()) {
+                        // Thread.interrupted() clears the flag so it cannot leak to later work.
+                        if (Thread.interrupted()) {
                             throw new LifecycleException("Agent execution cancelled (interrupted) before tool: " + toolRequest.name());
                         }
 

@@ -126,7 +126,9 @@ class ConfidenceEvaluator {
                 if (confidenceMatcher.find()) {
                     double confidence = clamp(Double.parseDouble(confidenceMatcher.group(1)));
                     Matcher responseMatcher = RESPONSE_JSON_PATTERN.matcher(candidate);
-                    String actualResponse = responseMatcher.find() ? unescapeJsonString(responseMatcher.group(1)) : stripJsonWrapper(response);
+                    // Use the fence-stripped candidate (not the raw response) so a fenced wrapper
+                    // does not leak markdown fences into the extracted answer.
+                    String actualResponse = responseMatcher.find() ? unescapeJsonString(responseMatcher.group(1)) : stripJsonWrapper(candidate);
                     return new EvaluationResult(actualResponse, confidence);
                 }
             } catch (NumberFormatException e) {

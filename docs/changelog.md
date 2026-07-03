@@ -20,15 +20,15 @@
 ### Broken promises made real
 
 - **SSE cascade events (#1).** `StreamingResponseHandler` gained default `onCascadeStepStart`/`onCascadeEscalation`; the anonymous sink in `ConversationService.sayStreaming` forwards them; `RestAgentEngineStreaming` emits `cascade_step_start` / `cascade_escalation` SSE events. The plumbing is now live end-to-end.
-- **judge_model implemented (#2).** New `judgeModel: {type, parameters}` config block, built once via `ChatModelRegistry` (vault + global-var resolution), passed into `ConfidenceEvaluator`. `evaluationStrategy: judge_model` without a judge now fails at configure time.
-- **`strategy: parallel` (#3) / budget javadoc (#4).** Unknown strategy rejected at configure time; `parallel` warns once and runs sequentially; the false "budget exhausted" javadoc replaced with real ceiling docs.
+- **judge_model implemented (#2).** New `judgeModel: {type, parameters}` config block, built once via `ChatModelRegistry` (vault + global-var resolution), passed into `ConfidenceEvaluator`. `evaluationStrategy: judge_model` without a judge logs a deploy-time warning and falls back to heuristic at runtime.
+- **`strategy: parallel` (#3) / budget javadoc (#4).** Unknown/`parallel` strategy logs a deploy-time warning and runs sequentially; the false "budget exhausted" javadoc replaced with real ceiling docs.
 
 ### Observability & guardrails
 
 - **Token + cost evidence.** Per-step `tokenUsage` and `costUsd` in the trace; aggregate run cost + token usage surfaced via `responseMetadataObjectName` (was `{}`). Agent-mode token usage is accumulated across tool-loop iterations.
 - **Micrometer metrics** under `eddi.llm.cascade.*`: executions, escalations (tag `reason`), accepted step, step latency, confidence distribution, step errors (tags `provider`,`type`), tokens, cost, ceiling exceeded (tag `kind`).
 - **Cascade ceilings.** `maxTotalDurationMs` (wall-clock) and `maxCostPerRun` (dollars, from configurable per-step `inputPricePer1M`/`outputPricePer1M`) stop escalation and return the best response so far. Per-step timeout is capped by the remaining duration budget.
-- **Configure-time validation** (`CascadeConfigValidator`): empty steps, unknown `evaluationStrategy`, `judge_model` without a judge, thresholds ∉ [0,1], null threshold on a non-last step (dead-step trap), negative pricing/ceilings — all fail fast at deploy.
+- **Configure-time validation** (`CascadeConfigValidator`): invalid *new* numeric fields (negative pricing, non-positive `maxTotalDurationMs`, negative `maxCostPerRun`) fail fast at deploy; legacy conditions (empty steps, unknown `evaluationStrategy`/`strategy`, `judge_model` without a judge, thresholds ∉ [0,1], dead non-last null thresholds, non-positive `timeoutMs`) emit deploy-time warnings but still load (backward-compatible).
 
 ### Robustness
 
@@ -77,6 +77,14 @@ A lean second adversarial pass (5 reviewers → synthesizer) found five more rea
 - **`returnBestAcrossSteps` trace (low):** the earlier winning step's trace entry is relabeled `accepted_as_best` so the trace agrees with `stepUsed`.
 
 Regression tests added for each. Full touched-area suite green.
+
+### PR-review fixes (bots)
+
+CodeRabbit + Copilot + github-code-quality on PR #587 flagged further items, now addressed: retry token usage accumulated across *all* attempts (not just the last); the cancellation interrupt flag is cleared (`Thread.interrupted()`) so it can't leak; the `accepted.step` metric + trace status name the *actual* returned step under `returnBestAcrossSteps`; unknown `evaluationStrategy` normalized to `structured_output` at runtime (matches the validator + evaluator default); SSE `cascade_escalation` guards non-finite `confidence`/`threshold`; the structured-output regex fallback uses the fence-stripped text; the cascade-disabled agent path forwards its buffered response to the stream; an unused parameter removed; a dead `@Disabled` test deleted; and the docs/changelog/plan corrected to say the validator *warns* (not "rejects/fails fast") on legacy conditions.
+
+### Status
+
+Complete and merged-ready on `feat/model-cascade-enterprise-hardening` (PR #587). No open items; the branch is the terminal state of this feature — next planned work is unrelated (see Section 3 of AGENTS.md).
 
 ---
 

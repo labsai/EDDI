@@ -89,10 +89,15 @@ test classes are updated to instantiate with mocks.
 `tokens`, `cost`, `ceiling.exceeded` (tag kind=duration|cost).
 
 ### Configure-time validation (`LlmTask.configure`)
-Fail fast on: empty steps; unknown `evaluationStrategy`; `judge_model` without judge config;
-threshold ∉ [0,1]; non-last step with null threshold (dead-step trap); unknown `strategy`
-(reject) / `parallel` (warn); negative pricing/ceilings. `convertToObject + structured_output`
-→ warn + auto-downgrade (per #7).
+Two tiers, chosen so an upgrade never stops a previously-loading agent from deploying:
+- **Hard error (throw)** — only the *new* numeric fields (no stored config predates them):
+  non-positive `maxTotalDurationMs`, negative `maxCostPerRun`, negative `inputPricePer1M` /
+  `outputPricePer1M`.
+- **Warn (deploy proceeds)** — legacy conditions older releases tolerated at load: empty steps;
+  unknown `evaluationStrategy` / `strategy`; `judge_model` without judge config; threshold ∉ [0,1];
+  non-last step with null threshold (dead-step trap); non-positive `timeoutMs`; cross-provider
+  step/judge missing its own `apiKey`; `convertToObject + structured_output` (warn + auto-downgrade,
+  per #7).
 
 ### Cancellation safety (#9)
 Cooperative cancellation flag checked between orchestrator tool-loop iterations so a timed-out

@@ -62,10 +62,10 @@ Cascading is configured per-task in a `langchain.json` resource:
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | boolean | `false` | Master toggle for cascading |
-| `strategy` | string | `"cascade"` | Execution strategy. Only `cascade` (sequential) is implemented; `parallel` is accepted but warns at deploy time and runs sequentially. Unknown values are rejected. |
+| `strategy` | string | `"cascade"` | Execution strategy. Only `cascade` (sequential) is implemented; `parallel` and any unknown value warn at deploy time and run sequentially. |
 | `evaluationStrategy` | string | `"structured_output"` | How confidence is evaluated (see below) |
 | `enableInAgentMode` | boolean | `true` | Whether cascade activates when tools/agents are configured |
-| `judgeModel` | object | — | Model for the `judge_model` strategy: `{ "type": "...", "parameters": {...} }`. **Required** when `evaluationStrategy` is `judge_model`. |
+| `judgeModel` | object | — | Model for the `judge_model` strategy: `{ "type": "...", "parameters": {...} }`. Expected when `evaluationStrategy` is `judge_model`; if omitted or unbuildable, deployment logs a warning and confidence evaluation falls back to `heuristic` at runtime. |
 | `heuristic` | object | — | Overrides for the `heuristic` strategy (see below). Optional. |
 | `maxTotalDurationMs` | long | — | Wall-clock ceiling across the whole cascade. When reached, escalation stops and the best response so far is returned. Also caps each step's timeout by the remaining budget. |
 | `maxCostPerRun` | double | — | Dollar ceiling for a single run, computed from token usage × per-step pricing. When reached, escalation stops and the best response so far is returned. |

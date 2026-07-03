@@ -265,7 +265,7 @@ class CascadingModelExecutor {
                 }
 
                 StepResult stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, messages, systemMessage, effectiveStrategy, task,
-                        step, memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, jsonMode, stepTimeout);
+                        memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, jsonMode, stepTimeout);
 
                 long durationMs = System.currentTimeMillis() - stepStart;
                 double stepCost = computeCost(step, cascade, stepResult.tokenUsage);
@@ -286,33 +286,31 @@ class CascadingModelExecutor {
                 }
 
                 if (isLastStep || step.getConfidenceThreshold() == null || stepResult.confidence >= step.getConfidenceThreshold()) {
-                    stepTrace.put("status", "accepted");
                     trace.add(stepTrace);
-                    increment("eddi.llm.cascade.accepted.step", "step", String.valueOf(i));
-
                     LOGGER.infof("Cascade step %d accepted: confidence=%.2f, model=%s, durationMs=%d", i, stepResult.confidence, modelName,
                             durationMs);
 
                     // returnBestAcrossSteps: an earlier escalated step may have scored higher.
                     // Do NOT swap when the accepted step was already streamed live — the client
                     // has already received its tokens, so returning a different step's text would
-                    // mismatch the stream.
+                    // mismatch the stream. Resolve the winner BEFORE recording the accepted-step
+                    // status/metric, so both name the step actually returned.
                     if (cascade.isReturnBestAcrossSteps() && !stepResult.streamedLive && bestSoFar != null && bestSoFar.stepUsed() != i
                             && bestSoFar.confidence() > stepResult.confidence) {
                         LOGGER.infof("returnBestAcrossSteps: returning step %d (confidence=%.2f) over accepted step %d (confidence=%.2f)",
                                 bestSoFar.stepUsed(), bestSoFar.confidence(), i, stepResult.confidence);
-                        // Reflect the override in the trace so audit artifacts agree with
-                        // stepUsed: the accepted step is superseded, and the earlier winner (which
-                        // was recorded as "escalated") is relabeled as the returned answer.
                         stepTrace.put("status", "superseded_by_best");
                         for (Map<String, Object> entry : trace) {
                             if (Integer.valueOf(bestSoFar.stepUsed()).equals(entry.get("step"))) {
                                 entry.put("status", "accepted_as_best");
                             }
                         }
+                        increment("eddi.llm.cascade.accepted.step", "step", String.valueOf(bestSoFar.stepUsed()));
                         return withRun(bestSoFar, runCostUsd, trace);
                     }
 
+                    stepTrace.put("status", "accepted");
+                    increment("eddi.llm.cascade.accepted.step", "step", String.valueOf(i));
                     return new CascadeResult(stepResult.response, stepResult.confidence, i, modelType, modelName, stepResult.tokenUsage, runCostUsd,
                             trace, stepResult.agentResult, stepResult.streamedLive);
                 }
@@ -396,6 +394,13 @@ class CascadingModelExecutor {
      */
     private String resolveEffectiveStrategy(String configured, boolean convertToObject, boolean useAgentMode, ModelCascadeConfig cascade) {
         String s = configured != null ? configured.toLowerCase() : "structured_output";
+        // Normalize an unknown strategy to structured_output — matches the deploy-time
+        // validator warning and the evaluator's own switch default, so
+        // streaming/wrapper
+        // gating and confidence evaluation stay consistent.
+        if (!Set.of("structured_output", "heuristic", "judge_model", "none").contains(s)) {
+            s = "structured_output";
+        }
         boolean wrapperUnusable = convertToObject || useAgentMode;
         if ("structured_output".equals(s) && wrapperUnusable) {
             String downgraded = cascade.getJudgeModel() != null ? "judge_model" : "heuristic";
@@ -427,7 +432,7 @@ class CascadingModelExecutor {
      */
     private StepResult executeStepWithTimeout(ChatModel chatModel, StreamingChatModel streamingModel, ConversationEventSink eventSink,
                                               List<ChatMessage> messages, String systemMessage, String evaluationStrategy,
-                                              LlmConfiguration.Task task, CascadeStep step, IConversationMemory memory,
+                                              LlmConfiguration.Task task, IConversationMemory memory,
                                               AgentOrchestrator agentOrchestrator, boolean useAgentMode, ChatModel judgeModel,
                                               HeuristicConfig heuristicConfig, boolean jsonMode, long timeoutMs)
             throws Exception {
