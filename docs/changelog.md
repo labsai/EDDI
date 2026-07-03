@@ -27,7 +27,7 @@
 
 - **Token + cost evidence.** Per-step `tokenUsage` and `costUsd` in the trace; aggregate run cost + token usage surfaced via `responseMetadataObjectName` (was `{}`). Agent-mode token usage is accumulated across tool-loop iterations.
 - **Micrometer metrics** under `eddi.llm.cascade.*`: executions, escalations (tag `reason`), accepted step, step latency, confidence distribution, step errors (tags `provider`,`type`), tokens, cost, ceiling exceeded (tag `kind`).
-- **Cascade ceilings.** `maxTotalDurationMs` (wall-clock) and `maxCostPerRun` (dollars, from configurable per-step `inputPricePer1M`/`outputPricePer1M`) stop escalation and return the best response so far. Per-step timeout is capped by the remaining duration budget.
+- **Cascade ceilings.** `maxTotalDurationMs` (wall-clock) and `maxCostPerRun` (dollars, from configurable per-step `inputPricePer1M`/`outputPricePer1M`) stop escalation and return the best response so far. Per-step timeout is capped by the remaining duration budget for **buffered** steps only — a live-streamed step is exempt (see the "Live-stream timeout" fix below).
 - **Configure-time validation** (`CascadeConfigValidator`): invalid *new* numeric fields (negative pricing, non-positive `maxTotalDurationMs`, negative `maxCostPerRun`) fail fast at deploy; legacy conditions (empty steps, unknown `evaluationStrategy`/`strategy`, `judge_model` without a judge, thresholds ∉ [0,1], dead non-last null thresholds, non-positive `timeoutMs`) emit deploy-time warnings but still load (backward-compatible).
 
 ### Robustness

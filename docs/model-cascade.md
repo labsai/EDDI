@@ -67,7 +67,7 @@ Cascading is configured per-task in a `langchain.json` resource:
 | `enableInAgentMode` | boolean | `true` | Whether cascade activates when tools/agents are configured |
 | `judgeModel` | object | — | Model for the `judge_model` strategy: `{ "type": "...", "parameters": {...} }`. Expected when `evaluationStrategy` is `judge_model`; if omitted or unbuildable, deployment logs a warning and confidence evaluation falls back to `heuristic` at runtime. |
 | `heuristic` | object | — | Overrides for the `heuristic` strategy (see below). Optional. |
-| `maxTotalDurationMs` | long | — | Wall-clock ceiling across the whole cascade. When reached, escalation stops and the best response so far is returned. Also caps each step's timeout by the remaining budget. |
+| `maxTotalDurationMs` | long | — | Wall-clock ceiling across the whole cascade. When reached, escalation stops and the best response so far is returned. Also caps each **buffered** step's timeout by the remaining budget — a step streamed live is exempt (see [Streaming the Final Step](#streaming-the-final-step)). |
 | `maxCostPerRun` | double | — | Dollar ceiling for a single run, computed from token usage × per-step pricing. When reached, escalation stops and the best response so far is returned. |
 | `inputPricePer1M` / `outputPricePer1M` | double | — | Cascade-level default token pricing (steps may override). Used for cost reporting and the cost ceiling. |
 | `returnBestAcrossSteps` | boolean | `false` | When true, if an earlier (escalated) step scored strictly higher than the finally-accepted step, the earlier step's response is returned. |
@@ -80,7 +80,7 @@ Cascading is configured per-task in a `langchain.json` resource:
 | `type` | string | task `type` | Provider type (e.g., `openai`, `anthropic`, `ollama`). Resolved through global variables, like the task type. |
 | `parameters` | object | `{}` | Provider-specific params. Merged over the base task parameters (step wins). Values are resolved for `${vault:...}` secrets, global variables, and Qute templates — parity with task params. |
 | `confidenceThreshold` | Double | `null` | Minimum confidence to accept this step. Below it, escalate. **A non-last step should set a threshold** (a null threshold there is always-accepted, making later steps unreachable — flagged with a deploy-time warning). The last step's threshold is ignored (always accepted). |
-| `timeoutMs` | long | `30000` | Per-step timeout in milliseconds. Also bounded by the remaining `maxTotalDurationMs` budget. |
+| `timeoutMs` | long | `30000` | Per-step timeout in milliseconds, for **buffered** (non-streamed) steps — also bounded by the remaining `maxTotalDurationMs` budget. A step streamed live ignores this and instead runs under an internal ~120 s bound (see [Streaming the Final Step](#streaming-the-final-step)). |
 | `inputPricePer1M` / `outputPricePer1M` | double | cascade default | Per-step token pricing (overrides the cascade-level default). |
 
 > **Merge note:** Step parameters are merged over base task parameters (step wins). Steps only specify overrides (e.g., a different `model`); shared params like `systemMessage` are inherited.
@@ -113,7 +113,7 @@ Analyzes the response text for uncertainty signals. Phrases and thresholds are *
 | Hedging phrase (e.g. "I'm not sure") | `hedgingScore` (`0.4`) |
 | No red flags | `defaultScore` (`0.8`) |
 
-`heuristic` config fields (all optional): `lowConfidencePhrases`, `refusalPhrases`, `shortLengthThreshold`, `shortScore`, `refusalScore`, `hedgingScore`, `defaultScore`. Localize the phrase lists for non-English deployments — without configured phrases, the evaluator cannot distinguish hedging from confidence and returns the default score.
+`heuristic` config fields (all optional): `lowConfidencePhrases`, `refusalPhrases`, `shortLengthThreshold`, `shortScore`, `refusalScore`, `hedgingScore`, `defaultScore`. Localize the phrase lists for non-English deployments — without configured phrases, the evaluator cannot distinguish hedging from confidence and returns the default score. Configured score values are clamped to `[0.0, 1.0]`, so a mis-set value can't produce an out-of-range confidence.
 
 ### `judge_model`
 
@@ -132,7 +132,7 @@ Always returns `1.0` — effectively disables confidence gating. The first step'
 | Error Type | Behavior |
 |---|---|
 | **Rate limited (429) / 5xx** | Retried **in-step** up to the task's `retry.maxAttempts` (with backoff) before escalating to the next step. |
-| **Timeout** | The step is cancelled and the cascade escalates; a warning is logged. |
+| **Timeout** | The step is cancelled and the cascade escalates; a warning is logged. A step streamed live is exempt from cancellation — see [Streaming the Final Step](#streaming-the-final-step). |
 | **Other errors** | Logged; escalate to the next step. |
 | **Duration / cost ceiling reached** | Stop escalating, return the best response so far. |
 | **All steps fail** | Return the best response seen so far, or throw `LifecycleException` if none produced a result. |
@@ -152,15 +152,15 @@ Two SSE event types provide real-time visibility, emitted through `ConversationE
 
 ## Streaming the Final Step
 
-When streaming (SSE), the always-accepted final step is streamed **live** token-by-token — as long as it runs in legacy (no-tools) mode, uses a non-wrapper strategy (`heuristic`, `judge_model`, or `none`), and the provider supports streaming. Earlier steps are buffered (their full text is needed to evaluate confidence). In agent mode, the cascade emits the final response as a single chunk.
+When streaming (SSE), a **guaranteed-accept step** is streamed **live** token-by-token: the last step, a step with a null `confidenceThreshold`, or a `none`-strategy step whose threshold is `≤ 1.0` (its confidence is always `1.0`, so it will always accept). This requires legacy (no-tools) mode, a non-wrapper strategy (`heuristic`, `judge_model`, or `none`), and a streaming-capable provider. Any step that could still escalate is always buffered instead (its full text is needed to evaluate confidence before deciding). In agent mode, the cascade emits the final response as a single chunk rather than streaming it live.
 
-> **Bounds & consistency:** a live-streamed step is **not** subject to the per-step / duration timeout (which would otherwise cancel it mid-stream while the provider keeps emitting tokens); it runs under the streaming executor's own internal bound (~120 s) and its result — even if partial at that bound — is the accepted answer, so the client never receives tokens for a response that is then replaced. `returnBestAcrossSteps` also never supersedes a step that was streamed live. Only genuinely-terminal steps (last step, null-threshold step, or `none`-strategy step) are streamed live.
+> **Bounds & consistency:** a live-streamed step is **not** subject to the per-step `timeoutMs` / `maxTotalDurationMs` cap — cancelling it mid-stream cannot stop the provider from continuing to emit tokens to the client, so instead it runs under the streaming executor's own internal bound (~120 s) and its result — even if partial at that bound — is the accepted answer. The client therefore never receives tokens for a response that is then replaced. `returnBestAcrossSteps` also never supersedes a step that was streamed live, for the same reason.
 
 ## Observability
 
 ### Trace
 
-The full per-step trace is stored in conversation memory under `langchain:cascade:trace:<taskId>`. Each entry contains: `step`, `model`, `modelType`, `confidence`, `durationMs`, `tokenUsage` (`inputTokens`/`outputTokens`/`totalTokens`), `costUsd`, and `status` (`accepted`, `escalated`, `timeout`, `error`, `retryable_error`).
+The full per-step trace is stored in conversation memory under `langchain:cascade:trace:<taskId>`. Each entry contains: `step`, `model`, `modelType`, `confidence`, `durationMs`, `tokenUsage` (`inputTokens`/`outputTokens`/`totalTokens`), `costUsd`, and `status` (`accepted`, `escalated`, `timeout`, `error`, `retryable_error`). When `returnBestAcrossSteps` overrides the outcome, the step that would have been accepted is relabeled `superseded_by_best` and the earlier winning step is relabeled `accepted_as_best`, so the trace always agrees with the returned `stepUsed`.
 
 ### Response metadata
 

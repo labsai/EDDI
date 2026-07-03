@@ -1,10 +1,15 @@
 # Multi-Model Cascade — Enterprise Hardening Plan
 
 > Branch: `feat/model-cascade-enterprise-hardening` (off `origin/main`)
-> Status: In progress
+> Status: **Complete** — [PR #587](https://github.com/labsai/EDDI/pull/587), reviewed and revised
+> through two adversarial passes plus CodeRabbit/Copilot/code-quality bot review.
 > Scope: Full enterprise pass over the multi-model cascading feature — fixes every
 > item in the code review (broken promises, correctness bugs, enterprise gaps) and
 > makes the docs honest.
+>
+> **Note:** the "Architecture changes" section below records the *final, shipped*
+> design (not the original round-1 intent) — a few line items changed during
+> implementation and review; see the deviations called out inline.
 
 ## Background
 
@@ -50,10 +55,15 @@ This plan implements the full enterprise pass. Design decisions (locked with the
   language-agnostic signals (length bands + JSON-structure presence) instead of a flat 0.8.
 - **judge_model**: now reachable — a real judge model is passed in.
 
-### `CascadingModelExecutor` → `@ApplicationScoped` CDI bean
-Converted from static utility to injectable bean so it can hold `MeterRegistry`,
-`GlobalVariableResolver`, and `IMemoryItemConverter` (templating). The 3 existing executor
-test classes are updated to instantiate with mocks.
+### `CascadingModelExecutor` → plain instance (constructed by `LlmTask`)
+**Deviation from original intent:** converted from a static utility to a package-private
+instance class — *not* a CDI `@ApplicationScoped` bean. `LlmTask` constructs it once via
+`new CascadingModelExecutor(...)` (the same pattern it already uses for `AgentOrchestrator`
+and `LegacyChatExecutor`), holding `ChatModelRegistry`, `GlobalVariableResolver`,
+`ITemplatingEngine`, `LegacyChatExecutor`, `StreamingLegacyChatExecutor`, and `MeterRegistry`
+(no `IMemoryItemConverter` — templating goes through `ITemplatingEngine` directly). The 3
+existing executor test classes are updated to instantiate with mocks; one dead `@Disabled`
+test class was later deleted (round-3 PR review).
 - Per-step token capture from `ChatResponse.metadata().tokenUsage()`; per-step `costUsd` from
   configured pricing. `CascadeResult` carries real `modelName`, aggregate `tokenUsage`,
   aggregate `costUsd`. All added to the per-step trace.
@@ -63,10 +73,18 @@ test classes are updated to instantiate with mocks.
 - **#6**: agent-mode `structured_output` → effective judge/heuristic (no wrapper).
 - **#7**: thread `jsonMode`; when `convertToObject=true`, effective strategy is never the wrapper.
 - **strategy**: `parallel`/unknown → handled by validation; runtime logs once, runs sequentially.
+  An unknown `evaluationStrategy` is likewise normalized to `structured_output` at runtime
+  (round-3 fix), matching the validator warning and the evaluator's own default.
 - **Ceilings**: track cumulative duration + cost; before each step after step 0, stop and return
-  best-so-far if a ceiling is exceeded; cap each step timeout by remaining duration budget.
+  best-so-far if a ceiling is exceeded; cap each **buffered** step's timeout by the remaining
+  duration budget. **Deviation (round-2):** a live-streamed step is exempt from this cap — see
+  "Streaming the final step live" below.
 - **returnBestAcrossSteps**: when true, if an earlier escalated step scored strictly higher than
-  the accepted final step, return the earlier one.
+  the accepted final step, return the earlier one — unless the accepted step was already
+  streamed live (round-2 fix; swapping it would mismatch tokens the client already received).
+  The trace is relabeled (`superseded_by_best` / `accepted_as_best`) so the audit trail agrees
+  with the returned step, and the `accepted.step` metric is recorded for the step actually
+  returned (round-3 PR-review fix).
 
 ### `LlmTask`
 - **#5 audit**: `audit:model_name` = real winning model under cascade; `audit:cascade_model` =
@@ -106,9 +124,15 @@ acceptance to avoid concurrent writes into the shared conversation step. Residua
 risk documented.
 
 ### Streaming the final step live
-Last step is always accepted → stream it live via the streaming model in legacy mode (earlier
-steps stay buffered for confidence eval); also stream step 0 live when `strategy: none`.
-Agent-mode cascade keeps today's single-chunk final response (documented).
+**Deviation from original intent (round-2 tightening):** the condition generalized from
+"last step, or step 0 with `strategy: none`" to any *guaranteed-accept* step — the last step,
+a step with a null `confidenceThreshold`, or a `none`-strategy step whose threshold is ≤ 1.0.
+A step that could still escalate is never streamed live (its full text is needed to evaluate
+confidence). A streamed step also runs under the streaming executor's own ~120 s bound instead
+of `timeoutMs`/`maxTotalDurationMs`, and is never cancelled mid-flight — cancelling the awaiting
+thread cannot stop the provider's callback thread, which would otherwise keep emitting tokens
+to the client after the cascade moved on to a different response. Agent-mode cascade keeps a
+single-chunk final response (documented).
 
 ### Docs
 Rewrite `docs/model-cascade.md`: 429 retried-then-escalate, real trace key
@@ -128,7 +152,11 @@ convertToObject behavior, token/cost/metrics, streaming caveat. Changelog entry 
 8. **Streaming final step**.
 9. **Docs rewrite + changelog**.
 10. **Test suite** — extend existing, add new coverage for every item.
-11. **Adversarial verification workflow** — multi-lens review + skeptics + completeness critic; fix confirmed findings.
+11. **Adversarial verification** — done in three rounds: (a) a 7-lens review + independent
+    skeptics + completeness critic; (b) a leaner 5-lens review + synthesizer that caught the
+    live-stream timeout defect and evaluator regressions; (c) PR review from CodeRabbit,
+    GitHub Copilot, and github-code-quality on [PR #587](https://github.com/labsai/EDDI/pull/587).
+    All confirmed findings across all three rounds were fixed with regression tests.
 
 ## Backward compatibility
 All new config fields are optional with today's behavior as defaults. Configs without
