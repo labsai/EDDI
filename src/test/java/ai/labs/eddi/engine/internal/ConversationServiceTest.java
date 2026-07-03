@@ -256,15 +256,20 @@ class ConversationServiceTest {
         }
 
         @Test
-        @DisplayName("G4: ending a READY conversation writes no HITL audit and fires no event")
+        @DisplayName("G4: ending a READY conversation writes no HITL audit, fires no event, clears no bookmark (timeout disarm is unconditional/idempotent)")
         void endingReady_noHitlSideEffects() throws Exception {
             doReturn(ConversationState.READY).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
 
             conversationService.endConversation(CONVERSATION_ID, "alice");
 
+            // Pause-terminating side effects must NOT run on a plain READY end.
             verify(auditLedgerService, never()).submit(any());
             verify(hitlResumeCompletedEvent, never()).fireAsync(any());
-            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+            verify(conversationMemoryStore, never()).clearHitlBookmark(anyString());
+            // F4: the timeout disarm is now UNCONDITIONAL (idempotent) — it also covers
+            // the resume-in-flight IN_PROGRESS window — so deleteSchedulesByName IS
+            // called even for a READY end (a no-op when no such schedule exists).
+            verify(scheduleStore).deleteSchedulesByName("hitl-timeout-" + CONVERSATION_ID);
         }
 
         @Test

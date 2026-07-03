@@ -214,8 +214,12 @@ class GroupConversationStoreTest {
         when(storage.findResources(any(IResourceFilter.QueryFilters[].class), anyString(), anyInt(), anyInt()))
                 .thenReturn(List.of(badId, goodId));
 
-        // read("gc-bad") wraps this IOException as a ResourceStoreException
-        when(storage.read("gc-bad", 1)).thenThrow(new IOException("disk error"));
+        // read("gc-bad") wraps this IOException as a ResourceStoreException. The
+        // IOException surfaces from IResource.getData() (which declares it) — NOT from
+        // storage.read(), which declares no checked exception — so stub getData().
+        IResourceStorage.IResource<GroupConversation> badResource = mock(IResourceStorage.IResource.class);
+        when(badResource.getData()).thenThrow(new IOException("disk error"));
+        when(storage.read("gc-bad", 1)).thenReturn(badResource);
 
         GroupConversation goodConversation = new GroupConversation();
         IResourceStorage.IResource<GroupConversation> goodResource = mock(IResourceStorage.IResource.class);
