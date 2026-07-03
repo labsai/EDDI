@@ -252,6 +252,44 @@ class AttachmentForwarderTest {
         assertInstanceOf(TextContent.class, ((UserMessage) messages.get(0)).contents().get(1));
     }
 
+    // ==================== Per-task overrides ====================
+
+    @Test
+    void visionOverrideOff_forcesImageNoteOnCapableModel() {
+        Attachment att = new Attachment();
+        att.setMimeType("image/png");
+        att.setBase64Data(Base64.getEncoder().encodeToString("png".getBytes()));
+        mockAttachments(att);
+        List<ChatMessage> messages = messages(UserMessage.from("look"));
+
+        // openai/gpt-4o has vision, but per-task OFF suppresses it
+        forwarder.forward(messages, memory, "openai", "gpt-4o",
+                ModelCapabilityService.Support.OFF,
+                ModelCapabilityService.Support.AUTO,
+                ModelCapabilityService.Support.AUTO);
+
+        Content c = ((UserMessage) messages.get(0)).contents().get(1);
+        assertInstanceOf(TextContent.class, c);
+        assertTrue(((TextContent) c).text().contains("not forwarded"));
+    }
+
+    @Test
+    void documentsOverrideOn_forcesNativePdfOnNonDocModel() {
+        Attachment att = new Attachment();
+        att.setMimeType("application/pdf");
+        att.setBase64Data(Base64.getEncoder().encodeToString("%PDF-1.4".getBytes()));
+        mockAttachments(att);
+        List<ChatMessage> messages = messages(UserMessage.from("summarize"));
+
+        // openai defaults documents=off, but per-task ON forces native PdfFileContent
+        forwarder.forward(messages, memory, "openai", "gpt-4o",
+                ModelCapabilityService.Support.AUTO,
+                ModelCapabilityService.Support.ON,
+                ModelCapabilityService.Support.AUTO);
+
+        assertInstanceOf(PdfFileContent.class, ((UserMessage) messages.get(0)).contents().get(1));
+    }
+
     // ==================== Unsupported + caps ====================
 
     @Test

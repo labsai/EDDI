@@ -111,6 +111,21 @@ public class AttachmentForwarder {
      *            the resolved model name
      */
     public void forward(List<ChatMessage> messages, IConversationMemory memory, String provider, String model) {
+        forward(messages, memory, provider, model,
+                ModelCapabilityService.Support.AUTO,
+                ModelCapabilityService.Support.AUTO,
+                ModelCapabilityService.Support.AUTO);
+    }
+
+    /**
+     * Overload honoring per-task multimodal overrides (from
+     * {@code LlmConfiguration.Task.multimodal}). {@code AUTO} defers to the
+     * capability service's deployment/built-in defaults.
+     */
+    public void forward(List<ChatMessage> messages, IConversationMemory memory, String provider, String model,
+                        ModelCapabilityService.Support visionOverride,
+                        ModelCapabilityService.Support documentsOverride,
+                        ModelCapabilityService.Support audioOverride) {
         if (messages == null || messages.isEmpty()) {
             return;
         }
@@ -132,7 +147,8 @@ public class AttachmentForwarder {
         int added = 0;
 
         for (Attachment att : attachments) {
-            Content content = process(att, memory.getConversationId(), provider, model, aggregate, extracts, errors);
+            Content content = process(att, memory.getConversationId(), provider, model, aggregate, extracts, errors,
+                    visionOverride, documentsOverride, audioOverride);
             if (content != null) {
                 contents.add(content);
                 added++;
@@ -147,7 +163,10 @@ public class AttachmentForwarder {
     }
 
     private Content process(Attachment att, String conversationId, String provider, String model,
-                            long[] aggregate, List<String> extracts, List<String> errors) {
+                            long[] aggregate, List<String> extracts, List<String> errors,
+                            ModelCapabilityService.Support visionOverride,
+                            ModelCapabilityService.Support documentsOverride,
+                            ModelCapabilityService.Support audioOverride) {
         String mime = att.getMimeType() == null ? "" : att.getMimeType().toLowerCase(Locale.ROOT);
         String name = att.getFileName() != null ? att.getFileName() : "unnamed";
 
@@ -162,7 +181,7 @@ public class AttachmentForwarder {
         boolean isPdf = mime.startsWith("application/pdf");
 
         if (isImage && att.getContentSource() == Attachment.ContentSource.URL
-                && capabilityService.supportsVision(provider, model)
+                && capabilityService.supportsVision(provider, model, visionOverride)
                 && capabilityService.supportsImageUrl(provider, model)) {
             try {
                 return ImageContent.from(URI.create(att.getUrl()));
@@ -183,7 +202,7 @@ public class AttachmentForwarder {
         }
 
         if (isImage) {
-            if (!capabilityService.supportsVision(provider, model)) {
+            if (!capabilityService.supportsVision(provider, model, visionOverride)) {
                 return note(errors, name, mime, att.getSizeBytes(),
                         "model does not support images");
             }
@@ -191,7 +210,7 @@ public class AttachmentForwarder {
         }
 
         if (isPdf) {
-            if (capabilityService.supportsDocuments(provider, model)) {
+            if (capabilityService.supportsDocuments(provider, model, documentsOverride)) {
                 return PdfFileContent.from(Base64.getEncoder().encodeToString(bytes), att.getMimeType());
             }
             return extractInline(bytes, att.getMimeType(), name, extracts, errors,
@@ -203,7 +222,7 @@ public class AttachmentForwarder {
         }
 
         if (isAudio) {
-            if (!capabilityService.supportsAudio(provider, model)) {
+            if (!capabilityService.supportsAudio(provider, model, audioOverride)) {
                 return note(errors, name, mime, att.getSizeBytes(), "model does not support audio");
             }
             return AudioContent.from(Base64.getEncoder().encodeToString(bytes), att.getMimeType());

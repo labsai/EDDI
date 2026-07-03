@@ -298,6 +298,25 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          */
         private IdentityMaskingConfig identityMasking;
 
+        /**
+         * Per-task multimodal capability overrides. Each of {@code vision},
+         * {@code documents}, {@code audio} may be {@code "auto"} (defer to
+         * deployment/built-in defaults), {@code "on"} (force enabled) or {@code "off"}
+         * (force disabled). {@code null} means all defer.
+         *
+         * @since 6.1.0
+         */
+        private MultimodalOverride multimodal;
+
+        /**
+         * Number of past turns whose attachments are natively re-attached to the LLM on
+         * later turns (in addition to the always-on text-extract stitching). {@code 0}
+         * (default) means attachments attach only on their own turn.
+         *
+         * @since 6.1.0
+         */
+        private Integer reattachTurns = 0;
+
         // === Helper Methods ===
 
         /**
@@ -630,6 +649,60 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.identityMasking = identityMasking;
         }
 
+        public MultimodalOverride getMultimodal() {
+            return multimodal;
+        }
+
+        public void setMultimodal(MultimodalOverride multimodal) {
+            this.multimodal = multimodal;
+        }
+
+        public Integer getReattachTurns() {
+            return reattachTurns != null ? reattachTurns : 0;
+        }
+
+        public void setReattachTurns(Integer reattachTurns) {
+            this.reattachTurns = reattachTurns;
+        }
+
+    }
+
+    /**
+     * Per-task multimodal capability overrides. Each field is a tri-state token
+     * {@code "auto"|"on"|"off"} parsed by
+     * {@link ai.labs.eddi.modules.llm.capability.ModelCapabilityService.Support#parse}.
+     * Unset fields default to {@code "auto"}.
+     *
+     * @since 6.1.0
+     */
+    public static class MultimodalOverride {
+        private String vision = "auto";
+        private String documents = "auto";
+        private String audio = "auto";
+
+        public String getVision() {
+            return vision;
+        }
+
+        public void setVision(String vision) {
+            this.vision = vision;
+        }
+
+        public String getDocuments() {
+            return documents;
+        }
+
+        public void setDocuments(String documents) {
+            this.documents = documents;
+        }
+
+        public String getAudio() {
+            return audio;
+        }
+
+        public void setAudio(String audio) {
+            this.audio = audio;
+        }
     }
 
     /**

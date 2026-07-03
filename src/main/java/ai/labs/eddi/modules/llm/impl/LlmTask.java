@@ -29,6 +29,7 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
+import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
@@ -340,9 +341,21 @@ public class LlmTask implements ILifecycleTask {
         }
 
         // Forward the current step's attachments to the LLM as multimodal content,
-        // gated on the resolved (provider, model) capabilities.
+        // gated on the resolved (provider, model) capabilities, honoring any
+        // per-task multimodal overrides.
         if (attachmentForwarder != null) {
-            attachmentForwarder.forward(messages, memory, resolvedType, resolveModelName(processedParams));
+            var mm = task.getMultimodal();
+            var vision = mm != null
+                    ? ModelCapabilityService.Support.parse(mm.getVision())
+                    : ModelCapabilityService.Support.AUTO;
+            var documents = mm != null
+                    ? ModelCapabilityService.Support.parse(mm.getDocuments())
+                    : ModelCapabilityService.Support.AUTO;
+            var audio = mm != null
+                    ? ModelCapabilityService.Support.parse(mm.getAudio())
+                    : ModelCapabilityService.Support.AUTO;
+            attachmentForwarder.forward(messages, memory, resolvedType, resolveModelName(processedParams),
+                    vision, documents, audio);
         }
 
         if (messages.isEmpty()) {

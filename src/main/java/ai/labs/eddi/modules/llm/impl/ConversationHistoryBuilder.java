@@ -91,8 +91,8 @@ class ConversationHistoryBuilder {
         if (skipSteps > 0) {
             chatMessages = generateMessagesFromOutputs(memory, skipSteps, logSizeLimit, includeFirstAgentMessage);
         } else {
-            chatMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(logSizeLimit, includeFirstAgentMessage).getMessages()
-                    .stream().map(this::convertMessage).toList());
+            chatMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(logSizeLimit, includeFirstAgentMessage, true)
+                    .getMessages().stream().map(this::convertMessage).toList());
         }
 
         // If a custom prompt is defined, replace the last user input with it
@@ -192,8 +192,8 @@ class ConversationHistoryBuilder {
         if (skipSteps > 0) {
             allMessages = generateMessagesFromOutputs(memory, skipSteps, -1, includeFirstAgentMessage);
         } else {
-            allMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(-1, includeFirstAgentMessage).getMessages().stream()
-                    .map(this::convertMessage).toList());
+            allMessages = new ArrayList<>(new ConversationLogGenerator(memory).generate(-1, includeFirstAgentMessage, true).getMessages()
+                    .stream().map(this::convertMessage).toList());
         }
 
         // If a custom prompt is defined, replace the last user input with it
@@ -316,12 +316,13 @@ class ConversationHistoryBuilder {
             startIndex = Math.max(startIndex, windowStart);
         }
 
+        var allSteps = memory.getAllSteps();
         var result = new ArrayList<ChatMessage>();
         for (int i = startIndex; i < outputs.size(); i++) {
             var output = outputs.get(i);
             var input = output.get("input", String.class);
             if (input != null) {
-                result.add(UserMessage.from(input));
+                result.add(UserMessage.from(ConversationLogGenerator.withAttachmentExtracts(allSteps, i, input)));
             }
 
             Object outputObj = output.get("output");

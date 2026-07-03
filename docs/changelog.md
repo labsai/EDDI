@@ -30,9 +30,14 @@
 
 `AttachmentForwarderTest` (18) covers the full branch matrix incl. URL-passthrough vs download-inline, base64/stored images, PDF native vs text-fallback (with extract persistence), text inline, audio on/off, unsupported note, per-file cap, store-load failure, and no-source skip. Enhancer tests removed.
 
-### What's next (remaining Phase 2, then 3–6)
+### Phase 2 tail (completed same branch)
 
-Still open in Phase 2: history stitching (inject `attachments:extracts` into the rebuilt turn's user message in `ConversationHistoryBuilder`) and per-task config (`LlmConfiguration.Task.multimodal` override + `reattachTurns`). Then Phase 3 (group parity), 4 (`readAttachment` tool), 5 (UX), 6 (ops).
+- **Per-task multimodal override + reattachTurns** — `LlmConfiguration.Task` gains an optional `multimodal { vision|documents|audio: auto|on|off }` block and `reattachTurns` (default 0). Old JSON configs deserialize cleanly (`FAIL_ON_UNKNOWN_PROPERTIES=false`). `AttachmentForwarder.forward` gains a `Support`-parameterized overload; `LlmTask` parses the task block and passes the overrides (per-task > deployment > default precedence).
+- **History stitching** — `ConversationLogGenerator.generate` gains an opt-in `stitchAttachmentExtracts` flag (only the LLM-facing `ConversationHistoryBuilder` path passes `true`, so the visible transcript stays clean). Per turn it appends that step's `attachments:extracts` to the rebuilt user message; verified aligned 1:1 with conversation outputs and that non-public step data survives snapshot persistence/reload, so a turn-2 follow-up sees turn-1's PDF/text extracts. `reattachTurns` is schema-ready; extract-stitching + the `readAttachment` tool (Phase 4) are the primary multi-turn continuity mechanisms.
+
+### What's next (Phases 3–6)
+
+Phase 3 (group parity), 4 (`readAttachment` tool), 5 (UX), 6 (ops).
 
 ---
 

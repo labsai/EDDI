@@ -38,6 +38,62 @@ class ConversationLogGeneratorTest {
         }
     }
 
+    // ─── Attachment extract stitching ───────────────────────────
+
+    @Nested
+    @DisplayName("Attachment extract stitching")
+    class ExtractStitching {
+
+        private IConversationMemory memoryWithExtract(String input, List<String> extracts) {
+            var output = new ConversationOutput();
+            output.put("input", input);
+            var memory = mock(IConversationMemory.class);
+            when(memory.getConversationOutputs()).thenReturn(new ArrayList<>(List.of(output)));
+
+            var step = mock(IConversationMemory.IConversationStep.class);
+            @SuppressWarnings("unchecked")
+            IData<List<String>> data = mock(IData.class);
+            when(data.getResult()).thenReturn(extracts);
+            when(step.getLatestData(MemoryKeys.ATTACHMENT_EXTRACTS)).thenReturn(data);
+
+            var stack = mock(IConversationMemory.IConversationStepStack.class);
+            when(stack.size()).thenReturn(1);
+            when(stack.get(0)).thenReturn(step);
+            when(memory.getAllSteps()).thenReturn(stack);
+            return memory;
+        }
+
+        @Test
+        @DisplayName("stitchExtracts=true appends extracts to the user turn")
+        void stitchesWhenEnabled() {
+            var memory = memoryWithExtract("Summarize this", List.of("report.pdf: quarterly numbers"));
+            var log = new ConversationLogGenerator(memory).generate(-1, true, true);
+
+            String userText = log.getMessages().getFirst().getContent().getLast().getValue();
+            assertTrue(userText.contains("Summarize this"));
+            assertTrue(userText.contains("quarterly numbers"), "extracts should be stitched: " + userText);
+        }
+
+        @Test
+        @DisplayName("stitchExtracts=false leaves the transcript clean")
+        void noStitchWhenDisabled() {
+            var memory = memoryWithExtract("Summarize this", List.of("report.pdf: quarterly numbers"));
+            var log = new ConversationLogGenerator(memory).generate(-1, true, false);
+
+            String userText = log.getMessages().getFirst().getContent().getLast().getValue();
+            assertEquals("Summarize this", userText);
+            verify(memory, never()).getAllSteps();
+        }
+
+        @Test
+        @DisplayName("no extracts on the step leaves input unchanged")
+        void noExtractsUnchanged() {
+            var memory = memoryWithExtract("Hi", List.of());
+            var log = new ConversationLogGenerator(memory).generate(-1, true, true);
+            assertEquals("Hi", log.getMessages().getFirst().getContent().getLast().getValue());
+        }
+    }
+
     // ─── Basic generation ───────────────────────────────────────
 
     @Nested
