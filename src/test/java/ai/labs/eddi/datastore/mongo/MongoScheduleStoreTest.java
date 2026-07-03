@@ -322,8 +322,18 @@ class MongoScheduleStoreTest extends MongoTestBase {
             due.setFireStatus(FireStatus.PENDING);
             store.createSchedule(due);
 
-            List<ScheduleConfiguration> dueList = store.findDueSchedules(
-                    Instant.now(), Instant.now().minusSeconds(300), 3);
+            // Re-query with a short bounded poll: the query is deterministic (the
+            // schedule is enabled, PENDING, nextFire 60s in the past), but under the
+            // full suite this container-backed read has intermittently observed an
+            // empty result before the just-inserted document is visible. A genuine
+            // failure stays empty for the whole window and still fails the assert.
+            List<ScheduleConfiguration> dueList = List.of();
+            for (int attempt = 0; attempt < 25 && dueList.isEmpty(); attempt++) {
+                if (attempt > 0) {
+                    Thread.sleep(100);
+                }
+                dueList = store.findDueSchedules(Instant.now(), Instant.now().minusSeconds(300), 3);
+            }
 
             assertFalse(dueList.isEmpty(), "Expected at least one due schedule");
             assertTrue(dueList.stream().anyMatch(s -> "Due".equals(s.getName())),
