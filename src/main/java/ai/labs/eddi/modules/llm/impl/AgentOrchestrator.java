@@ -272,7 +272,273 @@ class AgentOrchestrator {
     ExecutionResult resumeToolLoop(ChatModel chatModel, LlmConfiguration.Task task, IConversationMemory memory, PendingToolCallBatch batch,
                                    HitlDecision decision, Map<String, Object> templateDataObjects)
             throws LifecycleException {
-        throw new UnsupportedOperationException("implemented in Task 9");
+
+        String conversationId = memory.getConversationId();
+        String pauseEpoch = batch.getPauseEpoch();
+        List<Map<String, Object>> trace = new ArrayList<>();
+
+        // ── Step 2: rebuild tooling via the shared setup (SAME as the live path) ──
+        ToolSetup setup = buildToolSetup(task, memory);
+        boolean isLazy = task.getToolLoadingStrategy() == LlmConfiguration.ToolLoadingStrategy.LAZY;
+
+        // Restore the active-spec surface. For LAZY, reactivate exactly the specs that
+        // were active at pause time (activatedToolNames); otherwise the full set.
+        List<ToolSpecification> activeSpecs = restoreActiveSpecs(setup, isLazy, batch.getActivatedToolNames());
+
+        // ── Step 1: reconstitute the transcript (primary) or fall back to rebuild ──
+        List<ChatMessage> currentMessages = new ArrayList<>();
+        boolean transcriptRestored = false;
+        if (!batch.isTranscriptOmitted() && batch.getChatTranscriptJson() != null) {
+            try {
+                currentMessages.addAll(chatTranscriptCodec.deserialize(batch.getChatTranscriptJson()));
+                transcriptRestored = true;
+            } catch (ChatTranscriptCodec.TranscriptCodecException e) {
+                LOGGER.warnf("HITL resume: transcript restore failed (%s) — falling back to history rebuild for conversation '%s'",
+                        e.getMessage(), sanitize(conversationId));
+            }
+        }
+        if (!transcriptRestored) {
+            currentMessages.addAll(fallbackRebuildMessages(task, memory, batch));
+        }
+        trace.add(Map.of("type", "hitl_resume", "transcriptRestored", transcriptRestored));
+
+        // ── Step 3: apply verdicts in batch order ──
+        Set<String> clearedCallIds = new HashSet<>();
+        Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
+        HitlDecision.HitlVerdict topVerdict = decision.getVerdict();
+        Map<String, ToolCallDecision> perCall = decision.getToolDecisions() != null ? decision.getToolDecisions() : Map.of();
+
+        // Per-request execution controls (mirrors the live loop).
+        boolean enableRateLimiting = task.getEnableRateLimiting() != null ? task.getEnableRateLimiting() : true;
+        boolean enableCaching = task.getEnableToolCaching() != null ? task.getEnableToolCaching() : true;
+        boolean enableCostTracking = task.getEnableCostTracking() != null ? task.getEnableCostTracking() : true;
+        int defaultRateLimit = task.getDefaultRateLimit() != null ? task.getDefaultRateLimit() : 100;
+        Map<String, Integer> toolRateLimits = task.getToolRateLimits();
+        Double maxBudget = task.getMaxBudgetPerConversation();
+        List<ToolSpecification> builtInSpecs = setup.builtInSpecs();
+
+        for (PendingToolCallBatch.PendingToolCall c : batch.getCalls()) {
+            ToolCallDecision cd = perCall.get(c.getCallId());
+            HitlDecision.HitlVerdict verdict = cd != null && cd.getVerdict() != null ? cd.getVerdict() : topVerdict;
+            String note = cd != null ? cd.getNote() : decision.getNote();
+            String amended = cd != null ? cd.getAmendedArguments() : null;
+
+            if (verdict == HitlDecision.HitlVerdict.REJECTED) {
+                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), rejectionEnvelope(c.getToolName(), note)));
+                trace.add(Map.of("type", "hitl_rejected", "tool", c.getToolName(), "callId", c.getCallId()));
+                continue;
+            }
+
+            // APPROVED (top-level default or per-call) below.
+
+            // Truncated raw args can't be honestly executed (the approver never saw the
+            // full args and the raw bytes are incomplete). Validation already blocks
+            // amendments on these — approving yields an honest non-execution.
+            if (c.isArgsTruncated()) {
+                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
+                        "{\"status\":\"NOT_EXECUTED\",\"reason\":\"arguments exceeded the persistable size cap\"}"));
+                trace.add(Map.of("type", "hitl_not_executed", "tool", c.getToolName(), "callId", c.getCallId()));
+                continue;
+            }
+
+            // Journal protocol — at-most-once across crashes/re-approvals.
+            if (journalStore.tryClaim(conversationId, pauseEpoch, c.getCallId(), c.getToolName(), decision.getDecidedBy())) {
+                String args = amended != null ? amended : c.getArgumentsRaw();
+                ToolExecutionRequest req = rebuiltRequest(c, args);
+                // Full per-request pipeline (checkpoint, budget, executeToolWrapped,
+                // truncation, trace). Its own auto-checkpoint fires ONLY here.
+                String result = executeSingleToolCallResult(req, memory, trace, toolExecutors, toolRateLimits,
+                        defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching, enableCostTracking,
+                        task, isLazy, builtInSpecs, activeSpecs);
+                journalStore.markExecuted(conversationId, pauseEpoch, c.getCallId(), capUtf8(result, JOURNAL_RESULT_MAX_BYTES));
+                String envelope = amended != null ? amendedEnvelope(result) : result;
+                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), envelope));
+                clearedCallIds.add(c.getCallId());
+            } else {
+                // Duplicate claim — a prior attempt already ran (or crashed mid-tool).
+                var prior = journalStore.find(conversationId, pauseEpoch, c.getCallId());
+                if (prior.isPresent() && prior.get().status() == IHitlToolJournalStore.Status.EXECUTED) {
+                    // Replay the stored result — NEVER re-execute (no checkpoint re-fire).
+                    currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), prior.get().resultCapped()));
+                    trace.add(Map.of("type", "hitl_replayed", "tool", c.getToolName(), "callId", c.getCallId()));
+                    clearedCallIds.add(c.getCallId());
+                } else {
+                    // EXECUTING (crash inside the tool) — honest at-most-once outcome.
+                    currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
+                            "{\"status\":\"EXECUTION_OUTCOME_UNKNOWN\",\"message\":\"a previous execution attempt was interrupted; "
+                                    + "it may or may not have taken effect — verify externally before retrying\"}"));
+                    auditOutcomeUnknown(memory, c);
+                    trace.add(Map.of("type", "hitl_outcome_unknown", "tool", c.getToolName(), "callId", c.getCallId()));
+                    clearedCallIds.add(c.getCallId());
+                }
+            }
+        }
+
+        // ── Step 4: continue the SAME loop from the next iteration (budget-continuous)
+        // ──
+        // The gate resolves the SAME way the live path did (task override, else agent
+        // default) so NEW calls in continuation re-gate → re-pause. Approved ids are
+        // pre-cleared so they are never re-gated if the model reissues them.
+        ToolApprovalsConfig effectiveToolApprovals = task.getToolApprovals() != null
+                ? task.getToolApprovals()
+                : memory.getAgentToolApprovalsConfig();
+        int llmTaskIndex = batch.getLlmTaskIndex();
+
+        String response = runToolCallLoop(chatModel, currentMessages, activeSpecs, trace, batch.getIterationIndex() + 1,
+                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds);
+
+        // ── Step 5: merge the pre-pause trace with the resume trace ──
+        List<Map<String, Object>> mergedTrace = new ArrayList<>();
+        if (batch.getTraceSoFar() != null) {
+            mergedTrace.addAll(batch.getTraceSoFar());
+        }
+        mergedTrace.addAll(trace);
+
+        return new ExecutionResult(response, mergedTrace);
+    }
+
+    /** Journal-stored result cap (bytes) — matches the journal store's own cap. */
+    private static final int JOURNAL_RESULT_MAX_BYTES = 32_768;
+
+    /**
+     * Restores the active-spec surface on resume. For EAGER, every registered spec.
+     * For LAZY, exactly the specs that were active at pause time (by name), falling
+     * back to the LAZY-initial surface when the recorded names are absent.
+     */
+    private static List<ToolSpecification> restoreActiveSpecs(ToolSetup setup, boolean isLazy, List<String> activatedToolNames) {
+        if (!isLazy) {
+            return setup.toolSpecs();
+        }
+        if (activatedToolNames == null || activatedToolNames.isEmpty()) {
+            return computeInitialActiveSpecs(setup, true);
+        }
+        Set<String> names = new HashSet<>(activatedToolNames);
+        List<ToolSpecification> restored = new ArrayList<>();
+        for (ToolSpecification spec : setup.toolSpecs()) {
+            if (names.contains(spec.name())) {
+                restored.add(spec);
+            }
+        }
+        return restored.isEmpty() ? computeInitialActiveSpecs(setup, true) : restored;
+    }
+
+    /**
+     * Rebuilds the base history exactly as a fresh turn would (the ONE sanctioned
+     * history rebuild on resume) and appends a reconstructed {@link AiMessage}
+     * carrying the batch's gated calls, so the appended results bind by call id.
+     * Intra-turn prior iterations are lost — accepted trade-off when the transcript
+     * cannot be restored. Uses the task's own (untemplated) system/prompt params;
+     * the orchestrator has no templating engine, and this degraded path only needs
+     * to carry the gated AiMessage so the appended results bind by call id.
+     */
+    private List<ChatMessage> fallbackRebuildMessages(LlmConfiguration.Task task, IConversationMemory memory,
+                                                      PendingToolCallBatch batch) {
+        String systemMessage = "";
+        String prompt = null;
+        boolean includeFirstAgentMessage = true;
+        int logSizeLimit = task.getConversationHistoryLimit() != null ? task.getConversationHistoryLimit() : -1;
+        if (task.getParameters() != null) {
+            Object sys = task.getParameters().get("systemMessage");
+            if (sys != null) {
+                systemMessage = sys.toString();
+            }
+            Object p = task.getParameters().get("prompt");
+            if (p != null) {
+                prompt = p.toString();
+            }
+            Object inc = task.getParameters().get("includeFirstAgentMessage");
+            if (inc != null) {
+                includeFirstAgentMessage = Boolean.parseBoolean(inc.toString());
+            }
+        }
+
+        List<ChatMessage> base = conversationHistoryBuilder.buildMessages(memory, systemMessage, prompt, logSizeLimit,
+                includeFirstAgentMessage, null, 0);
+
+        List<ChatMessage> messages = new ArrayList<>(base);
+        List<ToolExecutionRequest> requests = new ArrayList<>();
+        for (PendingToolCallBatch.PendingToolCall c : batch.getCalls()) {
+            requests.add(rebuiltRequest(c));
+        }
+        messages.add(AiMessage.from(requests));
+        return messages;
+    }
+
+    /** Rebuilds a provider-safe request from a pending call (original raw args). */
+    private static ToolExecutionRequest rebuiltRequest(PendingToolCallBatch.PendingToolCall c) {
+        return rebuiltRequest(c, c.getArgumentsRaw());
+    }
+
+    /**
+     * Rebuilds a request binding by the original call id with the given arguments.
+     */
+    private static ToolExecutionRequest rebuiltRequest(PendingToolCallBatch.PendingToolCall c, String args) {
+        return ToolExecutionRequest.builder()
+                .id(c.getCallId())
+                .name(c.getToolName())
+                .arguments(args != null ? args : "")
+                .build();
+    }
+
+    /**
+     * Builds the reviewer-rejection envelope with the tool name and free-text note
+     * JSON-escaped via Jackson — NEVER string-concatenated with raw reviewer text.
+     */
+    private String rejectionEnvelope(String toolName, String note) {
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("status", "REJECTED_BY_REVIEWER");
+        envelope.put("tool", toolName);
+        envelope.put("note", note != null ? note : "");
+        envelope.put("instruction", "The reviewer declined this action. Do not retry this exact call; "
+                + "explain the situation to the user and offer alternatives.");
+        return toJson(envelope);
+    }
+
+    /**
+     * Wraps an executed amended-args result so the model knows why it may differ.
+     */
+    private String amendedEnvelope(String result) {
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("status", "EXECUTED");
+        envelope.put("argsAmendedByReviewer", true);
+        envelope.put("result", result);
+        return toJson(envelope);
+    }
+
+    /**
+     * Reusable Jackson mapper for approver/model-facing envelopes (escapes text).
+     */
+    private static final ObjectMapper ENVELOPE_MAPPER = new ObjectMapper();
+
+    /**
+     * Jackson serialization for approver/model-facing JSON envelopes. All embedded
+     * reviewer/tool text is escaped by Jackson — NEVER string-concatenated.
+     */
+    private static String toJson(Object value) {
+        try {
+            return ENVELOPE_MAPPER.writeValueAsString(value);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            // Fall back to a minimal, safe envelope rather than propagating — the
+            // resume must still complete. Effectively unreachable for the small maps
+            // serialized here.
+            LOGGER.warnf("HITL resume: JSON envelope serialization failed: %s", e.getMessage());
+            return "{\"status\":\"ERROR\",\"reason\":\"could not serialize result envelope\"}";
+        }
+    }
+
+    /**
+     * Records an at-most-once outcome-unknown event. No lightweight
+     * {@code hitl.tool.*} audit collector is reachable from this task (the
+     * {@link ai.labs.eddi.engine.audit.model.AuditEntry} record is built by the
+     * LifecycleManager per-task with HMAC context we do not have here), so —
+     * exactly as the config-drift path does — this WARN-logs with a distinctive
+     * marker that operators can alert on. Package-private + overridable so tests
+     * can assert it fired.
+     */
+    void auditOutcomeUnknown(IConversationMemory memory, PendingToolCallBatch.PendingToolCall c) {
+        LOGGER.warnf("hitl.tool.outcome_unknown: approved tool '%s' (callId '%s') for conversation '%s' had an interrupted prior execution; "
+                + "outcome is unknown — verify externally before retrying.",
+                sanitize(c.getToolName()), sanitize(c.getCallId()), sanitize(memory.getConversationId()));
     }
 
     /**
@@ -437,7 +703,41 @@ class AgentOrchestrator {
         // Trace for tool calls
         List<Map<String, Object>> trace = new ArrayList<>();
 
-        // Read config fields for tool execution controls
+        // Live path: iteration loop starts at 0, no pre-cleared call ids.
+        String response = runToolCallLoop(chatModel, messages, activeSpecs, trace, 0,
+                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, Set.of());
+
+        return new ExecutionResult(response, trace);
+    }
+
+    /**
+     * The single shared tool-calling loop, wrapped in
+     * {@link AgentExecutionHelper#executeWithRetry}. Used by the live path (start
+     * iteration 0, empty {@code clearedCallIds}) and by {@link #resumeToolLoop}
+     * (start iteration {@code batch.getIterationIndex()+1}, {@code clearedCallIds}
+     * = the human-approved ids so they are never re-gated). A fresh gated batch
+     * throws {@link ToolApprovalRequiredException} to re-pause — the retry guard
+     * lets it escape unchanged.
+     *
+     * @param initialMessages
+     *            the message list the loop starts from (defensively copied inside);
+     *            for resume this already carries the replayed transcript + the
+     *            verdict-applied tool results
+     * @param startIteration
+     *            first loop index — carries budget continuity across a pause
+     * @param clearedCallIds
+     *            call ids a human already approved this pause; never re-gated
+     */
+    private String runToolCallLoop(ChatModel chatModel, List<ChatMessage> initialMessages, List<ToolSpecification> activeSpecs,
+                                   List<Map<String, Object>> trace, int startIteration, ToolSetup setup, boolean isLazy,
+                                   LlmConfiguration.Task task, IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals,
+                                   int llmTaskIndex, Set<String> clearedCallIds)
+            throws LifecycleException {
+
+        Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
+        Map<String, String> toolSources = setup.toolSources();
+        List<ToolSpecification> builtInSpecs = setup.builtInSpecs();
+
         boolean enableRateLimiting = task.getEnableRateLimiting() != null ? task.getEnableRateLimiting() : true;
         boolean enableCaching = task.getEnableToolCaching() != null ? task.getEnableToolCaching() : true;
         boolean enableCostTracking = task.getEnableCostTracking() != null ? task.getEnableCostTracking() : true;
@@ -446,9 +746,8 @@ class AgentOrchestrator {
         Double maxBudget = task.getMaxBudgetPerConversation();
         String conversationId = memory.getConversationId();
 
-        // Execute with retry logic — the tool execution loop
-        String response = AgentExecutionHelper.executeWithRetry(() -> {
-            List<ChatMessage> currentMessages = new ArrayList<>(messages);
+        return AgentExecutionHelper.executeWithRetry(() -> {
+            List<ChatMessage> currentMessages = new ArrayList<>(initialMessages);
             int maxIterations = task.getMaxToolIterations() != null ? task.getMaxToolIterations() : 10;
 
             // Engine-enforced counterweight: strict mode caps iterations
@@ -463,7 +762,7 @@ class AgentOrchestrator {
                 }
             }
 
-            for (int i = 0; i < maxIterations; i++) {
+            for (int i = startIteration; i < maxIterations; i++) {
                 ChatRequest.Builder requestBuilder = ChatRequest.builder().messages(currentMessages);
 
                 if (!activeSpecs.isEmpty()) {
@@ -479,11 +778,11 @@ class AgentOrchestrator {
                 if (aiMessage.hasToolExecutionRequests()) {
                     // === Tool-approval gate (tool-level HITL) ===
                     // Split the batch into gated (require human approval) and allowed
-                    // calls. clearedCallIds is empty for live turns (Task 9 passes
-                    // approved ids on resume). Inert when effectiveToolApprovals is
+                    // calls. clearedCallIds carries the human-approved ids on resume so
+                    // they are never re-gated. Inert when effectiveToolApprovals is
                     // null/empty — byte-identical to the pre-HITL path.
                     var gateResult = toolApprovalGate.classify(aiMessage.toolExecutionRequests(), toolSources,
-                            effectiveToolApprovals, Set.of());
+                            effectiveToolApprovals, clearedCallIds);
 
                     if (!gateResult.gated().isEmpty()) {
                         int pausesSoFar = readToolPauseCount(memory);
@@ -531,11 +830,15 @@ class AgentOrchestrator {
                 }
             }
 
-            AiMessage lastMessage = (AiMessage) currentMessages.get(currentMessages.size() - 1);
-            return lastMessage.text() != null ? lastMessage.text() : "Max tool iterations reached";
+            // Loop exhausted its iteration budget. The last message is usually the
+            // model's final AiMessage; on resume with a spent budget it may instead be
+            // a verdict-applied tool result — guard the cast either way.
+            ChatMessage last = currentMessages.get(currentMessages.size() - 1);
+            if (last instanceof AiMessage aiLast) {
+                return aiLast.text() != null ? aiLast.text() : "Max tool iterations reached";
+            }
+            return "Max tool iterations reached";
         }, task, "Agent execution");
-
-        return new ExecutionResult(response, trace);
     }
 
     /**
@@ -555,6 +858,31 @@ class AgentOrchestrator {
                                boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                LlmConfiguration.Task task, boolean isLazy,
                                List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
+        // Live path: run the full pipeline, then append the raw result verbatim.
+        String toolResult = executeSingleToolCallResult(toolRequest, memory, trace, toolExecutors, toolRateLimits,
+                defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching, enableCostTracking,
+                task, isLazy, builtInSpecs, activeSpecs);
+        currentMessages.add(ToolExecutionResultMessage.from(toolRequest, toolResult));
+    }
+
+    /**
+     * Runs the full per-request pipeline (auto-checkpoint, trace entry,
+     * per-conversation budget check, tenant cost budget check, executor dispatch
+     * via {@link ToolExecutionService}, response truncation, result trace, LAZY
+     * activation) and RETURNS the resulting tool-result string WITHOUT appending it
+     * to any message list. The live loop appends the raw result; the resume path
+     * needs the string to journal it and to build the amended-args envelope, so it
+     * appends its own (possibly-enveloped) message. This is the single shared
+     * per-request pipeline for both paths — the auto-checkpoint fires here (and
+     * only here) so replayed/outcome-unknown resume calls never re-checkpoint.
+     */
+    String executeSingleToolCallResult(ToolExecutionRequest toolRequest, IConversationMemory memory,
+                                       List<Map<String, Object>> trace,
+                                       Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
+                                       int defaultRateLimit, Double maxBudget, String conversationId,
+                                       boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
+                                       LlmConfiguration.Task task, boolean isLazy,
+                                       List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
         // Auto-checkpoint before tool execution (Wave 4)
         if (memorySnapshotService != null) {
             try {
@@ -585,8 +913,7 @@ class AgentOrchestrator {
             budgetStep.put("error", budgetError);
             trace.add(budgetStep);
 
-            currentMessages.add(ToolExecutionResultMessage.from(toolRequest, "Error: " + budgetError));
-            return;
+            return "Error: " + budgetError;
         }
 
         // Check tenant-level monthly cost budget (MCP governance)
@@ -601,8 +928,7 @@ class AgentOrchestrator {
                 quotaStep.put("error", costCheck.reason());
                 trace.add(quotaStep);
 
-                currentMessages.add(ToolExecutionResultMessage.from(toolRequest, "Error: " + costCheck.reason()));
-                return;
+                return "Error: " + costCheck.reason();
             }
         }
 
@@ -632,12 +958,12 @@ class AgentOrchestrator {
         resultStep.put("result", toolResult);
         trace.add(resultStep);
 
-        currentMessages.add(ToolExecutionResultMessage.from(toolRequest, toolResult));
-
         // LAZY mode: after discover_tools returns, activate the matching built-in specs
         if (isLazy && "discover_tools".equals(toolRequest.name())) {
             activateDiscoveredTools(toolResult, builtInSpecs, activeSpecs);
         }
+
+        return toolResult;
     }
 
     // ─── Tool-approval gate helpers ───
