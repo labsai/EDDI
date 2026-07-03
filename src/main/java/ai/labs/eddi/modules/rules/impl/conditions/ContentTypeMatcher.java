@@ -90,7 +90,10 @@ public class ContentTypeMatcher implements IRuleCondition {
             return FAIL;
         }
 
-        IData<List<?>> data = memory.getCurrentStep().getLatestData(ATTACHMENTS);
+        // Exact-match read: "attachments" is a prefix of the attachments:extracts /
+        // attachments:errors keys the LLM forwarder persists, and getLatestData is a
+        // prefix scan — getData avoids returning the wrong entry.
+        IData<List<?>> data = memory.getCurrentStep().getData(ATTACHMENTS);
         if (data == null || data.getResult() == null) {
             return FAIL;
         }

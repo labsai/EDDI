@@ -5,6 +5,19 @@
 
 ---
 
+## 📎 Multimodal Attachments Completion — Adversarial review + fixes (2026-07-03)
+
+**Repo:** EDDI (`feat/multimodal-attachments-completion`)
+
+A multi-agent adversarial review of the whole implementation surfaced **two real high-severity defects** (both verified by an independent refutation pass, both missed by the unit tests because they stubbed `getLatestData` directly and used single-turn memories):
+
+1. **Prefix-collision silent data loss.** `IConversationStep.getLatestData` is a *prefix* scan, and the `ATTACHMENTS` key `"attachments"` is a prefix of the `attachments:extracts` / `attachments:errors` keys the forwarder `persist()`s. A second forwarder (or `readAttachment` auto-add, or `ContentTypeMatcher`) read in the same step reverse-scanned and returned a `List<String>` instead of the `List<Attachment>` → **zero attachments forwarded, no error note**. Reachable with two langchain tasks sharing an action or two langchain workflow steps. Fixed by reading the exact key via `getData(MemoryKey)` in `AttachmentForwarder`, `AgentOrchestrator`, and `ContentTypeMatcher`.
+2. **Mirror-inverted history stitching.** `ConversationLogGenerator.withAttachmentExtracts` passed the *forward* conversation-output index into `IConversationStepStack.get()`, which is *reverse*-ordered (`get(0)` = newest). In a 3-turn conversation, turn 1's extract surfaced on turn 3 and turn 1 lost it; only the middle turn aligned. Fixed by converting the forward index to the reverse accessor index (`size-1-index`).
+
+Regression tests added for both (a real `ConversationMemory` with persisted extract/error keys proving the forwarder still forwards; a 3-turn stitching test proving extracts land on the correct turn). All new/changed classes remain above the >90% instruction / >80% branch gate; 654 tests green across the touched surface.
+
+---
+
 ## 📎 Multimodal Attachments Completion — Phase 6 (partial): Metrics + GDPR portability (2026-07-03)
 
 **Repo:** EDDI (`feat/multimodal-attachments-completion`)
