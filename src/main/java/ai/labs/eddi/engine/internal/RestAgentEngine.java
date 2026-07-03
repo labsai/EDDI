@@ -327,11 +327,20 @@ public class RestAgentEngine implements IRestAgentEngine {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
                     .entity("Conversation not found.").build();
         } catch (IllegalStateException e) {
-            // wrong state (already resumed/cancelled/timed out, agent not deployed) —
-            // a curated, non-reflecting message (do not echo raw exception text).
+            // wrong state (already resumed/cancelled/timed out, agent not deployed).
+            // Contract (docs/hitl.md): the 409 body names the CURRENT state so the
+            // client knows why. Build it from the safe ConversationState enum — not
+            // the raw exception message (avoids the CodeQL error-exposure sink while
+            // preserving the documented, useful state hint).
+            String currentState;
+            try {
+                currentState = conversationService.getConversationState(conversationId).name();
+            } catch (RuntimeException lookupFailure) {
+                currentState = "unknown";
+            }
             return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
-                    .entity("Conversation is not in a resumable state — it may have been resumed, "
-                            + "cancelled, or timed out already, or its agent is not deployed.")
+                    .entity("Conversation is not in a resumable state (current state: " + currentState
+                            + ") — it may have been resumed, cancelled, or timed out already, or its agent is not deployed.")
                     .build();
         } catch (ResourceStoreException e) {
             // genuine infrastructure failure — the pause was restored by the service
