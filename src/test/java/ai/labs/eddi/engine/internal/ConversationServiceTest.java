@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.AgentMismatchException;
 import ai.labs.eddi.engine.api.IConversationService.AgentNotReadyException;
@@ -96,6 +97,8 @@ class ConversationServiceTest {
     @Mock
     private IAgentStore agentStore;
     @Mock
+    private IJsonSerialization jsonSerialization;
+    @Mock
     private ICache<String, ConversationState> conversationStateCache;
 
     private ConversationService conversationService;
@@ -114,6 +117,7 @@ class ConversationServiceTest {
                 userMemoryStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
+                jsonSerialization,
                 new SimpleMeterRegistry(), hitlResumeCompletedEvent, AGENT_TIMEOUT);
     }
 

@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService.ConversationAwaitingApprovalException;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
@@ -114,6 +115,8 @@ class ConversationServiceSayHitlTest {
     @Mock
     private IAgentStore agentStore;
     @Mock
+    private IJsonSerialization jsonSerialization;
+    @Mock
     private ICache<String, ConversationState> conversationStateCache;
 
     private ConversationService conversationService;
@@ -129,6 +132,7 @@ class ConversationServiceSayHitlTest {
                 userMemoryStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
+                jsonSerialization,
                 new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), AGENT_TIMEOUT);
     }
 

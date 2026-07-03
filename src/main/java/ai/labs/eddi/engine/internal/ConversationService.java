@@ -11,12 +11,16 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
@@ -97,6 +101,7 @@ public class ConversationService implements IConversationService {
     private final IConversationSetup conversationSetup;
     private final IScheduleStore scheduleStore;
     private final IAgentStore agentStore;
+    private final IJsonSerialization jsonSerialization;
     private final ICache<String, ConversationState> conversationStateCache;
 
     /**
@@ -142,6 +147,7 @@ public class ConversationService implements IConversationService {
             IConversationCoordinator conversationCoordinator, IConversationSetup conversationSetup, ICacheFactory cacheFactory, IRuntime runtime,
             IContextLogger contextLogger, AuditLedgerService auditLedgerService, GdprComplianceService gdprComplianceService,
             TenantQuotaService tenantQuotaService, IScheduleStore scheduleStore, IAgentStore agentStore,
+            IJsonSerialization jsonSerialization,
             MeterRegistry meterRegistry, Event<HitlResumeCompletedEvent> hitlResumeCompletedEvent,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.agentFactory = agentFactory;
@@ -152,6 +158,7 @@ public class ConversationService implements IConversationService {
         this.conversationSetup = conversationSetup;
         this.scheduleStore = scheduleStore;
         this.agentStore = agentStore;
+        this.jsonSerialization = jsonSerialization;
         this.conversationStateCache = cacheFactory.getCache(CACHE_NAME_CONVERSATION_STATE);
         this.runtime = runtime;
         this.contextLogger = contextLogger;
@@ -1166,6 +1173,20 @@ public class ConversationService implements IConversationService {
         if (conversationMemoryStore.getConversationState(conversationId) == null) {
             throw new ResourceNotFoundException("Conversation not found: " + conversationId);
         }
+        // Task 7: per-tool-call verdicts (toolDecisions) MUST be validated BEFORE the
+        // AWAITING_HUMAN->IN_PROGRESS CAS below — a malformed body must never consume
+        // the pause (mirrors GroupConversationService#resumeDiscussion's
+        // validate-before-mutate precedent for taskApprovals: IllegalArgumentException
+        // maps to REST 400 at the adapter). This is the ONLY pre-CAS snapshot read on
+        // this path (the 404 check above uses the cheaper getConversationState), and
+        // it is skipped entirely when toolDecisions is absent so the overwhelmingly
+        // common plain-verdict resume incurs no extra load.
+        if (decision != null && decision.getToolDecisions() != null && !decision.getToolDecisions().isEmpty()) {
+            var preCasSnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (preCasSnapshot != null) {
+                validateToolDecisions(decision, preCasSnapshot);
+            }
+        }
         if (!conversationMemoryStore.compareAndSetState(conversationId,
                 ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS)) {
             ConversationState current = conversationMemoryStore.getConversationState(conversationId);
@@ -1389,6 +1410,99 @@ public class ConversationService implements IConversationService {
             inFlightConversations.remove(conversationId, memory);
             restorePauseAfterFailedResume(conversationId, memory, true);
             throw new ResourceStoreException("Failed to resume conversation: " + e.getLocalizedMessage(), e);
+        }
+    }
+
+    /**
+     * Task 7: validates {@link HitlDecision#getToolDecisions()} against the pending
+     * TOOL_CALL batch BEFORE the resume CAS runs. Throws
+     * {@link IllegalArgumentException} (the same type
+     * {@code GroupConversationService#resumeDiscussion} uses for its taskApprovals
+     * validate-before-mutate precedent — {@code RestAgentEngine} maps it to REST
+     * 400) on the first violation found; callers must not have mutated any state
+     * yet when this is invoked.
+     * <p>
+     * Semantics: calls not listed in {@code toolDecisions} inherit the top-level
+     * {@link HitlDecision#getVerdict()} — they are not required to appear here.
+     */
+    private void validateToolDecisions(HitlDecision decision, ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot snapshot) {
+        Map<String, ToolCallDecision> toolDecisions = decision.getToolDecisions();
+
+        if (!"TOOL_CALL".equals(snapshot.getHitlPauseType())) {
+            throw new IllegalArgumentException("toolDecisions is only valid for tool-call pauses");
+        }
+
+        PendingToolCallBatch batch = snapshot.getHitlPendingToolCalls();
+        List<PendingToolCallBatch.PendingToolCall> pendingCalls = batch != null && batch.getCalls() != null
+                ? batch.getCalls()
+                : List.of();
+        Map<String, PendingToolCallBatch.PendingToolCall> pendingById = new LinkedHashMap<>();
+        for (var call : pendingCalls) {
+            pendingById.put(call.getCallId(), call);
+        }
+
+        // Top-level REJECTED + any per-call APPROVED is contradictory (mirrors the
+        // group taskApprovals semantics) — checked up front so it fails regardless
+        // of per-call iteration order.
+        if (decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED) {
+            boolean anyPerCallApproved = toolDecisions.values().stream()
+                    .anyMatch(d -> d.getVerdict() == HitlDecision.HitlVerdict.APPROVED);
+            if (anyPerCallApproved) {
+                throw new IllegalArgumentException(
+                        "top-level verdict is REJECTED but toolDecisions contains an APPROVED call; "
+                                + "set the top-level verdict to APPROVED to mix per-call outcomes");
+            }
+        }
+
+        for (var entry : toolDecisions.entrySet()) {
+            String callId = entry.getKey();
+            ToolCallDecision toolDecision = entry.getValue();
+
+            var pendingCall = pendingById.get(callId);
+            if (pendingCall == null) {
+                throw new IllegalArgumentException(
+                        "no pending tool call '" + callId + "'; pending: " + pendingById.keySet());
+            }
+
+            if (toolDecision.getVerdict() == null) {
+                throw new IllegalArgumentException(
+                        "toolDecisions['" + callId + "'].verdict is required (APPROVED or REJECTED)");
+            }
+
+            if (toolDecision.getNote() != null && toolDecision.getNote().length() > ToolCallDecision.MAX_NOTE_LENGTH) {
+                throw new IllegalArgumentException(
+                        "toolDecisions['" + callId + "'].note exceeds the maximum length of "
+                                + ToolCallDecision.MAX_NOTE_LENGTH + " characters");
+            }
+
+            String amendedArguments = toolDecision.getAmendedArguments();
+            if (amendedArguments != null) {
+                if (toolDecision.getVerdict() == HitlDecision.HitlVerdict.REJECTED) {
+                    throw new IllegalArgumentException(
+                            "toolDecisions['" + callId + "'].amendedArguments is only valid for an APPROVED call");
+                }
+                if (pendingCall.isArgsTruncated()) {
+                    throw new IllegalArgumentException(
+                            "call '" + callId + "' was truncated at pause time and cannot be amended; "
+                                    + "approve or reject it as-is");
+                }
+                if (amendedArguments.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > PendingToolCallBatch.AMENDED_ARGS_MAX_BYTES) {
+                    throw new IllegalArgumentException(
+                            "toolDecisions['" + callId + "'].amendedArguments exceeds the maximum size of "
+                                    + PendingToolCallBatch.AMENDED_ARGS_MAX_BYTES + " bytes");
+                }
+                Object parsed;
+                try {
+                    parsed = jsonSerialization.deserialize(amendedArguments);
+                } catch (Exception e) {
+                    throw new IllegalArgumentException(
+                            "toolDecisions['" + callId + "'].amendedArguments is not valid JSON: " + e.getMessage());
+                }
+                if (!(parsed instanceof Map)) {
+                    throw new IllegalArgumentException(
+                            "toolDecisions['" + callId + "'].amendedArguments must be a JSON object");
+                }
+            }
         }
     }
 

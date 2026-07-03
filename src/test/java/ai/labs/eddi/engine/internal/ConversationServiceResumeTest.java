@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
@@ -98,6 +99,8 @@ class ConversationServiceResumeTest {
     @Mock
     private IAgentStore agentStore;
     @Mock
+    private IJsonSerialization jsonSerialization;
+    @Mock
     private ICache<String, ConversationState> conversationStateCache;
 
     private ConversationService conversationService;
@@ -112,6 +115,7 @@ class ConversationServiceResumeTest {
                 userMemoryStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
+                jsonSerialization,
                 new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), AGENT_TIMEOUT);
 
         // The resume path pre-checks existence via getConversationState (404 vs 409)

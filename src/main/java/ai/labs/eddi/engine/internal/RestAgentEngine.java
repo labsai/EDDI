@@ -330,6 +330,14 @@ public class RestAgentEngine implements IRestAgentEngine {
         } catch (ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
                     .entity("Conversation not found.").build();
+        } catch (IllegalArgumentException e) {
+            // Task 7: toolDecisions validation (unknown callId, missing per-call
+            // verdict, amendedArguments misuse, …) — validated BEFORE the resume CAS,
+            // so the pause was never consumed. Mirrors the group taskApprovals 400
+            // precedent (RestGroupConversation).
+            LOGGER.infof("Resume of conversation %s rejected (invalid request): %s", sanitize(conversationId), e.getMessage());
+            return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
+                    .entity(e.getMessage()).build();
         } catch (IllegalStateException e) {
             // wrong state (already resumed/cancelled/timed out, agent not deployed).
             // Contract (docs/hitl.md): the 409 body names the CURRENT state so the

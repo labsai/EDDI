@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
@@ -83,6 +84,8 @@ class ConversationServiceCoverageTest {
     private IAgentStore agentStore;
     @Mock
     private IUserMemoryStore userMemoryStore;
+    @Mock
+    private IJsonSerialization jsonSerialization;
 
     private static final Environment ENV = Environment.production;
     private static final String AGENT_ID = "aabbccdd11223344eeff5566";
@@ -108,6 +111,7 @@ class ConversationServiceCoverageTest {
                 userMemoryStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
+                jsonSerialization,
                 new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), AGENT_TIMEOUT);
     }
 

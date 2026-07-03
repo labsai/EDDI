@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService.ConversationLogResult;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
@@ -67,6 +68,7 @@ class ConversationServiceReadLogTest {
         IScheduleStore scheduleStore = mock(IScheduleStore.class);
         IAgentStore agentStore = mock(IAgentStore.class);
         IUserMemoryStore userMemoryStore = mock(IUserMemoryStore.class);
+        IJsonSerialization jsonSerialization = mock(IJsonSerialization.class);
 
         when(tenantQuotaService.acquireConversationSlot()).thenReturn(QuotaCheckResult.OK);
         when(tenantQuotaService.acquireApiCallSlot()).thenReturn(QuotaCheckResult.OK);
@@ -79,6 +81,7 @@ class ConversationServiceReadLogTest {
                 conversationDescriptorStore, userMemoryStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService, gdprComplianceService,
                 tenantQuotaService, scheduleStore, agentStore,
+                jsonSerialization,
                 new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), 60);
     }
 

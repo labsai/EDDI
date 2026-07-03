@@ -34,6 +34,11 @@ public class HitlDecision {
     private String note;
     /** userId — set server-side from SecurityIdentity (not trusted from body). */
     private String decidedBy;
+    /**
+     * Per-tool-call verdicts, keyed by {@code callId} — TOOL_CALL pauses only.
+     * Calls not listed here inherit the top-level {@link #verdict}.
+     */
+    private java.util.Map<String, ToolCallDecision> toolDecisions;
 
     public HitlVerdict getVerdict() {
         return verdict;
@@ -57,5 +62,13 @@ public class HitlDecision {
 
     public void setDecidedBy(String decidedBy) {
         this.decidedBy = decidedBy;
+    }
+
+    public java.util.Map<String, ToolCallDecision> getToolDecisions() {
+        return toolDecisions;
+    }
+
+    public void setToolDecisions(java.util.Map<String, ToolCallDecision> toolDecisions) {
+        this.toolDecisions = toolDecisions;
     }
 }

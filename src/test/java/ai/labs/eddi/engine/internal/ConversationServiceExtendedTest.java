@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
@@ -62,6 +63,7 @@ class ConversationServiceExtendedTest {
     private IScheduleStore scheduleStore;
     private IAgentStore agentStore;
     private IUserMemoryStore userMemoryStore;
+    private IJsonSerialization jsonSerialization;
 
     private static final Environment ENV = Environment.production;
     private static final String AGENT_ID = "test-agent-id";
@@ -87,6 +89,7 @@ class ConversationServiceExtendedTest {
         scheduleStore = mock(IScheduleStore.class);
         agentStore = mock(IAgentStore.class);
         userMemoryStore = mock(IUserMemoryStore.class);
+        jsonSerialization = mock(IJsonSerialization.class);
 
         when(tenantQuotaService.acquireConversationSlot()).thenReturn(QuotaCheckResult.OK);
         when(tenantQuotaService.acquireApiCallSlot()).thenReturn(QuotaCheckResult.OK);
@@ -100,6 +103,7 @@ class ConversationServiceExtendedTest {
                 conversationDescriptorStore, userMemoryStore, conversationCoordinator,
                 conversationSetup, cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
+                jsonSerialization,
                 meterRegistry, ConversationServiceTestFixtures.hitlResumeEvent(), AGENT_TIMEOUT);
     }
 
