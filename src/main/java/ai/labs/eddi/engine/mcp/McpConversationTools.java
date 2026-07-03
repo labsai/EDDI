@@ -607,6 +607,11 @@ public class McpConversationTools {
         result.put("agentId", agentId);
         result.put("conversationId", conversationId);
         result.put("conversationState", ConversationState.AWAITING_HUMAN.name());
+        // Name the MCP tool that resolves this gate so an LLM client can chain the
+        // approval
+        // instead of dropping to REST. resume_conversation handles both RULE and
+        // TOOL_CALL pauses.
+        result.put("suggestNextTool", "resume_conversation");
         result.put("message", "The managed agent's conversation " + conversationId
                 + " requires human approval before it can continue. A reviewer must decide via "
                 + "POST /agents/" + conversationId + "/resume (APPROVED or REJECTED); "
@@ -632,6 +637,11 @@ public class McpConversationTools {
         result.put("agentId", agentId);
         result.put("conversationId", conversationId);
         result.put("conversationState", ConversationState.AWAITING_HUMAN.name());
+        // Name the MCP tool that resolves this gate so an LLM client can chain the
+        // approval
+        // instead of dropping to REST. resume_conversation handles both RULE and
+        // TOOL_CALL pauses.
+        result.put("suggestNextTool", "resume_conversation");
         result.put("message", "Conversation " + conversationId
                 + " requires human approval before it can continue; resolve via POST /agents/"
                 + conversationId + "/resume (APPROVED or REJECTED), then resend.");

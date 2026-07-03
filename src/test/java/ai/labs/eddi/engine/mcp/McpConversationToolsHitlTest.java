@@ -77,6 +77,11 @@ class McpConversationToolsHitlTest {
         assertTrue(result.contains("PAUSED_FOR_APPROVAL"), result);
         assertTrue(result.contains("conv-1"));
         assertTrue(result.contains("/resume"));
+        // The paused payload names the MCP tool that resolves the gate, so an LLM
+        // client can
+        // chain the approval over MCP instead of dropping to REST (loop
+        // discoverability).
+        assertTrue(result.contains("\"suggestNextTool\":\"resume_conversation\""), result);
         // The stale mapping must NOT be deleted — re-invoking after approval reuses it
         verify(userConversationStore, never()).deleteUserConversation("customer_support", "U1");
     }
@@ -169,6 +174,7 @@ class McpConversationToolsHitlTest {
         assertTrue(result.contains("conv-1"));
         assertTrue(result.contains("/resume"));
         assertTrue(result.contains("AWAITING_HUMAN"));
+        assertTrue(result.contains("\"suggestNextTool\":\"resume_conversation\""), result);
     }
 
     @Test
