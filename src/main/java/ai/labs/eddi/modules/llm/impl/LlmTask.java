@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
@@ -39,6 +40,7 @@ import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.ChatMessage;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -110,6 +112,14 @@ public class LlmTask implements ILifecycleTask {
     private final IApiCallExecutor apiCallExecutor;
     private final IRestAgentStore restAgentStore;
     private final IRestWorkflowStore restWorkflowStore;
+
+    /**
+     * Tool-level HITL kill-switch. When false the tool-approval gate is inert
+     * (effective config forced to null) — rolling-upgrade control. Default true.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.hitl.tool.enabled", defaultValue = "true")
+    boolean toolHitlEnabled;
 
     private static final Logger LOGGER = Logger.getLogger(LlmTask.class);
 
@@ -203,9 +213,11 @@ public class LlmTask implements ILifecycleTask {
                 return;
             }
 
-            for (var task : llmConfig.tasks()) {
+            var tasks = llmConfig.tasks();
+            for (int taskIndex = 0; taskIndex < tasks.size(); taskIndex++) {
+                var task = tasks.get(taskIndex);
                 if (task.getActions().contains(MATCH_ALL_OPERATOR) || task.getActions().stream().anyMatch(actions::contains)) {
-                    executeTask(memory, task, currentStep, templateDataObjects);
+                    executeTask(memory, task, currentStep, templateDataObjects, taskIndex);
                 }
             }
 
@@ -217,8 +229,22 @@ public class LlmTask implements ILifecycleTask {
     /**
      * Execute a single task — delegates to LegacyChatExecutor or AgentOrchestrator.
      */
-    private void executeTask(IConversationMemory memory, Task task, IWritableConversationStep currentStep, Map<String, Object> templateDataObjects)
+    private void executeTask(IConversationMemory memory, Task task, IWritableConversationStep currentStep, Map<String, Object> templateDataObjects,
+                             int llmTaskIndex)
             throws ITemplatingEngine.TemplateEngineException, ChatModelRegistry.UnsupportedLlmTaskException, IOException, LifecycleException {
+
+        // === Tool-approval (tool-level HITL) effective config resolution ===
+        // Per-task override fully replaces the agent-level default (no merging). The
+        // agent default reaches memory via a transient carrier set at turn start.
+        // The feature flag lets operators disable the gate cluster-wide during a
+        // rolling upgrade — when false the effective config is treated as null
+        // (gate inert), byte-identical to the pre-HITL path.
+        ToolApprovalsConfig effectiveToolApprovals = null;
+        if (toolHitlEnabled) {
+            effectiveToolApprovals = task.getToolApprovals() != null
+                    ? task.getToolApprovals()
+                    : memory.getAgentToolApprovalsConfig();
+        }
 
         var processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects);
 
@@ -379,7 +405,7 @@ public class LlmTask implements ILifecycleTask {
 
             if (!skipCascade) {
                 var cascadeResult = CascadingModelExecutor.execute(chatModelRegistry, cascadeConfig, messages, systemMessage, processedParams, task,
-                        memory, agentOrchestrator);
+                        memory, agentOrchestrator, effectiveToolApprovals, llmTaskIndex);
 
                 responseContent = cascadeResult.response();
 
@@ -413,7 +439,7 @@ public class LlmTask implements ILifecycleTask {
             } else {
                 // Agent mode with cascade disabled — use normal agent flow
                 var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
-                        memory);
+                        memory, effectiveToolApprovals, llmTaskIndex);
                 if (agentResult != null) {
                     responseContent = agentResult.response();
                     toolTrace = agentResult.trace();
@@ -431,7 +457,7 @@ public class LlmTask implements ILifecycleTask {
         } else {
             // === Standard (non-cascade) execution path ===
             var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
-                    memory);
+                    memory, effectiveToolApprovals, llmTaskIndex);
 
             if (agentResult != null) {
                 // Agent mode — tools execute synchronously, stream final response if sink

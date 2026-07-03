@@ -340,6 +340,17 @@ public class LifecycleManager implements ILifecycleManager {
                 checkIfPauseConversationAction(conversationMemory, indexOffset + index, actionsBefore);
 
             } catch (LifecycleException | RuntimeException e) {
+                // HITL tool pause: a gated LLM tool call is NOT a task failure. Convert
+                // it to a ConversationPauseException(TOOL_CALL) BEFORE the error counter
+                // and strict-write rollback — the partially-executed step data (incl. the
+                // pending batch just written to memory) must survive into the pause
+                // snapshot, exactly like the rule-based PAUSE_CONVERSATION path.
+                if (e instanceof ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException tare) {
+                    taskSpan.setAttribute("eddi.hitl.pause", "tool_call");
+                    throw new ConversationPauseException(workflowId.getId(), indexOffset + index,
+                            tare.getPauseReason(), ConversationPauseException.PauseOrigin.TOOL_CALL);
+                }
+
                 taskSpan.setStatus(StatusCode.ERROR, Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
                 taskSpan.recordException(e);
 

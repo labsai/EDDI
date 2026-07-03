@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.TaskId;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConversationLogGenerator;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -883,6 +884,10 @@ public class ConversationService implements IConversationService {
             // #2: register the live memory so cancelConversation can signal the
             // running pipeline via setCancelled (checked at task boundaries).
             inFlightConversations.put(conversationId, conversationMemory);
+            // Carry the agent-level tool-approval config onto memory BEFORE the
+            // pipeline (LlmTask) runs, so the tool-approval gate can resolve its
+            // effective config. Transient — never persisted; re-resolved each turn.
+            populateToolApprovalsConfig(conversationMemory);
             try {
                 runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory,
                         executeConversation, memoryStateAtSubmit);
@@ -1547,7 +1552,13 @@ public class ConversationService implements IConversationService {
                 return;
             // Designer-supplied pause reason answers "what am I approving?" in the
             // approval inbox; the generic reason set at pause time stays otherwise.
-            if (!isNullOrEmpty(hitlConfig.getPauseReason())) {
+            // Scope: apply the agent-level override ONLY for a rule pause (null/RULE
+            // pause type). A TOOL_CALL pause keeps its tool-specific reason (built at
+            // gate time, including the gated tool names) — the agent-level generic
+            // reason would erase that context.
+            String pauseType = memory.getHitlPauseType();
+            boolean isToolCallPause = ConversationPauseException.PauseOrigin.TOOL_CALL.name().equals(pauseType);
+            if (!isToolCallPause && !isNullOrEmpty(hitlConfig.getPauseReason())) {
                 memory.setHitlPauseReason(hitlConfig.getPauseReason());
             }
             if (hitlConfig.getTimeoutPolicy() == null)
@@ -1556,6 +1567,28 @@ public class ConversationService implements IConversationService {
             memory.setHitlApprovalTimeout(hitlConfig.getApprovalTimeout());
         } catch (Exception e) {
             LOGGER.warnf("Could not populate HITL timeout bookmark for %s: %s",
+                    memory.getConversationId(), e.getMessage());
+        }
+    }
+
+    /**
+     * Carries the agent-level {@code hitlConfig.toolApprovals} config onto the live
+     * memory as a transient carrier (never persisted) so the tool-approval gate in
+     * {@code LlmTask}/{@code AgentOrchestrator} can resolve its effective config
+     * before the pipeline runs. Reads the PINNED agent version (parity with
+     * {@link #populateHitlTimeoutBookmark}). Absent config leaves the carrier null
+     * (gate inert — byte-identical to the pre-HITL path).
+     */
+    private void populateToolApprovalsConfig(IConversationMemory memory) {
+        try {
+            AgentConfiguration agentConfig = readAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
+            if (agentConfig == null || agentConfig.getHitlConfig() == null) {
+                memory.setAgentToolApprovalsConfig(null);
+                return;
+            }
+            memory.setAgentToolApprovalsConfig(agentConfig.getHitlConfig().getToolApprovals());
+        } catch (Exception e) {
+            LOGGER.warnf("Could not populate tool-approval config for %s: %s",
                     memory.getConversationId(), e.getMessage());
         }
     }

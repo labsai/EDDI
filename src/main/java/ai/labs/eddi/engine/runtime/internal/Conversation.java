@@ -225,7 +225,28 @@ public class Conversation implements IConversation {
     }
 
     private void startNextStep() {
+        clearStaleToolPauseState();
         ((ConversationMemory) conversationMemory).startNextStep();
+    }
+
+    /**
+     * Stale-batch hygiene (Step 6): at the start of each fresh turn, defensively
+     * clear any leftover tool-pause state that is not backed by an active
+     * AWAITING_HUMAN pause. Guards against a crash that persisted a pending batch
+     * without the pause committing, and against future code paths that error after
+     * the gate trips. WARN only when a stale batch is actually dropped.
+     */
+    private void clearStaleToolPauseState() {
+        if (getConversationState() == ConversationState.AWAITING_HUMAN) {
+            return; // a legitimate pause owns this state
+        }
+        if (conversationMemory.getHitlPendingToolCalls() != null || conversationMemory.getHitlPauseType() != null) {
+            LOGGER.warnf("Clearing stale HITL tool-pause state at turn start for conversation %s (not AWAITING_HUMAN)",
+                    conversationMemory.getConversationId());
+            conversationMemory.setHitlPendingToolCalls(null);
+            conversationMemory.setHitlPauseType(null);
+            conversationMemory.setHitlResumeDecision(null);
+        }
     }
 
     private List<IData<?>> prepareLifecycleData(String message, Map<String, Context> contexts, List<String> taskTypeResultsToBeRemoved) {
@@ -454,6 +475,66 @@ public class Conversation implements IConversation {
         conversationMemory.setHitlPausedAbsoluteTaskIndex(e.getPausedAbsoluteTaskIndex());
         conversationMemory.setHitlPausedAt(Instant.now());
         conversationMemory.setHitlPauseReason(e.getPauseReason());
+        conversationMemory.setHitlPauseType(e.getPauseOrigin().name());
+        if (e.getPauseOrigin() == ConversationPauseException.PauseOrigin.TOOL_CALL) {
+            // End-user visibility: a tool pause aborts the turn BEFORE the output /
+            // templating tasks run, so without this the chat client renders NOTHING
+            // for the paused turn. Mirror the REJECTED path's Data/output pattern.
+            String pending = resolvePendingMessage(conversationMemory);
+            var pendingData = new Data<>(MemoryKeys.OUTPUT_PREFIX, List.of(pending));
+            pendingData.setPublic(true);
+            conversationMemory.getCurrentStep().storeData(pendingData);
+            conversationMemory.getCurrentStep().addConversationOutputList(MemoryKeys.OUTPUT_PREFIX, List.of(pending));
+        } else {
+            // A RULE pause must never carry a stale tool batch (e.g. the gate tripped
+            // earlier in the same turn on a path that recovered) — belt and braces.
+            clearToolPauseState();
+        }
+    }
+
+    /**
+     * Default end-user pending message used when the agent config does not supply a
+     * {@code toolApprovals.pendingMessage}.
+     */
+    private static final String DEFAULT_PENDING_MESSAGE = "This action requires human approval before it can proceed. "
+            + "You will receive the result once a reviewer decides.";
+
+    /**
+     * Resolves the end-user-facing pending message for a tool pause:
+     * {@code toolApprovals.pendingMessage} with {@code {toolNames}} substituted
+     * from the pending batch's gated call names, falling back to a generic default.
+     */
+    private String resolvePendingMessage(IConversationMemory memory) {
+        String template = null;
+        var cfg = memory.getAgentToolApprovalsConfig();
+        if (cfg != null && !isNullOrEmpty(cfg.getPendingMessage())) {
+            template = cfg.getPendingMessage();
+        }
+        if (template == null) {
+            template = DEFAULT_PENDING_MESSAGE;
+        }
+        String names = "";
+        var batch = memory.getHitlPendingToolCalls();
+        if (batch != null && batch.getCalls() != null) {
+            names = batch.getCalls().stream()
+                    .map(c -> c.getToolName())
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .reduce((a, b) -> a + ", " + b)
+                    .orElse("");
+        }
+        return template.replace("{toolNames}", names);
+    }
+
+    /**
+     * Nulls the transient tool-pause state on the live memory (pause type, pending
+     * batch, in-JVM resume decision). Distinct from {@link #clearHitlBookmark()},
+     * which owns only the six bookmark fields — this must NOT touch those.
+     */
+    private void clearToolPauseState() {
+        conversationMemory.setHitlPauseType(null);
+        conversationMemory.setHitlPendingToolCalls(null);
+        conversationMemory.setHitlResumeDecision(null);
     }
 
     @Override
