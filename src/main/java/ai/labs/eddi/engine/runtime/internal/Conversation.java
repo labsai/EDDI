@@ -489,6 +489,18 @@ public class Conversation implements IConversation {
             // A RULE pause must never carry a stale tool batch (e.g. the gate tripped
             // earlier in the same turn on a path that recovered) — belt and braces.
             clearToolPauseState();
+            // A RULE pause aborts the turn BEFORE the output/templating tasks run, so
+            // the paused step would otherwise commit an EMPTY conversationOutput and a
+            // client that renders turns from the output list shows a blank bubble.
+            // Emit a public hitl:status marker (framework plan §6.4) so state-aware
+            // clients can render an "awaiting approval" indicator. On resume the
+            // approved path re-runs the remaining output tasks (real answer appended)
+            // and the rejected path adds its own rejection output, so this marker is
+            // the sole output only while the turn is actually paused.
+            var statusData = new Data<>("hitl:status", "awaiting_approval");
+            statusData.setPublic(true);
+            conversationMemory.getCurrentStep().storeData(statusData);
+            conversationMemory.getCurrentStep().addConversationOutputString("hitl:status", "awaiting_approval");
         }
     }
 
