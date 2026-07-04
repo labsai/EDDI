@@ -144,6 +144,28 @@ class ConversationServiceHitlTest {
         }
 
         @Test
+        @DisplayName("Task 14/4: cancelling a TOOL_CALL pause reaches clearHitlBookmark exactly like a RULE "
+                + "pause — the store-level clear (verified in Mongo/PostgresConversationMemoryStoreTest) "
+                + "then unsets hitlPauseType/hitlPendingToolCalls")
+        void awaitingHuman_toolCallPause_reachesClearHitlBookmark() throws Exception {
+            doReturn(ConversationState.AWAITING_HUMAN)
+                    .when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
+
+            var outcome = conversationService.cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL);
+
+            assertEquals(IConversationService.CancelOutcome.CANCELLED, outcome);
+            // ConversationService itself is pause-type-agnostic on the cancel path — it
+            // calls clearHitlBookmark unconditionally on every successful pause
+            // cancellation. The store implementations (verified separately) unset BOTH
+            // the RULE-style bookmark fields AND hitlPauseType/hitlPendingToolCalls in
+            // that single call, so a TOOL_CALL pause's pending batch is cleared with no
+            // extra plumbing here.
+            verify(conversationMemoryStore).clearHitlBookmark(CONVERSATION_ID);
+        }
+
+        @Test
         @DisplayName("G5: cancelling a pause audits with the actor and fires the terminal resume-completed event (null verdict)")
         void awaitingHuman_auditsAndFiresEvent() throws Exception {
             doReturn(true).when(auditLedgerService).isEnabled();

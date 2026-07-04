@@ -246,6 +246,49 @@ class HitlCrashRecoveryObserverTest {
             // the stale schedule (state is AWAITING_HUMAN but the bookmark differs)
             verify(scheduleStore, times(2)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
         }
+
+        @Test
+        @DisplayName("Task 14/1: TOOL_CALL-flavored pause with finite policy is re-armed identically to a RULE pause")
+        void toolCallFlavoredPauseRearmedIdentically() throws Exception {
+            // A TOOL_CALL pause sets hitlPausedAt exactly like a RULE pause (Task 5) —
+            // the summary carries pauseType="TOOL_CALL" but the repair logic never
+            // reads pauseType at all, so a finite-policy tool pause must be re-armed
+            // the same way a RULE pause is.
+            Instant pausedAt = Instant.now().minus(48, ChronoUnit.HOURS);
+            var summary = pausedSummary("AUTO_REJECT", "PT30M", pausedAt);
+            summary.setPauseType("TOOL_CALL");
+            summary.setToolNames(List.of("sendEmail", "chargeCard"));
+            when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of(summary));
+            when(memStore.loadConversationMemorySnapshot(CONV_ID))
+                    .thenReturn(awaitingSnapshot(pausedAt));
+
+            observer(true, true).runRecovery();
+
+            verify(memStore, never()).setConversationState(anyString(), any());
+            verify(memStore, never()).compareAndSetState(anyString(), any(), any());
+            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+            var captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+            verify(scheduleStore).createSchedule(captor.capture());
+            var schedule = captor.getValue();
+            assertEquals("AUTO_REJECT", schedule.getMetadata().get("policy"));
+            assertEquals("regular", schedule.getMetadata().get("surface"));
+        }
+
+        @Test
+        @DisplayName("Task 14/1: WAIT_INDEFINITELY TOOL_CALL pause is skipped exactly like a RULE pause")
+        void toolCallFlavoredWaitIndefinitelyLeftAlone() throws Exception {
+            var summary = pausedSummary("WAIT_INDEFINITELY", null, Instant.now().minus(90, ChronoUnit.DAYS));
+            summary.setPauseType("TOOL_CALL");
+            summary.setToolNames(List.of("sendEmail"));
+            when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of(summary));
+
+            observer(true, true).runRecovery();
+
+            verify(memStore, never()).setConversationState(anyString(), any());
+            verify(memStore, never()).compareAndSetState(anyString(), any(), any());
+            verify(memStore, never()).loadConversationMemorySnapshot(anyString());
+            verifyNoInteractions(scheduleStore);
+        }
     }
 
     @Nested
@@ -266,6 +309,51 @@ class HitlCrashRecoveryObserverTest {
 
             verify(memStore).compareAndSetState(CONV_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
             verify(memStore, never()).setConversationState(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("Task 14/2: IN_PROGRESS-with-bookmark recovery of a TOOL_CALL pause restores AWAITING_HUMAN "
+                + "WITHOUT touching hitlPendingToolCalls — the pending batch survives for re-approval")
+        void crashedToolCallResumeRestoredWithBatchIntact() throws Exception {
+            // A pod died between the resume CAS (AWAITING_HUMAN->IN_PROGRESS) and the
+            // resume actually consuming the batch. Recovery must restore the pause
+            // WITHOUT ever loading/mutating hitlPendingToolCalls — the batch is only
+            // ever read/cleared by the resume path (AgentOrchestrator.resumeToolLoop),
+            // never by the crash-recovery observer. This is the structural precondition
+            // for the journal (IHitlToolJournalStore.tryClaim) to still prevent
+            // double-execution when the human re-approves: the SAME pauseEpoch/callId
+            // pairs from the ORIGINAL batch are replayed, not a fresh batch recovery
+            // might otherwise have reset. (The tryClaim-returns-false-on-replay
+            // contract itself is exercised end-to-end in
+            // AgentOrchestratorResumeToolLoopTest#journalExecutedReplays.)
+            var snapshot = pausedSnapshot("WAIT_INDEFINITELY", null, Instant.now().minus(1, ChronoUnit.HOURS));
+            snapshot.setHitlPauseType("TOOL_CALL");
+            var batch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
+            batch.setPauseEpoch("epoch-crash-1");
+            var call = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall();
+            call.setCallId("call-1");
+            call.setToolName("chargeCard");
+            batch.setCalls(List.of(call));
+            snapshot.setHitlPendingToolCalls(batch);
+
+            when(memStore.findConversationIdsByState(ConversationState.IN_PROGRESS))
+                    .thenReturn(List.of(CONV_ID));
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(snapshot);
+            when(memStore.compareAndSetState(CONV_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN))
+                    .thenReturn(true);
+
+            observer(true, true).runRecovery();
+
+            verify(memStore).compareAndSetState(CONV_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
+            verify(memStore, never()).setConversationState(anyString(), any());
+            // Recovery never clears the bookmark or the batch for a restored pause —
+            // only cancel/end (clearHitlBookmark) or LlmTask's post-consumption cleanup
+            // ever touch hitlPendingToolCalls.
+            verify(memStore, never()).clearHitlBookmark(anyString());
+            assertNotNull(snapshot.getHitlPendingToolCalls(), "the pending batch must still be present "
+                    + "in the snapshot after recovery — re-approval needs it to apply verdicts");
+            assertEquals("epoch-crash-1", snapshot.getHitlPendingToolCalls().getPauseEpoch());
+            assertEquals(1, snapshot.getHitlPendingToolCalls().getCalls().size());
         }
 
         @Test
@@ -313,6 +401,49 @@ class HitlCrashRecoveryObserverTest {
             assertDoesNotThrow(() -> observer(true, true).runRecovery());
             verify(memStore, never()).setConversationState(anyString(), any());
             verify(memStore, never()).compareAndSetState(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Task 14/5: orphaned hitlPendingToolCalls batch WITHOUT a bookmark is cleared when the "
+                + "conversation lands on EXECUTION_INTERRUPTED (neither AWAITING_HUMAN nor IN_PROGRESS)")
+        void orphanedToolBatchClearedOnUnknownInProgressRecovery() throws Exception {
+            // Defensive-only scenario: pauseConversation() commits hitlPausedAt and
+            // hitlPendingToolCalls in the SAME document write, so this should be
+            // impossible in practice — but a crash landing between the gate trip and
+            // the pause commit could theoretically leave an orphaned batch with no
+            // bookmark. The "no bookmark" branch already moves the conversation to
+            // EXECUTION_INTERRUPTED; it must also clear the stray batch.
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setAgentId("agent-1"); // no hitlPausedAt — the "unknown interrupted" branch
+            var orphanBatch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
+            orphanBatch.setPauseEpoch("orphan-epoch");
+            snapshot.setHitlPendingToolCalls(orphanBatch);
+            when(memStore.findConversationIdsByState(ConversationState.IN_PROGRESS))
+                    .thenReturn(List.of(CONV_ID));
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(snapshot);
+            when(memStore.compareAndSetState(CONV_ID, ConversationState.IN_PROGRESS, ConversationState.EXECUTION_INTERRUPTED))
+                    .thenReturn(true);
+
+            observer(true, true).runRecovery();
+
+            verify(memStore).compareAndSetState(CONV_ID, ConversationState.IN_PROGRESS, ConversationState.EXECUTION_INTERRUPTED);
+            verify(memStore).clearHitlBookmark(CONV_ID);
+        }
+
+        @Test
+        @DisplayName("Task 14/5: a normal (non-orphaned) stuck IN_PROGRESS conversation with no pending batch is NOT touched by the orphan-clear")
+        void noBatchNoClearCall() throws Exception {
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setAgentId("agent-1"); // no hitlPausedAt, no pending batch either
+            when(memStore.findConversationIdsByState(ConversationState.IN_PROGRESS))
+                    .thenReturn(List.of(CONV_ID));
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(snapshot);
+            when(memStore.compareAndSetState(CONV_ID, ConversationState.IN_PROGRESS, ConversationState.EXECUTION_INTERRUPTED))
+                    .thenReturn(true);
+
+            observer(true, true).runRecovery();
+
+            verify(memStore, never()).clearHitlBookmark(anyString());
         }
 
         @Test
@@ -443,6 +574,32 @@ class HitlCrashRecoveryObserverTest {
             observerWithRetention(Duration.ZERO).sweepExpiredPendingApprovals();
 
             verify(conversationService, never()).cancelConversation(any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("Task 14/4: TOOL_CALL-flavored expired pause is cancelled via the SAME audited "
+                + "cancelConversation path as a RULE pause — the sweep never special-cases pauseType")
+        void cancelsExpiredToolCallPause() throws Exception {
+            // The retention sweep reads only conversationId/pausedAt off the summary —
+            // pauseType is irrelevant to the cancellation decision. cancelConversation
+            // itself (verified in ConversationServiceHitlTest) calls
+            // conversationMemoryStore.clearHitlBookmark(conversationId) on a successful
+            // cancel, and clearHitlBookmark unsets hitlPauseType/hitlPendingToolCalls at
+            // the store level (ConversationMemoryStore/PostgresConversationMemoryStore) —
+            // so a TOOL_CALL pause's pending batch is cleared by the exact same call a
+            // RULE pause's bookmark is, with no separate code path required.
+            var toolPause = new PendingApprovalSummary("tool-conv", "agent-1", "user-1",
+                    Instant.now().minus(40, ChronoUnit.DAYS), "needs review", "WAIT_INDEFINITELY");
+            toolPause.setPauseType("TOOL_CALL");
+            toolPause.setToolNames(List.of("sendEmail", "chargeCard"));
+            when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of(toolPause));
+            when(conversationService.cancelConversation(eq("tool-conv"), any(), eq("system:retention")))
+                    .thenReturn(IConversationService.CancelOutcome.CANCELLED);
+
+            observerWithRetention(Duration.ofDays(30)).sweepExpiredPendingApprovals();
+
+            verify(conversationService).cancelConversation(
+                    eq("tool-conv"), eq(ControlSignal.CANCEL_GRACEFUL), eq("system:retention"));
         }
 
         private GroupConversation groupPausedAt(String id, Instant pausedAt) {

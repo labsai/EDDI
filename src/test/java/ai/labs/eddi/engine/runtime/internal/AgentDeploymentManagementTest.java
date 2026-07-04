@@ -233,6 +233,29 @@ class AgentDeploymentManagementTest {
             // And its descriptor is never even read (we short-circuit before that).
             verify(documentDescriptorStore, never()).readDescriptor(eq("agent1"), eq(1));
         }
+
+        @Test
+        @DisplayName("Task 14/3: skips a PENDING TOOL_CALL pause identically — the spare check only reads "
+                + "ConversationState, never hitlPauseType, so undeploy is allowed the same way for both pause flavors")
+        void skipsPausedToolCallConversation() throws Exception {
+            var toolPaused = snapshot("conv-tool-paused", ai.labs.eddi.engine.memory.model.ConversationState.AWAITING_HUMAN);
+            toolPaused.setHitlPauseType("TOOL_CALL");
+            var batch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
+            batch.setPauseEpoch("epoch-undeploy-sweep");
+            toolPaused.setHitlPendingToolCalls(batch);
+
+            when(conversationMemoryStore.loadActiveConversationMemorySnapshot("agent1", 1))
+                    .thenReturn(List.of(toolPaused));
+
+            invokeEndOldConversations("agent1", 1);
+
+            // Same guarantee as the RULE-pause variant: never force-ENDed, descriptor
+            // never read — the pending tool-call batch survives the sweep untouched so
+            // a later redeploy + resume can still process it.
+            verify(conversationMemoryStore, never())
+                    .setConversationState(eq("conv-tool-paused"), any());
+            verify(documentDescriptorStore, never()).readDescriptor(eq("agent1"), eq(1));
+        }
     }
 
     private static ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot snapshot(

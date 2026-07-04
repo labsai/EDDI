@@ -396,6 +396,131 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
         }
 
         @Test
+        @DisplayName("Task 14/6: a fully-populated PendingToolCallBatch survives a real JSONB round-trip "
+                + "— every field, including nested traceSoFar maps")
+        void pendingToolCallBatchFullRoundTrip() throws Exception {
+            // Mirrors MongoConversationMemoryStoreTest#pendingToolCallBatchFullRoundTrip.
+            // Unlike PendingToolCallBatchSnapshotTest (plain Jackson ObjectMapper, no DB
+            // involved), this exercises the ACTUAL codec path production uses here:
+            // IJsonSerialization -> JSONB column -> deserialize. Object-typed fields
+            // like traceSoFar's nested Map<String,Object> are exactly the kind of thing
+            // that can silently lose fidelity (numeric widening, key ordering) across a
+            // real JSON<->JSONB round-trip.
+            var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPauseType("TOOL_CALL");
+            snapshot.setHitlPausedAt(java.time.Instant.now());
+            snapshot.setHitlPauseReason("gated tool calls awaiting review");
+            snapshot.setHitlTimeoutPolicy("AUTO_REJECT");
+            snapshot.setHitlApprovalTimeout("PT30M");
+
+            var batch = new PendingToolCallBatch();
+            batch.setPauseEpoch("epoch-full-1");
+            batch.setLlmTaskId("llm-task-1");
+            batch.setLlmTaskIndex(2);
+            batch.setWorkflowId("workflow-1");
+            batch.setChatTranscriptJson("{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+            batch.setTranscriptOmitted(false);
+            batch.setIterationIndex(3);
+            batch.setActivatedToolNames(List.of("sendEmail", "chargeCard"));
+            batch.setFingerprint("sha256:abc123");
+            batch.setAutoApproveCount(2);
+            batch.setPauseCountThisTurn(1);
+            batch.setExecutedUngatedCallNames(List.of("readOnlyLookup"));
+
+            var call1 = new PendingToolCall();
+            call1.setCallId("call-1");
+            call1.setToolName("sendEmail");
+            call1.setSource("mcp");
+            call1.setArgumentsRaw("{\"to\":\"user@example.com\",\"body\":\"hi\"}");
+            call1.setArgsTruncated(false);
+            call1.setArgumentsRedacted("{\"to\":\"[REDACTED]\",\"body\":\"hi\"}");
+            call1.setGateReason("mcp:*");
+
+            var call2 = new PendingToolCall();
+            call2.setCallId("call-2");
+            call2.setToolName("chargeCard");
+            call2.setSource("http");
+            call2.setArgumentsRaw("{\"amount\":100}");
+            call2.setArgsTruncated(true);
+            call2.setArgumentsRedacted("{\"amount\":100}");
+            call2.setGateReason("http:chargeCard");
+            batch.setCalls(List.of(call1, call2));
+
+            // traceSoFar: a nested Map<String,Object> — the field most likely to lose
+            // fidelity across a real JSON round-trip (numeric widening, boolean/string
+            // coercion, nested structures).
+            var nested = new java.util.LinkedHashMap<String, Object>();
+            nested.put("stringField", "value");
+            nested.put("intField", 42);
+            nested.put("boolField", true);
+            nested.put("nestedList", List.of("a", "b", "c"));
+            var traceEntry1 = new java.util.LinkedHashMap<String, Object>();
+            traceEntry1.put("type", "tool_call");
+            traceEntry1.put("tool", "readOnlyLookup");
+            traceEntry1.put("detail", nested);
+            var traceEntry2 = new java.util.LinkedHashMap<String, Object>();
+            traceEntry2.put("type", "hitl_gate_tripped");
+            traceEntry2.put("gatedCount", 2);
+            batch.setTraceSoFar(List.of(traceEntry1, traceEntry2));
+
+            snapshot.setHitlPendingToolCalls(batch);
+
+            String id = store.storeConversationMemorySnapshot(snapshot);
+            var loaded = store.loadConversationMemorySnapshot(id);
+
+            assertNotNull(loaded);
+            assertEquals("TOOL_CALL", loaded.getHitlPauseType());
+            var loadedBatch = loaded.getHitlPendingToolCalls();
+            assertNotNull(loadedBatch, "the pending batch itself must survive the round-trip");
+
+            assertEquals("epoch-full-1", loadedBatch.getPauseEpoch());
+            assertEquals("llm-task-1", loadedBatch.getLlmTaskId());
+            assertEquals(2, loadedBatch.getLlmTaskIndex());
+            assertEquals("workflow-1", loadedBatch.getWorkflowId());
+            assertEquals("{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}", loadedBatch.getChatTranscriptJson());
+            assertFalse(loadedBatch.isTranscriptOmitted());
+            assertEquals(3, loadedBatch.getIterationIndex());
+            assertEquals(List.of("sendEmail", "chargeCard"), loadedBatch.getActivatedToolNames());
+            assertEquals("sha256:abc123", loadedBatch.getFingerprint());
+            assertEquals(2, loadedBatch.getAutoApproveCount());
+            assertEquals(1, loadedBatch.getPauseCountThisTurn());
+            assertEquals(List.of("readOnlyLookup"), loadedBatch.getExecutedUngatedCallNames());
+
+            assertNotNull(loadedBatch.getCalls());
+            assertEquals(2, loadedBatch.getCalls().size());
+            var loadedCall1 = loadedBatch.getCalls().get(0);
+            assertEquals("call-1", loadedCall1.getCallId());
+            assertEquals("sendEmail", loadedCall1.getToolName());
+            assertEquals("mcp", loadedCall1.getSource());
+            assertEquals("{\"to\":\"user@example.com\",\"body\":\"hi\"}", loadedCall1.getArgumentsRaw());
+            assertFalse(loadedCall1.isArgsTruncated());
+            assertEquals("{\"to\":\"[REDACTED]\",\"body\":\"hi\"}", loadedCall1.getArgumentsRedacted());
+            assertEquals("mcp:*", loadedCall1.getGateReason());
+
+            var loadedCall2 = loadedBatch.getCalls().get(1);
+            assertEquals("call-2", loadedCall2.getCallId());
+            assertEquals("chargeCard", loadedCall2.getToolName());
+            assertTrue(loadedCall2.isArgsTruncated());
+
+            assertNotNull(loadedBatch.getTraceSoFar());
+            assertEquals(2, loadedBatch.getTraceSoFar().size());
+            var loadedTrace1 = loadedBatch.getTraceSoFar().get(0);
+            assertEquals("tool_call", loadedTrace1.get("type"));
+            assertEquals("readOnlyLookup", loadedTrace1.get("tool"));
+            @SuppressWarnings("unchecked")
+            var loadedNested = (java.util.Map<String, Object>) loadedTrace1.get("detail");
+            assertNotNull(loadedNested, "the nested Map<String,Object> inside traceSoFar must survive");
+            assertEquals("value", loadedNested.get("stringField"));
+            assertEquals(42, ((Number) loadedNested.get("intField")).intValue());
+            assertEquals(true, loadedNested.get("boolField"));
+            assertEquals(List.of("a", "b", "c"), loadedNested.get("nestedList"));
+
+            var loadedTrace2 = loadedBatch.getTraceSoFar().get(1);
+            assertEquals("hitl_gate_tripped", loadedTrace2.get("type"));
+            assertEquals(2, ((Number) loadedTrace2.get("gatedCount")).intValue());
+        }
+
+        @Test
         @DisplayName("clearHitlBookmark removes the bookmark fields but keeps the conversation")
         void clearHitlBookmark() throws Exception {
             var snapshot = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);

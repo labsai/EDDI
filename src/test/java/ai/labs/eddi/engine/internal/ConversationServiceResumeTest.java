@@ -580,6 +580,50 @@ class ConversationServiceResumeTest {
         }
 
         @Test
+        @DisplayName("Task 14/3: agent not deployed with a PENDING TOOL_CALL pause → same 409 + pause "
+                + "RESTORED — the undeployed-agent path never inspects pauseType")
+        void agentNotDeployed_toolCallPause_restoresPauseIdentically() throws Exception {
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
+
+            var snapshot = createResumeSnapshot();
+            snapshot.setHitlPauseType("TOOL_CALL");
+            var batch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
+            batch.setPauseEpoch("epoch-undeploy-1");
+            var call = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall();
+            call.setCallId("call-1");
+            call.setToolName("chargeCard");
+            call.setSource("mcp");
+            call.setArgumentsRaw("{}");
+            batch.setCalls(java.util.List.of(call));
+            snapshot.setHitlPendingToolCalls(batch);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+            // Agent not found — mirrors an undeploy having happened while paused.
+            doReturn(null).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+
+            IllegalStateException exception = assertThrows(IllegalStateException.class,
+                    () -> conversationService.resumeConversation(CONVERSATION_ID, decision, null));
+            assertTrue(exception.getMessage().contains("Agent not deployed"),
+                    "Exception should mention agent not deployed, got: " + exception.getMessage());
+
+            // Same restore-not-destroy guarantee as the RULE-pause variant above: the
+            // pending tool-call batch is still in the snapshot (never loaded via a
+            // pauseType-specific branch), so a later redeploy + retry can still
+            // re-approve the exact same batch.
+            verify(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
+            verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+            verify(conversationMemoryStore, never()).clearHitlBookmark(anyString());
+            verify(scheduleStore, never()).createSchedule(any());
+        }
+
+        @Test
         @DisplayName("unexpected RuntimeException from continueConversation → pause RESTORED, wrapped as ResourceStoreException (not stuck IN_PROGRESS)")
         void continueConversationThrowsRuntimeException_restoresPause() throws Exception {
             doReturn(true).when(conversationMemoryStore).compareAndSetState(

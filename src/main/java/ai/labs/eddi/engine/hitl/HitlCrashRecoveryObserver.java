@@ -315,6 +315,24 @@ public class HitlCrashRecoveryObserver {
                             LOGGER.warnf("Recovered stuck IN_PROGRESS conversation to EXECUTION_INTERRUPTED: %s",
                                     conversationId);
                             count++;
+                            // Defensive: hitlPendingToolCalls and hitlPausedAt normally commit in the
+                            // SAME document write (pauseConversation sets both), so a batch surviving
+                            // without a bookmark should be impossible. But a crash landing exactly
+                            // between the gate trip and the pause commit could theoretically leave an
+                            // orphaned batch on a conversation that is now neither AWAITING_HUMAN nor
+                            // IN_PROGRESS (it just moved to EXECUTION_INTERRUPTED above) — clear it so
+                            // it can never poison a future resume's mode detection.
+                            if (snapshot.getHitlPendingToolCalls() != null) {
+                                LOGGER.warnf("Orphaned hitlPendingToolCalls batch found on non-paused "
+                                        + "conversation %s (state now EXECUTION_INTERRUPTED, no hitlPausedAt "
+                                        + "bookmark) — clearing stale tool-pause state", conversationId);
+                                try {
+                                    conversationMemoryStore.clearHitlBookmark(conversationId);
+                                } catch (Exception e) {
+                                    LOGGER.warnf("Failed to clear orphaned tool-pause state for %s: %s",
+                                            conversationId, e.getMessage());
+                                }
+                            }
                         }
                     }
                 } catch (Exception e) {
