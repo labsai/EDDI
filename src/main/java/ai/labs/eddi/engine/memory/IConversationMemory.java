@@ -306,6 +306,12 @@ public interface IConversationMemory extends Serializable {
          */
         void removeConversationOutputListItem(String key, Object value);
 
+        /**
+         * Removes an entire conversation-output entry by key (e.g. the transient
+         * {@code hitl:status} pause marker on resume).
+         */
+        void removeConversationOutput(String key);
+
         void addConversationOutputObject(String key, Object value);
 
         void replaceConversationOutputObject(String key, Object value, Object replace);

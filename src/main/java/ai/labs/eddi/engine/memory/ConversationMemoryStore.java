@@ -77,8 +77,12 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     @Override
     public boolean storeConversationMemorySnapshotIfState(ConversationMemorySnapshot snapshot, ConversationState expectedState) {
         String conversationId = snapshot.getConversationId();
-        if (conversationId == null) {
-            // A conditional store only makes sense against an existing document.
+        if (conversationId == null || expectedState == null) {
+            // A conditional store only makes sense against an existing document with a
+            // known expected state. expectedState can now be null when the caller
+            // derives it from a live lookup (say-path preTurnPersistedState, undo/redo
+            // loaded state) and the document was deleted concurrently — treat that as a
+            // CAS miss (discard) rather than NPE on expectedState.name().
             return false;
         }
         var filter = new Document(OBJECT_ID, new ObjectId(conversationId))

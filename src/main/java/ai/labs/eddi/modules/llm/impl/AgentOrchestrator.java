@@ -909,11 +909,15 @@ class AgentOrchestrator {
                             // stale batch on a conversation the caller abandoned (self-heals
                             // at next turn start) or overwrite a later step's real pause.
                             // Abort WITHOUT mutating shared memory: throw the interrupted
-                            // signal — on a cascade the discarded Future swallows it; on the
-                            // live path Conversation.runStep converts it to
-                            // EXECUTION_INTERRUPTED (the correct outcome for an abandoned
-                            // turn). NOT ToolApprovalRequiredException, which would commit a
-                            // pause with a null batch.
+                            // signal instead of the pause. NOT ToolApprovalRequiredException,
+                            // which would commit a pause with a null batch. The guarantee
+                            // here is only that this abandoned thread never writes stale/
+                            // overwriting pause state; the resulting terminal state is
+                            // fail-safe either way — a cascade discards the Future's exception
+                            // entirely, and on the live path AgentExecutionHelper.executeWithRetry
+                            // re-wraps this into a plain LifecycleException so the turn settles
+                            // to ERROR (where the watchdog fired it already persisted
+                            // EXECUTION_INTERRUPTED). Both are recoverable by the next say.
                             if (Thread.currentThread().isInterrupted()) {
                                 throw new LifecycleException.LifecycleInterruptedException(
                                         "Tool-approval pause abandoned: executing thread was interrupted before commit");

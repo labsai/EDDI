@@ -469,6 +469,24 @@ public class Conversation implements IConversation {
         }
     }
 
+    /**
+     * Public output key + value for the transient RULE-pause awaiting-approval
+     * marker.
+     */
+    private static final String HITL_STATUS_OUTPUT_KEY = "hitl:status";
+    private static final String HITL_STATUS_AWAITING = "awaiting_approval";
+
+    /**
+     * Removes the transient {@code hitl:status=awaiting_approval} marker (both the
+     * step Data and the conversation-output entry) on resume, so a resolved turn no
+     * longer advertises "awaiting approval" to state-aware clients. Only RULE
+     * pauses ever write it, so this is a no-op for TOOL_CALL pauses.
+     */
+    private void clearHitlStatusMarker(IWritableConversationStep currentStep) {
+        currentStep.removeData(HITL_STATUS_OUTPUT_KEY);
+        currentStep.removeConversationOutput(HITL_STATUS_OUTPUT_KEY);
+    }
+
     private void pauseConversation(ConversationPauseException e) {
         setConversationState(ConversationState.AWAITING_HUMAN);
         conversationMemory.setHitlPausedWorkflowId(e.getPausedWorkflowId());
@@ -493,14 +511,13 @@ public class Conversation implements IConversation {
             // the paused step would otherwise commit an EMPTY conversationOutput and a
             // client that renders turns from the output list shows a blank bubble.
             // Emit a public hitl:status marker (framework plan §6.4) so state-aware
-            // clients can render an "awaiting approval" indicator. On resume the
-            // approved path re-runs the remaining output tasks (real answer appended)
-            // and the rejected path adds its own rejection output, so this marker is
-            // the sole output only while the turn is actually paused.
-            var statusData = new Data<>("hitl:status", "awaiting_approval");
+            // clients can render an "awaiting approval" indicator. It is removed on
+            // resume (clearHitlStatusMarker) so the resolved turn no longer advertises
+            // "awaiting approval" — the marker is transient to the paused state.
+            var statusData = new Data<>(HITL_STATUS_OUTPUT_KEY, HITL_STATUS_AWAITING);
             statusData.setPublic(true);
             conversationMemory.getCurrentStep().storeData(statusData);
-            conversationMemory.getCurrentStep().addConversationOutputString("hitl:status", "awaiting_approval");
+            conversationMemory.getCurrentStep().addConversationOutputString(HITL_STATUS_OUTPUT_KEY, HITL_STATUS_AWAITING);
         }
     }
 
@@ -671,6 +688,11 @@ public class Conversation implements IConversation {
                 // preserved.
                 dropPendingApprovalPlaceholder(currentStep);
             }
+            // Drop the transient RULE-pause awaiting-approval marker so the resolved
+            // turn does not keep advertising "awaiting approval". No-op for TOOL_CALL
+            // pauses (which never write it); if the resume re-pauses, pauseConversation
+            // re-adds it.
+            clearHitlStatusMarker(currentStep);
             clearHitlBookmark();
 
             // Belt-and-braces for Blocker #1: strip PAUSE_CONVERSATION from the

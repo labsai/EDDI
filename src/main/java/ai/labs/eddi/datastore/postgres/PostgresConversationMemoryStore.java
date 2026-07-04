@@ -127,8 +127,12 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String conversationId = snapshot.getConversationId();
-        if (conversationId == null) {
-            // A conditional store only makes sense against an existing row.
+        if (conversationId == null || expectedState == null) {
+            // A conditional store only makes sense against an existing row with a known
+            // expected state. expectedState can be null when the caller derives it from
+            // a live lookup (say-path preTurnPersistedState, undo/redo loaded state) and
+            // the row was deleted concurrently — treat as a CAS miss, not an NPE at
+            // expectedState.name().
             return false;
         }
         try {

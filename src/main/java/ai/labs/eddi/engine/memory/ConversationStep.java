@@ -82,6 +82,11 @@ public class ConversationStep implements IConversationMemory.IWritableConversati
     }
 
     @Override
+    public void removeConversationOutput(String key) {
+        conversationOutput.remove(key);
+    }
+
+    @Override
     public void addConversationOutputObject(String key, Object value) {
         conversationOutput.put(key, value);
     }
