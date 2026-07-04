@@ -230,6 +230,29 @@ class AgentOrchestratorToolPauseTest {
     }
 
     @Test
+    @DisplayName("configured small transcript-max-bytes cap governs serialization: transcript omitted even though it fits the 2MB default")
+    void configuredTranscriptMaxBytes_smallCap_omitsTranscript() {
+        var task = twoToolTask();
+        ChatModel chatModel = mock(ChatModel.class);
+
+        var gatedReq = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        var ungatedReq = ToolExecutionRequest.builder().id("c2").name("getCurrentDateTime").arguments("{\"timezone\":\"UTC\"}").build();
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch(gatedReq, ungatedReq));
+
+        // Tiny cap (16 bytes) — the serialized transcript is far larger than this,
+        // but comfortably under the 2MB DEFAULT. If the configured value were being
+        // ignored (hard-coded default), the transcript would NOT be omitted.
+        var ex = assertThrows(ToolApprovalRequiredException.class,
+                () -> orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")),
+                        task, memory, gateCalculate(), 0, 16));
+
+        PendingToolCallBatch batch = ex.getBatch();
+        assertNotNull(batch);
+        assertTrue(batch.isTranscriptOmitted(), "a 16-byte configured cap must govern serialization, not the 2MB default");
+        assertNull(batch.getChatTranscriptJson(), "omitted transcript must not carry a JSON payload");
+    }
+
+    @Test
     @DisplayName("oversized raw args set argsTruncated; redacted args never exceed cap")
     void argsTruncation() {
         var task = twoToolTask();

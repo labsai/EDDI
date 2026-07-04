@@ -228,6 +228,35 @@ class AgentOrchestrator {
     ExecutionResult executeIfToolsEnabled(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, LlmConfiguration.Task task,
                                           IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex)
             throws LifecycleException {
+        // Backward-compatible overload: transcript cap defaults to the constant
+        // (callers that have not been updated to pass the configured value keep the
+        // exact pre-existing behavior).
+        return executeIfToolsEnabled(chatModel, systemMessage, chatMessages, task, memory, effectiveToolApprovals, llmTaskIndex,
+                DEFAULT_TRANSCRIPT_MAX_BYTES);
+    }
+
+    /**
+     * Collect enabled tools and run the tool-calling loop with the tool-approval
+     * gate active.
+     *
+     * @param effectiveToolApprovals
+     *            the resolved tool-approval config (task override or agent
+     *            default); {@code null}/empty means the gate is inert —
+     *            byte-identical to the pre-HITL behavior.
+     * @param llmTaskIndex
+     *            the position of {@code task} in the llmConfig task list — recorded
+     *            on the pending batch so resume re-enters the correct task.
+     * @param transcriptMaxBytes
+     *            the configured cap (bytes) for serializing the frozen transcript
+     *            into a {@link PendingToolCallBatch} on a tool pause — resolved by
+     *            {@code LlmTask} from {@code eddi.hitl.tool.transcript-max-bytes}
+     *            (default
+     *            {@link PendingToolCallBatch#TRANSCRIPT_MAX_BYTES_DEFAULT}).
+     */
+    ExecutionResult executeIfToolsEnabled(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, LlmConfiguration.Task task,
+                                          IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
+                                          int transcriptMaxBytes)
+            throws LifecycleException {
 
         // Discover + register all tools (built-in + http + mcp + a2a) — the SAME
         // prologue the resume path uses.
@@ -238,7 +267,8 @@ class AgentOrchestrator {
             return null;
         }
 
-        return executeWithTools(chatModel, systemMessage, chatMessages, setup, task, memory, effectiveToolApprovals, llmTaskIndex);
+        return executeWithTools(chatModel, systemMessage, chatMessages, setup, task, memory, effectiveToolApprovals, llmTaskIndex,
+                transcriptMaxBytes);
     }
 
     /**
@@ -385,8 +415,15 @@ class AgentOrchestrator {
                 : memory.getAgentToolApprovalsConfig();
         int llmTaskIndex = batch.getLlmTaskIndex();
 
+        // Transcript cap: resumeToolLoop replays the ALREADY-serialized transcript
+        // via ChatTranscriptCodec#deserialize (no cap involved) and never threads the
+        // configured value in (LlmTask does not resolve it for the resume path). If
+        // this continuation re-gates a fresh call and re-pauses, the resulting batch
+        // is capped at the constant default here — a defensible, rare-path fallback
+        // rather than widening resumeToolLoop's signature for the primary knob, which
+        // governs the initial pause.
         String response = runToolCallLoop(chatModel, currentMessages, activeSpecs, trace, batch.getIterationIndex() + 1,
-                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds);
+                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCallIds, DEFAULT_TRANSCRIPT_MAX_BYTES);
 
         // ── Step 5: merge the pre-pause trace with the resume trace ──
         List<Map<String, Object>> mergedTrace = new ArrayList<>();
@@ -682,7 +719,7 @@ class AgentOrchestrator {
      */
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, ToolSetup setup,
                                              LlmConfiguration.Task task, IConversationMemory memory,
-                                             ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex)
+                                             ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes)
             throws LifecycleException {
 
         Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
@@ -706,7 +743,7 @@ class AgentOrchestrator {
 
         // Live path: iteration loop starts at 0, no pre-cleared call ids.
         String response = runToolCallLoop(chatModel, messages, activeSpecs, trace, 0,
-                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, Set.of());
+                setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, Set.of(), transcriptMaxBytes);
 
         return new ExecutionResult(response, trace);
     }
@@ -728,11 +765,14 @@ class AgentOrchestrator {
      *            first loop index — carries budget continuity across a pause
      * @param clearedCallIds
      *            call ids a human already approved this pause; never re-gated
+     * @param transcriptMaxBytes
+     *            the configured cap (bytes) for freezing the transcript into a
+     *            {@link PendingToolCallBatch} if this iteration re-pauses
      */
     private String runToolCallLoop(ChatModel chatModel, List<ChatMessage> initialMessages, List<ToolSpecification> activeSpecs,
                                    List<Map<String, Object>> trace, int startIteration, ToolSetup setup, boolean isLazy,
                                    LlmConfiguration.Task task, IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals,
-                                   int llmTaskIndex, Set<String> clearedCallIds)
+                                   int llmTaskIndex, Set<String> clearedCallIds, int transcriptMaxBytes)
             throws LifecycleException {
 
         Map<String, ToolExecutor> toolExecutors = setup.toolExecutors();
@@ -820,7 +860,7 @@ class AgentOrchestrator {
                             // 2) snapshot + persist the pending batch, then abort the loop
                             PendingToolCallBatch batch = buildPendingBatch(currentMessages, gateResult, task, memory,
                                     i, activatedToolNames(isLazy, activeSpecs), trace, pausesSoFar + 1, llmTaskIndex,
-                                    toolSources, effectiveToolApprovals);
+                                    toolSources, effectiveToolApprovals, transcriptMaxBytes);
                             memory.setHitlPendingToolCalls(batch);
                             incrementToolPauseCount(memory, pausesSoFar);
                             throw new ToolApprovalRequiredException(buildPauseReason(effectiveToolApprovals, gateResult), batch);
@@ -1049,15 +1089,35 @@ class AgentOrchestrator {
     }
 
     /**
-     * Snapshots the interrupted tool-call batch into a durable
-     * {@link PendingToolCallBatch}. All approver-facing strings are secret-redacted
-     * and size-capped.
+     * Backward-compatible overload: transcript cap defaults to
+     * {@link #DEFAULT_TRANSCRIPT_MAX_BYTES}.
      */
     PendingToolCallBatch buildPendingBatch(List<ChatMessage> currentMessages, ToolApprovalGate.GateResult gateResult,
                                            LlmConfiguration.Task task, IConversationMemory memory, int iterationIndex,
                                            List<String> activatedToolNames, List<Map<String, Object>> trace,
                                            int pauseCountThisTurn, int llmTaskIndex,
                                            Map<String, String> toolSources, ToolApprovalsConfig effectiveToolApprovals) {
+        return buildPendingBatch(currentMessages, gateResult, task, memory, iterationIndex, activatedToolNames, trace,
+                pauseCountThisTurn, llmTaskIndex, toolSources, effectiveToolApprovals, DEFAULT_TRANSCRIPT_MAX_BYTES);
+    }
+
+    /**
+     * Snapshots the interrupted tool-call batch into a durable
+     * {@link PendingToolCallBatch}. All approver-facing strings are secret-redacted
+     * and size-capped.
+     *
+     * @param transcriptMaxBytes
+     *            the configured cap (bytes) for serializing {@code currentMessages}
+     *            — resolved by {@code LlmTask} from
+     *            {@code eddi.hitl.tool.transcript-max-bytes} (default
+     *            {@link PendingToolCallBatch#TRANSCRIPT_MAX_BYTES_DEFAULT}).
+     */
+    PendingToolCallBatch buildPendingBatch(List<ChatMessage> currentMessages, ToolApprovalGate.GateResult gateResult,
+                                           LlmConfiguration.Task task, IConversationMemory memory, int iterationIndex,
+                                           List<String> activatedToolNames, List<Map<String, Object>> trace,
+                                           int pauseCountThisTurn, int llmTaskIndex,
+                                           Map<String, String> toolSources, ToolApprovalsConfig effectiveToolApprovals,
+                                           int transcriptMaxBytes) {
         PendingToolCallBatch batch = new PendingToolCallBatch();
         batch.setPauseEpoch(UUID.randomUUID().toString());
         batch.setLlmTaskId(task.getId());
@@ -1076,7 +1136,6 @@ class AgentOrchestrator {
         batch.setAutoApproveCount(0);
 
         // Serialize the transcript (capped); omitted flag drives fallback on resume.
-        int transcriptMaxBytes = DEFAULT_TRANSCRIPT_MAX_BYTES;
         ChatTranscriptCodec.CodecResult codecResult = chatTranscriptCodec.serialize(currentMessages, transcriptMaxBytes);
         batch.setChatTranscriptJson(codecResult.json());
         batch.setTranscriptOmitted(codecResult.omitted());

@@ -125,6 +125,17 @@ public class LlmTask implements ILifecycleTask {
     @ConfigProperty(name = "eddi.hitl.tool.enabled", defaultValue = "true")
     boolean toolHitlEnabled;
 
+    /**
+     * Configured cap (bytes) for serializing the frozen tool-call transcript into a
+     * {@link PendingToolCallBatch} on a HITL tool pause. Default MUST equal
+     * {@link PendingToolCallBatch#TRANSCRIPT_MAX_BYTES_DEFAULT} (2_000_000) — kept
+     * as a literal here because {@code @ConfigProperty}'s {@code defaultValue} must
+     * be a compile-time constant string.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.hitl.tool.transcript-max-bytes", defaultValue = "2000000")
+    int toolTranscriptMaxBytes;
+
     private static final Logger LOGGER = Logger.getLogger(LlmTask.class);
 
     @Inject
@@ -440,7 +451,7 @@ public class LlmTask implements ILifecycleTask {
 
             if (!skipCascade) {
                 var cascadeResult = CascadingModelExecutor.execute(chatModelRegistry, cascadeConfig, messages, systemMessage, processedParams, task,
-                        memory, agentOrchestrator, effectiveToolApprovals, llmTaskIndex);
+                        memory, agentOrchestrator, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
 
                 responseContent = cascadeResult.response();
 
@@ -474,7 +485,7 @@ public class LlmTask implements ILifecycleTask {
             } else {
                 // Agent mode with cascade disabled — use normal agent flow
                 var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
-                        memory, effectiveToolApprovals, llmTaskIndex);
+                        memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
                 if (agentResult != null) {
                     responseContent = agentResult.response();
                     toolTrace = agentResult.trace();
@@ -492,7 +503,7 @@ public class LlmTask implements ILifecycleTask {
         } else {
             // === Standard (non-cascade) execution path ===
             var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, new ArrayList<>(chatMessagesWithoutSystem), task,
-                    memory, effectiveToolApprovals, llmTaskIndex);
+                    memory, effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes);
 
             if (agentResult != null) {
                 // Agent mode — tools execute synchronously, stream final response if sink

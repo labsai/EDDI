@@ -103,6 +103,25 @@ class CascadingModelExecutor {
                                  AgentOrchestrator agentOrchestrator,
                                  ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex)
             throws LifecycleException {
+        // Backward-compatible overload: transcript cap defaults to the constant
+        // (matches AgentOrchestrator#DEFAULT_TRANSCRIPT_MAX_BYTES /
+        // PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT).
+        return execute(registry, cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, effectiveToolApprovals,
+                llmTaskIndex, ai.labs.eddi.engine.memory.model.PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT);
+    }
+
+    /**
+     * @param transcriptMaxBytes
+     *            the configured cap (bytes) for serializing the frozen transcript
+     *            into a {@code PendingToolCallBatch} on a tool pause — resolved by
+     *            {@code LlmTask} from {@code eddi.hitl.tool.transcript-max-bytes}.
+     */
+    static CascadeResult execute(ChatModelRegistry registry, ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage,
+                                 Map<String, String> baseParams, LlmConfiguration.Task task, IConversationMemory memory,
+                                 AgentOrchestrator agentOrchestrator,
+                                 ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
+                                 int transcriptMaxBytes)
+            throws LifecycleException {
 
         List<CascadeStep> steps = cascade.getSteps();
         if (steps == null || steps.isEmpty()) {
@@ -144,7 +163,7 @@ class CascadingModelExecutor {
 
                 // Execute the model call with per-step timeout
                 StepResult stepResult = executeStepWithTimeout(chatModel, messages, systemMessage, evaluationStrategy, mergedParams, task, step,
-                        memory, agentOrchestrator, useAgentMode, effectiveToolApprovals, llmTaskIndex);
+                        memory, agentOrchestrator, useAgentMode, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
 
                 long durationMs = System.currentTimeMillis() - stepStart;
                 stepTrace.put("confidence", stepResult.confidence);
@@ -249,7 +268,8 @@ class CascadingModelExecutor {
                                                      Map<String, String> mergedParams, LlmConfiguration.Task task, CascadeStep step,
                                                      IConversationMemory memory,
                                                      AgentOrchestrator agentOrchestrator, boolean useAgentMode,
-                                                     ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex)
+                                                     ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
+                                                     int transcriptMaxBytes)
             throws Exception {
 
         long timeoutMs = step.getTimeoutMs() != null ? step.getTimeoutMs() : 30000L;
@@ -257,7 +277,7 @@ class CascadingModelExecutor {
         Future<StepResult> future = TIMEOUT_EXECUTOR.submit(() -> {
             if (useAgentMode) {
                 return executeAgentModeStep(chatModel, messages, systemMessage, evaluationStrategy, task, memory, agentOrchestrator,
-                        effectiveToolApprovals, llmTaskIndex);
+                        effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
             } else {
                 return executeLegacyModeStep(chatModel, messages, systemMessage, evaluationStrategy, task);
             }
@@ -308,7 +328,8 @@ class CascadingModelExecutor {
     private static StepResult executeAgentModeStep(ChatModel chatModel, List<ChatMessage> originalMessages, String systemMessage,
                                                    String evaluationStrategy, LlmConfiguration.Task task, IConversationMemory memory,
                                                    AgentOrchestrator agentOrchestrator,
-                                                   ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex)
+                                                   ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex,
+                                                   int transcriptMaxBytes)
             throws LifecycleException {
 
         // For agent mode, filter out system messages (orchestrator adds its own)
@@ -316,7 +337,7 @@ class CascadingModelExecutor {
                 .collect(java.util.stream.Collectors.toList());
 
         var agentResult = agentOrchestrator.executeIfToolsEnabled(chatModel, systemMessage, chatMessagesWithoutSystem, task, memory,
-                effectiveToolApprovals, llmTaskIndex);
+                effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes);
 
         if (agentResult != null) {
             String responseText = agentResult.response();
