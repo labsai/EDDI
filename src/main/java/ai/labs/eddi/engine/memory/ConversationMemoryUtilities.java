@@ -223,6 +223,12 @@ public class ConversationMemoryUtilities {
         simpleSnapshot.setAgentVersion(conversationMemorySnapshot.getAgentVersion());
         simpleSnapshot.setConversationState(conversationMemorySnapshot.getConversationState());
         simpleSnapshot.setHitlPausedAt(conversationMemorySnapshot.getHitlPausedAt());
+        // Task 13: carry the HITL pause type + gated tool-call batch (names-only for
+        // consumers) so delegated/MCP surfaces and the group member-turn path can
+        // additively surface a TOOL_CALL pause. Additive — RULE pauses leave these
+        // null.
+        simpleSnapshot.setHitlPauseType(conversationMemorySnapshot.getHitlPauseType());
+        simpleSnapshot.setHitlPendingToolCalls(conversationMemorySnapshot.getHitlPendingToolCalls());
         simpleSnapshot.setEnvironment(conversationMemorySnapshot.getEnvironment());
         simpleSnapshot.setUndoAvailable(conversationMemorySnapshot.getConversationSteps().size() > 1);
         simpleSnapshot.setRedoAvailable(!conversationMemorySnapshot.getRedoCache().isEmpty());

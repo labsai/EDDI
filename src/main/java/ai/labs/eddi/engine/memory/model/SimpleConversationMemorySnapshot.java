@@ -24,6 +24,19 @@ public class SimpleConversationMemorySnapshot {
     private Deployment.Environment environment;
     private ConversationState conversationState;
     private Instant hitlPausedAt;
+    /**
+     * Task 13: HITL pause type ("TOOL_CALL" | "RULE" | null) carried onto the
+     * simple snapshot so delegated/MCP surfaces and the group member-turn path can
+     * additively surface it. Mirrors
+     * {@code ConversationMemorySnapshot.hitlPauseType}.
+     */
+    private String hitlPauseType;
+    /**
+     * Task 13: the gated tool-call batch for a TOOL_CALL pause — consumers read
+     * tool NAMES only (never arguments). Null for RULE pauses. Mirrors
+     * {@code ConversationMemorySnapshot.hitlPendingToolCalls}.
+     */
+    private PendingToolCallBatch hitlPendingToolCalls;
     private boolean undoAvailable;
     private boolean redoAvailable;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
@@ -151,6 +164,22 @@ public class SimpleConversationMemorySnapshot {
 
     public void setHitlPausedAt(Instant hitlPausedAt) {
         this.hitlPausedAt = hitlPausedAt;
+    }
+
+    public String getHitlPauseType() {
+        return hitlPauseType;
+    }
+
+    public void setHitlPauseType(String hitlPauseType) {
+        this.hitlPauseType = hitlPauseType;
+    }
+
+    public PendingToolCallBatch getHitlPendingToolCalls() {
+        return hitlPendingToolCalls;
+    }
+
+    public void setHitlPendingToolCalls(PendingToolCallBatch hitlPendingToolCalls) {
+        this.hitlPendingToolCalls = hitlPendingToolCalls;
     }
 
     public boolean isUndoAvailable() {

@@ -1828,10 +1828,16 @@ public class GroupConversationService implements IGroupConversationService {
                 // is not supported inside a group — flag it here and resolve it after
                 // the say callback returns, rather than recording an empty contribution.
                 final boolean[] memberPaused = {false};
+                // Task 13: capture the paused snapshot so we can branch on its HITL
+                // pause type after the callback returns — a TOOL_CALL pause is
+                // auto-resolved gracefully (system:group REJECTED), a RULE pause needs
+                // a real human and stays SKIP+cancel.
+                final ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot[] pausedSnapshot = {null};
 
                 conversationService.say(DEFAULT_ENV, member.agentId(), convId, true, true, null, inputData, false, snapshot -> {
                     if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
                         memberPaused[0] = true;
+                        pausedSnapshot[0] = snapshot;
                     }
 
                     String response = extractResponse(snapshot);
@@ -1852,11 +1858,23 @@ public class GroupConversationService implements IGroupConversationService {
 
                 String response = responseFuture.get(timeout, TimeUnit.SECONDS);
 
-                // #3: member requested human approval mid-turn — cancel the stranded
-                // pause (disarms its timeout schedule and clears it from the regular
-                // pending-approvals surface so no human is left an unresolvable
-                // approval), record the turn SKIPPED, and tell observers why.
+                // #3 / Task 13: member requested human approval mid-turn. A TOOL_CALL
+                // pause is auto-resolved gracefully — the group rejects the gated
+                // tool(s) (system:group REJECTED) via the NORMAL resume path so the
+                // member's LLM receives rejection tool-results and produces a coherent
+                // tool-less answer that becomes its contribution. Only if that resume
+                // cannot complete (times out / re-pauses) do we fall back to the
+                // RULE-pause behavior: cancel the stranded pause + record SKIPPED.
                 if (memberPaused[0]) {
+                    if (pausedSnapshot[0] != null && "TOOL_CALL".equals(pausedSnapshot[0].getHitlPauseType())) {
+                        TranscriptEntry graceful = tryResolveMemberToolPause(
+                                member, gc, convId, input, timeout, phaseIdx, phase, entryType, targetAgentId);
+                        if (graceful != null) {
+                            return graceful;
+                        }
+                    }
+                    // RULE pause (needs a real human) or a TOOL_CALL graceful attempt
+                    // that could not complete → existing SKIP + cancel handling.
                     return handleMemberPause(member, gc, convId, phaseIdx, phase, targetAgentId, listener);
                 }
 
@@ -1981,6 +1999,100 @@ public class GroupConversationService implements IGroupConversationService {
                 return handleAgentFailure(member, phaseIdx, phase, protocol, cause, "Agent execution failed", targetAgentId);
             }
         }
+    }
+
+    /**
+     * Note recorded on the member's tool-less contribution when a group
+     * auto-rejects its gated tool call(s). Kept in one place so the transcript
+     * entry and docs stay consistent.
+     */
+    static final String MEMBER_TOOL_REJECTION_NOTE = "tool approval is not available during group discussions in this version";
+
+    /**
+     * Task 13 — graceful resolution of a member TOOL_CALL pause inside a group. The
+     * group has no human reviewer, so it auto-rejects the gated tool call(s) with a
+     * {@code system:group} REJECTED decision routed through the NORMAL resume path:
+     * the member's LLM receives rejection tool-results (Task 9) and produces a
+     * coherent tool-less answer, which becomes this turn's contribution.
+     * <p>
+     * The resume is driven synchronously within the member-turn budget. If it
+     * cannot complete in time, or the member re-pauses (its resumed snapshot is
+     * still {@code AWAITING_HUMAN}), this returns {@code null} — the caller then
+     * falls back to the existing member-pause handling (SKIP + cancel). A resume
+     * infrastructure failure likewise returns {@code null} so the fallback still
+     * terminates the turn cleanly.
+     *
+     * @return a real contribution entry on graceful success, or {@code null} to
+     *         signal "fall back to SKIP + cancel"
+     */
+    private TranscriptEntry tryResolveMemberToolPause(GroupMember member, GroupConversation gc, String convId,
+                                                      String input, int timeoutSeconds, int phaseIdx,
+                                                      DiscussionPhase phase, TranscriptEntryType entryType,
+                                                      String targetAgentId) {
+        LOGGER.infof("Member agent '%s' TOOL_CALL-paused during group discussion %s (phase %d) — "
+                + "auto-rejecting the gated tool call(s) (system:group) and resuming for a tool-less answer",
+                member.agentId(), gc.getId(), phaseIdx);
+
+        var decision = new ai.labs.eddi.engine.lifecycle.model.HitlDecision();
+        decision.setVerdict(ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict.REJECTED);
+        decision.setDecidedBy("system:group");
+        decision.setNote(MEMBER_TOOL_REJECTION_NOTE);
+
+        var resumeFuture = new CompletableFuture<ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot>();
+        try {
+            conversationService.resumeConversation(convId, decision,
+                    new IConversationService.ConversationResponseHandler() {
+                        @Override
+                        public void onComplete(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
+                            resumeFuture.complete(snapshot);
+                        }
+
+                        @Override
+                        public void onSkipped(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
+                            // Dropped without producing a fresh answer — treat as
+                            // "could not complete" so the caller falls back.
+                            resumeFuture.complete(null);
+                        }
+                    });
+        } catch (Exception e) {
+            LOGGER.warnf("Graceful tool-pause resume failed to start for member '%s' (conv %s): %s — falling back to SKIP+cancel",
+                    member.agentId(), convId, e.getMessage());
+            return null;
+        }
+
+        ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot resumed;
+        try {
+            resumed = resumeFuture.get(timeoutSeconds, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            LOGGER.warnf("Graceful tool-pause resume did not complete within %ds for member '%s' (conv %s) — falling back to SKIP+cancel",
+                    timeoutSeconds, member.agentId(), convId);
+            return null;
+        } catch (Exception e) {
+            LOGGER.warnf("Graceful tool-pause resume errored for member '%s' (conv %s): %s — falling back to SKIP+cancel",
+                    member.agentId(), convId, e instanceof ExecutionException && e.getCause() != null ? e.getCause().getMessage() : e.getMessage());
+            return null;
+        }
+
+        // Re-paused (still awaiting a human) → the graceful attempt did not resolve.
+        if (resumed == null || resumed.getConversationState() == ConversationState.AWAITING_HUMAN) {
+            LOGGER.warnf("Member '%s' re-paused after graceful tool rejection (conv %s) — falling back to SKIP+cancel",
+                    member.agentId(), convId);
+            return null;
+        }
+
+        propagateDynamicAgentTracking(resumed, gc);
+
+        String response = extractResponse(resumed);
+        if ((response == null || response.isEmpty())
+                && resumed.getConversationState() == ConversationState.ERROR) {
+            response = "[Agent failed to produce output — conversation entered ERROR state]";
+        }
+
+        LOGGER.infof("Member '%s' produced a tool-less contribution after group auto-rejection (conv %s)",
+                member.agentId(), convId);
+        return new TranscriptEntry(member.agentId(), member.displayName(), response,
+                phaseIdx, phase.name(), entryType, Instant.now(),
+                null, targetAgentId);
     }
 
     /**

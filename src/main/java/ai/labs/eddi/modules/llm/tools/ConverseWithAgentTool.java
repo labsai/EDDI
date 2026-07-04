@@ -116,7 +116,7 @@ public class ConverseWithAgentTool {
             // silently losing the eventual approved output.
             if (snapshot != null
                     && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
-                return pausedForApprovalMessage(convId);
+                return pausedForApprovalMessage(convId, snapshot);
             }
 
             // Finding H7: the input was dropped without being processed (busy or no
@@ -149,7 +149,9 @@ public class ConverseWithAgentTool {
             // 60s watchdog or surfacing a generic error.
             LOGGER.debugf("[CONVERSE] Conversation '%s' with agent '%s' is awaiting approval",
                     conversationId, agentId);
-            return pausedForApprovalMessage(conversationId);
+            // Already-paused at submit — no snapshot available here, so we cannot
+            // determine the pause type; report the base (RULE-shaped) message.
+            return pausedForApprovalMessage(conversationId, null);
         } catch (java.util.concurrent.TimeoutException e) {
             LOGGER.warnf("[CONVERSE] Timeout waiting for agent '%s' response", agentId);
             return "⚠️ Timeout waiting for agent '%s' to respond (60s limit).".formatted(agentId);
@@ -166,11 +168,41 @@ public class ConverseWithAgentTool {
      * be auto-cancelled. Re-invoke this tool with the same conversationId once a
      * reviewer has decided.
      */
-    private String pausedForApprovalMessage(String conversationId) {
-        return ("PAUSED_FOR_APPROVAL: the delegated agent's conversation %s requires human approval "
-                + "before it can continue. A reviewer must decide via POST /agents/%s/resume "
-                + "(APPROVED or REJECTED); re-invoke this tool with the same conversationId afterwards "
-                + "to retrieve the outcome.").formatted(conversationId, conversationId);
+    private String pausedForApprovalMessage(String conversationId, SimpleConversationMemorySnapshot snapshot) {
+        var message = new StringBuilder(
+                ("PAUSED_FOR_APPROVAL: the delegated agent's conversation %s requires human approval "
+                        + "before it can continue. A reviewer must decide via POST /agents/%s/resume "
+                        + "(APPROVED or REJECTED); re-invoke this tool with the same conversationId afterwards "
+                        + "to retrieve the outcome.").formatted(conversationId, conversationId));
+
+        // Task 13 (additive): a TOOL_CALL pause names the pause type and the gated
+        // tool NAMES (names only — never arguments, raw or redacted). A RULE pause
+        // leaves the message shape unchanged.
+        String pauseType = snapshot != null ? snapshot.getHitlPauseType() : null;
+        if ("TOOL_CALL".equals(pauseType)) {
+            message.append(" pauseType=TOOL_CALL.");
+            List<String> toolNames = pendingToolNames(snapshot);
+            if (!toolNames.isEmpty()) {
+                message.append(" Gated tools: ").append(String.join(", ", toolNames)).append('.');
+            }
+        }
+        return message.toString();
+    }
+
+    /**
+     * Task 13: the gated tool NAMES from a TOOL_CALL pause snapshot — names ONLY,
+     * never arguments (raw or redacted), for privacy. Returns an empty list when no
+     * batch is present.
+     */
+    private List<String> pendingToolNames(SimpleConversationMemorySnapshot snapshot) {
+        var batch = snapshot != null ? snapshot.getHitlPendingToolCalls() : null;
+        if (batch == null || batch.getCalls() == null) {
+            return Collections.emptyList();
+        }
+        return batch.getCalls().stream()
+                .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
+                .filter(java.util.Objects::nonNull)
+                .toList();
     }
 
     /**

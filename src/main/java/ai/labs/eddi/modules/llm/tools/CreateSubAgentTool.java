@@ -211,7 +211,7 @@ public class CreateSubAgentTool {
                     if (snapshot != null && snapshot.getConversationState() == ai.labs.eddi.engine.memory.model.ConversationState.AWAITING_HUMAN) {
                         response = "PAUSED_FOR_APPROVAL: the sub-agent's conversation " + conversationId
                                 + " requires human approval before it can continue. A reviewer must decide via "
-                                + "POST /agents/" + conversationId + "/resume.";
+                                + "POST /agents/" + conversationId + "/resume." + toolPauseSuffix(snapshot);
                     } else if (skipped.get()) {
                         // Finding H7: the initial message was dropped without being
                         // processed (busy or no longer active) — report accurately
@@ -277,5 +277,28 @@ public class CreateSubAgentTool {
      */
     private String extractResponse(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
         return ai.labs.eddi.engine.memory.ConversationOutputExtractor.extractResponse(snapshot);
+    }
+
+    /**
+     * Task 13 (additive): for a TOOL_CALL pause, a suffix naming the pause type and
+     * the gated tool NAMES (names ONLY — never arguments, raw or redacted). Empty
+     * for a RULE pause so the existing message shape is preserved.
+     */
+    private String toolPauseSuffix(ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot snapshot) {
+        if (snapshot == null || !"TOOL_CALL".equals(snapshot.getHitlPauseType())) {
+            return "";
+        }
+        var suffix = new StringBuilder(" pauseType=TOOL_CALL.");
+        var batch = snapshot.getHitlPendingToolCalls();
+        if (batch != null && batch.getCalls() != null) {
+            var toolNames = batch.getCalls().stream()
+                    .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
+                    .filter(java.util.Objects::nonNull)
+                    .toList();
+            if (!toolNames.isEmpty()) {
+                suffix.append(" Gated tools: ").append(String.join(", ", toolNames)).append('.');
+            }
+        }
+        return suffix.toString();
     }
 }

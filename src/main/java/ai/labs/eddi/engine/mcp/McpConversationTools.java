@@ -164,7 +164,7 @@ public class McpConversationTools {
             // structured PAUSED signal (not BUSY/error) so the MCP client can inform
             // its user and re-invoke after a reviewer decides.
             if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
-                return pausedForApprovalJson(agentId, conversationId);
+                return pausedForApprovalJson(agentId, conversationId, snapshot);
             }
 
             var result = buildConversationResponse(snapshot, null);
@@ -220,7 +220,7 @@ public class McpConversationTools {
             // structured PAUSED signal (not BUSY/error) so the MCP client can inform
             // its user and re-invoke after a reviewer decides.
             if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
-                return pausedForApprovalJson(agentId, convId);
+                return pausedForApprovalJson(agentId, convId, snapshot);
             }
 
             // Step 3: Return AI-agent-friendly summary + full snapshot
@@ -575,7 +575,7 @@ public class McpConversationTools {
             // Finding 25: this turn itself paused for approval — same structured
             // signal so the MCP client can inform its user and re-invoke later.
             if (snapshot != null && snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
-                return pausedForApprovalJson(intent, userId, userConversation.getAgentId(), conversationId);
+                return pausedForApprovalJson(intent, userId, userConversation.getAgentId(), conversationId, snapshot);
             }
 
             // Step 3: Build response
@@ -600,6 +600,11 @@ public class McpConversationTools {
      * after a reviewer decides.
      */
     private String pausedForApprovalJson(String intent, String userId, String agentId, String conversationId) {
+        return pausedForApprovalJson(intent, userId, agentId, conversationId, null);
+    }
+
+    private String pausedForApprovalJson(String intent, String userId, String agentId, String conversationId,
+                                         SimpleConversationMemorySnapshot snapshot) {
         var result = new LinkedHashMap<String, Object>();
         result.put("status", "PAUSED_FOR_APPROVAL");
         result.put("intent", intent);
@@ -612,6 +617,8 @@ public class McpConversationTools {
         // instead of dropping to REST. resume_conversation handles both RULE and
         // TOOL_CALL pauses.
         result.put("suggestNextTool", "resume_conversation");
+        // Task 13 (additive): a TOOL_CALL pause surfaces pauseType + tool NAMES.
+        addToolPauseFields(result, snapshot);
         result.put("message", "The managed agent's conversation " + conversationId
                 + " requires human approval before it can continue. A reviewer must decide via "
                 + "POST /agents/" + conversationId + "/resume (APPROVED or REJECTED); "
@@ -632,6 +639,10 @@ public class McpConversationTools {
      * same tool with the same conversationId after a reviewer decides.
      */
     private String pausedForApprovalJson(String agentId, String conversationId) {
+        return pausedForApprovalJson(agentId, conversationId, null);
+    }
+
+    private String pausedForApprovalJson(String agentId, String conversationId, SimpleConversationMemorySnapshot snapshot) {
         var result = new LinkedHashMap<String, Object>();
         result.put("status", "PAUSED_FOR_APPROVAL");
         result.put("agentId", agentId);
@@ -642,6 +653,8 @@ public class McpConversationTools {
         // instead of dropping to REST. resume_conversation handles both RULE and
         // TOOL_CALL pauses.
         result.put("suggestNextTool", "resume_conversation");
+        // Task 13 (additive): a TOOL_CALL pause surfaces pauseType + tool NAMES.
+        addToolPauseFields(result, snapshot);
         result.put("message", "Conversation " + conversationId
                 + " requires human approval before it can continue; resolve via POST /agents/"
                 + conversationId + "/resume (APPROVED or REJECTED), then resend.");
@@ -649,6 +662,30 @@ public class McpConversationTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             return errorJson("Conversation " + conversationId + " is awaiting human approval");
+        }
+    }
+
+    /**
+     * Task 13 (additive): when the pause is a TOOL_CALL gate, add {@code pauseType}
+     * and {@code tools} (gated tool NAMES only — never arguments, raw or redacted)
+     * to the envelope map. A RULE pause (or an absent snapshot) leaves the map
+     * unchanged, preserving the existing envelope shape and every existing field
+     * (including {@code suggestNextTool}) for backward compatibility.
+     */
+    private void addToolPauseFields(Map<String, Object> result, SimpleConversationMemorySnapshot snapshot) {
+        if (snapshot == null || !"TOOL_CALL".equals(snapshot.getHitlPauseType())) {
+            return;
+        }
+        result.put("pauseType", "TOOL_CALL");
+        var batch = snapshot.getHitlPendingToolCalls();
+        if (batch != null && batch.getCalls() != null) {
+            var toolNames = batch.getCalls().stream()
+                    .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
+                    .filter(java.util.Objects::nonNull)
+                    .toList();
+            if (!toolNames.isEmpty()) {
+                result.put("tools", toolNames);
+            }
         }
     }
 
