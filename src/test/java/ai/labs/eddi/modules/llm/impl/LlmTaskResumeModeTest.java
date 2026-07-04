@@ -26,6 +26,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
 import java.lang.reflect.Field;
@@ -312,5 +313,43 @@ class LlmTaskResumeModeTest {
         // re-run through it.
         verify(agentOrchestrator).resumeToolLoop(any(), eq(t1), any(), eq(b), any(), anyMap(), anyBoolean());
         verify(agentOrchestrator, never()).resumeToolLoop(any(), eq(t0), any(), any(), any(), anyMap(), anyBoolean());
+    }
+
+    @Test
+    @DisplayName("live path threads the injected eddi.hitl.tool.transcript-max-bytes cap to the orchestrator")
+    void livePath_threadsConfiguredTranscriptCap() throws Exception {
+        // Regression guard for fix #5 (9d07c525d): the standard live path must pass
+        // LlmTask's injected toolTranscriptMaxBytes to executeIfToolsEnabled — not the
+        // 2MB default. A revert to a default-constant overload at LlmTask:505 would
+        // silently drop the configured cap, and no test previously covered the
+        // LlmTask->orchestrator threading (only the orchestrator param directly).
+        llmTask.toolTranscriptMaxBytes = 12345;
+
+        // Non-resume memory (no pending batch / decision) so execute() runs the normal
+        // task path, not executeResume.
+        when(memory.getCurrentStep()).thenReturn(currentStep);
+        var actionData = mock(IData.class);
+        when(currentStep.getLatestData(ACTIONS)).thenReturn(actionData);
+        when(actionData.getResult()).thenReturn(List.of("action1"));
+        when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
+        when(memory.getHitlPendingToolCalls()).thenReturn(null);
+        when(memory.getHitlResumeDecision()).thenReturn(null);
+        var conversationOutput = new ConversationOutput();
+        conversationOutput.put("input", "user input");
+        when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
+        when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
+        // A non-null agent result keeps the standard branch (no legacy fallback).
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt()))
+                .thenReturn(new AgentOrchestrator.ExecutionResult("done", new ArrayList<>()));
+
+        var t = task("taskA", List.of("action1"));
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        var capCaptor = ArgumentCaptor.forClass(Integer.class);
+        verify(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(),
+                capCaptor.capture());
+        assertEquals(12345, capCaptor.getValue(),
+                "the injected transcript-max-bytes must reach the orchestrator, not the 2MB default");
     }
 }
