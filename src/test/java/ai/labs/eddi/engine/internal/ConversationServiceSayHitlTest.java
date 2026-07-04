@@ -120,6 +120,7 @@ class ConversationServiceSayHitlTest {
     private ICache<String, ConversationState> conversationStateCache;
 
     private ConversationService conversationService;
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
@@ -127,13 +128,14 @@ class ConversationServiceSayHitlTest {
         doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState");
         doReturn(new HashMap<String, String>()).when(contextLogger)
                 .createLoggingContext(any(), any(), any(), any());
+        meterRegistry = new SimpleMeterRegistry();
         conversationService = new ConversationService(
                 agentFactory, conversationMemoryStore, conversationDescriptorStore,
                 userMemoryStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
                 jsonSerialization,
-                new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), AGENT_TIMEOUT);
+                meterRegistry, ConversationServiceTestFixtures.hitlResumeEvent(), AGENT_TIMEOUT);
     }
 
     // =========================================================================
@@ -487,6 +489,10 @@ class ConversationServiceSayHitlTest {
 
             doReturn(ConversationState.READY)
                     .when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            // The say turn owns the persisted READY state — the fresh-pause commit is a
+            // compare-and-store FROM READY. It wins here (no concurrent end/cancel).
+            doReturn(true).when(conversationMemoryStore)
+                    .storeConversationMemorySnapshotIfState(any(), eq(ConversationState.READY));
             stubRuntimeInline();
 
             ConversationResponseHandler handler = mock(ConversationResponseHandler.class);
@@ -506,8 +512,11 @@ class ConversationServiceSayHitlTest {
 
             captor.getValue().call();
 
-            // A genuine pause is persisted and its finite-policy timeout schedule armed.
-            verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            // A genuine pause is persisted (via the state-CAS from READY) and its
+            // finite-policy timeout schedule armed. The unconditional full store is
+            // never used on the fresh-pause commit path.
+            verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), eq(ConversationState.READY));
+            verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
             ArgumentCaptor<ai.labs.eddi.engine.schedule.model.ScheduleConfiguration> schedCaptor = ArgumentCaptor
                     .forClass(ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.class);
             verify(scheduleStore).createSchedule(schedCaptor.capture());
@@ -515,6 +524,111 @@ class ConversationServiceSayHitlTest {
             assertEquals("hitl-timeout-" + CONVERSATION_ID, schedule.getName());
             assertEquals("AUTO_REJECT", schedule.getMetadata().get("policy"));
             assertEquals("regular", schedule.getMetadata().get("surface"));
+        }
+    }
+
+    // =========================================================================
+    // Finding #3: say-path fresh-pause commit is guarded by a state-CAS from the
+    // running state (READY) the turn owns. A concurrent end/cancel that lands in
+    // the TOCTOU window between the up-front isCancelled() check and the store
+    // moves the persisted state terminal (ENDED / EXECUTION_INTERRUPTED); the CAS
+    // then misses and the pause outcome is discarded — never overwriting the
+    // terminal state, never counting a pause, never arming a timeout. Mirrors the
+    // resume path's storeConversationMemorySnapshotIfState guard. Applies to BOTH
+    // pause origins (RULE and TOOL_CALL) — a RULE pause is equally vulnerable.
+    // =========================================================================
+
+    @Nested
+    @DisplayName("finding #3: fresh-pause commit guarded by state-CAS from READY")
+    class FreshPauseStateCas {
+
+        /**
+         * Drives a say turn that ends in a fresh pause (state left AWAITING_HUMAN by
+         * the pipeline, memoryStateAtSubmit READY) while the fresh-pause state-CAS from
+         * READY reports a MISMATCH — i.e. a concurrent end/cancel moved the persisted
+         * state terminal in the TOCTOU window. Returns after driving the coordinator
+         * callable so the caller can assert the discard.
+         */
+        private void driveFreshPauseWithCasMiss(boolean toolCallOrigin) throws Exception {
+            doReturn(snapshot(ConversationState.READY))
+                    .when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            doReturn(QuotaCheckResult.OK).when(tenantQuotaService).acquireApiCallSlot();
+
+            // Finite timeout policy — WITHOUT the guard, a committed pause would arm a
+            // schedule; the CAS miss must prevent that.
+            var agentConfig = new AgentConfiguration();
+            var hitlConfig = new AgentConfiguration.HitlConfig();
+            hitlConfig.setApprovalTimeout("PT30M");
+            hitlConfig.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
+            agentConfig.setHitlConfig(hitlConfig);
+            doReturn(agentConfig).when(agentStore).read(AGENT_ID, AGENT_VERSION);
+
+            IAgent agent = mock(IAgent.class);
+            IConversation conversation = mock(IConversation.class);
+            doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+            doReturn(false).when(conversation).isEnded();
+            var memoryRef = new java.util.concurrent.atomic.AtomicReference<IConversationMemory>();
+            doAnswer(inv -> {
+                memoryRef.set(inv.getArgument(0));
+                return conversation;
+            }).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+
+            // Persisted (column) state is READY at the queued-say guard → turn proceeds.
+            doReturn(ConversationState.READY)
+                    .when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            // The fresh-pause commit is a compare-and-store FROM READY. Report a MISMATCH:
+            // a concurrent end/cancel already moved the persisted state terminal in the
+            // TOCTOU window between the isCancelled() check and this store.
+            doReturn(false).when(conversationMemoryStore)
+                    .storeConversationMemorySnapshotIfState(any(), eq(ConversationState.READY));
+            stubRuntimeInline();
+
+            ConversationResponseHandler handler = mock(ConversationResponseHandler.class);
+            conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, true, List.of(),
+                    new InputData("please delete my account", Map.of()), false, handler);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Callable<Void>> captor = ArgumentCaptor.forClass(Callable.class);
+            verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), captor.capture());
+
+            // The pipeline produces a fresh pause THIS turn (memoryStateAtSubmit READY).
+            // The pause origin (RULE vs TOOL_CALL) is recorded via the pause type — both
+            // must be guarded identically.
+            doAnswer(inv -> {
+                memoryRef.get().setConversationState(ConversationState.AWAITING_HUMAN);
+                memoryRef.get().setHitlPauseType(toolCallOrigin ? "TOOL_CALL" : "RULE");
+                return null;
+            }).when(conversation).say(anyString(), any());
+
+            captor.getValue().call();
+        }
+
+        @Test
+        @DisplayName("RULE pause + CAS miss → terminal state not overwritten, no pause counter, no timeout schedule")
+        void rulePause_casMiss_discarded() throws Exception {
+            driveFreshPauseWithCasMiss(false);
+
+            // (a) The terminal state is never overwritten — the unconditional
+            // full-document store is never used on the fresh-pause commit path.
+            verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+            // (b) counterHitlPause is NOT incremented — the CAS-missed pause is not
+            // counted.
+            assertEquals(0.0, meterRegistry.counter("eddi_hitl_pause_count", "surface", "regular").count(),
+                    "counterHitlPause must not be incremented on a CAS miss");
+            // (c) scheduleHitlTimeout is NOT called — no timeout armed for a discarded
+            // pause.
+            verify(scheduleStore, never()).createSchedule(any());
+        }
+
+        @Test
+        @DisplayName("TOOL_CALL pause + CAS miss → terminal state not overwritten, no pause counter, no timeout schedule")
+        void toolCallPause_casMiss_discarded() throws Exception {
+            driveFreshPauseWithCasMiss(true);
+
+            verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+            assertEquals(0.0, meterRegistry.counter("eddi_hitl_pause_count", "surface", "regular").count(),
+                    "counterHitlPause must not be incremented on a CAS miss");
+            verify(scheduleStore, never()).createSchedule(any());
         }
     }
 

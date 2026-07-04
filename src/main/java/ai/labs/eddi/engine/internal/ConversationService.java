@@ -963,12 +963,40 @@ public class ConversationService implements IConversationService {
                             // WAIT_INDEFINITELY pauses from lost-schedule ones.
                             if (awaitingHuman) {
                                 populateHitlTimeoutBookmark(conversationMemory);
-                            }
-                            storeConversationMemory(conversationMemory, environment);
-                            // M1: Schedule HITL timeout if conversation paused
-                            if (awaitingHuman) {
+                                // #3 (say-path parity with resume): a fresh pause commits
+                                // the FULL AWAITING_HUMAN snapshot. The up-front
+                                // isCancelled() check above narrows but does not close the
+                                // race with a concurrent end/cancel (REST/admin thread, NOT
+                                // serialized by the per-conversation coordinator): a terminal
+                                // write (ENDED / EXECUTION_INTERRUPTED) can land between that
+                                // check and this store, and an unconditional full-document
+                                // replace would then overwrite the terminal state with a
+                                // pending approval — resurrecting a terminated conversation
+                                // with a live timeout. Persist ONLY while the conversation is
+                                // still in READY — the non-terminal running state a say turn
+                                // owns in the DB (the say path never CAS's READY->IN_PROGRESS;
+                                // Conversation.runStep sets IN_PROGRESS in-memory only, and the
+                                // queued-say guard already ensured the persisted state was READY
+                                // when this turn began). The atomic compare-and-store lets the
+                                // terminal writer win; on a CAS miss, discard the pause outcome
+                                // (no counter, no schedule) so the terminal state stands —
+                                // mirrors the resume path's storeConversationMemoryIfState guard.
+                                boolean persisted = storeConversationMemoryIfState(
+                                        conversationMemory, environment, ConversationState.READY);
+                                if (!persisted) {
+                                    contextLogger.setLoggingContext(loggingContext);
+                                    LOGGER.infof("Pause of conversation %s not persisted: a concurrent end/cancel moved "
+                                            + "it off READY — discarding the pause outcome so the terminal state wins",
+                                            conversationId);
+                                    return;
+                                }
+                                // M1: a durably-committed pause is counted and its timeout armed.
                                 counterHitlPause.increment();
                                 scheduleHitlTimeout(conversationId, conversationMemory);
+                            } else {
+                                // Non-pause completion is unchanged: the normal say turn
+                                // settles to READY/ENDED/… and persists the full snapshot.
+                                storeConversationMemory(conversationMemory, environment);
                             }
                         } catch (ResourceStoreException e) {
                             logConversationError(loggingContext, conversationId, e);
