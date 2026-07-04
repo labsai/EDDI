@@ -297,6 +297,15 @@ public interface IConversationMemory extends Serializable {
 
         void resetConversationOutput(String rootKey);
 
+        /**
+         * Removes the first occurrence of {@code value} from the list stored under
+         * {@code key} in the conversation output, leaving every other entry intact.
+         * No-op when the key is absent, holds a non-list, or the value is not present.
+         * Used to drop a single transient entry (e.g. the HITL pending-approval
+         * placeholder on resume) without clearing legitimate earlier output.
+         */
+        void removeConversationOutputListItem(String key, Object value);
+
         void addConversationOutputObject(String key, Object value);
 
         void replaceConversationOutputObject(String key, Object value, Object replace);

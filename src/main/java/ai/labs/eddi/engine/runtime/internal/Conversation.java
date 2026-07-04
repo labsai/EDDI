@@ -533,6 +533,41 @@ public class Conversation implements IConversation {
     }
 
     /**
+     * Removes the pending-approval placeholder that {@link #pauseConversation}
+     * added to the current step on a TOOL_CALL pause, so the resumed step renders
+     * ONLY the final answer.
+     * <p>
+     * Robust identification without dropping legitimate earlier output: the
+     * placeholder is the exact string produced by {@link #resolvePendingMessage},
+     * which is deterministic from the still-present pending batch (its effective
+     * tool-approvals config and gated call names survive on memory until LlmTask
+     * consumes them). We recompute that string and remove ONLY that value from the
+     * {@code "output"} conversation-output list — an earlier task's output in a
+     * multi-task step (e.g. {@code [earlierOutput, placeholder]}) keeps its entry.
+     * <p>
+     * We also blank the mirror public step-{@code Data<>} that pauseConversation
+     * stored under the bare {@code "output"} key (surfaced in detailed step-data
+     * snapshots via {@code startsWith("output")}) when it still holds exactly the
+     * placeholder — otherwise a client reading the detailed view would see the
+     * stale placeholder a second time. We overwrite that EXACT key with an empty
+     * list (not {@code removeData}, whose {@code startsWith} semantics would also
+     * wipe an earlier task's {@code output:text:*} data in a multi-task step) and
+     * only when it is untouched (equals {@code [placeholder]}); if some other
+     * writer replaced it we leave it alone.
+     */
+    private void dropPendingApprovalPlaceholder(IWritableConversationStep currentStep) {
+        String pending = resolvePendingMessage(conversationMemory);
+        currentStep.removeConversationOutputListItem(MemoryKeys.OUTPUT_PREFIX, pending);
+
+        IData<?> outputData = currentStep.getData(MemoryKeys.OUTPUT_PREFIX);
+        if (outputData != null && List.of(pending).equals(outputData.getResult())) {
+            var blanked = new Data<>(MemoryKeys.OUTPUT_PREFIX, new ArrayList<>());
+            blanked.setPublic(true);
+            currentStep.storeData(blanked);
+        }
+    }
+
+    /**
      * Nulls the transient tool-pause state on the live memory (pause type, pending
      * batch, in-JVM resume decision). Distinct from {@link #clearHitlBookmark()},
      * which owns only the six bookmark fields — this must NOT touch those.
@@ -608,6 +643,21 @@ public class Conversation implements IConversation {
             // consumption (Task 9) or by the finally safety-net below.
             if (toolPause) {
                 conversationMemory.setHitlResumeDecision(decision);
+                // Fix #2: a TOOL_CALL resume re-enters the SAME step at the SAME task
+                // index, so LlmTask.executeResume APPENDS the final answer to the same
+                // "output" conversation-output list that pauseConversation seeded with
+                // the pending-approval placeholder. addConversationOutputList never
+                // replaces, so without this the turn would render
+                // [placeholder, finalAnswer]. Drop the placeholder now — BEFORE the
+                // pipeline re-enters — so the resumed step renders ONLY the final answer
+                // (on both the APPROVED and the REJECTED-tool graceful-answer paths).
+                // The placeholder is still shown while AWAITING_HUMAN; only this resume
+                // removes it. We recompute the exact same string via resolvePendingMessage
+                // (deterministic: the batch + its effective config are still on memory,
+                // see PendingToolCallBatch#effectiveToolApprovals) and remove ONLY that
+                // value, so an earlier task's legitimate output in a multi-task step is
+                // preserved.
+                dropPendingApprovalPlaceholder(currentStep);
             }
             clearHitlBookmark();
 

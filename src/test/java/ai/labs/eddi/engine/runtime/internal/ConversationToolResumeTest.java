@@ -4,20 +4,25 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
+import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -232,5 +237,148 @@ class ConversationToolResumeTest {
         assertNull(memory.getHitlPendingToolCalls(),
                 "finally must clear the batch when the turn did not re-pause");
         assertNull(memory.getHitlPauseType());
+    }
+
+    // =========================================================================
+    // Fix #2: the pending-approval placeholder must be DROPPED on the tool-pause
+    // resume path so the resumed step renders ONLY the final answer — not
+    // [placeholder, answer]. The placeholder still shows while AWAITING_HUMAN.
+    // =========================================================================
+
+    private static final String PENDING = "Approval required for delete_record";
+
+    /**
+     * Drives a realistic TOOL_CALL pause through {@code say()}: the mock lifecycle
+     * arms a batch (with an effective pendingMessage so
+     * {@code resolvePendingMessage} is deterministic) and throws a TOOL_CALL
+     * {@link ConversationPauseException}, so {@code Conversation.pauseConversation}
+     * writes the placeholder to the step's {@code "output"} conversation-output
+     * exactly as production does.
+     */
+    private Conversation pauseViaToolCall() throws Exception {
+        memory.setConversationState(ConversationState.READY);
+
+        var effective = new ToolApprovalsConfig();
+        effective.setPendingMessage("Approval required for {toolNames}");
+
+        doAnswer(inv -> {
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setToolName("delete_record");
+            var b = new PendingToolCallBatch();
+            b.setLlmTaskId("ai.labs.llm");
+            b.setLlmTaskIndex(0);
+            b.setCalls(List.of(call));
+            b.setEffectiveToolApprovals(effective);
+            memory.setHitlPendingToolCalls(b);
+            throw new ConversationPauseException("wf1", 0, "gated tool call",
+                    ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+
+        var conv = createConversation();
+        conv.say("delete it", Map.of());
+        return conv;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Object> outputList() {
+        return (List<Object>) memory.getCurrentStep().getConversationOutput().get(MemoryKeys.OUTPUT_PREFIX);
+    }
+
+    @Test
+    @DisplayName("while AWAITING_HUMAN the placeholder IS present in the step output (not removed too early)")
+    void placeholderPresentWhilePaused() throws Exception {
+        pauseViaToolCall();
+
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+        var out = outputList();
+        assertNotNull(out, "pause must publish an output entry so a polling client sees something");
+        assertTrue(out.stream().anyMatch(o -> String.valueOf(o).equals(PENDING)),
+                "the pending-approval placeholder must be visible while awaiting approval; got: " + out);
+    }
+
+    @Test
+    @DisplayName("APPROVED tool resume: the step output contains ONLY the final answer — the placeholder is dropped")
+    void approvedResumeDropsPlaceholder() throws Exception {
+        var conv = pauseViaToolCall();
+
+        // Simulate LlmTask.executeResume appending the final answer to the SAME
+        // "output" list at the SAME index (as production does via TextOutputItem).
+        String finalAnswer = "Record deleted successfully.";
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem(finalAnswer, 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        var out = outputList();
+        assertNotNull(out);
+        assertFalse(out.stream().anyMatch(o -> String.valueOf(o).equals(PENDING)),
+                "the stale pending-approval placeholder must be gone after resume; got: " + out);
+        assertTrue(out.stream().anyMatch(o -> String.valueOf(o).equals(finalAnswer)),
+                "the final answer must be present; got: " + out);
+        assertEquals(1, out.size(),
+                "the resumed step must render ONLY the final answer, not [placeholder, answer]; got: " + out);
+    }
+
+    @Test
+    @DisplayName("REJECTED tool resume: the graceful answer replaces the placeholder (only the answer remains)")
+    void rejectedResumeDropsPlaceholder() throws Exception {
+        var conv = pauseViaToolCall();
+
+        // A TOOL_CALL REJECTED does NOT short-circuit — it re-enters the pipeline so
+        // the model answers gracefully without the tool. That graceful answer lands
+        // in the same "output" list via executeResume.
+        String gracefulAnswer = "I could not complete that action, but here is what I can tell you.";
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem(gracefulAnswer, 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+
+        conv.resume(decision(HitlVerdict.REJECTED, "not authorized", "supervisor"));
+
+        var out = outputList();
+        assertNotNull(out);
+        assertFalse(out.stream().anyMatch(o -> String.valueOf(o).equals(PENDING)),
+                "the placeholder must be gone on the REJECTED-tool resume too; got: " + out);
+        assertTrue(out.stream().anyMatch(o -> String.valueOf(o).equals(gracefulAnswer)),
+                "the graceful tool-less answer must be present; got: " + out);
+        assertEquals(1, out.size(),
+                "only the graceful answer must remain; got: " + out);
+    }
+
+    @Test
+    @DisplayName("multi-task step: an earlier task's legitimate output is preserved — only the placeholder is removed")
+    void multiTaskEarlierOutputPreserved() throws Exception {
+        var conv = pauseViaToolCall();
+
+        // Simulate an EARLIER task in the same step having produced legitimate output
+        // BEFORE the gated task paused — the "output" list is [earlier, placeholder].
+        String earlier = "Here is the summary you asked for.";
+        memory.getCurrentStep().getConversationOutput();
+        var out = outputList();
+        // insert the earlier output before the placeholder to mirror step ordering
+        out.add(0, new TextOutputItem(earlier, 0));
+
+        String finalAnswer = "Record deleted successfully.";
+        doAnswer(inv -> {
+            memory.getCurrentStep().addConversationOutputList(
+                    MemoryKeys.OUTPUT_PREFIX, List.of(new TextOutputItem(finalAnswer, 0)));
+            return null;
+        }).when(lifecycleManager).executeLifecycleFromIndex(eq(memory), anyInt());
+
+        conv.resume(decision(HitlVerdict.APPROVED));
+
+        var after = outputList();
+        assertFalse(after.stream().anyMatch(o -> String.valueOf(o).equals(PENDING)),
+                "the placeholder must be removed; got: " + after);
+        assertTrue(after.stream().anyMatch(o -> String.valueOf(o).equals(earlier)),
+                "an earlier task's legitimate output must be PRESERVED; got: " + after);
+        assertTrue(after.stream().anyMatch(o -> String.valueOf(o).equals(finalAnswer)),
+                "the final answer must be present; got: " + after);
+        assertEquals(2, after.size(),
+                "exactly the placeholder is removed — earlier output + final answer remain; got: " + after);
     }
 }
