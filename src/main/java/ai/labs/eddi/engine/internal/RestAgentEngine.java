@@ -10,10 +10,17 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.*;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationStepSnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -33,8 +40,10 @@ import org.jboss.logging.Logger;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -58,6 +67,7 @@ public class RestAgentEngine implements IRestAgentEngine {
     private final SecurityIdentity identity;
     private final OwnershipValidator ownershipValidator;
     private final HitlAccessGuard hitlAccessGuard;
+    private final IHitlToolJournalStore hitlToolJournalStore;
     private final int agentTimeout;
 
     private static final Logger LOGGER = Logger.getLogger(RestAgentEngine.class);
@@ -68,12 +78,14 @@ public class RestAgentEngine implements IRestAgentEngine {
             SecurityIdentity identity,
             OwnershipValidator ownershipValidator,
             HitlAccessGuard hitlAccessGuard,
+            IHitlToolJournalStore hitlToolJournalStore,
             @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds") int agentTimeout) {
         this.conversationService = conversationService;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.identity = identity;
         this.ownershipValidator = ownershipValidator;
         this.hitlAccessGuard = hitlAccessGuard;
+        this.hitlToolJournalStore = hitlToolJournalStore;
         this.agentTimeout = agentTimeout;
     }
 
@@ -387,13 +399,17 @@ public class RestAgentEngine implements IRestAgentEngine {
             // cancel that predates bookmark clearing) never mislead dashboards.
             // approvalTimeout lets a UI render the auto-decision deadline
             // (pausedAt + approvalTimeout) without extra round trips.
-            var summary = Map.of(
-                    "conversationId", conversationId,
-                    "state", snapshot.getConversationState().name(),
-                    "pausedAt", paused && snapshot.getHitlPausedAt() != null ? snapshot.getHitlPausedAt().toString() : "",
-                    "pauseReason", paused && snapshot.getHitlPauseReason() != null ? snapshot.getHitlPauseReason() : "",
-                    "timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy() : "",
-                    "approvalTimeout", paused && snapshot.getHitlApprovalTimeout() != null ? snapshot.getHitlApprovalTimeout() : "");
+            var summary = new LinkedHashMap<String, Object>();
+            summary.put("conversationId", conversationId);
+            summary.put("state", snapshot.getConversationState().name());
+            summary.put("pausedAt", paused && snapshot.getHitlPausedAt() != null ? snapshot.getHitlPausedAt().toString() : "");
+            summary.put("pauseReason", paused && snapshot.getHitlPauseReason() != null ? snapshot.getHitlPauseReason() : "");
+            summary.put("timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy() : "");
+            summary.put("approvalTimeout", paused && snapshot.getHitlApprovalTimeout() != null ? snapshot.getHitlApprovalTimeout() : "");
+            // Structured pauseDetails (Task 11) — computed at read time, never
+            // persisted. Absent entirely once the conversation is no longer
+            // paused, same suppression rule as the bookmark fields above.
+            summary.put("pauseDetails", paused ? buildPauseDetails(conversationId, snapshot) : null);
             return Response.ok(summary).build();
         } catch (ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
@@ -403,6 +419,103 @@ public class RestAgentEngine implements IRestAgentEngine {
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).type(TEXT_PLAIN)
                     .entity("Failed to read approval status.").build();
         }
+    }
+
+    /**
+     * Builds the structured {@code pauseDetails} object for a paused conversation
+     * (Task 11) — computed at read time from the snapshot, never persisted.
+     * TOOL_CALL pauses expose ONLY the redacted arguments (never
+     * {@code argumentsRaw}); RULE pauses (and legacy null-pauseType snapshots)
+     * expose the pause reason and the ACTIONS data of the paused step.
+     */
+    private Map<String, Object> buildPauseDetails(String conversationId, ConversationMemorySnapshot snapshot) {
+        String pauseType = snapshot.getHitlPauseType();
+        if ("TOOL_CALL".equals(pauseType)) {
+            return buildToolCallPauseDetails(conversationId, snapshot);
+        }
+        return buildRulePauseDetails(snapshot);
+    }
+
+    private Map<String, Object> buildToolCallPauseDetails(String conversationId, ConversationMemorySnapshot snapshot) {
+        var details = new LinkedHashMap<String, Object>();
+        details.put("type", "TOOL_CALL");
+
+        PendingToolCallBatch batch = snapshot.getHitlPendingToolCalls();
+        List<PendingToolCall> pendingCalls = batch != null && batch.getCalls() != null
+                ? batch.getCalls()
+                : List.of();
+        String pauseEpoch = batch != null ? batch.getPauseEpoch() : null;
+
+        List<Map<String, Object>> calls = new ArrayList<>();
+        List<String> outcomeUnknown = new ArrayList<>();
+        for (PendingToolCall call : pendingCalls) {
+            var callView = new LinkedHashMap<String, Object>();
+            callView.put("callId", call.getCallId());
+            callView.put("toolName", call.getToolName());
+            callView.put("source", call.getSource());
+            // ONLY the redacted, capped value is ever surfaced here — never
+            // call.getArgumentsRaw().
+            callView.put("arguments", call.getArgumentsRedacted());
+            callView.put("argsTruncated", call.isArgsTruncated());
+            callView.put("gateReason", call.getGateReason());
+            calls.add(callView);
+
+            if (pauseEpoch != null && call.getCallId() != null) {
+                hitlToolJournalStore.find(conversationId, pauseEpoch, call.getCallId())
+                        .filter(entry -> entry.status() == IHitlToolJournalStore.Status.EXECUTING)
+                        .ifPresent(entry -> outcomeUnknown.add(call.getCallId()));
+            }
+        }
+        details.put("calls", calls);
+        details.put("executedUngatedCalls",
+                batch != null && batch.getExecutedUngatedCallNames() != null
+                        ? batch.getExecutedUngatedCallNames()
+                        : List.of());
+        details.put("outcomeUnknown", outcomeUnknown);
+        return details;
+    }
+
+    private Map<String, Object> buildRulePauseDetails(ConversationMemorySnapshot snapshot) {
+        var details = new LinkedHashMap<String, Object>();
+        details.put("type", "RULE");
+        details.put("reason", snapshot.getHitlPauseReason());
+        details.put("actions", findPausedStepActions(snapshot));
+        return details;
+    }
+
+    /**
+     * The ACTIONS data of the most recent (paused) conversation step — read-time
+     * lookup over the snapshot's step history, no new persistence.
+     * <p>
+     * {@code ConversationMemorySnapshot.getConversationSteps()} is built by
+     * {@code ConversationMemoryUtilities.convertConversationMemory} in
+     * REVERSE-chronological order (index 0 = most recent step), each holding a
+     * single {@code WorkflowRunSnapshot} whose {@code lifecycleTasks} preserve the
+     * original insertion order — so within that step, the LAST matching "actions"
+     * entry is the most recent one (same semantics as
+     * {@code IConversationStep.getLatestData}).
+     */
+    private List<String> findPausedStepActions(ConversationMemorySnapshot snapshot) {
+        List<ConversationStepSnapshot> steps = snapshot.getConversationSteps();
+        if (steps == null || steps.isEmpty()) {
+            return List.of();
+        }
+        for (ConversationStepSnapshot step : steps) {
+            List<String> latestActionsInStep = null;
+            for (WorkflowRunSnapshot workflow : step.getWorkflows()) {
+                for (ResultSnapshot data : workflow.getLifecycleTasks()) {
+                    if ("actions".equals(data.getKey()) && data.getResult() instanceof List<?> actions) {
+                        @SuppressWarnings("unchecked")
+                        List<String> typed = (List<String>) actions;
+                        latestActionsInStep = typed;
+                    }
+                }
+            }
+            if (latestActionsInStep != null) {
+                return latestActionsInStep;
+            }
+        }
+        return List.of();
     }
 
     @Override

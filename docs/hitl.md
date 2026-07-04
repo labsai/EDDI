@@ -101,11 +101,36 @@ Validation happens at **save time** (and on ZIP import): a finite policy without
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/agents/{conversationId}/resume` | Submit a decision (`{"verdict": "APPROVED"\|"REJECTED", "note": "..."}` — verdict is case-insensitive) |
-| `GET` | `/agents/{conversationId}/approval-status` | Pause summary: `state`, `pausedAt`, `pauseReason`, `timeoutPolicy`, `approvalTimeout` (render the auto-decision deadline as `pausedAt + approvalTimeout`). `?detail=full` for the whole snapshot — approver-only callers get `full` only while the conversation is paused, `403` otherwise |
+| `GET` | `/agents/{conversationId}/approval-status` | Pause summary: `state`, `pausedAt`, `pauseReason`, `timeoutPolicy`, `approvalTimeout` (render the auto-decision deadline as `pausedAt + approvalTimeout`), `pauseDetails` — structured, computed at read time (see below). `?detail=full` for the whole snapshot — approver-only callers get `full` only while the conversation is paused, `403` otherwise |
 | `GET` | `/agents/pending-approvals?limit=200` | List paused conversations as summaries (bounded, max 1000). Non-admin/non-approver callers get their own conversations, filtered *inside* the query — the limit applies after the owner restriction, so a personal inbox is never starved by other users' backlog |
 | `POST` | `/agents/{conversationId}/cancel` | Cancel a paused (or same-pod running) conversation |
 
 Status codes are discriminating: `400` invalid body (missing verdict, note > 4 KB — the pause is **not** consumed), `404` unknown conversation, `409` not in a resumable state (body names the current state), `200` success. HITL operations on a conversation whose descriptor is missing (legacy/corruption) fail **closed** — only admins/approvers may act on them.
+
+#### `pauseDetails` shape
+
+`pauseDetails` is computed at read time from the snapshot (nothing new is persisted) and is `null` once the conversation is no longer paused. Its shape depends on `hitlPauseType`:
+
+- **`TOOL_CALL`** (a gated tool call paused for approval):
+  ```json
+  {
+    "type": "TOOL_CALL",
+    "calls": [
+      {"callId": "call-1", "toolName": "sendEmail", "source": "mcp",
+       "arguments": "{\"to\":\"[REDACTED]\"}", "argsTruncated": false, "gateReason": "mcp:*"}
+    ],
+    "executedUngatedCalls": ["getCurrentDateTime"],
+    "outcomeUnknown": []
+  }
+  ```
+  `arguments` is always the **redacted, capped** value (`argumentsRedacted`) — the raw arguments never appear in this response. `outcomeUnknown` lists callIds that have an `EXECUTING` journal entry — i.e. a prior approval crashed mid-execution and the outcome is genuinely unknown; it is empty in the common case.
+- **`RULE`** (a behavior-rule `PAUSE_CONVERSATION`, including legacy snapshots with no `hitlPauseType` recorded):
+  ```json
+  {"type": "RULE", "reason": "Account deletion requires manager sign-off", "actions": ["PAUSE_CONVERSATION", "notify_manager"]}
+  ```
+  `actions` is the `ACTIONS` data of the paused step.
+
+`GET /agents/pending-approvals` entries also carry `pauseType` (`RULE`/`TOOL_CALL`, `null` for legacy) and `toolNames` (names only, no arguments) so inbox UIs can badge tool-call pauses without a second round trip.
 
 ### What the Agent Sees After a Decision
 

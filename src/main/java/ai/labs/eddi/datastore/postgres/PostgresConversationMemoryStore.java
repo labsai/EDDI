@@ -358,10 +358,14 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
 
     /**
      * Projected columns for pending-approval summaries — never the full document.
+     * {@code hitlPendingToolCalls} is projected as JSON text and reduced to tool
+     * NAMES ONLY in {@link #readPendingSummaries} — arguments never leave the
+     * database for this bulk listing.
      */
     private static final String PENDING_SUMMARY_SELECT = "SELECT id, AGENT_ID, data->>'userId' AS user_id, data->'hitlPausedAt' AS paused_at_json, "
             + "data->>'hitlPauseReason' AS pause_reason, data->>'hitlTimeoutPolicy' AS timeout_policy, "
-            + "data->>'hitlApprovalTimeout' AS approval_timeout "
+            + "data->>'hitlApprovalTimeout' AS approval_timeout, data->>'hitlPauseType' AS pause_type, "
+            + "data->'hitlPendingToolCalls'->'calls' AS pending_calls_json "
             + "FROM conversation_memories WHERE conversation_state = ?";
 
     @Override
@@ -409,6 +413,8 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                         parseInstantJson(id, rs.getString("paused_at_json")),
                         rs.getString("pause_reason"), rs.getString("timeout_policy"));
                 summary.setApprovalTimeout(rs.getString("approval_timeout"));
+                summary.setPauseType(rs.getString("pause_type"));
+                summary.setToolNames(parsePendingToolNamesJson(id, rs.getString("pending_calls_json")));
                 out.add(summary);
             }
         }
@@ -428,6 +434,30 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             return jsonSerialization.deserialize(rawJson, java.time.Instant.class);
         } catch (Exception e) {
             LOGGER.warnf("Unparseable hitlPausedAt for conversation %s: %s", conversationId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Reduces the JSON array projected from {@code hitlPendingToolCalls.calls} to
+     * tool NAMES ONLY — never deserializes {@code argumentsRaw}/
+     * {@code argumentsRedacted} into memory for this bulk listing.
+     */
+    private List<String> parsePendingToolNamesJson(String conversationId, String rawJson) {
+        if (rawJson == null || rawJson.isBlank() || "null".equals(rawJson)) {
+            return null;
+        }
+        try {
+            var calls = jsonSerialization.deserialize(rawJson,
+                    ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall[].class);
+            if (calls == null) {
+                return null;
+            }
+            return java.util.Arrays.stream(calls)
+                    .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
+                    .toList();
+        } catch (Exception e) {
+            LOGGER.warnf("Unparseable hitlPendingToolCalls for conversation %s: %s", conversationId, e.getMessage());
             return null;
         }
     }

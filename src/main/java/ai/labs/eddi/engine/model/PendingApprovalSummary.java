@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.model;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * Summary of a conversation awaiting human approval.
@@ -21,6 +22,10 @@ public class PendingApprovalSummary {
     private String timeoutPolicy;
     /** ISO-8601 duration of the configured approval timeout (may be null). */
     private String approvalTimeout;
+    /** null/"RULE" = behavior-rule pause, "TOOL_CALL" = gated tool pause. */
+    private String pauseType;
+    /** Names only (no arguments) of the gated tool calls — badges inbox lists. */
+    private List<String> toolNames;
 
     public PendingApprovalSummary() {
     }
@@ -84,5 +89,17 @@ public class PendingApprovalSummary {
     }
     public void setApprovalTimeout(String approvalTimeout) {
         this.approvalTimeout = approvalTimeout;
+    }
+    public String getPauseType() {
+        return pauseType;
+    }
+    public void setPauseType(String pauseType) {
+        this.pauseType = pauseType;
+    }
+    public List<String> getToolNames() {
+        return toolNames;
+    }
+    public void setToolNames(List<String> toolNames) {
+        this.toolNames = toolNames;
     }
 }

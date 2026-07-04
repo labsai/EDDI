@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -126,6 +127,27 @@ class PendingApprovalSummaryTest {
             summary.setConversationId("old");
             summary.setConversationId("new");
             assertEquals("new", summary.getConversationId());
+        }
+
+        @Test
+        @DisplayName("setPauseType/getPauseType round-trips")
+        void pauseTypeRoundTrip() {
+            summary.setPauseType("TOOL_CALL");
+            assertEquals("TOOL_CALL", summary.getPauseType());
+        }
+
+        @Test
+        @DisplayName("setToolNames/getToolNames round-trips names only")
+        void toolNamesRoundTrip() {
+            summary.setToolNames(List.of("sendEmail", "chargeCard"));
+            assertEquals(List.of("sendEmail", "chargeCard"), summary.getToolNames());
+        }
+
+        @Test
+        @DisplayName("pauseType and toolNames are null by default")
+        void pauseTypeAndToolNamesNullByDefault() {
+            assertNull(summary.getPauseType());
+            assertNull(summary.getToolNames());
         }
     }
 }

@@ -54,6 +54,8 @@ class RestAgentEngineHitlTest {
     private OwnershipValidator ownershipValidator;
     @Mock
     private Principal principal;
+    @Mock
+    private ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore hitlToolJournalStore;
 
     private RestAgentEngine restAgentEngine;
 
@@ -79,7 +81,7 @@ class RestAgentEngineHitlTest {
                 mock(ai.labs.eddi.engine.api.IGroupConversationService.class));
         restAgentEngine = new RestAgentEngine(
                 conversationService, conversationDescriptorStore,
-                identity, ownershipValidator, hitlAccessGuard, AGENT_TIMEOUT);
+                identity, ownershipValidator, hitlAccessGuard, hitlToolJournalStore, AGENT_TIMEOUT);
     }
 
     // =========================================================================

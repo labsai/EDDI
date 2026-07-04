@@ -58,7 +58,9 @@ class RestAgentEngineTest {
                 .thenThrow(new ResourceNotFoundException("test default"));
         var hitlAccessGuard = new HitlAccessGuard(identity, ownershipValidator, descriptorStore, conversationService,
                 mock(ai.labs.eddi.engine.api.IGroupConversationService.class));
-        restAgentEngine = new RestAgentEngine(conversationService, descriptorStore, identity, ownershipValidator, hitlAccessGuard, 30);
+        var hitlToolJournalStore = mock(ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore.class);
+        restAgentEngine = new RestAgentEngine(conversationService, descriptorStore, identity, ownershipValidator,
+                hitlAccessGuard, hitlToolJournalStore, 30);
     }
 
     @Nested

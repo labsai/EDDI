@@ -207,9 +207,13 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
 
     /**
      * Projected fields for pending-approval summaries — never the full document.
+     * {@code hitlPendingToolCalls.calls.toolName} pulls in ONLY the tool names
+     * (never {@code argumentsRaw}/{@code argumentsRedacted}) so this bulk listing
+     * stays cheap and never risks exposing tool-call arguments.
      */
     private static final Bson PENDING_SUMMARY_PROJECTION = Projections.include(KEY_AGENT_ID, "userId",
-            "hitlPausedAt", "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout");
+            "hitlPausedAt", "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout",
+            "hitlPauseType", "hitlPendingToolCalls.calls.toolName");
 
     @Override
     public List<ai.labs.eddi.engine.model.PendingApprovalSummary> findPendingApprovalSummaries(int limit) {
@@ -244,6 +248,12 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                     snapshot.getHitlPausedAt(), snapshot.getHitlPauseReason(),
                     snapshot.getHitlTimeoutPolicy());
             summary.setApprovalTimeout(snapshot.getHitlApprovalTimeout());
+            summary.setPauseType(snapshot.getHitlPauseType());
+            if (snapshot.getHitlPendingToolCalls() != null && snapshot.getHitlPendingToolCalls().getCalls() != null) {
+                summary.setToolNames(snapshot.getHitlPendingToolCalls().getCalls().stream()
+                        .map(ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall::getToolName)
+                        .toList());
+            }
             out.add(summary);
         });
         return out;

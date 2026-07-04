@@ -9,6 +9,8 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall;
 import ai.labs.eddi.engine.model.Deployment;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
@@ -353,6 +355,44 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
             assertNotNull(summary.getPausedAt());
 
             assertEquals(1, store.findPendingApprovalSummaries(1).size(), "limit must bound the result");
+        }
+
+        @Test
+        @DisplayName("findPendingApprovalSummaries carries pauseType + toolNames (names only) for a TOOL_CALL pause")
+        void findPendingApprovalSummariesCarriesPauseTypeAndToolNames() throws Exception {
+            var toolPaused = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            toolPaused.setHitlPauseType("TOOL_CALL");
+            var batch = new PendingToolCallBatch();
+            batch.setPauseEpoch("epoch-1");
+            var call1 = new PendingToolCall();
+            call1.setCallId("call-1");
+            call1.setToolName("sendEmail");
+            call1.setSource("mcp");
+            call1.setArgumentsRaw("raw-secret-should-not-be-projected");
+            call1.setArgumentsRedacted("redacted");
+            var call2 = new PendingToolCall();
+            call2.setCallId("call-2");
+            call2.setToolName("chargeCard");
+            call2.setSource("http");
+            batch.setCalls(List.of(call1, call2));
+            toolPaused.setHitlPendingToolCalls(batch);
+            String toolPausedId = store.storeConversationMemorySnapshot(toolPaused);
+
+            var rulePaused = createSnapshot(null, "agent1", 1, "user1", ConversationState.AWAITING_HUMAN);
+            rulePaused.setHitlPauseType("RULE");
+            store.storeConversationMemorySnapshot(rulePaused);
+
+            var summaries = store.findPendingApprovalSummaries(10);
+            var toolSummary = summaries.stream().filter(s -> toolPausedId.equals(s.getConversationId()))
+                    .findFirst().orElseThrow();
+            assertEquals("TOOL_CALL", toolSummary.getPauseType());
+            assertEquals(List.of("sendEmail", "chargeCard"), toolSummary.getToolNames());
+
+            var ruleSummary = summaries.stream().filter(s -> !toolPausedId.equals(s.getConversationId()))
+                    .findFirst().orElseThrow();
+            assertEquals("RULE", ruleSummary.getPauseType());
+            assertTrue(ruleSummary.getToolNames() == null || ruleSummary.getToolNames().isEmpty(),
+                    "a RULE pause carries no tool names");
         }
 
         @Test
