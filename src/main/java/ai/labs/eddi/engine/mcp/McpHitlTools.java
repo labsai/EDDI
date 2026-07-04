@@ -401,11 +401,25 @@ public class McpHitlTools {
         }
         Map<String, String> taskApprovals = null;
         if (taskApprovalsJson != null && !taskApprovalsJson.isBlank()) {
+            Map<?, ?> rawApprovals;
             try {
-                taskApprovals = (Map<String, String>) jsonSerialization.deserialize(taskApprovalsJson, Map.class);
+                rawApprovals = jsonSerialization.deserialize(taskApprovalsJson, Map.class);
             } catch (Exception e) {
                 return errorJson("Malformed taskApprovals JSON (expected a JSON object of task-id to APPROVED/REJECTED)",
                         "BAD_REQUEST", null);
+            }
+            // Validate the value TYPES here: the erasure-blind cast to
+            // Map<String,String> accepts any JSON object, so a non-string value
+            // (e.g. {"t1": 5}) would otherwise survive to resumeDiscussion and throw
+            // a ClassCastException that surfaces as INTERNAL instead of the correct
+            // BAD_REQUEST. Fail fast with a clear message; keys are always JSON strings.
+            taskApprovals = new java.util.LinkedHashMap<>();
+            for (var entry : rawApprovals.entrySet()) {
+                if (!(entry.getValue() instanceof String value) || value.isBlank()) {
+                    return errorJson("Invalid taskApprovals: each value must be a non-empty string "
+                            + "(APPROVED or REJECTED)", "BAD_REQUEST", null);
+                }
+                taskApprovals.put(String.valueOf(entry.getKey()), value);
             }
         }
         try {
