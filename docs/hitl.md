@@ -328,7 +328,7 @@ Approved tool executions are protected by a write-ahead journal (`IHitlToolJourn
 1. Before running an approved tool, `tryClaim` inserts an `EXECUTING` entry keyed by `(conversationId, pauseEpoch, callId)`. The `pauseEpoch` is a per-pause UUID — providers may reuse tool-call ids across different pauses in one conversation, so the epoch keeps them distinct.
 2. After the tool returns, `markExecuted` stores the capped result.
 3. On resume, an `EXECUTED` entry **replays its stored result** — the tool is never re-run.
-4. An `EXECUTING` entry (a crash *inside* the tool) yields an honest `EXECUTION_OUTCOME_UNKNOWN` result fed to the LLM: *"a previous execution attempt was interrupted; it may or may not have taken effect — verify externally before retrying."* This is audited (`hitl.tool.outcome_unknown`) and surfaced in `pauseDetails.outcomeUnknown`.
+4. An `EXECUTING` entry (a crash *inside* the tool) yields an honest `EXECUTION_OUTCOME_UNKNOWN` result fed to the LLM: *"a previous execution attempt was interrupted; it may or may not have taken effect — verify externally before retrying."* This is logged with an alertable marker (`WARN hitl.tool.outcome_unknown`, not an audit-ledger entry — the orchestrator has no audit collector in scope here) and surfaced in `pauseDetails.outcomeUnknown`.
 
 > **Outcome-unknown contract:** the framework **never silently re-executes** a tool that may have already run. A crash between "claimed" and "executed" is reported as genuinely unknown, not retried — the human (or a downstream check) decides what to do.
 
@@ -430,7 +430,7 @@ The HITL operations are also exposed over the MCP server (`McpHitlTools`), so an
 | `approve_group_phase`             | `POST /groups/{groupId}/conversations/{gcId}/approve`        | Optional `taskApprovals` JSON for TASK granularity; blocks and returns the resumed discussion (no SSE variant over MCP) |
 | `cancel_group_discussion`         | `POST /groups/{groupId}/conversations/{gcId}/cancel`        |                                                                                                     |
 
-**Authority is identical to REST** — the shared `HitlAccessGuard` enforces owner / `eddi-admin` / `eddi-approver` per conversation (fail-closed on a missing descriptor), and the decision is attributed **server-side** to the authenticated caller, prefixed `mcp:` (e.g. `mcp:alice`, mirroring the `system:timeout` convention) — never taken from a tool argument. Errors are structured JSON (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | FORBIDDEN | DISABLED | BAD_REQUEST`) so a programmatic client can branch on the failure kind.
+**Authority is identical to REST** — the shared `HitlAccessGuard` enforces owner / `eddi-admin` / `eddi-approver` per conversation (fail-closed on a missing descriptor), and the decision is attributed **server-side** to the authenticated caller, prefixed `mcp:` (e.g. `mcp:alice`, mirroring the `system:timeout` convention) — never taken from a tool argument. Errors are structured JSON (`errorCode` ∈ `NOT_FOUND | WRONG_STATE | FORBIDDEN | DISABLED | BAD_REQUEST | CONFLICT | INTERNAL`) so a programmatic client can branch on the failure kind.
 
 **Kill-switch:** set `eddi.mcp.hitl.mutations.enabled=false` to make MCP a **read-only** HITL surface — `resume_conversation`, `cancel_conversation`, `approve_group_phase`, and `cancel_group_discussion` then return a `DISABLED` error while the read-only list/status tools keep working. MCP is a transport, not a new authority: no tool lets an agent approve its own gate.
 
