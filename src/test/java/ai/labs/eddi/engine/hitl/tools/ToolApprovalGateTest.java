@@ -72,4 +72,18 @@ class ToolApprovalGateTest {
         var result = gate.classify(batch, Map.of(), cfg(List.of("delete_*"), null), Set.of());
         assertEquals(1, result.gated().size());
     }
+
+    @Test
+    void nullToolName_doesNotNpe_flowsToAllowed() {
+        var gate = new ToolApprovalGate();
+        // Some providers emit a malformed tool call with a null name. The gate must
+        // NOT NPE while pattern-matching; the null-name call matches nothing and flows
+        // to `allowed` so the downstream dispatch degrades gracefully ("tool not
+        // found"), as it did pre-HITL — instead of failing the whole turn.
+        var batch = List.of(ToolExecutionRequest.builder().id("1").name(null).arguments("{}").build());
+        var result = assertDoesNotThrow(
+                () -> gate.classify(batch, Map.of(), cfg(List.of("*"), null), Set.of()));
+        assertTrue(result.gated().isEmpty(), "null-name call must not be gated");
+        assertEquals(1, result.allowed().size(), "null-name call must flow to allowed");
+    }
 }

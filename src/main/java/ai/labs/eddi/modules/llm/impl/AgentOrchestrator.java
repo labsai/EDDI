@@ -301,7 +301,7 @@ class AgentOrchestrator {
      * @return the execution result (final response + tool trace)
      */
     ExecutionResult resumeToolLoop(ChatModel chatModel, LlmConfiguration.Task task, IConversationMemory memory, PendingToolCallBatch batch,
-                                   HitlDecision decision, Map<String, Object> templateDataObjects)
+                                   HitlDecision decision, Map<String, Object> templateDataObjects, boolean toolHitlEnabled)
             throws LifecycleException {
 
         String conversationId = memory.getConversationId();
@@ -407,12 +407,18 @@ class AgentOrchestrator {
 
         // ── Step 4: continue the SAME loop from the next iteration (budget-continuous)
         // ──
-        // The gate resolves the SAME way the live path did (task override, else agent
-        // default) so NEW calls in continuation re-gate → re-pause. Approved ids are
-        // pre-cleared so they are never re-gated if the model reissues them.
-        ToolApprovalsConfig effectiveToolApprovals = task.getToolApprovals() != null
-                ? task.getToolApprovals()
-                : memory.getAgentToolApprovalsConfig();
+        // The gate resolves the SAME way the live path did (LlmTask.executeTask): the
+        // cluster-wide eddi.hitl.tool.enabled kill-switch nulls the config (gate
+        // inert), otherwise task override else agent default, so NEW calls in the
+        // continuation re-gate → re-pause. Approved ids are pre-cleared so they are
+        // never re-gated if the model reissues them. Threading toolHitlEnabled here
+        // keeps the resume path from re-arming an approval flow an operator disabled.
+        ToolApprovalsConfig effectiveToolApprovals = null;
+        if (toolHitlEnabled) {
+            effectiveToolApprovals = task.getToolApprovals() != null
+                    ? task.getToolApprovals()
+                    : memory.getAgentToolApprovalsConfig();
+        }
         int llmTaskIndex = batch.getLlmTaskIndex();
 
         // Transcript cap: resumeToolLoop replays the ALREADY-serialized transcript
@@ -500,6 +506,44 @@ class AgentOrchestrator {
         }
         messages.add(AiMessage.from(requests));
         return messages;
+    }
+
+    /**
+     * When the gate is active, assigns a stable synthetic id to any tool-call
+     * request the provider emitted WITHOUT one, so the id is identical across the
+     * frozen pause transcript, the pending batch, and the resume result messages. A
+     * null-id request in the transcript paired with an invented id on resume breaks
+     * providers that match tool results by {@code tool_call_id}; and the gate
+     * itself only records a reason per non-null id. Returns the message unchanged
+     * when the gate is inert (pre-HITL byte-identical) or no id is missing.
+     */
+    private static AiMessage normalizeToolCallIds(AiMessage aiMessage, ToolApprovalsConfig effectiveToolApprovals) {
+        boolean gateActive = effectiveToolApprovals != null
+                && effectiveToolApprovals.getRequireApproval() != null
+                && !effectiveToolApprovals.getRequireApproval().isEmpty();
+        if (!gateActive || !aiMessage.hasToolExecutionRequests()) {
+            return aiMessage;
+        }
+        List<ToolExecutionRequest> requests = aiMessage.toolExecutionRequests();
+        if (requests.stream().allMatch(r -> r.id() != null)) {
+            return aiMessage;
+        }
+        List<ToolExecutionRequest> normalized = new ArrayList<>(requests.size());
+        for (ToolExecutionRequest r : requests) {
+            if (r.id() == null) {
+                normalized.add(ToolExecutionRequest.builder()
+                        .id("gen-" + UUID.randomUUID())
+                        .name(r.name())
+                        .arguments(r.arguments() != null ? r.arguments() : "")
+                        .build());
+            } else {
+                normalized.add(r);
+            }
+        }
+        String text = aiMessage.text();
+        return text != null && !text.isBlank()
+                ? AiMessage.from(text, normalized)
+                : AiMessage.from(normalized);
     }
 
     /** Rebuilds a provider-safe request from a pending call (original raw args). */
@@ -813,7 +857,7 @@ class AgentOrchestrator {
                 ChatRequest chatRequest = requestBuilder.build();
 
                 ChatResponse chatResponse = chatModel.chat(chatRequest);
-                AiMessage aiMessage = chatResponse.aiMessage();
+                AiMessage aiMessage = normalizeToolCallIds(chatResponse.aiMessage(), effectiveToolApprovals);
                 currentMessages.add(aiMessage);
 
                 if (aiMessage.hasToolExecutionRequests()) {
@@ -856,6 +900,23 @@ class AgentOrchestrator {
                                 executeSingleToolCall(allowedReq, memory, currentMessages, trace, toolExecutors,
                                         toolRateLimits, defaultRateLimit, maxBudget, conversationId,
                                         enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
+                            }
+                            // Abandoned-thread guard: a cascade step that timed out (or
+                            // the agentTimeout watchdog on the live path) cancels the future
+                            // via cancel(true), interrupting THIS thread — but it keeps
+                            // running to here on the shared live memory while the caller has
+                            // already moved on. Committing pause state now would leave a
+                            // stale batch on a conversation the caller abandoned (self-heals
+                            // at next turn start) or overwrite a later step's real pause.
+                            // Abort WITHOUT mutating shared memory: throw the interrupted
+                            // signal — on a cascade the discarded Future swallows it; on the
+                            // live path Conversation.runStep converts it to
+                            // EXECUTION_INTERRUPTED (the correct outcome for an abandoned
+                            // turn). NOT ToolApprovalRequiredException, which would commit a
+                            // pause with a null batch.
+                            if (Thread.currentThread().isInterrupted()) {
+                                throw new LifecycleException.LifecycleInterruptedException(
+                                        "Tool-approval pause abandoned: executing thread was interrupted before commit");
                             }
                             // 2) snapshot + persist the pending batch, then abort the loop
                             PendingToolCallBatch batch = buildPendingBatch(currentMessages, gateResult, task, memory,

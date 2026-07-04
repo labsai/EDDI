@@ -686,7 +686,10 @@ public class LlmTask implements ILifecycleTask {
         var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams);
 
         // === Hand off to the resume loop (Task 9) ===
-        var result = agentOrchestrator.resumeToolLoop(chatModel, task, memory, batch, resumeDecision, templateDataObjects);
+        // Pass the cluster-wide kill-switch so the continuation's gate resolution
+        // matches the live path (executeTask) — a disabled gate stays inert on resume.
+        var result = agentOrchestrator.resumeToolLoop(chatModel, task, memory, batch, resumeDecision, templateDataObjects,
+                toolHitlEnabled);
 
         String responseContent = result != null ? result.response() : null;
         List<Map<String, Object>> toolTrace = result != null && result.trace() != null ? result.trace() : new ArrayList<>();

@@ -257,7 +257,7 @@ class AgentOrchestratorResumeToolLoopTest {
         ChatModel chatModel = mock(ChatModel.class);
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("The answers are 42 and 4."));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of());
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
 
         assertNotNull(result);
         assertEquals("The answers are 42 and 4.", result.response());
@@ -281,7 +281,7 @@ class AgentOrchestratorResumeToolLoopTest {
         var captor = ArgumentCaptor.forClass(ChatRequest.class);
         when(chatModel.chat(captor.capture())).thenReturn(text("I could not perform that action."));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, rejectAll("policy forbids this"), Map.of());
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, rejectAll("policy forbids this"), Map.of(), true);
 
         assertEquals("I could not perform that action.", result.response());
         verify(calculatorTool, never()).calculate(anyString());
@@ -328,7 +328,7 @@ class AgentOrchestratorResumeToolLoopTest {
         var captor = ArgumentCaptor.forClass(ChatRequest.class);
         when(chatModel.chat(captor.capture())).thenReturn(text("done"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, decision, Map.of());
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, decision, Map.of(), true);
 
         assertEquals("done", result.response());
         // c1 executed with amended args only (JSON unwrapped to the {expression} value)
@@ -362,7 +362,7 @@ class AgentOrchestratorResumeToolLoopTest {
         var captor = ArgumentCaptor.forClass(ChatRequest.class);
         when(chatModel.chat(captor.capture())).thenReturn(text("replayed 42"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of());
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
 
         assertEquals("replayed 42", result.response());
         verify(calculatorTool, never()).calculate(anyString());
@@ -390,7 +390,7 @@ class AgentOrchestratorResumeToolLoopTest {
         var captor = ArgumentCaptor.forClass(ChatRequest.class);
         when(chatModel.chat(captor.capture())).thenReturn(text("uncertain"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of());
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
 
         assertEquals("uncertain", result.response());
         verify(calculatorTool, never()).calculate(anyString());
@@ -432,7 +432,7 @@ class AgentOrchestratorResumeToolLoopTest {
         var captor = ArgumentCaptor.forClass(ChatRequest.class);
         when(chatModel.chat(captor.capture())).thenReturn(text("fallback done"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of());
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
 
         assertEquals("fallback done", result.response());
         verify(calculatorTool, times(1)).calculate("6*7");
@@ -470,7 +470,7 @@ class AgentOrchestratorResumeToolLoopTest {
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(toolBatch(newGated));
 
         var ex = assertThrows(ToolApprovalRequiredException.class,
-                () -> orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of()));
+                () -> orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true));
 
         var newBatch = ex.getBatch();
         assertNotNull(newBatch);
@@ -496,7 +496,7 @@ class AgentOrchestratorResumeToolLoopTest {
         ChatModel chatModel = mock(ChatModel.class);
         when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("should not be reached"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of());
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
 
         assertNotNull(result);
         // The continuation loop makes NO further model call (budget exhausted).
@@ -518,7 +518,7 @@ class AgentOrchestratorResumeToolLoopTest {
         var captor = ArgumentCaptor.forClass(ChatRequest.class);
         when(chatModel.chat(captor.capture())).thenReturn(text("handled"));
 
-        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of());
+        var result = orchestrator.resumeToolLoop(chatModel, task, memory, batch, approveAll(), Map.of(), true);
 
         assertEquals("handled", result.response());
         verify(calculatorTool, never()).calculate(anyString());

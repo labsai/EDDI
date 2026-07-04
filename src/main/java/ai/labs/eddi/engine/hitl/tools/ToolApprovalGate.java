@@ -46,6 +46,15 @@ public class ToolApprovalGate {
                 allowed.add(request); // already approved by a human — never re-gate
                 continue;
             }
+            if (request.name() == null) {
+                // Malformed tool call with no name (some providers emit these): it can
+                // match no pattern and would NPE at toolSources.get(null) on an
+                // immutable map. Let it through to `allowed` so the downstream dispatch
+                // degrades gracefully to "tool not found", as it did pre-HITL, instead
+                // of failing the whole turn.
+                allowed.add(request);
+                continue;
+            }
             String source = toolSources.get(request.name());
             String qualified = source != null ? source + ":" + request.name() : null;
             if (firstMatch(exempt, qualified, request.name()) != null) {
@@ -77,7 +86,14 @@ public class ToolApprovalGate {
 
     private static CompiledPattern firstMatch(List<CompiledPattern> patterns, String qualified, String bare) {
         for (CompiledPattern cp : patterns) {
-            if ((qualified != null && cp.pattern().matcher(qualified).matches()) || cp.pattern().matcher(bare).matches()) {
+            // bare (= request.name()) can be null: langchain4j's ToolExecutionRequest
+            // does not guarantee a non-null name (some providers emit malformed tool
+            // calls). Guard both matchers so a null name matches nothing and the call
+            // flows to `allowed` — the gate stays inert for it and the downstream tool
+            // dispatch degrades gracefully to "tool not found", as it did pre-HITL,
+            // instead of NPEing and failing the whole turn.
+            if ((qualified != null && cp.pattern().matcher(qualified).matches())
+                    || (bare != null && cp.pattern().matcher(bare).matches())) {
                 return cp;
             }
         }
