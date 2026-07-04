@@ -306,6 +306,26 @@ public class ConversationMemoryUtilities {
         return projected;
     }
 
+    /**
+     * Fix (security): projects the raw {@link PendingToolCallBatch} on a snapshot
+     * returned by the GENERIC raw-read surface ({@code readRawConversationLog})
+     * down to the same names-only view the Simple projection uses — stripping
+     * {@code argumentsRaw}, {@code argumentsRedacted}, {@code chatTranscriptJson},
+     * {@code traceSoFar}, {@code fingerprint} and {@code effectiveToolApprovals}.
+     * Without this, the raw endpoint leaks unredacted tool arguments and the frozen
+     * LLM transcript of a paused conversation to any authenticated caller,
+     * defeating the approver-only {@code detail=full} gate. The persisted document
+     * is untouched; {@code loadConversationMemorySnapshot} returns a
+     * freshly-deserialized, caller-owned snapshot per call, so mutating its batch
+     * field here is safe.
+     */
+    public static ConversationMemorySnapshot redactRawPendingToolCallsForRead(ConversationMemorySnapshot snapshot) {
+        if (snapshot != null && snapshot.getHitlPendingToolCalls() != null) {
+            snapshot.setHitlPendingToolCalls(namesOnlyPendingToolCalls(snapshot.getHitlPendingToolCalls()));
+        }
+        return snapshot;
+    }
+
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(IConversationMemory returnConversationMemory,
                                                                                            Boolean returnDetailed, Boolean returnCurrentStepOnly,
                                                                                            List<String> returningFields) {

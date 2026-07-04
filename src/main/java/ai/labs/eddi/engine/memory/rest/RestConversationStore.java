@@ -36,6 +36,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertSimpleConversationMemory;
+import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.redactRawPendingToolCallsForRead;
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
@@ -214,7 +215,13 @@ public class RestConversationStore implements IRestConversationStore {
         checkNotNull(conversationId, "conversationId");
 
         try {
-            return conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            // Project the pending tool-call batch down to names-only before returning:
+            // this generic raw-read surface is reachable by any authenticated caller
+            // and must NOT leak the unredacted tool arguments or the frozen LLM
+            // transcript of a paused conversation — those stay behind the approver-only
+            // detail=full gate. Mirrors fix #4's confinement on the Simple surface.
+            return redactRawPendingToolCallsForRead(
+                    conversationMemoryStore.loadConversationMemorySnapshot(conversationId));
         } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
             throw sneakyThrow(e);
         }
