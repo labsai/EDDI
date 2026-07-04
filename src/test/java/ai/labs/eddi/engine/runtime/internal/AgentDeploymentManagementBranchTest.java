@@ -13,6 +13,8 @@ import ai.labs.eddi.configs.migration.ChannelConnectorMigration;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.V6QuteMigration;
 import ai.labs.eddi.configs.migration.V6RenameMigration;
+import ai.labs.eddi.configs.rules.IRuleSetStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -62,6 +64,10 @@ class AgentDeploymentManagementBranchTest {
     private ChannelConnectorMigration channelConnectorMigration;
     @Mock
     private IRuntime runtime;
+    @Mock
+    private IWorkflowStore workflowStore;
+    @Mock
+    private IRuleSetStore ruleSetStore;
 
     private AgentDeploymentManagement management;
 
@@ -75,7 +81,7 @@ class AgentDeploymentManagementBranchTest {
         management = new AgentDeploymentManagement(
                 deploymentStore, agentFactory, agentStore, agentsReadiness,
                 conversationMemoryStore, documentDescriptorStore, migrationManager,
-                v6RenameMigration, v6QuteMigration, channelConnectorMigration, runtime, 30);
+                v6RenameMigration, v6QuteMigration, channelConnectorMigration, runtime, workflowStore, ruleSetStore, 30);
     }
 
     @Nested
