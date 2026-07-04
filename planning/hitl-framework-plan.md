@@ -35,7 +35,7 @@ and group discussions**. Built on top of the full conversation-cancel plan (Wave
 | Group resume granularity | **Phase boundary only.** PHASE pauses fire after a phase's repeats fully complete and resume at `pausedPhaseIndex + 1`. TASK pauses fire at a wave-join boundary and resume at `pausedPhaseIndex` (re-enter same EXECUTE phase). No mid-repeat resume. |
 | Group concurrency | **State-CAS** on the indexed `state` field via a new `storeIfFieldEquals` storage primitive. No POJO `version` field; `_version` stays pinned at `SINGLE_VERSION=1`. |
 | Regular concurrency | `compareAndSetState` on `conversationState`, plus per-conversation `submitInOrder` (in-JVM ordering) — correctness comes from the DB CAS. |
-| Tool-level HITL | Deferred. |
+| Tool-level HITL | Implemented — see [`planning/hitl-tool-approval-plan.md`](hitl-tool-approval-plan.md). |
 | Manager approvals UI | Deferred to the EDDI-Manager repo (separate PR). |
 
 ---

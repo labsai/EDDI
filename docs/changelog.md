@@ -5,6 +5,30 @@
 
 ---
 
+## 🛠️ Tool-level HITL — complete feature + documentation (Tasks 5–17 of 17) (2026-07-04)
+
+**Repo:** EDDI (`feat/hitl-framework`)
+
+Completes and documents **tool-level HITL approval gating**: the conversation pauses for human approval when the LLM invokes a *gated tool* (any of the 8 sources — built-in `@Tool`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`), gated *before* the tool executes (fail-safe), configured via allow/exempt glob patterns, coexisting with the behavior-rule `PAUSE_CONVERSATION` turn gate. Builds on the Tasks 1–4 foundation (see the earlier 2026-07-03 entry — do not duplicate). Full plan: [`planning/hitl-tool-approval-plan.md`](../planning/hitl-tool-approval-plan.md).
+
+**Task 17 — documentation (this entry).** No production code changed. Docs/markdown only:
+- **`docs/hitl.md`** — removed the now-false "Tool-level HITL … is deferred" from *Known Limitations* (it contradicted the rest of the same doc) and replaced it with an *implemented* note; scoped the Slack data-minimization sentence to **RULE** pauses and documented the **TOOL_CALL** exception (the approval channel renders redacted, 300-char-truncated tool arguments so a reviewer can see what they are approving; the in-thread notice stays pause-reason-only); added a **Tool-Level Approval Gating** section (config schema + defaults, pattern language, precedence, effective-timeout-policy rule, per-call verdict/amendment REST bodies with a JSON example, `pauseDetails` reference, the write-ahead journal + outcome-unknown contract, Slack all-or-nothing buttons, group-member REJECT, frozen-transcript semantics, and the `eddi.hitl.tool.enabled` rolling-upgrade note). Reconciled with the existing tool-level content earlier tasks had already added (the `pauseDetails` shapes, MCP Surface table, `eddi.mcp.hitl.mutations.enabled` kill-switch) — no duplicate sections.
+- **`AGENTS.md` §5.3** — extended the HITL note: behavior rules gate *turns* (`PAUSE_CONVERSATION`); `hitlConfig.toolApprovals` gates *individual LLM tool calls* (`hitlPauseType: "TOOL_CALL"`); both share the same pause/timeout/audit/Slack machinery; link to `docs/hitl.md`.
+- **`planning/hitl-framework-plan.md`** — flipped the decision-table line "Tool-level HITL: Deferred" to "Implemented — see `planning/hitl-tool-approval-plan.md`".
+
+**The 5 product decisions (from the plan's decision record), now locked and documented:**
+1. **`AUTO_APPROVE` never applies to tool pauses implicitly** — explicit opt-in only. Agent-level `AUTO_APPROVE` covers RULE pauses; for a tool pause it is demoted to `WAIT_INDEFINITELY` unless `toolApprovals.timeoutPolicy` sets `AUTO_APPROVE` explicitly (a silent timeout must never auto-execute a gated tool).
+2. **Crash inside an approved tool yields an honest `EXECUTION_OUTCOME_UNKNOWN`** — never silent re-execution. The write-ahead journal (`IHitlToolJournalStore`, keyed by `conversationId + pauseEpoch + callId`) replays `EXECUTED` results and reports `EXECUTING` (crashed mid-tool) as genuinely unknown, audited and surfaced in `pauseDetails.outcomeUnknown`.
+3. **Group-member tool pauses auto-reject gracefully** (`system:group`) — a group has no reviewer, so the member's gated call is REJECTED through the normal resume path and its LLM produces a coherent tool-less contribution (fallback: SKIP + auto-cancel). `inGroupTurns: "INBOX"` is reserved (400 in v1).
+4. **Ungated calls in a mixed batch execute before the human sees the pause** — the approver is then shown which ones already ran via `pauseDetails.executedUngatedCalls`.
+5. **A multi-day pause resumes against pause-time prompt state** — the exact in-flight langchain4j transcript is frozen at pause time and replayed on resume (same task index), never rebuilt from current memory.
+
+**Cross-checked every documented fact against source** (`ToolApprovalsConfig`, `ToolApprovalPatterns`, `ToolApprovalGate`, `HitlDecision`/`ToolCallDecision`, `HitlConfigValidation`, `ConversationService.applyEffectiveToolTimeoutPolicy` + `validateToolDecisions`, `RestAgentEngine.buildToolCallPauseDetails`, `AgentOrchestrator.resumeToolLoop`, `IHitlToolJournalStore`, `SlackHitlSupport`, `GroupConversationService.tryResolveMemberToolPause`, and the `eddi.hitl.tool.enabled` flag in `LlmTask`/`application.properties`) — field names, defaults (`maxPausesPerTurn` 3/1..10, `maxAutoApprovalsPerTurn` 2/0..10), ranges, note caps (top-level 4096, per-call 1024), the 300-char Slack display truncation, and the precedence/timeout rules all match the implementation.
+
+**Next:** the tool-level HITL feature (Tasks 1–17) is complete on `feat/hitl-framework`. Remaining HITL roadmap items: EDDI-Manager approvals UI (separate repo/PR) and the reserved `inGroupTurns: "INBOX"` mode.
+
+---
+
 ## 🔐 MCP HITL surface — resolve approval gates over MCP (2026-07-03)
 
 **Repo:** EDDI (`feat/hitl-framework`)

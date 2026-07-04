@@ -710,7 +710,7 @@ Do NOT reuse system action names as quick reply expressions. The reserved action
 ✅ RIGHT:  "expressions" : "get_started"           (dedicated identifier)
 ```
 
-> **HITL**: a behavior rule that emits `PAUSE_CONVERSATION` pauses the conversation (`AWAITING_HUMAN`) until a human approves or rejects via `POST /agents/{conversationId}/resume`. Timeout behavior is configured via `hitlConfig` on the agent. Full reference: [`docs/hitl.md`](docs/hitl.md).
+> **HITL**: EDDI has two human-approval gates. (1) A behavior rule that emits `PAUSE_CONVERSATION` gates a **whole turn** — the conversation pauses (`AWAITING_HUMAN`) until a human approves or rejects via `POST /agents/{conversationId}/resume`. (2) `hitlConfig.toolApprovals` gates **individual LLM tool calls** — when the model invokes a tool matching a `requireApproval` pattern (any of the 8 tool sources), the conversation pauses *before* the tool runs (`hitlPauseType: "TOOL_CALL"`, resumed through the same endpoint). Both share the same pause/timeout/audit/Slack machinery; timeout behavior is configured via `hitlConfig` on the agent (with a tool-level override). Full reference: [`docs/hitl.md`](docs/hitl.md).
 
 #### `actionmatcher` comma-separated values = AND (contiguous sublist), NOT OR
 

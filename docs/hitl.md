@@ -209,6 +209,150 @@ A TASK-gate pause caused by turn-budget exhaustion could previously loop forever
 
 ---
 
+## Tool-Level Approval Gating
+
+The two surfaces above pause **turns** (a behavior-rule `PAUSE_CONVERSATION`) or **phases** (`requiresApproval`). Tool-level HITL is a third, finer gate: it pauses when the LLM **invokes a matching tool**, before that tool executes. It works for **all eight tool sources** — built-in `@Tool`, `http` (httpcall), `mcp`, `a2a`, `dynamic` (dynamic agents), `memory`, and `recall`.
+
+The gate lives in the tool-execution loop (`AgentOrchestrator`), so it is **fail-safe**: a gated call is intercepted *before* execution. It reuses the existing pause machinery — same `AWAITING_HUMAN` state, same `POST /agents/{id}/resume` endpoint, same timeout/audit/Slack/crash-recovery paths — with `hitlPauseType = "TOOL_CALL"` distinguishing it from a `RULE` pause. A single resume verdict resolves either pause type.
+
+### Configuration
+
+`toolApprovals` has two homes, both optional:
+
+- **Agent-level default** — `AgentConfiguration.hitlConfig.toolApprovals` (applies to every LLM task in the agent).
+- **Per-task override** — `LlmConfiguration.task[n].toolApprovals` (a langchain task). This is a **full replace**, not a merge: if a task defines `toolApprovals`, its block is used verbatim and the agent-level block is ignored for that task.
+
+```json
+{
+  "hitlConfig": {
+    "toolApprovals": {
+      "requireApproval": ["mcp:*", "delete_*", "transfer_funds"],
+      "exempt": ["mcp:read_*"],
+      "maxPausesPerTurn": 3,
+      "maxAutoApprovalsPerTurn": 2,
+      "onNoProgress": "WAIT_FOR_HUMAN",
+      "approvalTimeout": "PT30M",
+      "timeoutPolicy": "AUTO_REJECT",
+      "pauseReason": "Approval required for {toolNames}",
+      "pendingMessage": "Waiting for a human to approve {toolNames}…",
+      "inGroupTurns": "REJECT"
+    }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `requireApproval` | list of glob patterns | absent/empty = **gate off** | Tools whose calls must be human-approved. An absent or empty list disables tool gating entirely (backward compatible). |
+| `exempt` | list of glob patterns | `null` | Exemptions — **always beat** `requireApproval`. A pattern in `exempt` with no `requireApproval` is rejected at save time (no effect). |
+| `maxPausesPerTurn` | integer, `1`..`10` | `3` | Max tool pauses in one turn. **Fail-closed at the cap**: once reached, the remaining gated calls in that turn are auto-error-resulted (`hitl_pause_cap`) rather than executed — never silently run. |
+| `maxAutoApprovalsPerTurn` | integer, `0`..`10` | `2` | Max consecutive `system:*` (timeout) auto-approvals per turn before the no-progress guard applies `onNoProgress`. |
+| `onNoProgress` | `WAIT_FOR_HUMAN` \| `AUTO_REJECT` \| `ABORT` | `WAIT_FOR_HUMAN` | What happens when a tool pause re-pauses with an identical fingerprint after a system decision (loop protection). `WAIT_FOR_HUMAN` demotes the re-pause to `WAIT_INDEFINITELY`; `AUTO_REJECT` reject-alls; `ABORT` cancels. |
+| `approvalTimeout` | ISO-8601 duration | inherits `hitlConfig.approvalTimeout` | Tool-pause timeout override. A finite policy requires a positive duration (validated at save time). |
+| `timeoutPolicy` | `AUTO_APPROVE` \| `AUTO_REJECT` \| `ABORT` \| `WAIT_INDEFINITELY` | see [Effective timeout policy](#effective-timeout-policy) | Tool-pause timeout policy override. |
+| `pauseReason` | string, ≤ 500 chars | generic | Approver-facing reason; the literal `{toolNames}` placeholder is substituted with the gated tool names. |
+| `pendingMessage` | string, ≤ 500 chars | `null` | End-user-facing message stored as **public output** at pause commit (so a chat UI shows the user *why* the turn stalled). `{toolNames}` is substituted. |
+| `inGroupTurns` | `REJECT` | `REJECT` | Behavior when a member agent's tool call is gated inside a group turn. `INBOX` is **reserved** (rejected with a 400 in v1). See [Group members](#group-members). |
+
+All values are validated at **save time** and on ZIP import (`HitlConfigValidation.validateToolApprovals`): bad patterns (with the offending index), a pattern in both `requireApproval` and `exempt`, duplicates, `exempt` without `requireApproval`, out-of-range integers, a reserved `INBOX`, a finite policy without a valid `approvalTimeout`, and overlong reason/message all yield an actionable 400 — the gate never degrades silently at runtime.
+
+### Pattern language
+
+Patterns are matched by `ToolApprovalPatterns` / `ToolApprovalGate`:
+
+- **`*` is the only wildcard** — it matches any run of characters (including empty). Every other character is a quoted literal, so compilation is **ReDoS-safe**.
+- **Source-qualified or bare.** A pattern may carry a known source prefix (`mcp:read_*`, `http:*`) or match the bare tool name (`delete_account`). Each call is tested against `source:name` **first**, then the bare dispatch name — a tool with an unknown source still matches bare-name patterns (fail-safe).
+- **Known sources** (the only accepted prefixes): `builtin`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`. An unknown prefix is rejected at save time with a typo suggestion (Levenshtein ≤ 2).
+- **Case-sensitive.** Patterns match tool names exactly; `Delete_*` does not match `delete_account`.
+- Patterns may not start or end with `:`, and are capped at 256 characters. Allowed characters: `A-Za-z0-9_-.:*`.
+
+### Precedence
+
+| Rule | Behavior |
+|------|----------|
+| **Task replaces agent** | A per-task `toolApprovals` is a **full replace** of the agent-level block — no field-level merge. |
+| **Exempt beats require** | If a call matches any `exempt` pattern, it runs — even if it also matches `requireApproval`. |
+| **Absent/empty `requireApproval` = gate off** | No `requireApproval` patterns → the gate is fully inactive; every call runs. |
+| **Any match suffices** | A call is gated if it matches *any* `requireApproval` pattern (and no `exempt` pattern). |
+| **Already-approved never re-gated** | A callId the human already approved is pre-cleared, so a model that reissues the same call in a continuation does not re-pause on it. |
+
+### Effective timeout policy
+
+Tool pauses resolve their effective timeout policy with a deliberate rule (`ConversationService.applyEffectiveToolTimeoutPolicy`):
+
+1. An **explicit** `toolApprovals.timeoutPolicy` wins verbatim — including an explicit `AUTO_APPROVE` (the designer opted in at the tool level). Its `approvalTimeout` is used, falling back to the outer `hitlConfig.approvalTimeout`.
+2. Otherwise the outer `hitlConfig.timeoutPolicy`/`approvalTimeout` is inherited, **except** an inherited `AUTO_APPROVE` is **demoted to `WAIT_INDEFINITELY`** — a silent timeout must never auto-execute a gated tool call (that is exactly what the gate exists to prevent).
+3. Absent config on both levels leaves the default `WAIT_INDEFINITELY`.
+
+> **Key rule:** `AUTO_APPROVE` applies to a **tool** pause **only when set explicitly on `toolApprovals`**. Agent-level `AUTO_APPROVE` covers RULE pauses but is demoted for tool pauses. Save-time emits a WARN (not a 400) when an agent sets `AUTO_APPROVE` and a `toolApprovals` block without its own `timeoutPolicy`.
+
+### Resuming — per-call verdicts and amendments
+
+A tool pause is resumed through the **same** `POST /agents/{conversationId}/resume` endpoint. The top-level verdict resolves the whole batch; the optional `toolDecisions` map (keyed by `callId`) lets a reviewer decide individual calls and amend an approved call's arguments before it runs. **Calls not listed in `toolDecisions` inherit the top-level verdict.**
+
+```jsonc
+// Approve everything (all-or-nothing — the common case)
+{ "verdict": "APPROVED", "note": "looks fine" }
+
+// Reject everything
+{ "verdict": "REJECTED", "note": "not this time" }
+
+// Mixed: approve one (with amended arguments), reject another, the rest inherit APPROVED
+{
+  "verdict": "APPROVED",
+  "toolDecisions": {
+    "call-1": { "verdict": "APPROVED", "amendedArguments": "{\"to\":\"ops@acme.com\"}" },
+    "call-2": { "verdict": "REJECTED", "note": "wrong recipient" }
+  }
+}
+```
+
+Validation (all `400`, applied **before** any state changes, so a bad body never consumes the pause):
+
+- `toolDecisions` is only valid for a `TOOL_CALL` pause.
+- An unknown `callId` (not in the pending batch) is rejected (the body names the valid ids).
+- Each listed call requires a `verdict`; per-call `note` ≤ **1024** chars (top-level `note` ≤ 4096).
+- Top-level `REJECTED` combined with any per-call `APPROVED` is contradictory — set the top-level verdict to `APPROVED` to mix outcomes.
+- `amendedArguments` is only valid on an `APPROVED` call, must be a **JSON object**, is size-capped, and cannot amend a call whose arguments were truncated at pause time (approve/reject it as-is).
+
+A **REJECTED** call is not executed; instead the LLM receives a structured rejection tool-result (with the reviewer's note) so it can produce a coherent tool-less answer — rejection feeds *back into* the model rather than aborting the turn.
+
+### `pauseDetails` for a tool pause
+
+`GET /agents/{id}/approval-status` returns a `TOOL_CALL` `pauseDetails` object (computed at read time; see the [`pauseDetails` shape](#pausedetails-shape) reference above for the full JSON). Its `calls[].arguments` is **always** the redacted, size-capped value (`argumentsRedacted`) — the raw arguments never appear. `executedUngatedCalls` names ungated calls in the same batch that already ran (see decision 4). `outcomeUnknown` lists callIds with an `EXECUTING` journal entry — a prior approval that crashed mid-execution — and is empty in the common case.
+
+### The execution journal (at-most-once)
+
+Approved tool executions are protected by a write-ahead journal (`IHitlToolJournalStore`) so a human approval is executed **at most once**, across pod crashes and re-approvals:
+
+1. Before running an approved tool, `tryClaim` inserts an `EXECUTING` entry keyed by `(conversationId, pauseEpoch, callId)`. The `pauseEpoch` is a per-pause UUID — providers may reuse tool-call ids across different pauses in one conversation, so the epoch keeps them distinct.
+2. After the tool returns, `markExecuted` stores the capped result.
+3. On resume, an `EXECUTED` entry **replays its stored result** — the tool is never re-run.
+4. An `EXECUTING` entry (a crash *inside* the tool) yields an honest `EXECUTION_OUTCOME_UNKNOWN` result fed to the LLM: *"a previous execution attempt was interrupted; it may or may not have taken effect — verify externally before retrying."* This is audited (`hitl.tool.outcome_unknown`) and surfaced in `pauseDetails.outcomeUnknown`.
+
+> **Outcome-unknown contract:** the framework **never silently re-executes** a tool that may have already run. A crash between "claimed" and "executed" is reported as genuinely unknown, not retried — the human (or a downstream check) decides what to do.
+
+### Slack
+
+The Slack integration is tool-pause-aware. When `hitlApprovalChannel` is set, a `TOOL_CALL` pause posts an interactive approval card that additionally renders one context block per pending call — `toolName` plus its **redacted, 300-char-truncated arguments** (max 5 calls, then `+N more`) — so a reviewer sees *what* they are approving. The raw argument value is never accessed. The in-thread pause notice stays pause-reason-only. **Slack buttons are all-or-nothing in v1** (Approve/Reject the whole batch); per-call verdicts and amendments require the REST/MCP resume body. See [Slack Integration](#slack-integration).
+
+### Group members
+
+A group has no per-member human reviewer, so a member agent's gated tool call inside a group turn is resolved **gracefully, not stranded**: the framework issues a `system:group` **REJECTED** decision through the normal resume path (note: *"tool approval is not available during group discussions in this version"*), the member's LLM receives the rejection tool-result and produces a coherent tool-less contribution, and that becomes the turn's output. If the resume cannot complete in the member-turn budget (or the member re-pauses), it falls back to the existing member-pause handling (turn recorded SKIPPED, stranded pause auto-cancelled as `system:group`). The `inGroupTurns: "INBOX"` mode (routing member tool pauses to a human inbox instead) is reserved and rejected at save time in v1.
+
+### Frozen-transcript semantics
+
+A tool pause serializes the **exact** in-flight langchain4j message list (the AiMessage + prior tool results of the current LLM loop) at pause time and persists it on the snapshot. On resume — even days later — the loop re-enters the **same** task index and replays that frozen transcript, then applies the verdicts and continues. The human therefore approves against, and the model resumes against, **pause-time prompt state** — not a transcript rebuilt from current memory. This is why the design persists the transcript rather than reconstructing it: a multi-iteration turn rebuilt from memory would lose intermediate tool results.
+
+### Rolling upgrade
+
+The gate is guarded by a feature flag: `eddi.hitl.tool.enabled` (default `true`; injected into `LlmTask`). When `false`, the effective tool-approvals config resolves to `null` and the gate is inert.
+
+- **Enabling on a cluster:** complete the rollout of the new version to **all** pods *before* enabling gates in agent configs. A pod running the previous version cannot read a `TOOL_CALL`-paused conversation (it does not understand the `AWAITING_HUMAN`/`TOOL_CALL` state), so mixed-version pods should not be producing tool pauses.
+- **Downgrading:** set `eddi.hitl.tool.enabled=false` and **drain existing tool pauses** (resolve or cancel them) before rolling back to a version without this feature — otherwise those paused conversations are unreadable by the old code.
+
+---
+
 ## Timeout Policies
 
 | Policy | On timeout | Typical use case |
@@ -263,7 +407,7 @@ The Slack channel integration is HITL-aware end to end. Configuration lives in t
 Behavior:
 
 - **In-thread pause notice** — when a turn pauses, the thread receives the output so far plus "⏸️ awaiting human approval" with the `pauseReason`. Messages sent while paused get "Still awaiting approval" instead of a generic error (the input is not consumed).
-- **Approval inbox message** — if `hitlApprovalChannel` is set, an interactive Block Kit message is posted there (conversation, agent, reason, timeout deadline) with Approve/Reject buttons. Only the pause reason is shared — no conversation content (data minimization).
+- **Approval inbox message** — if `hitlApprovalChannel` is set, an interactive Block Kit message is posted there (conversation, agent, reason, timeout deadline) with Approve/Reject buttons. For a **RULE** pause only the pause reason is shared — no conversation content (data minimization). For a **TOOL_CALL** pause the approval channel additionally renders one context block per pending call — `toolName` plus its **redacted, size-capped arguments** truncated to 300 chars for display (max 5 calls, then a `+N more` line) — because a reviewer cannot responsibly approve `transfer_funds` without seeing the amount. The raw (unredacted) argument value is never accessed; this relaxation applies to the approval channel only, not the in-thread notice (which stays pause-reason-only).
 - **Deciding from Slack** — buttons post to `POST /integrations/slack/interactive` (configure this as the Slack app's *Interactivity Request URL*; requests are signature-verified like the events webhook). The acting Slack user must be in `hitlApproverUserIds`; decisions are attributed `decidedBy: slack:<userId>` in the audit trail. Double-clicks and already-decided races update the message ("already resolved") without error spam. Group pauses work the same way (the button value carries `group:<conversationId>` and routes to the group approve machinery).
 - **Continuation push** — when the pause is resolved (human, Slack button, or `system:timeout`), the originating thread automatically receives the verdict and the resumed conversation's output — no polling. This works cross-pod: the resume fires an async CDI event (`HitlResumeCompletedEvent`) and the Slack observer resolves the thread from the persistent conversation mapping.
 - **Group discussions** — Slack-driven group discussions post pause/resume/cancel notices (and `member_pause_skipped` explanations) into their thread.
@@ -295,7 +439,7 @@ The HITL operations are also exposed over the MCP server (`McpHitlTools`), so an
 - **Member-level HITL inside a group**: a member agent's own `PAUSE_CONVERSATION` rule firing during a group turn is not supported — the turn is recorded as SKIPPED with an explanatory note, the member's stranded pause is auto-cancelled (audited as `system:group`), and a `member_pause_skipped` SSE event is emitted. Use group-level HITL (`requiresApproval`) instead.
 - **Nested groups**: `requiresApproval` inside a sub-group of a group-of-groups is not supported — the sub-pause is cancelled and the member turn is recorded as SKIPPED with an explanatory note.
 - **Cross-pod cancel of an actively-running turn**: the cooperative cancel flag is per-pod; the DB CAS covers paused states cluster-wide, and a running group leg re-checks the persisted state at every phase boundary, so a cross-pod cancel takes effect at the next boundary.
-- **Tool-level HITL** (pausing inside an LLM tool call) is deferred.
+- **Tool-level HITL** (pausing when the LLM invokes a gated tool) is **implemented** — see [Tool-Level Approval Gating](#tool-level-approval-gating). Group-member tool pauses are auto-rejected gracefully (they have no reviewer); the `inGroupTurns: "INBOX"` mode is reserved (rejected at save time in v1).
 - **Managed REST conversations** (`RestAgentManagement`): a managed intent mapping stays pinned to a paused conversation until it is resumed or reset — a managed `say` against it answers `409` promptly, but the mapping is not automatically re-created while the approval is pending.
 - **Upgrade notes**:
   - `DiscussionPhase.requiresApproval` existed before this feature as an inert placeholder. Stored group configs that set it to `true` will begin pausing for approval after this upgrade.
