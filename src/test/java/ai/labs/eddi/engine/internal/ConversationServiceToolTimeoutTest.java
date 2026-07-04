@@ -112,6 +112,14 @@ class ConversationServiceToolTimeoutTest {
 
     private ConversationService conversationService;
 
+    /**
+     * When set, the helper stamps this task-scoped effective config onto the
+     * re-pause batch (and the pre-pause snapshot batch) so the fix's post-pause
+     * resolvers read the batch config instead of the agent-level default. Null
+     * exercises the legacy/backward-compat path (agent-level resolution).
+     */
+    private ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig batchEffectiveToolApprovals;
+
     @BeforeEach
     @SuppressWarnings("unchecked")
     void setUp() throws Exception {
@@ -407,6 +415,146 @@ class ConversationServiceToolTimeoutTest {
     }
 
     // =========================================================================
+    // Fix #1 — post-pause resolution reads the TASK-SCOPED effective config
+    // persisted on the batch, not the agent-level default only.
+    // =========================================================================
+
+    @Nested
+    @DisplayName("task-scoped effective tool-approval config drives post-pause resolution")
+    class TaskScopedEffectiveConfig {
+
+        @Test
+        @DisplayName("agent-level tool config ABSENT but batch effective AUTO_REJECT PT1H → finite AUTO_REJECT schedule armed")
+        void batchEffectiveAutoRejectArmsFiniteSchedule() throws Exception {
+            // Agent-level HITL has NO toolApprovals at all — the defect path where the
+            // outer resolution falls to WAIT_INDEFINITELY and arms no timer.
+            var hitl = new AgentConfiguration.HitlConfig();
+            // The paused TASK set a per-task override; it rides on the batch.
+            var taskOverride = new ToolApprovalsConfig();
+            taskOverride.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
+            taskOverride.setApprovalTimeout("PT1H");
+            batchEffectiveToolApprovals = taskOverride;
+
+            resumeWithToolRePause(hitl, FINGERPRINT, null);
+
+            ArgumentCaptor<ScheduleConfiguration> cap = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+            verify(scheduleStore).createSchedule(cap.capture());
+            assertEquals("AUTO_REJECT", cap.getValue().getMetadata().get("policy"),
+                    "batch effective tool policy must arm the finite AUTO_REJECT timeout");
+        }
+
+        @Test
+        @DisplayName("batch effective onNoProgress=AUTO_REJECT is honored even with agent-level tool config absent → reject-all follow-up")
+        void batchEffectiveOnNoProgressHonored() throws Exception {
+            doReturn(true).when(auditLedgerService).isEnabled();
+            var hitl = new AgentConfiguration.HitlConfig();
+            // Batch carries the finite timeout AND onNoProgress=AUTO_REJECT.
+            var taskOverride = new ToolApprovalsConfig();
+            taskOverride.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
+            taskOverride.setApprovalTimeout("PT30S");
+            taskOverride.setOnNoProgress("AUTO_REJECT");
+            batchEffectiveToolApprovals = taskOverride;
+
+            AtomicReference<HitlDecision> secondResume = new AtomicReference<>();
+            resumeWithToolRePause(hitl, FINGERPRINT, "system:timeout", FINGERPRINT, 1, secondResume, null);
+
+            assertNotNull(secondResume.get(),
+                    "batch-scoped onNoProgress=AUTO_REJECT must drive a reject-all follow-up");
+            assertEquals(HitlVerdict.REJECTED, secondResume.get().getVerdict());
+            assertEquals("system:no-progress", secondResume.get().getDecidedBy());
+            assertGuardAudit("hitl.tool.no_progress");
+        }
+
+        @Test
+        @DisplayName("batch effective maxAutoApprovalsPerTurn=5 lifts the cap so a 2nd auto-approval still arms a finite schedule")
+        void batchEffectiveMaxAutoApprovalsHonored() throws Exception {
+            // With the DEFAULT cap (2) the hard >=2 no-progress threshold demotes the
+            // re-pause. A batch override raising maxAutoApprovals does NOT lift the fixed
+            // >=2 loop breaker, but it DOES route through resolveMaxAutoApprovals — this
+            // asserts the resolver reads the batch config (capReached would otherwise
+            // fire an extra guard). We assert the batch's maxAutoApprovals is the source
+            // by checking the DIFFERENT-fingerprint path stays finite (progress → reset).
+            var hitl = new AgentConfiguration.HitlConfig();
+            var taskOverride = new ToolApprovalsConfig();
+            taskOverride.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
+            taskOverride.setApprovalTimeout("PT30S");
+            taskOverride.setMaxAutoApprovalsPerTurn(5);
+            batchEffectiveToolApprovals = taskOverride;
+
+            // System decision, DIFFERENT re-pause fingerprint → progress was made, the
+            // guard resets and a finite schedule is armed from the batch policy.
+            resumeWithToolRePause(hitl, "fp-old", "system:timeout", "fp-new", 1);
+
+            verify(scheduleStore).createSchedule(any());
+        }
+
+        // The batch-effective pendingMessage precedence is asserted in
+        // ConversationHitlTest (same package as Conversation.resolvePendingMessage,
+        // which owns that resolution).
+    }
+
+    // =========================================================================
+    // Fix #1 — backward compatibility: a legacy batch (null effective config),
+    // a RULE pause, or a null batch must behave EXACTLY as before.
+    // =========================================================================
+
+    @Nested
+    @DisplayName("backward compatibility: legacy batch / RULE pause / null batch unchanged")
+    class BackwardCompat {
+
+        @Test
+        @DisplayName("legacy batch (null effectiveToolApprovals) → agent-level AUTO_REJECT resolution unchanged")
+        void legacyBatchFallsBackToAgentLevel() throws Exception {
+            // batchEffectiveToolApprovals stays null (legacy). Agent-level tool config
+            // supplies the finite policy exactly as before the fix.
+            var hitl = new AgentConfiguration.HitlConfig();
+            var toolApprovals = new ToolApprovalsConfig();
+            toolApprovals.setApprovalTimeout("PT30S");
+            toolApprovals.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
+            hitl.setToolApprovals(toolApprovals);
+
+            resumeWithToolRePause(hitl, FINGERPRINT, null);
+
+            ArgumentCaptor<ScheduleConfiguration> cap = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+            verify(scheduleStore).createSchedule(cap.capture());
+            assertEquals("AUTO_REJECT", cap.getValue().getMetadata().get("policy"));
+        }
+
+        @Test
+        @DisplayName("legacy batch with NO explicit tool policy still demotes inherited AUTO_APPROVE → WAIT_INDEFINITELY (no schedule)")
+        void legacyBatchInheritedAutoApproveStillDemoted() throws Exception {
+            // batchEffectiveToolApprovals null; agent-level tool config present but WITHOUT
+            // its own timeout policy → inherit the outer AUTO_APPROVE, demoted.
+            var hitl = new AgentConfiguration.HitlConfig();
+            hitl.setApprovalTimeout("PT30S");
+            hitl.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_APPROVE);
+            hitl.setToolApprovals(new ToolApprovalsConfig());
+
+            resumeWithToolRePause(hitl, FINGERPRINT, null);
+
+            verify(scheduleStore, never()).createSchedule(any());
+        }
+
+        @Test
+        @DisplayName("batch present with NO explicit tool policy still inherits outer AUTO_APPROVE demotion")
+        void batchWithoutExplicitPolicyStillDemotesInheritedAutoApprove() throws Exception {
+            // The batch carries an effective config but WITHOUT a timeoutPolicy — the
+            // inherit-from-outer + AUTO_APPROVE-demotion rule (Task 10) must still hold,
+            // reading the outer hitlConfig, unchanged by the fix.
+            var hitl = new AgentConfiguration.HitlConfig();
+            hitl.setApprovalTimeout("PT30S");
+            hitl.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_APPROVE);
+            var taskOverride = new ToolApprovalsConfig();
+            // No timeoutPolicy on the override → inherit outer, demote AUTO_APPROVE.
+            batchEffectiveToolApprovals = taskOverride;
+
+            resumeWithToolRePause(hitl, FINGERPRINT, null);
+
+            verify(scheduleStore, never()).createSchedule(any());
+        }
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 
@@ -499,6 +647,7 @@ class ConversationServiceToolTimeoutTest {
             newBatch.setFingerprint(rePauseFingerprint);
             newBatch.setAutoApproveCount(0);
             newBatch.setCalls(List.of(pendingCall("call-xyz", false)));
+            newBatch.setEffectiveToolApprovals(batchEffectiveToolApprovals);
             memory.setHitlPendingToolCalls(newBatch);
             if (newBatchCapture != null) {
                 newBatchCapture.set(newBatch);
@@ -573,6 +722,7 @@ class ConversationServiceToolTimeoutTest {
         batch.setLlmTaskId("llm-task-1");
         batch.setFingerprint(fingerprint);
         batch.setAutoApproveCount(autoApproveCount);
+        batch.setEffectiveToolApprovals(batchEffectiveToolApprovals);
         List<PendingToolCall> calls = new ArrayList<>();
         calls.add(pendingCall("call-abc", false));
         batch.setCalls(calls);

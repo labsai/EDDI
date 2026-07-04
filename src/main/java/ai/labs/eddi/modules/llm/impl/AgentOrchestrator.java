@@ -820,7 +820,7 @@ class AgentOrchestrator {
                             // 2) snapshot + persist the pending batch, then abort the loop
                             PendingToolCallBatch batch = buildPendingBatch(currentMessages, gateResult, task, memory,
                                     i, activatedToolNames(isLazy, activeSpecs), trace, pausesSoFar + 1, llmTaskIndex,
-                                    toolSources);
+                                    toolSources, effectiveToolApprovals);
                             memory.setHitlPendingToolCalls(batch);
                             incrementToolPauseCount(memory, pausesSoFar);
                             throw new ToolApprovalRequiredException(buildPauseReason(effectiveToolApprovals, gateResult), batch);
@@ -1057,11 +1057,17 @@ class AgentOrchestrator {
                                            LlmConfiguration.Task task, IConversationMemory memory, int iterationIndex,
                                            List<String> activatedToolNames, List<Map<String, Object>> trace,
                                            int pauseCountThisTurn, int llmTaskIndex,
-                                           Map<String, String> toolSources) {
+                                           Map<String, String> toolSources, ToolApprovalsConfig effectiveToolApprovals) {
         PendingToolCallBatch batch = new PendingToolCallBatch();
         batch.setPauseEpoch(UUID.randomUUID().toString());
         batch.setLlmTaskId(task.getId());
         batch.setLlmTaskIndex(llmTaskIndex);
+        // Fix #1: persist the EXACT effective tool-approval config that gated this
+        // batch (task-level override when the task set one, else the agent-level
+        // default) so the post-pause resolvers in ConversationService and
+        // Conversation.resolvePendingMessage read the task-scoped config that produced
+        // the pause instead of re-deriving from the agent level only.
+        batch.setEffectiveToolApprovals(effectiveToolApprovals);
         // workflowId is informational; the authoritative pause bookmark carries the
         // paused workflow id (set by the LifecycleManager → Conversation pause commit).
         batch.setIterationIndex(iterationIndex);

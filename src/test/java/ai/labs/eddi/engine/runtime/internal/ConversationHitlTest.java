@@ -143,6 +143,71 @@ class ConversationHitlTest {
         }
 
         @Test
+        @DisplayName("TOOL_CALL pause uses the batch's task-scoped pendingMessage over the agent-level default")
+        void toolPauseUsesBatchEffectivePendingMessage() throws Exception {
+            memory.setConversationState(ConversationState.READY);
+
+            // Agent-level default present on memory (what the pre-fix path read only).
+            var agentLevel = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            agentLevel.setPendingMessage("AGENT default for {toolNames}");
+            memory.setAgentToolApprovalsConfig(agentLevel);
+
+            // The batch carries the task-scoped override that actually gated the call.
+            var taskOverride = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            taskOverride.setPendingMessage("TASK review pending for {toolNames}");
+
+            doAnswer(inv -> {
+                var call = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall();
+                call.setToolName("delete_record");
+                var batch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
+                batch.setCalls(List.of(call));
+                batch.setEffectiveToolApprovals(taskOverride);
+                memory.setHitlPendingToolCalls(batch);
+                throw new ConversationPauseException("wf1", 2, "gated tool call",
+                        ConversationPauseException.PauseOrigin.TOOL_CALL);
+            }).when(lifecycleManager).executeLifecycle(any(), any());
+
+            var conv = createConversation();
+            conv.say("delete it", Map.of());
+
+            var output = memory.getCurrentStep().getConversationOutput();
+            String rendered = output.get(ai.labs.eddi.engine.memory.MemoryKeys.OUTPUT_PREFIX).toString();
+            assertTrue(rendered.contains("TASK review pending for delete_record"),
+                    "the batch's task-scoped pendingMessage must win over the agent-level default; got: " + rendered);
+            assertFalse(rendered.contains("AGENT default"),
+                    "the agent-level default must NOT be used when the batch carries an effective config");
+        }
+
+        @Test
+        @DisplayName("TOOL_CALL pause with legacy batch (null effective config) falls back to the agent-level pendingMessage")
+        void toolPauseLegacyBatchFallsBackToAgentLevel() throws Exception {
+            memory.setConversationState(ConversationState.READY);
+
+            var agentLevel = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            agentLevel.setPendingMessage("AGENT default for {toolNames}");
+            memory.setAgentToolApprovalsConfig(agentLevel);
+
+            doAnswer(inv -> {
+                var call = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch.PendingToolCall();
+                call.setToolName("delete_record");
+                var batch = new ai.labs.eddi.engine.memory.model.PendingToolCallBatch();
+                batch.setCalls(List.of(call));
+                // No effectiveToolApprovals — legacy batch.
+                memory.setHitlPendingToolCalls(batch);
+                throw new ConversationPauseException("wf1", 2, "gated tool call",
+                        ConversationPauseException.PauseOrigin.TOOL_CALL);
+            }).when(lifecycleManager).executeLifecycle(any(), any());
+
+            var conv = createConversation();
+            conv.say("delete it", Map.of());
+
+            var output = memory.getCurrentStep().getConversationOutput();
+            String rendered = output.get(ai.labs.eddi.engine.memory.MemoryKeys.OUTPUT_PREFIX).toString();
+            assertTrue(rendered.contains("AGENT default for delete_record"),
+                    "a legacy batch must fall back to the agent-level pendingMessage; got: " + rendered);
+        }
+
+        @Test
         @DisplayName("normal (non-pause) turn DOES purge step-scoped properties — companion to Invariant 9")
         void normalTurnPurgesStepProperties() throws Exception {
             memory.setConversationState(ConversationState.READY);

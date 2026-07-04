@@ -221,6 +221,11 @@ class ConversationMemoryUtilitiesHitlTest {
             batch.setTraceSoFar(List.of(java.util.Map.of("args", CANARY_ARGS)));
             batch.setFingerprint("sha256-" + CANARY_SECRET);
             batch.setCalls(List.of(call));
+            // Fix #1: the batch carries the effective tool-approval config — it must NOT
+            // enter the fix-#4 names-only projection (config, not user data).
+            var effective = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+            effective.setPendingMessage("Awaiting review for {toolNames}");
+            batch.setEffectiveToolApprovals(effective);
             snapshot.setHitlPendingToolCalls(batch);
             return snapshot;
         }
@@ -289,6 +294,10 @@ class ConversationMemoryUtilitiesHitlTest {
             assertNull(batch.getChatTranscriptJson(), "projected batch must not carry the transcript");
             assertNull(batch.getTraceSoFar(), "projected batch must not carry the trace");
             assertNull(batch.getFingerprint(), "projected batch must not carry the fingerprint");
+            // Fix #1: the effective tool-approval config must NOT enter the names-only
+            // projection — the generic read path does not need it.
+            assertNull(batch.getEffectiveToolApprovals(),
+                    "projected batch must not carry the effective tool-approval config");
         }
     }
 

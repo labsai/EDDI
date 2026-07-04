@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.memory.model;
 
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+
 import java.util.List;
 import java.util.Map;
 
@@ -106,6 +108,21 @@ public class PendingToolCallBatch {
     private String fingerprint; // sha256(sorted toolName + "|" + arguments)
     private int autoApproveCount; // consecutive system approvals, carried across re-pauses
     private int pauseCountThisTurn; // enforced against maxPausesPerTurn
+    /**
+     * The EXACT effective tool-approval config that gated this batch — the
+     * task-level override when the paused task set one, else the agent-level
+     * default. Persisted so the post-pause policy resolvers in
+     * {@code ConversationService} (timeout, no-progress, max-auto-approvals) and
+     * {@code Conversation.resolvePendingMessage} read the same task-scoped config
+     * that produced the pause instead of re-deriving from the agent level only.
+     * <p>
+     * Nullable for backward compatibility: a legacy persisted batch (pre-fix) or a
+     * RULE pause leaves this null, and readers fall back to the agent-level config
+     * exactly as before. Deliberately excluded from the fix-#4 names-only
+     * projection ({@code ConversationMemoryUtilities.namesOnlyPendingToolCalls}) —
+     * it is config, not user data, and the generic read path does not need it.
+     */
+    private ToolApprovalsConfig effectiveToolApprovals;
 
     public String getPauseEpoch() {
         return pauseEpoch;
@@ -217,5 +234,13 @@ public class PendingToolCallBatch {
 
     public void setPauseCountThisTurn(int pauseCountThisTurn) {
         this.pauseCountThisTurn = pauseCountThisTurn;
+    }
+
+    public ToolApprovalsConfig getEffectiveToolApprovals() {
+        return effectiveToolApprovals;
+    }
+
+    public void setEffectiveToolApprovals(ToolApprovalsConfig effectiveToolApprovals) {
+        this.effectiveToolApprovals = effectiveToolApprovals;
     }
 }

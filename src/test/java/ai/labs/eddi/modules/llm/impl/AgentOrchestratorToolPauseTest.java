@@ -220,6 +220,13 @@ class AgentOrchestratorToolPauseTest {
         assertTrue(batch.getChatTranscriptJson().contains("calculate"));
 
         assertEquals(1, batch.getPauseCountThisTurn());
+
+        // Fix #1: the batch carries the EXACT effective tool-approval config that
+        // gated it, so the post-pause resolvers (timeout/no-progress/pending-message)
+        // read the task-scoped config instead of re-deriving from the agent level.
+        assertNotNull(batch.getEffectiveToolApprovals(),
+                "the batch must persist the effective tool-approval config that gated it");
+        assertEquals(List.of("calculate"), batch.getEffectiveToolApprovals().getRequireApproval());
     }
 
     @Test

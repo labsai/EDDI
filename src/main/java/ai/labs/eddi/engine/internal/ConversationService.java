@@ -1661,7 +1661,13 @@ public class ConversationService implements IConversationService {
         int carried = prePauseAutoApproveCount + 1;
         newBatch.setAutoApproveCount(carried);
 
-        int maxAutoApprovals = resolveMaxAutoApprovals(memory.getAgentToolApprovalsConfig());
+        // Fix #1: resolve max-auto-approvals + onNoProgress from the config that gated
+        // the RE-PAUSE batch (task-scoped override when present), falling back to the
+        // agent-level default for a legacy/null-field batch.
+        ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig noProgressCfg = newBatch.getEffectiveToolApprovals() != null
+                ? newBatch.getEffectiveToolApprovals()
+                : memory.getAgentToolApprovalsConfig();
+        int maxAutoApprovals = resolveMaxAutoApprovals(noProgressCfg);
         boolean hardThreshold = carried >= 2;
         boolean capReached = carried >= maxAutoApprovals;
         boolean budgetSpent = hardThreshold || capReached;
@@ -1680,7 +1686,7 @@ public class ConversationService implements IConversationService {
                     "auto_approve_cap", newBatch.getFingerprint(), "system:no-progress");
         }
 
-        String onNoProgress = resolveOnNoProgress(memory.getAgentToolApprovalsConfig());
+        String onNoProgress = resolveOnNoProgress(noProgressCfg);
         switch (onNoProgress) {
             case "AUTO_REJECT" -> {
                 recordGuard("no_progress");
@@ -2103,7 +2109,13 @@ public class ConversationService implements IConversationService {
      * by the caller.
      */
     private void applyEffectiveToolTimeoutPolicy(IConversationMemory memory, AgentConfiguration.HitlConfig hitlConfig) {
-        ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovals = hitlConfig.getToolApprovals();
+        // Fix #1: the TOOL-LEVEL source is the config that ACTUALLY gated the paused
+        // batch — the task-level override rides on the batch (persisted by
+        // AgentOrchestrator.buildPendingBatch). Prefer it; fall back to the
+        // agent-level hitlConfig.toolApprovals for a legacy batch (null field) or a
+        // null batch. The inherit-from-outer fallback and the AUTO_APPROVE-demotion
+        // below still read the OUTER hitlConfig — Task 10 semantics unchanged.
+        ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig toolApprovals = effectiveToolApprovals(memory, hitlConfig);
         HitlTimeoutPolicy effectivePolicy;
         String effectiveTimeout;
         if (toolApprovals != null && toolApprovals.getTimeoutPolicy() != null) {
@@ -2129,6 +2141,24 @@ public class ConversationService implements IConversationService {
         }
         memory.setHitlTimeoutPolicy(effectivePolicy.name());
         memory.setHitlApprovalTimeout(effectiveTimeout);
+    }
+
+    /**
+     * Fix #1: resolves the TASK-SCOPED effective tool-approval config for a paused
+     * batch. Returns the config the batch carries (persisted at gate time — the
+     * task-level override when the paused task set one, else the agent-level
+     * default). Falls back to the agent-level {@code hitlConfig.toolApprovals} when
+     * the batch is null (never populated) or carries a null effective config (a
+     * legacy pre-fix batch) — so those paths resolve EXACTLY as before the fix.
+     */
+    private static ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig effectiveToolApprovals(
+                                                                                              IConversationMemory memory,
+                                                                                              AgentConfiguration.HitlConfig hitlConfig) {
+        PendingToolCallBatch batch = memory.getHitlPendingToolCalls();
+        if (batch != null && batch.getEffectiveToolApprovals() != null) {
+            return batch.getEffectiveToolApprovals();
+        }
+        return hitlConfig != null ? hitlConfig.getToolApprovals() : null;
     }
 
     /**

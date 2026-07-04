@@ -506,7 +506,14 @@ public class Conversation implements IConversation {
      */
     private String resolvePendingMessage(IConversationMemory memory) {
         String template = null;
-        var cfg = memory.getAgentToolApprovalsConfig();
+        var batch = memory.getHitlPendingToolCalls();
+        // Fix #1: prefer the task-scoped effective config that ACTUALLY gated this
+        // batch (persisted by AgentOrchestrator.buildPendingBatch) over the agent-level
+        // default. A legacy batch (null effective config) or a null batch falls back to
+        // the agent-level config exactly as before.
+        var cfg = batch != null && batch.getEffectiveToolApprovals() != null
+                ? batch.getEffectiveToolApprovals()
+                : memory.getAgentToolApprovalsConfig();
         if (cfg != null && !isNullOrEmpty(cfg.getPendingMessage())) {
             template = cfg.getPendingMessage();
         }
@@ -514,7 +521,6 @@ public class Conversation implements IConversation {
             template = DEFAULT_PENDING_MESSAGE;
         }
         String names = "";
-        var batch = memory.getHitlPendingToolCalls();
         if (batch != null && batch.getCalls() != null) {
             names = batch.getCalls().stream()
                     .map(c -> c.getToolName())

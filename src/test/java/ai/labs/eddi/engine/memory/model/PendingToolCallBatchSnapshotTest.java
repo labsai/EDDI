@@ -68,6 +68,14 @@ class PendingToolCallBatchSnapshotTest {
         batch.setFingerprint("sha256-xyz");
         batch.setAutoApproveCount(1);
         batch.setPauseCountThisTurn(2);
+
+        var effective = new ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig();
+        effective.setRequireApproval(List.of("delete_*", "mcp:*"));
+        effective.setTimeoutPolicy(ai.labs.eddi.configs.hitl.HitlTimeoutPolicy.AUTO_REJECT);
+        effective.setApprovalTimeout("PT1H");
+        effective.setOnNoProgress("AUTO_REJECT");
+        effective.setPendingMessage("Awaiting review for {toolNames}");
+        batch.setEffectiveToolApprovals(effective);
         return batch;
     }
 
@@ -96,6 +104,15 @@ class PendingToolCallBatchSnapshotTest {
         assertEquals("sha256-xyz", batch.getFingerprint());
         assertEquals(1, batch.getAutoApproveCount());
         assertEquals(2, batch.getPauseCountThisTurn());
+
+        // Fix #1: the effective tool-approval config round-trips on the batch.
+        assertNotNull(batch.getEffectiveToolApprovals());
+        assertEquals(List.of("delete_*", "mcp:*"), batch.getEffectiveToolApprovals().getRequireApproval());
+        assertEquals(ai.labs.eddi.configs.hitl.HitlTimeoutPolicy.AUTO_REJECT,
+                batch.getEffectiveToolApprovals().getTimeoutPolicy());
+        assertEquals("PT1H", batch.getEffectiveToolApprovals().getApprovalTimeout());
+        assertEquals("AUTO_REJECT", batch.getEffectiveToolApprovals().getOnNoProgress());
+        assertEquals("Awaiting review for {toolNames}", batch.getEffectiveToolApprovals().getPendingMessage());
     }
 
     @Test
