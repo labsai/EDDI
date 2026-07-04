@@ -9,14 +9,18 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ConversationS
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.Date;
+import java.util.List;
+import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -180,6 +184,111 @@ class ConversationMemoryUtilitiesHitlTest {
                     snapshot, true, false);
 
             assertNull(simple.getHitlPausedAt());
+        }
+    }
+
+    // =========================================================================
+    // Security: generic simple-snapshot must NOT leak raw args / transcript
+    // =========================================================================
+
+    @Nested
+    @DisplayName("Simple snapshot HITL batch is a names-only projection (security)")
+    class SimpleSnapshotProjectionSecurity {
+
+        private static final String CANARY_SECRET = "sk-live-SECRET-9999";
+        private static final String CANARY_ARGS = "{\"amount\":250,\"apiKey\":\"" + CANARY_SECRET + "\"}";
+        private static final String CANARY_TRANSCRIPT = "[{\"type\":\"AI\",\"text\":\"" + CANARY_SECRET + "\"}]";
+
+        private ConversationMemorySnapshot toolPausedSnapshot() {
+            var snapshot = buildMinimalSnapshot();
+            snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPauseType("TOOL_CALL");
+            snapshot.setHitlPausedAt(Instant.parse("2026-07-04T10:00:00Z"));
+
+            var call = new PendingToolCallBatch.PendingToolCall();
+            call.setCallId("call_abc");
+            call.setToolName("transfer_funds");
+            call.setSource("http");
+            call.setArgumentsRaw(CANARY_ARGS);
+            call.setArgumentsRedacted(CANARY_ARGS);
+            call.setArgsTruncated(false);
+            call.setGateReason("http:transfer_*");
+
+            var batch = new PendingToolCallBatch();
+            batch.setPauseEpoch("epoch-1");
+            batch.setLlmTaskId("task-a");
+            batch.setChatTranscriptJson(CANARY_TRANSCRIPT);
+            batch.setTraceSoFar(List.of(java.util.Map.of("args", CANARY_ARGS)));
+            batch.setFingerprint("sha256-" + CANARY_SECRET);
+            batch.setCalls(List.of(call));
+            snapshot.setHitlPendingToolCalls(batch);
+            return snapshot;
+        }
+
+        @Test
+        @DisplayName("serialized simple snapshot omits raw args, redacted args, transcript, trace, and fingerprint")
+        void rawArgsAndTranscriptNotSerialized() throws Exception {
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(
+                    toolPausedSnapshot(), true, false);
+
+            // Serialize exactly the way the generic read surfaces do (JsonSerialization
+            // wraps the app ObjectMapper over the SimpleConversationMemorySnapshot).
+            // findAndRegisterModules() picks up jackson-datatype-jsr310 for Instant,
+            // matching the production SerializationCustomizer.
+            var json = new ObjectMapper().findAndRegisterModules().writeValueAsString(simple);
+
+            // The canary raw value and the frozen transcript MUST NOT appear anywhere.
+            assertFalse(json.contains(CANARY_SECRET),
+                    "raw secret leaked into generic simple-snapshot JSON: " + json);
+            assertFalse(json.contains(CANARY_TRANSCRIPT),
+                    "chat transcript leaked into generic simple-snapshot JSON");
+            // The heavy/sensitive batch fields must serialize as null (field name may
+            // remain, but never a value).
+            assertTrue(json.contains("\"chatTranscriptJson\":null"),
+                    "transcript must be projected to null in generic simple-snapshot JSON");
+            assertTrue(json.contains("\"traceSoFar\":null"),
+                    "trace must be projected to null in generic simple-snapshot JSON");
+            assertTrue(json.contains("\"fingerprint\":null"),
+                    "fingerprint must be projected to null in generic simple-snapshot JSON");
+            // And per-call argument fields must never carry a value.
+            assertFalse(json.contains("\"argumentsRaw\":\""),
+                    "argumentsRaw value leaked into generic simple-snapshot JSON");
+            assertFalse(json.contains("\"argumentsRedacted\":\""),
+                    "argumentsRedacted value leaked into generic simple-snapshot JSON");
+
+            // But the safe metadata the delegated/group/MCP consumers rely on MUST appear.
+            assertTrue(json.contains("TOOL_CALL"), "pauseType must be present");
+            assertTrue(json.contains("transfer_funds"), "tool NAME must be present");
+        }
+
+        @Test
+        @DisplayName("delegated/MCP consumer still reads tool names from the projected batch")
+        void delegatedConsumerStillReadsToolNames() {
+            var simple = ConversationMemoryUtilities.convertSimpleConversationMemory(
+                    toolPausedSnapshot(), true, false);
+
+            // Mirror exactly what McpConversationTools / ConverseWithAgentTool /
+            // CreateSubAgentTool do: read batch.getCalls() → getToolName().
+            var batch = simple.getHitlPendingToolCalls();
+            assertNotNull(batch, "names-only batch must be present for a TOOL_CALL pause");
+            assertNotNull(batch.getCalls(), "calls must be non-null so consumers can stream them");
+
+            var toolNames = batch.getCalls().stream()
+                    .map(PendingToolCallBatch.PendingToolCall::getToolName)
+                    .filter(Objects::nonNull)
+                    .toList();
+            assertEquals(List.of("transfer_funds"), toolNames);
+
+            // And the projected calls must carry NO sensitive payload.
+            var call = batch.getCalls().getFirst();
+            assertNull(call.getArgumentsRaw(), "projected call must not carry raw args");
+            assertNull(call.getArgumentsRedacted(), "projected call must not carry redacted args");
+            assertEquals("TOOL_CALL", simple.getHitlPauseType());
+
+            // The batch-level heavy fields must be stripped too.
+            assertNull(batch.getChatTranscriptJson(), "projected batch must not carry the transcript");
+            assertNull(batch.getTraceSoFar(), "projected batch must not carry the trace");
+            assertNull(batch.getFingerprint(), "projected batch must not carry the fingerprint");
         }
     }
 
