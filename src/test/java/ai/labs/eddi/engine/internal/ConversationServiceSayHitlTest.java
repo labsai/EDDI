@@ -312,27 +312,30 @@ class ConversationServiceSayHitlTest {
         }
 
         @Test
-        @DisplayName("G1: persisted EXECUTION_INTERRUPTED (cancel ran while queued) → onSkipped, turn not executed")
-        void persistedInterrupted_skips() throws Exception {
+        @DisplayName("G1: persisted EXECUTION_INTERRUPTED is RECOVERABLE → a fresh say runs the turn, not skipped")
+        void persistedInterrupted_recovers() throws Exception {
             IConversation conversation = mock(IConversation.class);
             ConversationResponseHandler handler = mock(ConversationResponseHandler.class);
 
             Callable<Void> queued = acceptTurnAndCaptureCallable(conversation, handler);
 
-            // A cancel flipped the conversation to EXECUTION_INTERRUPTED after this
-            // turn was accepted — the queued turn must not run and resurrect it.
+            // EXECUTION_INTERRUPTED marks an interrupted prior turn (agentTimeout
+            // watchdog expiry, HitlCrashRecoveryObserver parking a stuck IN_PROGRESS
+            // conversation, or a cancel) — NOT a terminal state like ENDED. A fresh say
+            // must run a new turn to self-heal the conversation back to READY, matching
+            // the pre-HITL behavior and the crash-recovery observer's documented
+            // "unlock say()" intent. Skipping it (as the guard previously did) stranded
+            // the conversation's input forever, since nothing else transitions
+            // EXECUTION_INTERRUPTED back to READY.
             doReturn(ConversationState.EXECUTION_INTERRUPTED)
                     .when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            stubRuntimeInline();
 
             queued.call();
 
-            verify(runtime, never()).submitCallable(any(), any(), any());
-            verify(conversation, never()).say(anyString(), any());
-            verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
-
-            ArgumentCaptor<SimpleConversationMemorySnapshot> snapCaptor = ArgumentCaptor.forClass(SimpleConversationMemorySnapshot.class);
-            verify(handler).onSkipped(snapCaptor.capture());
-            assertEquals(ConversationState.EXECUTION_INTERRUPTED, snapCaptor.getValue().getConversationState());
+            // The turn IS executed (dispatched to the runtime) and NOT skipped.
+            verify(runtime).submitCallable(any(), any(), any());
+            verify(handler, never()).onSkipped(any());
         }
     }
 

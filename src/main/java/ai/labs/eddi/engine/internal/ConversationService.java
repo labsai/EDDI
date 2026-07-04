@@ -671,16 +671,28 @@ public class ConversationService implements IConversationService {
             // persisted IN_PROGRESS from outside the resume CAS — breaking the
             // invariant crash recovery relies on. Checked against the loaded
             // (DB-backed) state; false maps to 409 CONFLICT at the REST layer.
-            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN
-                    || conversationMemory.getConversationState() == ConversationState.IN_PROGRESS) {
-                LOGGER.warnf("Undo rejected: conversation %s is in state %s",
-                        conversationId, conversationMemory.getConversationState());
+            ConversationState loadedStateForUndo = conversationMemory.getConversationState();
+            if (loadedStateForUndo == ConversationState.AWAITING_HUMAN
+                    || loadedStateForUndo == ConversationState.IN_PROGRESS) {
+                LOGGER.warnf("Undo rejected: conversation %s is in state %s", conversationId, loadedStateForUndo);
                 return false;
             }
 
             if (conversationMemory.isUndoAvailable()) {
                 conversationMemory.undoLastStep();
-                storeConversationMemory(conversationMemory, environment);
+                // undo/redo run on the REST thread, NOT through the per-conversation
+                // coordinator, so a say turn on this conversation can commit a fresh
+                // pause between the state check above and this store. An unconditional
+                // full-document replace would then clobber that just-persisted
+                // AWAITING_HUMAN snapshot — destroying the pending approval and
+                // orphaning its armed timer. CAS from the loaded (pre-undo) state so
+                // the store lands only if nothing moved the DB state meanwhile; on a
+                // miss the concurrent writer wins and undo reports no-op.
+                if (!storeConversationMemoryIfState(conversationMemory, environment, loadedStateForUndo)) {
+                    LOGGER.warnf("Undo of conversation %s aborted: state changed concurrently (was %s)",
+                            conversationId, loadedStateForUndo);
+                    return false;
+                }
                 return true;
             } else {
                 return false;
@@ -711,16 +723,22 @@ public class ConversationService implements IConversationService {
             // #5: redo during AWAITING_HUMAN would corrupt the HITL bookmark;
             // redo during IN_PROGRESS races an executing resume (see undo).
             // DB-backed state check; false maps to 409 CONFLICT at the REST layer.
-            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN
-                    || conversationMemory.getConversationState() == ConversationState.IN_PROGRESS) {
-                LOGGER.warnf("Redo rejected: conversation %s is in state %s",
-                        conversationId, conversationMemory.getConversationState());
+            ConversationState loadedStateForRedo = conversationMemory.getConversationState();
+            if (loadedStateForRedo == ConversationState.AWAITING_HUMAN
+                    || loadedStateForRedo == ConversationState.IN_PROGRESS) {
+                LOGGER.warnf("Redo rejected: conversation %s is in state %s", conversationId, loadedStateForRedo);
                 return false;
             }
 
             if (conversationMemory.isRedoAvailable()) {
                 conversationMemory.redoLastStep();
-                storeConversationMemory(conversationMemory, environment);
+                // Same second-writer race as undo (see above): CAS from the loaded
+                // state so a concurrent say-turn pause commit is not clobbered.
+                if (!storeConversationMemoryIfState(conversationMemory, environment, loadedStateForRedo)) {
+                    LOGGER.warnf("Redo of conversation %s aborted: state changed concurrently (was %s)",
+                            conversationId, loadedStateForRedo);
+                    return false;
+                }
                 return true;
             } else {
                 return false;
@@ -865,17 +883,27 @@ public class ConversationService implements IConversationService {
             // Queued-say guard: this memory copy was loaded at REST-request time;
             // a previously queued turn may have committed a pause (or a resume may
             // be executing), or the conversation may have been terminally resolved
-            // (ENDED via endConversation, EXECUTION_INTERRUPTED via cancel) in the
-            // meantime. Skip the turn entirely — executing it against the stale
-            // snapshot would end with a full-document store that silently overwrites
-            // the pause (destroying the pending approval and orphaning its timeout
-            // schedule) or RESURRECTS a terminated conversation to READY with
-            // post-termination side effects. The skip notifier completes the
-            // caller's response handler with the persisted state, so the client
-            // gets a prompt, honest answer instead of a watchdog timeout.
+            // (ENDED via endConversation) in the meantime. Skip the turn entirely —
+            // executing it against the stale snapshot would end with a full-document
+            // store that silently overwrites the pause (destroying the pending
+            // approval and orphaning its timeout schedule) or RESURRECTS a terminated
+            // conversation to READY with post-termination side effects. The skip
+            // notifier completes the caller's response handler with the persisted
+            // state, so the client gets a prompt, honest answer instead of a watchdog
+            // timeout.
+            //
+            // EXECUTION_INTERRUPTED is deliberately NOT skipped: unlike ENDED it is a
+            // RECOVERABLE marker meaning "the previous turn did not finish" (an
+            // agentTimeout watchdog expiry, or HitlCrashRecoveryObserver parking a
+            // stuck IN_PROGRESS conversation with the explicit intent to "unlock
+            // say()"). A fresh say must run a new turn to self-heal the conversation
+            // back to READY — mirroring the pre-HITL behavior where a retry after an
+            // interrupt executed normally. Skipping it would strand the conversation's
+            // input forever, since nothing else transitions EXECUTION_INTERRUPTED back
+            // to READY.
             ConversationState persistedState = conversationMemoryStore.getConversationState(conversationId);
             if (persistedState == ConversationState.AWAITING_HUMAN || persistedState == ConversationState.IN_PROGRESS
-                    || persistedState == ConversationState.ENDED || persistedState == ConversationState.EXECUTION_INTERRUPTED) {
+                    || persistedState == ConversationState.ENDED) {
                 conversationMemory.setConversationState(persistedState);
                 contextLogger.setLoggingContext(loggingContext);
                 LOGGER.warnf("Skipping queued turn for conversation %s: persisted state is %s (turn arrived before the state change)",
@@ -903,7 +931,7 @@ public class ConversationService implements IConversationService {
             populateToolApprovalsConfig(conversationMemory);
             try {
                 runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory,
-                        executeConversation, memoryStateAtSubmit);
+                        executeConversation, memoryStateAtSubmit, persistedState);
             } finally {
                 // value-conditional: only the leg that registered this memory may
                 // unregister — a plain remove(key) could evict a NEWER execution's
@@ -916,7 +944,8 @@ public class ConversationService implements IConversationService {
 
     private void runGuardedConversationStep(Map<String, String> loggingContext, String conversationId,
                                             Environment environment, IConversationMemory conversationMemory,
-                                            Callable<Void> executeConversation, ConversationState memoryStateAtSubmit) {
+                                            Callable<Void> executeConversation, ConversationState memoryStateAtSubmit,
+                                            ConversationState preTurnPersistedState) {
         waitForExecutionFinishOrTimeout(loggingContext, conversationId,
                 runtime.submitCallable(executeConversation, new IRuntime.IFinishedExecution<>() {
                     @Override
@@ -972,21 +1001,53 @@ public class ConversationService implements IConversationService {
                                 // check and this store, and an unconditional full-document
                                 // replace would then overwrite the terminal state with a
                                 // pending approval — resurrecting a terminated conversation
-                                // with a live timeout. Persist ONLY while the conversation is
-                                // still in READY — the non-terminal running state a say turn
-                                // owns in the DB (the say path never CAS's READY->IN_PROGRESS;
-                                // Conversation.runStep sets IN_PROGRESS in-memory only, and the
-                                // queued-say guard already ensured the persisted state was READY
-                                // when this turn began). The atomic compare-and-store lets the
-                                // terminal writer win; on a CAS miss, discard the pause outcome
-                                // (no counter, no schedule) so the terminal state stands —
-                                // mirrors the resume path's storeConversationMemoryIfState guard.
+                                // with a live timeout. Persist ONLY while the conversation
+                                // still holds the non-terminal state this turn started in —
+                                // the say path never CAS's the DB state (Conversation.runStep
+                                // sets IN_PROGRESS in-memory only), so the persisted state is
+                                // whatever it was when the queued-say guard let this turn
+                                // through: READY normally, or ERROR / EXECUTION_INTERRUPTED on
+                                // a retry after a failed or interrupted prior turn (both are
+                                // legal say-start states the guard deliberately admits). CAS
+                                // from that exact baseline so a concurrent end/cancel that
+                                // moved the state to a terminal value still wins; on a CAS
+                                // miss, discard the pause outcome (no counter, no schedule) so
+                                // the terminal state stands — mirrors the resume path's
+                                // storeConversationMemoryIfState guard.
                                 boolean persisted = storeConversationMemoryIfState(
-                                        conversationMemory, environment, ConversationState.READY);
+                                        conversationMemory, environment, preTurnPersistedState);
                                 if (!persisted) {
                                     contextLogger.setLoggingContext(loggingContext);
                                     LOGGER.infof("Pause of conversation %s not persisted: a concurrent end/cancel moved "
-                                            + "it off READY — discarding the pause outcome so the terminal state wins",
+                                            + "it off %s — discarding the pause outcome so the terminal state wins",
+                                            conversationId, preTurnPersistedState);
+                                    return;
+                                }
+                                // M2: close the cancel-during-commit window. A cancel that
+                                // signalled setCancelled(true) AFTER the top-of-onComplete
+                                // check but BEFORE the store above returned CANCELLED to its
+                                // caller via cancelConversation's in-flight-signal branch
+                                // WITHOUT flipping our (still-non-terminal) DB state — so the
+                                // pause we just committed would strand as a live approval with
+                                // an armed timer on a conversation the caller was told is
+                                // cancelled. Now that the pause is durable, re-check the flag:
+                                // if signalled, convert the committed AWAITING_HUMAN pause to
+                                // EXECUTION_INTERRUPTED and skip the counter/schedule so nothing
+                                // is armed and no approval is stranded.
+                                if (conversationMemory.isCancelled()) {
+                                    contextLogger.setLoggingContext(loggingContext);
+                                    if (conversationMemoryStore.compareAndSetState(conversationId,
+                                            ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED)) {
+                                        cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
+                                        try {
+                                            conversationMemoryStore.clearHitlBookmark(conversationId);
+                                        } catch (Exception e) {
+                                            LOGGER.warnf("Failed to clear HITL bookmark on cancel-raced pause of %s: %s",
+                                                    conversationId, e.getMessage());
+                                        }
+                                    }
+                                    LOGGER.infof("Cancel raced the pause commit for conversation %s — converted the "
+                                            + "committed pause to EXECUTION_INTERRUPTED (no counter, no timeout armed)",
                                             conversationId);
                                     return;
                                 }
@@ -2260,10 +2321,16 @@ public class ConversationService implements IConversationService {
 
             Duration timeout = Duration.parse(timeoutStr);
             Instant pausedAt = memory.getHitlPausedAt();
-            Instant fireAt = pausedAt != null ? pausedAt.plus(timeout) : Instant.now().plus(timeout);
-            Instant earliest = Instant.now().plus(HITL_REARM_GRACE);
-            if (fireAt.isBefore(earliest)) {
-                fireAt = earliest;
+            Instant now = Instant.now();
+            Instant fireAt = pausedAt != null ? pausedAt.plus(timeout) : now.plus(timeout);
+            // Clamp ONLY a past-due deadline (a restore-after-failed-resume or crash
+            // recovery re-arm whose original pausedAt+timeout already elapsed) up to a
+            // small grace window. A FRESH pause has pausedAt ≈ now, so fireAt is in the
+            // future and must be honored as configured — clamping it to the grace floor
+            // would silently raise any approvalTimeout shorter than the grace (e.g.
+            // PT30S, which HitlConfigValidation explicitly permits) to 2 minutes.
+            if (fireAt.isBefore(now)) {
+                fireAt = now.plus(HITL_REARM_GRACE);
             }
 
             var schedule = new ScheduleConfiguration();
