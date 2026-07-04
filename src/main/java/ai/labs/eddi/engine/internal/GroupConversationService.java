@@ -515,8 +515,9 @@ public class GroupConversationService implements IGroupConversationService {
             timerGroupDiscussion.record(System.nanoTime() - startTime, TimeUnit.NANOSECONDS);
             // NEW-2: Always remove the control token — paused conversations have no
             // running thread, so a lingering token causes cancel-of-paused to take
-            // the no-op signal branch. Resume re-registers a fresh token.
-            activeTokens.remove(gc.getId());
+            // the no-op signal branch. Resume re-registers a fresh token. Re-check the
+            // removed token so a cancel that raced this remove is not silently dropped.
+            removeTokenAndConvertIfSignalled(gc, listener);
             // Only clean up ephemeral agents when the discussion is truly done
             if (gc.getState() != GroupConversationState.AWAITING_APPROVAL) {
                 lastVerifiedIndex.remove(gc.getId());
@@ -671,7 +672,28 @@ public class GroupConversationService implements IGroupConversationService {
      * block.
      */
     private void convertPauseToCancelIfSignalled(GroupConversation gc, GroupDiscussionEventListener listener) {
-        var token = activeTokens.get(gc.getId());
+        convertPauseToCancelIfSignalled(gc, listener, activeTokens.get(gc.getId()));
+    }
+
+    /**
+     * Removes the control token AND re-checks the removed instance for a cancel
+     * signal. A cancel that landed AFTER an in-leg
+     * {@code convertPauseToCancelIfSignalled} check but BEFORE this remove would
+     * otherwise be dropped with the discarded token, leaving a "cancelled"
+     * discussion stuck AWAITING_APPROVAL with an armed timer (cancelDiscussion
+     * reported success on the token path and did not touch the DB/schedule).
+     * Re-checking the removed instance closes that window; signals arriving after
+     * the remove take cancelDiscussion's DB-CAS path instead.
+     */
+    private void removeTokenAndConvertIfSignalled(GroupConversation gc, GroupDiscussionEventListener listener) {
+        var removed = activeTokens.remove(gc.getId());
+        if (removed != null && removed.isCancelled() && gc.getState() == GroupConversationState.AWAITING_APPROVAL) {
+            convertPauseToCancelIfSignalled(gc, listener, removed);
+        }
+    }
+
+    private void convertPauseToCancelIfSignalled(GroupConversation gc, GroupDiscussionEventListener listener,
+                                                 DiscussionControlToken token) {
         if (token == null || !token.isCancelled()) {
             return;
         }
@@ -731,10 +753,15 @@ public class GroupConversationService implements IGroupConversationService {
 
             java.time.Duration timeout = java.time.Duration.parse(timeoutStr);
             Instant pausedAt = gc.getPausedAt();
-            Instant fireAt = pausedAt != null ? pausedAt.plus(timeout) : Instant.now().plus(timeout);
-            Instant earliest = Instant.now().plus(GROUP_HITL_REARM_GRACE);
-            if (fireAt.isBefore(earliest)) {
-                fireAt = earliest;
+            Instant now = Instant.now();
+            Instant fireAt = pausedAt != null ? pausedAt.plus(timeout) : now.plus(timeout);
+            // Clamp ONLY a past-due deadline (crash recovery / restore-after-failed-
+            // resume re-arm) up to the grace window. A FRESH pause has pausedAt ≈ now,
+            // so honor its configured timeout as-is — clamping it to the grace floor
+            // would silently raise any sub-2min approvalTimeout to 2 minutes (parity
+            // with the regular surface's scheduleHitlTimeout fix).
+            if (fireAt.isBefore(now)) {
+                fireAt = now.plus(GROUP_HITL_REARM_GRACE);
             }
 
             var schedule = new ScheduleConfiguration();
@@ -2949,9 +2976,9 @@ public class GroupConversationService implements IGroupConversationService {
                         // operator can fix the config and approve again, or cancel.
                         restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, groupConfig,
                                 savedTimeoutPolicy, savedApprovalTimeout);
-                        // A cancel signalled in this window must win over the restore
-                        convertPauseToCancelIfSignalled(gc, listener);
-                        activeTokens.remove(gc.getId());
+                        // A cancel signalled in this window must win over the restore —
+                        // remove-and-recheck so a signal racing the remove is not dropped.
+                        removeTokenAndConvertIfSignalled(gc, listener);
                         if (listener != null) {
                             listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(driftMessage));
                         }
@@ -2965,9 +2992,9 @@ public class GroupConversationService implements IGroupConversationService {
                 // terminally — symmetric with the regular surface.
                 restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, null,
                         savedTimeoutPolicy, savedApprovalTimeout);
-                // A cancel signalled in this window must win over the restore
-                convertPauseToCancelIfSignalled(gc, listener);
-                activeTokens.remove(gc.getId());
+                // A cancel signalled in this window must win over the restore —
+                // remove-and-recheck so a signal racing the remove is not dropped.
+                removeTokenAndConvertIfSignalled(gc, listener);
                 if (listener != null) {
                     listener.onGroupError(new GroupConversationEventSink.GroupErrorEvent(
                             "Resume failed: " + e.getMessage() + " — the discussion remains awaiting approval; retry"));
