@@ -519,12 +519,12 @@ class ConversationServiceTest {
         void undoAvailable_returnsTrue() throws Exception {
             var snapshot = createSnapshotWithMultipleSteps(AGENT_ID);
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
-            doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            doReturn(true).when(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
 
             boolean result = conversationService.undo(ENV, AGENT_ID, CONVERSATION_ID);
 
             assertTrue(result);
-            verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
         }
 
         @Test
@@ -553,12 +553,12 @@ class ConversationServiceTest {
         void redoAvailable_returnsTrue() throws Exception {
             var snapshot = createSnapshotWithRedoCache(AGENT_ID);
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
-            doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            doReturn(true).when(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
 
             boolean result = conversationService.redo(ENV, AGENT_ID, CONVERSATION_ID);
 
             assertTrue(result);
-            verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
         }
 
         @Test
@@ -802,12 +802,12 @@ class ConversationServiceTest {
             var snapshot = createSnapshotWithMultipleSteps(AGENT_ID);
             snapshot.setEnvironment(ENV);
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
-            doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            doReturn(true).when(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
 
             boolean result = conversationService.undo(CONVERSATION_ID);
 
             assertTrue(result);
-            verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
         }
 
         @Test
@@ -833,12 +833,12 @@ class ConversationServiceTest {
             var snapshot = createSnapshotWithRedoCache(AGENT_ID);
             snapshot.setEnvironment(ENV);
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
-            doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            doReturn(true).when(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
 
             boolean result = conversationService.redo(CONVERSATION_ID);
 
             assertTrue(result);
-            verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
         }
 
         @Test

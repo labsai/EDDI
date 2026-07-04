@@ -204,13 +204,16 @@ class ConversationServiceCoverageTest {
             var snapshot = createSnapshotWithSteps(2);
             when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID))
                     .thenReturn(snapshot);
-            when(conversationMemoryStore.storeConversationMemorySnapshot(any()))
-                    .thenReturn(CONVERSATION_ID);
+            // undo now uses a conditional store (CAS from the loaded READY state) instead
+            // of an unconditional replace, so a concurrent say-turn pause commit is not
+            // clobbered; a successful CAS returns true.
+            when(conversationMemoryStore.storeConversationMemorySnapshotIfState(any(), any()))
+                    .thenReturn(true);
 
             boolean result = conversationService.undo(ENV, AGENT_ID, CONVERSATION_ID);
 
             assertTrue(result);
-            verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), any());
         }
 
         @Test
