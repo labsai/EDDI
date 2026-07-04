@@ -484,9 +484,12 @@ public class SlackEventHandler {
         // The button value carries the owning integration name so the decision is
         // bound to THIS integration at the interactivity endpoint (IDOR-safe).
         String actionValue = SlackHitlSupport.buildActionValue(integration.getName(), conversationId);
+        String pauseType = bookmark != null ? bookmark.getHitlPauseType() : null;
+        var pendingToolCalls = bookmark != null ? bookmark.getHitlPendingToolCalls() : null;
         var blocks = SlackHitlSupport.buildApprovalBlocks(
                 "⏸️ Conversation awaiting approval", "Conversation", conversationId,
-                agentId, pauseReason, timeoutInfo, actionValue, includeButtons);
+                agentId, pauseReason, timeoutInfo, actionValue, includeButtons,
+                pauseType, pendingToolCalls);
         String fallback = "Conversation " + conversationId + " is awaiting human approval.";
 
         // H6: never send "Bearer null". If neither the resolved integration token

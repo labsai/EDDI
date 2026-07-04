@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.modules.output.model.OutputItem;
 
@@ -55,6 +56,23 @@ public final class SlackHitlSupport {
      * can no longer let one integration's secret govern another's decision).
      */
     public static final String VALUE_SEPARATOR = "|";
+
+    /**
+     * {@code hitlPauseType} value for a tool-call gate (vs. a behavior-rule pause).
+     */
+    public static final String PAUSE_TYPE_TOOL_CALL = "TOOL_CALL";
+
+    /**
+     * Max pending tool calls rendered as individual context blocks before
+     * collapsing into "+N more".
+     */
+    private static final int MAX_RENDERED_TOOL_CALLS = 5;
+
+    /**
+     * Display truncation applied to {@code argumentsRedacted} in the approval card
+     * ONLY.
+     */
+    private static final int TOOL_ARGS_DISPLAY_MAX_CHARS = 300;
 
     /** In-thread notice posted when a conversation enters AWAITING_HUMAN. */
     public static final String PAUSE_NOTICE = "⏸️ This conversation is awaiting human approval.";
@@ -189,6 +207,41 @@ public final class SlackHitlSupport {
     public static List<Map<String, Object>> buildApprovalBlocks(
                                                                 String title, String subjectLabel, String subjectId, String agentLabel,
                                                                 String pauseReason, String timeoutInfo, String actionValue, boolean includeButtons) {
+        return buildApprovalBlocks(title, subjectLabel, subjectId, agentLabel, pauseReason,
+                timeoutInfo, actionValue, includeButtons, null, null);
+    }
+
+    /**
+     * Build the interactive approval-notification blocks for a paused
+     * conversation/group, additionally rendering pending-tool-call detail when the
+     * pause is a tool-call gate.
+     * <p>
+     * When {@code pauseType} equals {@link #PAUSE_TYPE_TOOL_CALL} and
+     * {@code pendingToolCalls} carries at least one call, one context block per
+     * call is appended (max {@value #MAX_RENDERED_TOOL_CALLS}, then a single "+N
+     * more" line): {@code "<toolName> — <argumentsRedacted truncated to 300
+     * chars>"}. {@code argumentsRedacted} is already redaction-filtered at batch
+     * build time (see {@code PendingToolCallBatch}) — the 300-char DISPLAY
+     * truncation happens here, and only here. This intentionally relaxes the
+     * names-only data-minimization stance of the plain overload above, but ONLY for
+     * the approval channel: a reviewer cannot responsibly approve
+     * {@code transfer_funds} without seeing the amount. The raw (unredacted)
+     * argument value is NEVER accessed here.
+     * <p>
+     * For a RULE pause (any other {@code pauseType}, including {@code null}) or a
+     * {@code null}/empty batch, this renders identically to the plain overload — no
+     * tool-detail blocks, no behavior change.
+     *
+     * @param pauseType
+     *            the bookmark's {@code hitlPauseType} ({@code "TOOL_CALL"},
+     *            {@code "RULE"}, or {@code null})
+     * @param pendingToolCalls
+     *            the bookmark's pending tool-call batch (may be {@code null})
+     */
+    public static List<Map<String, Object>> buildApprovalBlocks(
+                                                                String title, String subjectLabel, String subjectId, String agentLabel,
+                                                                String pauseReason, String timeoutInfo, String actionValue, boolean includeButtons,
+                                                                String pauseType, PendingToolCallBatch pendingToolCalls) {
 
         var blocks = new ArrayList<Map<String, Object>>();
 
@@ -210,6 +263,10 @@ public final class SlackHitlSupport {
         fieldsSection.put("fields", fields);
         blocks.add(fieldsSection);
 
+        if (PAUSE_TYPE_TOOL_CALL.equals(pauseType)) {
+            blocks.addAll(buildToolCallDetailBlocks(pendingToolCalls));
+        }
+
         if (includeButtons) {
             var actions = new LinkedHashMap<String, Object>();
             actions.put("type", "actions");
@@ -223,6 +280,45 @@ public final class SlackHitlSupport {
         }
 
         return blocks;
+    }
+
+    /**
+     * Build one context block per pending tool call (max
+     * {@value #MAX_RENDERED_TOOL_CALLS}, then a single "+N more" block). Returns an
+     * empty list when {@code batch} is null or has no calls — never throws.
+     */
+    private static List<Map<String, Object>> buildToolCallDetailBlocks(PendingToolCallBatch batch) {
+        if (batch == null || batch.getCalls() == null || batch.getCalls().isEmpty()) {
+            return List.of();
+        }
+        var calls = batch.getCalls();
+        var detailBlocks = new ArrayList<Map<String, Object>>();
+        int rendered = Math.min(calls.size(), MAX_RENDERED_TOOL_CALLS);
+        for (int i = 0; i < rendered; i++) {
+            var call = calls.get(i);
+            String toolName = safe(call.getToolName());
+            String args = truncateForDisplay(call.getArgumentsRedacted());
+            detailBlocks.add(context(toolName + " — " + args));
+        }
+        int remaining = calls.size() - rendered;
+        if (remaining > 0) {
+            detailBlocks.add(context("+" + remaining + " more"));
+        }
+        return detailBlocks;
+    }
+
+    /**
+     * Truncate an already-redacted argument string to
+     * {@value #TOOL_ARGS_DISPLAY_MAX_CHARS} characters for approval-card display.
+     * This is a DISPLAY-only truncation distinct from the byte caps already applied
+     * to {@code argumentsRedacted} at batch build time.
+     */
+    private static String truncateForDisplay(String argumentsRedacted) {
+        String text = safe(argumentsRedacted);
+        if (text.length() <= TOOL_ARGS_DISPLAY_MAX_CHARS) {
+            return text;
+        }
+        return text.substring(0, TOOL_ARGS_DISPLAY_MAX_CHARS) + "…";
     }
 
     /**
