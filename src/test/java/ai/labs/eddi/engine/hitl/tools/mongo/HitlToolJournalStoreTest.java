@@ -14,6 +14,8 @@ import com.mongodb.WriteError;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.BsonDocument;
 import org.bson.Document;
@@ -22,10 +24,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Date;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -71,11 +76,37 @@ class HitlToolJournalStoreTest {
     }
 
     @Test
-    @DisplayName("constructor creates unique compound index and TTL index")
+    @DisplayName("constructor creates a unique compound index on (conversationId, pauseEpoch, callId)")
     void constructorCreatesIndexes() {
-        // Two createIndex calls: unique compound (conversationId, pauseEpoch, callId)
-        // and TTL on executedAt.
-        verify(collection, times(2)).createIndex(any(Bson.class), any());
+        // The at-most-once guarantee rests on the UNIQUE compound index — assert its
+        // key composition and unique flag specifically (the exact number of
+        // createIndex calls may change as the legacy TTL is dropped and a new TTL
+        // index is created, so we do not pin times(N)).
+        var keyCaptor = ArgumentCaptor.forClass(Bson.class);
+        var optionsCaptor = ArgumentCaptor.forClass(IndexOptions.class);
+        verify(collection, atLeastOnce()).createIndex(keyCaptor.capture(), optionsCaptor.capture());
+
+        var keys = keyCaptor.getAllValues();
+        var options = optionsCaptor.getAllValues();
+
+        IndexOptions uniqueOptions = null;
+        Bson uniqueKey = null;
+        for (int i = 0; i < options.size(); i++) {
+            if (Boolean.TRUE.equals(options.get(i).isUnique())) {
+                uniqueOptions = options.get(i);
+                uniqueKey = keys.get(i);
+                break;
+            }
+        }
+
+        assertNotNull(uniqueOptions, "a unique index must be created");
+        assertTrue(uniqueOptions.isUnique(), "the key index must be unique");
+
+        BsonDocument renderedKey = uniqueKey
+                .toBsonDocument(Document.class, com.mongodb.MongoClientSettings.getDefaultCodecRegistry());
+        assertEquals(List.of("conversationId", "pauseEpoch", "callId"),
+                List.copyOf(renderedKey.keySet()),
+                "unique index must compose exactly (conversationId, pauseEpoch, callId) in order");
     }
 
     @Nested
@@ -112,7 +143,28 @@ class HitlToolJournalStoreTest {
 
             assertTrue(firstClaim);
             assertTrue(secondClaim);
-            verify(collection, times(2)).insertOne(any(Document.class));
+
+            // Capture both inserted documents and assert the pauseEpoch field is
+            // actually written and distinguishes the two re-pauses — proving the key
+            // includes pauseEpoch, not just callId.
+            var docCaptor = ArgumentCaptor.forClass(Document.class);
+            verify(collection, times(2)).insertOne(docCaptor.capture());
+            var docs = docCaptor.getAllValues();
+            assertEquals("epoch-1", docs.get(0).getString("pauseEpoch"));
+            assertEquals("epoch-2", docs.get(1).getString("pauseEpoch"));
+        }
+
+        @Test
+        @DisplayName("writes claimedAt as a java.util.Date so the TTL monitor honors it")
+        void writesClaimedAtAsDate() {
+            store.tryClaim("conv-1", "epoch-1", "call-1", "toolA", "user-1");
+
+            var docCaptor = ArgumentCaptor.forClass(Document.class);
+            verify(collection).insertOne(docCaptor.capture());
+            Object claimedAt = docCaptor.getValue().get("claimedAt");
+            assertNotNull(claimedAt, "every entry must carry claimedAt for TTL expiry");
+            assertInstanceOf(Date.class, claimedAt,
+                    "claimedAt must be a BSON Date (java.util.Date) — an int64 is ignored by the TTL monitor");
         }
 
         @Test
@@ -260,6 +312,47 @@ class HitlToolJournalStoreTest {
             assertEquals(Status.EXECUTED, result.get().status());
             assertEquals("the result", result.get().resultCapped());
             assertNotNull(result.get().executedAt());
+        }
+
+        @Test
+        @DisplayName("reads executedAt stored as a BSON Date (the new format)")
+        void readsExecutedAtStoredAsDate() {
+            Instant when = Instant.now();
+            Document doc = new Document()
+                    .append("conversationId", "conv-1")
+                    .append("pauseEpoch", "epoch-1")
+                    .append("callId", "call-1")
+                    .append("toolName", "toolA")
+                    .append("status", Status.EXECUTED.name())
+                    .append("resultCapped", "the result")
+                    .append("executedAt", Date.from(when))
+                    .append("decidedBy", "user-1");
+            doReturn(findIterable).when(collection).find(any(Bson.class));
+            doReturn(doc).when(findIterable).first();
+
+            Optional<JournalEntry> result = store.find("conv-1", "epoch-1", "call-1");
+
+            assertTrue(result.isPresent());
+            assertNotNull(result.get().executedAt());
+            assertEquals(when.toEpochMilli(), result.get().executedAt().toEpochMilli());
+        }
+    }
+
+    @Nested
+    @DisplayName("deleteByConversationId")
+    class DeleteByConversationId {
+
+        @Test
+        @DisplayName("deletes all entries for the conversation and returns the count")
+        void deletesAndReturnsCount() {
+            DeleteResult deleteResult = mock(DeleteResult.class);
+            doReturn(4L).when(deleteResult).getDeletedCount();
+            doReturn(deleteResult).when(collection).deleteMany(any(Bson.class));
+
+            long deleted = store.deleteByConversationId("conv-1");
+
+            assertEquals(4L, deleted);
+            verify(collection).deleteMany(any(Bson.class));
         }
     }
 }

@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IAttachmentStorage;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
@@ -54,6 +55,7 @@ public class GdprComplianceService {
     private final IAuditStore auditStore;
     private final AuditLedgerService auditLedgerService;
     private final Instance<IAttachmentStorage> attachmentStorageInstance;
+    private final IHitlToolJournalStore hitlToolJournalStore;
 
     @Inject
     public GdprComplianceService(IUserMemoryStore userMemoryStore,
@@ -62,7 +64,8 @@ public class GdprComplianceService {
             IDatabaseLogs databaseLogs,
             IAuditStore auditStore,
             AuditLedgerService auditLedgerService,
-            Instance<IAttachmentStorage> attachmentStorageInstance) {
+            Instance<IAttachmentStorage> attachmentStorageInstance,
+            IHitlToolJournalStore hitlToolJournalStore) {
         this.userMemoryStore = userMemoryStore;
         this.conversationMemoryStore = conversationMemoryStore;
         this.userConversationStore = userConversationStore;
@@ -70,6 +73,7 @@ public class GdprComplianceService {
         this.auditStore = auditStore;
         this.auditLedgerService = auditLedgerService;
         this.attachmentStorageInstance = attachmentStorageInstance;
+        this.hitlToolJournalStore = hitlToolJournalStore;
     }
 
     /**
@@ -79,11 +83,18 @@ public class GdprComplianceService {
      * <ol>
      * <li>Delete all persistent user memories</li>
      * <li>Delete all binary attachments for user conversations</li>
+     * <li>Delete all HITL tool execution journal entries for user
+     * conversations</li>
      * <li>Delete all conversation memory snapshots</li>
      * <li>Delete all managed conversation mappings</li>
      * <li>Pseudonymize database log entries</li>
      * <li>Pseudonymize audit ledger entries</li>
      * </ol>
+     * <p>
+     * The journal deletion (step 3) runs <em>before</em> the conversation snapshots
+     * are deleted (step 4) because it resolves the conversation ids from
+     * {@link IConversationMemoryStore#getConversationIdsByUserId(String)}, which is
+     * only meaningful while those conversations still exist.
      *
      * @param userId
      *            the user to erase
@@ -123,7 +134,25 @@ public class GdprComplianceService {
             LOGGER.errorf(e, "[GDPR] Failed to delete attachments [%s]", pseudonym);
         }
 
-        // 3. Delete conversation memory snapshots
+        // 3. Delete HITL tool execution journal entries for user conversations.
+        // Must run BEFORE the conversations themselves are deleted (step 4), since
+        // the conversation ids are resolved by userId from the memory store.
+        long journalEntriesDeleted = 0;
+        try {
+            var conversationIds = conversationMemoryStore.getConversationIdsByUserId(userId);
+            for (String convId : conversationIds) {
+                journalEntriesDeleted += hitlToolJournalStore.deleteByConversationId(convId);
+            }
+            if (journalEntriesDeleted > 0) {
+                LOGGER.infof("[GDPR] Deleted %d HITL tool journal entries [%s]",
+                        journalEntriesDeleted, pseudonym);
+            }
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[GDPR] Failed to delete HITL tool journal entries [%s]",
+                    pseudonym);
+        }
+
+        // 4. Delete conversation memory snapshots
         long conversationsDeleted = 0;
         try {
             conversationsDeleted = conversationMemoryStore
@@ -135,7 +164,7 @@ public class GdprComplianceService {
                     pseudonym);
         }
 
-        // 4. Delete managed conversation mappings
+        // 5. Delete managed conversation mappings
         long mappingsDeleted = 0;
         try {
             mappingsDeleted = userConversationStore.deleteAllForUser(userId);
@@ -146,7 +175,7 @@ public class GdprComplianceService {
                     pseudonym);
         }
 
-        // 5. Pseudonymize database logs (not deleted — operational data)
+        // 6. Pseudonymize database logs (not deleted — operational data)
         long logsPseudonymized = 0;
         try {
             logsPseudonymized = databaseLogs.pseudonymizeByUserId(userId, pseudonym);
@@ -157,7 +186,7 @@ public class GdprComplianceService {
                     pseudonym);
         }
 
-        // 6. Pseudonymize audit ledger (retained under Art. 17(3)(e))
+        // 7. Pseudonymize audit ledger (retained under Art. 17(3)(e))
         long auditPseudonymized = 0;
         try {
             auditPseudonymized = auditStore.pseudonymizeByUserId(userId, pseudonym);
@@ -182,6 +211,7 @@ public class GdprComplianceService {
         submitComplianceAuditEntry("GDPR_ERASURE", pseudonym, Map.of(
                 "memoriesDeleted", memoriesDeleted,
                 "attachmentsDeleted", attachmentsDeleted,
+                "journalEntriesDeleted", journalEntriesDeleted,
                 "conversationsDeleted", conversationsDeleted,
                 "mappingsDeleted", mappingsDeleted,
                 "logsPseudonymized", logsPseudonymized,

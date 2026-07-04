@@ -38,4 +38,11 @@ public interface IHitlToolJournalStore {
     void markExecuted(String conversationId, String pauseEpoch, String callId, String resultCapped);
 
     Optional<JournalEntry> find(String conversationId, String pauseEpoch, String callId);
+
+    /**
+     * Delete all journal entries for a conversation (GDPR erasure cascade).
+     *
+     * @return the number of entries deleted
+     */
+    long deleteByConversationId(String conversationId);
 }

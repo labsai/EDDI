@@ -5,11 +5,13 @@
 package ai.labs.eddi.engine.hitl.tools.mongo;
 
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
+import com.mongodb.MongoCommandException;
 import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
+import org.bson.conversions.Bson;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -20,6 +22,7 @@ import org.jboss.logging.Logger;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Date;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
@@ -54,6 +57,11 @@ public class HitlToolJournalStore implements IHitlToolJournalStore {
 
     private static final int RESULT_CAPPED_MAX_BYTES = 32 * 1024;
     private static final int DUPLICATE_KEY_ERROR_CODE = 11000;
+    private static final int INDEX_OPTIONS_CONFLICT_ERROR_CODE = 85;
+
+    private static final String KEY_INDEX_NAME = "idx_journal_key";
+    private static final String LEGACY_TTL_INDEX_NAME = "idx_journal_ttl";
+    private static final String TTL_INDEX_NAME = "idx_journal_ttl_claimed";
 
     private static final String CONVERSATION_ID = "conversationId";
     private static final String PAUSE_EPOCH = "pauseEpoch";
@@ -62,6 +70,7 @@ public class HitlToolJournalStore implements IHitlToolJournalStore {
     private static final String STATUS = "status";
     private static final String RESULT_CAPPED = "resultCapped";
     private static final String EXECUTED_AT = "executedAt";
+    private static final String CLAIMED_AT = "claimedAt";
     private static final String DECIDED_BY = "decidedBy";
 
     private final MongoCollection<Document> collection;
@@ -73,13 +82,54 @@ public class HitlToolJournalStore implements IHitlToolJournalStore {
 
         collection.createIndex(
                 Indexes.compoundIndex(Indexes.ascending(CONVERSATION_ID), Indexes.ascending(PAUSE_EPOCH), Indexes.ascending(CALL_ID)),
-                new IndexOptions().name("idx_journal_key").unique(true));
+                new IndexOptions().name(KEY_INDEX_NAME).unique(true));
 
         long retentionSeconds = journalRetention == null || journalRetention.isNegative() || journalRetention.isZero()
                 ? Duration.ofDays(30).toSeconds()
                 : journalRetention.toSeconds();
-        collection.createIndex(Indexes.ascending(EXECUTED_AT),
-                new IndexOptions().name("idx_journal_ttl").expireAfter(retentionSeconds, TimeUnit.SECONDS));
+
+        // Drop the legacy TTL index that anchored on executedAt (stored as int64,
+        // which the TTL monitor ignores, and which crash-orphaned EXECUTING claims
+        // never even got). Absent on fresh deployments, so ignore a missing index.
+        dropIndexIfPresent(LEGACY_TTL_INDEX_NAME);
+
+        // Anchor the retention TTL on claimedAt (a BSON Date set on every entry in
+        // tryClaim), so BOTH completed entries and crash-orphaned EXECUTING claims
+        // expire after the retention window.
+        createTtlIndexWithConflictRetry(retentionSeconds);
+    }
+
+    /**
+     * Create the claimedAt TTL index, recreating it if the retention value changed
+     * since last startup. Mongo raises IndexOptionsConflict (error code 85) when an
+     * index with the same name/key already exists but with different options (here,
+     * a different {@code expireAfterSeconds}); in that case drop and recreate with
+     * the new retention.
+     */
+    private void createTtlIndexWithConflictRetry(long retentionSeconds) {
+        Bson ttlKey = Indexes.ascending(CLAIMED_AT);
+        IndexOptions ttlOptions = new IndexOptions().name(TTL_INDEX_NAME).expireAfter(retentionSeconds, TimeUnit.SECONDS);
+        try {
+            collection.createIndex(ttlKey, ttlOptions);
+        } catch (MongoCommandException e) {
+            if (e.getErrorCode() == INDEX_OPTIONS_CONFLICT_ERROR_CODE) {
+                LOGGER.infof("HITL tool journal: TTL retention changed — recreating %s with expireAfterSeconds=%d",
+                        TTL_INDEX_NAME, retentionSeconds);
+                dropIndexIfPresent(TTL_INDEX_NAME);
+                collection.createIndex(ttlKey, ttlOptions);
+            } else {
+                throw e;
+            }
+        }
+    }
+
+    private void dropIndexIfPresent(String indexName) {
+        try {
+            collection.dropIndex(indexName);
+        } catch (RuntimeException e) {
+            // Index absent (fresh deployment) — nothing to drop.
+            LOGGER.debugf("HITL tool journal: index %s not present to drop (%s)", indexName, e.getMessage());
+        }
     }
 
     @Override
@@ -90,6 +140,9 @@ public class HitlToolJournalStore implements IHitlToolJournalStore {
                 .append(CALL_ID, callId)
                 .append(TOOL_NAME, toolName)
                 .append(STATUS, Status.EXECUTING.name())
+                // BSON Date so the TTL monitor honors it. Set on EVERY entry (not
+                // just executed ones) so crash-orphaned EXECUTING claims also expire.
+                .append(CLAIMED_AT, Date.from(Instant.now()))
                 .append(DECIDED_BY, decidedBy);
 
         try {
@@ -123,13 +176,19 @@ public class HitlToolJournalStore implements IHitlToolJournalStore {
         var update = combine(
                 set(STATUS, Status.EXECUTED.name()),
                 set(RESULT_CAPPED, capped),
-                set(EXECUTED_AT, Instant.now().toEpochMilli()));
+                // BSON Date (not epoch millis) so it reads back as a real timestamp.
+                set(EXECUTED_AT, Date.from(Instant.now())));
 
         var result = collection.updateOne(filter, update);
         if (result.getMatchedCount() == 0) {
             LOGGER.warnf("HITL tool journal: markExecuted found no claimed entry for conversationId=%s pauseEpoch=%s callId=%s",
                     conversationId, pauseEpoch, callId);
         }
+    }
+
+    @Override
+    public long deleteByConversationId(String conversationId) {
+        return collection.deleteMany(eq(CONVERSATION_ID, conversationId)).getDeletedCount();
     }
 
     @Override
@@ -159,6 +218,10 @@ public class HitlToolJournalStore implements IHitlToolJournalStore {
 
     private static Instant readEpochMillis(Document doc, String field) {
         Object val = doc.get(field);
+        if (val instanceof Date date) {
+            return date.toInstant();
+        }
+        // Backward-compat: pre-existing rows stored executedAt as int64 epoch millis.
         return val instanceof Number num ? Instant.ofEpochMilli(num.longValue()) : null;
     }
 
