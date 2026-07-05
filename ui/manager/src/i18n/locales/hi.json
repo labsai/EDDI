@@ -727,6 +727,7 @@
     "ragMinScore": "Min Similarity Score (0-1)",
     "moveDown": "नीचे ले जाएं",
     "moveUp": "ऊपर ले जाएं",
+    "removeStep": "चरण हटाएं",
     "execution": "निष्पादन",
     "budgetCosts": "बजट और लागत",
     "preRequestDesc": "LLM निष्पादन से पहले प्रॉपर्टीज सेट या ट्रांसफॉर्म करें।",

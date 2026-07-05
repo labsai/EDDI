@@ -727,6 +727,7 @@
     "ragMinScore": "Min Similarity Score (0-1)",
     "moveDown": "Bajar",
     "moveUp": "Subir",
+    "removeStep": "Quitar paso",
     "execution": "Ejecución",
     "budgetCosts": "Presupuesto y costes",
     "preRequestDesc": "Establecer o transformar propiedades antes de que se ejecute el LLM.",
@@ -1063,7 +1064,7 @@
   },
   "cascadeTrace": {
     "title": "Cascada de modelos",
-    "escalated": "conf {{c}} < {{th}}",
+    "escalated": "confianza {{c}} < {{th}}",
     "escalatedShort": "escalado",
     "accepted": "aceptada",
     "reason": {

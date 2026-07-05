@@ -40,7 +40,12 @@ export function TaskCascadeSection({ task, onChange, readOnly }: TaskSectionProp
   // handlers keep it in lockstep; the length guard resyncs on external changes.
   const stepKeys = useRef<number[]>([]);
   const keySeq = useRef(0);
-  if (stepKeys.current.length !== steps.length) {
+  const taskIdRef = useRef(task.id);
+  // Regenerate keys when the editor switches to a different task, or when the
+  // step count changes — so a card's local UI state never binds to the wrong
+  // step. During normal editing of one task the handlers keep the array aligned.
+  if (taskIdRef.current !== task.id || stepKeys.current.length !== steps.length) {
+    taskIdRef.current = task.id;
     stepKeys.current = steps.map(() => keySeq.current++);
   }
 

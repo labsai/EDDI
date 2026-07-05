@@ -97,7 +97,7 @@ describe("TaskCascadeSection", () => {
     renderWithProviders(<Harness initial={taskWith({ steps: [] })} onChangeSpy={spy} />);
     await userEvent.click(screen.getByTestId("add-cascade-step"));
     expect(screen.getByTestId("cascade-step-0")).toBeInTheDocument();
-    const last = spy.mock.calls.at(-1)![0] as LlmTask;
+    const last = spy.mock.calls[spy.mock.calls.length - 1]![0] as LlmTask;
     expect(last.modelCascade?.steps).toHaveLength(1);
   });
 
@@ -107,7 +107,7 @@ describe("TaskCascadeSection", () => {
       <Harness initial={taskWith({ steps: [{ confidenceThreshold: null }] })} onChangeSpy={spy} />,
     );
     await userEvent.click(screen.getByTestId("cascade-return-best"));
-    const last = spy.mock.calls.at(-1)![0] as LlmTask;
+    const last = spy.mock.calls[spy.mock.calls.length - 1]![0] as LlmTask;
     expect(last.modelCascade?.returnBestAcrossSteps).toBe(true);
   });
 });

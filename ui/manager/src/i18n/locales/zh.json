@@ -727,6 +727,7 @@
     "ragMinScore": "Min Similarity Score (0-1)",
     "moveDown": "下移",
     "moveUp": "上移",
+    "removeStep": "移除步骤",
     "execution": "执行",
     "budgetCosts": "预算与成本",
     "preRequestDesc": "在 LLM 执行前设置或转换属性。",
@@ -1063,7 +1064,7 @@
   },
   "cascadeTrace": {
     "title": "模型级联",
-    "escalated": "conf {{c}} < {{th}}",
+    "escalated": "置信度 {{c}} < {{th}}",
     "escalatedShort": "已升级",
     "accepted": "已接受",
     "reason": {

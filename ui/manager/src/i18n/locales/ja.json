@@ -727,6 +727,7 @@
     "ragMinScore": "Min Similarity Score (0-1)",
     "moveDown": "下へ移動",
     "moveUp": "上へ移動",
+    "removeStep": "ステップを削除",
     "execution": "実行",
     "budgetCosts": "予算とコスト",
     "preRequestDesc": "LLM が実行される前にプロパティを設定または変換します。",

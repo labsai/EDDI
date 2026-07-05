@@ -100,6 +100,36 @@ describe("validateCascade", () => {
     ).not.toContain("JUDGE_MODEL_MISSING");
   });
 
+  it("warns when the judge model is cross-provider without its own apiKey", () => {
+    const issues = validateCascade(
+      mk({
+        evaluationStrategy: "judge_model",
+        judgeModel: { type: "anthropic", parameters: { model: "claude-haiku" } },
+        steps: [{ confidenceThreshold: null }],
+      }),
+    );
+    expect(codes(issues)).toContain("JUDGE_CROSS_PROVIDER_NO_APIKEY");
+    expect(codes(issues)).not.toContain("JUDGE_MODEL_MISSING");
+  });
+
+  it("warns on convertToObject with structured_output, but not with heuristic", () => {
+    const withStructured = mk({ steps: [{ confidenceThreshold: null }] });
+    withStructured.parameters = { ...withStructured.parameters, convertToObject: "true" };
+    expect(codes(validateCascade(withStructured))).toContain("CONVERT_TO_OBJECT_STRUCTURED");
+
+    const withHeuristic = mk({ evaluationStrategy: "heuristic", steps: [{ confidenceThreshold: null }] });
+    withHeuristic.parameters = { ...withHeuristic.parameters, convertToObject: "true" };
+    expect(codes(validateCascade(withHeuristic))).not.toContain("CONVERT_TO_OBJECT_STRUCTURED");
+
+    // An unknown strategy defaults to structured_output (like the backend), so
+    // the convertToObject collision still fires alongside the unknown warning.
+    const withUnknown = mk({ evaluationStrategy: "vibes", steps: [{ confidenceThreshold: null }] });
+    withUnknown.parameters = { ...withUnknown.parameters, convertToObject: "true" };
+    const unknownCodes = codes(validateCascade(withUnknown));
+    expect(unknownCodes).toContain("UNKNOWN_EVAL_STRATEGY");
+    expect(unknownCodes).toContain("CONVERT_TO_OBJECT_STRUCTURED");
+  });
+
   it("warns when a cross-provider step omits its own apiKey", () => {
     const issues = validateCascade(
       mk({

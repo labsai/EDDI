@@ -92,12 +92,10 @@ export function validateCascade(task: LlmTask): CascadeIssue[] {
   }
 
   const evalStrategy = norm(cascade.evaluationStrategy);
-  if (
-    evalStrategy &&
-    !CASCADE_EVAL_STRATEGIES.includes(
-      evalStrategy as (typeof CASCADE_EVAL_STRATEGIES)[number],
-    )
-  ) {
+  const knownEval = CASCADE_EVAL_STRATEGIES.includes(
+    evalStrategy as (typeof CASCADE_EVAL_STRATEGIES)[number],
+  );
+  if (evalStrategy && !knownEval) {
     issues.push({
       level: "warning",
       code: "UNKNOWN_EVAL_STRATEGY",
@@ -106,8 +104,10 @@ export function validateCascade(task: LlmTask): CascadeIssue[] {
     });
   }
 
-  // Effective strategy — the backend default is structured_output.
-  const effectiveEval = evalStrategy || "structured_output";
+  // Effective strategy — an unset or unrecognised value defaults to the backend
+  // default (structured_output), matching the warning above so downstream checks
+  // (e.g. the convertToObject collision) treat "vibes" the same as the default.
+  const effectiveEval = knownEval ? evalStrategy : "structured_output";
 
   if (effectiveEval === "judge_model" && !norm(cascade.judgeModel?.type)) {
     issues.push({
@@ -171,7 +171,7 @@ export function validateCascade(task: LlmTask): CascadeIssue[] {
       level: "warning",
       code: "CONVERT_TO_OBJECT_STRUCTURED",
       message:
-        "convertToObject is incompatible with Structured Output confidence — the cascade will use heuristic (or the judge model, if one is configured) instead.",
+        "convertToObject is incompatible with Structured Output confidence — the cascade will use heuristic instead.",
     });
   }
 

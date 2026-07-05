@@ -6,7 +6,8 @@ import type { CascadeStepInfo } from "@/hooks/use-debug-events";
 /**
  * Shared model-cascade step trace: one row per attempted model tier. The
  * escalation reason (its own confidence vs threshold) renders on the step that
- * escalated, and an "accepted" marker on the final step. Rendered by both the
+ * escalated, and an "accepted" marker on the final step — unless that final step
+ * itself escalated (a partial/live trace), which would be contradictory. Rendered by both the
  * chat activity card and the debug-drawer pipeline trace — `testId` also drives
  * the per-step test ids (`${testId}-step-${n}`).
  */
@@ -59,7 +60,7 @@ export function CascadeStepTrace({
                   )}
                 </span>
               )}
-              {isLast && (
+              {isLast && !step.escalation && (
                 <span className="inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
                   <Check className="h-2.5 w-2.5" />
                   {t("cascadeTrace.accepted", "accepted")}

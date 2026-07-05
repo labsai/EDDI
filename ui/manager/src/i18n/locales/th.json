@@ -727,6 +727,7 @@
     "ragMinScore": "Min Similarity Score (0-1)",
     "moveDown": "เลื่อนลง",
     "moveUp": "เลื่อนขึ้น",
+    "removeStep": "ลบขั้นตอน",
     "execution": "การดำเนินการ",
     "budgetCosts": "งบประมาณและต้นทุน",
     "preRequestDesc": "ตั้งค่าหรือแปลงคุณสมบัติก่อนการทำงานของ LLM",
@@ -1063,7 +1064,7 @@
   },
   "cascadeTrace": {
     "title": "โมเดลคาสเคด",
-    "escalated": "conf {{c}} < {{th}}",
+    "escalated": "ความมั่นใจ {{c}} < {{th}}",
     "escalatedShort": "ยกระดับแล้ว",
     "accepted": "ยอมรับแล้ว",
     "reason": {

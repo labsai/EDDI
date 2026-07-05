@@ -108,6 +108,7 @@ export function CascadeStepCard({
               onClick={onMoveUp}
               className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
               title={t("llmEditor.moveUp", "Move up")}
+              aria-label={t("llmEditor.moveUp", "Move up")}
             >
               <ArrowUp className="h-3.5 w-3.5" />
             </button>
@@ -117,6 +118,7 @@ export function CascadeStepCard({
               onClick={onMoveDown}
               className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-30"
               title={t("llmEditor.moveDown", "Move down")}
+              aria-label={t("llmEditor.moveDown", "Move down")}
             >
               <ArrowDown className="h-3.5 w-3.5" />
             </button>
@@ -124,7 +126,8 @@ export function CascadeStepCard({
               type="button"
               onClick={onRemove}
               className="rounded p-1 text-muted-foreground transition-colors hover:text-destructive"
-              title={t("common.remove", "Remove")}
+              title={t("llmEditor.removeStep", "Remove step")}
+              aria-label={t("llmEditor.removeStep", "Remove step")}
             >
               <Trash2 className="h-3.5 w-3.5" />
             </button>

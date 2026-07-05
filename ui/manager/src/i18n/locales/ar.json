@@ -727,6 +727,7 @@
     "ragMinScore": "Min Similarity Score (0-1)",
     "moveDown": "تحريك لأسفل",
     "moveUp": "تحريك لأعلى",
+    "removeStep": "إزالة الخطوة",
     "execution": "التنفيذ",
     "budgetCosts": "الميزانية والتكاليف",
     "preRequestDesc": "تعيين أو تحويل الخصائص قبل تنفيذ LLM.",
