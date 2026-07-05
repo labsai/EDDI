@@ -169,9 +169,9 @@ class HitlDecisionTest {
         }
 
         @Test
-        @DisplayName("an unknown verdict still throws")
-        void unknownThrows() {
-            assertThrows(IllegalArgumentException.class, () -> HitlVerdict.fromString("maybe"));
+        @DisplayName("an unknown verdict yields null (reported as the friendly 400 upstream, not a raw enum error)")
+        void unknownReturnsNull() {
+            assertNull(HitlVerdict.fromString("maybe"));
         }
     }
 

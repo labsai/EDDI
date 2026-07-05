@@ -22,11 +22,21 @@ public class HitlDecision {
 
         /**
          * Case-insensitive parsing on every surface — "approved" and "APPROVED" are the
-         * same human intent; rejecting on casing is needless 400 noise.
+         * same human intent; rejecting on casing is needless 400 noise. An unrecognized
+         * value yields {@code null} (not a raw Jackson enum error), which every resume
+         * surface reports as the friendly "must include a 'verdict'" 400 — so no
+         * request-local deserializer is needed to soften the error.
          */
         @com.fasterxml.jackson.annotation.JsonCreator
         public static HitlVerdict fromString(String value) {
-            return value == null ? null : HitlVerdict.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+            if (value == null) {
+                return null;
+            }
+            try {
+                return HitlVerdict.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+            } catch (IllegalArgumentException unrecognized) {
+                return null;
+            }
         }
     }
 

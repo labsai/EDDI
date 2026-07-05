@@ -155,5 +155,21 @@ class GroupApprovalRequestTest {
             assertNull(parsed.getDecision().getVerdict(),
                     "an unrecognized verdict must not throw a raw Jackson error — it is nulled");
         }
+
+        @Test
+        @DisplayName("default Jackson preserves ALL HitlDecision fields, incl. toolDecisions (the removed custom deserializer dropped them)")
+        void allDecisionFieldsPreserved() throws Exception {
+            var parsed = mapper.readValue(
+                    "{\"decision\":{\"verdict\":\"approved\",\"note\":\"ok\",\"decidedBy\":\"rev\","
+                            + "\"toolDecisions\":{\"c1\":{\"verdict\":\"rejected\",\"amendedArguments\":\"{}\"}}}}",
+                    GroupApprovalRequest.class);
+            var decision = parsed.getDecision();
+            assertEquals(HitlVerdict.APPROVED, decision.getVerdict());
+            assertEquals("ok", decision.getNote());
+            assertEquals("rev", decision.getDecidedBy());
+            assertNotNull(decision.getToolDecisions(), "toolDecisions must survive deserialization");
+            assertEquals(HitlVerdict.REJECTED, decision.getToolDecisions().get("c1").getVerdict());
+            assertEquals("{}", decision.getToolDecisions().get("c1").getAmendedArguments());
+        }
     }
 }
